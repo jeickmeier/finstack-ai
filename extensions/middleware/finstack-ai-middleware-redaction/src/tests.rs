@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
     ToolResultBlock, Timestamp,
 };
 use finstack_ai_runtime::{
-    AuthorizationContext, BeforeModelInput, CancellationSignal, Middleware as _, ModelName,
+    AuthorizationContext, BeforeModelInput, CancellationSignal, ModelName,
     ModelRequestDraft, ModelRequestLimits, ModelSettings, OrderTier, RunCallContext, StageInput,
     StageOutcome,
 };
@@ -496,6 +496,216 @@ fn off_policy_ignores_after_model() {
     let middleware = RedactionMiddleware::try_new().expect("construct");
     let outcome = invoke(&middleware, after_model_input(&secret_message));
     assert_eq!(outcome, StageOutcome::Continue);
+}
+
+// ---------------------------------------------------------------------------
+// Task 5: wrapping composition
+// ---------------------------------------------------------------------------
+
+use finstack_ai_kernel::{ComponentId, ComponentInvocation, InvocationRecovery, Version};
+use finstack_ai_runtime::{
+    Middleware, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole, PortFuture,
+    StageMask,
+};
+
+/// Stub Replace-emitting inner middleware standing in for document-ingest.
+#[derive(Clone)]
+struct StubInner {
+    descriptor: MiddlewareDescriptor,
+    outcome: StageOutcome,
+}
+
+impl StubInner {
+    fn new(stages: StageMask, role: MiddlewareRole, outcome: StageOutcome) -> Self {
+        Self {
+            descriptor: MiddlewareDescriptor {
+                invocation: ComponentInvocation {
+                    component: ComponentId::parse("finstack.middleware.stub-ingest")
+                        .expect("component"),
+                    version: Version {
+                        major: 1,
+                        minor: 0,
+                        patch: 0,
+                    },
+                    configuration_digest: Digest::raw_json(b"stub"),
+                    recovery: InvocationRecovery::RecomputeSafe,
+                },
+                stages,
+                order: MiddlewareOrder {
+                    tier: OrderTier::ContextMutation,
+                    priority: 7,
+                    before: Arc::from([]),
+                    after: Arc::from([]),
+                },
+                role,
+                metadata: Metadata::empty(),
+            },
+            outcome,
+        }
+    }
+
+    fn before_model(outcome: StageOutcome) -> Arc<dyn Middleware> {
+        Arc::new(Self::new(
+            StageMask::from_stages([Stage::BeforeModel]),
+            MiddlewareRole::Standard,
+            outcome,
+        ))
+    }
+}
+
+impl Middleware for StubInner {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn invoke(
+        &self,
+        _ctx: finstack_ai_runtime::MiddlewareContext,
+        _input: StageInput,
+    ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
+        let outcome = self.outcome.clone();
+        Box::pin(async move { Ok(outcome) })
+    }
+}
+
+fn replace_outcome(messages: Vec<Message>) -> StageOutcome {
+    let bytes =
+        serde_json_canonicalizer::to_vec(&draft_with_messages(messages)).expect("canonical");
+    StageOutcome::Replace(RawJson::parse(bytes).expect("raw"))
+}
+
+#[test]
+fn wrapper_redacts_inner_replace_payload() {
+    let inner = StubInner::before_model(replace_outcome(vec![message(
+        1,
+        MessageRole::User,
+        vec![text("ingested doc says key sk-proj-abcdefghij0123456789")],
+    )]));
+    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
+        .expect("wrap");
+    let outcome = invoke(
+        &wrapper,
+        before_model_input(vec![message(2, MessageRole::User, vec![text("clean")])]),
+    );
+    let draft = replaced_draft(&outcome);
+    let ContentBlock::Text(block) = &draft.messages[0].content()[0] else {
+        panic!("expected text block");
+    };
+    assert_eq!(block.text(), "ingested doc says key [REDACTED:api-key]");
+}
+
+#[test]
+fn wrapper_redacts_base_draft_when_inner_continues() {
+    let inner = StubInner::before_model(StageOutcome::Continue);
+    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
+        .expect("wrap");
+    let outcome = invoke(
+        &wrapper,
+        before_model_input(vec![message(
+            1,
+            MessageRole::User,
+            vec![text("mail jane@example.com")],
+        )]),
+    );
+    let draft = replaced_draft(&outcome);
+    let ContentBlock::Text(block) = &draft.messages[0].content()[0] else {
+        panic!("expected text block");
+    };
+    assert_eq!(block.text(), "mail [REDACTED:email]");
+}
+
+#[test]
+fn wrapper_passes_through_inner_terminal_outcomes() {
+    let descriptor = finstack_ai_kernel::ErrorDescriptor::new(
+        "stub_failed",
+        "stub failure",
+        finstack_ai_kernel::ErrorCategory::Middleware,
+        false,
+    )
+    .expect("descriptor");
+    let inner = StubInner::before_model(StageOutcome::Fail(Box::new(descriptor)));
+    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
+        .expect("wrap");
+    let outcome = invoke(
+        &wrapper,
+        before_model_input(vec![message(
+            1,
+            MessageRole::User,
+            vec![text("mail jane@example.com")],
+        )]),
+    );
+    let StageOutcome::Fail(failed) = outcome else {
+        panic!("expected passthrough Fail, got {outcome:?}");
+    };
+    assert_eq!(failed.code.as_str(), "stub_failed");
+}
+
+#[test]
+fn wrapper_passes_through_unparsable_inner_replace() {
+    let inner = StubInner::before_model(StageOutcome::Replace(
+        RawJson::parse(b"{\"not\":\"a draft\"}").expect("raw"),
+    ));
+    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
+        .expect("wrap");
+    let outcome = invoke(
+        &wrapper,
+        before_model_input(vec![message(1, MessageRole::User, vec![text("clean")])]),
+    );
+    let StageOutcome::Replace(raw) = outcome else {
+        panic!("expected passthrough Replace, got {outcome:?}");
+    };
+    assert_eq!(raw.as_bytes(), b"{\"not\":\"a draft\"}");
+}
+
+#[test]
+fn wrapper_rejects_non_before_model_inner() {
+    let inner: Arc<dyn Middleware> = Arc::new(StubInner::new(
+        StageMask::from_stages([Stage::BeforeModel, Stage::AfterModel]),
+        MiddlewareRole::Standard,
+        StageOutcome::Continue,
+    ));
+    let result = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default());
+    assert_eq!(
+        result.err(),
+        Some(RedactionError::Configuration {
+            reason: "wrapped_middleware_not_before_model_only",
+        })
+    );
+}
+
+#[test]
+fn wrapper_rejects_non_standard_inner_role() {
+    let inner: Arc<dyn Middleware> = Arc::new(StubInner::new(
+        StageMask::from_stages([Stage::BeforeModel]),
+        MiddlewareRole::PostCompactionValidator,
+        StageOutcome::Continue,
+    ));
+    let result = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default());
+    assert_eq!(
+        result.err(),
+        Some(RedactionError::Configuration {
+            reason: "wrapped_middleware_not_standard_role",
+        })
+    );
+}
+
+#[test]
+fn wrapper_descriptor_adopts_inner_order() {
+    let inner = StubInner::before_model(StageOutcome::Continue);
+    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
+        .expect("wrap");
+    let descriptor = wrapper.descriptor();
+    assert_eq!(
+        descriptor.invocation.component.to_string(),
+        "finstack.middleware.redaction"
+    );
+    assert_eq!(descriptor.order.tier, OrderTier::ContextMutation);
+    assert_eq!(descriptor.order.priority, 7);
+    let standalone = RedactionMiddleware::try_new().expect("construct");
+    assert_ne!(
+        descriptor.invocation.configuration_digest,
+        standalone.descriptor().invocation.configuration_digest,
+    );
 }
 
 #[test]

@@ -191,6 +191,65 @@ impl RedactionMiddleware {
             inner: None,
         })
     }
+
+    /// Compose redaction around another `BeforeModel` middleware.
+    ///
+    /// The middleware chain hands every `BeforeModel` component the same
+    /// base draft and keeps only the last `Replace` in chain order, so a
+    /// standalone redaction middleware cannot coexist with another
+    /// Replace-emitting `BeforeModel` middleware (such as document-ingest):
+    /// one of the two rewrites would be silently discarded. This constructor
+    /// solves that by registering redaction *as* the inner middleware's
+    /// chain slot: the wrapper adopts `inner`'s ordering, invokes it first,
+    /// and redacts whatever draft it produces — so text the inner middleware
+    /// injects (e.g. Markdown extracted from attachments) is redacted too.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an inner middleware whose stage mask is not exactly
+    /// `BeforeModel` or whose role is not `Standard`, an all-disabled
+    /// detector set, and an invalid checked-in identity.
+    pub fn try_wrapping(
+        inner: Arc<dyn Middleware>,
+        config: RedactionConfig,
+    ) -> Result<Self, RedactionError> {
+        let detectors = Arc::new(Detectors::try_new(config)?);
+        let inner_descriptor = inner.descriptor();
+        if inner_descriptor.stages != StageMask::from_stages([Stage::BeforeModel]) {
+            return Err(RedactionError::Configuration {
+                reason: "wrapped_middleware_not_before_model_only",
+            });
+        }
+        if inner_descriptor.role != MiddlewareRole::Standard {
+            return Err(RedactionError::Configuration {
+                reason: "wrapped_middleware_not_standard_role",
+            });
+        }
+        let stages = match config.output_policy {
+            OutputPolicy::Off => StageMask::from_stages([Stage::BeforeModel]),
+            OutputPolicy::Fail => StageMask::from_stages([Stage::BeforeModel, Stage::AfterModel]),
+        };
+        Ok(Self {
+            descriptor: MiddlewareDescriptor {
+                invocation: ComponentInvocation {
+                    component: parse_component_id()?,
+                    version: REDACTION_VERSION,
+                    configuration_digest: configuration_digest(
+                        config,
+                        Some(&inner_descriptor.invocation),
+                    )?,
+                    recovery: InvocationRecovery::RecomputeSafe,
+                },
+                stages,
+                order: inner_descriptor.order,
+                role: MiddlewareRole::Standard,
+                metadata: Metadata::empty(),
+            },
+            detectors,
+            config,
+            inner: Some(inner),
+        })
+    }
 }
 
 fn parse_component_id() -> Result<ComponentId, RedactionError> {
@@ -228,14 +287,20 @@ impl Middleware for RedactionMiddleware {
 
     fn invoke(
         &self,
-        _ctx: MiddlewareContext,
+        ctx: MiddlewareContext,
         input: StageInput,
     ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
         let middleware = self.clone();
         Box::pin(async move {
             match input {
                 StageInput::BeforeModel(before_model) => {
-                    Ok(middleware.redact_before_model(&before_model))
+                    let Some(inner) = middleware.inner.clone() else {
+                        return Ok(middleware.redact_before_model(&before_model));
+                    };
+                    let outcome = inner
+                        .invoke(ctx, StageInput::BeforeModel(before_model.clone()))
+                        .await?;
+                    Ok(middleware.redact_inner_outcome(&before_model, outcome))
                 }
                 StageInput::AfterModel { value } => Ok(middleware.check_after_model(&value)),
                 _ => Ok(StageOutcome::Continue),
@@ -307,6 +372,40 @@ impl RedactionMiddleware {
         ) {
             Ok(rebuilt) => (rebuilt, true),
             Err(_) => (message.clone(), false),
+        }
+    }
+
+    /// Redact whatever draft the wrapped middleware produced.
+    ///
+    /// `Replace` payloads are parsed back into a [`ModelRequestDraft`],
+    /// redacted, and re-canonicalized; an unparsable payload or a failed
+    /// re-canonicalization passes the inner `Replace` through unchanged
+    /// (fail-soft — the inner middleware's work is never dropped).
+    /// `Continue` falls back to redacting the base draft, and every other
+    /// outcome passes through untouched.
+    fn redact_inner_outcome(
+        &self,
+        before_model: &BeforeModelInput,
+        outcome: StageOutcome,
+    ) -> StageOutcome {
+        match outcome {
+            StageOutcome::Replace(raw) => {
+                let Ok(inner_draft) = serde_json::from_slice::<ModelRequestDraft>(raw.as_bytes())
+                else {
+                    return StageOutcome::Replace(raw);
+                };
+                let (draft, changed) = self.redact_draft(&inner_draft);
+                if !changed {
+                    return StageOutcome::Replace(raw);
+                }
+                let Ok(bytes) = serde_json_canonicalizer::to_vec(&draft) else {
+                    return StageOutcome::Replace(raw);
+                };
+                RawJson::parse(bytes)
+                    .map_or(StageOutcome::Replace(raw), StageOutcome::Replace)
+            }
+            StageOutcome::Continue => self.redact_before_model(before_model),
+            other => other,
         }
     }
 
