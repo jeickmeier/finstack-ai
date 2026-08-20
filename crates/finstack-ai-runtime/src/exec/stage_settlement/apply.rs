@@ -192,8 +192,10 @@ pub(super) fn apply_model_draft<C: Clock, R: RandomSource>(
 /// When the surviving array ends with a `MessageRole::User` message — the
 /// current user message in every facade-prepared context — the fold's
 /// instruction and context messages are **inserted immediately before it**,
-/// mirroring the provider convention in
-/// `exec/context_driver/collect.rs::rebuild_messages`. This keeps the current
+/// preserving the same trailing-user-last invariant as
+/// `exec/context_driver/collect.rs::rebuild_messages` (whose insertion point
+/// differs: provider items land after the leading system/developer prefix,
+/// before conversation history). This keeps the current
 /// user message *last*, which is load-bearing downstream: `before_model_input`
 /// (`input.rs`) marks the trailing user structurally protected, and
 /// `validate_compaction_result` (`ports/middleware/validate.rs`) requires the
@@ -201,7 +203,11 @@ pub(super) fn apply_model_draft<C: Clock, R: RandomSource>(
 /// land. Appending after the user message would make every compaction fail
 /// whenever a `prepare_context` addition ran. When the array is empty or its
 /// last message is not a user message (e.g. a `Replace` reshaped it), the
-/// additions append at the tail — the fold does not invent structure.
+/// additions append at the tail — the fold does not invent structure. A
+/// `Replace` author is therefore responsible for ending the payload with the
+/// current user message: a payload that buries the user turn mid-array leaves
+/// no protected trailing user, so `validate_compaction_result` rejects every
+/// subsequent `CompactContext` for that turn.
 ///
 /// The alternative — letting a `Replace` from one component discard an
 /// `AddContext` from another — was rejected: silently dropping a component's

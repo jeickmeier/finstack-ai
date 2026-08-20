@@ -40,8 +40,12 @@ pub const MAX_POLICY_ENTRIES: usize = 16;
 /// Longest permitted `PolicyEntry::label`, in bytes.
 ///
 /// The label becomes the item's provenance source id as `policy:{label}`, and
-/// the runtime caps source ids at 256 bytes; `"policy:"` occupies 7 of them.
+/// the runtime caps source ids at 256 bytes; [`POLICY_SOURCE_ID_PREFIX`]
+/// occupies 7 of them. A test pins the `prefix + label == 256` relationship.
 pub const MAX_POLICY_LABEL_BYTES: usize = 249;
+
+/// Prefix prepended to every entry label to form the provenance source id.
+const POLICY_SOURCE_ID_PREFIX: &str = "policy:";
 
 const INSTRUCTIONS_VERSION: Version = Version {
     major: 1,
@@ -155,7 +159,7 @@ impl InstructionsMiddleware {
                 ContextItemKind::Instruction,
                 vec![block],
                 ContextProvenance {
-                    source_id: Arc::from(format!("policy:{}", entry.label)),
+                    source_id: Arc::from(format!("{POLICY_SOURCE_ID_PREFIX}{}", entry.label)),
                     source_ref: None,
                     external: false,
                 },

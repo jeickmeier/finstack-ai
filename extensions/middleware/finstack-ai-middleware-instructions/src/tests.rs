@@ -81,6 +81,23 @@ fn oversized_label_is_rejected() {
 }
 
 #[test]
+fn label_cap_tracks_the_runtime_source_id_cap() {
+    // The runtime's validate_label caps provenance source ids at 256 bytes.
+    // MAX_POLICY_LABEL_BYTES is hand-derived from that cap; this pins the
+    // relationship so a prefix change cannot silently strand the constant.
+    assert_eq!(MAX_POLICY_LABEL_BYTES + POLICY_SOURCE_ID_PREFIX.len(), 256);
+
+    // And the runtime must actually accept a maximum-length source id: a
+    // 249-byte label constructs a full middleware (so ContextItem::try_new
+    // ran validate_label on the 256-byte source id). If the runtime cap
+    // ever shrinks, this fails here rather than in production.
+    let config = PolicyInstructionsConfig {
+        entries: vec![entry(&"a".repeat(MAX_POLICY_LABEL_BYTES), "text")],
+    };
+    InstructionsMiddleware::try_new(config).expect("maximum-length label builds");
+}
+
+#[test]
 fn label_with_nul_is_rejected() {
     let config = PolicyInstructionsConfig {
         entries: vec![entry("bad\0label", "text")],
