@@ -26,5 +26,5 @@ mod ingress;
 mod token;
 
 pub use config::{CompletionIngressConfig, CompletionIngressConfigError};
-pub use ingress::IngressError;
+pub use ingress::{CompletionGrant, CompletionIngress, IngressError, MintError};
 pub use token::CallbackToken;
