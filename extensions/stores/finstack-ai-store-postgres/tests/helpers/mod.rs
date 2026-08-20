@@ -77,7 +77,15 @@ pub fn fresh_schema_name() -> String {
 /// stops driving spawned tasks once the test function returns). Calling
 /// `cleanup()` explicitly at the end of each test is simpler and its
 /// completion is actually observable. `Drop` still exists below purely to
-/// flag (via `debug_assert`) a test that forgot to call it.
+/// flag (via a stderr warning) a test that forgot to call it.
+///
+/// The `Drop` impl must never panic: it also runs while unwinding from a
+/// failed assertion inside a test (the guard is typically constructed
+/// before the assertions it covers), and a panic during unwind is a double
+/// panic that aborts the whole test process, taking down every
+/// concurrently-running test with it. A leaked `fa_test_*` schema after a
+/// failed test is an acceptable, visible (via the eprintln) trade-off for
+/// keeping the original assertion failure intact.
 pub struct SchemaGuard {
     schema: String,
     cleaned_up: bool,
@@ -112,11 +120,16 @@ impl SchemaGuard {
 
 impl Drop for SchemaGuard {
     fn drop(&mut self) {
-        debug_assert!(
-            self.cleaned_up,
-            "SchemaGuard for {} dropped without calling cleanup(); the disposable schema was \
-             leaked in the test database",
-            self.schema
-        );
+        // Must not panic here: this can run during unwind from a failed
+        // test assertion, and panicking while already panicking aborts the
+        // process (see the struct doc comment). Warn instead so the leaked
+        // schema is still visible for manual cleanup.
+        if !self.cleaned_up {
+            eprintln!(
+                "warning: SchemaGuard for {} dropped without calling cleanup(); the disposable \
+                 schema was leaked in the test database",
+                self.schema
+            );
+        }
     }
 }
