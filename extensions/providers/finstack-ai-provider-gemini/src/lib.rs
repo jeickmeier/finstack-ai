@@ -23,5 +23,6 @@
 
 mod config;
 mod error;
+mod sse;
 
 pub use config::{GeminiConfig, GeminiEndpoint, GeminiModelConfig, SecretHeader};
