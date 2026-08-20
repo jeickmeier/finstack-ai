@@ -13,6 +13,7 @@ members = [
     "extensions/stores/finstack-ai-store-sqlite",
     "extensions/stores/finstack-ai-store-object-s3",
     "extensions/stores/finstack-ai-store-object-local",
+    "extensions/stores/finstack-ai-store-artifact-object",
     "extensions/providers/finstack-ai-provider-openai",
     "extensions/providers/finstack-ai-provider-ollama",
     "extensions/providers/finstack-ai-provider-anthropic",
@@ -116,6 +117,7 @@ finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory"
 finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "1.0.0" }
 finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-object-s3", version = "1.0.0" }
 finstack-ai-store-object-local = { path = "extensions/stores/finstack-ai-store-object-local", version = "1.0.0" }
+finstack-ai-store-artifact-object = { path = "extensions/stores/finstack-ai-store-artifact-object", version = "1.0.0" }
 rusqlite = { version = "0.37.0", default-features = false, features = ["bundled"] }
 finstack-ai-provider-openai = { path = "extensions/providers/finstack-ai-provider-openai", version = "1.0.0" }
 finstack-ai-provider-ollama = { path = "extensions/providers/finstack-ai-provider-ollama", version = "1.0.0" }
