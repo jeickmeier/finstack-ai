@@ -286,9 +286,14 @@ impl OpenAiMediaToolset {
                 reason: "invalid_tool_spec",
             })?;
 
+        // Downloads (e.g. transcription audio_url) must not follow redirects
+        // past the caller-supplied-URL validation performed before the
+        // request is sent — a redirect could otherwise smuggle the request
+        // to a host/scheme that validate_download_url never saw.
         let client = reqwest::Client::builder()
             .http1_only()
             .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| OpenAiMediaError::EndpointInvalid {
                 reason: "http_client",
@@ -570,8 +575,16 @@ async fn handle_transcribe(
     validate_download_url(&arguments.audio_url)?;
     let downloaded =
         download_bytes(client, &arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
-    let file_name = arguments
+    // Presigned/signed download URLs commonly carry a query string (and
+    // occasionally a fragment) after the real file name, e.g.
+    // `https://bucket.example/a.mp3?X-Sig=...`; strip both before deriving
+    // the file name so the signature doesn't leak into the multipart part.
+    let path = arguments
         .audio_url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(arguments.audio_url.as_str());
+    let file_name = path
         .rsplit('/')
         .next()
         .filter(|segment| !segment.is_empty())
@@ -1271,6 +1284,84 @@ mod tests {
         let seen = api_rx.recv().await.expect("request");
         assert!(seen.contains("hello-audio-bytes"));
         assert!(seen.contains(CANARY));
+        audio_server.await.expect("audio server");
+        api_server.await.expect("api server");
+    }
+
+    #[tokio::test]
+    async fn transcribe_tool_derives_file_name_from_a_presigned_url_ignoring_the_query_string() {
+        let audio_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let audio_addr = audio_listener.local_addr().expect("addr");
+        let (audio_tx, _audio_rx) = mpsc::unbounded_channel();
+        let audio_server = tokio::spawn(async move {
+            respond(
+                &audio_listener,
+                &audio_tx,
+                200,
+                b"hello-audio-bytes",
+                "audio/mpeg",
+            )
+            .await;
+        });
+
+        let api_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let api_addr = api_listener.local_addr().expect("addr");
+        let (api_tx, mut api_rx) = mpsc::unbounded_channel();
+        let api_server = tokio::spawn(async move {
+            let (mut stream, _) = api_listener.accept().await.expect("accept");
+            let mut received = Vec::new();
+            let mut buf = vec![0_u8; 8_192];
+            loop {
+                let n = stream.read(&mut buf).await.expect("read");
+                if n == 0 {
+                    break;
+                }
+                received.extend_from_slice(&buf[..n]);
+                if received.windows(4).any(|w| w == b"\r\n\r\n")
+                    && String::from_utf8_lossy(&received).contains("hello-audio-bytes")
+                {
+                    break;
+                }
+            }
+            api_tx
+                .send(String::from_utf8_lossy(&received).into_owned())
+                .expect("seen");
+            let body = br#"{"text":"hello"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write head");
+            stream.write_all(body).await.expect("write body");
+            stream.shutdown().await.expect("shutdown");
+        });
+
+        let tools =
+            OpenAiMediaToolset::try_new(base_config(format!("http://{api_addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), TRANSCRIBE_TOOL_NAME);
+        // A presigned-style URL: the real file name is followed by a query
+        // string carrying an unrelated signature parameter.
+        let args = format!(r#"{{"model":"m","audio_url":"http://{audio_addr}/a.mp3?X-Sig=abc"}}"#);
+        let call = call_for(&spec, args.as_bytes());
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(result) = item else {
+            panic!("expected completion");
+        };
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
+        assert_eq!(payload["text"], "hello");
+        let seen = api_rx.recv().await.expect("request");
+        assert!(
+            seen.contains(r#"filename="a.mp3""#),
+            "file name must be derived from the path, not the query string: {seen}"
+        );
         audio_server.await.expect("audio server");
         api_server.await.expect("api server");
     }

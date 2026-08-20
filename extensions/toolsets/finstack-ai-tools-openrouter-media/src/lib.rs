@@ -389,9 +389,14 @@ impl OpenRouterMediaToolset {
                 reason: "invalid_tool_spec",
             })?;
 
+        // Downloads (e.g. transcription audio_url) must not follow redirects
+        // past the caller-supplied-URL validation performed before the
+        // request is sent — a redirect could otherwise smuggle the request
+        // to a host/scheme that validate_download_url never saw.
         let client = reqwest::Client::builder()
             .http1_only()
             .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                 reason: "http_client",
@@ -897,9 +902,16 @@ async fn handle_transcribe(
         download_bytes(client, &arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
     let b64_audio = BASE64_STANDARD.encode(downloaded);
     let format = arguments.format.unwrap_or_else(|| {
-        arguments
+        // Presigned/signed download URLs commonly carry a query string (and
+        // occasionally a fragment) after the real file extension, e.g.
+        // `https://bucket.example/a.mp3?X-Sig=...`; strip both before
+        // deriving the extension so the signature doesn't leak into `format`.
+        let path = arguments
             .audio_url
-            .rsplit('.')
+            .split(['?', '#'])
+            .next()
+            .unwrap_or(arguments.audio_url.as_str());
+        path.rsplit('.')
             .next()
             .filter(|ext| !ext.is_empty() && !ext.contains('/'))
             .map_or_else(|| "mp3".to_owned(), str::to_owned)
@@ -1690,6 +1702,63 @@ mod tests {
         );
         let seen = api_rx.recv().await.expect("request");
         assert!(seen.contains(&expected_b64));
+        audio_server.await.expect("audio server");
+        api_server.await.expect("api server");
+    }
+
+    #[tokio::test]
+    async fn transcribe_tool_derives_format_from_a_presigned_url_ignoring_the_query_string() {
+        let audio_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let audio_addr = audio_listener.local_addr().expect("addr");
+        let (audio_tx, _audio_rx) = mpsc::unbounded_channel();
+        let audio_server = tokio::spawn(async move {
+            respond(
+                &audio_listener,
+                &audio_tx,
+                200,
+                b"hello-audio-bytes",
+                "audio/mpeg",
+            )
+            .await;
+        });
+
+        let api_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let api_addr = api_listener.local_addr().expect("addr");
+        let (api_tx, mut api_rx) = mpsc::unbounded_channel();
+        let api_server = tokio::spawn(async move {
+            respond(
+                &api_listener,
+                &api_tx,
+                200,
+                br#"{"text":"hello"}"#,
+                "application/json",
+            )
+            .await;
+        });
+
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{api_addr}")))
+            .expect("tools");
+        let spec = find_spec(&tools.tools(), TRANSCRIBE_TOOL_NAME);
+        // A presigned-style URL: the real extension is followed by a query
+        // string carrying an unrelated signature parameter.
+        let args = format!(r#"{{"model":"m","audio_url":"http://{audio_addr}/a.mp3?X-Sig=abc"}}"#);
+        let call = call_for(&spec, args.as_bytes());
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(result) = item else {
+            panic!("expected completion");
+        };
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
+        assert_eq!(payload["text"], "hello");
+        let seen = api_rx.recv().await.expect("request");
+        assert!(
+            seen.contains(r#""format":"mp3""#),
+            "format must be derived from the path, not the query string: {seen}"
+        );
         audio_server.await.expect("audio server");
         api_server.await.expect("api server");
     }
