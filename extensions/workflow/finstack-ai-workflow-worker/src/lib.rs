@@ -18,7 +18,7 @@ pub use fires::{FireRow, FireStatus, FireStore, idempotency_key};
 pub use inbox::{InboxKind, InboxRow, InboxStore};
 pub use memory::MemoryWorkerStore;
 pub use park::park;
-pub use sqlite::SqliteWorkerStore;
+pub use sqlite::{SqliteWorkerStore, is_memory_sqlite_path};
 pub use wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline, lease_open, wake_due};
 pub use worker::{
     PortsFactory, RunStarter, StartedRun, TickReport, WorkerBuilder, WorkerHandle, WorkflowWorker,

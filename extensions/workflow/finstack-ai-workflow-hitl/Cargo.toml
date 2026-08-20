@@ -1,5 +1,5 @@
 [package]
-name = "finstack-ai-example-durable-interaction"
+name = "finstack-ai-workflow-hitl"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,19 +7,24 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Durable interaction restart example using the local workflow driver"
-publish = false
+description = "Human-in-the-loop router battery for the finstack-ai local workflow driver"
+readme = "README.md"
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai-workflow-worker = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+finstack-ai-store-memory = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-test = { workspace = true }
-finstack-ai-workflow-hitl = { workspace = true }
 finstack-ai-workflow-local = { workspace = true }
-finstack-ai-workflow-worker = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 
 [lints]
 workspace = true

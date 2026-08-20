@@ -48,6 +48,7 @@ members = [
     "extensions/interop/finstack-ai-codex-child",
     "extensions/interop/finstack-ai-completion-ingress",
     "extensions/interop/finstack-ai-remote-child",
+    "extensions/workflow/finstack-ai-workflow-hitl",
     "extensions/workflow/finstack-ai-workflow-local",
     "extensions/workflow/finstack-ai-workflow-worker",
     "examples/rust-minimal",
@@ -167,6 +168,7 @@ finstack-ai-observer-notify = { path = "extensions/observers/finstack-ai-observe
 finstack-ai-observer-billing = { path = "extensions/observers/finstack-ai-observer-billing", version = "1.0.0" }
 finstack-ai-completion-ingress = { path = "extensions/interop/finstack-ai-completion-ingress", version = "1.0.0" }
 finstack-ai-remote-child = { path = "extensions/interop/finstack-ai-remote-child", version = "1.0.0" }
+finstack-ai-workflow-hitl = { path = "extensions/workflow/finstack-ai-workflow-hitl", version = "1.0.0" }
 finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "1.0.0" }
 finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "1.0.0" }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }

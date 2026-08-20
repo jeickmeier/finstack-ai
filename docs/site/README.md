@@ -25,6 +25,7 @@ the public index and does not replace either layer.
 | [Providers](provider.md) | Separate crates; no secrets in `AgentSpec` |
 | [Toolsets](toolset.md) | Calculator, filesystem, MCP, shell |
 | [Middleware](middleware.md) | Stage fold, what can land, compaction status |
+| [Workflow](workflow.md) | Local driver, leased worker, HITL router battery |
 | [Plugins](plugin.md) | Frozen `@1.0.0` WIT; experimental `@0.0.4` stays loadable |
 | [Server](server.md) | Loopback/Unix reference server |
 | [Migration](migration.md) | Compatibility policy and release rehearsal |

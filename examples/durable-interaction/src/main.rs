@@ -1,4 +1,7 @@
-//! Typed interaction that survives a simulated worker restart.
+//! UC-05 end to end: a run parks on a tool-approval interaction, the worker
+//! process dies, a fresh host rebuilds every store from disk paths alone, an
+//! operator resolves the interaction through the HITL router, and the very
+//! same worker drives the run to a terminal state.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::float_cmp)]
@@ -32,11 +35,10 @@ use finstack_ai_kernel::ToolFailurePolicy;
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AuthorizationEvidence, BudgetPropagation, CancellationPropagation,
     ContentBlock, DeadlinePropagation, Digest, EffectOutputContract, EffectOutputKind, Id, IdTag,
-    InteractionResolution, InteractionResolutionCommand, KernelInput, KernelState, Message,
-    MessageRole, Metadata, OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef,
-    ProviderIds, RawJson, ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits, RunPhase,
-    RunPropagationPolicy, RunRelation, RunSecurityContext, Stage, StageCursor, TextBlock,
-    Timestamp, TransitionEnv, Usage,
+    KernelInput, KernelState, Message, MessageRole, Metadata, OperationLocator, OutputSpec,
+    PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, ReducerStageOutcome, RetrySafety,
+    RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Stage,
+    StageCursor, TextBlock, Timestamp, TransitionEnv, Usage,
 };
 use finstack_ai_runtime::{
     ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
@@ -44,10 +46,10 @@ use finstack_ai_runtime::{
     Model, ModelContextProfile, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
     ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
     RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
+    SameIdentityRetryPolicy, SideEffectClass, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
     ToolCallDelta, ToolDeferralSupport, ToolExecutionPolicy, ToolPolicyDecision, ToolResult,
     ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
-    WorkflowSession, WorkflowWait, resolve_model_context_profile,
+    WorkflowSession, WorkflowWait, classify_wait, resolve_model_context_profile,
 };
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
@@ -57,6 +59,21 @@ use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
     ScriptedToolset,
 };
+use finstack_ai_workflow_hitl::{
+    HitlInboxStore, HitlRouter, ResolutionInput, SqliteHitlStore, park,
+};
+use finstack_ai_workflow_local::MemoryCronStore;
+use finstack_ai_workflow_worker::{
+    FireStore, InboxStore, PortsFactory, SqliteWorkerStore, WakeIndexStore, WorkerBuilder,
+    WorkerError,
+};
+
+/// Workflow kind the park is indexed under and the key the worker's ports
+/// factory is registered against.
+const WORKFLOW_KIND: &str = "durable-interaction";
+/// Tenant scope shared by the accepted run and the resolving operator.
+const TENANT: &str = "tenant-a";
+
 fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
     bytes[6] = 0x70;
@@ -145,8 +162,8 @@ fn accepted() -> Result<RunAccepted, BoxError> {
         run_id,
         RunRelation::root(run_id)?,
         RunSecurityContext::try_new(
-            "tenant-a",
-            PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))?,
+            TENANT,
+            PrincipalRef::try_new("issuer", "subject", Some(TENANT))?,
             "oidc",
             "high",
             "policy-v1",
@@ -179,8 +196,12 @@ fn user_message() -> Result<Message, BoxError> {
 }
 
 fn stage(stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
+    stage_at(0, stage, outcome)
+}
+
+fn stage_at(cycle: u64, stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
     KernelInput::StageSettled(finstack_ai_kernel::StageSettled {
-        cursor: StageCursor { cycle: 0, stage },
+        cursor: StageCursor { cycle, stage },
         outcome,
     })
 }
@@ -203,7 +224,7 @@ fn draft(messages: Arc<[Message]>, tools: Arc<[ToolSpec]>) -> Result<ModelReques
 }
 
 fn locator() -> Result<OperationLocator, BoxError> {
-    Ok(OperationLocator::try_new("tenant-a", id(1), id(2), id(3))?)
+    Ok(OperationLocator::try_new(TENANT, id(1), id(2), id(3))?)
 }
 
 fn tools() -> Result<Arc<[ToolSpec]>, BoxError> {
@@ -294,6 +315,52 @@ fn model() -> Result<Arc<dyn Model>, BoxError> {
             ],
         }],
     )))
+}
+
+/// Model for the restarted host's second model cycle: a plain-text
+/// completion that finalizes the run once the approved tool's result has
+/// been folded back into the conversation.
+fn finalizing_model() -> Result<Arc<dyn Model>, BoxError> {
+    Ok(Arc::new(ScriptedModel::from_plans(
+        profile()?,
+        vec![ScriptedModelPlan {
+            actions: vec![
+                ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(TextDelta {
+                    text: Arc::from("done"),
+                }))),
+                ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                    assistant_content: Arc::from([ContentBlock::Text(TextBlock::try_new("done")?)]),
+                    tool_calls: Arc::from([]),
+                    usage: Usage::empty(),
+                    provider_ids: ProviderIds::try_new(
+                        None::<&str>,
+                        Some("response-1"),
+                        None::<&str>,
+                    )?,
+                    completion_id: Arc::from("completion-done"),
+                    continuation_state: None,
+                }))),
+            ],
+        }],
+    )))
+}
+
+/// Binds the restarted host's model and catalog onto every session the
+/// worker resumes for [`WORKFLOW_KIND`].
+struct BindPorts {
+    model: Arc<dyn Model>,
+    profile: LockedModelContextProfile,
+    catalog: Arc<ResolvedToolCatalog>,
+}
+
+impl PortsFactory for BindPorts {
+    fn bind(&self, session: WorkflowSession) -> Result<WorkflowSession, WorkerError> {
+        Ok(session.with_ports(
+            Arc::clone(&self.model),
+            self.profile.clone(),
+            Some(Arc::clone(&self.catalog)),
+        ))
+    }
 }
 
 async fn spawn_owner(
@@ -426,24 +493,178 @@ fn open_store(path: &std::path::Path) -> Result<Arc<SqliteJournalStore>, BoxErro
     })?))
 }
 
+/// One shared adapter file holding both the worker's tables (wake index,
+/// cron fires, response inbox) and the HITL inbox.
+fn open_worker_store(path: &std::path::Path) -> Result<Arc<SqliteWorkerStore>, BoxError> {
+    Ok(Arc::new(SqliteWorkerStore::open(path)?))
+}
+
+fn open_hitl_store(path: &std::path::Path) -> Result<Arc<SqliteHitlStore>, BoxError> {
+    Ok(Arc::new(SqliteHitlStore::open(path)?))
+}
+
+/// Stands in for the missing application-level facade: settling an
+/// interaction that parked inside `Stage::BeforeToolBatch` unconditionally
+/// lands the run's kernel phase on `RunPhase::AfterToolBatch`, and advancing
+/// past that phase requires an externally submitted `KernelInput::StageSettled`
+/// decision that no worker makes on its own. A real host supplies these
+/// decisions from its own product logic; here they are submitted directly so
+/// the example can show the run reach a terminal state.
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps the whole facade drive (AfterToolBatch -> BeforeFinalize) contiguous"
+)]
+async fn drive_past_missing_facade_decisions(
+    journal: &Arc<SqliteJournalStore>,
+    tools: Arc<[ToolSpec]>,
+    model: Arc<dyn Model>,
+    catalog: Arc<ResolvedToolCatalog>,
+    clock: ExternalClock,
+) -> Result<(), BoxError> {
+    let recovered = CommitCoordinator::recover(Arc::clone(journal) as _, id(1)).await?;
+    let cycle = recovered.state().cycle;
+
+    let facade = RunTaskOwner::spawn_with_model_and_tools(
+        recovered,
+        RunTaskConfig {
+            command_capacity: 8,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
+            shutdown_deadline: StdDuration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
+        },
+        ModelTaskConfig {
+            job_capacity: 2,
+            result_capacity: 2,
+            stream_limits: ModelStreamLimits::default(),
+            warmup_deadline: None,
+            warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
+        },
+        ToolTaskConfig {
+            job_capacity: 8,
+            result_capacity: 8,
+            global_max_concurrency: 2,
+            stream_limits: ToolStreamLimits::default(),
+        },
+        model,
+        locked_profile()?,
+        catalog,
+        clock,
+        CounterRandom(AtomicU64::new(705)),
+    )
+    .await?;
+
+    facade
+        .handle()
+        .submit(
+            env(3_100, &[300], &[], &[], &[], &[], &[], 301)?,
+            stage_at(cycle, Stage::AfterToolBatch, ReducerStageOutcome::Continue),
+        )
+        .await?;
+    wait_state(journal, |state| {
+        state.phase == Some(RunPhase::PreparingContext)
+    })
+    .await?;
+
+    let next_cycle = cycle + 1;
+    let messages: Arc<[Message]> = Arc::from(
+        CommitCoordinator::recover(Arc::clone(journal) as _, id(1))
+            .await?
+            .state()
+            .messages
+            .as_slice(),
+    );
+    facade
+        .handle()
+        .submit(
+            env(3_200, &[302, 303], &[], &[], &[304], &[], &[], 305)?,
+            stage_at(
+                next_cycle,
+                Stage::PrepareContext,
+                ReducerStageOutcome::ContextPrepared {
+                    messages: Arc::clone(&messages),
+                },
+            ),
+        )
+        .await?;
+
+    let raw = RawJson::parse(draft(messages, tools)?.canonical_bytes()?)?;
+    facade
+        .handle()
+        .submit(
+            env(3_300, &[306, 307], &[308], &[309], &[], &[310], &[], 311)?,
+            stage_at(
+                next_cycle,
+                Stage::BeforeModel,
+                ReducerStageOutcome::ModelRequestPrepared {
+                    request: raw,
+                    component: None,
+                    output_contract: EffectOutputContract {
+                        kind: EffectOutputKind::ModelResponse,
+                        schema_version: 1,
+                        schema_digest: Digest::raw_json(b"model-response"),
+                    },
+                    retry_safety: RetrySafety::SafeToRetry,
+                    deadline: Some(timestamp(5_000)),
+                },
+            ),
+        )
+        .await?;
+    wait_state(journal, |state| state.phase == Some(RunPhase::AfterModel)).await?;
+
+    facade
+        .handle()
+        .submit(
+            env(3_400, &[312], &[], &[], &[], &[], &[], 313)?,
+            stage_at(next_cycle, Stage::AfterModel, ReducerStageOutcome::Continue),
+        )
+        .await?;
+    wait_state(journal, |state| {
+        state.phase == Some(RunPhase::BeforeFinalize)
+    })
+    .await?;
+
+    facade
+        .handle()
+        .submit(
+            env(3_500, &[314, 315], &[316], &[], &[], &[], &[], 317)?,
+            stage_at(
+                next_cycle,
+                Stage::BeforeFinalize,
+                ReducerStageOutcome::FinalizeAccepted,
+            ),
+        )
+        .await?;
+    wait_state(journal, |state| state.terminal.is_some()).await?;
+    drop(facade);
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps the whole UC-05 story — accept, park, restart, resolve, complete — contiguous"
+)]
 async fn main() -> Result<(), BoxError> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("journal.sqlite");
-    let tools = tools()?;
-    let catalog = catalog(&tools)?;
+    let seed_tools = tools()?;
+    let seed_catalog = catalog(&seed_tools)?;
     let model = model()?;
     let clock = ExternalClock::new(timestamp(2_500));
     let store = open_store(&path)?;
     let owner = spawn_owner(
         Arc::clone(&store),
         Arc::clone(&model),
-        Arc::clone(&catalog),
+        Arc::clone(&seed_catalog),
         clock.clone(),
         700,
     )
     .await?;
-    drive_to_after_model(&owner.handle(), &store, tools).await?;
+    drive_to_after_model(&owner.handle(), &store, seed_tools).await?;
     owner
         .handle()
         .submit(
@@ -458,30 +679,128 @@ async fn main() -> Result<(), BoxError> {
     drop(owner);
     drop(store);
 
+    // --- park the interaction through the HITL router battery ---
+    let adapters_path = dir.path().join("adapters.sqlite");
     let store = open_store(&path)?;
-    let mut driver: WorkflowSession =
+    let mut session: WorkflowSession =
         WorkflowSession::trusted(Arc::clone(&store) as _, locator()?, clock.clone(), 701)
             .await?
-            .with_ports(Arc::clone(&model), locked_profile()?, Some(catalog));
-    let WorkflowWait::Interaction { interaction_id, .. } = driver.drive_until_wait().await? else {
+            .with_ports(
+                Arc::clone(&model),
+                locked_profile()?,
+                Some(Arc::clone(&seed_catalog)),
+            );
+    let WorkflowWait::Interaction { interaction_id, .. } = session.drive_until_wait().await? else {
         return Err("expected interaction after worker restart".into());
     };
-    driver
-        .resolve_interaction(
-            InteractionResolutionCommand::try_new(
-                locator()?,
-                InteractionResolution::try_new(
-                    interaction_id,
-                    "resolution-1",
-                    PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))?,
-                    AuthorizationEvidence::try_new("policy-v1", "decision-v1")?,
-                    RawJson::parse(r#"{"approved":true}"#)?,
-                    None::<&str>,
-                )?,
-            )?,
-            timestamp(3_000),
+    let wake = open_worker_store(&adapters_path)?;
+    let inbox = open_hitl_store(&adapters_path)?;
+    park(
+        &mut session,
+        wake.as_ref(),
+        inbox.as_ref(),
+        WORKFLOW_KIND,
+        timestamp(2_600),
+    )?;
+
+    // Process death: every in-memory handle goes away. Only the journal and
+    // adapters files under `dir` survive.
+    drop(session);
+    drop(inbox);
+    drop(wake);
+    drop(seed_catalog);
+    drop(model);
+    drop(store);
+
+    // --- restarted host: rebuild every store from disk paths alone ---
+    let journal = open_store(&path)?;
+    let adapters = open_worker_store(&adapters_path)?;
+    let inbox = open_hitl_store(&adapters_path)?;
+    let restart_tools = tools()?;
+    let restart_catalog = catalog(&restart_tools)?;
+    let model = finalizing_model()?;
+    let clock = ExternalClock::new(timestamp(2_600));
+
+    let worker = Arc::new(
+        WorkerBuilder::new(
+            Arc::clone(&journal) as _,
+            Arc::new(MemoryCronStore::new()),
+            Arc::clone(&adapters) as Arc<dyn WakeIndexStore>,
+            Arc::clone(&adapters) as Arc<dyn FireStore>,
+            Arc::clone(&adapters) as Arc<dyn InboxStore>,
         )
-        .await?;
-    println!("durable interaction {interaction_id} survived worker restart");
+        .clock(clock.clone())
+        .drive_timeout(StdDuration::from_millis(500))
+        .register_ports(
+            WORKFLOW_KIND,
+            Arc::new(BindPorts {
+                model: Arc::clone(&model),
+                profile: locked_profile()?,
+                catalog: Arc::clone(&restart_catalog),
+            }),
+        )
+        .build(),
+    );
+    let router = HitlRouter::new(
+        Arc::clone(&inbox) as Arc<dyn HitlInboxStore>,
+        Arc::clone(&worker),
+        Arc::clone(&adapters) as Arc<dyn WakeIndexStore>,
+    );
+
+    // --- inbox → authorized resolve ---
+    let pending = router.pending(TENANT)?;
+    let Some(row) = pending.first() else {
+        return Err("expected one pending interaction after restart".into());
+    };
+    println!(
+        "durable interaction {} pending ({}) for session {}",
+        row.interaction_id, row.kind, row.session_id
+    );
+    router.resolve(
+        TENANT,
+        &interaction_id.to_canonical_string(),
+        ResolutionInput {
+            resolution_id: Arc::from("resolution-1"),
+            principal: PrincipalRef::try_new("issuer", "subject", Some(TENANT))?,
+            evidence: AuthorizationEvidence::try_new("policy-v1", "decision-v1")?,
+            payload: RawJson::parse(r#"{"approved":true}"#)?,
+            note: None,
+        },
+        timestamp(3_000),
+    )?;
+
+    // First tick: the resolution is delivered and the approved tool runs, but
+    // the run lands on `AfterToolBatch`, which the worker cannot advance past
+    // on its own (see `drive_past_missing_facade_decisions`).
+    Box::pin(worker.tick()).await?;
+    drive_past_missing_facade_decisions(
+        &journal,
+        Arc::clone(&restart_tools),
+        Arc::clone(&model),
+        Arc::clone(&restart_catalog),
+        clock.clone(),
+    )
+    .await?;
+
+    // Second tick: past the resume backoff, the same worker observes the run
+    // is already terminal and drains the wake/inbox rows for it.
+    clock.jump(120_000)?;
+    Box::pin(worker.tick()).await?;
+
+    let terminal_session =
+        WorkflowSession::trusted(Arc::clone(&journal) as _, locator()?, clock.clone(), 720).await?;
+    if !matches!(
+        classify_wait(terminal_session.last_state()),
+        Some(WorkflowWait::Terminal { .. })
+    ) {
+        return Err("expected the run to reach a terminal state after restart".into());
+    }
+
+    let report = router.sweep(timestamp(200_000))?;
+    if report.reconciled != 1 {
+        return Err("expected the sweep to reconcile the delivered row to Closed".into());
+    }
+
+    println!("durable interaction {interaction_id} resolved and run completed after restart");
     Ok(())
 }

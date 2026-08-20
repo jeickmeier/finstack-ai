@@ -206,7 +206,7 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_hitl_inbox (
 );
 ```
 
-Never touch `PRAGMA user_version` (kernel-owned in shared files). Map store failures to `StoreUnavailable`/`StoreIntegrity` with codes following the worker's naming (`"hitl_open"`, `"hitl_upsert"`, `"hitl_row"`, …).
+Never touch `PRAGMA user_version` (kernel-owned in shared files). Map store failures to `StoreUnavailable`/`StoreIntegrity` with codes following the worker's naming, backend-prefixed (`"sqlite_hitl_open"`, `"sqlite_hitl_upsert"`, `"sqlite_hitl_row"`, …; the prefix was added during the final review wave).
 
 - [ ] **Step 1: Write the failing test** — `tests/hitl/sqlite.rs`: run the exact Task 2 assertions against `SqliteHitlStore::open(tempdir.path().join("hitl.sqlite"))` (extract the assertion body into a shared `fn exercise_store(store: &dyn HitlInboxStore)` in `tests/hitl/store.rs` and call it from both); plus a persistence check — drop the store, reopen the same path, rows and statuses survive; plus co-location — open a `SqliteWorkerStore` on the same file first, then `SqliteHitlStore::open` on it, both operate without error.
 - [ ] **Step 2: Run to verify failure** — `cargo test -p finstack-ai-workflow-hitl sqlite` → compile failure.
@@ -356,6 +356,8 @@ impl HitlRouter {
     pub fn sweep(&self, now: Timestamp) -> Result<SweepReport, HitlError>;
 }
 ```
+
+*Historical: the `ApprovalExpiry` default sketched in this block — refusing expired approvals under a synthetic `("finstack.workflow.hitl", "expiry", …)` principal — was superseded during implementation by the amendment recorded in [design spec §2.4](../specs/2026-08-20-workflow-hitl-router-design.md): the shipped default is fail-closed (it declines every row, because no battery-authored credential satisfies the runtime's interaction ingress), credential-free expiry is driven by the worker tick's kernel `ExpireIfDue`, and `ExpiryPolicy` is a row-disposition hook rather than a way to author the run's outcome. The task below is left as written.*
 
 Ordering is load-bearing: reconcile **before** expiry so an interaction resolved out-of-band (wake row consumed by a tick) is closed rather than refused. A policy returning `None` leaves the row `Open` — it will be reconsidered next sweep, so `sweep` stays idempotent. Policy or delivery failure for one row does not abort the sweep; the row stays `Open` and the error propagates only if every row failed — no: keep it simpler and strict, first error aborts and returns `Err`; rows already transitioned stay transitioned (each transition is independently durable, re-sweep is safe).
 

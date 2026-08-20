@@ -125,6 +125,8 @@ unpublished.
   call sites; a `Bounce` retries with `RetryClassification::Verification`
   and a `Reject` fails the run with the stable, non-retryable
   `verify_rejected` code.
+- `finstack-ai-workflow-hitl`: new HITL router battery (UC-05) — interaction
+  inbox, authorized resolve, expiry sweep (fail-closed default).
 
 ### Changed
 

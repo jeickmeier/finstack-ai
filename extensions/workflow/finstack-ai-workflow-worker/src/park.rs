@@ -12,6 +12,14 @@ use crate::wake::{WakeIndexStore, WakeReason, WakeRow};
 /// The row is a hint: the journal stays authoritative. A terminal state
 /// deletes any existing row instead of writing one.
 ///
+/// An [`WorkflowWait::Interaction`] row also records the committed request's
+/// `expires_at` on [`WakeRow::expires_at`], which is what lets the tick drive
+/// the kernel's credential-free expiry once that deadline passes without any
+/// resolution arriving. Re-parking after the expiry settles rewrites (or,
+/// on a terminal state, deletes) this row, and the rewritten row no longer
+/// classifies as the same interaction wait — so a later tick cannot expire
+/// the same interaction twice.
+///
 /// # Errors
 ///
 /// Returns [`WorkerError::NotParked`] when no wait is classified, and
@@ -33,15 +41,20 @@ pub fn park(
                 workflow_kind,
                 WakeReason::Timer,
                 Some(*due_at),
+                None,
                 &effect_id.to_canonical_string(),
             ))?;
         }
-        WorkflowWait::Interaction { interaction_id, .. } => {
+        WorkflowWait::Interaction {
+            interaction_id,
+            request,
+        } => {
             wake.upsert(&row(
                 &checkpoint,
                 workflow_kind,
                 WakeReason::Interaction,
                 None,
+                request.expires_at(),
                 &interaction_id.to_canonical_string(),
             ))?;
         }
@@ -50,6 +63,7 @@ pub fn park(
                 &checkpoint,
                 workflow_kind,
                 WakeReason::Deferred,
+                None,
                 None,
                 &effect_id.to_canonical_string(),
             ))?;
@@ -65,6 +79,7 @@ fn row(
     workflow_kind: &str,
     reason: WakeReason,
     wake_at: Option<finstack_ai_kernel::Timestamp>,
+    expires_at: Option<finstack_ai_kernel::Timestamp>,
     pending_id: &str,
 ) -> WakeRow {
     WakeRow {
@@ -75,6 +90,7 @@ fn row(
         workflow_kind: Arc::from(workflow_kind),
         reason,
         wake_at,
+        expires_at,
         pending_id: Arc::from(pending_id),
         leased_by: None,
         lease_expires_at: None,
