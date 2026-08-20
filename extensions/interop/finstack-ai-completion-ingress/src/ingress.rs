@@ -2,11 +2,15 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::{AuthorizationEvidence, EffectId, OperationLocator, PrincipalRef, Timestamp};
+use finstack_ai_kernel::{
+    AuthorizationEvidence, EffectId, OperationLocator, PrincipalRef, Timestamp,
+};
 use finstack_ai_runtime::{IdempotencyHorizon, JournalStore, SecurityAuditGate};
 use thiserror::Error;
 
-use crate::config::{CompletionIngressConfig, CompletionIngressConfigError, ResolvedKeys, validated_keys};
+use crate::config::{
+    CompletionIngressConfig, CompletionIngressConfigError, ResolvedKeys, validated_keys,
+};
 use crate::token::{CLAIMS_VERSION, CallbackToken, Claims, KIND_EFFECT_COMPLETION, mint_token};
 
 /// Caller-visible delivery failures.
@@ -62,6 +66,9 @@ impl CompletionIngress {
     /// # Errors
     ///
     /// Returns [`CompletionIngressConfigError`] for invalid keys.
+    #[allow(clippy::needless_pass_by_value)]
+    // Public constructor intentionally takes ownership of the config: it's
+    // consumed once at construction, and callers typically build it inline.
     pub fn try_new(
         store: Arc<dyn JournalStore>,
         audit: Arc<SecurityAuditGate>,
@@ -128,12 +135,14 @@ impl CompletionIngress {
                     crate::token::VerifyFailure::UnknownKey => {
                         (SecurityAuditCategory::AuthenticationFailure, "unknown_key")
                     }
-                    crate::token::VerifyFailure::BadSignature => {
-                        (SecurityAuditCategory::AuthenticationFailure, "bad_signature")
-                    }
-                    crate::token::VerifyFailure::Expired => {
-                        (SecurityAuditCategory::AuthenticationFailure, "expired_token")
-                    }
+                    crate::token::VerifyFailure::BadSignature => (
+                        SecurityAuditCategory::AuthenticationFailure,
+                        "bad_signature",
+                    ),
+                    crate::token::VerifyFailure::Expired => (
+                        SecurityAuditCategory::AuthenticationFailure,
+                        "expired_token",
+                    ),
                 };
                 let event = crate::audit::ingress_audit_event(
                     category,
@@ -164,38 +173,29 @@ impl CompletionIngress {
             let event = reject_body("oversize_body", &claims);
             return Err(crate::audit::audit_and_reject(&self.audit, event).await);
         }
-        let decoded: DeliveryBody = match serde_json::from_slice(body) {
-            Ok(decoded) => decoded,
-            Err(_) => {
-                let event = reject_body("invalid_body", &claims);
-                return Err(crate::audit::audit_and_reject(&self.audit, event).await);
-            }
+        let Ok(decoded) = serde_json::from_slice::<DeliveryBody>(body) else {
+            let event = reject_body("invalid_body", &claims);
+            return Err(crate::audit::audit_and_reject(&self.audit, event).await);
         };
         let completion_id = decoded
             .completion_id
             .unwrap_or_else(|| claims.effect_id.to_canonical_string());
-        let completion = match finstack_ai_kernel::ExternalEffectCompletion::try_new(
+        let Ok(completion) = finstack_ai_kernel::ExternalEffectCompletion::try_new(
             claims.effect_id,
             completion_id,
             decoded.outcome,
-        ) {
-            Ok(completion) => completion,
-            Err(_) => {
-                let event = reject_body("invalid_body", &claims);
-                return Err(crate::audit::audit_and_reject(&self.audit, event).await);
-            }
+        ) else {
+            let event = reject_body("invalid_body", &claims);
+            return Err(crate::audit::audit_and_reject(&self.audit, event).await);
         };
-        let command = match finstack_ai_kernel::ExternalEffectCompletionCommand::try_new(
+        let Ok(command) = finstack_ai_kernel::ExternalEffectCompletionCommand::try_new(
             claims.locator.clone(),
             claims.principal.clone(),
             claims.authorization.clone(),
             completion,
-        ) {
-            Ok(command) => command,
-            Err(_) => {
-                let event = reject_body("invalid_body", &claims);
-                return Err(crate::audit::audit_and_reject(&self.audit, event).await);
-            }
+        ) else {
+            let event = reject_body("invalid_body", &claims);
+            return Err(crate::audit::audit_and_reject(&self.audit, event).await);
         };
 
         let mut router = finstack_ai_runtime::ExternalCompletionRouter::new(
@@ -205,18 +205,23 @@ impl CompletionIngress {
         if let Some(horizon) = self.horizon {
             router = router.with_horizon(horizon);
         }
-        router.route(command, submitted_at).await.map_err(|error| match error {
-            finstack_ai_runtime::ExternalRouteError::IngressRejected
-            | finstack_ai_runtime::ExternalRouteError::InvalidNormalizedCommand => {
-                IngressError::Rejected
-            }
-            finstack_ai_runtime::ExternalRouteError::IdAllocation => IngressError::Unavailable {
-                reason_code: "id_allocation",
-            },
-            finstack_ai_runtime::ExternalRouteError::Runtime(_) => IngressError::Unavailable {
-                reason_code: "runtime",
-            },
-        })
+        router
+            .route(command, submitted_at)
+            .await
+            .map_err(|error| match error {
+                finstack_ai_runtime::ExternalRouteError::IngressRejected
+                | finstack_ai_runtime::ExternalRouteError::InvalidNormalizedCommand => {
+                    IngressError::Rejected
+                }
+                finstack_ai_runtime::ExternalRouteError::IdAllocation => {
+                    IngressError::Unavailable {
+                        reason_code: "id_allocation",
+                    }
+                }
+                finstack_ai_runtime::ExternalRouteError::Runtime(_) => IngressError::Unavailable {
+                    reason_code: "runtime",
+                },
+            })
     }
 }
 
@@ -398,7 +403,12 @@ mod tests {
         let events = sink.events.lock().expect("lock");
         // Two records with the same event_id; the gate/sink contract is
         // idempotent by event_id, so assert both share one id.
-        assert!(events.iter().all(|event| event.event_id() == events[0].event_id()));
+        assert!(!events.is_empty());
+        assert!(
+            events
+                .iter()
+                .all(|event| event.event_id() == events[0].event_id())
+        );
     }
 
     #[tokio::test]
@@ -422,7 +432,10 @@ mod tests {
         let token = ingress.mint(&grant()).expect("mint");
         let oversize = vec![b'x'; MAX_BODY_BYTES + 1];
         assert_eq!(
-            ingress.deliver(token.as_str(), &oversize, ts(50)).await.expect_err("oversize"),
+            ingress
+                .deliver(token.as_str(), &oversize, ts(50))
+                .await
+                .expect_err("oversize"),
             IngressError::Rejected
         );
         assert_eq!(
@@ -433,13 +446,23 @@ mod tests {
             IngressError::Rejected
         );
         let events = sink.events.lock().expect("lock");
-        assert!(events.iter().any(|event| event.reason_code() == "oversize_body"));
-        assert!(events.iter().any(|event| event.reason_code() == "invalid_body"));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.reason_code() == "oversize_body")
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.reason_code() == "invalid_body")
+        );
         // Post-auth events carry the authenticated principal.
-        assert!(events
-            .iter()
-            .filter(|event| event.reason_code() == "oversize_body")
-            .all(|event| event.principal().is_some()));
+        assert!(
+            events
+                .iter()
+                .filter(|event| event.reason_code() == "oversize_body")
+                .all(|event| event.principal().is_some())
+        );
     }
 
     #[tokio::test]

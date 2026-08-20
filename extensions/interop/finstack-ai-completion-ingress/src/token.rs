@@ -89,6 +89,15 @@ fn mac_for(key: &str, message: &[u8]) -> Result<HmacSha256, ()> {
     Ok(mac)
 }
 
+/// Read only the `kid` before authentication; full strict decode happens
+/// after the signature is proven.
+#[derive(Deserialize)]
+struct KidOnly {
+    kid: String,
+    #[serde(flatten)]
+    _rest: serde_json::Map<String, serde_json::Value>,
+}
+
 /// Mint a signed callback token for `claims`, signed with the active key.
 ///
 /// # Errors
@@ -104,7 +113,7 @@ pub(crate) fn mint_token(
     let claims_b64 = URL_SAFE_NO_PAD.encode(claims_bytes);
     let message = format!("{TOKEN_PREFIX}{claims_b64}");
     let (_, key) = keys.keys.first().ok_or(MintErrorKind::Encoding)?;
-    let mac = mac_for(key.expose(), message.as_bytes()).map_err(|_| MintErrorKind::Encoding)?;
+    let mac = mac_for(key.expose(), message.as_bytes()).map_err(|()| MintErrorKind::Encoding)?;
     let tag = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     Ok(CallbackToken(format!("{message}.{tag}")))
 }
@@ -135,14 +144,6 @@ pub(crate) fn verify_token(
     let tag = URL_SAFE_NO_PAD
         .decode(tag_b64)
         .map_err(|_| VerifyFailure::Malformed)?;
-    // Read only the kid before authentication; full strict decode happens
-    // after the signature is proven.
-    #[derive(Deserialize)]
-    struct KidOnly {
-        kid: String,
-        #[serde(flatten)]
-        _rest: serde_json::Map<String, serde_json::Value>,
-    }
     let kid_probe: KidOnly =
         serde_json::from_slice(&claims_bytes).map_err(|_| VerifyFailure::Malformed)?;
     let key = keys
@@ -153,8 +154,9 @@ pub(crate) fn verify_token(
         .ok_or(VerifyFailure::UnknownKey)?;
     let message = format!("{TOKEN_PREFIX}{claims_b64}");
     let mac =
-        mac_for(key.expose(), message.as_bytes()).map_err(|_| VerifyFailure::BadSignature)?;
-    mac.verify_slice(&tag).map_err(|_| VerifyFailure::BadSignature)?;
+        mac_for(key.expose(), message.as_bytes()).map_err(|()| VerifyFailure::BadSignature)?;
+    mac.verify_slice(&tag)
+        .map_err(|_| VerifyFailure::BadSignature)?;
     let claims: Claims =
         serde_json::from_slice(&claims_bytes).map_err(|_| VerifyFailure::Malformed)?;
     if claims.v != CLAIMS_VERSION

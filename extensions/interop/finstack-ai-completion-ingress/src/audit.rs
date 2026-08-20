@@ -2,7 +2,7 @@
 //!
 //! Mirrors the runtime's derivation (driver/ingress/shared.rs): the event id
 //! is the hex of a domain-separated digest over (token digest, body digest,
-//! submitted_at, reason_code), so identical replayed garbage produces one
+//! `submitted_at`, `reason_code`), so identical replayed garbage produces one
 //! idempotent audit event.
 
 use finstack_ai_kernel::{Digest, PrincipalRef, Timestamp};
@@ -36,13 +36,9 @@ pub(crate) fn ingress_audit_event(
 ) -> Option<SecurityAuditEvent> {
     let token_digest = raw_digest(TOKEN_DIGEST_DOMAIN, token)?;
     let body_digest = raw_digest(BODY_DIGEST_DOMAIN, body)?;
-    let id_bytes = serde_json_canonicalizer::to_vec(&(
-        token_digest,
-        body_digest,
-        submitted_at,
-        reason_code,
-    ))
-    .ok()?;
+    let id_bytes =
+        serde_json_canonicalizer::to_vec(&(token_digest, body_digest, submitted_at, reason_code))
+            .ok()?;
     let id_digest = raw_digest(SECURITY_AUDIT_EVENT_DOMAIN, &id_bytes)?;
     SecurityAuditEvent::try_new(
         id_digest.to_hex(),
