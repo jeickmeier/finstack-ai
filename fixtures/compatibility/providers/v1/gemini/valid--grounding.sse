@@ -1,0 +1,4 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Answer is 42."}]},"index":0}],"responseId":"resp-ground-1","modelVersion":"gemini-2.5-pro"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0,"groundingMetadata":{"webSearchQueries":["rust async runtime"],"groundingChunks":[{"web":{"uri":"https://example.com/rust","title":"Rust async"}}]}}],"usageMetadata":{"promptTokenCount":14,"candidatesTokenCount":6,"cachedContentTokenCount":3,"totalTokenCount":20},"responseId":"resp-ground-1"}
+
