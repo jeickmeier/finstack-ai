@@ -488,6 +488,68 @@ FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
   closing-tag direction). All prior depth-guard tests still pass.
   `cargo test -p finstack-ai-tools-fetch` (61 tests at this point) and
   `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
+
+  UPDATE 4 (2026-08-20, fourth review pass — APPROACH CHANGED): the
+  terminator-rule fix above closed bypass 3 correctly in both
+  directions, and the new differential test was verified as genuinely
+  catching bypasses 1, 2 and 3. But the same review found TWO more
+  under-trip bypasses, each again reproduced as a real SIGABRT (exit
+  134) through `htmd::HtmlToMarkdown::convert`:
+    (4) The scanner had no notion of comment/CDATA/doctype regions, so
+        `"<div><!--</div>-->".repeat(100_000)` had its in-comment
+        `</div>` read as a genuine close that popped the real open
+        `<div>` — the tracked stack oscillated 0<->1 while html5ever,
+        which treats those bytes as comment DATA, nested 1002+.
+        Confirmed in the same family: `<![CDATA[</div>]]>`, `<?</div>>`,
+        `<!</div>>`, `<!DOCTYPE </div>>`.
+    (5) Introduced by UPDATE 3 itself: `is_tag_name_terminator` listed
+        NUL as a terminator, but html5ever's tag-name state REPLACES
+        NUL with U+FFFD inside the name — so `</div\0>` is an unmatched
+        end tag it ignores, while the guard trusted "div" and popped.
+        NUL is a name continuation byte, not a terminator.
+  Root cause, now explicit: four rounds of patching produced four new
+  bypasses, all of one kind — a hand-rolled byte scanner cannot be
+  patched into agreement with html5ever's tokenizer, because it has no
+  model of WHICH BYTES ARE TAG CONTEXT AT ALL. Every construct that
+  makes html5ever swallow `</div>` as data, or mangle a name, hands the
+  scanner a free pop.
+  Fix (this pass, approach change): the hand-rolled scan is DELETED.
+  `exceeds_safe_nesting_depth` now drives `html5ever::tokenizer::
+  Tokenizer` — the very tokenizer html5ever's own tree builder uses —
+  with a small `TokenSink` (`DepthCounter`) that pushes non-void start
+  tags, pops only on an exactly-matching end tag, ignores comment /
+  doctype / character tokens, and early-exits once the depth exceeds
+  `MAX_SCAN_DEPTH`. `html5ever` was promoted from a dev-dependency to a
+  real dependency of finstack-ai-tools-fetch for this (already in the
+  tree and license-cleared via `htmd`; `cargo deny check licenses`
+  passes). Comments, bogus comments, CDATA, doctypes, NUL-in-name,
+  attribute values containing `>` or `</div>`, character references and
+  case folding are now all resolved INSIDE the tokenizer, identically
+  to what the tree builder will see — the entire divergence class is
+  closed by construction rather than by another rule.
+  Remaining divergences are all in the fail-closed direction and are
+  documented on the function: a bare tokenizer does not enter rawtext
+  state for `<script>`/`<style>`/`<textarea>`/`<title>` (their contents
+  get tokenized as tags -> over-count), and it models neither implied
+  end tags nor the adoption agency algorithm (-> over-count). The false
+  claim carried by the previous doc comment ("can only reject more
+  documents than strictly necessary, never fewer") has been deleted and
+  replaced with this accurate statement plus the residual list.
+  Test net widened from a backward-looking regression list into a
+  discovery net: the vacuous corpus entry flagged by the reviewer
+  (`comment_wrapped_fake_tags`, whose real depth was 2 so its assertion
+  never ran) is fixed, the bypass-4 and bypass-5 shapes are added, and
+  the differential test gained a DETERMINISTIC generative component — a
+  seeded LCG assembles a few hundred documents from a token alphabet
+  (void and non-void opens, matching and mismatching closes, comments,
+  CDATA, bogus comments, doctypes, rawtext blocks, quoted attributes
+  containing `>` and `</div>`, odd trailing bytes and NUL) and asserts
+  for each that a real DOM depth over `MAX_SCAN_DEPTH` implies the
+  guard trips. Fixed seed, so CI stays stable. The ×100_000 crash
+  regressions for bypasses 1-5 are retained.
+  `cargo test -p finstack-ai-tools-fetch` (64 tests),
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` and
+  `cargo deny check licenses` all clean.
   Original finding text retained below for the record.
 
   --- original finding ---

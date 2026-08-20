@@ -19,6 +19,11 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-net-guard = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 futures-util = { workspace = true }
+# Real (non-dev) dependency: the pre-parse nesting-depth guard in
+# `markdown.rs` (F-4) drives html5ever's own tokenizer directly, rather than
+# a hand-rolled byte scanner, so its behavior agrees with what `htmd`'s
+# underlying html5ever tree builder will see.
+html5ever = { workspace = true }
 htmd = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -29,7 +34,6 @@ url = { workspace = true }
 
 [dev-dependencies]
 finstack-ai-context-memory = { workspace = true }
-html5ever = { workspace = true }
 markup5ever_rcdom = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 

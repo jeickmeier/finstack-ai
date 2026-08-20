@@ -6,12 +6,18 @@
 //! inlining the original text, which is already budget-checked. This
 //! function never returns an error.
 
+use std::cell::{Cell, RefCell};
+
+use html5ever::tendril::StrTendril;
+use html5ever::tokenizer::{
+    BufferQueue, Tag, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
+};
 use htmd::HtmlToMarkdown;
 
-/// Cap on the heuristic nesting-depth scan performed by
-/// [`exceeds_safe_nesting_depth`] before a document is handed to
-/// `htmd`/`html5ever`. See that function's doc comment for what "depth"
-/// means here and why the cap is heuristic rather than exact.
+/// Cap on the nesting-depth scan performed by [`exceeds_safe_nesting_depth`]
+/// before a document is handed to `htmd`/`html5ever`'s full tree-building
+/// parse. See that function's doc comment for what "depth" means here and
+/// why the cap is heuristic rather than exact.
 const MAX_SCAN_DEPTH: usize = 512;
 
 /// HTML void elements (per the living standard, never have a closing tag)
@@ -22,146 +28,192 @@ const VOID_ELEMENTS: &[&str] = &[
     "track", "wbr",
 ];
 
-/// Parse an ASCII tag name (letters, digits, `-`, `:`) from the start of
-/// `bytes`, lowercased. Returns `(name, bytes_consumed)`; `name` is `None`
-/// when `bytes` does not start with a valid name character.
-///
-/// This is a strict subset of html5ever's real tag-name tokenizer state,
-/// which appends essentially any byte (`_`, `.`, `@`, non-ASCII, ...) to the
-/// name rather than stopping. That means this function can stop mid-name on
-/// input html5ever would keep consuming — see [`is_tag_name_terminator`] and
-/// the doc comment on [`exceeds_safe_nesting_depth`] for why a name is only
-/// trusted when the byte immediately after it is a genuine terminator.
-fn parse_tag_name(bytes: &[u8]) -> (Option<String>, usize) {
-    let len = bytes
-        .iter()
-        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'-' || **b == b':')
-        .count();
-    if len == 0 {
-        (None, 0)
-    } else {
-        (
-            Some(String::from_utf8_lossy(&bytes[..len]).to_ascii_lowercase()),
-            len,
-        )
+/// [`TokenSink`] that tracks the depth of the open-element stack a real
+/// html5ever tree builder would maintain, without building a tree, and
+/// signals early once [`MAX_SCAN_DEPTH`] would be exceeded. See
+/// [`exceeds_safe_nesting_depth`]'s doc comment for the full rationale.
+struct DepthCounter {
+    stack: RefCell<Vec<html5ever::LocalName>>,
+    exceeded: Cell<bool>,
+}
+
+impl TokenSink for DepthCounter {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<()> {
+        let Token::TagToken(Tag { kind, name, .. }) = token else {
+            // Comments, bogus comments, CDATA-as-bogus-comment, doctypes,
+            // NUL characters, and ordinary character data never affect
+            // depth and are ignored outright -- the tokenizer has already
+            // done the real parsing work of telling these apart from tags.
+            return TokenSinkResult::Continue;
+        };
+        match kind {
+            TagKind::StartTag => {
+                // Void elements never hold the open-elements stack open,
+                // regardless of a trailing self-closing `/` (which the
+                // tokenizer resolves per-spec; void status is what actually
+                // matters, not the flag). Everything else is pushed exactly
+                // once, using the exact name the tokenizer parsed -- no
+                // truncation is possible here, because this name is
+                // produced by the same tag-name tokenizer state
+                // html5ever's tree builder itself consumes.
+                if !VOID_ELEMENTS.contains(&&*name) {
+                    let mut stack = self.stack.borrow_mut();
+                    stack.push(name);
+                    if stack.len() > MAX_SCAN_DEPTH {
+                        self.exceeded.set(true);
+                        drop(stack);
+                        // There is no explicit "abort" TokenSinkResult; but
+                        // returning `Script` causes the tokenizer's run
+                        // loop to return early rather than keep tokenizing
+                        // the rest of a potentially huge document (see
+                        // `html5ever::tokenizer::Tokenizer::run`, which
+                        // matches this variant and returns immediately).
+                        // `Handle = ()` here has no meaning beyond that.
+                        return TokenSinkResult::Script(());
+                    }
+                }
+            }
+            TagKind::EndTag => {
+                // Pop only on an exact match with the top of the stack,
+                // mirroring html5ever's tree-construction rule that an end
+                // tag with no matching open element is ignored rather than
+                // treated as a decrement.
+                let mut stack = self.stack.borrow_mut();
+                if stack.last() == Some(&name) {
+                    stack.pop();
+                }
+            }
+        }
+        TokenSinkResult::Continue
     }
 }
 
-/// Byte offset of the next `>` in `bytes`, if any.
-fn find_gt(bytes: &[u8]) -> Option<usize> {
-    bytes.iter().position(|&b| b == b'>')
-}
-
-/// Whether `byte` is a genuine HTML tag-name terminator: ASCII whitespace,
-/// `/`, `>`, or NUL. [`parse_tag_name`]'s output is only trustworthy as a
-/// *complete* tag name when the byte right after it is one of these —
-/// otherwise `parse_tag_name` stopped early because it hit a character it
-/// doesn't understand (e.g. `_`, `.`, `@`, non-ASCII), while html5ever's
-/// tokenizer would have kept appending that character to the name. See
-/// [`exceeds_safe_nesting_depth`]'s doc comment for the bypass this closes.
-fn is_tag_name_terminator(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0C | b'/' | b'>' | 0)
-}
-
-/// Placeholder pushed onto the depth-tracking stack in place of a real tag
-/// name when [`parse_tag_name`]'s output could not be trusted (see
-/// [`is_tag_name_terminator`]). Deliberately a byte sequence
-/// [`parse_tag_name`] can never itself produce (it only emits ASCII
-/// alphanumerics, `-`, and `:`), so this marker can never accidentally
-/// string-equal a later trusted, properly-terminated tag name and get
-/// popped by it — an untrusted push must stay on the stack for the rest of
-/// the scan, exactly mirroring "the real element's true identity is unknown,
-/// so nothing we parse later can be assumed to close it."
-const UNTRUSTED_TAG_MARKER: &str = "\u{0}untrusted";
-
 /// Cheap pre-parse guard against pathologically deep HTML (F-4): `htmd`'s
-/// underlying `html5ever` parse produces a DOM that is walked, and dropped,
-/// recursively, so a document with tens or hundreds of thousands of nested
-/// elements can exhaust the stack and abort the process rather than
-/// returning an error — confirmed by a 100,000-level `<div>` document
-/// aborting with SIGABRT before this guard existed.
+/// underlying `html5ever` tree-building parse produces a DOM that is
+/// walked, and dropped, recursively, so a document with tens or hundreds of
+/// thousands of nested elements can exhaust the stack and abort the process
+/// rather than returning an error — confirmed repeatedly by SIGABRT
+/// reproductions during this guard's development.
 ///
-/// This is a single-pass byte scan, not a real parser, but it does track a
-/// bounded stack of open tag names (lowercased) rather than a bare integer
-/// counter. That distinction matters: an earlier version of this guard
-/// counted `</` transitions as unconditional decrements, which is *wrong*
-/// for the direction that matters, because html5ever ignores an end tag
-/// that has no matching open element on its stack of open elements (per the
-/// HTML parsing spec's tree-construction algorithm) rather than treating it
-/// as a decrement. A document built from `<div></span>` repeated 100,000
-/// times therefore kept a naive counter at depth <= 1 while html5ever's real
-/// DOM nested 100,000 unclosed `<div>`s — the stack-exhaustion abort stayed
-/// reachable through that gap. This version fixes that: a closing tag pops
-/// the stack ONLY when its name equals the top of the stack; a mismatched or
-/// stray close is ignored (no pop), mirroring html5ever's ignore-unmatched
-/// behavior in the conservative direction.
+/// # History: five rounds, one lesson
 ///
-/// A second, independent bypass was found and fixed the same way: a trailing
-/// `/` on an opening tag (`<div/>`) used to be treated as self-closing and
-/// therefore skipped the push, but the HTML5 tree-construction algorithm
-/// only honors that slash on void elements and foreign-content (SVG/MathML)
-/// elements — on an ordinary HTML element like `<div/>` it is IGNORED and
-/// the element stays open exactly as `<div>` would. `"<div/>".repeat(100_000)`
-/// therefore pushed nothing under the old rule while html5ever built a real
-/// DOM ~100,000 elements deep, and the guard reported "not exceeded" right
-/// up to the SIGABRT. Only [`VOID_ELEMENTS`] are now exempt from the push;
-/// a trailing `/` on anything else no longer matters.
+/// This guard went through five review rounds before landing on its current
+/// design, and every one of the first four found a new way a hand-rolled
+/// byte scanner disagreed with html5ever's real tokenizer:
+///   1. An integer counter that decremented on any `</...>` unconditionally
+///      — bypassed by mismatched-close padding (`<div></span>` repeated),
+///      since html5ever ignores an end tag with no matching open element
+///      rather than treating it as a decrement.
+///   2. A tag-name stack that treated any trailing `/` as self-closing —
+///      bypassed by `<div/>` repeated, since HTML5 only honors a
+///      self-closing slash on void and foreign-content (SVG/MathML)
+///      elements; on an ordinary element it is ignored and the element
+///      stays open.
+///   3. A name parser that stopped at the first byte outside
+///      `[A-Za-z0-9\-:]` — bypassed by `<img_x>` repeated, since a byte like
+///      `_` truncated the parsed name to the void element "img" while
+///      html5ever's real tokenizer appends that byte to the name, building
+///      a different, non-void, stays-open element.
+///   4. Adding a terminator check for that truncation still had no notion
+///      of comments, CDATA, bogus comments, or doctypes at all — bypassed
+///      by `<div><!--</div>-->` repeated (the scanner read the `</div>`
+///      *inside* the comment as a real close for the genuinely open `div`)
+///      and by `NUL` inside a name being treated as a terminator when
+///      html5ever actually replaces NUL with U+FFFD as a name
+///      *continuation* byte, not a terminator.
 ///
-/// A third, independent bypass was found and fixed the same way:
-/// [`parse_tag_name`] stops at the first byte outside `[A-Za-z0-9\-:]`, but
-/// html5ever's real tag-name tokenizer state appends essentially *any*
-/// other byte (`_`, `.`, `@`, non-ASCII, ...) to the name instead of
-/// stopping there. So a void element name padded with such a byte (e.g.
-/// `<img_x>`) used to truncate to a void match ("img") and get skipped,
-/// while html5ever parsed a *different*, non-void element ("`img_x`") that
-/// stayed open and nested — `"<img_x>".repeat(100_000)` reproduced the same
-/// SIGABRT. The same truncation is a bypass on the closing side too: a
-/// padded close like `</div_x>` used to truncate to "div" and could
-/// wrongly pop a genuinely open `<div>`, when html5ever would treat
-/// `</div_x>` as an unmatched end tag for an unrelated element and ignore
-/// it. The fix ([`is_tag_name_terminator`]) inspects the byte immediately
-/// after a parsed name: the name is trusted only when that byte is a real
-/// HTML tag-name terminator (ASCII whitespace, `/`, `>`, or NUL); anything
-/// else means the name is a truncation of something this scan cannot
-/// identify, and both directions now fail closed on that — an untrusted
-/// opening tag is pushed unconditionally (bypassing the void check, see
-/// [`UNTRUSTED_TAG_MARKER`]) rather than skipped, and an untrusted closing
-/// tag never pops. Only an exact-and-terminated name may match
-/// [`VOID_ELEMENTS`] or pop the stack.
+/// Each fix closed the specific bypass a reviewer found by hand-compiling a
+/// differential harness against the real parser — and each fix left room
+/// for the next one, because a hand-rolled scanner cannot be made to agree
+/// with a real tokenizer by iterative patching; there is always another
+/// production rule it doesn't know about.
 ///
-/// Because closes only pop on an exact-and-terminated match, a trailing `/`
-/// no longer suppresses a push except for true void elements, and an
-/// untrusted name is always pushed rather than trusted either way, this now
-/// genuinely can only reject more documents than strictly necessary, never
-/// fewer: any push this scan misses would have to come from a tag html5ever
-/// also wouldn't count as an open element, and any close this scan fails to
-/// apply (a mismatched, untrusted, or otherwise non-matching close) only
-/// leaves the tracked depth higher than reality, not lower. Known
-/// false-positive sources from that same conservative bias:
-///   - Implied closes handled by html5ever's tree-construction
-///     adoption-agency / implied-end-tag rules (e.g. a huge run of sibling
-///     `<li>`s that HTML treats as auto-closing one another, or misnesting
-///     patterns like `<b><i></b>`) are not modeled here.
-///   - Genuine foreign-content self-closing elements (SVG/MathML, e.g.
-///     `<path/>`, `<circle/>`) ARE honored by html5ever as self-closing, but
-///     this scan has no namespace awareness and pushes them like any other
-///     non-void element, so an SVG-heavy document with more than
-///     [`MAX_SCAN_DEPTH`] such elements will over-count and trip the guard.
-///   - Any tag name this scan cannot fully parse (an untrusted name, per
-///     above) is always pushed, whether or not the real element html5ever
-///     builds is void or otherwise short-lived, so a large run of oddly
-///     punctuated tag-like fragments (attacker-chosen or otherwise) can
-///     trip the guard even if html5ever's real tree stays shallow.
+/// # Current design: drive html5ever's own tokenizer
 ///
-/// In every case a legitimate document at extreme scale could trip this
-/// guard and fall back to plain-text delivery even though html5ever would
-/// have handled it without unbounded real nesting. That fallback is inline
-/// text, not an error, so this is an accepted, documented tradeoff.
+/// This version does not parse HTML itself at all. It drives
+/// `html5ever::tokenizer::Tokenizer` — the same tokenizer html5ever's tree
+/// builder consumes, and thus the same one `htmd` uses internally — with a
+/// [`DepthCounter`] [`TokenSink`] that:
+///   - on a start tag: pushes the tokenizer-supplied name onto a stack
+///     unless it is a [`VOID_ELEMENTS`] entry, and stops early (via
+///     [`TokenSinkResult::Script`], the only early-exit signal a bare
+///     tokenizer honors) the moment the stack would exceed
+///     [`MAX_SCAN_DEPTH`], so a pathological document is never tokenized in
+///     full;
+///   - on an end tag: pops only when the name exactly matches the top of
+///     the stack, exactly as html5ever's tree builder does for unmatched
+///     end tags;
+///   - ignores every other token kind (comments, bogus comments treated as
+///     comments, CDATA-outside-foreign-content treated as a bogus comment,
+///     doctypes, character data, and NUL characters) outright.
 ///
-/// A differential test (`differential_guard_never_under_trips_against_the_real_parser`,
-/// below) parses an adversarial corpus with the real `html5ever` +
-/// `markup5ever_rcdom` parser and asserts the invariant this whole function
-/// exists to uphold: whenever the real DOM's depth exceeds
+/// Because comments, bogus comments, CDATA, doctypes, NUL-in-a-name,
+/// attribute values containing `>` or `</div>`-looking text, character
+/// references, and case folding are all resolved *inside the tokenizer
+/// itself* — identically to what the tree builder will see, since it is
+/// the literal same component — none of the five prior bypasses are
+/// reachable through this scan any more: there is no separate byte-scanning
+/// logic left to disagree with html5ever about what a tag, a comment, or a
+/// truncated name is.
+///
+/// ## What is NOT claimed
+///
+/// This does **not** claim to only ever reject more documents than
+/// strictly necessary, never fewer — that claim was accurate-sounding but
+/// false for every prior hand-rolled version, and is not repeated here.
+/// What *is* true: this scan uses the exact same tokenizer as the real
+/// parse, so the only remaining divergence from what the tree builder
+/// would do is where this scan is *not* the tree builder:
+///   - **Rawtext state.** A real tree builder switches the tokenizer into
+///     rawtext mode for `<script>`, `<style>`, `<textarea>`, and `<title>`
+///     content (so a literal `<div>` or `</div>` inside a `<script>` body
+///     is just text, not markup). The bare tokenizer used here has no tree
+///     builder driving that switch, so it tokenizes rawtext-element bodies
+///     as ordinary markup. Every fake tag this produces is still pushed
+///     under the same last-in-first-out matching discipline as real tags,
+///     so a fake push can only ever get "stuck" behind (blocking a correct
+///     pop of) whatever is really open — it cannot itself cause an
+///     erroneous pop of a genuinely open ancestor, because a pop only
+///     applies when the name exactly matches the current top, and entering
+///     a rawtext element's body always pushes that element as the new top
+///     first. Net effect: over-counting, not under-counting.
+///   - **Implied end tags and the adoption agency.** html5ever's real tree
+///     construction algorithm auto-closes some elements implicitly (e.g. a
+///     new `<li>` closing a previous open `<li>`) and resolves certain
+///     misnesting patterns (e.g. `<b><i></b>`) via the adoption agency
+///     algorithm. Both are tree-construction rules, not tokenizer rules,
+///     so this scan does not model them: an element that the real tree
+///     builder would have implicitly closed stays open in this scan's
+///     stack. Net effect: over-counting, not under-counting.
+///   - **Foreign content (SVG/MathML) self-closing.** The tokenizer reports
+///     a `self_closing` flag on every tag, but whether that flag is
+///     honored depends on the element's namespace, which only the tree
+///     builder tracks. This scan ignores the flag entirely (matching round
+///     2's fix) and always pushes non-void elements regardless, so a
+///     genuine foreign-content self-closing element (`<path/>`,
+///     `<circle/>`) is over-counted as staying open.
+///
+/// In every documented case above, the divergence biases toward this scan
+/// tracking *more* open elements than the real tree builder would, which is
+/// the fail-closed direction: a legitimate document using these patterns at
+/// extreme scale could trip this guard and fall back to plain-text
+/// delivery even though html5ever would have handled it without unbounded
+/// real nesting. That fallback is inline text, not an error, so this is an
+/// accepted, documented tradeoff. No divergence that causes *under*-
+/// counting (missing a push, or an erroneous pop of something genuinely
+/// open) is known; the differential and generative tests below exist
+/// specifically to keep checking that claim rather than asserting it once
+/// and trusting it forever.
+///
+/// A differential test
+/// (`differential_guard_never_under_trips_against_the_real_parser`) and a
+/// seeded-PRNG generative test
+/// (`generative_fuzz_guard_never_under_trips_against_the_real_parser`,
+/// below) parse adversarial and randomized corpora with the real
+/// `html5ever` + `markup5ever_rcdom` parser and assert the invariant this
+/// whole function exists to uphold: whenever the real DOM's depth exceeds
 /// [`MAX_SCAN_DEPTH`], this guard trips. It may trip early (over-count); it
 /// must never fail to trip when the real parser would recurse past the cap.
 ///
@@ -169,92 +221,28 @@ const UNTRUSTED_TAG_MARKER: &str = "\u{0}untrusted";
 /// likely to nest by hand or by templating, and well below the depth that
 /// risks stack exhaustion in the underlying parser/DOM-walk/Drop.
 fn exceeds_safe_nesting_depth(html: &str) -> bool {
-    let bytes = html.as_bytes();
-    let mut stack: Vec<String> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'<' {
-            i += 1;
-            continue;
-        }
-        if bytes.get(i + 1) == Some(&b'/') {
-            // Closing tag: pop only when the parsed name is BOTH an exact
-            // match with the top of the stack AND properly terminated (see
-            // the doc comment above for why an unconditional decrement is
-            // unsound, and for the untrusted-name direction of the third
-            // bypass this terminator check closes). A truncated name (e.g.
-            // `</div_x>` parsing as "div") must never be allowed to pop a
-            // genuinely open "div" -- html5ever would treat `</div_x>` as
-            // an unmatched end tag for an unrelated element and ignore it
-            // entirely, so this scan must too.
-            let (name, consumed) = parse_tag_name(&bytes[i + 2..]);
-            let after_name = i + 2 + consumed;
-            let terminated = bytes
-                .get(after_name)
-                .is_none_or(|&b| is_tag_name_terminator(b));
-            let tag_end =
-                find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
-            if terminated
-                && let Some(name) = name
-                && stack.last() == Some(&name)
-            {
-                stack.pop();
-            }
-            i = tag_end.max(i + 1);
-            continue;
-        }
-        if !bytes.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
-            i += 1;
-            continue;
-        }
-        // Opening tag. A trailing `/` (`<div/>`) is NOT treated as a reason
-        // to skip the push: per the HTML5 tree-construction algorithm, a
-        // self-closing slash on a non-void, non-foreign (HTML-namespace)
-        // element is ignored, and the element stays open exactly like
-        // `<div>` would. Only [`VOID_ELEMENTS`] are exempt from the stack —
-        // and only when the parsed name is properly terminated (see
-        // [`is_tag_name_terminator`]): a truncated name (e.g. `<img_x>`
-        // parsing as "img") must NOT be treated as the void element "img",
-        // because html5ever's real tag name is "img_x", a non-void element
-        // that stays open. An untrusted name is pushed unconditionally
-        // (skipping the void check entirely) using
-        // [`UNTRUSTED_TAG_MARKER`] rather than the truncated string, so it
-        // can never later be matched and popped by an unrelated, correctly
-        // terminated closing tag. See the doc comment above for the second
-        // and third bypasses this closed and the residuals both accept.
-        let (name, consumed) = parse_tag_name(&bytes[i + 1..]);
-        let after_name = i + 1 + consumed;
-        let terminated = bytes
-            .get(after_name)
-            .is_none_or(|&b| is_tag_name_terminator(b));
-        let tag_end =
-            find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
-        if let Some(name) = name {
-            let pushed = if !terminated {
-                Some(UNTRUSTED_TAG_MARKER.to_owned())
-            } else if VOID_ELEMENTS.contains(&name.as_str()) {
-                None
-            } else {
-                Some(name)
-            };
-            if let Some(pushed) = pushed {
-                stack.push(pushed);
-                if stack.len() > MAX_SCAN_DEPTH {
-                    return true;
-                }
-            }
-        }
-        i = tag_end.max(i + 1);
-    }
-    false
+    let sink = DepthCounter {
+        stack: RefCell::new(Vec::new()),
+        exceeded: Cell::new(false),
+    };
+    let input = BufferQueue::default();
+    input.push_back(StrTendril::from_slice(html));
+    let tokenizer = Tokenizer::new(sink, TokenizerOpts::default());
+    // A single `feed` call processes the whole buffer (it is one tendril
+    // covering the entire document); we deliberately never call `feed`
+    // again or `end()` -- if the sink already tripped, there is nothing
+    // further to learn and no reason to keep tokenizing a possibly huge
+    // remainder.
+    let _ = tokenizer.feed(&input);
+    tokenizer.sink.exceeded.get()
 }
 
 /// Convert `html` to Markdown, dropping scripts/styles/comments.
 ///
-/// Returns `None` when conversion fails, when the input's heuristic nesting
-/// depth exceeds [`MAX_SCAN_DEPTH`] (see [`exceeds_safe_nesting_depth`],
-/// F-4), or when the converted Markdown's byte length exceeds `output_cap`
-/// — in every case the caller falls back to inlining the original text.
+/// Returns `None` when conversion fails, when the input's nesting depth
+/// exceeds [`MAX_SCAN_DEPTH`] (see [`exceeds_safe_nesting_depth`], F-4), or
+/// when the converted Markdown's byte length exceeds `output_cap` — in
+/// every case the caller falls back to inlining the original text.
 /// Conversion is expected to run only on bodies already under the raw read
 /// cap. Callers pass the same `effective_cap`/`max_result_budget` used by
 /// every other inline delivery path here, not `max_result_bytes - 4096`, so
@@ -286,37 +274,31 @@ mod tests {
 
     const BIG_CAP: usize = 1_048_576;
 
-    fn golden(name: &str) -> String {
-        // Trim trailing whitespace consistently: goldens are committed with
-        // a single trailing newline, `htmd`'s output has none.
-        let raw = match name {
-            "nested_lists" => include_str!("../fixtures/nested_lists.md"),
-            "table" => include_str!("../fixtures/table.md"),
-            "script_style" => include_str!("../fixtures/script_style.md"),
-            other => panic!("unknown golden {other}"),
-        };
-        raw.trim_end().to_owned()
-    }
+    // Goldens are committed with a single trailing newline; `htmd`'s output
+    // has none, so every comparison below trims both sides consistently.
 
     #[test]
     fn nested_lists_match_golden() {
         let html = include_str!("../fixtures/nested_lists.html");
+        let want = include_str!("../fixtures/nested_lists.md").trim_end();
         let markdown = html_to_markdown(html, BIG_CAP).expect("conversion succeeds");
-        assert_eq!(markdown.trim_end(), golden("nested_lists"));
+        assert_eq!(markdown.trim_end(), want);
     }
 
     #[test]
     fn table_matches_golden() {
         let html = include_str!("../fixtures/table.html");
+        let want = include_str!("../fixtures/table.md").trim_end();
         let markdown = html_to_markdown(html, BIG_CAP).expect("conversion succeeds");
-        assert_eq!(markdown.trim_end(), golden("table"));
+        assert_eq!(markdown.trim_end(), want);
     }
 
     #[test]
     fn script_and_style_are_dropped() {
         let html = include_str!("../fixtures/script_style.html");
+        let want = include_str!("../fixtures/script_style.md").trim_end();
         let markdown = html_to_markdown(html, BIG_CAP).expect("conversion succeeds");
-        assert_eq!(markdown.trim_end(), golden("script_style"));
+        assert_eq!(markdown.trim_end(), want);
         assert!(!markdown.contains("var secret"));
         assert!(!markdown.contains("color: red"));
         assert!(!markdown.contains("display: none"));
@@ -366,12 +348,7 @@ mod tests {
     #[test]
     fn deeply_nested_html_does_not_crash() {
         // F-4: a document with 100_000 levels of nesting must not blow the
-        // stack during parse/convert/drop. Confirmed pre-mitigation: this
-        // test aborted the process with SIGABRT (stack overflow) when run
-        // in isolation before the depth-scan guard was added. With the
-        // guard in place, 100_000 is far past MAX_SCAN_DEPTH (512), so the
-        // guard trips and conversion returns `None` well before htmd ever
-        // sees the input.
+        // stack during parse/convert/drop.
         let html = nested_divs(100_000);
         let result = html_to_markdown(&html, BIG_CAP);
         assert!(result.is_none(), "expected the depth guard to trip");
@@ -387,28 +364,12 @@ mod tests {
         assert!(result.unwrap().contains("text"));
     }
 
-    /// Build a document with `count` repetitions of `<div></span>`: an
-    /// unclosed `<div>` immediately followed by a `</span>` close that
-    /// cannot match it. html5ever ignores an end tag with no matching open
-    /// element, so every `<div>` here stays open in the real DOM while the
-    /// `</span>` closes stay unmatched — exactly the mismatched-close
-    /// padding that bypassed the original (unconditional-decrement) guard.
-    fn mismatched_close_padding(count: usize) -> String {
-        "<div></span>".repeat(count)
-    }
-
     #[test]
     fn mismatched_close_padding_does_not_bypass_the_depth_guard() {
-        // Critical regression: an earlier version of `exceeds_safe_nesting_depth`
-        // decremented on ANY `</...>` sequence, so 100_000 repetitions of
-        // `<div></span>` kept its counter near 0 even though html5ever's
-        // real DOM nests 100_000 unclosed `<div>`s -- the stack-exhaustion
-        // abort stayed reachable. The fixed guard tracks a stack of open
-        // tag names and pops only on an exact match, so `</span>` never
-        // pops the `<div>` on top; the stack keeps growing and trips the
-        // cap well before conversion, returning `None`. Critically, this
-        // must not crash the process either way.
-        let html = mismatched_close_padding(100_000);
+        // Bypass 1 regression: `<div></span>` repeated leaves every `<div>`
+        // genuinely open in the real DOM (the `</span>` never matches), so
+        // this must still trip the guard, not decrement past it.
+        let html = "<div></span>".repeat(100_000);
         let result = html_to_markdown(&html, BIG_CAP);
         assert!(
             result.is_none(),
@@ -418,19 +379,8 @@ mod tests {
 
     #[test]
     fn self_closing_non_void_padding_does_not_bypass_the_depth_guard() {
-        // Critical regression: an earlier version of `exceeds_safe_nesting_depth`
-        // treated a trailing `/` on ANY opening tag as self-closing and
-        // skipped the push. But the HTML5 tree-construction algorithm only
-        // honors that slash on void elements and foreign-content
-        // (SVG/MathML) elements -- on an ordinary element like `<div/>` it
-        // is ignored and the element stays open exactly as `<div>` would.
-        // `"<div/>".repeat(100_000)` therefore pushed nothing under the old
-        // rule (the guard reported "not exceeded") while html5ever built a
-        // real DOM ~100,000 elements deep and aborted the process. This is
-        // an easier trigger than the mismatched-close bypass above: one
-        // repeated fragment, no padding trick. The fixed guard no longer
-        // treats a trailing `/` as a reason to skip the push for a
-        // non-void element, so the stack grows and trips the cap here too.
+        // Bypass 2 regression: `<div/>` repeated stays open in the real DOM
+        // (self-closing is ignored on a non-void, non-foreign element).
         let html = "<div/>".repeat(100_000);
         let result = html_to_markdown(&html, BIG_CAP);
         assert!(
@@ -441,15 +391,8 @@ mod tests {
 
     #[test]
     fn truncated_void_name_padding_does_not_bypass_the_depth_guard() {
-        // Critical regression: an earlier version of `parse_tag_name` had no
-        // notion of a "terminator", so a void element name padded with a
-        // byte outside `[A-Za-z0-9\-:]` (e.g. `<img_x>`) truncated to a void
-        // match ("img") and was skipped, while html5ever parsed the real,
-        // *different*, non-void element "img_x" that stayed open and
-        // nested. `"<img_x>".repeat(100_000)` reported "not exceeded" from
-        // the old guard while `htmd::HtmlToMarkdown::convert` on the same
-        // input aborted the process (SIGABRT). Easier to trigger than
-        // either prior bypass: one repeated fragment, no padding trick.
+        // Bypass 3 regression: `<img_x>` is a different, non-void element
+        // from the void `<img>`, and stays open in the real DOM.
         let html = "<img_x>".repeat(100_000);
         let result = html_to_markdown(&html, BIG_CAP);
         assert!(
@@ -460,11 +403,9 @@ mod tests {
 
     #[test]
     fn truncated_close_padding_does_not_bypass_the_depth_guard() {
-        // The closing-tag direction of the same bypass: a genuinely open
-        // run of `<div>`s followed by padded closes (`</div_x>`) that
-        // truncate to "div" must NOT be allowed to pop them. html5ever
-        // treats `</div_x>` as an unmatched end tag for an unrelated
-        // element and ignores it, so all the `<div>`s stay open and nested.
+        // Bypass 3 regression, closing-tag direction: a genuinely open run
+        // of `<div>`s followed by padded closes (`</div_x>`) that must not
+        // pop them (html5ever ignores `</div_x>` as an unmatched end tag).
         let opens = "<div>".repeat(1_000);
         let padded_closes = "</div_x>".repeat(1_000);
         let html = format!("{opens}{padded_closes}");
@@ -475,15 +416,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn comment_wrapped_close_padding_does_not_bypass_the_depth_guard() {
+        // Bypass 4 regression: the scanner had no comment state at all, so
+        // `<div><!--</div>-->` repeated let the `</div>` *inside* the
+        // comment pop the genuinely open `<div>` right next to it -- the
+        // tracked stack oscillated 0<->1 while html5ever's real DOM nested
+        // 1000+ deep (every `<div>` stays open; comments are never tags).
+        let html = "<div><!--</div>-->".repeat(100_000);
+        let result = html_to_markdown(&html, BIG_CAP);
+        assert!(
+            result.is_none(),
+            "expected the depth guard to trip: a `</div>` inside a comment must not pop a real div"
+        );
+    }
+
+    #[test]
+    fn nul_padded_close_does_not_bypass_the_depth_guard() {
+        // Bypass 5 regression: NUL was wrongly treated as a tag-name
+        // terminator. html5ever replaces NUL with U+FFFD *inside* a name
+        // (a continuation byte, not a terminator), so `</div\0>` is an
+        // unmatched end tag for a name that isn't "div" and must not pop a
+        // genuinely open `<div>`.
+        let opens = "<div>".repeat(1_000);
+        let padded_closes = "</div\u{0}>".repeat(1_000);
+        let html = format!("{opens}{padded_closes}");
+        let result = html_to_markdown(&html, BIG_CAP);
+        assert!(
+            result.is_none(),
+            "expected the depth guard to trip: a NUL-padded close must not pop a real open"
+        );
+    }
+
     // --- Differential test against the real parser -------------------------
     //
-    // Three bypasses have now slipped through this heuristic guard, each
-    // only found by a reviewer hand-compiling a harness against the real
-    // parser. This brings that harness into the suite permanently: for an
-    // adversarial corpus, assert that whenever the REAL DOM's max depth
-    // exceeds the cap, the guard also trips. The guard may over-trip
-    // (reject a document the real parser would have handled); it must never
-    // under-trip.
+    // Five bypasses have now slipped through this guard's various
+    // hand-rolled scanning approaches, each only found by a reviewer
+    // hand-compiling a harness against the real parser. This brings that
+    // harness into the suite permanently: for an adversarial corpus, assert
+    // that whenever the REAL DOM's max depth exceeds the cap, the guard
+    // also trips. The guard may over-trip (reject a document the real
+    // parser would have handled); it must never under-trip.
 
     use html5ever::tendril::TendrilSink;
     use html5ever::{ParseOpts, parse_document};
@@ -513,6 +486,20 @@ mod tests {
         max_depth
     }
 
+    /// Assert the guard's core invariant for one document: if the real DOM
+    /// exceeds the cap, the guard must trip. Never asserts the converse.
+    fn assert_guard_never_under_trips(label: &str, html: &str) {
+        let real_depth = real_dom_max_depth(html);
+        if real_depth > super::MAX_SCAN_DEPTH {
+            assert!(
+                super::exceeds_safe_nesting_depth(html),
+                "{label:?}: real DOM depth {real_depth} exceeds MAX_SCAN_DEPTH \
+                 ({}) but the guard did not trip -- this is a bypass",
+                super::MAX_SCAN_DEPTH
+            );
+        }
+    }
+
     #[test]
     fn differential_guard_never_under_trips_against_the_real_parser() {
         // N=1000 keeps this fast (the dedicated 100_000-repetition cases
@@ -534,22 +521,37 @@ mod tests {
             ),
             ("quoted_gt_in_attribute", "<div title=\"a>b\">".repeat(N)),
             (
-                "comment_wrapped_fake_tags",
-                "<!-- <div><div><div> -->".repeat(N),
+                "comment_wrapped_close_padding",
+                "<div><!--</div>-->".repeat(N),
+            ),
+            ("cdata_wrapped_close_padding", "<div><![CDATA[</div>]]>".repeat(N)),
+            ("processing_instruction_close_padding", "<div><?</div>></div>".repeat(N)),
+            ("bogus_comment_close_padding", "<div><!</div>></div>".repeat(N)),
+            (
+                "doctype_wrapped_close_padding",
+                "<div><!DOCTYPE </div>></div>".repeat(N),
+            ),
+            (
+                "nul_padded_close_direction",
+                format!("{}{}", "<div>".repeat(N), "</div\u{0}>".repeat(N)),
             ),
         ];
 
-        for (label, html) in corpus {
-            let real_depth = real_dom_max_depth(&html);
-            if real_depth > super::MAX_SCAN_DEPTH {
-                assert!(
-                    super::exceeds_safe_nesting_depth(&html),
-                    "corpus item {label:?}: real DOM depth {real_depth} exceeds \
-                     MAX_SCAN_DEPTH ({}) but the guard did not trip -- this is a bypass",
-                    super::MAX_SCAN_DEPTH
-                );
-            }
+        for (label, html) in &corpus {
+            assert_guard_never_under_trips(label, html);
         }
+
+        // The comment-wrapped fake-tags case only makes sense as a shallow
+        // *negative* check: real depth here is tiny (the fake tags never
+        // leave the comment), so the invariant above would pass vacuously.
+        // Assert the shallow direction explicitly instead of leaving it
+        // untested.
+        let shallow_comment_html = "<!-- <div><div><div> -->".repeat(N);
+        let shallow_real_depth = real_dom_max_depth(&shallow_comment_html);
+        assert!(
+            shallow_real_depth <= 3,
+            "sanity: fake tags inside a comment must not create real nesting, got depth {shallow_real_depth}"
+        );
     }
 
     #[test]
@@ -565,5 +567,174 @@ mod tests {
         );
         assert!(!super::exceeds_safe_nesting_depth(&html));
         assert!(html_to_markdown(&html, BIG_CAP).is_some());
+    }
+
+    // --- Generative (seeded PRNG) differential test -------------------------
+    //
+    // The hand-picked corpus above is backward-looking: every entry is a
+    // known past bypass. This is a forward-looking discovery net: a small,
+    // deterministic (fixed-seed) PRNG builds a few hundred randomized
+    // documents from a token alphabet covering the same feature space —
+    // void/non-void opens (with attributes, odd trailing bytes, NUL),
+    // matching/mismatching closes, comments/CDATA/bogus-comments/doctypes,
+    // rawtext blocks, and quoted attributes containing `>`/`</div>` — and
+    // checks the same never-under-trips invariant against each one.
+
+    /// Minimal deterministic PRNG (a Linear Congruential Generator, same
+    /// constants as Knuth's MMIX/PCG family) -- no new dependency, and a
+    /// fixed seed keeps this test's corpus, and thus CI, stable run to run.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next_u64(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0
+        }
+
+        /// Uniform-ish value in `0..bound` (`bound` must be nonzero).
+        fn below(&mut self, bound: usize) -> usize {
+            let bound_u64 = u64::try_from(bound).unwrap_or(u64::MAX);
+            usize::try_from(self.next_u64() % bound_u64).unwrap_or(0)
+        }
+
+        fn choose<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+            &items[self.below(items.len())]
+        }
+    }
+
+    const FUZZ_VOID_NAMES: &[&str] = &["br", "img", "input", "hr", "area", "meta"];
+    const FUZZ_NON_VOID_NAMES: &[&str] = &["div", "span", "p", "section", "article", "b", "i", "li"];
+    const FUZZ_RAWTEXT_NAMES: &[&str] = &["script", "style", "textarea", "title"];
+    /// Bytes html5ever's tokenizer treats as name *continuation* (never a
+    /// terminator), so appending one mid-name changes the parsed identity
+    /// rather than ending it -- exactly the shape bypass 3 exploited.
+    const FUZZ_ODD_SUFFIXES: &[&str] = &["_x", ".y", "@z", "\u{00ef}"];
+
+    /// Append one random "token" to `doc`, biased toward opening tags so a
+    /// meaningful fraction of generated documents actually nest past the
+    /// cap (the invariant under test is conditional on that, so a corpus
+    /// that never nests deeply would exercise nothing).
+    fn push_random_token(doc: &mut String, rng: &mut Lcg) {
+        match rng.below(20) {
+            // Plain non-void open (~55%): the main depth-building token.
+            // Heavily biased so a meaningful share of generated documents
+            // actually nest past the cap -- the invariant under test is
+            // conditional on that, so a corpus that never nests deeply
+            // would exercise nothing.
+            0..=10 => {
+                let name = rng.choose(FUZZ_NON_VOID_NAMES);
+                doc.push('<');
+                doc.push_str(name);
+                if rng.below(2) == 0 {
+                    doc.push_str(" title=\"a>b\"");
+                }
+                doc.push('>');
+            }
+            // Non-void open with an odd trailing byte before `>` (~15%):
+            // must still count as an open (bypass 3/5 shape), never as the
+            // void element it superficially resembles.
+            11..=13 => {
+                let name = rng.choose(FUZZ_VOID_NAMES);
+                let suffix = rng.choose(FUZZ_ODD_SUFFIXES);
+                doc.push('<');
+                doc.push_str(name);
+                doc.push_str(suffix);
+                doc.push('>');
+            }
+            // Genuine void open (~5%): must never hold the stack open.
+            14 => {
+                let name = rng.choose(FUZZ_VOID_NAMES);
+                doc.push('<');
+                doc.push_str(name);
+                doc.push('>');
+            }
+            // Matching close (~5%).
+            15 => {
+                let name = rng.choose(FUZZ_NON_VOID_NAMES);
+                doc.push_str("</");
+                doc.push_str(name);
+                doc.push('>');
+            }
+            // Mismatching / truncated / NUL-padded close (~5%): must never
+            // pop an unrelated genuinely open element.
+            16 => {
+                let name = rng.choose(FUZZ_NON_VOID_NAMES);
+                let suffix = rng.choose(FUZZ_ODD_SUFFIXES);
+                doc.push_str("</");
+                doc.push_str(name);
+                doc.push_str(suffix);
+                doc.push('>');
+            }
+            // Comment / CDATA / bogus comment / doctype, each wrapping a
+            // fake close that must never reach real tag content (~10%
+            // combined).
+            17 => {
+                doc.push_str("<div><!--</div>-->");
+            }
+            18 => match rng.below(3) {
+                0 => doc.push_str("<div><![CDATA[</div>]]>"),
+                1 => doc.push_str("<div><?</div>>"),
+                _ => doc.push_str("<div><!DOCTYPE </div>>"),
+            },
+            // Rawtext block containing a fake nested tag and a fake close
+            // (~5%): exercises the documented rawtext-state residual.
+            _ => {
+                let name = rng.choose(FUZZ_RAWTEXT_NAMES);
+                doc.push('<');
+                doc.push_str(name);
+                doc.push('>');
+                doc.push_str("<div></div>");
+                doc.push_str("</");
+                doc.push_str(name);
+                doc.push('>');
+            }
+        }
+    }
+
+    /// Build one deterministic pseudo-random document of roughly
+    /// `token_count` tokens.
+    fn generate_fuzz_doc(seed: u64, token_count: usize) -> String {
+        let mut rng = Lcg(seed);
+        let mut doc = String::new();
+        for _ in 0..token_count {
+            push_random_token(&mut doc, &mut rng);
+        }
+        doc
+    }
+
+    #[test]
+    fn generative_fuzz_guard_never_under_trips_against_the_real_parser() {
+        // Fixed seed base: deterministic corpus, stable CI. The token
+        // alphabet is heavily biased toward opening tags (see
+        // `push_random_token`) so a meaningful share of documents actually
+        // nest past the cap -- the invariant under test is conditional on
+        // that, so a corpus that never nests deeply would exercise
+        // nothing. That bias needs ~1_300 tokens per document (tens of KB,
+        // larger than a first-pass "few KB" estimate) before the expected
+        // depth reliably clears MAX_SCAN_DEPTH (512); the vacuousness
+        // assertion below exists precisely to catch this sizing drifting
+        // wrong again. Runs in low single-digit seconds for 300 documents.
+        const DOC_COUNT: u64 = 300;
+        const TOKENS_PER_DOC: usize = 1_300;
+        const SEED_BASE: u64 = 0x5EED_00F4_0000_0001;
+
+        let mut any_exceeded_cap = false;
+        for i in 0..DOC_COUNT {
+            let seed = SEED_BASE.wrapping_add(i.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let html = generate_fuzz_doc(seed, TOKENS_PER_DOC);
+            let real_depth = real_dom_max_depth(&html);
+            if real_depth > super::MAX_SCAN_DEPTH {
+                any_exceeded_cap = true;
+            }
+            assert_guard_never_under_trips(&format!("fuzz#{i}"), &html);
+        }
+        assert!(
+            any_exceeded_cap,
+            "generative corpus never exceeded MAX_SCAN_DEPTH -- the invariant \
+             above passed vacuously; widen the token alphabet's open-tag bias"
+        );
     }
 }

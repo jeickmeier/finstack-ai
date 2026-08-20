@@ -203,11 +203,14 @@ url = "2"
 # via `cargo deny check licenses` before use; fallback is a hand-rolled
 # `scraper` DOM walk if this ever fails the gate.
 htmd = "0.5"
-# Dev-only: the real parser/DOM behind `htmd`, used directly by
-# finstack-ai-tools-fetch's differential depth-guard test (F-4) to build the
-# real DOM and compare its max depth against the heuristic pre-parse guard.
-# Already in the dependency tree (and license-cleared) via `htmd` above; this
-# just exposes the same locked versions for test-only use.
+# The real parser/DOM behind `htmd`. `html5ever` is a real (non-dev)
+# dependency of finstack-ai-tools-fetch: its pre-parse nesting-depth guard
+# (F-4) drives html5ever's own tokenizer directly (not a hand-rolled byte
+# scanner) so its behavior agrees with what htmd's tree builder will see.
+# `markup5ever_rcdom` stays dev-only, used by that crate's differential test
+# to build the real DOM and compare its depth against the guard. Both are
+# already in the dependency tree (and license-cleared) via `htmd` above;
+# these entries just expose the same locked versions directly.
 html5ever = "0.38"
 markup5ever_rcdom = "0.38"
 rustix = { version = "1.1.4", default-features = false, features = ["alloc", "fs", "std"] }
