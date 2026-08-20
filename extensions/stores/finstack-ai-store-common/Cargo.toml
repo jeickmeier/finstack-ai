@@ -1,0 +1,20 @@
+[package]
+name = "finstack-ai-store-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Shared journal-store semantics for finstack-ai store backends"
+publish = false
+
+[dependencies]
+finstack-ai-kernel = { workspace = true }
+finstack-ai-protocol = { workspace = true }
+finstack-ai-runtime = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true
