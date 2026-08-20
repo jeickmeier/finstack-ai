@@ -103,6 +103,8 @@ unpublished.
   (`load_from_splits_batch` / `snapshot_splits_batch`) instead of returning a
   reconstructed batch that splits a committed one; unify the memory store's
   hole-at-start code to the `gap` reason codes.
+- `finstack-ai-workflow-hitl`: new HITL router battery (UC-05) — interaction
+  inbox, authorized resolve, expiry sweep (fail-closed default).
 
 ### Changed
 
