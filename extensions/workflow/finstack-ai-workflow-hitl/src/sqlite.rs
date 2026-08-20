@@ -59,9 +59,8 @@ impl SqliteHitlStore {
     /// be created.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, HitlError> {
         let path = path.as_ref().to_path_buf();
-        let conn = Connection::open(&path).map_err(|_| HitlError::StoreUnavailable {
-            code: "hitl_open",
-        })?;
+        let conn = Connection::open(&path)
+            .map_err(|_| HitlError::StoreUnavailable { code: "hitl_open" })?;
         conn.busy_timeout(Duration::from_secs(1))
             .map_err(|_| HitlError::StoreUnavailable {
                 code: "hitl_busy_timeout",

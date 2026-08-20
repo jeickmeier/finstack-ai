@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::Timestamp;
-use finstack_ai_workflow_hitl::{HitlInboxStore, InteractionRow, InteractionStatus, SqliteHitlStore};
+use finstack_ai_workflow_hitl::{
+    HitlInboxStore, InteractionRow, InteractionStatus, SqliteHitlStore,
+};
 use finstack_ai_workflow_worker::SqliteWorkerStore;
 
 use crate::store::exercise_hitl_inbox;
