@@ -22,6 +22,9 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 pub mod config;
+pub mod request;
 pub mod sigv4;
+pub mod store;
 
 pub use config::{Addressing, S3ObjectStoreConfig};
+pub use store::S3ObjectStore;
