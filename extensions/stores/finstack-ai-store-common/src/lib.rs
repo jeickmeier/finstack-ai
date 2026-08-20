@@ -25,5 +25,10 @@
 )]
 
 mod error;
+mod snapshot;
 
 pub use error::protocol_error;
+pub use snapshot::{
+    accelerated_from, admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size,
+    encode_state_request, outstanding_count, tombstone_count,
+};
