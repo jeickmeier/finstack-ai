@@ -55,6 +55,10 @@ def test_sqlite_extension_constructs_on_a_file(tmp_path: Path) -> None:
     assert (tmp_path / "memory.db").exists()
 
 
+def test_tenant_defaults_to_the_run_scope() -> None:
+    assert finstack_ai.MemoryExtension.in_process().tenant == "python-local"
+
+
 def test_invalid_tenant_raises_configuration_error() -> None:
     with pytest.raises(finstack_ai.ConfigurationError):
         finstack_ai.MemoryExtension.in_process(tenant="")
@@ -64,7 +68,6 @@ def test_sqlite_rejects_an_unopenable_path(tmp_path: Path) -> None:
     with pytest.raises(finstack_ai.ConfigurationError):
         finstack_ai.MemoryExtension.sqlite(
             path=str(tmp_path / "missing-dir" / "memory.db"),
-            tenant="t1",
         )
 
 
@@ -77,12 +80,9 @@ def test_policy_gates_the_exposed_tools() -> None:
 
 
 def test_remember_then_recall_across_two_agents(tmp_path: Path) -> None:
-    # Recall requires the extension tenant to equal the run's tenant scope,
-    # which is "python-local" for Agent.run / Agent.start.
-    memory = finstack_ai.MemoryExtension.sqlite(
-        path=str(tmp_path / "memory.db"),
-        tenant="python-local",
-    )
+    # No tenant: the default already matches the tenant scope Agent.run
+    # binds its runs to, so recall works without configuration.
+    memory = finstack_ai.MemoryExtension.sqlite(path=str(tmp_path / "memory.db"))
     body = "The quarterly close deadline is the fifth business day."
 
     write_calls = 0

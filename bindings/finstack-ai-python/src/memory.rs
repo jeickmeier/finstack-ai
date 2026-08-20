@@ -46,6 +46,10 @@ use pyo3::prelude::*;
 
 use crate::errors::{agent_error, configuration_error};
 
+/// Tenant scope `Agent.run` and `Agent.start` bind their runs to; the
+/// default tenant, so recall works without configuration on that path.
+const DEFAULT_TENANT: &str = "python-local";
+
 /// Registered component identity of the native memory toolset.
 const MEMORY_TOOLSET_COMPONENT: &str = "finstack.tools.memory";
 const MEMORY_COMPONENT_VERSION: Version = Version {
@@ -118,18 +122,19 @@ pub(crate) struct PyMemoryExtension {
 impl PyMemoryExtension {
     /// Build an extension over a process-local, non-durable store.
     ///
-    /// `tenant` is required and must equal the tenant scope of the runs
-    /// that recall from it: `"python-local"` for `Agent.run`/`Agent.start`,
-    /// or the session's tenant scope for lane runs. Recall on a mismatched
-    /// tenant fails the run with `context_contribution_invalid`; writes
-    /// through the toolset are not affected.
+    /// `tenant` must equal the tenant scope of the runs that recall from
+    /// it. It defaults to `"python-local"`, the scope `Agent.run` and
+    /// `Agent.start` use; pass the session's tenant scope instead when the
+    /// recalling runs execute on a lane. Recall on a mismatched tenant
+    /// fails the run with `context_contribution_invalid`; writes through
+    /// the toolset are not affected.
     ///
     /// `user`, `agent`, and `workspace` narrow the scope that every read
     /// and write is bound to. The policy flags gate the exposed tools:
     /// `read` covers `search_memory`/`inspect_memory`, `write` covers
     /// `remember`, and `manage` covers `forget_memory`/`correct_memory`.
     #[staticmethod]
-    #[pyo3(signature = (*, tenant, user = None, agent = None, workspace = None, read = true, write = true, manage = false))]
+    #[pyo3(signature = (*, tenant = DEFAULT_TENANT, user = None, agent = None, workspace = None, read = true, write = true, manage = false))]
     #[expect(
         clippy::too_many_arguments,
         reason = "scope narrowing and policy flags are distinct keyword parameters"
@@ -155,9 +160,11 @@ impl PyMemoryExtension {
     /// Build an extension over a durable `SQLite` store at `path`.
     ///
     /// The file and its schema are created on first open. Parameters other
-    /// than `path` match [`MemoryExtension.in_process`].
+    /// than `path` match [`MemoryExtension.in_process`], including the
+    /// `tenant` default and the rule that it must equal the tenant scope of
+    /// the runs that recall from this store.
     #[staticmethod]
-    #[pyo3(signature = (*, path, tenant, user = None, agent = None, workspace = None, read = true, write = true, manage = false))]
+    #[pyo3(signature = (*, path, tenant = DEFAULT_TENANT, user = None, agent = None, workspace = None, read = true, write = true, manage = false))]
     #[expect(
         clippy::too_many_arguments,
         reason = "scope narrowing and policy flags are distinct keyword parameters"

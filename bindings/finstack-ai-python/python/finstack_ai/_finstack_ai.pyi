@@ -188,7 +188,7 @@ class MemoryExtension:
     @staticmethod
     def in_process(
         *,
-        tenant: str,
+        tenant: str = "python-local",
         user: str | None = None,
         agent: str | None = None,
         workspace: str | None = None,
@@ -199,16 +199,18 @@ class MemoryExtension:
         """Build an extension over a process-local, non-durable store.
 
         ``tenant`` must equal the tenant scope of the runs that recall from
-        it: ``"python-local"`` for :meth:`Agent.run` / :meth:`Agent.start`,
-        or the session's tenant scope for lane runs. Recall on a mismatched
-        tenant fails the run with ``context_contribution_invalid``.
+        it. It defaults to ``"python-local"``, the scope :meth:`Agent.run`
+        and :meth:`Agent.start` use; pass the session's tenant scope
+        instead when the recalling runs execute on a lane. Recall on a
+        mismatched tenant fails the run with
+        ``context_contribution_invalid``.
         """
 
     @staticmethod
     def sqlite(
         *,
         path: str,
-        tenant: str,
+        tenant: str = "python-local",
         user: str | None = None,
         agent: str | None = None,
         workspace: str | None = None,
@@ -216,7 +218,17 @@ class MemoryExtension:
         write: bool = True,
         manage: bool = False,
     ) -> MemoryExtension:
-        """Build an extension over a durable SQLite store at ``path``."""
+        """Build an extension over a durable SQLite store at ``path``.
+
+        The file and its schema are created on first open.
+
+        ``tenant`` must equal the tenant scope of the runs that recall from
+        it. It defaults to ``"python-local"``, the scope :meth:`Agent.run`
+        and :meth:`Agent.start` use; pass the session's tenant scope
+        instead when the recalling runs execute on a lane. Recall on a
+        mismatched tenant fails the run with
+        ``context_contribution_invalid``.
+        """
 
     @property
     def tenant(self) -> str: ...
