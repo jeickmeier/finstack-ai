@@ -20,14 +20,25 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
 const DEFAULT_CREDENTIAL_NAME: &str = "default";
-#[allow(dead_code, reason = "read once request-building support lands in a later task")]
+#[allow(
+    dead_code,
+    reason = "read once request-building support lands in a later task"
+)]
 const GENERATIVE_LANGUAGE_API_VERSION: &str = "v1beta";
-#[allow(dead_code, reason = "read once request-building support lands in a later task")]
+#[allow(
+    dead_code,
+    reason = "read once request-building support lands in a later task"
+)]
 const VERTEX_API_VERSION: &str = "v1";
 const MAX_LABEL_BYTES: usize = 255;
 
 fn config_error(message: &'static str) -> ModelError {
-    error(GEMINI_CONFIG_INVALID, ErrorCategory::Configuration, false, message)
+    error(
+        GEMINI_CONFIG_INVALID,
+        ErrorCategory::Configuration,
+        false,
+        message,
+    )
 }
 
 /// Resolved Gemini transport target.
@@ -107,13 +118,25 @@ pub struct GeminiConfig {
     credentials: CredentialStore,
     credential: Option<CredentialReference>,
     headers: Arc<[SecretHeader]>,
-    #[allow(dead_code, reason = "read once request-building support lands in a later task")]
+    #[allow(
+        dead_code,
+        reason = "read once request-building support lands in a later task"
+    )]
     request_timeout: Duration,
-    #[allow(dead_code, reason = "read once request-building support lands in a later task")]
+    #[allow(
+        dead_code,
+        reason = "read once request-building support lands in a later task"
+    )]
     max_event_bytes: usize,
-    #[allow(dead_code, reason = "read once request-building support lands in a later task")]
+    #[allow(
+        dead_code,
+        reason = "read once request-building support lands in a later task"
+    )]
     max_stream_bytes: usize,
-    #[allow(dead_code, reason = "read once request-building support lands in a later task")]
+    #[allow(
+        dead_code,
+        reason = "read once request-building support lands in a later task"
+    )]
     media_resolver: Option<Arc<dyn MediaResolver>>,
 }
 
@@ -229,7 +252,11 @@ impl GeminiConfig {
     ///
     /// Rejects a header name that duplicates an already-configured header.
     pub fn with_secret_header(mut self, header: SecretHeader) -> Result<Self, ModelError> {
-        if self.headers.iter().any(|existing| existing.name == header.name) {
+        if self
+            .headers
+            .iter()
+            .any(|existing| existing.name == header.name)
+        {
             return Err(config_error("provider header is duplicated"));
         }
         let mut headers = self.headers.to_vec();
@@ -260,7 +287,10 @@ impl GeminiConfig {
         self
     }
 
-    #[allow(dead_code, reason = "called once request-building support lands in a later task")]
+    #[allow(
+        dead_code,
+        reason = "called once request-building support lands in a later task"
+    )]
     fn resolved_authentication(&self) -> Result<Authentication, ModelError> {
         let Some(reference) = &self.credential else {
             return Ok(Authentication::None);
@@ -271,7 +301,10 @@ impl GeminiConfig {
             .ok_or_else(|| config_error("named credential is missing"))
     }
 
-    #[allow(dead_code, reason = "called once request-building support lands in a later task")]
+    #[allow(
+        dead_code,
+        reason = "called once request-building support lands in a later task"
+    )]
     pub(crate) fn header_map(&self) -> Result<HeaderMap, ModelError> {
         let url =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
@@ -312,7 +345,10 @@ impl GeminiConfig {
         Ok(headers)
     }
 
-    #[allow(dead_code, reason = "called once request-building support lands in a later task")]
+    #[allow(
+        dead_code,
+        reason = "called once request-building support lands in a later task"
+    )]
     pub(crate) fn model_url(&self, model: &ModelName) -> Result<Url, ModelError> {
         let name = model.as_str();
         if name.contains('/') || name.contains(':') {
@@ -373,7 +409,6 @@ pub struct GeminiModelConfig {
     provider_overhead_tokens: u64,
     parallel_tool_calls: bool,
     thinking: bool,
-    #[allow(dead_code, reason = "read once request-building support lands in a later task")]
     thinking_budget_tokens: u64,
     input_images: bool,
     input_audio: bool,
@@ -568,6 +603,46 @@ impl GeminiModelConfig {
             .iter()
             .any(|capability| capability.as_ref() == "gemini.code-execution");
         Ok(())
+    }
+
+    pub(crate) const fn name(&self) -> &ModelName {
+        &self.name
+    }
+
+    pub(crate) const fn max_output_tokens(&self) -> u64 {
+        self.max_output_tokens
+    }
+
+    pub(crate) const fn thinking(&self) -> bool {
+        self.thinking
+    }
+
+    pub(crate) const fn thinking_budget_tokens(&self) -> u64 {
+        self.thinking_budget_tokens
+    }
+
+    pub(crate) const fn input_images(&self) -> bool {
+        self.input_images
+    }
+
+    pub(crate) const fn input_audio(&self) -> bool {
+        self.input_audio
+    }
+
+    pub(crate) const fn input_files(&self) -> bool {
+        self.input_files
+    }
+
+    pub(crate) const fn google_search(&self) -> bool {
+        self.google_search
+    }
+
+    pub(crate) const fn code_execution(&self) -> bool {
+        self.code_execution
+    }
+
+    pub(crate) const fn cached_content(&self) -> bool {
+        self.cached_content
     }
 
     pub(crate) fn estimator_ref() -> TokenEstimatorRef {

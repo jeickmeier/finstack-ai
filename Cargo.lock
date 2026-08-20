@@ -1368,6 +1368,7 @@ dependencies = [
 name = "finstack-ai-provider-gemini"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",

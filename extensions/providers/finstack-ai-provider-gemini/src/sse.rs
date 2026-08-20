@@ -10,12 +10,18 @@ use finstack_ai_runtime::{ModelError, SseEvent, SseEventParser, SseParseError};
 
 use crate::error::{GEMINI_STREAM_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED, error};
 
-#[allow(dead_code, reason = "consumed once streaming request support lands in a later task")]
+#[allow(
+    dead_code,
+    reason = "consumed once streaming request support lands in a later task"
+)]
 fn stream_error(message: &'static str) -> ModelError {
     error(GEMINI_STREAM_INVALID, ErrorCategory::Model, false, message)
 }
 
-#[allow(dead_code, reason = "consumed once streaming request support lands in a later task")]
+#[allow(
+    dead_code,
+    reason = "consumed once streaming request support lands in a later task"
+)]
 fn stream_limit_error() -> ModelError {
     error(
         GEMINI_STREAM_LIMIT_EXCEEDED,
@@ -25,12 +31,18 @@ fn stream_limit_error() -> ModelError {
     )
 }
 
-#[allow(dead_code, reason = "constructed once streaming request support lands in a later task")]
+#[allow(
+    dead_code,
+    reason = "constructed once streaming request support lands in a later task"
+)]
 pub(crate) struct GeminiSse {
     inner: SseEventParser,
 }
 
-#[allow(dead_code, reason = "called once streaming request support lands in a later task")]
+#[allow(
+    dead_code,
+    reason = "called once streaming request support lands in a later task"
+)]
 impl GeminiSse {
     pub(crate) fn new(max_event_bytes: usize) -> Self {
         Self {
@@ -65,7 +77,10 @@ impl GeminiSse {
     }
 }
 
-#[allow(dead_code, reason = "called once streaming request support lands in a later task")]
+#[allow(
+    dead_code,
+    reason = "called once streaming request support lands in a later task"
+)]
 fn map_parse(error: SseParseError) -> ModelError {
     match error {
         SseParseError::Limit => stream_limit_error(),
@@ -83,7 +98,9 @@ mod tests {
         let mut parser = GeminiSse::new(256);
         assert!(parser.push(b"data: {\"candidates\":").unwrap().is_empty());
         assert_eq!(
-            parser.push(b"[1]}\r\n\r\ndata: {\"candidates\":[2]}\n\n").unwrap(),
+            parser
+                .push(b"[1]}\r\n\r\ndata: {\"candidates\":[2]}\n\n")
+                .unwrap(),
             vec![
                 "{\"candidates\":[1]}".to_owned(),
                 "{\"candidates\":[2]}".to_owned(),
