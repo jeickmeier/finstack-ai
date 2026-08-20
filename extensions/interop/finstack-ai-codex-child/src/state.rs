@@ -28,7 +28,15 @@ pub struct CodexRunReport {
     pub usage: Option<CodexUsage>,
     /// Process exit code, when the process has exited.
     pub exit_code: Option<i32>,
+    /// Last bytes the child wrote to stderr, on a failed run only.
+    ///
+    /// Bounded to roughly 4 KiB and truncated from the front, so a chatty
+    /// child cannot grow the report without bound.
+    pub stderr_tail: Option<String>,
 }
+
+/// Upper bound on retained stderr bytes per run.
+const STDERR_TAIL_BYTES: usize = 4_096;
 
 /// Reduced view of one child's Codex event stream and process exit.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -38,6 +46,7 @@ pub(crate) struct RunState {
     usage: Option<CodexUsage>,
     failure: Option<String>,
     exit_code: Option<i32>,
+    stderr: String,
     cancelled: bool,
     exited: bool,
 }
@@ -62,7 +71,31 @@ impl RunState {
         self.exit_code = code;
     }
 
+    /// Append one stderr line, keeping only the trailing window.
+    ///
+    /// The window is trimmed from the front and snapped forward to the
+    /// next char boundary, so the retained tail is always valid UTF-8.
+    pub(crate) fn append_stderr(&mut self, line: &str) {
+        self.stderr.push_str(line);
+        self.stderr.push('\n');
+        if self.stderr.len() <= STDERR_TAIL_BYTES {
+            return;
+        }
+        let mut start = self.stderr.len() - STDERR_TAIL_BYTES;
+        while start < self.stderr.len() && !self.stderr.is_char_boundary(start) {
+            start += 1;
+        }
+        let tail = self.stderr.get(start..).unwrap_or_default().to_string();
+        self.stderr = tail;
+    }
+
+    /// Record a cancel request. Terminal runs are immutable: once the
+    /// process exited, its recorded outcome is the truth, so a late cancel
+    /// must not rewrite `Completed`/`Failed` into `Cancelled`.
     pub(crate) fn mark_cancelled(&mut self) {
+        if self.exited {
+            return;
+        }
         self.cancelled = true;
     }
 
@@ -76,12 +109,18 @@ impl RunState {
         } else {
             CodexRunStatus::Completed
         };
+        let stderr_tail = if status == CodexRunStatus::Failed && !self.stderr.trim().is_empty() {
+            Some(self.stderr.clone())
+        } else {
+            None
+        };
         CodexRunReport {
             status,
             thread_id: self.thread_id.clone(),
             last_message: self.last_message.clone(),
             usage: self.usage,
             exit_code: self.exit_code,
+            stderr_tail,
         }
     }
 }

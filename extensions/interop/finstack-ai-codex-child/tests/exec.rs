@@ -158,6 +158,43 @@ async fn failing_run_reports_failed() {
         .expect("accepted");
     let report = wait_until_settled(&invoker, &run_id).await;
     assert_eq!(report.status, CodexRunStatus::Failed);
+    assert_eq!(report.stderr_tail, None, "quiet failure has no tail");
+}
+
+/// A real Codex failure often says nothing on stdout; the bounded stderr
+/// tail is what makes it diagnosable.
+#[tokio::test]
+async fn failing_run_surfaces_the_stderr_tail() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = fake_invoker("fail-noisy", dir.path());
+    let request = codex_request("do the impossible loudly");
+    let run_id = request.locator.operation.run_id;
+    invoker
+        .start_or_attach(child_context(), request)
+        .await
+        .expect("accepted");
+    let report = wait_until_settled(&invoker, &run_id).await;
+    assert_eq!(report.status, CodexRunStatus::Failed);
+    let tail = report.stderr_tail.expect("stderr tail");
+    assert!(tail.contains("sandbox denied write"), "tail was {tail:?}");
+}
+
+/// NFR-4: the prompt is passed after a literal `--`, so a prompt that looks
+/// like a flag is still a prompt. `codex_fake` rejects any other argv shape,
+/// so reaching a completed run proves the separator was honored.
+#[tokio::test]
+async fn flag_shaped_prompt_is_passed_after_the_separator() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = fake_invoker("success", dir.path());
+    let request = codex_request("--dangerously-bypass-approvals-and-sandbox");
+    let run_id = request.locator.operation.run_id;
+    invoker
+        .start_or_attach(child_context(), request)
+        .await
+        .expect("accepted");
+    let report = wait_until_settled(&invoker, &run_id).await;
+    assert_eq!(report.status, CodexRunStatus::Completed);
+    assert_eq!(report.exit_code, Some(0));
 }
 
 #[tokio::test]

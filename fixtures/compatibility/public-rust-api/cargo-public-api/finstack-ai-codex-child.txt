@@ -69,6 +69,7 @@ pub struct finstack_ai_codex_child::CodexRunReport
 pub finstack_ai_codex_child::CodexRunReport::exit_code: core::option::Option<i32>
 pub finstack_ai_codex_child::CodexRunReport::last_message: core::option::Option<alloc::string::String>
 pub finstack_ai_codex_child::CodexRunReport::status: finstack_ai_codex_child::CodexRunStatus
+pub finstack_ai_codex_child::CodexRunReport::stderr_tail: core::option::Option<alloc::string::String>
 pub finstack_ai_codex_child::CodexRunReport::thread_id: core::option::Option<alloc::string::String>
 pub finstack_ai_codex_child::CodexRunReport::usage: core::option::Option<finstack_ai_codex_child::CodexUsage>
 impl core::clone::Clone for finstack_ai_codex_child::CodexRunReport

@@ -281,6 +281,10 @@ fn status_child(
         .last_message
         .as_deref()
         .map(|text| truncate_message(text, MAX_MESSAGE_BYTES));
+    let stderr_tail = report
+        .stderr_tail
+        .as_deref()
+        .map(|text| truncate_message(text, MAX_MESSAGE_BYTES));
     let output = result_json(&serde_json::json!({
         "run_id": key.run_id.as_ref(),
         "status": status_name(report.status),
@@ -288,6 +292,7 @@ fn status_child(
         "last_message": last_message,
         "usage": report.usage,
         "exit_code": report.exit_code,
+        "stderr_tail": stderr_tail,
     }))?;
     Ok(CallOutcome {
         output,
