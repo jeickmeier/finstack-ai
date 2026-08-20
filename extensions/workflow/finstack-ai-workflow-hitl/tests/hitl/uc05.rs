@@ -1023,10 +1023,32 @@ async fn uc05_resolve_end_to_end() {
 }
 
 // ---------------------------------------------------------------------------
-// UC-05: nobody answers, and the sweep refuses
+// UC-05: nobody answers, and the deadline settles it
 // ---------------------------------------------------------------------------
 
+/// Nobody answers. One clock drives the router and the worker together, which
+/// is what a real host has, and under it the *kernel* settles the interaction:
+///
+/// The sweep may only hand a row to an [`ExpiryPolicy`] once `now >=
+/// expires_at`. The worker then submits that policy's buffered resolution with
+/// its own clock, which under a shared frame is also `>= expires_at`. And
+/// `interaction_settled_input`
+/// (`crates/finstack-ai-runtime/src/driver/ingress/shared.rs`) rewrites any
+/// resolution whose `submitted_at` is at or after the deadline into
+/// `InteractionSettled::Expired` before the reducer sees it. So the policy's
+/// authored `{"approved":false}` payload is discarded, the journal records a
+/// plain `Expired` with no resolution identity, and the run proceeds on the
+/// deadline alone — no principal, no authorization evidence.
+///
+/// The policy is kept here precisely to prove that: it exercises the whole
+/// delivery path (sweep -> row status -> worker inbox -> tick) and shows the
+/// payload dropped at the end of it. What an `ExpiryPolicy` actually controls
+/// is the router's own row (`Expired`, `resolved_by`), not the run's outcome.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one end-to-end sentence: sweep, tick, journal, router row"
+)]
 async fn uc05_expiry_end_to_end() {
     let deadline = timestamp(600_000);
     let paths = paths();
@@ -1045,11 +1067,17 @@ async fn uc05_expiry_end_to_end() {
         "the run's effective deadline is the approval's deadline"
     );
 
-    // Nobody resolves. The sweep, told the deadline has passed, refuses.
+    // One clock: every sweep instant is also the worker's instant.
+    host.clock.set(timestamp(500_000));
     let early = router.sweep(timestamp(500_000)).expect("early sweep");
     assert_eq!(early.expired, 0, "before the deadline nothing expires");
     assert_eq!(early.reconciled, 0);
+    assert!(
+        host.adapters.load_all().expect("inbox").is_empty(),
+        "and nothing is delivered to the worker either"
+    );
 
+    host.clock.set(deadline);
     let report = router.sweep(deadline).expect("sweep");
     assert_eq!(report.expired, 1);
     assert_eq!(report.reconciled, 0);
@@ -1058,65 +1086,92 @@ async fn uc05_expiry_end_to_end() {
         .load(TENANT, &interaction_id)
         .expect("load")
         .expect("row");
-    assert_eq!(refused.status, InteractionStatus::Expired);
+    assert_eq!(
+        refused.status,
+        InteractionStatus::Expired,
+        "the router records what its own policy authored"
+    );
     assert_eq!(
         refused.resolved_by.as_deref(),
         Some("subject"),
-        "the policy's refusing principal is recorded on the row"
+        "including the principal the policy named"
     );
-
-    // First tick: the refusal is applied. The runtime synthesizes the
-    // `tool_approval_required` tool outcome for the model; the tool itself
-    // never runs.
-    let applied = Box::pin(host.worker.tick()).await.expect("apply refusal");
-    assert_eq!(applied.sessions_resumed, 0);
-    assert_eq!(applied.failures, 1);
     assert_eq!(
-        host.toolset.call_count(),
-        0,
-        "a refused approval never executes the tool"
+        host.adapters.load_all().expect("inbox").len(),
+        1,
+        "the authored refusal is durably buffered for the worker"
     );
 
-    drive_past_missing_facade_decisions(&host).await;
+    // One tick settles it. No facade stand-in is needed here, unlike the
+    // resolve test: the run's own deadline has passed too, so the run does not
+    // continue into another model cycle — it terminates.
+    let applied = Box::pin(host.worker.tick()).await.expect("tick");
+    assert_eq!(applied.sessions_resumed, 1);
+    assert_eq!(applied.failures, 0);
+    assert_eq!(
+        applied.sessions_expired, 1,
+        "the tick recorded an interaction expiry, not a resolution"
+    );
 
-    host.clock.jump(120_000).expect("past backoff");
-    let completed = Box::pin(host.worker.tick())
+    let settled = CommitCoordinator::recover(Arc::clone(&host.journal), locator().session_id)
         .await
-        .expect("resume to completion");
-    assert_eq!(completed.sessions_resumed, 1);
-    assert!(host.adapters.load_all().expect("inbox").is_empty());
+        .expect("recover");
+    assert_eq!(
+        settled
+            .state()
+            .last_interaction_terminal
+            .as_ref()
+            .map(|terminal| terminal.outcome),
+        Some(finstack_ai_kernel::InteractionTerminalOutcome::Expired),
+        "the kernel settled it as an expiry — NOT `Denied`, so the policy's \
+         authored refusal payload never reached the run"
+    );
     assert!(
-        host.adapters
-            .load_tenant(TENANT)
-            .expect("wake rows")
-            .is_empty()
+        settled.state().resolution_identities.is_empty(),
+        "a rewritten command is not a resolution: no principal is recorded"
     );
 
     assert_terminal(&host, 730).await;
     assert_eq!(
         host.toolset.call_count(),
         0,
-        "the refused tool never executed"
+        "the approval-gated tool never executed"
     );
     let messages = messages_json(&host).await;
-    assert!(
-        messages.contains("tool_approval_required"),
-        "the runtime synthesized the refusal outcome for the model: {messages}"
-    );
     assert!(
         !messages.contains(r#"{"ok":true,"value":1}"#),
         "no tool output exists, because the tool never ran: {messages}"
     );
 
+    assert!(
+        host.adapters.load_all().expect("inbox").is_empty(),
+        "the buffered command is drained once consumed"
+    );
+    assert!(
+        host.adapters
+            .load_tenant(TENANT)
+            .expect("wake rows")
+            .is_empty(),
+        "a terminal run has no wake row left"
+    );
+
+    // The router's row keeps the disposition its own policy authored. That is
+    // the honest reading of `Expired` here: it means "this battery authored an
+    // expiry for this row", and it happens to agree with the journal's own
+    // terminal outcome — but it is bookkeeping about the router, not proof of
+    // what settled the run. A row the worker expired with no policy installed
+    // would instead be reconciled to `Closed` by the next sweep.
     let final_row = host
         .inbox
         .load(TENANT, &interaction_id)
         .expect("load")
         .expect("row");
+    assert_eq!(final_row.status, InteractionStatus::Expired);
+    let after_sweep = router.sweep(timestamp(700_000)).expect("sweep again");
     assert_eq!(
-        final_row.status,
-        InteractionStatus::Expired,
-        "the refused row stays Expired"
+        (after_sweep.expired, after_sweep.reconciled),
+        (0, 0),
+        "an inactive row is neither re-expired nor reconciled"
     );
     assert!(router.pending(TENANT).expect("pending").is_empty());
 }
