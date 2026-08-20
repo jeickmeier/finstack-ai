@@ -582,11 +582,9 @@ async fn load_session_snapshot(
 
 /// Read the stored snapshot row, if any.
 ///
-/// Written against the schema's `snapshots` table ahead of the snapshot
-/// *writer* (Task 6): until then the table is always empty, so this returns
-/// `None` and [`LoadWindow::SnapshotPlusTail`] falls back to a full load, as
-/// the port contract requires.
-async fn load_snapshot(
+/// Reused by [`crate::prune::prune`], which needs the same row inside its own
+/// (write) transaction to admit and decode the prune-covering snapshot.
+pub(crate) async fn load_snapshot(
     transaction: &Transaction<'_>,
     session_id: SessionId,
     snapshot_bytes: usize,

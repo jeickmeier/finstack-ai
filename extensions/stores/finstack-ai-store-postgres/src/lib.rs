@@ -40,6 +40,7 @@ mod error;
 mod journal_store;
 mod load;
 mod pool;
+mod prune;
 mod schema;
 mod session;
 mod snapshot;

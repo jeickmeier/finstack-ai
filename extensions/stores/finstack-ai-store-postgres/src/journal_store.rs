@@ -5,8 +5,8 @@
 //! [`crate::load`]), [`JournalStore::health`], and
 //! [`JournalStore::write_snapshot`]/[`JournalStore::write_state_snapshot`]/
 //! [`JournalStore::scan`]/[`JournalStore::write_metadata`] (see
-//! [`crate::snapshot`]) are implemented. Only [`JournalStore::prune`] keeps
-//! the port's own default implementation, pending a later task.
+//! [`crate::snapshot`]), and [`JournalStore::prune`] (see [`crate::prune`])
+//! are all implemented.
 //!
 //! ## The verified-head cache
 //!
@@ -27,13 +27,14 @@ use std::sync::Arc;
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
 use finstack_ai_runtime::{
     JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
-    PortFuture, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
-    StoreError, StoreHealth, WriteMetadataRequest,
+    PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
+    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 use crate::append::append;
 use crate::config::PostgresDurability;
 use crate::load::{VerifiedHead, load};
+use crate::prune;
 use crate::snapshot;
 use crate::store::{
     DURABLE_DETAIL, PostgresJournalStore, RELAXED_DETAIL, VerifiedCache, cached_head,
@@ -121,6 +122,20 @@ impl JournalStore for PostgresJournalStore {
         Box::pin(async move {
             let mut client = pool.get().await?;
             snapshot::write_metadata(&mut client, &request).await
+        })
+    }
+
+    /// Snapshot-aligned prefix prune, per [`crate::prune::prune`].
+    ///
+    /// Never touches the verified-head cache: prune only ever deletes an
+    /// already-pruned prefix a cached suffix proof does not depend on, so
+    /// the cached head (if any) is left exactly as it was.
+    fn prune(&self, request: PruneRequest) -> PortFuture<Result<PruneReceipt, StoreError>> {
+        let pool = self.pool.clone();
+        let snapshot_bytes = self.config.limits.snapshot_bytes;
+        Box::pin(async move {
+            let mut client = pool.get().await?;
+            prune::prune(&mut client, &request, snapshot_bytes).await
         })
     }
 
