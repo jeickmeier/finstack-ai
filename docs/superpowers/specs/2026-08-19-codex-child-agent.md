@@ -122,7 +122,14 @@ These change the design, so they are recorded explicitly:
 - NFR-4: Prompt text is passed after a literal `--` argument so a prompt
   beginning with `-` cannot inject flags.
 - NFR-5: Accepted-run table capped at 1 024 entries (`MAX_ACCEPTED`,
-  matching `RemoteChildInvoker`).
+  matching `RemoteChildInvoker`). The cap evicts rather than wedges: when
+  the table is full, entries whose status is terminal (completed, failed,
+  cancelled) are dropped to make room, since they are pure history — the
+  process is gone and only a status snapshot is lost. `Unavailable` is
+  returned only if the table is still full of `Running` entries after that
+  eviction. An entry whose state lock is poisoned is kept, because we
+  cannot tell whether its child is still alive and eviction would discard
+  the only handle `cancel` could use.
 - NFR-6: Tool results bounded: `max_result_bytes: 8_192`; last message
   truncated to 4 096 bytes on a char boundary.
 
