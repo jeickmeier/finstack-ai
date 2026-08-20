@@ -48,7 +48,7 @@ pub use handle::Agent;
 pub(crate) use lane::LaneLive;
 pub use linked::{
     AnthropicAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
 };
 pub use run::AgentRun;
 pub use types::{

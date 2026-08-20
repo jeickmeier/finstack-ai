@@ -1077,6 +1077,8 @@ dependencies = [
  "finstack-ai-store-memory",
  "finstack-ai-test",
  "finstack-ai-tools-calculator",
+ "finstack-ai-tools-openai-media",
+ "finstack-ai-tools-openrouter-media",
  "finstack-ai-tools-skills",
  "serde",
  "serde_json",

@@ -57,7 +57,7 @@ pub use agent::{
     E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
     MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS, NativeAgentBuilder,
     NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
-    RemoteChildRouteSpec,
+    OpenRouterMediaToolsSpec, RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]
 pub use agent::{
