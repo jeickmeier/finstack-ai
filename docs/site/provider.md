@@ -61,10 +61,13 @@ with `with_media_resolver` (`OpenRouterConfig`, `OpenAIConfig`,
 `with_credential_store`. Without a configured resolver, a media-bearing
 user message fails closed rather than being silently dropped. Each
 provider also advertises per-model `InputCapabilities` toggles
-(`with_input_images`, `with_input_audio`, `with_input_files`) that gate
-which `ContentBlock` variants are accepted; the OpenRouter catalog fetch
-can set these automatically from `architecture.input_modalities`. The
-supported modalities differ by provider:
+(`with_input_images`, `with_input_audio`, `with_input_files`) that both
+advertise and enforce which `ContentBlock` variants are accepted: draft
+translation rejects a media block with that crate's `*_request_invalid`
+error when its modality flag is off, even if the block resolved
+successfully. The OpenRouter catalog fetch can set these flags
+automatically from `architecture.input_modalities`. The supported
+modalities differ by provider:
 
 | Provider | Images | Files / documents | Audio |
 | --- | --- | --- | --- |

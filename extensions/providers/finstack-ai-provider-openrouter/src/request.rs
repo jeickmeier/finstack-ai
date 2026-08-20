@@ -82,7 +82,8 @@ impl ResponsesRequest {
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
-        let (instructions, input) = map_input(&draft.messages, continuation_state, resolved)?;
+        let (instructions, input) =
+            map_input(&draft.messages, continuation_state, resolved, model)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -203,6 +204,7 @@ fn map_input(
     messages: &[Message],
     continuation_state: Option<&RawJson>,
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &OpenRouterModelConfig,
 ) -> Result<(Option<String>, Vec<Value>), ModelError> {
     let prefix_len = messages
         .iter()
@@ -228,13 +230,17 @@ fn map_input(
             .map_or(prefix_len, |index| index.saturating_add(1));
         let mut input = envelope.replay_items;
         for message in &messages[suffix_start..] {
-            input.extend(map_conversation_message(message, &call_ids, resolved)?);
+            input.extend(map_conversation_message(
+                message, &call_ids, resolved, model,
+            )?);
         }
         input
     } else {
         let mut input = Vec::with_capacity(messages.len().saturating_sub(prefix_len));
         for message in &messages[prefix_len..] {
-            input.extend(map_conversation_message(message, &call_ids, resolved)?);
+            input.extend(map_conversation_message(
+                message, &call_ids, resolved, model,
+            )?);
         }
         input
     };
@@ -284,12 +290,13 @@ fn map_conversation_message(
     message: &Message,
     call_ids: &BTreeMap<ToolCallId, String>,
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &OpenRouterModelConfig,
 ) -> Result<Vec<Value>, ModelError> {
     match message.role() {
         MessageRole::User => Ok(vec![json!({
             "type": "message",
             "role": "user",
-            "content": map_user_content(message.content(), resolved)?
+            "content": map_user_content(message.content(), resolved, model)?
         })]),
         MessageRole::Assistant => map_assistant_items(message.content(), call_ids),
         MessageRole::Tool => map_tool_results(message.content(), call_ids),
@@ -302,6 +309,7 @@ fn map_conversation_message(
 fn map_user_content(
     content: &[ContentBlock],
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &OpenRouterModelConfig,
 ) -> Result<Vec<Value>, ModelError> {
     let mut parts = Vec::new();
     let mut text = String::new();
@@ -316,6 +324,9 @@ fn map_user_content(
             ContentBlock::Text(value) => text.push_str(value.text()),
             ContentBlock::Json(value) => text.push_str(value.value().as_str()),
             ContentBlock::Image(media) => {
+                if !model.input_images {
+                    return Err(request_error("model is not configured for image input"));
+                }
                 flush(&mut parts, &mut text);
                 parts.push(json!({
                     "type": "input_image",
@@ -323,6 +334,9 @@ fn map_user_content(
                 }));
             }
             ContentBlock::File(media) => {
+                if !model.input_files {
+                    return Err(request_error("model is not configured for file input"));
+                }
                 flush(&mut parts, &mut text);
                 parts.push(json!({
                     "type": "input_file",
@@ -330,6 +344,9 @@ fn map_user_content(
                 }));
             }
             ContentBlock::Audio(media) => {
+                if !model.input_audio {
+                    return Err(request_error("model is not configured for audio input"));
+                }
                 flush(&mut parts, &mut text);
                 let (data, format) = media_reference_audio(media, resolved)?;
                 parts.push(json!({
@@ -688,14 +705,111 @@ mod tests {
             Arc::from(media.blob().id()),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
         );
-        let request =
-            ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved).expect("request");
+        let request = ResponsesRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["input"][0]["content"][1]["type"], "input_image");
         assert_eq!(
             value["input"][0]["content"][1]["image_url"],
             "https://cdn.example/a.png"
         );
+    }
+
+    #[test]
+    fn image_input_is_rejected_when_the_model_flag_is_off() {
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
+                .expect("blob");
+        let media = finstack_ai_kernel::MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::Image(media.clone())],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from(media.blob().id()),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved)
+            .expect_err("image input must be rejected when the flag is off");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn file_input_is_rejected_when_the_model_flag_is_off() {
+        let blob = finstack_ai_kernel::BlobRef::try_new(
+            "blob-1",
+            "application/pdf",
+            4,
+            None,
+            None::<&str>,
+        )
+        .expect("blob");
+        let media = finstack_ai_kernel::MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::File(media.clone())],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from(media.blob().id()),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.pdf")),
+        );
+        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved)
+            .expect_err("file input must be rejected when the flag is off");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn audio_input_is_rejected_when_the_model_flag_is_off() {
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "audio/wav", 4, None, None::<&str>)
+                .expect("blob");
+        let media = finstack_ai_kernel::MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::Audio(media.clone())],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from(media.blob().id()),
+            ResolvedMedia::Bytes {
+                media_type: Arc::from("audio/wav"),
+                bytes: Arc::from(b"data".as_slice()),
+            },
+        );
+        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved)
+            .expect_err("audio input must be rejected when the flag is off");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
 
     #[test]
@@ -744,8 +858,13 @@ mod tests {
             Arc::from(media.blob().id()),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.mp3")),
         );
-        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved)
-            .expect_err("audio URL resolution must fail");
+        let error = ResponsesRequest::try_from_draft(
+            &draft,
+            &model().with_input_audio(true),
+            None,
+            &resolved,
+        )
+        .expect_err("audio URL resolution must fail");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
 
@@ -775,8 +894,13 @@ mod tests {
                 bytes: Arc::from(b"data".as_slice()),
             },
         );
-        let request =
-            ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved).expect("request");
+        let request = ResponsesRequest::try_from_draft(
+            &draft,
+            &model().with_input_audio(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["input"][0]["content"][0]["type"], "input_audio");
         assert_eq!(

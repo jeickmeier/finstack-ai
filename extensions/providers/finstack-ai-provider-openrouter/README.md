@@ -50,11 +50,14 @@ Applying the result stays explicit via `replace_model_catalog`.
 
 Attach a host-supplied `MediaResolver` via `OpenRouterConfig::with_media_resolver`
 to enable image/audio/file content blocks in user messages, then advertise
-per-model support with `OpenRouterModelConfig::with_input_images`,
+and enforce per-model support with `OpenRouterModelConfig::with_input_images`,
 `with_input_audio`, and `with_input_files` (or via the catalog's
 `architecture.input_modalities`, applied automatically by
-`model_configs_from_catalog_json`). Without a configured resolver, any
-media-bearing user message fails closed with `openrouter_request_invalid`.
+`model_configs_from_catalog_json`). These flags are gated at draft
+translation: a media block whose modality flag is off is rejected with
+`openrouter_request_invalid`, even after it resolved successfully. Without
+a configured resolver, any media-bearing user message also fails closed
+with `openrouter_request_invalid`.
 
 **Audio caveat**: `OpenRouter` documents audio input only for
 `/api/v1/chat/completions` (base64 `input_audio`, not URLs). This crate maps

@@ -114,7 +114,7 @@ impl ChatRequest {
             return Err(request_error("requested model is not configured"));
         }
         let matched_replay = resolve_replay(&draft.messages, continuation);
-        let messages = map_messages(&draft.messages, matched_replay.as_deref(), resolved)?;
+        let messages = map_messages(&draft.messages, matched_replay.as_deref(), resolved, model)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -215,6 +215,7 @@ fn map_messages(
     messages: &[Message],
     replay: Option<&[ReplayEntry]>,
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &OllamaModelConfig,
 ) -> Result<Vec<WireMessage>, ModelError> {
     let mut mapped = Vec::new();
     let mut assistant_index = 0_usize;
@@ -234,7 +235,9 @@ fn map_messages(
         } else {
             None
         };
-        mapped.push(map_conversation_message(message, thinking, resolved)?);
+        mapped.push(map_conversation_message(
+            message, thinking, resolved, model,
+        )?);
     }
     Ok(mapped)
 }
@@ -243,6 +246,7 @@ fn map_conversation_message(
     message: &Message,
     thinking: Option<String>,
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &OllamaModelConfig,
 ) -> Result<WireMessage, ModelError> {
     let role = match message.role() {
         MessageRole::System | MessageRole::Developer => "system",
@@ -270,6 +274,9 @@ fn map_conversation_message(
                 });
             }
             ContentBlock::Image(media) if message.role() == MessageRole::User => {
+                if !model.input_images {
+                    return Err(request_error("model is not configured for image input"));
+                }
                 images.push(resolved_image(media, resolved)?);
             }
             ContentBlock::Opaque(_) => {}
@@ -662,9 +669,10 @@ mod tests {
                 bytes: Arc::from(b"pngbytes".as_slice()),
             },
         );
-        let request = ChatRequest::try_from_draft(&draft, &model(), None, &resolved)
-            .expect("request")
-            .request;
+        let request =
+            ChatRequest::try_from_draft(&draft, &model().with_input_images(true), None, &resolved)
+                .expect("request")
+                .request;
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         let expected = base64::engine::general_purpose::STANDARD.encode(b"pngbytes");
         assert_eq!(value["messages"][0]["images"][0], expected);
@@ -683,8 +691,30 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
         );
+        let error =
+            ChatRequest::try_from_draft(&draft, &model().with_input_images(true), None, &resolved)
+                .expect_err("url resolution must be rejected");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn image_input_is_rejected_when_the_model_flag_is_off() {
+        let draft = draft_with(
+            vec![media_message(ContentBlock::Image(media_ref("blob-1")))],
+            b"{}",
+            OutputSpec::PlainText,
+            Vec::new(),
+        );
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Bytes {
+                media_type: Arc::from("image/png"),
+                bytes: Arc::from(b"pngbytes".as_slice()),
+            },
+        );
         let error = ChatRequest::try_from_draft(&draft, &model(), None, &resolved)
-            .expect_err("url resolution must be rejected");
+            .expect_err("image input must be rejected when the flag is off");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
 
@@ -714,8 +744,13 @@ mod tests {
             OutputSpec::PlainText,
             Vec::new(),
         );
-        let error = ChatRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
-            .expect_err("missing resolution must fail");
+        let error = ChatRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            None,
+            &BTreeMap::new(),
+        )
+        .expect_err("missing resolution must fail");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
 
