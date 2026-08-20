@@ -62,9 +62,21 @@ pub(super) fn stage_input(
                 MessageRole::Tool,
             ))?,
         }),
-        Stage::BeforeFinalize => Ok(StageInput::BeforeFinalize {
-            candidate: canonical_terminal_candidate(state)?,
-        }),
+        Stage::BeforeFinalize => {
+            let result_message = match state.terminal_candidate.as_ref() {
+                Some(finstack_ai_kernel::TerminalCandidate::Completed { message_id, .. }) => state
+                    .messages
+                    .iter()
+                    .find(|message| message.id() == message_id)
+                    .map(canonical_message)
+                    .transpose()?,
+                _ => None,
+            };
+            Ok(StageInput::BeforeFinalize {
+                candidate: canonical_terminal_candidate(state)?,
+                result_message,
+            })
+        }
         Stage::BeforeModel => Ok(StageInput::BeforeModel(Box::new(before_model_input(
             outcome, profile, projection,
         )?))),

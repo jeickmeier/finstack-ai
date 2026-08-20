@@ -52,6 +52,7 @@ fn ctx() -> MiddlewareContext {
 fn finalize_input() -> StageInput {
     StageInput::BeforeFinalize {
         candidate: RawJson::parse(br#""candidate""#).expect("candidate"),
+        result_message: None,
     }
 }
 
