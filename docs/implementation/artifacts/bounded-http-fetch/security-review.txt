@@ -390,6 +390,45 @@ FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
   and the full suite still pass; `cargo test -p finstack-ai-tools-fetch`
   (54 tests at this point, other agents' work included) and
   `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
+
+  UPDATE 2 (2026-08-20, second review pass): the stack-based fix above
+  introduced its OWN critical bypass, also found and confirmed by the
+  reviewer with a real SIGABRT reproduction. The guard's opening-tag
+  handling treated any trailing `/` (`<div/>`) as self-closing and
+  skipped the push, on the assumption that a self-closed tag cannot
+  stay open. That assumption is wrong for ordinary HTML elements: per
+  the HTML5 tree-construction algorithm, a self-closing slash is only
+  honored on void elements and on foreign-content (SVG/MathML)
+  elements — on a plain element like `<div/>` it is IGNORED and the
+  element stays open exactly as `<div>` would. `"<div/>".repeat(100_000)`
+  therefore pushed nothing under the old rule (the guard reported "not
+  exceeded") while html5ever built a real DOM ~100,000 elements deep,
+  reproducing the same SIGABRT stack-overflow abort this guard exists
+  to prevent — and more easily than the first bypass, since it needs
+  only one repeated fragment rather than a padding trick. Reviewer
+  confirmed `real_dom_depth("<div/>" x 1000) == 1002` while the guard
+  returned `false`.
+  Fix (this pass): dropped `self_closing` from the push condition
+  entirely (and removed the now-dead variable/detection code). A tag
+  is now pushed onto the stack unless it is a [`VOID_ELEMENTS`] entry,
+  full stop — a trailing `/` no longer matters for non-void elements.
+  `<div/>` and friends now count as opens, matching html5ever. Accepted
+  new residual, added to the doc comment's list alongside the
+  implied-close/`<li>` case: genuine foreign-content self-closing
+  elements (SVG/MathML, e.g. `<path/>`, `<circle/>`), which html5ever
+  DOES honor as self-closing, are over-counted by this
+  namespace-unaware scan, so an SVG-heavy document with more than
+  `MAX_SCAN_DEPTH` (512) such elements will fall back to plain text
+  even though html5ever would have handled it fine. Fail-closed and
+  accepted, same as the other residual.
+  New regression test `self_closing_non_void_padding_does_not_bypass_the_depth_guard`
+  (markdown.rs): `"<div/>".repeat(100_000)` asserts `None` (guard
+  trips) and does not crash. All prior depth-guard tests
+  (deeply_nested_html_does_not_crash, moderately_nested_html_still_converts,
+  mismatched_close_padding_does_not_bypass_the_depth_guard) still pass.
+  `cargo test -p finstack-ai-tools-fetch` (57 tests at this point,
+  other agents' work included) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
   Original finding text retained below for the record.
 
   --- original finding ---

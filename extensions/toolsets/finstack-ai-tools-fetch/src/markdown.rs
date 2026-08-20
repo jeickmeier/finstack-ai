@@ -65,25 +65,41 @@ fn find_gt(bytes: &[u8]) -> Option<usize> {
 /// reachable through that gap. This version fixes that: a closing tag pops
 /// the stack ONLY when its name equals the top of the stack; a mismatched or
 /// stray close is ignored (no pop), mirroring html5ever's ignore-unmatched
-/// behavior in the conservative direction. Void elements
-/// ([`VOID_ELEMENTS`]) and explicitly self-closing tags (`<x/>`) are
-/// recognized and never pushed, so they cannot inflate the tracked depth on
-/// their own.
+/// behavior in the conservative direction.
 ///
-/// Because closes only pop on an exact match, this now genuinely can only
-/// reject more documents than strictly necessary, never fewer: any push this
-/// scan misses would have to come from a tag html5ever also wouldn't count
-/// as an open element, and any close this scan fails to apply (a mismatched
-/// close) only leaves the tracked depth higher than reality, not lower.
-/// Known false-positive sources from that same conservative bias: implied
-/// closes handled by html5ever's tree-construction adoption-agency /
-/// implied-end-tag rules (e.g. a huge run of sibling `<li>`s that HTML
-/// treats as auto-closing one another, or misnesting patterns like
-/// `<b><i></b>`) are not modeled here, so a legitimate document using those
-/// patterns at extreme scale could trip this guard and fall back to
-/// plain-text delivery even though html5ever would have handled it without
-/// unbounded real nesting. That fallback is inline text, not an error, so
-/// this is an accepted, documented tradeoff.
+/// A second, independent bypass was found and fixed the same way: a trailing
+/// `/` on an opening tag (`<div/>`) used to be treated as self-closing and
+/// therefore skipped the push, but the HTML5 tree-construction algorithm
+/// only honors that slash on void elements and foreign-content (SVG/MathML)
+/// elements — on an ordinary HTML element like `<div/>` it is IGNORED and
+/// the element stays open exactly as `<div>` would. `"<div/>".repeat(100_000)`
+/// therefore pushed nothing under the old rule while html5ever built a real
+/// DOM ~100,000 elements deep, and the guard reported "not exceeded" right
+/// up to the SIGABRT. Only [`VOID_ELEMENTS`] are now exempt from the push;
+/// a trailing `/` on anything else no longer matters.
+///
+/// Because closes only pop on an exact match, and a trailing `/` no longer
+/// suppresses a push except for true void elements, this now genuinely can
+/// only reject more documents than strictly necessary, never fewer: any
+/// push this scan misses would have to come from a tag html5ever also
+/// wouldn't count as an open element, and any close this scan fails to
+/// apply (a mismatched close) only leaves the tracked depth higher than
+/// reality, not lower. Known false-positive sources from that same
+/// conservative bias:
+///   - Implied closes handled by html5ever's tree-construction
+///     adoption-agency / implied-end-tag rules (e.g. a huge run of sibling
+///     `<li>`s that HTML treats as auto-closing one another, or misnesting
+///     patterns like `<b><i></b>`) are not modeled here.
+///   - Genuine foreign-content self-closing elements (SVG/MathML, e.g.
+///     `<path/>`, `<circle/>`) ARE honored by html5ever as self-closing, but
+///     this scan has no namespace awareness and pushes them like any other
+///     non-void element, so an SVG-heavy document with more than
+///     [`MAX_SCAN_DEPTH`] such elements will over-count and trip the guard.
+///
+/// In both cases a legitimate document at extreme scale could trip this
+/// guard and fall back to plain-text delivery even though html5ever would
+/// have handled it without unbounded real nesting. That fallback is inline
+/// text, not an error, so this is an accepted, documented tradeoff.
 ///
 /// `MAX_SCAN_DEPTH` (512) is well above any HTML a legitimate document is
 /// likely to nest by hand or by templating, and well below the depth that
@@ -116,14 +132,19 @@ fn exceeds_safe_nesting_depth(html: &str) -> bool {
             i += 1;
             continue;
         }
-        // Opening tag.
+        // Opening tag. A trailing `/` (`<div/>`) is NOT treated as a reason
+        // to skip the push: per the HTML5 tree-construction algorithm, a
+        // self-closing slash on a non-void, non-foreign (HTML-namespace)
+        // element is ignored, and the element stays open exactly like
+        // `<div>` would. Only [`VOID_ELEMENTS`] are exempt from the stack;
+        // see the doc comment above for the second bypass this closed and
+        // the foreign-content (SVG/MathML) residual it accepts.
         let (name, consumed) = parse_tag_name(&bytes[i + 1..]);
         let after_name = i + 1 + consumed;
         let tag_end = find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
-        let self_closing = tag_end >= 2 && bytes.get(tag_end - 2) == Some(&b'/');
         if let Some(name) = name {
             let is_void = VOID_ELEMENTS.contains(&name.as_str());
-            if !self_closing && !is_void {
+            if !is_void {
                 stack.push(name);
                 if stack.len() > MAX_SCAN_DEPTH {
                     return true;
@@ -299,6 +320,29 @@ mod tests {
         assert!(
             result.is_none(),
             "expected the depth guard to trip on mismatched-close padding"
+        );
+    }
+
+    #[test]
+    fn self_closing_non_void_padding_does_not_bypass_the_depth_guard() {
+        // Critical regression: an earlier version of `exceeds_safe_nesting_depth`
+        // treated a trailing `/` on ANY opening tag as self-closing and
+        // skipped the push. But the HTML5 tree-construction algorithm only
+        // honors that slash on void elements and foreign-content
+        // (SVG/MathML) elements -- on an ordinary element like `<div/>` it
+        // is ignored and the element stays open exactly as `<div>` would.
+        // `"<div/>".repeat(100_000)` therefore pushed nothing under the old
+        // rule (the guard reported "not exceeded") while html5ever built a
+        // real DOM ~100,000 elements deep and aborted the process. This is
+        // an easier trigger than the mismatched-close bypass above: one
+        // repeated fragment, no padding trick. The fixed guard no longer
+        // treats a trailing `/` as a reason to skip the push for a
+        // non-void element, so the stack grows and trips the cap here too.
+        let html = "<div/>".repeat(100_000);
+        let result = html_to_markdown(&html, BIG_CAP);
+        assert!(
+            result.is_none(),
+            "expected the depth guard to trip on self-closing non-void padding"
         );
     }
 }
