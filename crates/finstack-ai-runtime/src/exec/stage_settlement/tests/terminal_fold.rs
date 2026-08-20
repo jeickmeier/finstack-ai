@@ -289,3 +289,219 @@ fn a_fold_that_crosses_a_limit_still_lands_through_the_choke_point() {
         coordinator.state().terminal
     );
 }
+
+// ---- Verification bounce lands end to end -----------------------------
+
+fn verify_model_response(text: &str) -> crate::ModelResponse {
+    crate::ModelResponse {
+        assistant_content: Arc::from([ContentBlock::Text(
+            TextBlock::try_new(text).expect("text"),
+        )]),
+        tool_calls: Arc::from([]),
+        usage: finstack_ai_kernel::Usage::empty(),
+        provider_ids: ProviderIds::empty(),
+        completion_id: Arc::from("completion-verify"),
+        continuation_state: None,
+    }
+}
+
+fn verify_model_completion(
+    effect_id: finstack_ai_kernel::Id<finstack_ai_kernel::EffectTag>,
+    text: &str,
+) -> finstack_ai_kernel::EffectCompleted {
+    let response = verify_model_response(text);
+    let output = RawJson::parse(
+        serde_json_canonicalizer::to_vec(&response)
+            .expect("response json")
+            .as_slice(),
+    )
+    .expect("canonical response");
+    finstack_ai_kernel::EffectCompleted::try_new(
+        effect_id,
+        model_output_contract(),
+        output,
+        Some(finstack_ai_kernel::Usage::empty()),
+        vec![],
+        ProviderIds::empty(),
+        Some("completion-verify"),
+        None,
+    )
+    .expect("completion")
+}
+
+/// Drive an accepted coordinator all the way to `BeforeFinalize` with a
+/// `Completed` terminal candidate over the assistant message `504`, mirroring
+/// the kernel harness `drive_to_before_finalize_with_limits`
+/// (`model_only_reducer/termination/verification_retry.rs`).
+fn drive_to_before_finalize(coordinator: &mut CommitCoordinator) -> Message {
+    drive_to_before_model(coordinator);
+    let draft = request_draft(vec![user_message(4, "hi")], Vec::new());
+    block_on(coordinator.submit(
+        before_model_env(),
+        KernelInput::StageSettled(model_request_settled(&draft)),
+    ))
+    .expect("model request settles");
+
+    // `validate_assistant_semantics` requires `message.created_at() ==
+    // env.now`, so this cannot reuse the fixture `assistant_message` helper,
+    // which is pinned to `timestamp(900)`.
+    let assistant = Message::try_new(
+        id(504),
+        MessageRole::Assistant,
+        vec![ContentBlock::Text(
+            TextBlock::try_new("final answer").expect("text"),
+        )],
+        timestamp(1_400),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("assistant message");
+    block_on(coordinator.submit(
+        env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[504], 105),
+        KernelInput::ModelSettled(finstack_ai_kernel::ModelSettled {
+            turn_id: id(101),
+            model_request_id: id(102),
+            outcome: finstack_ai_kernel::ModelSettlement::Completed {
+                completion: verify_model_completion(id(103), "final answer"),
+                assistant_message: assistant.clone(),
+            },
+        }),
+    ))
+    .expect("model settled");
+
+    block_on(coordinator.submit(
+        env(1_450, &[9], &[], &[], &[], &[], &[], 106),
+        KernelInput::StageSettled(StageSettled {
+            cursor: StageCursor {
+                cycle: 0,
+                stage: Stage::AfterModel,
+            },
+            outcome: ReducerStageOutcome::Continue,
+        }),
+    ))
+    .expect("after model settles");
+
+    assert!(
+        matches!(
+            coordinator.state().terminal_candidate,
+            Some(finstack_ai_kernel::TerminalCandidate::Completed { .. })
+        ),
+        "the drive must land a Completed candidate before BeforeFinalize: {:?}",
+        coordinator.state().terminal_candidate
+    );
+    assistant
+}
+
+/// End to end through the choke point: a `finstack.middleware.verify`
+/// component bounces a `Completed` candidate at `BeforeFinalize` with a
+/// `Verification` retry. The kernel side of this is pinned in
+/// `crates/finstack-ai-kernel/tests/model_only_reducer/termination/verification_retry.rs`;
+/// this test is the promotion claim that the same bounce lands through the
+/// runtime's own choke point, `settle_facade_stage`, and that the run
+/// actually re-enters `PreparingContext` on cycle `n + 1` once the retry
+/// timer fires — with the bounced assistant message still in
+/// `state.messages`, which is what Task 5's feedback design depends on.
+#[test]
+fn a_verification_bounce_at_before_finalize_lands_end_to_end() {
+    let mut coordinator = accepted_coordinator_with_dispatcher(RunLimits {
+        max_retries: Some(3),
+        ..RunLimits::empty()
+    });
+    let bounced_assistant_message = drive_to_before_finalize(&mut coordinator);
+    let sources = test_sources();
+
+    let retry = finstack_ai_kernel::RetryDirective::try_new(
+        finstack_ai_kernel::RetryClassification::Verification,
+        finstack_ai_kernel::Duration::from_millis(1),
+        "verify-policy-v1",
+    )
+    .expect("verification retry directive");
+    let driver = driver_for(
+        "finstack.middleware.verify",
+        Stage::BeforeFinalize,
+        StageOutcome::Retry(retry),
+    );
+
+    let outcome = block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&driver),
+        &sources,
+        &test_profile(),
+        env(1_500, &[13, 14], &[7], &[], &[], &[], &[], 108),
+        StageSettled {
+            cursor: StageCursor {
+                cycle: 0,
+                stage: Stage::BeforeFinalize,
+            },
+            outcome: ReducerStageOutcome::FinalizeAccepted,
+        },
+    ))
+    .expect("a Verification bounce must commit over a Completed candidate");
+
+    // ---- Step 1: the bounce lands as a retry, not a terminal -----------
+    assert!(
+        coordinator.state().terminal.is_none(),
+        "a Verification bounce must not terminate the run: {:?}",
+        coordinator.state().terminal
+    );
+    let pending = coordinator
+        .state()
+        .retry
+        .pending
+        .clone()
+        .expect("the bounce must leave a pending retry");
+    assert_eq!(
+        pending.classification,
+        finstack_ai_kernel::RetryClassification::Verification
+    );
+
+    let committed = outcome.committed.as_ref().expect("committed batch");
+    let scheduled = committed
+        .records
+        .iter()
+        .find_map(|record| match record.body() {
+            finstack_ai_kernel::RecordBody::RetryScheduled(scheduled) => Some(scheduled),
+            _ => None,
+        })
+        .expect("a RetryScheduled record must land in the journal");
+    assert_eq!(
+        scheduled.classification,
+        finstack_ai_kernel::RetryClassification::Verification
+    );
+    assert_eq!(
+        scheduled.prior_error.code.as_str(),
+        "candidate_rejected",
+        "a Verification bounce over a Completed candidate must carry the kernel's own error"
+    );
+
+    // ---- Step 2: settle the timer and re-enter PreparingContext --------
+    let due_at = pending.due_at;
+    block_on(coordinator.submit(
+        env(1_501, &[15], &[], &[], &[], &[], &[], 109),
+        KernelInput::TimerFired(finstack_ai_kernel::TimerFiredInput {
+            effect_id: pending.timer_effect_id,
+            due_at,
+            fired_at: due_at,
+        }),
+    ))
+    .expect("the retry timer fires");
+
+    assert_eq!(
+        coordinator.state().cycle, 1,
+        "the fired timer must open cycle n + 1"
+    );
+    assert_eq!(
+        coordinator.state().phase,
+        Some(RunPhase::PreparingContext),
+        "the run must re-enter PreparingContext once the retry timer fires"
+    );
+    assert!(
+        coordinator
+            .state()
+            .messages
+            .iter()
+            .any(|message| message.id() == bounced_assistant_message.id()),
+        "the bounced assistant message must still be in state.messages on cycle n + 1"
+    );
+}
