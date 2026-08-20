@@ -282,6 +282,44 @@ fn stage_bodies(
     }
 }
 
+/// Resolves the safe failure descriptor a retry attaches to `RetryScheduled`.
+///
+/// A `Failed` candidate reuses its own retryable error. A `Completed`
+/// candidate only admits a retry when `Verification` bounced it at
+/// `before_finalize`, in which case a kernel-owned, middleware-agnostic
+/// descriptor is synthesized.
+fn retry_prior_error(
+    state: &KernelState,
+    directive: &crate::RetryDirective,
+) -> Result<crate::ErrorDescriptor, KernelError> {
+    match state.terminal_candidate.as_ref() {
+        Some(TerminalCandidate::Failed { error, .. }) => {
+            if !error.retryable {
+                return Err(KernelError::InvalidPhaseInput {
+                    phase: state.phase,
+                    input: "stage_settled",
+                });
+            }
+            Ok(error.clone())
+        }
+        Some(TerminalCandidate::Completed { .. })
+            if directive.classification == RetryClassification::Verification =>
+        {
+            crate::ErrorDescriptor::new(
+                "candidate_rejected",
+                "a before-finalize verifier rejected the completed candidate",
+                crate::ErrorCategory::Validation,
+                true,
+            )
+            .map_err(|_| KernelError::InvariantViolation)
+        }
+        _ => Err(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "stage_settled",
+        }),
+    }
+}
+
 fn retry_bodies(
     state: &KernelState,
     env: &TransitionEnv,
@@ -297,20 +335,6 @@ fn retry_bodies(
             input: "stage_settled",
         });
     }
-    let TerminalCandidate::Failed { error, .. } =
-        state
-            .terminal_candidate
-            .as_ref()
-            .ok_or(KernelError::InvalidPhaseInput {
-                phase: state.phase,
-                input: "stage_settled",
-            })?
-    else {
-        return Err(KernelError::InvalidPhaseInput {
-            phase: state.phase,
-            input: "stage_settled",
-        });
-    };
     if state.validation_failure.is_some()
         && directive.classification != RetryClassification::Validation
     {
@@ -319,12 +343,7 @@ fn retry_bodies(
             input: "stage_settled",
         });
     }
-    if !error.retryable {
-        return Err(KernelError::InvalidPhaseInput {
-            phase: state.phase,
-            input: "stage_settled",
-        });
-    }
+    let prior_error = retry_prior_error(state, directive)?;
     let attempt = state
         .retry
         .attempts
@@ -348,7 +367,7 @@ fn retry_bodies(
         directive.policy_version.as_ref(),
         timer_effect_id,
         due_at,
-        error.clone(),
+        prior_error,
     )
     .map_err(|_| KernelError::InvalidInputPayload {
         field: "retry",
