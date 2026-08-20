@@ -1,3 +1,4 @@
+mod provider;
 mod record;
 mod store;
 
