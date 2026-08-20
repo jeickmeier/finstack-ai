@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use finstack_ai_runtime::PortFuture;
+use finstack_ai_runtime::{PortFuture, PortObject};
 
 use crate::record::{MemoryId, MemoryRecord, MemoryScope};
 
@@ -114,9 +114,11 @@ pub enum MemoryStoreError {
 /// Durable memory storage: write, point-read, search, tombstone, supersede,
 /// and list memory records.
 ///
-/// Implementations must be object-safe and safely shareable across threads;
-/// all operations are asynchronous and scope-checked.
-pub trait MemoryStore: Send + Sync {
+/// Implementations must be object-safe; all operations are asynchronous and
+/// scope-checked. Off `wasm32`, implementations must also be safely
+/// shareable across threads ([`PortObject`] relaxes this on `wasm32`, where
+/// the runtime is single-threaded and JS host adapters are not `Send`).
+pub trait MemoryStore: PortObject {
     /// Insert `record`, keyed by `idempotency_key`. Re-applying the same key
     /// is a no-op that reports [`PutOutcome::AlreadyApplied`] rather than
     /// erroring or double-writing.

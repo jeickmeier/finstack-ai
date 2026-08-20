@@ -48,6 +48,7 @@ mod host;
 mod host_artifact;
 mod host_clock;
 mod host_context;
+mod host_memory;
 mod host_middleware;
 mod host_model;
 mod host_observer;
@@ -65,6 +66,10 @@ mod scripted;
 use std::sync::Arc;
 
 use wasm_bindgen::prelude::*;
+
+/// In-process, non-persistent [`MemoryStore`](finstack_ai_memory::MemoryStore)
+/// for wasm consumers that skip host-backed persistence entirely.
+pub use finstack_ai_memory::InProcessMemoryStore;
 
 /// Install the host driver when the generated module loads.
 #[cfg(target_arch = "wasm32")]
@@ -472,6 +477,46 @@ impl JsJournalStore {
     }
 }
 
+/// Trusted JS memory-store wrapper. Missing `memory_*` methods on the
+/// adapter are `Unavailable` per operation, not a construction failure.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = JsMemoryStore)]
+pub struct JsMemoryStore {
+    inner: std::sync::Arc<host_memory::HostMemoryStore>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_class = JsMemoryStore)]
+impl JsMemoryStore {
+    /// Construct a memory-store wrapper around a trusted host adapter.
+    #[wasm_bindgen(constructor)]
+    #[must_use]
+    pub fn new(adapter: JsValue) -> JsMemoryStore {
+        Self {
+            inner: std::sync::Arc::new(host_memory::HostMemoryStore::from_js(adapter)),
+        }
+    }
+
+    /// Clone the wrapper without moving the caller's handle.
+    #[wasm_bindgen(js_name = cloneHandle)]
+    pub fn clone_handle(&self) -> JsMemoryStore {
+        Self {
+            inner: std::sync::Arc::clone(&self.inner),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsMemoryStore {
+    // Not yet wired into `JsAgent`: the memory extension is not part of the
+    // Agent port bundle. Kept for the coming memory-extension task and for
+    // direct Rust composition.
+    #[allow(dead_code)]
+    pub(crate) fn port(&self) -> std::sync::Arc<dyn finstack_ai_memory::MemoryStore> {
+        std::sync::Arc::clone(&self.inner) as std::sync::Arc<dyn finstack_ai_memory::MemoryStore>
+    }
+}
+
 /// Host clock wrapper. `now()` returns Unix milliseconds.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsClock)]
@@ -608,8 +653,10 @@ pub fn compile_native_host_adapters() {
     use crate::host::{HostFailure, NativeHostResult};
     use crate::host_artifact::HostArtifactStore;
     use crate::host_clock::{HostClock, HostRandomSource};
+    use crate::host_memory::HostMemoryStore;
     use crate::host_store::{HostJournalStore, HostJournalStoreOptions};
     use finstack_ai::runtime::{ArtifactStore, Clock, JournalStore, RandomSource};
+    use finstack_ai_memory::MemoryStore;
 
     compile_native_port_adapters();
     let store = HostJournalStore::from_callback(
@@ -627,6 +674,19 @@ pub fn compile_native_host_adapters() {
     let artifacts = HostArtifactStore::memory();
     let _: std::sync::Arc<dyn ArtifactStore> = std::sync::Arc::new(artifacts);
     let _ = HostFailure::Failed;
+    let memory_store = HostMemoryStore::from_callback_fns(
+        |_| Ok(NativeHostResult::Object(r#"{"ok":"inserted"}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":null}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":[]}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":null}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":null}"#.into())),
+        |_| {
+            Ok(NativeHostResult::Object(
+                r#"{"ok":{"records":[],"total":0}}"#.into(),
+            ))
+        },
+    );
+    let _: std::sync::Arc<dyn MemoryStore> = std::sync::Arc::new(memory_store);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
