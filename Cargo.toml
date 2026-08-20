@@ -44,6 +44,7 @@ members = [
     "extensions/observers/finstack-ai-observer-notify",
     "extensions/observers/finstack-ai-observer-billing",
     "extensions/interop/finstack-ai-codex-child",
+    "extensions/interop/finstack-ai-completion-ingress",
     "extensions/interop/finstack-ai-remote-child",
     "extensions/workflow/finstack-ai-workflow-local",
     "extensions/workflow/finstack-ai-workflow-worker",
@@ -160,6 +161,7 @@ finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-
 finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "1.0.0" }
 finstack-ai-observer-notify = { path = "extensions/observers/finstack-ai-observer-notify", version = "1.0.0" }
 finstack-ai-observer-billing = { path = "extensions/observers/finstack-ai-observer-billing", version = "1.0.0" }
+finstack-ai-completion-ingress = { path = "extensions/interop/finstack-ai-completion-ingress", version = "1.0.0" }
 finstack-ai-remote-child = { path = "extensions/interop/finstack-ai-remote-child", version = "1.0.0" }
 finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "1.0.0" }
 finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "1.0.0" }

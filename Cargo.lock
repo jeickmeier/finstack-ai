@@ -1104,6 +1104,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-completion-ingress"
+version = "1.0.0"
+dependencies = [
+ "base64",
+ "finstack-ai",
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-test",
+ "hmac",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha2",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-context-repository"
 version = "1.0.0"
 dependencies = [
