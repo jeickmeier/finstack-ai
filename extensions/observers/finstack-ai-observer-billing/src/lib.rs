@@ -22,10 +22,14 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Version};
+use finstack_ai_kernel::{
+    ComponentId, ComponentRef, EffectId, Metadata, RunEvent, RunEventBody, RunEventKind, RunId,
+    SessionId, Usage, Version,
+};
 use finstack_ai_runtime::{
     OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
     ObserverDiagnostic, ObserverError, ObserverPayloadMode, ObserverQueue, ObserverQueuePush,
@@ -47,8 +51,96 @@ pub enum BillingObserverError {
     },
 }
 
+/// Ledger attribution key: session, run, and optional model name.
+type AttributionKey = (SessionId, RunId, Option<Arc<str>>);
+/// Spend-cell key: unit and pricing policy version. Never merged.
+type CostKey = (Arc<str>, Arc<str>);
+
 #[derive(Debug, Default)]
-struct LedgerState {}
+struct CostCell {
+    micros: u128,
+    costed_effects: u64,
+}
+
+#[derive(Debug, Default)]
+struct AttributionState {
+    provider: Option<ComponentRef>,
+    input_tokens: u64,
+    output_tokens: u64,
+    effects: u64,
+    uncosted_effects: u64,
+    spend: BTreeMap<CostKey, CostCell>,
+}
+
+#[derive(Debug, Clone)]
+struct EffectOrigin {
+    provider: Option<ComponentRef>,
+    model: Option<Arc<str>>,
+}
+
+#[derive(Debug, Default)]
+struct LedgerState {
+    entries: BTreeMap<AttributionKey, AttributionState>,
+    pending: BTreeMap<EffectId, EffectOrigin>,
+    unattributed_effects: u64,
+    overflowed_events: u64,
+}
+
+/// One spend row: cost accumulated for an attribution key under one unit and
+/// pricing policy version. Micros are exact integers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpendEntry {
+    /// Session identity.
+    pub session_id: SessionId,
+    /// Run identity.
+    pub run_id: RunId,
+    /// Model name parsed from the model request, when known.
+    pub model: Option<Arc<str>>,
+    /// Provider component, when known.
+    pub provider: Option<ComponentRef>,
+    /// Cost unit (for example an ISO currency code).
+    pub unit: Arc<str>,
+    /// Pricing policy version the cost was recorded under.
+    pub pricing_policy_version: Arc<str>,
+    /// Exact accumulated micros (millionths of the unit).
+    pub micros: u128,
+    /// Completions that carried a cost in this cell.
+    pub costed_effects: u64,
+}
+
+/// One usage row: token totals and cost coverage for an attribution key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageEntry {
+    /// Session identity.
+    pub session_id: SessionId,
+    /// Run identity.
+    pub run_id: RunId,
+    /// Model name parsed from the model request, when known.
+    pub model: Option<Arc<str>>,
+    /// Accumulated input tokens.
+    pub input_tokens: u64,
+    /// Accumulated output tokens.
+    pub output_tokens: u64,
+    /// Settled effects observed for this key.
+    pub effects: u64,
+    /// Settled effects that carried no cost amount.
+    pub uncosted_effects: u64,
+}
+
+/// Point-in-time projection of the ledger. Deterministic ordering.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LedgerSnapshot {
+    /// Spend rows ordered by (session, run, model, unit, policy version).
+    pub spend: Vec<SpendEntry>,
+    /// Usage rows ordered by (session, run, model).
+    pub usage: Vec<UsageEntry>,
+    /// Settled effects whose origin could not be tracked.
+    pub unattributed_effects: u64,
+    /// Events ignored because the ledger reached its entry bound.
+    pub overflowed_events: u64,
+    /// Observer queue drops.
+    pub dropped_events: u64,
+}
 
 /// Read-only spend-ledger observer. Default payload mode is metadata-only.
 pub struct BillingObserver {
@@ -123,11 +215,66 @@ impl BillingObserver {
         self.diagnostic.lock().ok().and_then(|slot| *slot)
     }
 
+    /// Snapshot the ledger. Returns an empty snapshot when state is poisoned.
+    #[must_use]
+    pub fn snapshot(&self) -> LedgerSnapshot {
+        let Ok(state) = self.state.lock() else {
+            return LedgerSnapshot::default();
+        };
+        let mut spend = Vec::new();
+        let mut usage = Vec::new();
+        for ((session_id, run_id, model), entry) in &state.entries {
+            for ((unit, policy), cell) in &entry.spend {
+                spend.push(SpendEntry {
+                    session_id: *session_id,
+                    run_id: *run_id,
+                    model: model.clone(),
+                    provider: entry.provider.clone(),
+                    unit: Arc::clone(unit),
+                    pricing_policy_version: Arc::clone(policy),
+                    micros: cell.micros,
+                    costed_effects: cell.costed_effects,
+                });
+            }
+            usage.push(UsageEntry {
+                session_id: *session_id,
+                run_id: *run_id,
+                model: model.clone(),
+                input_tokens: entry.input_tokens,
+                output_tokens: entry.output_tokens,
+                effects: entry.effects,
+                uncosted_effects: entry.uncosted_effects,
+            });
+        }
+        LedgerSnapshot {
+            spend,
+            usage,
+            unattributed_effects: state.unattributed_effects,
+            overflowed_events: state.overflowed_events,
+            dropped_events: self.dropped(),
+        }
+    }
+
     fn ingest(&self, event: &RunEvent) {
-        let Ok(_state) = self.state.lock() else {
+        let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let _ = event;
+        match event.kind() {
+            RunEventKind::EffectCompleted => {
+                if let RunEventBody::EffectCompleted(body) = event.body() {
+                    let origin = state.pending.remove(&body.effect_id());
+                    settle(
+                        &mut state,
+                        self.max_entries,
+                        event.session_id(),
+                        event.run_id(),
+                        origin,
+                        body.usage(),
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 
     fn record_overflow(&self) {
@@ -158,6 +305,54 @@ impl Observer for BillingObserver {
         let _ = self.queue.drain();
         Box::pin(async { Ok(()) })
     }
+}
+
+/// Fold one settled effect into the ledger. `usage` may be absent.
+fn settle(
+    state: &mut LedgerState,
+    max_entries: usize,
+    session_id: SessionId,
+    run_id: RunId,
+    origin: Option<EffectOrigin>,
+    usage: Option<&Usage>,
+) -> bool {
+    let (provider, model) = match origin {
+        Some(origin) => (origin.provider, origin.model),
+        None => (None, None),
+    };
+    let key = (session_id, run_id, model);
+    if !state.entries.contains_key(&key) && state.entries.len() >= max_entries {
+        state.overflowed_events = state.overflowed_events.saturating_add(1);
+        return false;
+    }
+    let entry = state.entries.entry(key).or_default();
+    if entry.provider.is_none() {
+        entry.provider = provider;
+    }
+    entry.effects = entry.effects.saturating_add(1);
+    let cost = usage.and_then(Usage::cost);
+    if let Some(usage) = usage {
+        entry.input_tokens = entry
+            .input_tokens
+            .saturating_add(usage.input_tokens().unwrap_or(0));
+        entry.output_tokens = entry
+            .output_tokens
+            .saturating_add(usage.output_tokens().unwrap_or(0));
+    }
+    match cost {
+        Some(cost) => {
+            let cell = entry
+                .spend
+                .entry((Arc::from(cost.unit()), Arc::from(cost.pricing_policy_version())))
+                .or_default();
+            cell.micros = cell.micros.saturating_add(u128::from(cost.micros()));
+            cell.costed_effects = cell.costed_effects.saturating_add(1);
+        }
+        None => {
+            entry.uncosted_effects = entry.uncosted_effects.saturating_add(1);
+        }
+    }
+    true
 }
 
 #[cfg(test)]
