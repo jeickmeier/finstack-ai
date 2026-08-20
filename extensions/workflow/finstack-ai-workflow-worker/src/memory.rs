@@ -7,15 +7,18 @@ use std::sync::{Arc, Mutex};
 use finstack_ai_kernel::{SessionId, Timestamp};
 
 use crate::error::WorkerError;
+use crate::fires::{FireRow, FireStatus, FireStore};
 use crate::wake::{WakeIndexStore, WakeRow, lease_deadline, lease_open, wake_due};
 
 type WakeRows = BTreeMap<(Arc<str>, SessionId), WakeRow>;
+type FireRows = BTreeMap<(Arc<str>, Arc<str>, u64), FireRow>;
 
-/// In-memory worker store. Implements the wake index (and, in later tasks,
-/// the cron-fire and inbox tables) behind a single mutex.
+/// In-memory worker store. Implements the wake index and cron-fire tables
+/// (and, in a later task, the inbox table) behind a single mutex per table.
 #[derive(Debug, Default)]
 pub struct MemoryWorkerStore {
     wake: Mutex<WakeRows>,
+    fires: Mutex<FireRows>,
 }
 
 impl MemoryWorkerStore {
@@ -146,6 +149,63 @@ impl WakeIndexStore for MemoryWorkerStore {
         row.lease_expires_at = None;
         row.wake_at = Some(retry_at);
         Ok(())
+    }
+}
+
+impl FireStore for MemoryWorkerStore {
+    fn record_claimed(&self, row: &FireRow) -> Result<(), WorkerError> {
+        let mut fires = self
+            .fires
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        let key = (
+            Arc::clone(&row.tenant_scope),
+            Arc::clone(&row.schedule_id),
+            row.fire_count,
+        );
+        fires.entry(key).or_insert_with(|| row.clone());
+        Ok(())
+    }
+
+    fn mark_started(
+        &self,
+        tenant_scope: &str,
+        schedule_id: &str,
+        fire_count: u64,
+        started_session: &str,
+    ) -> Result<(), WorkerError> {
+        let mut fires = self
+            .fires
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        let key = (
+            Arc::from(tenant_scope),
+            Arc::from(schedule_id),
+            fire_count,
+        );
+        if let Some(row) = fires.get_mut(&key) {
+            row.status = FireStatus::Started;
+            row.started_session = Some(Arc::from(started_session));
+        }
+        Ok(())
+    }
+
+    fn load_unstarted(&self) -> Result<Vec<FireRow>, WorkerError> {
+        let fires = self
+            .fires
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        Ok(fires
+            .values()
+            .filter(|row| row.status == FireStatus::Claimed)
+            .cloned()
+            .collect())
     }
 }
 

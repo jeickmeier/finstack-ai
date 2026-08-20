@@ -13,6 +13,7 @@ use finstack_ai_kernel::{Id, LaneId, RunId, SessionId, Timestamp};
 use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::error::WorkerError;
+use crate::fires::{FireRow, FireStatus, FireStore};
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
 
 const WORKER_DDL: &str = "
@@ -411,6 +412,138 @@ impl WakeIndexStore for SqliteWorkerStore {
                 code: "sqlite_wake_row",
             })?;
             Ok(())
+        })
+    }
+}
+
+/// Convert a `u64` fire count to `i64` for storage, failing closed on
+/// overflow.
+fn i64_from_fire_count(value: u64) -> Result<i64, WorkerError> {
+    i64::try_from(value).map_err(|_| WorkerError::StoreIntegrity {
+        code: "sqlite_fire_count",
+    })
+}
+
+/// Convert a stored `i64` fire count back to `u64`, failing closed on
+/// negative values.
+fn u64_from_fire_count(value: i64) -> Result<u64, WorkerError> {
+    u64::try_from(value).map_err(|_| WorkerError::StoreIntegrity {
+        code: "sqlite_fire_count",
+    })
+}
+
+const FIRE_SELECT: &str = "SELECT tenant_scope, schedule_id, fire_count, fired_unix_ms,
+       status, started_session
+FROM finstack_workflow_worker_fires";
+
+/// Decode one row from [`FIRE_SELECT`] into a [`FireRow`].
+fn decode_fire_row(
+    tenant_scope: String,
+    schedule_id: String,
+    fire_count: i64,
+    fired_unix_ms: i64,
+    status: &str,
+    started_session: Option<String>,
+) -> Result<FireRow, WorkerError> {
+    let fired_at = Timestamp::from_unix_ms(fired_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
+        code: "sqlite_fire_time",
+    })?;
+    Ok(FireRow {
+        tenant_scope: tenant_scope.into(),
+        schedule_id: schedule_id.into(),
+        fire_count: u64_from_fire_count(fire_count)?,
+        fired_at,
+        status: FireStatus::parse(status)?,
+        started_session: started_session.map(Into::into),
+    })
+}
+
+impl FireStore for SqliteWorkerStore {
+    fn record_claimed(&self, row: &FireRow) -> Result<(), WorkerError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT OR IGNORE INTO finstack_workflow_worker_fires (
+                    tenant_scope, schedule_id, fire_count, fired_unix_ms,
+                    status, started_session
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    row.tenant_scope.as_ref(),
+                    row.schedule_id.as_ref(),
+                    i64_from_fire_count(row.fire_count)?,
+                    row.fired_at.as_unix_ms(),
+                    row.status.as_str(),
+                    row.started_session.as_deref(),
+                ],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_fire_insert",
+            })?;
+            Ok(())
+        })
+    }
+
+    fn mark_started(
+        &self,
+        tenant_scope: &str,
+        schedule_id: &str,
+        fire_count: u64,
+        started_session: &str,
+    ) -> Result<(), WorkerError> {
+        let fire_count = i64_from_fire_count(fire_count)?;
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE finstack_workflow_worker_fires
+                 SET status = 'started', started_session = ?4
+                 WHERE tenant_scope = ?1 AND schedule_id = ?2 AND fire_count = ?3",
+                params![tenant_scope, schedule_id, fire_count, started_session],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_fire_start",
+            })?;
+            Ok(())
+        })
+    }
+
+    fn load_unstarted(&self) -> Result<Vec<FireRow>, WorkerError> {
+        self.with_conn(|conn| {
+            let sql = format!(
+                "{FIRE_SELECT}
+                 WHERE status = 'claimed'
+                 ORDER BY tenant_scope, schedule_id, fire_count"
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_fire_row",
+            })?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                    ))
+                })
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_fire_row",
+                })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (tenant_scope, schedule_id, fire_count, fired_unix_ms, status, started_session) =
+                    row.map_err(|_| WorkerError::StoreIntegrity {
+                        code: "sqlite_fire_row",
+                    })?;
+                out.push(decode_fire_row(
+                    tenant_scope,
+                    schedule_id,
+                    fire_count,
+                    fired_unix_ms,
+                    &status,
+                    started_session,
+                )?);
+            }
+            Ok(out)
         })
     }
 }
