@@ -208,3 +208,118 @@ async fn document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_fil
         "journaled user message must still carry the original File block"
     );
 }
+
+/// A >4 MiB attachment must stage and flow through the full lane when the
+/// artifact store is backed by [`ObjectArtifactStore`] (default 64 MiB
+/// ceiling), not the small in-process default. This is the regression the
+/// object-store integration lane exists to catch: any consumer path still
+/// pinning the old 4 MiB assumption would reject this attachment outright.
+#[tokio::test]
+async fn large_attachment_stages_through_the_object_backed_artifact_store() {
+    use finstack_ai_store_artifact_object::ObjectArtifactStore;
+    use finstack_ai_test::object_store::FakeObjectStore;
+
+    const SIX_MIB: usize = 6 * 1024 * 1024;
+
+    let object_store = Arc::new(FakeObjectStore::default());
+    let artifact_store: Arc<dyn ArtifactStore> =
+        Arc::new(ObjectArtifactStore::new(object_store));
+    let attachment_index = Arc::new(AttachmentIndex::default());
+
+    let store: Arc<dyn finstack_ai_runtime::JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 8_192,
+        })
+        .expect("journal store"),
+    );
+    let model = Arc::new(ScriptedModel::from_plans(
+        scripted_profile(),
+        vec![completed_plan("acknowledged")],
+    ));
+
+    let middleware = Arc::new(
+        DocumentIngestMiddleware::try_new(
+            Arc::clone(&artifact_store),
+            Arc::clone(&attachment_index),
+        )
+        .expect("document ingest middleware"),
+    );
+    let toolset = Arc::new(
+        DocumentToolset::try_new()
+            .expect("document toolset")
+            .with_artifact_store(Arc::clone(&artifact_store)),
+    );
+
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.document-ingest-large").expect("agent id"),
+        BundleId::parse("test.bundle.document-ingest-large").expect("bundle id"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.document-ingest-large").expect("model id"),
+                Some(COMPONENT_VERSION),
+            ),
+            Arc::clone(&model) as Arc<dyn Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.document-ingest-large").expect("store id"),
+                Some(COMPONENT_VERSION),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("finstack.tools.document").expect("toolset id"),
+            Some(COMPONENT_VERSION),
+        ),
+        toolset,
+    )
+    .middleware(
+        ComponentRef::new(
+            ComponentId::parse("finstack.middleware.document-ingest").expect("middleware id"),
+            Some(COMPONENT_VERSION),
+        ),
+        middleware,
+    )
+    .policy(RunPolicy::default())
+    .build()
+    .await
+    .expect("agent");
+
+    let artifact = artifact_store
+        .stage_put(
+            staging_scope(),
+            Bytes::from(vec![0x25_u8; SIX_MIB]),
+            ArtifactMetadata {
+                kind: Arc::from("attachment"),
+                media_type: Arc::from("application/pdf"),
+                name: Some(Arc::from("large.pdf")),
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("staged artifact");
+    assert_eq!(
+        artifact.blob().length(),
+        6_291_456,
+        "staged ArtifactRef length must be exactly 6 MiB"
+    );
+    attachment_index.insert(artifact.clone());
+
+    let mut request = AgentRunRequest::try_new(
+        finstack_ai_runtime::ModelName::try_new("lanes-1").expect("model name"),
+        "Please summarize the attached document",
+        security("decision-v1"),
+    )
+    .expect("request");
+    request.attachments = Arc::from([AttachmentInput {
+        artifact: artifact.clone(),
+    }]);
+
+    let output = agent.run(request).await.expect("run completes");
+    assert_eq!(output.text(), "acknowledged");
+}

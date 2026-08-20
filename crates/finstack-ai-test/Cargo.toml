@@ -29,6 +29,7 @@ finstack-ai = { workspace = true, default-features = false, features = ["native-
 finstack-ai-context-memory = { workspace = true }
 finstack-ai-middleware-document-ingest = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai-store-artifact-object = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-tools-document = { workspace = true }
