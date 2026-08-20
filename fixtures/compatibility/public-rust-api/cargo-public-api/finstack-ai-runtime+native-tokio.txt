@@ -490,6 +490,19 @@ impl core::fmt::Debug for finstack_ai_runtime::LoadWindow
 pub fn finstack_ai_runtime::LoadWindow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::LoadWindow
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::LoadWindow
+pub enum finstack_ai_runtime::MediaResolveKind
+pub finstack_ai_runtime::MediaResolveKind::Limit
+pub finstack_ai_runtime::MediaResolveKind::NotFound
+pub finstack_ai_runtime::MediaResolveKind::Unavailable
+impl core::clone::Clone for finstack_ai_runtime::MediaResolveKind
+pub fn finstack_ai_runtime::MediaResolveKind::clone(&self) -> finstack_ai_runtime::MediaResolveKind
+impl core::cmp::Eq for finstack_ai_runtime::MediaResolveKind
+impl core::cmp::PartialEq for finstack_ai_runtime::MediaResolveKind
+pub fn finstack_ai_runtime::MediaResolveKind::eq(&self, &finstack_ai_runtime::MediaResolveKind) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::MediaResolveKind
+pub fn finstack_ai_runtime::MediaResolveKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::MediaResolveKind
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::MediaResolveKind
 pub enum finstack_ai_runtime::MiddlewareRole
 pub finstack_ai_runtime::MiddlewareRole::ContextCompactor
 pub finstack_ai_runtime::MiddlewareRole::ContextCompactor::strategy_id: alloc::sync::Arc<str>
@@ -737,6 +750,15 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::PromptCacheImpact
 pub fn finstack_ai_runtime::PromptCacheImpact::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::PromptCacheImpact
 pub fn finstack_ai_runtime::PromptCacheImpact::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_runtime::ResolvedMedia
+pub finstack_ai_runtime::ResolvedMedia::Bytes
+pub finstack_ai_runtime::ResolvedMedia::Bytes::bytes: alloc::sync::Arc<[u8]>
+pub finstack_ai_runtime::ResolvedMedia::Bytes::media_type: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ResolvedMedia::Url(alloc::sync::Arc<str>)
+impl core::clone::Clone for finstack_ai_runtime::ResolvedMedia
+pub fn finstack_ai_runtime::ResolvedMedia::clone(&self) -> finstack_ai_runtime::ResolvedMedia
+impl core::fmt::Debug for finstack_ai_runtime::ResolvedMedia
+pub fn finstack_ai_runtime::ResolvedMedia::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum finstack_ai_runtime::RunHandleError
 pub finstack_ai_runtime::RunHandleError::CancellationSettlement
 pub finstack_ai_runtime::RunHandleError::CancellationSettlement::code: &'static str
@@ -2174,6 +2196,18 @@ pub fn finstack_ai_runtime::LockedModelContextProfile::eq(&self, &finstack_ai_ru
 impl core::fmt::Debug for finstack_ai_runtime::LockedModelContextProfile
 pub fn finstack_ai_runtime::LockedModelContextProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::LockedModelContextProfile
+pub struct finstack_ai_runtime::MediaResolveError
+pub finstack_ai_runtime::MediaResolveError::kind: finstack_ai_runtime::MediaResolveKind
+pub finstack_ai_runtime::MediaResolveError::message: &'static str
+impl core::clone::Clone for finstack_ai_runtime::MediaResolveError
+pub fn finstack_ai_runtime::MediaResolveError::clone(&self) -> finstack_ai_runtime::MediaResolveError
+impl core::cmp::Eq for finstack_ai_runtime::MediaResolveError
+impl core::cmp::PartialEq for finstack_ai_runtime::MediaResolveError
+pub fn finstack_ai_runtime::MediaResolveError::eq(&self, &finstack_ai_runtime::MediaResolveError) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::MediaResolveError
+pub fn finstack_ai_runtime::MediaResolveError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::MediaResolveError
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::MediaResolveError
 pub struct finstack_ai_runtime::MemoryExternalIdentityMap
 impl finstack_ai_runtime::MemoryExternalIdentityMap
 pub fn finstack_ai_runtime::MemoryExternalIdentityMap::new() -> Self
@@ -3607,6 +3641,8 @@ pub fn finstack_ai_runtime::JournalStore::scan(&self, finstack_ai_runtime::ScanR
 pub fn finstack_ai_runtime::JournalStore::write_metadata(&self, finstack_ai_runtime::WriteMetadataRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::MetadataReceipt, finstack_ai_runtime::StoreError>>
 pub fn finstack_ai_runtime::JournalStore::write_snapshot(&self, finstack_ai_runtime::SnapshotRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::SnapshotReceipt, finstack_ai_runtime::StoreError>>
 pub fn finstack_ai_runtime::JournalStore::write_state_snapshot(&self, finstack_ai_runtime::StateSnapshotRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::SnapshotReceipt, finstack_ai_runtime::StoreError>>
+pub trait finstack_ai_runtime::MediaResolver: finstack_ai_runtime::PortObject
+pub fn finstack_ai_runtime::MediaResolver::resolve(&self, &finstack_ai_kernel::content::blob::BlobRef) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ResolvedMedia, finstack_ai_runtime::MediaResolveError>>
 pub trait finstack_ai_runtime::Middleware: finstack_ai_runtime::PortObject
 pub fn finstack_ai_runtime::Middleware::descriptor(&self) -> finstack_ai_runtime::MiddlewareDescriptor
 pub fn finstack_ai_runtime::Middleware::invoke(&self, finstack_ai_runtime::MiddlewareContext, finstack_ai_runtime::StageInput) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::StageOutcome, finstack_ai_runtime::MiddlewareError>>

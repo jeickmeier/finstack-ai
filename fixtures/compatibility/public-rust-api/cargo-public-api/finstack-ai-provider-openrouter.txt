@@ -1,0 +1,74 @@
+pub mod finstack_ai_provider_openrouter
+pub use finstack_ai_provider_openrouter::Authentication
+pub use finstack_ai_provider_openrouter::CredentialReference
+pub use finstack_ai_provider_openrouter::CredentialRejected
+pub use finstack_ai_provider_openrouter::CredentialStore
+pub use finstack_ai_provider_openrouter::SecretRejected
+pub use finstack_ai_provider_openrouter::SecretString
+pub struct finstack_ai_provider_openrouter::OpenRouterConfig
+impl finstack_ai_provider_openrouter::OpenRouterConfig
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::with_attribution(self, core::option::Option<&str>, core::option::Option<&str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::with_authentication(self, finstack_ai_runtime::ports::model::provider_util::credentials::Authentication) -> Self
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::with_credential_store(self, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialStore, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialReference) -> Self
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::with_headers(self, alloc::vec::Vec<finstack_ai_provider_openrouter::SecretHeader>) -> Self
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::provider_util::media::MediaResolver>) -> Self
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::with_request_timeout(self, core::time::Duration) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::with_stream_limits(self, usize, usize) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::clone::Clone for finstack_ai_provider_openrouter::OpenRouterConfig
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::clone(&self) -> finstack_ai_provider_openrouter::OpenRouterConfig
+impl core::fmt::Debug for finstack_ai_provider_openrouter::OpenRouterConfig
+pub fn finstack_ai_provider_openrouter::OpenRouterConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_provider_openrouter::OpenRouterModelConfig
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::context_window_tokens: u64
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::hard_input_bytes: u64
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::input_audio: bool
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::input_files: bool
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::input_images: bool
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::max_output_tokens: u64
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::name: finstack_ai_runtime::ports::model::identity::ModelName
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::parallel_tool_calls: bool
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::provider_overhead_tokens: u64
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::reasoning: bool
+pub finstack_ai_provider_openrouter::OpenRouterModelConfig::reserved_output_tokens: u64
+impl finstack_ai_provider_openrouter::OpenRouterModelConfig
+pub fn finstack_ai_provider_openrouter::OpenRouterModelConfig::try_new(impl core::convert::AsRef<str>, u64, u64, u64, u64, u64) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub const fn finstack_ai_provider_openrouter::OpenRouterModelConfig::with_input_audio(self, bool) -> Self
+pub const fn finstack_ai_provider_openrouter::OpenRouterModelConfig::with_input_files(self, bool) -> Self
+pub const fn finstack_ai_provider_openrouter::OpenRouterModelConfig::with_input_images(self, bool) -> Self
+pub const fn finstack_ai_provider_openrouter::OpenRouterModelConfig::with_parallel_tool_calls(self, bool) -> Self
+pub const fn finstack_ai_provider_openrouter::OpenRouterModelConfig::with_reasoning(self, bool) -> Self
+impl core::clone::Clone for finstack_ai_provider_openrouter::OpenRouterModelConfig
+pub fn finstack_ai_provider_openrouter::OpenRouterModelConfig::clone(&self) -> finstack_ai_provider_openrouter::OpenRouterModelConfig
+impl core::cmp::Eq for finstack_ai_provider_openrouter::OpenRouterModelConfig
+impl core::cmp::PartialEq for finstack_ai_provider_openrouter::OpenRouterModelConfig
+pub fn finstack_ai_provider_openrouter::OpenRouterModelConfig::eq(&self, &finstack_ai_provider_openrouter::OpenRouterModelConfig) -> bool
+impl core::fmt::Debug for finstack_ai_provider_openrouter::OpenRouterModelConfig
+pub fn finstack_ai_provider_openrouter::OpenRouterModelConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_openrouter::OpenRouterModelConfig
+pub struct finstack_ai_provider_openrouter::OpenRouterProvider
+impl finstack_ai_provider_openrouter::OpenRouterProvider
+pub async fn finstack_ai_provider_openrouter::OpenRouterProvider::fetch_model_catalog(&self, u64) -> core::result::Result<alloc::vec::Vec<finstack_ai_provider_openrouter::OpenRouterModelConfig>, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::refresh_model_metadata(&self, &finstack_ai_runtime::ports::model::identity::ModelName, finstack_ai_runtime::ports::model::profile::ModelCapabilities) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::replace_model_catalog(&self, alloc::vec::Vec<finstack_ai_provider_openrouter::OpenRouterModelConfig>) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::try_new(finstack_ai_provider_openrouter::OpenRouterConfig, alloc::vec::Vec<finstack_ai_provider_openrouter::OpenRouterModelConfig>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::fmt::Debug for finstack_ai_provider_openrouter::OpenRouterProvider
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::model::port::Model for finstack_ai_provider_openrouter::OpenRouterProvider
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::capabilities(&self, &finstack_ai_runtime::ports::model::identity::ModelName) -> finstack_ai_runtime::ports::model::profile::ModelCapabilities
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::descriptor(&self) -> finstack_ai_runtime::ports::model::identity::ModelDescriptor
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::estimate_input_tokens(&self, &finstack_ai_runtime::ports::model::identity::ModelName, &[u8]) -> core::result::Result<finstack_ai_runtime::ports::model::request::ModelTokenEstimate, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::context::ModelReconcileResult, finstack_ai_runtime::ports::model::error::ModelError>>
+pub fn finstack_ai_provider_openrouter::OpenRouterProvider::request(&self, finstack_ai_runtime::ports::model::context::ModelRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::stream::ModelEventStream, finstack_ai_runtime::ports::model::error::ModelError>>
+pub struct finstack_ai_provider_openrouter::SecretHeader
+impl finstack_ai_provider_openrouter::SecretHeader
+pub fn finstack_ai_provider_openrouter::SecretHeader::try_new(impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::clone::Clone for finstack_ai_provider_openrouter::SecretHeader
+pub fn finstack_ai_provider_openrouter::SecretHeader::clone(&self) -> finstack_ai_provider_openrouter::SecretHeader
+impl core::cmp::Eq for finstack_ai_provider_openrouter::SecretHeader
+impl core::cmp::PartialEq for finstack_ai_provider_openrouter::SecretHeader
+pub fn finstack_ai_provider_openrouter::SecretHeader::eq(&self, &finstack_ai_provider_openrouter::SecretHeader) -> bool
+impl core::fmt::Debug for finstack_ai_provider_openrouter::SecretHeader
+pub fn finstack_ai_provider_openrouter::SecretHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_openrouter::SecretHeader
+pub fn finstack_ai_provider_openrouter::model_configs_from_catalog_json(&[u8], u64) -> core::result::Result<alloc::vec::Vec<finstack_ai_provider_openrouter::OpenRouterModelConfig>, finstack_ai_runtime::ports::model::error::ModelError>

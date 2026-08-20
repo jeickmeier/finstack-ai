@@ -1020,6 +1020,7 @@ pub async fn finstack_ai::Agent::e2b_sandbox(finstack_ai::E2bSandboxAgentSpec) -
 pub async fn finstack_ai::Agent::gateway(finstack_ai::GatewayAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::ollama(finstack_ai::OllamaAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::openai(finstack_ai::OpenAiAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
+pub async fn finstack_ai::Agent::openrouter(finstack_ai::OpenRouterAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 impl finstack_ai::Agent
 pub fn finstack_ai::Agent::builder(finstack_ai_kernel::primitives::ids::AgentId, finstack_ai_kernel::primitives::ids::BundleId, (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::port::Model>), (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)) -> finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::Agent::capability_catalog(&self) -> alloc::vec::Vec<finstack_ai::CapabilityCatalogEntry>
@@ -1171,6 +1172,7 @@ pub finstack_ai::AnthropicAgentSpec::api_key: core::option::Option<alloc::string
 pub finstack_ai::AnthropicAgentSpec::base_url: alloc::string::String
 pub finstack_ai::AnthropicAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::AnthropicAgentSpec::model: alloc::string::String
+pub finstack_ai::AnthropicAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::AttachmentInput
 pub finstack_ai::AttachmentInput::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
 impl core::clone::Clone for finstack_ai::AttachmentInput
@@ -1520,12 +1522,28 @@ pub struct finstack_ai::OllamaAgentSpec
 pub finstack_ai::OllamaAgentSpec::base_url: alloc::string::String
 pub finstack_ai::OllamaAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::OllamaAgentSpec::model: alloc::string::String
+pub finstack_ai::OllamaAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::OpenAiAgentSpec
 pub finstack_ai::OpenAiAgentSpec::api_key: alloc::string::String
 pub finstack_ai::OpenAiAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::OpenAiAgentSpec::media_tools: bool
 pub finstack_ai::OpenAiAgentSpec::model: alloc::string::String
+pub finstack_ai::OpenAiAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub finstack_ai::OpenAiAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenAiAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
+pub struct finstack_ai::OpenRouterAgentSpec
+pub finstack_ai::OpenRouterAgentSpec::api_key: alloc::string::String
+pub finstack_ai::OpenRouterAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::OpenRouterAgentSpec::media_tools: bool
+pub finstack_ai::OpenRouterAgentSpec::model: alloc::string::String
+pub finstack_ai::OpenRouterAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::referer: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::title: core::option::Option<alloc::string::String>
+pub struct finstack_ai::OpenRouterMediaToolsSpec
+pub finstack_ai::OpenRouterMediaToolsSpec::api_key: alloc::string::String
+pub finstack_ai::OpenRouterMediaToolsSpec::referer: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterMediaToolsSpec::title: core::option::Option<alloc::string::String>
 pub struct finstack_ai::OutstandingDeferral
 pub finstack_ai::OutstandingDeferral::deferred: finstack_ai_kernel::effects::lifecycle::EffectDeferred
 impl core::clone::Clone for finstack_ai::OutstandingDeferral

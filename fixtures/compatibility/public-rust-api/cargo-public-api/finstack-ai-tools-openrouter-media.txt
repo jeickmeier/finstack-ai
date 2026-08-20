@@ -1,0 +1,41 @@
+pub mod finstack_ai_tools_openrouter_media
+pub enum finstack_ai_tools_openrouter_media::OpenRouterMediaError
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaError::CredentialRequired
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaError::EndpointInvalid
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaError::EndpointInvalid::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_openrouter_media::OpenRouterMediaError
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaError::clone(&self) -> finstack_ai_tools_openrouter_media::OpenRouterMediaError
+impl core::cmp::Eq for finstack_ai_tools_openrouter_media::OpenRouterMediaError
+impl core::cmp::PartialEq for finstack_ai_tools_openrouter_media::OpenRouterMediaError
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaError::eq(&self, &finstack_ai_tools_openrouter_media::OpenRouterMediaError) -> bool
+impl core::error::Error for finstack_ai_tools_openrouter_media::OpenRouterMediaError
+impl core::fmt::Debug for finstack_ai_tools_openrouter_media::OpenRouterMediaError
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_openrouter_media::OpenRouterMediaError
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_openrouter_media::OpenRouterMediaError
+pub struct finstack_ai_tools_openrouter_media::OpenRouterMediaConfig
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::api_key: alloc::string::String
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::endpoint: alloc::string::String
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::max_result_bytes: usize
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::referer: core::option::Option<alloc::string::String>
+pub finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::title: core::option::Option<alloc::string::String>
+impl core::clone::Clone for finstack_ai_tools_openrouter_media::OpenRouterMediaConfig
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::clone(&self) -> finstack_ai_tools_openrouter_media::OpenRouterMediaConfig
+impl core::fmt::Debug for finstack_ai_tools_openrouter_media::OpenRouterMediaConfig
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_openrouter_media::OpenRouterMediaToolset
+impl finstack_ai_tools_openrouter_media::OpenRouterMediaToolset
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::try_new(finstack_ai_tools_openrouter_media::OpenRouterMediaConfig) -> core::result::Result<Self, finstack_ai_tools_openrouter_media::OpenRouterMediaError>
+impl core::fmt::Debug for finstack_ai_tools_openrouter_media::OpenRouterMediaToolset
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_openrouter_media::OpenRouterMediaToolset
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_CREDENTIAL_REQUIRED: &str
+pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_ENDPOINT_INVALID: &str
+pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_TIMEOUT: &str
+pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_TRANSPORT_FAILED: &str

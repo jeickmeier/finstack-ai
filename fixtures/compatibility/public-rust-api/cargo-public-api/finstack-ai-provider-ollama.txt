@@ -10,6 +10,7 @@ impl finstack_ai_provider_ollama::OllamaConfig
 pub fn finstack_ai_provider_ollama::OllamaConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_ollama::OllamaConfig::with_authentication(self, finstack_ai_runtime::ports::model::provider_util::credentials::Authentication) -> Self
 pub fn finstack_ai_provider_ollama::OllamaConfig::with_credential_store(self, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialStore, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialReference) -> Self
+pub fn finstack_ai_provider_ollama::OllamaConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::provider_util::media::MediaResolver>) -> Self
 pub fn finstack_ai_provider_ollama::OllamaConfig::with_request_timeout(self, core::time::Duration) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_ollama::OllamaConfig::with_stream_limits(self, usize, usize) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 impl core::clone::Clone for finstack_ai_provider_ollama::OllamaConfig
@@ -19,6 +20,7 @@ pub fn finstack_ai_provider_ollama::OllamaConfig::fmt(&self, &mut core::fmt::For
 pub struct finstack_ai_provider_ollama::OllamaModelConfig
 pub finstack_ai_provider_ollama::OllamaModelConfig::context_window_tokens: u64
 pub finstack_ai_provider_ollama::OllamaModelConfig::hard_input_bytes: u64
+pub finstack_ai_provider_ollama::OllamaModelConfig::input_images: bool
 pub finstack_ai_provider_ollama::OllamaModelConfig::max_output_tokens: u64
 pub finstack_ai_provider_ollama::OllamaModelConfig::name: finstack_ai_runtime::ports::model::identity::ModelName
 pub finstack_ai_provider_ollama::OllamaModelConfig::provider_overhead_tokens: u64
@@ -26,6 +28,7 @@ pub finstack_ai_provider_ollama::OllamaModelConfig::reasoning: bool
 pub finstack_ai_provider_ollama::OllamaModelConfig::reserved_output_tokens: u64
 impl finstack_ai_provider_ollama::OllamaModelConfig
 pub fn finstack_ai_provider_ollama::OllamaModelConfig::try_new(impl core::convert::AsRef<str>, u64, u64, u64, u64, u64) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub const fn finstack_ai_provider_ollama::OllamaModelConfig::with_input_images(self, bool) -> Self
 pub const fn finstack_ai_provider_ollama::OllamaModelConfig::with_reasoning(self, bool) -> Self
 impl core::clone::Clone for finstack_ai_provider_ollama::OllamaModelConfig
 pub fn finstack_ai_provider_ollama::OllamaModelConfig::clone(&self) -> finstack_ai_provider_ollama::OllamaModelConfig
