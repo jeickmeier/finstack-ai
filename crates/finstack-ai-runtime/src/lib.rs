@@ -162,15 +162,15 @@ pub use journal::{
     WriteMetadataRequest,
 };
 pub use middleware::{
-    BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,
-    COMPACTION_RESULT_INVALID, CompactedSummary, CompactionCheckpoint, CompactionEvidence,
-    CompactionModelRequest, CompactionModelResume, CompactionResult, CompactionSourceEntry,
-    MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRegistration, MiddlewareRole, OrderTier,
-    PromptCacheImpact, ResolvedMiddleware, ResolvedMiddlewareChain, StageInput, StageMask,
-    StageOutcome, compaction_checkpoint_compatible, compaction_projection_digest,
-    compaction_protected_set_digest, compaction_source_digest, compaction_summary_digest,
-    validate_compaction_result, validate_stage_outcome,
+    BeforeModelInput, BeforeToolBatchInput, COMPACTION_BUDGET_EXCEEDED,
+    COMPACTION_MODEL_NOT_AUTHORIZED, COMPACTION_RESULT_INVALID, CompactedSummary,
+    CompactionCheckpoint, CompactionEvidence, CompactionModelRequest, CompactionModelResume,
+    CompactionResult, CompactionSourceEntry, MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware,
+    MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRegistration, MiddlewareRole, OrderTier, PromptCacheImpact, ResolvedMiddleware,
+    ResolvedMiddlewareChain, StageInput, StageMask, StageOutcome, compaction_checkpoint_compatible,
+    compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
+    compaction_summary_digest, validate_compaction_result, validate_stage_outcome,
 };
 pub use model::{
     AnthropicMessagesAssembly, ApprovalMetadata, ApprovalRequirement, AssembledModelStream,

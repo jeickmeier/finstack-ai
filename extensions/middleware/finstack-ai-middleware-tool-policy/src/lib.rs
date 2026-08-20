@@ -123,25 +123,9 @@ impl Middleware for ToolPolicyMiddleware {
                     &before_model,
                     &ctx.run.authorization.roles,
                 )),
-                StageInput::BeforeToolBatch { value } => {
-                    if serde_json::from_slice::<Vec<finstack_ai_kernel::ToolCallBlock>>(
-                        value.as_bytes(),
-                    )
-                    .is_err()
-                    {
-                        return Err(MiddlewareError::try_new(
-                            TOOL_POLICY_BATCH_PAYLOAD_MALFORMED,
-                            ErrorCategory::Middleware,
-                            "tool batch payload malformed",
-                            Metadata::empty(),
-                        )
-                        .unwrap_or_else(Into::into));
-                    }
-                    verdict_to_outcome(evaluate_before_tool_batch(
-                        &config,
-                        &ctx.run.authorization.roles,
-                    ))
-                }
+                StageInput::BeforeToolBatch(_input) => verdict_to_outcome(
+                    evaluate_before_tool_batch(&config, &ctx.run.authorization.roles),
+                ),
                 _ => Err(MiddlewareError::try_new(
                     finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
                     ErrorCategory::Middleware,

@@ -3,12 +3,12 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ArtifactRef, BudgetScopeId, ComponentId, ComponentInvocation, ComponentRef, Digest, EntryId,
     ErrorDescriptor, InteractionRequest, Message, Metadata, ModelRequestId, RawJson,
-    RetryDirective, Sensitivity,
+    RetryDirective, Sensitivity, ToolCallBlock,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::context::ContextItem;
-use crate::{ModelRequestDraft, RunCallContext};
+use crate::{ModelRequestDraft, RunCallContext, ToolSpec};
 
 use super::error::MiddlewareError;
 use super::{
@@ -229,6 +229,17 @@ pub struct BeforeModelInput {
     pub checkpoint: Option<CompactionCheckpoint>,
 }
 
+/// Immutable input for one `before_tool_batch` invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BeforeToolBatchInput {
+    /// Canonicalized source calls of the batch, in source order.
+    pub calls: Arc<[ToolCallBlock]>,
+    /// The resolved tool universe visible to this run's catalog, in catalog
+    /// order (`ResolvedToolCatalog::tools()`), including side-effect classes.
+    pub tools: Arc<[ToolSpec]>,
+}
+
 /// Immutable input for one middleware invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "stage", rename_all = "snake_case")]
@@ -251,10 +262,7 @@ pub enum StageInput {
         value: RawJson,
     },
     /// Before tool batch.
-    BeforeToolBatch {
-        /// Immutable normalized stage input.
-        value: RawJson,
-    },
+    BeforeToolBatch(Box<BeforeToolBatchInput>),
     /// After tool batch.
     AfterToolBatch {
         /// Immutable normalized stage input.
@@ -276,7 +284,7 @@ impl StageInput {
             Self::PrepareContext { .. } => Stage::PrepareContext,
             Self::BeforeModel(_) => Stage::BeforeModel,
             Self::AfterModel { .. } => Stage::AfterModel,
-            Self::BeforeToolBatch { .. } => Stage::BeforeToolBatch,
+            Self::BeforeToolBatch(_) => Stage::BeforeToolBatch,
             Self::AfterToolBatch { .. } => Stage::AfterToolBatch,
             Self::BeforeFinalize { .. } => Stage::BeforeFinalize,
         }

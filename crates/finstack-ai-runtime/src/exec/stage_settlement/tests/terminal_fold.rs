@@ -153,9 +153,22 @@ fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
         stage: Stage::BeforeToolBatch,
     };
 
+    let catalog = crate::ResolvedToolCatalog::try_new(
+        [],
+        &std::collections::BTreeMap::new(),
+        &crate::JsonSchemaToolValidatorCompiler,
+    )
+    .expect("empty catalog");
+
     for driver in [None, Some(&driver)] {
-        let policy =
-            block_on(run_tool_batch_chain(&coordinator, driver, cursor, &[])).expect("passthrough");
+        let policy = block_on(run_tool_batch_chain(
+            &coordinator,
+            &catalog,
+            driver,
+            cursor,
+            &[],
+        ))
+        .expect("passthrough");
         assert_eq!(policy, ToolBatchPolicy::Unchanged);
     }
 }

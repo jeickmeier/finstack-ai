@@ -111,7 +111,7 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         cycle: state.cycle,
         stage: Stage::BeforeToolBatch,
     };
-    let retained = match run_tool_batch_chain(coordinator, driver, cursor, &calls).await? {
+    let retained = match run_tool_batch_chain(coordinator, catalog, driver, cursor, &calls).await? {
         ToolBatchPolicy::Unchanged => None,
         ToolBatchPolicy::Retain(retained) => Some(retained),
         ToolBatchPolicy::Fail(descriptor) => {

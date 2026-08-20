@@ -297,7 +297,7 @@ mod middleware_tests {
     }
 
     #[tokio::test]
-    async fn before_tool_batch_role_policy_filters_and_malformed_payload_errors() {
+    async fn before_tool_batch_role_policy_filters_tools() {
         use std::collections::{BTreeMap, BTreeSet};
         use std::sync::Arc;
 
@@ -306,8 +306,8 @@ mod middleware_tests {
             SessionId, ToolCallBlock, ToolCallId,
         };
         use finstack_ai_runtime::{
-            AuthorizationContext, CancellationSignal, MiddlewareContext, RunCallContext,
-            StageInput, StageOutcome,
+            AuthorizationContext, BeforeToolBatchInput, CancellationSignal, MiddlewareContext,
+            RunCallContext, StageInput, StageOutcome,
         };
 
         use super::tid;
@@ -365,23 +365,15 @@ mod middleware_tests {
             RawJson::parse(b"{}").expect("args"),
         )
         .expect("call");
-        let payload = RawJson::parse(serde_json::to_vec(&vec![call]).expect("serialize calls"))
-            .expect("payload json");
-        let outcome = mw
-            .invoke(ctx(), StageInput::BeforeToolBatch { value: payload })
-            .await
-            .expect("invoke");
+        let input = StageInput::BeforeToolBatch(Box::new(BeforeToolBatchInput {
+            calls: Arc::from([call]),
+            tools: Arc::from([]),
+        }));
+        let outcome = mw.invoke(ctx(), input).await.expect("invoke");
         assert_eq!(
             outcome,
             StageOutcome::FilterTools(Arc::from([tid("finstack.tools.read")]))
         );
-
-        let malformed = RawJson::parse(b"{}").expect("malformed but valid json");
-        let err = mw
-            .invoke(ctx(), StageInput::BeforeToolBatch { value: malformed })
-            .await
-            .expect_err("malformed batch payload must error, not Continue");
-        assert_eq!(err.code(), crate::TOOL_POLICY_BATCH_PAYLOAD_MALFORMED);
     }
 
     #[test]
