@@ -26,10 +26,15 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 pub mod record;
+pub mod store;
 
 pub use record::{
     ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
     MemoryRecord, MemoryScope, RetentionPolicy, system_clock,
+};
+pub use store::{
+    InProcessArtifactStore, InProcessMemoryStore, MatchEvidence, MemoryHit, MemoryListing,
+    MemoryPage, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
 };
 
 #[cfg(test)]
