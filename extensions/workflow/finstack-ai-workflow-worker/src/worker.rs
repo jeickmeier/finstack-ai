@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
@@ -139,6 +139,8 @@ impl WorkerBuilder {
                 lease_ttl_ms: DEFAULT_LEASE_TTL_MS,
                 drive_timeout: DEFAULT_DRIVE_TIMEOUT,
                 seed_counter: AtomicU64::new(0),
+                pump_clock: AtomicBool::new(false),
+                start_backoff: Mutex::new(BTreeMap::new()),
             },
         }
     }
@@ -246,6 +248,10 @@ pub struct WorkflowWorker {
     drive_timeout: Duration,
     /// Monotonic random seed source for attached sessions.
     seed_counter: AtomicU64,
+    /// Whether the tick loop drives this worker from wall time.
+    pump_clock: AtomicBool,
+    /// Process-local start backoff per fire: attempts and next eligible time.
+    start_backoff: Mutex<BTreeMap<String, (u32, Timestamp)>>,
 }
 
 impl WorkflowWorker {
@@ -337,7 +343,7 @@ impl WorkflowWorker {
         let now = self.clock.now().map_err(|_| WorkerError::TimeOverflow)?;
         let mut report = TickReport::default();
         self.tick_cron(now, &mut report)?;
-        self.tick_bridge(&mut report).await?;
+        Box::pin(self.tick_bridge(now, &mut report)).await?;
         Box::pin(self.tick_wake(now, &mut report)).await?;
         Ok(report)
     }
@@ -355,12 +361,32 @@ impl WorkflowWorker {
     }
 
     /// Claim one due schedule, mirroring `LocalWorkflowDriver::fire_due`.
+    ///
+    /// The fire is recorded *before* the schedule CAS. The CAS is the durable,
+    /// irreversible step: once it lands, `next_fire_at` has moved past this
+    /// tick and nothing will ever offer the schedule again, so a fire recorded
+    /// after it and lost to a store failure is lost for good. Recording first
+    /// cannot double-run instead, because the record is keyed by
+    /// `(tenant, schedule_id, fire_count)` and every worker racing for this
+    /// tick derives the same `fire_count` from the same observed row: the
+    /// key collides, `record_claimed` ignores the duplicate, and the bridge
+    /// still starts exactly one run. Losing the CAS therefore leaves the
+    /// winner's identical record in place, and crashing between the two
+    /// leaves a fire that the next successful CAS reconciles to the same key.
     fn claim_schedule(&self, schedule: &CronSchedule, now: Timestamp) -> Result<bool, WorkerError> {
         let expected_next = schedule.next_fire_at.as_unix_ms();
         let mut claimed = schedule.clone();
         claimed.last_fired_at = Some(now);
         claimed.fire_count = claimed.fire_count.saturating_add(1);
         claimed.next_fire_at = claimed.expression.next_after(claimed.origin, now)?;
+        self.fires.record_claimed(&FireRow {
+            tenant_scope: Arc::clone(&claimed.tenant_scope),
+            schedule_id: Arc::clone(&claimed.schedule_id),
+            fire_count: claimed.fire_count,
+            fired_at: now,
+            status: FireStatus::Claimed,
+            started_session: None,
+        })?;
         if !self.cron.try_claim(
             claimed.tenant_scope.as_ref(),
             claimed.schedule_id.as_ref(),
@@ -370,14 +396,6 @@ impl WorkflowWorker {
         )? {
             return Ok(false);
         }
-        self.fires.record_claimed(&FireRow {
-            tenant_scope: Arc::clone(&claimed.tenant_scope),
-            schedule_id: Arc::clone(&claimed.schedule_id),
-            fire_count: claimed.fire_count,
-            fired_at: now,
-            status: FireStatus::Claimed,
-            started_session: None,
-        })?;
         Ok(true)
     }
 
@@ -385,22 +403,42 @@ impl WorkflowWorker {
     ///
     /// A fire whose schedule has no registered starter is counted as a
     /// failure and left claimed — fail closed, visible, never dropped.
-    async fn tick_bridge(&self, report: &mut TickReport) -> Result<(), WorkerError> {
+    ///
+    /// Two bounds protect the tick from the host code behind [`RunStarter`].
+    /// Each call is capped by the same per-item budget a resume gets, so a
+    /// starter that never returns cannot wedge the loop (and with it the
+    /// shutdown signal, which is only observed between ticks). A call that
+    /// fails or times out also backs the fire off, so a starter whose
+    /// dependency is down is retried on a widening delay instead of once per
+    /// poll interval. That backoff is process-local: the fires table records
+    /// no attempt state, so a restart deliberately retries immediately.
+    async fn tick_bridge(
+        &self,
+        now: Timestamp,
+        report: &mut TickReport,
+    ) -> Result<(), WorkerError> {
         for row in self.fires.load_unstarted()? {
             let Some(starter) = self.starters.get(row.schedule_id.as_ref()) else {
                 report.failures += 1;
                 continue;
             };
+            let key = idempotency_key(&row);
+            if self.start_deferred(key.as_str(), now) {
+                continue;
+            }
             let fire = CronFire {
                 tenant_scope: Arc::clone(&row.tenant_scope),
                 schedule_id: Arc::clone(&row.schedule_id),
                 fired_at: row.fired_at,
             };
-            let key = idempotency_key(&row);
-            let Ok(run) = starter.start(&fire, key.as_str()).await else {
+            let outcome =
+                tokio::time::timeout(self.drive_timeout, starter.start(&fire, key.as_str())).await;
+            let Ok(Ok(run)) = outcome else {
                 report.failures += 1;
+                self.defer_start(key, now);
                 continue;
             };
+            self.clear_start_backoff(key.as_str());
             match self.fires.mark_started(
                 row.tenant_scope.as_ref(),
                 row.schedule_id.as_ref(),
@@ -442,11 +480,15 @@ impl WorkflowWorker {
             if row.reason != WakeReason::Timer && entry.is_none() {
                 continue;
             }
+            // Both the lease this takes out and the backoff written below are
+            // deadlines measured from the moment they are written, so each
+            // row reads the clock afresh rather than reusing the tick's.
+            let claim_now = self.row_now(now);
             let claim = self.wake.try_claim(
                 row.tenant_scope.as_ref(),
                 row.session_id,
                 self.worker_id.as_ref(),
-                now,
+                claim_now,
                 self.lease_ttl_ms,
             );
             let Ok(won) = claim else {
@@ -456,7 +498,7 @@ impl WorkflowWorker {
             if !won {
                 continue;
             }
-            if let Ok(terminal) = Box::pin(self.resume_row(&row, entry, now)).await {
+            if let Ok(terminal) = Box::pin(self.resume_row(&row, entry, claim_now)).await {
                 report.sessions_resumed += 1;
                 if !terminal {
                     report.sessions_reparked += 1;
@@ -465,7 +507,7 @@ impl WorkflowWorker {
                 report.failures += 1;
                 // A store that cannot record the backoff keeps the stale
                 // lease until it expires; the failure is already counted.
-                drop(self.back_off(&row, now));
+                drop(self.back_off(&row, self.row_now(now)));
             }
         }
         Ok(())
@@ -639,6 +681,58 @@ impl WorkflowWorker {
             .record_failure(row.tenant_scope.as_ref(), row.session_id, retry_at)
     }
 
+    /// Whether this fire's starter is still inside its backoff window.
+    fn start_deferred(&self, key: &str, now: Timestamp) -> bool {
+        let Ok(backoff) = self.start_backoff.lock() else {
+            return false;
+        };
+        backoff
+            .get(key)
+            .is_some_and(|(_, retry_at)| *retry_at > now)
+    }
+
+    /// Widen this fire's starter backoff after a failed or timed-out start.
+    fn defer_start(&self, key: String, now: Timestamp) {
+        let Ok(mut backoff) = self.start_backoff.lock() else {
+            return;
+        };
+        let attempts = backoff.get(&key).map_or(0, |(attempts, _)| *attempts);
+        let shift = attempts.min(BACKOFF_MAX_SHIFT);
+        let backoff_ms = BACKOFF_BASE_MS.saturating_mul(1_u64 << shift);
+        let Ok(retry_at) = lease_deadline(now, backoff_ms) else {
+            return;
+        };
+        backoff.insert(key, (attempts.saturating_add(1), retry_at));
+    }
+
+    /// Drop this fire's starter backoff after a successful start.
+    fn clear_start_backoff(&self, key: &str) {
+        if let Ok(mut backoff) = self.start_backoff.lock() {
+            backoff.remove(key);
+        }
+    }
+
+    /// Current instant for one row's work.
+    ///
+    /// A tick that drives many rows can span far more wall time than its own
+    /// budget, and every lease deadline and backoff it writes must be
+    /// measured from when it is written, not from when the tick began. When
+    /// [`Self::spawn`] drives the loop the wall clock is the source of truth,
+    /// so re-read it (and pump the injected clock with it, so sessions
+    /// attached later in the tick see the same instant). A worker whose
+    /// `tick` is called directly keeps its injected clock authoritative and
+    /// deterministic: the tick-start value is returned unchanged.
+    fn row_now(&self, tick_now: Timestamp) -> Timestamp {
+        if !self.pump_clock.load(Ordering::Acquire) {
+            return tick_now;
+        }
+        let Ok(now) = SystemClock.now() else {
+            return tick_now;
+        };
+        self.clock.set(now);
+        now
+    }
+
     /// Run the tick loop every `poll_interval`, pumping the clock from
     /// [`SystemClock`] before each tick.
     ///
@@ -649,8 +743,14 @@ impl WorkflowWorker {
     #[must_use]
     pub fn spawn(self: Arc<Self>, poll_interval: Duration) -> WorkerHandle {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        self.pump_clock.store(true, Ordering::Release);
         let join = tokio::spawn(async move {
             let mut interval = tokio::time::interval(poll_interval);
+            // A tick that overruns the interval must not be chased by a burst
+            // of immediate catch-up ticks: the point of the interval is to
+            // pace queries against a database the journal is also writing,
+            // and the overrun is exactly when that pacing matters most.
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
                     _ = interval.tick() => {

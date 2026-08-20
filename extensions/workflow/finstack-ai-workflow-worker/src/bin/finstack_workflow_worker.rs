@@ -4,12 +4,14 @@
 //! file, builds a [`WorkerBuilder`] with no `PortsFactory` or `RunStarter`
 //! registered, and spawns the tick loop until `ctrl-c`.
 //!
-//! With nothing registered this daemon still fires due cron schedules and
-//! corrects stale wake-index rows against the journal — both phases need
-//! only the adapter tables. It cannot resume a run onto a wait, because
-//! doing so requires host-owned ports (a model, tools, middleware) that only
-//! an embedding host can supply; those runs simply wait for a host process
-//! that has registered them. Usage: `finstack_workflow_worker <sqlite-path>`.
+//! With nothing registered the only phase that does useful work is cron:
+//! due schedules are claimed and recorded as fires, which then wait for a
+//! host with a matching `RunStarter`. This daemon touches no parked session
+//! at all — resuming one, including reaping a wake row whose run already
+//! reached a terminal state, needs host-owned ports (a model, tools,
+//! middleware) that only an embedding host can supply, so every due wake row
+//! is counted as a failure and backed off until such a host runs.
+//! Usage: `finstack_workflow_worker <sqlite-path>`.
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -313,7 +313,9 @@ impl WakeIndexStore for SqliteWorkerStore {
         self.with_conn(|conn| {
             let sql = format!(
                 "{WAKE_SELECT}
-                 WHERE (leased_by IS NULL OR lease_expires_unix_ms <= ?1)
+                 WHERE (leased_by IS NULL
+                        OR lease_expires_unix_ms IS NULL
+                        OR lease_expires_unix_ms <= ?1)
                    AND (CASE WHEN reason = 'timer'
                              THEN wake_at_unix_ms IS NOT NULL AND wake_at_unix_ms <= ?1
                              ELSE wake_at_unix_ms IS NULL OR wake_at_unix_ms <= ?1
@@ -354,7 +356,9 @@ impl WakeIndexStore for SqliteWorkerStore {
                 "UPDATE finstack_workflow_worker_wake
                  SET leased_by = ?1, lease_expires_unix_ms = ?2
                  WHERE tenant_scope = ?3 AND session_id = ?4
-                   AND (leased_by IS NULL OR lease_expires_unix_ms <= ?5)",
+                   AND (leased_by IS NULL
+                        OR lease_expires_unix_ms IS NULL
+                        OR lease_expires_unix_ms <= ?5)",
                 params![
                     worker_id,
                     deadline.as_unix_ms(),

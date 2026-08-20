@@ -21,12 +21,15 @@ finstack_workflow_worker <sqlite-path>
 
 It opens the worker/cron/journal sqlite tables on one file, builds a
 `WorkflowWorker` with no `PortsFactory` or `RunStarter` registered, and
-spawns the tick loop until `ctrl-c`. With nothing registered it still fires
-due cron schedules and corrects stale wake-index rows against the journal —
-both phases need only the adapter tables. It cannot resume a run onto a
-wait, because that requires host-owned ports (a model, tools, middleware);
-runs needing ports resume only in embedding hosts that register their own
-`PortsFactory`/`RunStarter` and call `WorkflowWorker::spawn` themselves.
+spawns the tick loop until `ctrl-c`. With nothing registered the only phase
+that does useful work is cron: due schedules are claimed and recorded as
+fires, which then wait for a host with a matching `RunStarter`. It touches
+no parked session at all — resuming one (including reaping a wake row whose
+run already reached a terminal state) requires host-owned ports, so every
+due wake row is counted as a failure and backed off instead. Both resuming
+runs and correcting stale wake rows happen only in embedding hosts that
+register their own `PortsFactory`/`RunStarter` and call
+`WorkflowWorker::spawn` themselves.
 
 ## Embedding
 
