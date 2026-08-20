@@ -1254,6 +1254,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-net-guard"
+version = "1.0.0"
+dependencies = [
+ "futures-util",
+ "reqwest",
+ "thiserror",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "finstack-ai-observer-log"
 version = "1.0.0"
 dependencies = [
