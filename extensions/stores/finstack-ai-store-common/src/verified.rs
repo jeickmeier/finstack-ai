@@ -290,11 +290,91 @@ mod tests {
             sequence: 2,
             checksum: Some(Digest::raw_json(b"{}")),
         };
+        // A garbage anchor is rejected, a real one accepted. (On this valid
+        // journal both routes return the same head, so these two assertions
+        // pin the predicate rather than the outcome.)
+        assert!(
+            !suffix_verifies(
+                &records,
+                2,
+                Digest::raw_json(b"{}"),
+                head_sequence,
+                stored_head
+            ),
+            "a garbage anchor must not be trusted"
+        );
+        assert!(
+            suffix_verifies(
+                &records,
+                2,
+                records[1].checksum(),
+                head_sequence,
+                stored_head
+            ),
+            "the real record-2 checksum must anchor"
+        );
         assert_eq!(
             verify_head_against_cache(&records, head_sequence, stored_head, Some(stale))
                 .expect("full fallback"),
             stored_head
         );
+    }
+
+    /// The anchor predicate is what makes the cache fail *closed* when the
+    /// record it was proved against has been replaced.
+    ///
+    /// The stored journal here is `[2', 3, 4]`: some other record now holds
+    /// sequence 2, while records 3-4 still chain from the *original* record
+    /// 2 — the checksum this process cached. The suffix after the cached
+    /// sequence therefore verifies perfectly on its own, and only the
+    /// requirement that the cached proof anchor on a stored record with that
+    /// exact checksum catches the broken join. Drop that requirement and this
+    /// corrupt journal loads successfully.
+    #[test]
+    fn a_cached_head_whose_anchor_record_was_replaced_is_not_trusted() {
+        let records = chained_records();
+        let anchor = records[1].checksum();
+        // A different record occupying sequence 2, chained from record 1.
+        let replacement = build_committed_batch(
+            &request(3, 1, 2, vec![draft(99, 1)]),
+            Some(records[0].checksum()),
+        )
+        .expect("replacement batch");
+        let divergent: Vec<RecordEnvelope> = core::iter::once(replacement.records[0].clone())
+            .chain(records[2..].iter().cloned())
+            .collect();
+        assert_ne!(divergent[0].checksum(), anchor, "sequence 2 really changed");
+        let (head_sequence, stored_head) = head_of(&divergent);
+
+        // The suffix on its own is intact: records 3-4 chain from the cached
+        // checksum and land on the stored head.
+        verify_tail_records(
+            &divergent[1..],
+            3,
+            anchor,
+            head_sequence,
+            stored_head,
+            FROM_SEQUENCE_WINDOW,
+        )
+        .expect("the suffix alone verifies");
+        // The anchor check is the only thing that rejects it…
+        assert!(
+            !suffix_verifies(&divergent, 2, anchor, head_sequence, stored_head),
+            "a proof about a record that is no longer stored must be rejected"
+        );
+        // …and the load then fails closed on the full verification.
+        assert!(matches!(
+            verify_head_against_cache(
+                &divergent,
+                head_sequence,
+                stored_head,
+                Some(VerifiedHead {
+                    sequence: 2,
+                    checksum: Some(anchor),
+                })
+            ),
+            Err(StoreError::Integrity { .. })
+        ));
     }
 
     #[test]

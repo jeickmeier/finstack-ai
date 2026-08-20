@@ -675,9 +675,10 @@ fn windowed_load_must_not_cache_an_unverified_prefix() {
     // A windowed load's tail verification chains from a caller-supplied
     // prior checksum and proves nothing about the omitted prefix. If it were
     // allowed to populate the process-local verified-head cache, a later
-    // `Full` load could accept that cached head via `confirm_cached_head`
-    // and skip full-chain verification of a prefix corruption this process
-    // never actually checked (fail-open).
+    // `Full` load could anchor on that head in
+    // `finstack_ai_store_common::verify_head_against_cache` and verify only
+    // the suffix after it, skipping a prefix corruption this process never
+    // actually checked (fail-open).
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("journal.sqlite");
     let setup = file_store(&dir, SqliteDurability::Durable);
