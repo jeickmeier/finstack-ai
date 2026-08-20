@@ -60,6 +60,14 @@ impl HitlRouter {
     }
 
     /// Replace the expiry policy consulted by [`HitlRouter::sweep`].
+    ///
+    /// The default [`ApprovalExpiry`] declines everything, so expiry is off
+    /// until a host installs a policy here. Whatever the policy returns is
+    /// delivered under the host's own responsibility: the resolution must
+    /// carry the principal and authorization evidence the run was accepted
+    /// with, or the runtime's ingress rejects it on every tick while the
+    /// inbox row has already been marked `Expired`. See [`ApprovalExpiry`]
+    /// for the exact requirement.
     #[must_use]
     pub fn with_expiry_policy(mut self, policy: Arc<dyn ExpiryPolicy>) -> Self {
         self.expiry = policy;
@@ -157,6 +165,12 @@ impl HitlRouter {
     /// resolution is delivered to the worker under the idempotent id
     /// `"hitl-expiry-<interaction_id>"` and the row becomes `Expired`, while
     /// a policy that declines leaves the row `Open` for the next sweep.
+    ///
+    /// The default [`ApprovalExpiry`] declines every row, so a sweep expires
+    /// nothing until a host installs a policy whose credentials the runtime's
+    /// interaction ingress admits — see [`HitlRouter::with_expiry_policy`].
+    /// The `Expired` stamp is only as truthful as that policy: this router
+    /// cannot see whether the tick will accept the resolution it delivered.
     ///
     /// The first row that errors aborts the pass. Each transition is
     /// independently durable, so rows already transitioned stay that way and

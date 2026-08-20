@@ -631,21 +631,21 @@ impl Reopened {
 /// Expiry policy that refuses under the *run's own* accepted principal and
 /// authorization evidence.
 ///
-/// The shipped default, [`finstack_ai_workflow_hitl::ApprovalExpiry`],
-/// attributes its refusal to a synthetic
-/// `("finstack.workflow.hitl", "expiry", Some(tenant))` principal with
-/// `("hitl-expiry-v1", "refuse-on-expiry")` evidence. That resolution is
-/// durably delivered to the worker inbox and the row is marked `Expired` —
-/// but the runtime's interaction ingress
-/// (`crates/finstack-ai-runtime/src/driver/ingress/shared.rs::authorization_matches`)
-/// admits a resolution only when its principal *and* policy version *and*
-/// decision id equal the ones on `RunAccepted`'s security context. A
-/// synthetic expiry principal can never satisfy that, so the refusal is
-/// rejected as `scope_mismatch`, the run stays parked on
-/// `RunPhase::AwaitingInteraction` forever, and the inbox row is already
-/// `Expired` and therefore invisible to `pending`. This test therefore
-/// supplies a policy whose credentials the ingress accepts; see the report
-/// for the defect write-up.
+/// This is the shape every host must supply, because the battery cannot
+/// author it. The runtime's interaction ingress
+/// (`crates/finstack-ai-runtime/src/driver/ingress/shared.rs:85`,
+/// `authorization_matches`) admits a resolution only when its principal *and*
+/// policy version *and* decision id equal the ones on `RunAccepted`'s
+/// security context — per-run data that neither the inbox row nor the
+/// committed request carries. The shipped default,
+/// [`finstack_ai_workflow_hitl::ApprovalExpiry`], therefore declines
+/// everything rather than forging a credential: an earlier version refused
+/// under a synthetic `("finstack.workflow.hitl", "expiry", …)` principal,
+/// which the ingress rejected as `scope_mismatch` on every tick while the row
+/// was already `Expired` and invisible to `pending` — a permanent, silent
+/// stall (reproduced by this test before the default was fixed). This policy
+/// presents the credentials the host itself accepted the run with, which is
+/// what makes the expiry act below reach a terminal run.
 struct RunPrincipalExpiry;
 
 impl ExpiryPolicy for RunPrincipalExpiry {

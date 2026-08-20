@@ -99,16 +99,53 @@ impl Harness {
     }
 }
 
+/// The shape of policy a host installs: it refuses an expired approval under
+/// the run's *own* accepted principal and evidence — the only credential the
+/// runtime's interaction ingress admits — and declines every other kind.
+/// `("issuer", "subject", Some("tenant-a"))` / `("policy-v1", "decision-v1")`
+/// are what the shared fixture's `accepted()` run was accepted with; the
+/// UC-05 spec proves this shape through a real tick.
+struct RunPrincipalExpiry;
+
+impl ExpiryPolicy for RunPrincipalExpiry {
+    fn expire(
+        &self,
+        row: &InteractionRow,
+        request: &InteractionRequest,
+    ) -> Result<Option<ExpiryResolution>, HitlError> {
+        if !matches!(request.kind(), InteractionKind::Approval) {
+            return Ok(None);
+        }
+        Ok(Some(ExpiryResolution {
+            principal: PrincipalRef::try_new("issuer", "subject", Some(row.tenant_scope.as_ref()))
+                .expect("principal"),
+            evidence: AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("evidence"),
+            payload: RawJson::parse(r#"{"approved":false}"#).expect("payload"),
+        }))
+    }
+}
+
 #[test]
 fn sweep_before_the_deadline_changes_nothing() {
     let harness = harness();
     let interaction_id = harness.seed(InteractionKind::Approval, Some(timestamp(9_000)));
+    let router = harness
+        .router
+        .with_expiry_policy(Arc::new(RunPrincipalExpiry));
 
-    let report = harness.router.sweep(timestamp(5_000)).expect("sweep");
+    let report = router.sweep(timestamp(5_000)).expect("sweep");
 
     assert_eq!(report.expired, 0);
     assert_eq!(report.reconciled, 0);
-    assert_eq!(harness.row(&interaction_id).status, InteractionStatus::Open);
+    assert_eq!(
+        harness
+            .inbox
+            .load("tenant-a", &interaction_id)
+            .expect("load")
+            .expect("row")
+            .status,
+        InteractionStatus::Open
+    );
     assert!(
         harness
             .worker_store
@@ -118,12 +155,48 @@ fn sweep_before_the_deadline_changes_nothing() {
     );
 }
 
+/// The shipped default never forges a resolution: it holds no credential the
+/// runtime's interaction ingress would admit
+/// (`crates/finstack-ai-runtime/src/driver/ingress/shared.rs:85`), and a row
+/// marked `Expired` behind a resolution the tick rejects would strand the run
+/// while hiding it from `pending`.
 #[test]
-fn sweep_refuses_an_expired_approval_and_delivers_the_refusal() {
+fn the_default_policy_expires_nothing_and_delivers_nothing() {
     let harness = harness();
     let interaction_id = harness.seed(InteractionKind::Approval, Some(timestamp(9_000)));
 
     let report = harness.router.sweep(timestamp(9_000)).expect("sweep");
+
+    assert_eq!(report.expired, 0);
+    assert_eq!(report.reconciled, 0);
+    assert!(
+        harness
+            .worker_store
+            .load_all()
+            .expect("worker inbox")
+            .is_empty(),
+        "the default policy delivers nothing"
+    );
+
+    let row = harness.row(&interaction_id);
+    assert_eq!(row.status, InteractionStatus::Open);
+    assert_eq!(row.resolved_by, None);
+    assert_eq!(
+        harness.router.pending("tenant-a").expect("pending").len(),
+        1,
+        "an unexpired-by-policy interaction stays operator-visible"
+    );
+}
+
+#[test]
+fn a_host_policy_expires_an_approval_and_delivers_its_refusal() {
+    let harness = harness();
+    let interaction_id = harness.seed(InteractionKind::Approval, Some(timestamp(9_000)));
+    let router = harness
+        .router
+        .with_expiry_policy(Arc::new(RunPrincipalExpiry));
+
+    let report = router.sweep(timestamp(9_000)).expect("sweep");
 
     assert_eq!(report.expired, 1);
     assert_eq!(report.reconciled, 0);
@@ -139,41 +212,50 @@ fn sweep_refuses_an_expired_approval_and_delivers_the_refusal() {
         command.resolution.response().as_str(),
         r#"{"approved":false}"#
     );
-    assert_eq!(command.resolution.principal().subject(), "expiry");
-    assert_eq!(
-        command.resolution.principal().issuer(),
-        "finstack.workflow.hitl"
-    );
+    assert_eq!(command.resolution.principal().subject(), "subject");
+    assert_eq!(command.resolution.principal().issuer(), "issuer");
     assert_eq!(
         command.resolution.resolution_id(),
         format!("hitl-expiry-{interaction_id}")
     );
 
-    let row = harness.row(&interaction_id);
+    let row = harness
+        .inbox
+        .load("tenant-a", &interaction_id)
+        .expect("load")
+        .expect("row");
     assert_eq!(row.status, InteractionStatus::Expired);
-    assert_eq!(row.resolved_by.as_deref(), Some("expiry"));
+    assert_eq!(row.resolved_by.as_deref(), Some("subject"));
     assert_eq!(row.updated_at, timestamp(9_000));
     assert!(
         harness
-            .router
-            .pending("tenant-a")
-            .expect("pending")
+            .inbox
+            .load_open("tenant-a")
+            .expect("open")
             .is_empty(),
         "an expired interaction leaves the pending view"
     );
 }
 
 #[test]
-fn the_default_policy_leaves_a_non_approval_kind_open() {
+fn a_policy_that_declines_leaves_the_row_open() {
     let harness = harness();
     let interaction_id = harness.seed(InteractionKind::FreeText, Some(timestamp(9_000)));
+    let router = harness
+        .router
+        .with_expiry_policy(Arc::new(RunPrincipalExpiry));
 
-    let report = harness.router.sweep(timestamp(9_000)).expect("sweep");
+    let report = router.sweep(timestamp(9_000)).expect("sweep");
 
     assert_eq!(report.expired, 0);
     assert_eq!(report.reconciled, 0);
     assert_eq!(
-        harness.row(&interaction_id).status,
+        harness
+            .inbox
+            .load("tenant-a", &interaction_id)
+            .expect("load")
+            .expect("row")
+            .status,
         InteractionStatus::Open,
         "a policy that declines leaves the row for the next sweep"
     );
@@ -216,13 +298,22 @@ fn reconcile_beats_expiry_for_a_row_whose_wake_row_is_gone() {
     let harness = harness();
     let interaction_id = harness.seed(InteractionKind::Approval, Some(timestamp(9_000)));
     harness.forget_wake();
+    // A policy that *would* expire this row, so the ordering is what decides.
+    let router = harness
+        .router
+        .with_expiry_policy(Arc::new(RunPrincipalExpiry));
 
-    let report = harness.router.sweep(timestamp(9_000)).expect("sweep");
+    let report = router.sweep(timestamp(9_000)).expect("sweep");
 
     assert_eq!(report.reconciled, 1);
     assert_eq!(report.expired, 0);
     assert_eq!(
-        harness.row(&interaction_id).status,
+        harness
+            .inbox
+            .load("tenant-a", &interaction_id)
+            .expect("load")
+            .expect("row")
+            .status,
         InteractionStatus::Closed,
         "an out-of-band resolution closes the row instead of refusing it"
     );
@@ -240,14 +331,14 @@ fn reconcile_beats_expiry_for_a_row_whose_wake_row_is_gone() {
 fn sweeping_twice_is_idempotent() {
     let harness = harness();
     harness.seed(InteractionKind::Approval, Some(timestamp(9_000)));
+    let router = harness
+        .router
+        .with_expiry_policy(Arc::new(RunPrincipalExpiry));
 
-    let first = harness.router.sweep(timestamp(9_000)).expect("first sweep");
+    let first = router.sweep(timestamp(9_000)).expect("first sweep");
     assert_eq!(first.expired, 1);
 
-    let second = harness
-        .router
-        .sweep(timestamp(9_500))
-        .expect("second sweep");
+    let second = router.sweep(timestamp(9_500)).expect("second sweep");
     assert_eq!(second.expired, 0);
     assert_eq!(second.reconciled, 0);
     assert_eq!(
@@ -258,7 +349,7 @@ fn sweeping_twice_is_idempotent() {
 }
 
 #[test]
-fn a_custom_expiry_policy_replaces_the_approval_default() {
+fn a_custom_policy_can_expire_a_non_approval_kind() {
     struct AlwaysRefuse;
     impl ExpiryPolicy for AlwaysRefuse {
         fn expire(
