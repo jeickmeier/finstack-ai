@@ -82,6 +82,7 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
         workflow_kind: Arc::from("unregistered-kind"),
         reason: WakeReason::Timer,
         wake_at: Some(timestamp(2_050)),
+        expires_at: None,
         pending_id: Arc::from("effect-poison"),
         leased_by: None,
         lease_expires_at: None,

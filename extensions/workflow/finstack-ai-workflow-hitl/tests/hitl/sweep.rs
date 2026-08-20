@@ -77,6 +77,7 @@ impl Harness {
                 workflow_kind: Arc::from("hitl-demo"),
                 reason: WakeReason::Interaction,
                 wake_at: None,
+                expires_at,
                 pending_id: Arc::clone(&pending_id),
                 leased_by: None,
                 lease_expires_at: None,

@@ -282,6 +282,7 @@ mod tests {
             workflow_kind: Arc::from("research"),
             reason: WakeReason::Timer,
             wake_at: Some(ts(due_ms)),
+            expires_at: None,
             pending_id: Arc::from("effect-1"),
             leased_by: None,
             lease_expires_at: None,
