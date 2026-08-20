@@ -5,5 +5,9 @@
 //! Every table is a hint; the kernel journal stays authoritative.
 
 mod error;
+mod memory;
+mod wake;
 
 pub use error::WorkerError;
+pub use memory::MemoryWorkerStore;
+pub use wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline, lease_open, wake_due};
