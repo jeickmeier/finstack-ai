@@ -608,6 +608,26 @@ fn conformance_and_ambiguous_ack_use_the_sqlite_store() {
 }
 
 #[test]
+fn tail_window_rejects_mid_batch_starts() {
+    let store = memory_store();
+    let first =
+        block_on(store.append(request(1, 1, 1, vec![draft(1, 1), draft(2, 1)]))).expect("append");
+    block_on(store.append(request(2, 1, 3, vec![draft(3, 1)]))).expect("append");
+    assert!(matches!(
+        block_on(store.load_from(LoadFromRequest {
+            session_id: id::<SessionTag>(1),
+            window: LoadWindow::FromSequence {
+                from_sequence: 2,
+                prior_checksum: first.records[0].checksum(),
+            },
+        })),
+        Err(StoreError::Integrity {
+            reason_code: "load_from_splits_batch"
+        })
+    ));
+}
+
+#[test]
 fn discarding_sqlite_snapshots_still_recovers_from_the_journal() {
     let store = snapshot_capable_store();
     accept_root_run(&store);
