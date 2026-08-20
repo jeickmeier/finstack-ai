@@ -1090,16 +1090,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "finstack-ai-context-memory"
-version = "1.0.0"
-dependencies = [
- "finstack-ai-kernel",
- "finstack-ai-runtime",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "finstack-ai-context-repository"
 version = "1.0.0"
 dependencies = [
@@ -1191,8 +1181,8 @@ name = "finstack-ai-middleware-document-ingest"
 version = "1.0.0"
 dependencies = [
  "criterion",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-runtime",
  "finstack-ai-tools-document",
  "serde_json",
@@ -1227,9 +1217,9 @@ name = "finstack-ai-native-examples"
 version = "1.0.0"
 dependencies = [
  "finstack-ai",
- "finstack-ai-context-memory",
  "finstack-ai-context-repository",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-compaction",
  "finstack-ai-middleware-verify",
  "finstack-ai-provider-ollama",
@@ -1389,8 +1379,8 @@ name = "finstack-ai-python"
 version = "1.0.0"
 dependencies = [
  "finstack-ai",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
@@ -1541,8 +1531,8 @@ version = "1.0.0"
 dependencies = [
  "criterion",
  "finstack-ai",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
@@ -1646,8 +1636,8 @@ name = "finstack-ai-tools-openai-media"
 version = "1.0.0"
 dependencies = [
  "base64",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-runtime",
  "futures-util",
  "reqwest",
@@ -1662,8 +1652,8 @@ name = "finstack-ai-tools-openrouter-media"
 version = "1.0.0"
 dependencies = [
  "base64",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-runtime",
  "futures-util",
  "reqwest",

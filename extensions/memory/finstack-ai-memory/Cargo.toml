@@ -8,6 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
 description = "Memory extension composition (store, recall provider, toolset, observer) for finstack-ai"
+readme = "README.md"
 publish = false
 
 [features]

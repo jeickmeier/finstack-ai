@@ -26,7 +26,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
-finstack-ai-context-memory = { workspace = true }
+finstack-ai-memory = { workspace = true }
 finstack-ai-middleware-document-ingest = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-store-artifact-object = { workspace = true }

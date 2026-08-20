@@ -12,7 +12,7 @@ use finstack_ai::{
     E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
     OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
 };
-use finstack_ai_context_memory::InProcessArtifactStore;
+use finstack_ai_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
     SessionId, Version,

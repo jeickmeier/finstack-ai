@@ -13,7 +13,7 @@ use finstack_ai_runtime::{
     ModelRequestLimits, ModelSettings, PortFuture, RunCallContext, StageInput, StageOutcome,
 };
 
-use finstack_ai_context_memory::InProcessArtifactStore;
+use finstack_ai_memory::InProcessArtifactStore;
 
 use crate::{AttachmentIndex, DocumentIngestMiddleware};
 

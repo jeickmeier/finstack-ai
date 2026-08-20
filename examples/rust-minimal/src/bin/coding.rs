@@ -25,7 +25,9 @@ use std::sync::Arc;
 
 use finstack_ai::runtime::{ContextProvider, JournalStore, Middleware, Model, ModelName, Toolset};
 use finstack_ai::{Agent, AgentRunRequest};
-use finstack_ai_context_memory::MemoryContextProvider;
+use finstack_ai_memory::{
+    InProcessMemoryStore, MemoryContextProvider, MemoryScope, RecallConfig,
+};
 use finstack_ai_context_repository::RepositoryContextProvider;
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
@@ -72,7 +74,13 @@ async fn main() -> Result<(), BoxError> {
         records_per_session: 1_024,
         snapshot_bytes: 16_384,
     })?);
-    let memory = MemoryContextProvider::try_new("preview-local");
+    let memory = MemoryScope::try_new("preview-local").and_then(|scope| {
+        MemoryContextProvider::try_new(
+            Arc::new(InProcessMemoryStore::new()),
+            scope,
+            RecallConfig::default(),
+        )
+    });
     let compaction: Arc<dyn Middleware> = Arc::new(CompactionMiddleware::try_new(
         CompactionConfig::sliding_window(8_192, 256),
     )?);

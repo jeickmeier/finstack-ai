@@ -1,0 +1,772 @@
+pub mod finstack_ai_memory
+pub mod finstack_ai_memory::extract
+pub struct finstack_ai_memory::extract::CandidateMemory
+pub finstack_ai_memory::extract::CandidateMemory::body: alloc::sync::Arc<str>
+pub finstack_ai_memory::extract::CandidateMemory::confidence: u8
+pub finstack_ai_memory::extract::CandidateMemory::id: core::option::Option<finstack_ai_memory::record::MemoryId>
+pub finstack_ai_memory::extract::CandidateMemory::keywords: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_memory::extract::CandidateMemory::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_memory::extract::CandidateMemory::source_ref: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::extract::CandidateMemory::source_run: core::option::Option<alloc::sync::Arc<str>>
+impl core::clone::Clone for finstack_ai_memory::extract::CandidateMemory
+pub fn finstack_ai_memory::extract::CandidateMemory::clone(&self) -> finstack_ai_memory::extract::CandidateMemory
+impl core::cmp::Eq for finstack_ai_memory::extract::CandidateMemory
+impl core::cmp::PartialEq for finstack_ai_memory::extract::CandidateMemory
+pub fn finstack_ai_memory::extract::CandidateMemory::eq(&self, &finstack_ai_memory::extract::CandidateMemory) -> bool
+impl core::fmt::Debug for finstack_ai_memory::extract::CandidateMemory
+pub fn finstack_ai_memory::extract::CandidateMemory::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::extract::CandidateMemory
+pub struct finstack_ai_memory::extract::RuleBasedExtractor
+impl finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::new(alloc::sync::Arc<str>) -> Self
+impl core::clone::Clone for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::clone(&self) -> finstack_ai_memory::extract::RuleBasedExtractor
+impl core::default::Default for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::default() -> Self
+impl core::fmt::Debug for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_memory::extract::MemoryExtractor for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
+pub const finstack_ai_memory::extract::DEFAULT_MARKER: &str
+pub trait finstack_ai_memory::extract::MemoryExtractor: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_memory::extract::MemoryExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
+impl finstack_ai_memory::extract::MemoryExtractor for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
+pub mod finstack_ai_memory::observer
+pub struct finstack_ai_memory::observer::MemoryObserver
+impl finstack_ai_memory::observer::MemoryObserver
+pub fn finstack_ai_memory::observer::MemoryObserver::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, finstack_ai_memory::record::MemoryScope, alloc::sync::Arc<dyn finstack_ai_memory::extract::MemoryExtractor>, finstack_ai_memory::record::MemoryClock) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_memory::observer::MemoryObserver
+pub fn finstack_ai_memory::observer::MemoryObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
+pub fn finstack_ai_memory::observer::MemoryObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
+pub mod finstack_ai_memory::provider
+pub struct finstack_ai_memory::provider::MemoryContextProvider
+impl finstack_ai_memory::provider::MemoryContextProvider
+pub fn finstack_ai_memory::provider::MemoryContextProvider::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::provider::RecallConfig) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl finstack_ai_runtime::ports::context::port::ContextProvider for finstack_ai_memory::provider::MemoryContextProvider
+pub fn finstack_ai_memory::provider::MemoryContextProvider::collect(&self, finstack_ai_runtime::ports::context::port::ContextCallContext, finstack_ai_runtime::ports::context::types::ContextRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::types::ContextContribution, finstack_ai_runtime::ports::context::error::ContextError>>
+pub fn finstack_ai_memory::provider::MemoryContextProvider::descriptor(&self) -> finstack_ai_runtime::ports::context::port::ContextProviderDescriptor
+pub struct finstack_ai_memory::provider::RecallConfig
+pub finstack_ai_memory::provider::RecallConfig::max_hits: usize
+pub finstack_ai_memory::provider::RecallConfig::stable_prefix: usize
+impl core::clone::Clone for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::clone(&self) -> finstack_ai_memory::provider::RecallConfig
+impl core::cmp::Eq for finstack_ai_memory::provider::RecallConfig
+impl core::cmp::PartialEq for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::eq(&self, &finstack_ai_memory::provider::RecallConfig) -> bool
+impl core::default::Default for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::default() -> Self
+impl core::fmt::Debug for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::provider::RecallConfig
+impl core::marker::StructuralPartialEq for finstack_ai_memory::provider::RecallConfig
+pub mod finstack_ai_memory::record
+pub enum finstack_ai_memory::record::ExtractionMethod
+pub finstack_ai_memory::record::ExtractionMethod::Explicit
+pub finstack_ai_memory::record::ExtractionMethod::Imported
+pub finstack_ai_memory::record::ExtractionMethod::ObserverCapture
+pub finstack_ai_memory::record::ExtractionMethod::ToolWrite
+impl core::clone::Clone for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::clone(&self) -> finstack_ai_memory::record::ExtractionMethod
+impl core::cmp::Eq for finstack_ai_memory::record::ExtractionMethod
+impl core::cmp::PartialEq for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::eq(&self, &finstack_ai_memory::record::ExtractionMethod) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for finstack_ai_memory::record::ExtractionMethod
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::ExtractionMethod
+impl serde_core::ser::Serialize for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_memory::record::MemoryBody
+pub finstack_ai_memory::record::MemoryBody::Blob(finstack_ai_kernel::primitives::handles::ArtifactRef)
+pub finstack_ai_memory::record::MemoryBody::Inline(alloc::sync::Arc<str>)
+impl core::clone::Clone for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::clone(&self) -> finstack_ai_memory::record::MemoryBody
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryBody
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::eq(&self, &finstack_ai_memory::record::MemoryBody) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryBody
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_memory::record::MemoryError
+pub finstack_ai_memory::record::MemoryError::Configuration
+pub finstack_ai_memory::record::MemoryError::Configuration::reason: &'static str
+pub finstack_ai_memory::record::MemoryError::InvalidRecord
+pub finstack_ai_memory::record::MemoryError::InvalidRecord::reason: &'static str
+impl core::clone::Clone for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::clone(&self) -> finstack_ai_memory::record::MemoryError
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryError
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::eq(&self, &finstack_ai_memory::record::MemoryError) -> bool
+impl core::error::Error for finstack_ai_memory::record::MemoryError
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryError
+pub enum finstack_ai_memory::record::RetentionPolicy
+pub finstack_ai_memory::record::RetentionPolicy::ExpireAfterMs(u64)
+pub finstack_ai_memory::record::RetentionPolicy::KeepUntilDeleted
+impl core::clone::Clone for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::clone(&self) -> finstack_ai_memory::record::RetentionPolicy
+impl core::cmp::Eq for finstack_ai_memory::record::RetentionPolicy
+impl core::cmp::PartialEq for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::eq(&self, &finstack_ai_memory::record::RetentionPolicy) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::record::RetentionPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::RetentionPolicy
+impl serde_core::ser::Serialize for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::record::MemoryId(_)
+impl finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::as_str(&self) -> &str
+pub fn finstack_ai_memory::record::MemoryId::parse(&str) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl core::clone::Clone for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::clone(&self) -> finstack_ai_memory::record::MemoryId
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryId
+impl core::cmp::Ord for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::cmp(&self, &finstack_ai_memory::record::MemoryId) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::eq(&self, &finstack_ai_memory::record::MemoryId) -> bool
+impl core::cmp::PartialOrd for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::partial_cmp(&self, &finstack_ai_memory::record::MemoryId) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryId
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::record::MemoryProvenance
+pub finstack_ai_memory::record::MemoryProvenance::confidence: u8
+pub finstack_ai_memory::record::MemoryProvenance::extraction: finstack_ai_memory::record::ExtractionMethod
+pub finstack_ai_memory::record::MemoryProvenance::source_ref: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::record::MemoryProvenance::source_run: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::record::MemoryProvenance::source_session: core::option::Option<alloc::sync::Arc<str>>
+impl core::clone::Clone for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::clone(&self) -> finstack_ai_memory::record::MemoryProvenance
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryProvenance
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::eq(&self, &finstack_ai_memory::record::MemoryProvenance) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryProvenance
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::record::MemoryRecord
+pub finstack_ai_memory::record::MemoryRecord::body: finstack_ai_memory::record::MemoryBody
+pub finstack_ai_memory::record::MemoryRecord::created_at: finstack_ai_kernel::primitives::time::Timestamp
+pub finstack_ai_memory::record::MemoryRecord::id: finstack_ai_memory::record::MemoryId
+pub finstack_ai_memory::record::MemoryRecord::keywords: alloc::sync::Arc<[alloc::sync::Arc<str>]>
+pub finstack_ai_memory::record::MemoryRecord::last_confirmed_at: finstack_ai_kernel::primitives::time::Timestamp
+pub finstack_ai_memory::record::MemoryRecord::preview: alloc::sync::Arc<str>
+pub finstack_ai_memory::record::MemoryRecord::provenance: finstack_ai_memory::record::MemoryProvenance
+pub finstack_ai_memory::record::MemoryRecord::retention: finstack_ai_memory::record::RetentionPolicy
+pub finstack_ai_memory::record::MemoryRecord::scope: finstack_ai_memory::record::MemoryScope
+pub finstack_ai_memory::record::MemoryRecord::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_memory::record::MemoryRecord::superseded_by: core::option::Option<finstack_ai_memory::record::MemoryId>
+pub finstack_ai_memory::record::MemoryRecord::supersedes: core::option::Option<finstack_ai_memory::record::MemoryId>
+pub finstack_ai_memory::record::MemoryRecord::tombstoned: bool
+impl finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::validate(&self) -> core::result::Result<(), finstack_ai_memory::record::MemoryError>
+impl core::clone::Clone for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::clone(&self) -> finstack_ai_memory::record::MemoryRecord
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryRecord
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::eq(&self, &finstack_ai_memory::record::MemoryRecord) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryRecord
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::record::MemoryScope
+pub finstack_ai_memory::record::MemoryScope::agent: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::record::MemoryScope::tenant: alloc::sync::Arc<str>
+pub finstack_ai_memory::record::MemoryScope::user: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::record::MemoryScope::workspace: core::option::Option<alloc::sync::Arc<str>>
+impl finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::permits(&self, &finstack_ai_memory::record::MemoryScope) -> bool
+pub fn finstack_ai_memory::record::MemoryScope::tenant(&self) -> &str
+pub fn finstack_ai_memory::record::MemoryScope::try_new(&str) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+pub fn finstack_ai_memory::record::MemoryScope::with_agent(self, &str) -> Self
+pub fn finstack_ai_memory::record::MemoryScope::with_user(self, &str) -> Self
+pub fn finstack_ai_memory::record::MemoryScope::with_workspace(self, &str) -> Self
+impl core::clone::Clone for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::clone(&self) -> finstack_ai_memory::record::MemoryScope
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryScope
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::eq(&self, &finstack_ai_memory::record::MemoryScope) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryScope
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const finstack_ai_memory::record::CONFIDENCE_MAX: u8
+pub const finstack_ai_memory::record::KEYWORDS_MAX_COUNT: usize
+pub const finstack_ai_memory::record::KEYWORD_MAX_BYTES: usize
+pub const finstack_ai_memory::record::MEMORY_ID_MAX_BYTES: usize
+pub const finstack_ai_memory::record::PREVIEW_MAX_BYTES: usize
+pub fn finstack_ai_memory::record::system_clock() -> finstack_ai_memory::record::MemoryClock
+pub type finstack_ai_memory::record::MemoryClock = alloc::sync::Arc<(dyn core::ops::function::Fn() -> finstack_ai_kernel::primitives::time::Timestamp + core::marker::Send + core::marker::Sync)>
+pub mod finstack_ai_memory::store
+pub enum finstack_ai_memory::store::MatchEvidence
+pub finstack_ai_memory::store::MatchEvidence::ExactId
+pub finstack_ai_memory::store::MatchEvidence::FullText
+pub finstack_ai_memory::store::MatchEvidence::Keyword(alloc::sync::Arc<str>)
+impl core::clone::Clone for finstack_ai_memory::store::MatchEvidence
+pub fn finstack_ai_memory::store::MatchEvidence::clone(&self) -> finstack_ai_memory::store::MatchEvidence
+impl core::cmp::Eq for finstack_ai_memory::store::MatchEvidence
+impl core::cmp::PartialEq for finstack_ai_memory::store::MatchEvidence
+pub fn finstack_ai_memory::store::MatchEvidence::eq(&self, &finstack_ai_memory::store::MatchEvidence) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MatchEvidence
+pub fn finstack_ai_memory::store::MatchEvidence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MatchEvidence
+#[non_exhaustive] pub enum finstack_ai_memory::store::MemoryQuery
+pub finstack_ai_memory::store::MemoryQuery::ExactId(finstack_ai_memory::record::MemoryId)
+pub finstack_ai_memory::store::MemoryQuery::FullText(alloc::sync::Arc<str>)
+pub finstack_ai_memory::store::MemoryQuery::Keywords(alloc::sync::Arc<[alloc::sync::Arc<str>]>)
+impl core::clone::Clone for finstack_ai_memory::store::MemoryQuery
+pub fn finstack_ai_memory::store::MemoryQuery::clone(&self) -> finstack_ai_memory::store::MemoryQuery
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryQuery
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryQuery
+pub fn finstack_ai_memory::store::MemoryQuery::eq(&self, &finstack_ai_memory::store::MemoryQuery) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryQuery
+pub fn finstack_ai_memory::store::MemoryQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryQuery
+pub enum finstack_ai_memory::store::MemoryStoreError
+pub finstack_ai_memory::store::MemoryStoreError::InvalidRecord
+pub finstack_ai_memory::store::MemoryStoreError::InvalidRecord::reason: &'static str
+pub finstack_ai_memory::store::MemoryStoreError::NotFound
+pub finstack_ai_memory::store::MemoryStoreError::ScopeMismatch
+pub finstack_ai_memory::store::MemoryStoreError::Unavailable
+pub finstack_ai_memory::store::MemoryStoreError::Unavailable::message: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::clone(&self) -> finstack_ai_memory::store::MemoryStoreError
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryStoreError
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::eq(&self, &finstack_ai_memory::store::MemoryStoreError) -> bool
+impl core::error::Error for finstack_ai_memory::store::MemoryStoreError
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryStoreError
+pub enum finstack_ai_memory::store::PutOutcome
+pub finstack_ai_memory::store::PutOutcome::AlreadyApplied
+pub finstack_ai_memory::store::PutOutcome::Inserted
+impl core::clone::Clone for finstack_ai_memory::store::PutOutcome
+pub fn finstack_ai_memory::store::PutOutcome::clone(&self) -> finstack_ai_memory::store::PutOutcome
+impl core::cmp::Eq for finstack_ai_memory::store::PutOutcome
+impl core::cmp::PartialEq for finstack_ai_memory::store::PutOutcome
+pub fn finstack_ai_memory::store::PutOutcome::eq(&self, &finstack_ai_memory::store::PutOutcome) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::PutOutcome
+pub fn finstack_ai_memory::store::PutOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::store::PutOutcome
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::PutOutcome
+pub struct finstack_ai_memory::store::InProcessArtifactStore
+impl finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::with_max_artifact_bytes(self, usize) -> Self
+impl core::default::Default for finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::default() -> finstack_ai_memory::InProcessArtifactStore
+impl core::fmt::Debug for finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::services::artifact::ArtifactStore for finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::get(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_memory::InProcessArtifactStore::limits(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreLimits
+pub fn finstack_ai_memory::InProcessArtifactStore::stage_put(&self, finstack_ai_runtime::services::artifact::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub struct finstack_ai_memory::store::InProcessMemoryStore
+impl finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::new() -> Self
+impl core::default::Default for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::default() -> finstack_ai_memory::InProcessMemoryStore
+impl core::fmt::Debug for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_memory::store::MemoryStore for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub struct finstack_ai_memory::store::MemoryHit
+pub finstack_ai_memory::store::MemoryHit::matched: finstack_ai_memory::store::MatchEvidence
+pub finstack_ai_memory::store::MemoryHit::record: finstack_ai_memory::record::MemoryRecord
+pub finstack_ai_memory::store::MemoryHit::score: u32
+impl core::clone::Clone for finstack_ai_memory::store::MemoryHit
+pub fn finstack_ai_memory::store::MemoryHit::clone(&self) -> finstack_ai_memory::store::MemoryHit
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryHit
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryHit
+pub fn finstack_ai_memory::store::MemoryHit::eq(&self, &finstack_ai_memory::store::MemoryHit) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryHit
+pub fn finstack_ai_memory::store::MemoryHit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryHit
+pub struct finstack_ai_memory::store::MemoryListing
+pub finstack_ai_memory::store::MemoryListing::records: alloc::vec::Vec<finstack_ai_memory::record::MemoryRecord>
+pub finstack_ai_memory::store::MemoryListing::total: usize
+impl core::clone::Clone for finstack_ai_memory::store::MemoryListing
+pub fn finstack_ai_memory::store::MemoryListing::clone(&self) -> finstack_ai_memory::store::MemoryListing
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryListing
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryListing
+pub fn finstack_ai_memory::store::MemoryListing::eq(&self, &finstack_ai_memory::store::MemoryListing) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryListing
+pub fn finstack_ai_memory::store::MemoryListing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryListing
+pub struct finstack_ai_memory::store::MemoryPage
+pub finstack_ai_memory::store::MemoryPage::limit: usize
+pub finstack_ai_memory::store::MemoryPage::offset: usize
+impl core::clone::Clone for finstack_ai_memory::store::MemoryPage
+pub fn finstack_ai_memory::store::MemoryPage::clone(&self) -> finstack_ai_memory::store::MemoryPage
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryPage
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryPage
+pub fn finstack_ai_memory::store::MemoryPage::eq(&self, &finstack_ai_memory::store::MemoryPage) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryPage
+pub fn finstack_ai_memory::store::MemoryPage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::store::MemoryPage
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryPage
+pub trait finstack_ai_memory::store::MemoryStore: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_memory::store::MemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+impl finstack_ai_memory::store::MemoryStore for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub mod finstack_ai_memory::toolset
+pub struct finstack_ai_memory::toolset::MemoryPolicy
+pub finstack_ai_memory::toolset::MemoryPolicy::consolidate: bool
+pub finstack_ai_memory::toolset::MemoryPolicy::manage: bool
+pub finstack_ai_memory::toolset::MemoryPolicy::profile: bool
+pub finstack_ai_memory::toolset::MemoryPolicy::read: bool
+pub finstack_ai_memory::toolset::MemoryPolicy::write: bool
+impl core::clone::Clone for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::clone(&self) -> finstack_ai_memory::toolset::MemoryPolicy
+impl core::cmp::Eq for finstack_ai_memory::toolset::MemoryPolicy
+impl core::cmp::PartialEq for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::eq(&self, &finstack_ai_memory::toolset::MemoryPolicy) -> bool
+impl core::default::Default for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::default() -> Self
+impl core::fmt::Debug for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::toolset::MemoryPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_memory::toolset::MemoryPolicy
+pub struct finstack_ai_memory::toolset::MemoryToolset
+impl finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::toolset::MemoryPolicy, finstack_ai_memory::record::MemoryClock) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl core::clone::Clone for finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::clone(&self) -> finstack_ai_memory::toolset::MemoryToolset
+impl core::fmt::Debug for finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_memory::toolset::MemoryToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_memory::toolset::MemoryToolset::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::tool::types::PendingToolEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolReconcileResult, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_memory::toolset::MemoryToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_memory::toolset::INLINE_BODY_MAX_BYTES: usize
+pub const finstack_ai_memory::toolset::MEMORY_TOOL_INVALID_ARGUMENTS: &str
+pub const finstack_ai_memory::toolset::MEMORY_TOOL_NOT_FOUND: &str
+pub const finstack_ai_memory::toolset::MEMORY_TOOL_UNAVAILABLE: &str
+pub enum finstack_ai_memory::ExtractionMethod
+pub finstack_ai_memory::ExtractionMethod::Explicit
+pub finstack_ai_memory::ExtractionMethod::Imported
+pub finstack_ai_memory::ExtractionMethod::ObserverCapture
+pub finstack_ai_memory::ExtractionMethod::ToolWrite
+impl core::clone::Clone for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::clone(&self) -> finstack_ai_memory::record::ExtractionMethod
+impl core::cmp::Eq for finstack_ai_memory::record::ExtractionMethod
+impl core::cmp::PartialEq for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::eq(&self, &finstack_ai_memory::record::ExtractionMethod) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for finstack_ai_memory::record::ExtractionMethod
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::ExtractionMethod
+impl serde_core::ser::Serialize for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::ExtractionMethod
+pub fn finstack_ai_memory::record::ExtractionMethod::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_memory::MatchEvidence
+pub finstack_ai_memory::MatchEvidence::ExactId
+pub finstack_ai_memory::MatchEvidence::FullText
+pub finstack_ai_memory::MatchEvidence::Keyword(alloc::sync::Arc<str>)
+impl core::clone::Clone for finstack_ai_memory::store::MatchEvidence
+pub fn finstack_ai_memory::store::MatchEvidence::clone(&self) -> finstack_ai_memory::store::MatchEvidence
+impl core::cmp::Eq for finstack_ai_memory::store::MatchEvidence
+impl core::cmp::PartialEq for finstack_ai_memory::store::MatchEvidence
+pub fn finstack_ai_memory::store::MatchEvidence::eq(&self, &finstack_ai_memory::store::MatchEvidence) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MatchEvidence
+pub fn finstack_ai_memory::store::MatchEvidence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MatchEvidence
+pub enum finstack_ai_memory::MemoryBody
+pub finstack_ai_memory::MemoryBody::Blob(finstack_ai_kernel::primitives::handles::ArtifactRef)
+pub finstack_ai_memory::MemoryBody::Inline(alloc::sync::Arc<str>)
+impl core::clone::Clone for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::clone(&self) -> finstack_ai_memory::record::MemoryBody
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryBody
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::eq(&self, &finstack_ai_memory::record::MemoryBody) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryBody
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryBody
+pub fn finstack_ai_memory::record::MemoryBody::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_memory::MemoryError
+pub finstack_ai_memory::MemoryError::Configuration
+pub finstack_ai_memory::MemoryError::Configuration::reason: &'static str
+pub finstack_ai_memory::MemoryError::InvalidRecord
+pub finstack_ai_memory::MemoryError::InvalidRecord::reason: &'static str
+impl core::clone::Clone for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::clone(&self) -> finstack_ai_memory::record::MemoryError
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryError
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::eq(&self, &finstack_ai_memory::record::MemoryError) -> bool
+impl core::error::Error for finstack_ai_memory::record::MemoryError
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_memory::record::MemoryError
+pub fn finstack_ai_memory::record::MemoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryError
+#[non_exhaustive] pub enum finstack_ai_memory::MemoryQuery
+pub finstack_ai_memory::MemoryQuery::ExactId(finstack_ai_memory::record::MemoryId)
+pub finstack_ai_memory::MemoryQuery::FullText(alloc::sync::Arc<str>)
+pub finstack_ai_memory::MemoryQuery::Keywords(alloc::sync::Arc<[alloc::sync::Arc<str>]>)
+impl core::clone::Clone for finstack_ai_memory::store::MemoryQuery
+pub fn finstack_ai_memory::store::MemoryQuery::clone(&self) -> finstack_ai_memory::store::MemoryQuery
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryQuery
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryQuery
+pub fn finstack_ai_memory::store::MemoryQuery::eq(&self, &finstack_ai_memory::store::MemoryQuery) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryQuery
+pub fn finstack_ai_memory::store::MemoryQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryQuery
+pub enum finstack_ai_memory::MemoryStoreError
+pub finstack_ai_memory::MemoryStoreError::InvalidRecord
+pub finstack_ai_memory::MemoryStoreError::InvalidRecord::reason: &'static str
+pub finstack_ai_memory::MemoryStoreError::NotFound
+pub finstack_ai_memory::MemoryStoreError::ScopeMismatch
+pub finstack_ai_memory::MemoryStoreError::Unavailable
+pub finstack_ai_memory::MemoryStoreError::Unavailable::message: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::clone(&self) -> finstack_ai_memory::store::MemoryStoreError
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryStoreError
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::eq(&self, &finstack_ai_memory::store::MemoryStoreError) -> bool
+impl core::error::Error for finstack_ai_memory::store::MemoryStoreError
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_memory::store::MemoryStoreError
+pub fn finstack_ai_memory::store::MemoryStoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryStoreError
+pub enum finstack_ai_memory::PutOutcome
+pub finstack_ai_memory::PutOutcome::AlreadyApplied
+pub finstack_ai_memory::PutOutcome::Inserted
+impl core::clone::Clone for finstack_ai_memory::store::PutOutcome
+pub fn finstack_ai_memory::store::PutOutcome::clone(&self) -> finstack_ai_memory::store::PutOutcome
+impl core::cmp::Eq for finstack_ai_memory::store::PutOutcome
+impl core::cmp::PartialEq for finstack_ai_memory::store::PutOutcome
+pub fn finstack_ai_memory::store::PutOutcome::eq(&self, &finstack_ai_memory::store::PutOutcome) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::PutOutcome
+pub fn finstack_ai_memory::store::PutOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::store::PutOutcome
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::PutOutcome
+pub enum finstack_ai_memory::RetentionPolicy
+pub finstack_ai_memory::RetentionPolicy::ExpireAfterMs(u64)
+pub finstack_ai_memory::RetentionPolicy::KeepUntilDeleted
+impl core::clone::Clone for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::clone(&self) -> finstack_ai_memory::record::RetentionPolicy
+impl core::cmp::Eq for finstack_ai_memory::record::RetentionPolicy
+impl core::cmp::PartialEq for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::eq(&self, &finstack_ai_memory::record::RetentionPolicy) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::record::RetentionPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::RetentionPolicy
+impl serde_core::ser::Serialize for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::RetentionPolicy
+pub fn finstack_ai_memory::record::RetentionPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::CandidateMemory
+pub finstack_ai_memory::CandidateMemory::body: alloc::sync::Arc<str>
+pub finstack_ai_memory::CandidateMemory::confidence: u8
+pub finstack_ai_memory::CandidateMemory::id: core::option::Option<finstack_ai_memory::record::MemoryId>
+pub finstack_ai_memory::CandidateMemory::keywords: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_memory::CandidateMemory::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_memory::CandidateMemory::source_ref: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::CandidateMemory::source_run: core::option::Option<alloc::sync::Arc<str>>
+impl core::clone::Clone for finstack_ai_memory::extract::CandidateMemory
+pub fn finstack_ai_memory::extract::CandidateMemory::clone(&self) -> finstack_ai_memory::extract::CandidateMemory
+impl core::cmp::Eq for finstack_ai_memory::extract::CandidateMemory
+impl core::cmp::PartialEq for finstack_ai_memory::extract::CandidateMemory
+pub fn finstack_ai_memory::extract::CandidateMemory::eq(&self, &finstack_ai_memory::extract::CandidateMemory) -> bool
+impl core::fmt::Debug for finstack_ai_memory::extract::CandidateMemory
+pub fn finstack_ai_memory::extract::CandidateMemory::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::extract::CandidateMemory
+pub struct finstack_ai_memory::InProcessArtifactStore
+impl finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::with_max_artifact_bytes(self, usize) -> Self
+impl core::default::Default for finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::default() -> finstack_ai_memory::InProcessArtifactStore
+impl core::fmt::Debug for finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::services::artifact::ArtifactStore for finstack_ai_memory::InProcessArtifactStore
+pub fn finstack_ai_memory::InProcessArtifactStore::get(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_memory::InProcessArtifactStore::limits(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreLimits
+pub fn finstack_ai_memory::InProcessArtifactStore::stage_put(&self, finstack_ai_runtime::services::artifact::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub struct finstack_ai_memory::InProcessMemoryStore
+impl finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::new() -> Self
+impl core::default::Default for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::default() -> finstack_ai_memory::InProcessMemoryStore
+impl core::fmt::Debug for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_memory::store::MemoryStore for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub struct finstack_ai_memory::MemoryContextProvider
+impl finstack_ai_memory::provider::MemoryContextProvider
+pub fn finstack_ai_memory::provider::MemoryContextProvider::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::provider::RecallConfig) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl finstack_ai_runtime::ports::context::port::ContextProvider for finstack_ai_memory::provider::MemoryContextProvider
+pub fn finstack_ai_memory::provider::MemoryContextProvider::collect(&self, finstack_ai_runtime::ports::context::port::ContextCallContext, finstack_ai_runtime::ports::context::types::ContextRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::types::ContextContribution, finstack_ai_runtime::ports::context::error::ContextError>>
+pub fn finstack_ai_memory::provider::MemoryContextProvider::descriptor(&self) -> finstack_ai_runtime::ports::context::port::ContextProviderDescriptor
+pub struct finstack_ai_memory::MemoryHit
+pub finstack_ai_memory::MemoryHit::matched: finstack_ai_memory::store::MatchEvidence
+pub finstack_ai_memory::MemoryHit::record: finstack_ai_memory::record::MemoryRecord
+pub finstack_ai_memory::MemoryHit::score: u32
+impl core::clone::Clone for finstack_ai_memory::store::MemoryHit
+pub fn finstack_ai_memory::store::MemoryHit::clone(&self) -> finstack_ai_memory::store::MemoryHit
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryHit
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryHit
+pub fn finstack_ai_memory::store::MemoryHit::eq(&self, &finstack_ai_memory::store::MemoryHit) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryHit
+pub fn finstack_ai_memory::store::MemoryHit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryHit
+pub struct finstack_ai_memory::MemoryId(_)
+impl finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::as_str(&self) -> &str
+pub fn finstack_ai_memory::record::MemoryId::parse(&str) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl core::clone::Clone for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::clone(&self) -> finstack_ai_memory::record::MemoryId
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryId
+impl core::cmp::Ord for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::cmp(&self, &finstack_ai_memory::record::MemoryId) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::eq(&self, &finstack_ai_memory::record::MemoryId) -> bool
+impl core::cmp::PartialOrd for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::partial_cmp(&self, &finstack_ai_memory::record::MemoryId) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryId
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryId
+pub fn finstack_ai_memory::record::MemoryId::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::MemoryListing
+pub finstack_ai_memory::MemoryListing::records: alloc::vec::Vec<finstack_ai_memory::record::MemoryRecord>
+pub finstack_ai_memory::MemoryListing::total: usize
+impl core::clone::Clone for finstack_ai_memory::store::MemoryListing
+pub fn finstack_ai_memory::store::MemoryListing::clone(&self) -> finstack_ai_memory::store::MemoryListing
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryListing
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryListing
+pub fn finstack_ai_memory::store::MemoryListing::eq(&self, &finstack_ai_memory::store::MemoryListing) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryListing
+pub fn finstack_ai_memory::store::MemoryListing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryListing
+pub struct finstack_ai_memory::MemoryObserver
+impl finstack_ai_memory::observer::MemoryObserver
+pub fn finstack_ai_memory::observer::MemoryObserver::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, finstack_ai_memory::record::MemoryScope, alloc::sync::Arc<dyn finstack_ai_memory::extract::MemoryExtractor>, finstack_ai_memory::record::MemoryClock) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_memory::observer::MemoryObserver
+pub fn finstack_ai_memory::observer::MemoryObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
+pub fn finstack_ai_memory::observer::MemoryObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
+pub struct finstack_ai_memory::MemoryPage
+pub finstack_ai_memory::MemoryPage::limit: usize
+pub finstack_ai_memory::MemoryPage::offset: usize
+impl core::clone::Clone for finstack_ai_memory::store::MemoryPage
+pub fn finstack_ai_memory::store::MemoryPage::clone(&self) -> finstack_ai_memory::store::MemoryPage
+impl core::cmp::Eq for finstack_ai_memory::store::MemoryPage
+impl core::cmp::PartialEq for finstack_ai_memory::store::MemoryPage
+pub fn finstack_ai_memory::store::MemoryPage::eq(&self, &finstack_ai_memory::store::MemoryPage) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::MemoryPage
+pub fn finstack_ai_memory::store::MemoryPage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::store::MemoryPage
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryPage
+pub struct finstack_ai_memory::MemoryPolicy
+pub finstack_ai_memory::MemoryPolicy::consolidate: bool
+pub finstack_ai_memory::MemoryPolicy::manage: bool
+pub finstack_ai_memory::MemoryPolicy::profile: bool
+pub finstack_ai_memory::MemoryPolicy::read: bool
+pub finstack_ai_memory::MemoryPolicy::write: bool
+impl core::clone::Clone for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::clone(&self) -> finstack_ai_memory::toolset::MemoryPolicy
+impl core::cmp::Eq for finstack_ai_memory::toolset::MemoryPolicy
+impl core::cmp::PartialEq for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::eq(&self, &finstack_ai_memory::toolset::MemoryPolicy) -> bool
+impl core::default::Default for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::default() -> Self
+impl core::fmt::Debug for finstack_ai_memory::toolset::MemoryPolicy
+pub fn finstack_ai_memory::toolset::MemoryPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::toolset::MemoryPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_memory::toolset::MemoryPolicy
+pub struct finstack_ai_memory::MemoryProvenance
+pub finstack_ai_memory::MemoryProvenance::confidence: u8
+pub finstack_ai_memory::MemoryProvenance::extraction: finstack_ai_memory::record::ExtractionMethod
+pub finstack_ai_memory::MemoryProvenance::source_ref: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::MemoryProvenance::source_run: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::MemoryProvenance::source_session: core::option::Option<alloc::sync::Arc<str>>
+impl core::clone::Clone for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::clone(&self) -> finstack_ai_memory::record::MemoryProvenance
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryProvenance
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::eq(&self, &finstack_ai_memory::record::MemoryProvenance) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryProvenance
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryProvenance
+pub fn finstack_ai_memory::record::MemoryProvenance::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::MemoryRecord
+pub finstack_ai_memory::MemoryRecord::body: finstack_ai_memory::record::MemoryBody
+pub finstack_ai_memory::MemoryRecord::created_at: finstack_ai_kernel::primitives::time::Timestamp
+pub finstack_ai_memory::MemoryRecord::id: finstack_ai_memory::record::MemoryId
+pub finstack_ai_memory::MemoryRecord::keywords: alloc::sync::Arc<[alloc::sync::Arc<str>]>
+pub finstack_ai_memory::MemoryRecord::last_confirmed_at: finstack_ai_kernel::primitives::time::Timestamp
+pub finstack_ai_memory::MemoryRecord::preview: alloc::sync::Arc<str>
+pub finstack_ai_memory::MemoryRecord::provenance: finstack_ai_memory::record::MemoryProvenance
+pub finstack_ai_memory::MemoryRecord::retention: finstack_ai_memory::record::RetentionPolicy
+pub finstack_ai_memory::MemoryRecord::scope: finstack_ai_memory::record::MemoryScope
+pub finstack_ai_memory::MemoryRecord::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_memory::MemoryRecord::superseded_by: core::option::Option<finstack_ai_memory::record::MemoryId>
+pub finstack_ai_memory::MemoryRecord::supersedes: core::option::Option<finstack_ai_memory::record::MemoryId>
+pub finstack_ai_memory::MemoryRecord::tombstoned: bool
+impl finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::validate(&self) -> core::result::Result<(), finstack_ai_memory::record::MemoryError>
+impl core::clone::Clone for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::clone(&self) -> finstack_ai_memory::record::MemoryRecord
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryRecord
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::eq(&self, &finstack_ai_memory::record::MemoryRecord) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryRecord
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryRecord
+pub fn finstack_ai_memory::record::MemoryRecord::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::MemoryScope
+pub finstack_ai_memory::MemoryScope::agent: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::MemoryScope::tenant: alloc::sync::Arc<str>
+pub finstack_ai_memory::MemoryScope::user: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_memory::MemoryScope::workspace: core::option::Option<alloc::sync::Arc<str>>
+impl finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::permits(&self, &finstack_ai_memory::record::MemoryScope) -> bool
+pub fn finstack_ai_memory::record::MemoryScope::tenant(&self) -> &str
+pub fn finstack_ai_memory::record::MemoryScope::try_new(&str) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+pub fn finstack_ai_memory::record::MemoryScope::with_agent(self, &str) -> Self
+pub fn finstack_ai_memory::record::MemoryScope::with_user(self, &str) -> Self
+pub fn finstack_ai_memory::record::MemoryScope::with_workspace(self, &str) -> Self
+impl core::clone::Clone for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::clone(&self) -> finstack_ai_memory::record::MemoryScope
+impl core::cmp::Eq for finstack_ai_memory::record::MemoryScope
+impl core::cmp::PartialEq for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::eq(&self, &finstack_ai_memory::record::MemoryScope) -> bool
+impl core::fmt::Debug for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::record::MemoryScope
+impl serde_core::ser::Serialize for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryScope
+pub fn finstack_ai_memory::record::MemoryScope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_memory::MemoryToolset
+impl finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::toolset::MemoryPolicy, finstack_ai_memory::record::MemoryClock) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+impl core::clone::Clone for finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::clone(&self) -> finstack_ai_memory::toolset::MemoryToolset
+impl core::fmt::Debug for finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_memory::toolset::MemoryToolset
+pub fn finstack_ai_memory::toolset::MemoryToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_memory::toolset::MemoryToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_memory::toolset::MemoryToolset::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::tool::types::PendingToolEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolReconcileResult, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_memory::toolset::MemoryToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub struct finstack_ai_memory::RecallConfig
+pub finstack_ai_memory::RecallConfig::max_hits: usize
+pub finstack_ai_memory::RecallConfig::stable_prefix: usize
+impl core::clone::Clone for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::clone(&self) -> finstack_ai_memory::provider::RecallConfig
+impl core::cmp::Eq for finstack_ai_memory::provider::RecallConfig
+impl core::cmp::PartialEq for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::eq(&self, &finstack_ai_memory::provider::RecallConfig) -> bool
+impl core::default::Default for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::default() -> Self
+impl core::fmt::Debug for finstack_ai_memory::provider::RecallConfig
+pub fn finstack_ai_memory::provider::RecallConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_memory::provider::RecallConfig
+impl core::marker::StructuralPartialEq for finstack_ai_memory::provider::RecallConfig
+pub struct finstack_ai_memory::RuleBasedExtractor
+impl finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::new(alloc::sync::Arc<str>) -> Self
+impl core::clone::Clone for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::clone(&self) -> finstack_ai_memory::extract::RuleBasedExtractor
+impl core::default::Default for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::default() -> Self
+impl core::fmt::Debug for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_memory::extract::MemoryExtractor for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
+pub const finstack_ai_memory::DEFAULT_MARKER: &str
+pub const finstack_ai_memory::INLINE_BODY_MAX_BYTES: usize
+pub const finstack_ai_memory::MEMORY_TOOL_INVALID_ARGUMENTS: &str
+pub const finstack_ai_memory::MEMORY_TOOL_NOT_FOUND: &str
+pub const finstack_ai_memory::MEMORY_TOOL_UNAVAILABLE: &str
+pub trait finstack_ai_memory::MemoryExtractor: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_memory::MemoryExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
+impl finstack_ai_memory::extract::MemoryExtractor for finstack_ai_memory::extract::RuleBasedExtractor
+pub fn finstack_ai_memory::extract::RuleBasedExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
+pub trait finstack_ai_memory::MemoryStore: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_memory::MemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::MemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::MemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::MemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::MemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::MemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+impl finstack_ai_memory::store::MemoryStore for finstack_ai_memory::InProcessMemoryStore
+pub fn finstack_ai_memory::InProcessMemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::InProcessMemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::system_clock() -> finstack_ai_memory::record::MemoryClock
+pub type finstack_ai_memory::MemoryClock = alloc::sync::Arc<(dyn core::ops::function::Fn() -> finstack_ai_kernel::primitives::time::Timestamp + core::marker::Send + core::marker::Sync)>
