@@ -42,3 +42,12 @@ coverage.xml
 
 # Media the notebooks generate at run time.
 /examples/python-notebooks/media-output/
+
+#mypy cache
+.mypy_cache/
+
+# claude cache
+.claude/
+
+# superpowers cache
+.superpowers/

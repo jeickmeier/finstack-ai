@@ -904,7 +904,7 @@ Using the native callback side (as `host_store.rs` tests do): a scripted host im
 
 - [ ] **Step 5: Implement, run tests**
 
-Run: `cargo test -p finstack-ai-wasm` (native tests) and the crate's wasm build check (see how CI/scripts build it: `ls scripts/wasm_package tools/wasm_package`). Expected: PASS.
+Run: `cargo test -p finstack-ai-wasm` (native tests) and the crate's wasm build check (see how CI/scripts build it: `ls scripts/wasm_package`). Expected: PASS.
 
 - [ ] **Step 6: Commit**
 

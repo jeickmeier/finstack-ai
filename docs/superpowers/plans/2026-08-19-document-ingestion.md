@@ -27,7 +27,7 @@
 ### Task 1: Fixture corpus
 
 **Files:**
-- Create: `tools/gen_document_fixtures.py`
+- Create: `scripts/gen_document_fixtures.py`
 - Create: `fixtures/documents/` (generated: `text.pdf`, `scanned.pdf`, `sample.docx`, `sample.xlsx`, `sample.pptx`, `sample.csv`, `corrupt.bin`)
 
 Spec decision 23 also names a table-heavy PDF; a convincing one cannot be hand-written. If no local tool can generate one deterministically in a few minutes, skip it, note the omission in the Task 10 changelog commit message, and flag it to the human partner — table rendering is then covered only by anydoc's own upstream corpus. The oversized-input fixture is not checked in; oversize cases construct large buffers in-test.
@@ -181,7 +181,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Run it and inspect output**
 
-Run: `python3 tools/gen_document_fixtures.py && ls -la fixtures/documents/`
+Run: `python3 scripts/gen_document_fixtures.py && ls -la fixtures/documents/`
 Expected: seven files, each under 4 KB.
 
 - [ ] **Step 3: Sanity-check the PDFs parse**
@@ -192,7 +192,7 @@ Expected: `b'%PDF-1.4'`. (Full parser validation happens in Task 2's tests; if a
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tools/gen_document_fixtures.py fixtures/documents/
+git add scripts/gen_document_fixtures.py fixtures/documents/
 git commit -m "test: add document fixture corpus for ingestion extension"
 ```
 
@@ -652,12 +652,12 @@ fn bounded_message(message: &str) -> String {
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cargo test -p finstack-ai-tools-document`
-Expected: all Task 2 tests PASS. If a fixture is rejected by anydoc (hand-written PDFs can be too minimal), adjust `tools/gen_document_fixtures.py` output until it parses, regenerate, and re-run — the fixture serves the parser, not vice versa.
+Expected: all Task 2 tests PASS. If a fixture is rejected by anydoc (hand-written PDFs can be too minimal), adjust `scripts/gen_document_fixtures.py` output until it parses, regenerate, and re-run — the fixture serves the parser, not vice versa.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Cargo.toml Cargo.lock extensions/toolsets/finstack-ai-tools-document/ fixtures/documents/ tools/gen_document_fixtures.py
+git add Cargo.toml Cargo.lock extensions/toolsets/finstack-ai-tools-document/ fixtures/documents/ scripts/gen_document_fixtures.py
 git commit -m "feat: add finstack-ai-tools-document parser module over anydoc"
 ```
 
