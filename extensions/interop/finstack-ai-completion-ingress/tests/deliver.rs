@@ -8,7 +8,7 @@ mod helpers {
     //! `crates/finstack-ai-test/tests/deferred_bridge/helpers/mod.rs` and the
     //! `RecordingSink` from `crates/finstack-ai-test/tests/crash_prefix/helpers/mod.rs`.
 
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time::Duration;
 
     use finstack_ai::{Agent, AgentRun, AgentRunRequest};
@@ -168,41 +168,7 @@ mod helpers {
         )
     }
 
-    /// Task 4's unit-test signing config: one active 32-byte key, no rotation.
-    pub(crate) fn config() -> CompletionIngressConfig {
-        CompletionIngressConfig {
-            key_id: "k-active".to_owned(),
-            key: SecretString::try_new("a".repeat(32)).expect("secret"),
-            additional_verification_keys: vec![],
-        }
-    }
-
-    /// Records every audit event the gate flushes to it.
-    #[derive(Default)]
-    pub(crate) struct RecordingSink {
-        pub(crate) events: Mutex<Vec<SecurityAuditEvent>>,
-    }
-
-    impl SecurityAuditSink for RecordingSink {
-        fn record(
-            &self,
-            event: SecurityAuditEvent,
-        ) -> PortFuture<Result<SecurityAuditReceipt, SecurityAuditError>> {
-            let event_id = Arc::<str>::from(event.event_id());
-            let recorded_at = event.timestamp();
-            self.events.lock().expect("lock").push(event);
-            Box::pin(async move {
-                Ok(SecurityAuditReceipt {
-                    event_id,
-                    recorded_at,
-                })
-            })
-        }
-
-        fn health(&self) -> PortFuture<Result<SecurityAuditHealth, SecurityAuditError>> {
-            Box::pin(async { Ok(SecurityAuditHealth { ready: true }) })
-        }
-    }
+    include!("support/fixtures.rs");
 
     /// A `Failed` outcome body, serialized through the kernel's own serde so the
     /// wire shape can never drift from the deserializer the ingress uses.
@@ -454,16 +420,17 @@ async fn horizon_expires_deliveries_regardless_of_token_expiry() {
     let sink = Arc::new(helpers::RecordingSink::default());
     let gate = recording_gate(&sink).await;
     let base = base_ms();
-    let ingress = CompletionIngress::try_new(store, gate, helpers::config())
-        .expect("ingress")
-        .with_horizon(IdempotencyHorizon {
-            expire_at: ts(base - 500),
-        });
-    // The token stays valid for another 60 seconds; only the horizon expires
-    // this delivery.
+    let ingress = CompletionIngress::try_new(store, gate, helpers::config()).expect("ingress");
+    // Mint while no horizon is configured (mint refuses grants that outlive a
+    // configured horizon), then shrink the horizon under the outstanding
+    // token: the token stays valid for another 60 seconds; only the horizon
+    // expires this delivery.
     let token = ingress
         .mint(&grant_for(&parent, effect_id, ts(base + 60_000)))
         .expect("mint");
+    let ingress = ingress.with_horizon(IdempotencyHorizon {
+        expire_at: ts(base - 500),
+    });
     let body = helpers::failed_outcome_body();
     let error = ingress
         .deliver(token.as_str(), &body, ts(base))

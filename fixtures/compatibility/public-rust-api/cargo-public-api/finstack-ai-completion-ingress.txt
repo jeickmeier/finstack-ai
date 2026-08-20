@@ -32,6 +32,8 @@ pub fn finstack_ai_completion_ingress::IngressError::fmt(&self, &mut core::fmt::
 impl core::marker::StructuralPartialEq for finstack_ai_completion_ingress::IngressError
 pub enum finstack_ai_completion_ingress::MintError
 pub finstack_ai_completion_ingress::MintError::Encoding
+pub finstack_ai_completion_ingress::MintError::ExpiryBeyondHorizon
+pub finstack_ai_completion_ingress::MintError::PrincipalScopeMismatch
 impl core::clone::Clone for finstack_ai_completion_ingress::MintError
 pub fn finstack_ai_completion_ingress::MintError::clone(&self) -> finstack_ai_completion_ingress::MintError
 impl core::cmp::Eq for finstack_ai_completion_ingress::MintError

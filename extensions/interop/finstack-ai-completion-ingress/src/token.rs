@@ -93,12 +93,10 @@ fn mac_for(key: &str, message: &[u8]) -> Result<HmacSha256, ()> {
 }
 
 /// Read only the `kid` before authentication; full strict decode happens
-/// after the signature is proven.
+/// after the signature is proven. Serde ignores the other claims fields.
 #[derive(Deserialize)]
 struct KidOnly {
     kid: String,
-    #[serde(flatten)]
-    _rest: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Mint a signed callback token for `claims`, signed with the active key.

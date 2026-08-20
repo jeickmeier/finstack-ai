@@ -48,6 +48,15 @@ pub enum MintError {
     /// Claims could not be canonically encoded or signed.
     #[error("token encoding failed")]
     Encoding,
+    /// The grant principal's explicit tenant scope disagrees with the
+    /// locator's, so the kernel would reject every delivery of the token.
+    #[error("grant principal tenant scope does not match the locator")]
+    PrincipalScopeMismatch,
+    /// The grant expiry outlives this ingress's configured idempotency
+    /// horizon, so the router would reject the token as `expired_locator`
+    /// while it still verifies as unexpired.
+    #[error("grant expiry outlives the configured idempotency horizon")]
+    ExpiryBeyondHorizon,
 }
 
 /// Host-embedded ingress: mints callback tokens and delivers completions.
@@ -93,11 +102,31 @@ impl CompletionIngress {
     ///
     /// # Errors
     ///
-    /// Returns [`MintError::Encoding`] when signing fails.
+    /// Returns [`MintError::PrincipalScopeMismatch`] when the grant's
+    /// principal names a tenant scope other than the locator's (the kernel
+    /// would reject every delivery of such a token as it does at
+    /// `ExternalEffectCompletionCommand::try_new`),
+    /// [`MintError::ExpiryBeyondHorizon`] when a configured idempotency
+    /// horizon would expire before the grant does, and
+    /// [`MintError::Encoding`] when signing fails.
     pub fn mint(&self, grant: &CompletionGrant) -> Result<CallbackToken, MintError> {
+        if grant
+            .principal
+            .tenant_scope()
+            .is_some_and(|scope| scope != grant.locator.tenant_scope.as_ref())
+        {
+            return Err(MintError::PrincipalScopeMismatch);
+        }
+        if self
+            .horizon
+            .is_some_and(|horizon| grant.expires_at > horizon.expire_at)
+        {
+            return Err(MintError::ExpiryBeyondHorizon);
+        }
+        let (active_id, _) = self.keys.keys.first().ok_or(MintError::Encoding)?;
         let claims = Claims {
             v: CLAIMS_VERSION,
-            kid: self.keys.active_id.as_ref().to_owned(),
+            kid: active_id.as_ref().to_owned(),
             kind: KIND_EFFECT_COMPLETION.to_owned(),
             locator: grant.locator.clone(),
             principal: grant.principal.clone(),
@@ -290,16 +319,22 @@ mod tests {
             .expect("noop gate")
     }
 
+    include!("../tests/support/fixtures.rs");
+
     fn ts(ms: i64) -> Timestamp {
         Timestamp::from_unix_ms(ms).expect("timestamp")
     }
 
-    fn config() -> CompletionIngressConfig {
-        CompletionIngressConfig {
-            key_id: "k-active".to_owned(),
-            key: SecretString::try_new("a".repeat(32)).expect("secret"),
-            additional_verification_keys: vec![],
-        }
+    fn test_store() -> Arc<MemoryJournalStore> {
+        Arc::new(
+            MemoryJournalStore::try_new(MemoryStoreLimits {
+                sessions: 4,
+                batches_per_session: 64,
+                records_per_session: 256,
+                snapshot_bytes: 64 * 1024,
+            })
+            .expect("store"),
+        )
     }
 
     fn grant() -> CompletionGrant {
@@ -321,58 +356,12 @@ mod tests {
     }
 
     async fn ingress() -> CompletionIngress {
-        let store = Arc::new(
-            MemoryJournalStore::try_new(MemoryStoreLimits {
-                sessions: 4,
-                batches_per_session: 64,
-                records_per_session: 256,
-                snapshot_bytes: 64 * 1024,
-            })
-            .expect("store"),
-        );
         let gate = noop_gate().await;
-        CompletionIngress::try_new(store, gate, config()).expect("ingress")
-    }
-
-    /// In-test recording sink: records every audit event it receives, so
-    /// pre-router rejection paths can be asserted on directly. Copied in
-    /// shape from `crates/finstack-ai-test/tests/crash_prefix/helpers/mod.rs`.
-    #[derive(Default)]
-    struct RecordingSink {
-        events: std::sync::Mutex<Vec<SecurityAuditEvent>>,
-    }
-
-    impl SecurityAuditSink for RecordingSink {
-        fn record(
-            &self,
-            event: SecurityAuditEvent,
-        ) -> PortFuture<Result<SecurityAuditReceipt, SecurityAuditError>> {
-            let event_id = Arc::<str>::from(event.event_id());
-            let recorded_at = event.timestamp();
-            self.events.lock().expect("lock").push(event);
-            Box::pin(async move {
-                Ok(SecurityAuditReceipt {
-                    event_id,
-                    recorded_at,
-                })
-            })
-        }
-
-        fn health(&self) -> PortFuture<Result<SecurityAuditHealth, SecurityAuditError>> {
-            Box::pin(async { Ok(SecurityAuditHealth { ready: true }) })
-        }
+        CompletionIngress::try_new(test_store(), gate, config()).expect("ingress")
     }
 
     async fn recording_ingress() -> (CompletionIngress, Arc<RecordingSink>) {
-        let store = Arc::new(
-            MemoryJournalStore::try_new(MemoryStoreLimits {
-                sessions: 4,
-                batches_per_session: 64,
-                records_per_session: 256,
-                snapshot_bytes: 64 * 1024,
-            })
-            .expect("store"),
-        );
+        let store = test_store();
         let sink = Arc::new(RecordingSink::default());
         let gate = SecurityAuditGate::enable(
             Some(Arc::clone(&sink) as Arc<dyn SecurityAuditSink>),
@@ -480,16 +469,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn try_new_rejects_invalid_config() {
-        let store = Arc::new(
-            MemoryJournalStore::try_new(MemoryStoreLimits {
-                sessions: 1,
-                batches_per_session: 8,
-                records_per_session: 16,
-                snapshot_bytes: 1024,
-            })
-            .expect("store"),
+    async fn mint_rejects_mismatched_tenant_scope() {
+        let ingress = ingress().await;
+        let mut bad = grant();
+        bad.principal =
+            PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-b")).expect("principal");
+        assert_eq!(
+            ingress.mint(&bad).expect_err("mismatched scope"),
+            MintError::PrincipalScopeMismatch
         );
+    }
+
+    #[tokio::test]
+    async fn mint_rejects_expiry_beyond_configured_horizon() {
+        // grant() expires at ts(10_000); a horizon at ts(5_000) must refuse it.
+        let ingress = ingress().await.with_horizon(IdempotencyHorizon {
+            expire_at: ts(5_000),
+        });
+        assert_eq!(
+            ingress.mint(&grant()).expect_err("beyond horizon"),
+            MintError::ExpiryBeyondHorizon
+        );
+        // Expiry at (or before) the horizon still mints.
+        let mut within = grant();
+        within.expires_at = ts(5_000);
+        assert!(ingress.mint(&within).is_ok());
+    }
+
+    #[tokio::test]
+    async fn try_new_rejects_invalid_config() {
+        let store = test_store();
         let gate = noop_gate().await;
         let bad = CompletionIngressConfig {
             key_id: "k1".to_owned(),

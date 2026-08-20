@@ -56,8 +56,8 @@ pub enum CompletionIngressConfigError {
 
 #[derive(Debug)]
 pub(crate) struct ResolvedKeys {
-    pub(crate) active_id: Arc<str>,
-    /// Active key first; all entries accepted for verification.
+    /// Active signing key first; all entries accepted for verification.
+    /// The first entry's id is the `kid` stamped into minted tokens.
     pub(crate) keys: Vec<(Arc<str>, SecretString)>,
 }
 
@@ -89,10 +89,7 @@ pub(crate) fn validated_keys(
     for (id, key) in &config.additional_verification_keys {
         push(id, key)?;
     }
-    Ok(ResolvedKeys {
-        active_id: Arc::from(config.key_id.as_str()),
-        keys,
-    })
+    Ok(ResolvedKeys { keys })
 }
 
 #[cfg(test)]
@@ -112,7 +109,6 @@ mod tests {
             additional_verification_keys: vec![("k-old".to_owned(), key(b'b'))],
         };
         let resolved = validated_keys(&config).expect("valid");
-        assert_eq!(resolved.active_id.as_ref(), "k-active");
         assert_eq!(resolved.keys.len(), 2);
         assert_eq!(resolved.keys[0].0.as_ref(), "k-active");
     }
