@@ -6,10 +6,10 @@ use std::thread;
 
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AppendRequest, BudgetPropagation, CancellationPropagation,
-    DeadlinePropagation, Digest, KernelInput, LaneCreated, LaneTag, Metadata,
-    PrincipalPropagation, PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
-    RecordDraft, RecordTag, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
-    RunSecurityContext, RunTag, SessionCreated, SessionTag, Timestamp, TransitionEnv,
+    DeadlinePropagation, Digest, KernelInput, LaneCreated, LaneTag, Metadata, PrincipalPropagation,
+    PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordTag,
+    RunAccepted, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag,
+    SessionCreated, SessionTag, Timestamp, TransitionEnv,
 };
 use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
 use finstack_ai_runtime::{

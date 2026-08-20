@@ -6,7 +6,9 @@ use finstack_ai_runtime::{
     ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError,
     WriteMetadataRequest,
 };
-use finstack_ai_store_common::{admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size};
+use finstack_ai_store_common::{
+    admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size,
+};
 use rusqlite::{Transaction, TransactionBehavior, params};
 
 use crate::append::append_in_transaction;

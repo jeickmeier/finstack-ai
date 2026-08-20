@@ -65,8 +65,8 @@ mod tests {
         validate_scan_limit(SCAN_PAGE_MAX_RECORDS).expect("at limit");
         assert_eq!(scan_start(0), 1);
         assert_eq!(scan_start(7), 7);
-        let batch = build_committed_batch(&request(1, 1, 1, vec![draft(1, 1)]), None)
-            .expect("batch");
+        let batch =
+            build_committed_batch(&request(1, 1, 1, vec![draft(1, 1)]), None).expect("batch");
         let records: Vec<RecordEnvelope> = batch.records.iter().cloned().collect();
         assert_eq!(scan_next_sequence(&records, true), Some(2));
         assert_eq!(scan_next_sequence(&records, false), None);

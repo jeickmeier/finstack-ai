@@ -46,9 +46,10 @@ use finstack_ai_kernel::{
     RetryClassification, RetryDirective, Sensitivity, Stage, TEXT_MAX_BYTES, TextBlock, Version,
 };
 use finstack_ai_runtime::{
-    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance, Middleware,
-    MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole,
-    MIDDLEWARE_OUTCOME_NOT_ALLOWED, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+    MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext, MiddlewareDescriptor,
+    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask,
+    StageOutcome,
 };
 use thiserror::Error;
 
@@ -182,7 +183,10 @@ impl VerifyMiddleware {
     /// # Errors
     ///
     /// Rejects an invalid checked-in identity or configuration.
-    pub fn try_new(verifier: Arc<dyn EvidenceVerifier>, policy: VerifyPolicy) -> Result<Self, VerifyError> {
+    pub fn try_new(
+        verifier: Arc<dyn EvidenceVerifier>,
+        policy: VerifyPolicy,
+    ) -> Result<Self, VerifyError> {
         let verifier_id = verifier.verifier_id();
         validate_label(verifier_id, "invalid_verifier_id")?;
         let backoff_ms = policy.backoff.as_millis();
@@ -251,19 +255,18 @@ impl Middleware for VerifyMiddleware {
                         }
                         Verdict::Reject(findings) => {
                             let message_text = reject_message(&findings);
-                            let error =
-                                ErrorDescriptor::new(
-                                    "verify_rejected",
-                                    message_text,
-                                    ErrorCategory::Validation,
-                                    false,
+                            let error = ErrorDescriptor::new(
+                                "verify_rejected",
+                                message_text,
+                                ErrorCategory::Validation,
+                                false,
+                            )
+                            .map_err(|_| {
+                                stable_error(
+                                    "verify_rejected_descriptor_invalid",
+                                    "verify rejection descriptor is invalid",
                                 )
-                                .map_err(|_| {
-                                    stable_error(
-                                        "verify_rejected_descriptor_invalid",
-                                        "verify rejection descriptor is invalid",
-                                    )
-                                })?;
+                            })?;
                             Ok(StageOutcome::Fail(Box::new(error)))
                         }
                     },

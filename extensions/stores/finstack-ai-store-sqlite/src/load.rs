@@ -445,7 +445,14 @@ fn loaded_tail(
         .map(|row| row.envelope.clone())
         .collect::<Vec<_>>();
     let stored_head = session_head_checksum(connection, session_id)?;
-    verify_tail_records(&records, start, prior_checksum, head_sequence, stored_head, codes)?;
+    verify_tail_records(
+        &records,
+        start,
+        prior_checksum,
+        head_sequence,
+        stored_head,
+        codes,
+    )?;
     let committed_batches = group_batches(stored)?;
     Ok(LoadedSession {
         session_id,

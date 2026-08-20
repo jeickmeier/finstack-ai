@@ -1,11 +1,11 @@
 use finstack_ai_kernel::{AppendBatchId, AppendRequest, CommittedBatch, Metadata, RecordEnvelope};
 use finstack_ai_protocol::encode;
 use finstack_ai_runtime::StoreError;
+pub(crate) use finstack_ai_store_common::{AppendIdentity, request_cbor};
 use finstack_ai_store_common::{
     SessionUsage, admit_append_limits, build_committed_batch, check_append_sequence,
     classify_record_reuse, request_identity,
 };
-pub(crate) use finstack_ai_store_common::{AppendIdentity, request_cbor};
 use rusqlite::{Transaction, params};
 
 use crate::config::SqliteStoreLimits;

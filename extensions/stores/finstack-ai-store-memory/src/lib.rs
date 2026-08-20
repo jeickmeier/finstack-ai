@@ -33,8 +33,8 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
-    OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest,
-    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
+    OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
+    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
     WriteMetadataRequest,
 };
 use finstack_ai_store_common::{
@@ -229,7 +229,13 @@ impl MemoryJournalStore {
                 reason_code: "load_from_sequence_gap",
             });
         };
-        loaded_from_batches(session_id, session, start, prior_checksum, FROM_SEQUENCE_WINDOW)
+        loaded_from_batches(
+            session_id,
+            session,
+            start,
+            prior_checksum,
+            FROM_SEQUENCE_WINDOW,
+        )
     }
 
     fn load_snapshot_plus_tail(&self, session_id: SessionId) -> Result<LoadedSession, StoreError> {

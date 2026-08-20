@@ -508,7 +508,10 @@ fn settle(
         Some(cost) => {
             let cell = entry
                 .spend
-                .entry((Arc::from(cost.unit()), Arc::from(cost.pricing_policy_version())))
+                .entry((
+                    Arc::from(cost.unit()),
+                    Arc::from(cost.pricing_policy_version()),
+                ))
                 .or_default();
             cell.micros = cell.micros.saturating_add(u128::from(cost.micros()));
             cell.costed_effects = cell.costed_effects.saturating_add(1);

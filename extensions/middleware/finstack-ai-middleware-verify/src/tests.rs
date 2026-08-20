@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use finstack_ai_kernel::{
     ContentBlock, Digest, EffectId, LaneId, Message, MessageRole, Metadata, OperationLocator,
@@ -54,7 +54,9 @@ fn ctx() -> MiddlewareContext {
 }
 
 fn message_id(value: u64) -> finstack_ai_kernel::MessageId {
-    id(value, |v| finstack_ai_kernel::MessageId::parse(v).expect("message id"))
+    id(value, |v| {
+        finstack_ai_kernel::MessageId::parse(v).expect("message id")
+    })
 }
 
 fn text_message(ordinal: u64, role: MessageRole, text: &str) -> Message {
@@ -212,7 +214,10 @@ async fn before_finalize_reject_fails_with_stable_code() {
         StageOutcome::Fail(error) => {
             assert_eq!(error.code.as_str(), "verify_rejected");
             assert!(!error.retryable);
-            assert_eq!(error.category, finstack_ai_kernel::ErrorCategory::Validation);
+            assert_eq!(
+                error.category,
+                finstack_ai_kernel::ErrorCategory::Validation
+            );
         }
         other => panic!("expected fail, got {other:?}"),
     }
@@ -226,7 +231,11 @@ async fn before_finalize_none_result_message_short_circuits_without_calling_veri
     let input = finalize_input("irrelevant", false);
     let outcome = mw.invoke(ctx(), input).await.expect("invoke");
     assert_eq!(outcome, StageOutcome::Continue);
-    assert_eq!(verifier.call_count(), 0, "verifier must not run on a failed candidate");
+    assert_eq!(
+        verifier.call_count(),
+        0,
+        "verifier must not run on a failed candidate"
+    );
 }
 
 #[tokio::test]
@@ -234,7 +243,10 @@ async fn before_model_bounce_adds_feedback_context() {
     let verifier = Arc::new(ScriptedVerifier::default());
     let mw = middleware(verifier);
     let assistant = text_message(1, MessageRole::Assistant, "please bounce this");
-    let input = before_model_input(vec![text_message(0, MessageRole::User, "question"), assistant]);
+    let input = before_model_input(vec![
+        text_message(0, MessageRole::User, "question"),
+        assistant,
+    ]);
     let outcome = mw.invoke(ctx(), input).await.expect("invoke");
     match outcome {
         StageOutcome::AddContext(items) => {
@@ -243,7 +255,11 @@ async fn before_model_bounce_adds_feedback_context() {
                 panic!("expected text block");
             };
             let text = block.text();
-            assert!(text.contains("Evidence verification found issues with the previous assistant answer"));
+            assert!(
+                text.contains(
+                    "Evidence verification found issues with the previous assistant answer"
+                )
+            );
             assert!(text.contains("[citation]"));
             assert!(text.contains("missing citation"));
         }
@@ -275,7 +291,11 @@ async fn before_model_reject_adds_feedback_context() {
 async fn before_model_no_assistant_message_continues() {
     let verifier = Arc::new(ScriptedVerifier::default());
     let mw = middleware(verifier);
-    let input = before_model_input(vec![text_message(0, MessageRole::User, "please bounce this")]);
+    let input = before_model_input(vec![text_message(
+        0,
+        MessageRole::User,
+        "please bounce this",
+    )]);
     let outcome = mw.invoke(ctx(), input).await.expect("invoke");
     assert_eq!(outcome, StageOutcome::Continue);
 }
@@ -310,9 +330,12 @@ async fn before_model_verifier_receives_canonical_message_json_identical_to_befo
     let input = before_model_input(vec![assistant.clone()]);
     mw.invoke(ctx(), input).await.expect("invoke");
 
-    let expected =
-        serde_json_canonicalizer::to_vec(&assistant).expect("canonical message bytes");
-    let observed_bytes = observed.lock().expect("lock").clone().expect("verifier called");
+    let expected = serde_json_canonicalizer::to_vec(&assistant).expect("canonical message bytes");
+    let observed_bytes = observed
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("verifier called");
     assert_eq!(
         observed_bytes, expected,
         "before_model must hand the verifier byte-identical JCS-canonical Message JSON"

@@ -190,10 +190,26 @@ async fn costed_completions_aggregate_by_unit_and_policy() {
         BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
     billing
         .observe(Arc::from([
-            model_event(1, 7, completed(7, Some(usage(10, 20, Some(cost("USD", 250, "prices-v1")))))),
-            model_event(2, 8, completed(8, Some(usage(1, 2, Some(cost("USD", 750, "prices-v1")))))),
-            model_event(3, 9, completed(9, Some(usage(0, 0, Some(cost("USD", 5, "prices-v2")))))),
-            model_event(4, 10, completed(10, Some(usage(3, 4, Some(cost("EUR", 9, "prices-v1")))))),
+            model_event(
+                1,
+                7,
+                completed(7, Some(usage(10, 20, Some(cost("USD", 250, "prices-v1"))))),
+            ),
+            model_event(
+                2,
+                8,
+                completed(8, Some(usage(1, 2, Some(cost("USD", 750, "prices-v1"))))),
+            ),
+            model_event(
+                3,
+                9,
+                completed(9, Some(usage(0, 0, Some(cost("USD", 5, "prices-v2"))))),
+            ),
+            model_event(
+                4,
+                10,
+                completed(10, Some(usage(3, 4, Some(cost("EUR", 9, "prices-v1"))))),
+            ),
         ]))
         .await
         .expect("observe");
@@ -202,7 +218,9 @@ async fn costed_completions_aggregate_by_unit_and_policy() {
     let usd_v1 = snapshot
         .spend
         .iter()
-        .find(|row| row.unit.as_ref() == "USD" && row.pricing_policy_version.as_ref() == "prices-v1")
+        .find(|row| {
+            row.unit.as_ref() == "USD" && row.pricing_policy_version.as_ref() == "prices-v1"
+        })
         .expect("usd v1 row");
     assert_eq!(usd_v1.micros, 1_000);
     assert_eq!(usd_v1.costed_effects, 2);
@@ -240,8 +258,16 @@ async fn model_and_provider_are_attributed_from_the_request() {
         BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
     billing
         .observe(Arc::from([
-            model_event(1, 7, requested(7, r#"{"model":"demo-model-1","messages":[]}"#)),
-            model_event(2, 7, completed(7, Some(usage(10, 20, Some(cost("USD", 100, "prices-v1")))))),
+            model_event(
+                1,
+                7,
+                requested(7, r#"{"model":"demo-model-1","messages":[]}"#),
+            ),
+            model_event(
+                2,
+                7,
+                completed(7, Some(usage(10, 20, Some(cost("USD", 100, "prices-v1"))))),
+            ),
         ]))
         .await
         .expect("observe");
@@ -326,8 +352,18 @@ async fn ledger_saturation_is_counted_and_diagnosed() {
         BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 1).expect("billing");
     billing
         .observe(Arc::from([
-            session_event(1, 1, 7, completed(7, Some(usage(1, 1, Some(cost("USD", 1, "prices-v1")))))),
-            session_event(2, 2, 8, completed(8, Some(usage(1, 1, Some(cost("USD", 1, "prices-v1")))))),
+            session_event(
+                1,
+                1,
+                7,
+                completed(7, Some(usage(1, 1, Some(cost("USD", 1, "prices-v1"))))),
+            ),
+            session_event(
+                2,
+                2,
+                8,
+                completed(8, Some(usage(1, 1, Some(cost("USD", 1, "prices-v1"))))),
+            ),
         ]))
         .await
         .expect("observe");
@@ -341,7 +377,9 @@ async fn ledger_saturation_is_counted_and_diagnosed() {
     // The existing key keeps aggregating after saturation.
     billing
         .observe(Arc::from([session_event(
-            1, 3, 9,
+            1,
+            3,
+            9,
             completed(9, Some(usage(1, 1, Some(cost("USD", 4, "prices-v1"))))),
         )]))
         .await
@@ -376,7 +414,14 @@ async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
     billing
         .observe(Arc::from([
             model_event(1, 7, requested(7, &request)),
-            model_event(2, 7, completed(7, Some(usage(10, 20, Some(cost("USD", 1_250_000, "prices-v1")))))),
+            model_event(
+                2,
+                7,
+                completed(
+                    7,
+                    Some(usage(10, 20, Some(cost("USD", 1_250_000, "prices-v1")))),
+                ),
+            ),
         ]))
         .await
         .expect("observe");
@@ -401,9 +446,8 @@ async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
 
 #[tokio::test]
 async fn pending_map_saturation_evicts_oldest_and_new_origins_still_attribute() {
-    let billing =
-        BillingObserver::try_new(16_384, ObserverBackpressure::DropProgress, 1_000_000)
-            .expect("billing");
+    let billing = BillingObserver::try_new(16_384, ObserverBackpressure::DropProgress, 1_000_000)
+        .expect("billing");
     // Fill the pending-attribution bound (4096) with distinct model-effect
     // requests that never settle, then request one more to trip eviction.
     let mut events = Vec::with_capacity(4_100);

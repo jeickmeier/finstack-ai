@@ -74,7 +74,6 @@ pub use fixtures::golden_scenarios::{
 };
 pub use fixtures::journal::bodies::{all_activated_record_bodies, draft_for_body};
 pub use fixtures::journal::generate::write_journal_v1_fixtures;
-pub use fixtures::store as store_fixtures;
 pub use fixtures::journal::runner::{
     JournalExpect, JournalFixture, JournalFixtureError, JournalRecipe,
     discover_journal_v1_fixtures, known_answer_for_body, known_answer_for_envelope,
@@ -84,6 +83,7 @@ pub use fixtures::public_api::{
     Expect, PublicApiFixture, PublicApiFixtureError, Recipe, discover_public_api_fixtures,
     load_public_api_fixture, run_all_public_api_fixtures, run_public_api_fixture,
 };
+pub use fixtures::store as store_fixtures;
 pub use fixtures::trace::{
     DurabilityClass, EffectExpectation, ExpectedTrace, GoldenTrace, NormalizedEvent,
     PayloadDeclaration, TraceError, TraceRecord, TransitionEnv, compare_normalized_bytes,

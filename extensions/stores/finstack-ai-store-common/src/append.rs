@@ -91,10 +91,7 @@ pub fn classify_record_reuse(
 /// Returns [`StoreError::Integrity`] (`sequence_exhausted`) when the journal
 /// head cannot advance, and [`StoreError::Conflict`] when
 /// `expected_sequence` is not the next sequence.
-pub fn check_append_sequence(
-    current_head: u64,
-    expected_sequence: u64,
-) -> Result<(), StoreError> {
+pub fn check_append_sequence(current_head: u64, expected_sequence: u64) -> Result<(), StoreError> {
     let actual_next_sequence = current_head.checked_add(1).ok_or(StoreError::Integrity {
         reason_code: "sequence_exhausted",
     })?;
@@ -325,8 +322,8 @@ mod tests {
 
     #[test]
     fn committed_batches_chain_from_the_previous_checksum() {
-        let first = build_committed_batch(&request(1, 1, 1, vec![draft(1, 1)]), None)
-            .expect("first batch");
+        let first =
+            build_committed_batch(&request(1, 1, 1, vec![draft(1, 1)]), None).expect("first batch");
         assert_eq!((first.first_sequence, first.last_sequence), (1, 1));
         let prior = first.records[0].checksum();
         let second = build_committed_batch(

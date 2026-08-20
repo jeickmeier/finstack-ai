@@ -41,6 +41,6 @@ pub use snapshot::{
     encode_state_request, outstanding_count, tombstone_count,
 };
 pub use window::{
-    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, check_batch_alignment,
-    select_tail_batches, verify_full_head, verify_tail_records,
+    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, check_batch_alignment, select_tail_batches,
+    verify_full_head, verify_tail_records,
 };
