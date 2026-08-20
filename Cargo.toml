@@ -34,6 +34,7 @@ members = [
     "extensions/context/finstack-ai-context-repository",
     "extensions/memory/finstack-ai-memory",
     "extensions/middleware/finstack-ai-middleware-compaction",
+    "extensions/middleware/finstack-ai-middleware-instructions",
     "extensions/middleware/finstack-ai-middleware-verify",
     "extensions/middleware/finstack-ai-middleware-document-ingest",
     "extensions/middleware/finstack-ai-middleware-redaction",
@@ -147,6 +148,7 @@ finstack-ai-memory = { path = "extensions/memory/finstack-ai-memory", version = 
 # Non-ASCII MCP `Mcp-Name` header sentinel encoding (`=?base64?…?=`).
 finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "1.0.0" }
 finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "1.0.0" }
+finstack-ai-middleware-instructions = { path = "extensions/middleware/finstack-ai-middleware-instructions", version = "1.0.0" }
 finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "1.0.0" }
 finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstack-ai-middleware-document-ingest", version = "1.0.0" }
 finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "1.0.0" }
