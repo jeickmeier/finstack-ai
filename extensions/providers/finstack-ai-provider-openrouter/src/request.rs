@@ -232,7 +232,7 @@ fn map_input(
         }
         input
     } else {
-        let mut input = Vec::new();
+        let mut input = Vec::with_capacity(messages.len().saturating_sub(prefix_len));
         for message in &messages[prefix_len..] {
             input.extend(map_conversation_message(message, &call_ids, resolved)?);
         }
