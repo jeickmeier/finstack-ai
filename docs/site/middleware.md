@@ -74,10 +74,11 @@ settlement that can carry them.
 
 ## Shipping leaves
 
-| Leaf | Status |
-| --- | --- |
-| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | In-repo fixture. Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
-| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
+| Leaf | Stages | Outcome | Purpose |
+| --- | --- | --- | --- |
+| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | `before_finalize` | `Continue` / `Fail` / `RequestInteraction` | In-repo fixture. Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
+| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | `before_model` | `CompactContext` / `RequestCompactionModel` | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
+| [`finstack-ai-middleware-tool-policy`](../../extensions/middleware/finstack-ai-middleware-tool-policy/README.md) | `before_model`, `before_tool_batch` | `FilterTools` / `Fail` | Policy-driven tool narrowing: role allowlists, write budgets, jailbreak triggers, and child-depth gates. |
 
 ### How summarize compaction completes
 
