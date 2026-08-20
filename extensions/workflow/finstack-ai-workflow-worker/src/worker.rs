@@ -78,6 +78,13 @@ pub struct TickReport {
     /// that follows cannot reach a new wait within the budget and is also
     /// counted in [`TickReport::failures`]. A later tick over the same row
     /// finds nothing pending to expire and does not count it again.
+    ///
+    /// A buffered response that arrives for an interaction whose deadline has
+    /// already passed does *not* avoid this counter. The interaction ingress is
+    /// fail-closed on a late answer and settles it `Expired` rather than
+    /// `Granted`, so the expiry is real and is counted here as well as in
+    /// [`TickReport::sessions_resumed`]. Only a response the ingress actually
+    /// accepts — one submitted before the deadline — leaves this counter alone.
     pub sessions_expired: usize,
     /// Per-item failures isolated during the tick.
     pub failures: usize,
@@ -627,6 +634,19 @@ impl WorkflowWorker {
         // an expiry this tick performed apart from one an earlier tick already
         // did — a re-tick over a row whose resume failed after the expiry must
         // not count it a second time.
+        //
+        // A row can be due on both counts at once: a resolution buffered before
+        // the deadline, ticked after it. That still counts as an expiry, and
+        // deliberately so — the resolution does not win. The interaction
+        // ingress is fail-closed on a late answer: `interaction_settled_input`
+        // (`crates/finstack-ai-runtime/src/driver/ingress/shared.rs`) rewrites
+        // a resolution submitted at or after `expires_at` into
+        // `InteractionSettled::Expired` before it ever reaches the reducer, so
+        // the `submit_response` above commits the expiry itself and the
+        // interaction is settled `Expired`, not `Granted`. Counting it is
+        // therefore truthful: an expiry really was committed, by this tick, for
+        // this row. Gating on `inbox_entry.is_none()` here would *under*-report
+        // exactly that case.
         let was_pending = expiry_due(row, now) && pending_matches_row(&session, row);
         session.respawn_owner().await?;
         if was_pending {

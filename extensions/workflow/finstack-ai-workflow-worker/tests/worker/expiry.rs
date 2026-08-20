@@ -21,8 +21,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    InteractionKind, Metadata, ProviderIds, RawJson, ReducerStageOutcome, RetrySafety, RunPhase,
-    Stage, Timestamp, ToolExecutionMode, ToolFailurePolicy, ToolId, Usage,
+    AuthorizationEvidence, InteractionKind, InteractionResolution, InteractionResolutionCommand,
+    InteractionTerminalOutcome, Metadata, PrincipalRef, ProviderIds, RawJson, ReducerStageOutcome,
+    RetrySafety, RunPhase, Stage, Timestamp, ToolExecutionMode, ToolFailurePolicy, ToolId, Usage,
 };
 use finstack_ai_runtime::{
     ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
@@ -237,12 +238,25 @@ async fn a_deadline_less_interaction_is_never_claimed() {
     );
 }
 
-#[tokio::test]
+/// Everything one parked, approval-gated run needs: the journal it lives in,
+/// the worker over its adapter tables, and the identities the assertions use.
+struct Parked {
+    journal: Arc<finstack_ai_store_memory::MemoryJournalStore>,
+    store: Arc<MemoryWorkerStore>,
+    toolset: Arc<ScriptedToolset>,
+    clock: ExternalClock,
+    worker: WorkflowWorker,
+    interaction_id: finstack_ai_kernel::InteractionId,
+}
+
+/// Drive a fresh run to an approval interaction carrying the run's effective
+/// deadline, park it, and build the worker that will resume it. `seed` keeps
+/// two fixtures in one test binary from colliding on generated ids.
 #[expect(
     clippy::too_many_lines,
-    reason = "mirrors inbox_resume's fixture assembly, three-act shape"
+    reason = "mirrors inbox_resume's fixture assembly end to end"
 )]
-async fn a_past_deadline_interaction_is_expired_by_the_tick() {
+async fn park_on_approval(seed: u64) -> Parked {
     let tools = approval_tools();
     let (toolset, catalog) = approval_catalog(&tools);
     let journal = memory_store();
@@ -277,7 +291,7 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
         locked_profile(),
         Arc::clone(&catalog),
         clock.clone(),
-        CounterRandom(std::sync::atomic::AtomicU64::new(900)),
+        CounterRandom(std::sync::atomic::AtomicU64::new(seed)),
     )
     .await
     .expect("owner");
@@ -304,7 +318,7 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
 
     // ACT ONE: park the approval. The committed request carries the run's
     // effective deadline, and `park` copies it onto the wake row.
-    let mut session = WorkflowSession::trusted(journal.clone(), locator(), clock.clone(), 901)
+    let mut session = WorkflowSession::trusted(journal.clone(), locator(), clock.clone(), seed + 1)
         .await
         .expect("attach")
         .with_ports(
@@ -359,6 +373,27 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
     )
     .build();
 
+    Parked {
+        journal,
+        store,
+        toolset,
+        clock,
+        worker,
+        interaction_id,
+    }
+}
+
+#[tokio::test]
+async fn a_past_deadline_interaction_is_expired_by_the_tick() {
+    let Parked {
+        journal,
+        store,
+        toolset,
+        clock,
+        worker,
+        interaction_id,
+    } = Box::pin(park_on_approval(900)).await;
+
     // ACT TWO: before the deadline, nobody has answered and nothing is due.
     let before = Box::pin(worker.tick()).await.expect("before the deadline");
     assert_eq!(before.sessions_expired, 0);
@@ -398,9 +433,14 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
         settled.state().pending_interaction.is_none(),
         "the pending approval is settled"
     );
-    assert!(
-        settled.state().last_interaction_terminal.is_some(),
-        "a terminal outcome is recorded for the expired approval"
+    assert_eq!(
+        settled
+            .state()
+            .last_interaction_terminal
+            .as_ref()
+            .map(|terminal| terminal.outcome),
+        Some(InteractionTerminalOutcome::Expired),
+        "the kernel classified the settlement as an expiry, not a decision"
     );
     assert!(
         settled.state().resolution_identities.is_empty(),
@@ -439,4 +479,89 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
         "an already expired interaction cannot double-fire"
     );
     assert_eq!(again.failures, 0);
+}
+
+/// A resolution buffered before the deadline but ticked after it does not
+/// beat the deadline: the interaction ingress is fail-closed on a late answer.
+/// `interaction_settled_input`
+/// (`crates/finstack-ai-runtime/src/driver/ingress/shared.rs`) rewrites a
+/// resolution whose `submitted_at` is at or after `expires_at` into
+/// `InteractionSettled::Expired` before the reducer sees it, so the row is
+/// settled `Expired` and `sessions_expired` counts it — the expiry is real.
+#[tokio::test]
+async fn a_resolution_that_races_the_deadline_still_expires_and_is_counted() {
+    let Parked {
+        journal,
+        store,
+        toolset,
+        clock,
+        worker,
+        interaction_id,
+    } = Box::pin(park_on_approval(920)).await;
+
+    // Delivered while the worker was down, before the deadline. The inbox
+    // buffers it; nothing is submitted to the journal yet.
+    let command = InteractionResolutionCommand::try_new(
+        locator(),
+        InteractionResolution::try_new(
+            interaction_id,
+            "resolution-1",
+            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+            AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth"),
+            RawJson::parse(r#"{"approved":true}"#).expect("response"),
+            None::<&str>,
+        )
+        .expect("resolution"),
+    )
+    .expect("command");
+    worker
+        .deliver_interaction(&command, timestamp(DEADLINE_MS - 500))
+        .expect("deliver interaction");
+
+    // The tick only runs once the deadline has also passed, so the row is due
+    // on both counts at once and `submit_response` submits the buffered
+    // resolution with a past-deadline `submitted_at`.
+    clock.set(timestamp(DEADLINE_MS + 100));
+    let report = Box::pin(worker.tick()).await.expect("tick");
+    assert_eq!(
+        report.sessions_resumed, 1,
+        "the row is claimed and driven exactly as an ordinary inbox delivery"
+    );
+    assert_eq!(
+        report.sessions_expired, 1,
+        "an expiry really was committed for this row on this tick"
+    );
+
+    let settled = CommitCoordinator::recover(
+        Arc::clone(&journal) as Arc<dyn JournalStore>,
+        locator().session_id,
+    )
+    .await
+    .expect("recover");
+    assert!(
+        settled.state().pending_interaction.is_none(),
+        "the approval is settled"
+    );
+    assert_eq!(
+        settled
+            .state()
+            .last_interaction_terminal
+            .as_ref()
+            .map(|terminal| terminal.outcome),
+        Some(InteractionTerminalOutcome::Expired),
+        "a late answer is refused: the deadline settles it, not the principal"
+    );
+    assert!(
+        settled.state().resolution_identities.is_empty(),
+        "no resolution identity is recorded for a refused late answer"
+    );
+    assert_eq!(
+        toolset.call_count(),
+        0,
+        "the tool the approval gated never runs"
+    );
+    assert!(
+        store.load_all().expect("inbox").is_empty(),
+        "the consumed response is drained from the inbox"
+    );
 }
