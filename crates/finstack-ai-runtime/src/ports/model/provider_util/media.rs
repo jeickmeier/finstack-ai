@@ -75,8 +75,8 @@ mod tests {
     async fn fixture_resolver_round_trips() {
         let resolver: Arc<dyn MediaResolver> = Arc::new(FixtureResolver);
         let blob = BlobRef::try_new("blob-1", "image/png", 8, None, None::<&str>).expect("blob");
-        let resolved = resolver.resolve(&blob).await.expect("resolved");
-        assert!(matches!(resolved, ResolvedMedia::Url(_)));
+        let outcome = resolver.resolve(&blob).await.expect("resolved");
+        assert!(matches!(outcome, ResolvedMedia::Url(_)));
         let missing =
             BlobRef::try_new("missing", "image/png", 8, None, None::<&str>).expect("blob");
         let error = resolver.resolve(&missing).await.expect_err("missing");
