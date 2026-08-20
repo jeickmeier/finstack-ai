@@ -1,5 +1,7 @@
 mod provider;
 mod record;
+#[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
+mod sqlite;
 mod store;
 
 use crate::record::*;
