@@ -1676,6 +1676,7 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-store-artifact-object",
  "finstack-ai-store-memory",
+ "finstack-ai-store-postgres",
  "finstack-ai-store-sqlite",
  "finstack-ai-tools-document",
  "finstack-ai-tools-subagent",
@@ -1689,6 +1690,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
