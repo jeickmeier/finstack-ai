@@ -118,10 +118,18 @@ rustdoc on `ApprovalExpiry`, `ExpiryPolicy`, and
 [the design spec §2.4](../../../docs/superpowers/specs/2026-08-20-workflow-hitl-router-design.md)
 for the amended decision record.
 
-**Recorded follow-up:** the credential-free path is a worker-driven
-kernel `ExpireIfDue` input — the worker itself, not this synchronous
-battery, would carry the authority to expire a run it is already ticking.
-That is future work, not something this crate can retrofit today.
+**Credential-free expiry is the worker's job, and it is implemented.**
+`finstack-ai-workflow-worker` persists the committed request's deadline on
+`WakeRow::expires_at` at park time, and its tick claims a past-deadline
+interaction row on the clock alone — attaching the session is what commits
+the expiry, because the runtime applies `ExpireIfDue` inside every run
+owner constructor; no input is submitted and no credentials are presented.
+Each committed expiry is counted in `TickReport::sessions_expired`. So an
+unanswered interaction expires regardless of this battery's default: a
+declining `ApprovalExpiry` means "no authored refusal payload", not "never
+expires". After a worker-driven expiry the sweep reconciles the inbox row
+to `Closed`; the `Expired` status only ever comes from a host policy's
+delivered refusal.
 
 ## Non-goals
 
