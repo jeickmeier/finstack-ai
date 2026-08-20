@@ -1,11 +1,14 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, SessionId,
+    ContentBlock, Digest, EffectId, LaneId, Message, MessageRole, Metadata, OperationLocator,
+    OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, TextBlock, Timestamp,
 };
 use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, Middleware, MiddlewareContext, RunCallContext,
-    StageInput, StageOutcome, validate_stage_outcome,
+    AuthorizationContext, BeforeModelInput, CancellationSignal, Middleware, MiddlewareContext,
+    ModelName, ModelRequestDraft, ModelRequestLimits, ModelSettings, RunCallContext, StageInput,
+    StageOutcome, validate_stage_outcome,
 };
 use finstack_ai_test::{MiddlewareConformanceCase, check_middleware_conformance};
 
@@ -49,92 +52,272 @@ fn ctx() -> MiddlewareContext {
     }
 }
 
-fn finalize_input() -> StageInput {
+fn message_id(value: u64) -> finstack_ai_kernel::MessageId {
+    id(value, |v| finstack_ai_kernel::MessageId::parse(v).expect("message id"))
+}
+
+fn text_message(ordinal: u64, role: MessageRole, text: &str) -> Message {
+    Message::try_new(
+        message_id(ordinal),
+        role,
+        vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
+        Timestamp::from_unix_ms(i64::try_from(ordinal).expect("ts")).expect("ts"),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("message")
+}
+
+fn message_raw_json(text: &str) -> RawJson {
+    RawJson::parse(format!(r#"{{"role":"assistant","text":"{text}"}}"#)).expect("raw message")
+}
+
+fn policy() -> VerifyPolicy {
+    VerifyPolicy::try_new(finstack_ai_kernel::Duration::from_millis(250), "policy-v1")
+        .expect("policy")
+}
+
+fn finalize_input(text: &str, has_result: bool) -> StageInput {
     StageInput::BeforeFinalize {
         candidate: RawJson::parse(br#""candidate""#).expect("candidate"),
-        result_message: None,
+        result_message: if has_result {
+            Some(message_raw_json(text))
+        } else {
+            None
+        },
+    }
+}
+
+fn before_model_input(messages: Vec<Message>) -> StageInput {
+    StageInput::BeforeModel(Box::new(BeforeModelInput {
+        request: ModelRequestDraft {
+            model: ModelName::try_new("preview-model").expect("model"),
+            messages: messages.into(),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 10_000,
+                max_output_tokens: 1_000,
+            },
+        },
+        source_entries: Arc::from([]),
+        model_context_profile_digest: Digest::raw_json(b"profile"),
+        hard_input_tokens: 10_000,
+        checkpoint: None,
+    }))
+}
+
+/// Scripted verifier keyed on message text: text containing "bounce" or
+/// "reject" drives the matching verdict with one finding each; anything
+/// else is accepted. Every call is counted.
+#[derive(Debug, Default)]
+struct ScriptedVerifier {
+    calls: AtomicUsize,
+}
+
+impl ScriptedVerifier {
+    fn call_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl EvidenceVerifier for ScriptedVerifier {
+    fn verifier_id(&self) -> &'static str {
+        "scripted-verifier"
+    }
+
+    fn verify(&self, message: &RawJson) -> Verdict {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let text = message.as_str();
+        if text.contains("bounce") {
+            Verdict::Bounce(vec![
+                EvidenceFinding::try_new(EvidenceKind::Citation, "missing citation")
+                    .expect("finding"),
+            ])
+        } else if text.contains("reject") {
+            Verdict::Reject(vec![
+                EvidenceFinding::try_new(EvidenceKind::Test, "failing test").expect("finding"),
+            ])
+        } else {
+            Verdict::Accept
+        }
+    }
+}
+
+fn middleware(verifier: Arc<dyn EvidenceVerifier>) -> VerifyMiddleware {
+    VerifyMiddleware::try_new(verifier, policy()).expect("middleware")
+}
+
+#[tokio::test]
+async fn before_finalize_accept_continues() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let input = finalize_input("looks fine", true);
+    let outcome = mw.invoke(ctx(), input.clone()).await.expect("invoke");
+    assert_eq!(outcome, StageOutcome::Continue);
+    validate_stage_outcome(&mw.descriptor(), &input, &outcome).expect("allowed");
+}
+
+#[tokio::test]
+async fn before_finalize_bounce_retries_with_verification_classification() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let input = finalize_input("please bounce this", true);
+    let outcome = mw.invoke(ctx(), input.clone()).await.expect("invoke");
+    match &outcome {
+        StageOutcome::Retry(directive) => {
+            assert_eq!(
+                directive.classification,
+                finstack_ai_kernel::RetryClassification::Verification
+            );
+            assert_eq!(directive.backoff.as_millis(), 250);
+            assert_eq!(directive.policy_version.as_ref(), "policy-v1");
+        }
+        other => panic!("expected retry, got {other:?}"),
+    }
+    validate_stage_outcome(&mw.descriptor(), &input, &outcome).expect("retry allowed");
+}
+
+#[tokio::test]
+async fn before_finalize_reject_fails_with_stable_code() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let input = finalize_input("please reject this", true);
+    let outcome = mw.invoke(ctx(), input.clone()).await.expect("invoke");
+    match &outcome {
+        StageOutcome::Fail(error) => {
+            assert_eq!(error.code.as_str(), "verify_rejected");
+            assert!(!error.retryable);
+            assert_eq!(error.category, finstack_ai_kernel::ErrorCategory::Validation);
+        }
+        other => panic!("expected fail, got {other:?}"),
+    }
+    validate_stage_outcome(&mw.descriptor(), &input, &outcome).expect("fail allowed");
+}
+
+#[tokio::test]
+async fn before_finalize_none_result_message_short_circuits_without_calling_verifier() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(Arc::clone(&verifier) as Arc<dyn EvidenceVerifier>);
+    let input = finalize_input("irrelevant", false);
+    let outcome = mw.invoke(ctx(), input).await.expect("invoke");
+    assert_eq!(outcome, StageOutcome::Continue);
+    assert_eq!(verifier.call_count(), 0, "verifier must not run on a failed candidate");
+}
+
+#[tokio::test]
+async fn before_model_bounce_adds_feedback_context() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let assistant = text_message(1, MessageRole::Assistant, "please bounce this");
+    let input = before_model_input(vec![text_message(0, MessageRole::User, "question"), assistant]);
+    let outcome = mw.invoke(ctx(), input).await.expect("invoke");
+    match outcome {
+        StageOutcome::AddContext(items) => {
+            assert_eq!(items.len(), 1);
+            let ContentBlock::Text(block) = &items[0].content[0] else {
+                panic!("expected text block");
+            };
+            let text = block.text();
+            assert!(text.contains("Evidence verification rejected the previous answer"));
+            assert!(text.contains("[citation]"));
+            assert!(text.contains("missing citation"));
+        }
+        other => panic!("expected add_context, got {other:?}"),
     }
 }
 
 #[tokio::test]
-async fn accept_continues_and_never_writes_a_store() {
-    let middleware = VerifyMiddleware::try_accept().expect("verify");
-    let outcome = middleware
-        .invoke(ctx(), finalize_input())
-        .await
-        .expect("invoke");
+async fn before_model_reject_adds_feedback_context() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let assistant = text_message(1, MessageRole::Assistant, "please reject this");
+    let input = before_model_input(vec![assistant]);
+    let outcome = mw.invoke(ctx(), input).await.expect("invoke");
+    match outcome {
+        StageOutcome::AddContext(items) => {
+            let ContentBlock::Text(block) = &items[0].content[0] else {
+                panic!("expected text block");
+            };
+            let text = block.text();
+            assert!(text.contains("[test]"));
+            assert!(text.contains("failing test"));
+        }
+        other => panic!("expected add_context, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn before_model_no_assistant_message_continues() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let input = before_model_input(vec![text_message(0, MessageRole::User, "please bounce this")]);
+    let outcome = mw.invoke(ctx(), input).await.expect("invoke");
     assert_eq!(outcome, StageOutcome::Continue);
-    validate_stage_outcome(&middleware.descriptor(), &finalize_input(), &outcome).expect("allowed");
 }
 
 #[tokio::test]
-async fn fail_and_interaction_are_allowed_before_finalize() {
-    let fail = VerifyMiddleware::try_new(VerifyDecision::Fail).expect("fail");
-    let outcome = fail.invoke(ctx(), finalize_input()).await.expect("fail");
-    assert!(matches!(outcome, StageOutcome::Fail(_)));
-    validate_stage_outcome(&fail.descriptor(), &finalize_input(), &outcome).expect("fail allowed");
-
-    let interact = VerifyMiddleware::try_new(VerifyDecision::RequestInteraction).expect("interact");
-    let outcome = interact
-        .invoke(ctx(), finalize_input())
-        .await
-        .expect("interact");
-    assert!(matches!(outcome, StageOutcome::RequestInteraction(_)));
-    validate_stage_outcome(&interact.descriptor(), &finalize_input(), &outcome)
-        .expect("interact allowed");
+async fn before_model_empty_draft_continues() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let input = before_model_input(vec![]);
+    let outcome = mw.invoke(ctx(), input).await.expect("invoke");
+    assert_eq!(outcome, StageOutcome::Continue);
 }
 
 #[tokio::test]
-async fn interaction_ids_follow_the_run_effect_id() {
-    let interact = VerifyMiddleware::try_new(VerifyDecision::RequestInteraction).expect("interact");
-    let first = match interact
-        .invoke(ctx(), finalize_input())
+async fn before_model_accept_continues() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let assistant = text_message(1, MessageRole::Assistant, "all good here");
+    let input = before_model_input(vec![assistant]);
+    let outcome = mw.invoke(ctx(), input).await.expect("invoke");
+    assert_eq!(outcome, StageOutcome::Continue);
+}
+
+#[tokio::test]
+async fn oversized_finding_note_is_truncated_not_rejected() {
+    let oversized = "x".repeat(TEXT_MAX_BYTES + 16);
+    let finding =
+        EvidenceFinding::try_new(EvidenceKind::Artifact, &oversized).expect("truncated finding");
+    assert!(finding.note.len() <= TEXT_MAX_BYTES);
+    assert!(finding.note.len() < oversized.len());
+}
+
+#[tokio::test]
+async fn wrong_stage_still_errors() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
+    let error = mw
+        .invoke(
+            ctx(),
+            StageInput::AfterModel {
+                value: RawJson::parse(b"{}").expect("value"),
+            },
+        )
         .await
-        .expect("first")
-    {
-        StageOutcome::RequestInteraction(request) => request.interaction_id(),
-        other => panic!("expected interaction, got {other:?}"),
-    };
-    let mut second_ctx = ctx();
-    second_ctx.run.effect_id = id(40, |value| EffectId::parse(value).expect("effect"));
-    let second = match interact
-        .invoke(second_ctx, finalize_input())
-        .await
-        .expect("second")
-    {
-        StageOutcome::RequestInteraction(request) => request.interaction_id(),
-        other => panic!("expected interaction, got {other:?}"),
-    };
-    assert_ne!(first, second);
+        .expect_err("wrong stage must error");
+    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
 }
 
 #[tokio::test]
 async fn middleware_satisfies_the_published_port_conformance_suite() {
-    let middleware = VerifyMiddleware::try_accept().expect("verify");
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(verifier);
     let outcome = check_middleware_conformance(
-        &middleware,
+        &mw,
         MiddlewareConformanceCase {
             context: ctx(),
-            input: finalize_input(),
+            input: finalize_input("looks fine", true),
             expected: StageOutcome::Continue,
         },
     )
     .await
     .expect("published middleware conformance suite");
     assert_eq!(outcome, StageOutcome::Continue);
-}
-
-#[tokio::test]
-async fn replace_is_structurally_unrepresentable_at_finalize() {
-    let middleware = VerifyMiddleware::try_accept().expect("verify");
-    let error = validate_stage_outcome(
-        &middleware.descriptor(),
-        &finalize_input(),
-        &StageOutcome::Replace(RawJson::parse(b"{}").expect("json")),
-    )
-    .expect_err("replace forbidden");
-    assert_eq!(
-        error.code(),
-        finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED
-    );
 }
