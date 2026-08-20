@@ -61,8 +61,12 @@ impl HitlRouter {
 
     /// Replace the expiry policy consulted by [`HitlRouter::sweep`].
     ///
-    /// The default [`ApprovalExpiry`] declines everything, so expiry is off
-    /// until a host installs a policy here. Whatever the policy returns is
+    /// The default [`ApprovalExpiry`] declines everything, so *this sweep*
+    /// delivers nothing until a host installs a policy here. That does not
+    /// keep unanswered interactions alive: past the deadline the worker's
+    /// tick expires them through the kernel's own credential-free path. A
+    /// policy is how a host substitutes an authored refusal payload for that
+    /// plain expiry. Whatever the policy returns is
     /// delivered under the host's own responsibility: the resolution must
     /// carry the principal and authorization evidence the run was accepted
     /// with, or the runtime's ingress rejects it on every tick while the
@@ -171,6 +175,9 @@ impl HitlRouter {
     /// interaction ingress admits — see [`HitlRouter::with_expiry_policy`].
     /// The `Expired` stamp is only as truthful as that policy: this router
     /// cannot see whether the tick will accept the resolution it delivered.
+    /// `Expired` therefore only ever means "a host policy authored a refusal
+    /// for this row"; an interaction the worker's tick expired on its own
+    /// arrives here as a reconcile, and is closed by the branch above.
     ///
     /// The first row that errors aborts the pass. Each transition is
     /// independently durable, so rows already transitioned stay that way and
