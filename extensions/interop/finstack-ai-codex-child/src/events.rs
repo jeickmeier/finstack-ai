@@ -18,10 +18,9 @@ pub struct CodexUsage {
     pub output_tokens: u64,
 }
 
-// Consumed by the run-state reducer (`crate::state`) and, in a later task,
-// by the process supervisor that streams `codex exec --json` stdout.
+// Consumed by the run-state reducer (`crate::state`) and the process
+// supervisor that streams `codex exec --json` stdout.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum CodexEvent {
     ThreadStarted { thread_id: String },
     AgentMessage { text: String },
@@ -30,7 +29,6 @@ pub(crate) enum CodexEvent {
     Other,
 }
 
-#[allow(dead_code)]
 pub(crate) fn parse_event(line: &str) -> CodexEvent {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
         return CodexEvent::Other;
@@ -52,7 +50,9 @@ pub(crate) fn parse_event(line: &str) -> CodexEvent {
                 .and_then(|item| item.get("text"))
                 .and_then(serde_json::Value::as_str);
             match (is_message, text) {
-                (true, Some(text)) => CodexEvent::AgentMessage { text: text.to_string() },
+                (true, Some(text)) => CodexEvent::AgentMessage {
+                    text: text.to_string(),
+                },
                 _ => CodexEvent::Other,
             }
         }
@@ -82,7 +82,9 @@ pub(crate) fn parse_event(line: &str) -> CodexEvent {
     }
 }
 
-#[allow(dead_code)]
 fn field_u64(value: &serde_json::Value, key: &str) -> u64 {
-    value.get(key).and_then(serde_json::Value::as_u64).unwrap_or(0)
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
 }

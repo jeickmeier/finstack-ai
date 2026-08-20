@@ -27,7 +27,11 @@ pub fn codex_agent_ref() -> Result<AgentRef, CodexChildError> {
         .map_err(|_| configuration("peer_agent_id_invalid"))?;
     let spec_digest = Digest::domain_separated(CODEX_SPEC_DOMAIN, 1, CODEX_SPEC_INPUT)
         .map_err(|_| configuration("peer_spec_digest_failed"))?;
-    Ok(AgentRef { id, bundle: None, spec_digest })
+    Ok(AgentRef {
+        id,
+        bundle: None,
+        spec_digest,
+    })
 }
 
 /// Build the stable [`RemoteRouteRef`] carried on every Codex child locator.
@@ -43,7 +47,14 @@ pub fn codex_route_ref() -> Result<RemoteRouteRef, CodexChildError> {
     let route = ExternalHandleRef::try_new(service.clone(), CODEX_ROUTE_LABEL, metadata)
         .map_err(|_| configuration("route_handle_invalid"))?;
     Ok(RemoteRouteRef {
-        service: ComponentRef::new(service, Some(Version { major: 1, minor: 0, patch: 0 })),
+        service: ComponentRef::new(
+            service,
+            Some(Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            }),
+        ),
         route,
     })
 }

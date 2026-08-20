@@ -10,6 +10,10 @@ authors.workspace = true
 description = "Codex exec child-agent invoker and toolset for finstack-ai"
 readme = "README.md"
 
+[[bin]]
+name = "codex_fake"
+path = "src/bin/codex_fake.rs"
+
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }

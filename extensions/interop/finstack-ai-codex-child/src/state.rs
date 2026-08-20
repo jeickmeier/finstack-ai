@@ -30,10 +30,8 @@ pub struct CodexRunReport {
     pub exit_code: Option<i32>,
 }
 
-// Wired into the invoker's per-run tracking in a later task; only the
-// tests below construct it for now.
+/// Reduced view of one child's Codex event stream and process exit.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) struct RunState {
     thread_id: Option<String>,
     last_message: Option<String>,
@@ -44,7 +42,6 @@ pub(crate) struct RunState {
     exited: bool,
 }
 
-#[allow(dead_code)]
 impl RunState {
     pub(crate) fn apply(&mut self, event: CodexEvent) {
         match event {
@@ -65,6 +62,10 @@ impl RunState {
         self.exit_code = code;
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "consumed by cancel in the following task")
+    )]
     pub(crate) fn mark_cancelled(&mut self) {
         self.cancelled = true;
     }
