@@ -35,6 +35,7 @@ members = [
     "extensions/middleware/finstack-ai-middleware-compaction",
     "extensions/middleware/finstack-ai-middleware-verify",
     "extensions/middleware/finstack-ai-middleware-document-ingest",
+    "extensions/middleware/finstack-ai-middleware-redaction",
     "extensions/observers/finstack-ai-observer-log",
     "extensions/observers/finstack-ai-observer-otel",
     "extensions/observers/finstack-ai-observer-metrics",
@@ -143,6 +144,9 @@ finstack-ai-context-memory = { path = "extensions/context/finstack-ai-context-me
 finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "1.0.0" }
 finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "1.0.0" }
 finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstack-ai-middleware-document-ingest", version = "1.0.0" }
+finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "1.0.0" }
+# ASCII-only patterns; no unicode-* features needed. Already in-tree transitively.
+regex = { version = "1.13", default-features = false, features = ["std", "perf"] }
 finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "1.0.0" }
 finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "1.0.0" }
 finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "1.0.0" }

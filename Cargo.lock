@@ -1186,6 +1186,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-middleware-redaction"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+]
+
+[[package]]
 name = "finstack-ai-middleware-verify"
 version = "1.0.0"
 dependencies = [
