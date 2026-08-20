@@ -27,6 +27,7 @@
 use thiserror::Error;
 
 mod config;
+mod events;
 mod identity;
 mod invoker;
 
@@ -34,6 +35,7 @@ mod invoker;
 mod tests;
 
 pub use config::{CodexExecConfig, CodexSandboxMode};
+pub use events::CodexUsage;
 pub use identity::{CODEX_PEER_AGENT_ID, codex_agent_ref, codex_route_ref};
 pub use invoker::CodexChildInvoker;
 

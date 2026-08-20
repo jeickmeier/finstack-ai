@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::{parse_event, CodexEvent};
 use std::path::PathBuf;
 
 fn valid_config(dir: &std::path::Path) -> CodexExecConfig {
@@ -48,6 +49,51 @@ fn try_new_accepts_valid_config_and_maps_sandbox_flags() {
     assert_eq!(CodexSandboxMode::ReadOnly.flag(), "read-only");
     assert_eq!(CodexSandboxMode::WorkspaceWrite.flag(), "workspace-write");
     assert_eq!(CodexSandboxMode::DangerFullAccess.flag(), "danger-full-access");
+}
+
+#[test]
+fn parses_thread_started() {
+    let event = parse_event(r#"{"type":"thread.started","thread_id":"thread-1"}"#);
+    assert_eq!(event, CodexEvent::ThreadStarted { thread_id: "thread-1".to_string() });
+}
+
+#[test]
+fn parses_agent_message_item() {
+    let event = parse_event(
+        r#"{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}"#,
+    );
+    assert_eq!(event, CodexEvent::AgentMessage { text: "done".to_string() });
+}
+
+#[test]
+fn parses_turn_completed_usage() {
+    let event = parse_event(
+        r#"{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":5}}"#,
+    );
+    let CodexEvent::TurnCompleted { usage: Some(usage) } = event else {
+        panic!("expected usage");
+    };
+    assert_eq!((usage.input_tokens, usage.cached_input_tokens, usage.output_tokens), (10, 2, 5));
+}
+
+#[test]
+fn parses_failures() {
+    assert_eq!(
+        parse_event(r#"{"type":"turn.failed","error":{"message":"boom"}}"#),
+        CodexEvent::Failed { message: "boom".to_string() },
+    );
+    assert_eq!(
+        parse_event(r#"{"type":"error","message":"broke"}"#),
+        CodexEvent::Failed { message: "broke".to_string() },
+    );
+}
+
+#[test]
+fn unknown_and_malformed_lines_are_other() {
+    assert_eq!(parse_event(r#"{"type":"turn.started"}"#), CodexEvent::Other);
+    assert_eq!(parse_event("not json"), CodexEvent::Other);
+    assert_eq!(parse_event(""), CodexEvent::Other);
+    assert_eq!(parse_event(r#"{"type":"item.completed","item":{"type":"command_execution"}}"#), CodexEvent::Other);
 }
 
 #[test]
