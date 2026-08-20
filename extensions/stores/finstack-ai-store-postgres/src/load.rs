@@ -50,15 +50,87 @@ use finstack_ai_store_common::{
     AppendIdentity, FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, accelerated_from,
     check_batch_alignment, protocol_error, verify_full_head, verify_tail_records,
 };
-use tokio_postgres::{Client, IsolationLevel, Transaction};
+use tokio_postgres::{Client, IsolationLevel, Statement, Transaction};
 
-use crate::error::{Failure, i64_from_u64, u64_from_i64};
+use crate::error::{Failure, i64_from_u64, settle, u64_from_i64};
 use crate::pool::PooledClient;
 
-/// Record columns, in the order [`reconstruct_envelope`] reads them.
-pub(crate) const RECORD_COLUMNS: &str = "session_id, sequence, record_id, lane_id, run_id, kind, \
-     format_version, kind_version, payload_cbor, timestamp, payload_digest, previous_checksum, \
-     envelope_checksum, derived_event_ids";
+/// Read the session row.
+pub(crate) const SELECT_SESSION_ROW: &str = "SELECT current_sequence, head_checksum, \
+     snapshot_sequence, metadata FROM sessions WHERE session_id = $1";
+
+/// Read every record of a session at or after a sequence, with its batch id.
+const SELECT_RECORDS_FROM: &str = concat!(
+    "SELECT ",
+    record_columns!(),
+    ", batch_id FROM records WHERE session_id = $1 AND sequence >= $2 ORDER BY sequence"
+);
+
+/// Read one record's stored envelope checksum.
+pub(crate) const SELECT_ENVELOPE_CHECKSUM: &str =
+    "SELECT envelope_checksum FROM records WHERE session_id = $1 AND sequence = $2";
+
+/// Read the batch id that committed one sequence.
+const SELECT_SEQUENCE_BATCH: &str =
+    "SELECT batch_id FROM records WHERE session_id = $1 AND sequence = $2";
+
+/// Read a session's stored snapshot row.
+pub(crate) const SELECT_SNAPSHOT: &str =
+    "SELECT sequence, payload_cbor, digest FROM snapshots WHERE session_id = $1";
+
+/// Read one committed batch's header.
+pub(crate) const SELECT_BATCH: &str =
+    "SELECT request_cbor, first_sequence, last_sequence FROM batches WHERE batch_id = $1";
+
+/// Read the records of one committed batch, in sequence order.
+pub(crate) const SELECT_BATCH_RECORDS: &str = concat!(
+    "SELECT ",
+    record_columns!(),
+    " FROM records WHERE batch_id = $1 ORDER BY sequence"
+);
+
+/// The statements one [`load`] prepares up front, before opening its
+/// transaction (see [`PooledClient::prepared`] for why that ordering is
+/// forced).
+///
+/// All four are prepared even though `sequence_batch` is only used by the
+/// windowed loads: they are prepared once per physical connection, and
+/// splitting the bundle per window would buy one saved `PREPARE` at the cost
+/// of two more code paths.
+pub(crate) struct LoadStatements {
+    /// [`SELECT_SESSION_ROW`].
+    session_row: Statement,
+    /// [`SELECT_RECORDS_FROM`].
+    records_from: Statement,
+    /// [`SELECT_SNAPSHOT`].
+    snapshot: Statement,
+    /// [`SELECT_SEQUENCE_BATCH`].
+    sequence_batch: Statement,
+}
+
+impl LoadStatements {
+    /// Prepare (or reuse) every statement the load path needs.
+    async fn prepare(client: &mut PooledClient<Client>) -> Result<Self, Failure> {
+        Ok(Self {
+            session_row: prepare(client, SELECT_SESSION_ROW).await?,
+            records_from: prepare(client, SELECT_RECORDS_FROM).await?,
+            snapshot: prepare(client, SELECT_SNAPSHOT).await?,
+            sequence_batch: prepare(client, SELECT_SEQUENCE_BATCH).await?,
+        })
+    }
+}
+
+/// Fetch one cached statement, classifying a `PREPARE` failure exactly as
+/// any other statement failure on the connection.
+pub(crate) async fn prepare(
+    client: &mut PooledClient<Client>,
+    sql: &'static str,
+) -> Result<Statement, Failure> {
+    client
+        .prepared(sql)
+        .await
+        .map_err(|error| Failure::from_driver(&error))
+}
 
 /// Process-local proof that a session journal was verified through this head.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,7 +156,14 @@ pub(crate) struct SessionRow {
     /// Checksum of the head record, `None` before the first append.
     pub(crate) head_checksum: Option<Digest>,
     /// Sequence covered by the stored snapshot, when one exists.
-    snapshot_sequence: Option<u64>,
+    ///
+    /// Doubles as the *prune boundary*: [`crate::prune::prune`] deletes
+    /// records with `sequence < snapshot_sequence`, so a record missing
+    /// below this value may have been legitimately pruned, while a record
+    /// missing at or above it is a hole in the journal. See
+    /// [`crate::snapshot::scan`], which is the only reader that needs the
+    /// distinction.
+    pub(crate) snapshot_sequence: Option<u64>,
     /// Session metadata. Never grants authority.
     metadata: Metadata,
 }
@@ -117,24 +196,32 @@ pub(crate) async fn load(
     window: LoadWindow,
     cached: Option<VerifiedHead>,
 ) -> Result<LoadedSession, StoreError> {
-    // `client` deref-coerces to the `&mut Client` this needs; the borrow (and
-    // the transaction that borrows from it) ends with the statement, before
-    // `poison` touches the checkout itself.
-    let outcome = load_on_connection(client, session_id, snapshot_bytes, window, cached).await;
-    match outcome {
-        Ok(loaded) => Ok(loaded),
-        Err(failure) => {
-            if failure.poison {
-                client.poison();
-            }
-            Err(failure.error)
+    // Statements are prepared first: `Client::transaction` borrows the
+    // client mutably, and the statement cache lives on the checkout.
+    let outcome = match LoadStatements::prepare(client).await {
+        Ok(statements) => {
+            // `client` deref-coerces to the `&mut Client` this needs; the
+            // borrow (and the transaction that borrows from it) ends with
+            // the statement, before `poison` touches the checkout itself.
+            load_on_connection(
+                client,
+                &statements,
+                session_id,
+                snapshot_bytes,
+                window,
+                cached,
+            )
+            .await
         }
-    }
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
 }
 
 /// Run one load inside a read-only, repeatable-read transaction.
 async fn load_on_connection(
     client: &mut Client,
+    statements: &LoadStatements,
     session_id: SessionId,
     snapshot_bytes: usize,
     window: LoadWindow,
@@ -148,19 +235,27 @@ async fn load_on_connection(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
-    let loaded =
-        match load_session_window(&transaction, session_id, snapshot_bytes, window, cached).await {
-            Ok(loaded) => loaded,
-            Err(mut failure) => {
-                // Same rule as append: a rollback that could not be delivered
-                // leaves the connection possibly still in a transaction, so it
-                // must not go back to the pool even for a logical failure.
-                if transaction.rollback().await.is_err() {
-                    failure.poison = true;
-                }
-                return Err(failure);
+    let loaded = match load_session_window(
+        &transaction,
+        statements,
+        session_id,
+        snapshot_bytes,
+        window,
+        cached,
+    )
+    .await
+    {
+        Ok(loaded) => loaded,
+        Err(mut failure) => {
+            // Same rule as append: a rollback that could not be delivered
+            // leaves the connection possibly still in a transaction, so it
+            // must not go back to the pool even for a logical failure.
+            if transaction.rollback().await.is_err() {
+                failure.poison = true;
             }
-        };
+            return Err(failure);
+        }
+    };
 
     // Nothing was written, but the read-only transaction still has to be
     // ended before the connection is reusable.
@@ -173,19 +268,23 @@ async fn load_on_connection(
 /// Dispatch on the requested window (mirrors sqlite's `load_session_window`).
 async fn load_session_window(
     transaction: &Transaction<'_>,
+    statements: &LoadStatements,
     session_id: SessionId,
     snapshot_bytes: usize,
     window: LoadWindow,
     cached: Option<VerifiedHead>,
 ) -> Result<LoadedSession, Failure> {
     match window {
-        LoadWindow::Full => load_session(transaction, session_id, snapshot_bytes, cached).await,
+        LoadWindow::Full => {
+            load_session(transaction, statements, session_id, snapshot_bytes, cached).await
+        }
         LoadWindow::FromSequence {
             from_sequence,
             prior_checksum,
         } => {
             load_session_from_sequence(
                 transaction,
+                statements,
                 session_id,
                 snapshot_bytes,
                 from_sequence,
@@ -194,7 +293,8 @@ async fn load_session_window(
             .await
         }
         LoadWindow::SnapshotPlusTail => {
-            load_session_snapshot_plus_tail(transaction, session_id, snapshot_bytes).await
+            load_session_snapshot_plus_tail(transaction, statements, session_id, snapshot_bytes)
+                .await
         }
     }
 }
@@ -202,22 +302,37 @@ async fn load_session_window(
 /// Load and verify a whole session journal.
 async fn load_session(
     transaction: &Transaction<'_>,
+    statements: &LoadStatements,
     session_id: SessionId,
     snapshot_bytes: usize,
     cached: Option<VerifiedHead>,
 ) -> Result<LoadedSession, Failure> {
-    let Some(session) = load_session_row(transaction, session_id).await? else {
+    let Some(session) = load_session_row(transaction, &statements.session_row, session_id).await?
+    else {
         return Ok(LoadedSession::empty(session_id));
     };
-    let stored = load_records_from(transaction, session_id, 1).await?;
-    let records = envelopes(&stored);
-    let head_checksum = verify_against_cache(&records, &session, cached)?;
-    let snapshot = load_session_snapshot(transaction, session_id, &session, snapshot_bytes).await?;
+    let stored = load_records_from(transaction, &statements.records_from, session_id, 1).await?;
+    // The verification copy is scoped so it is dropped before
+    // `loaded_session` moves the originals out of `stored`: store-common's
+    // verification takes `&[RecordEnvelope]`, so one owned copy is
+    // unavoidable, but only one is ever alive at a time.
+    let head_checksum = {
+        let records = envelopes(&stored);
+        verify_against_cache(&records, &session, cached)?
+    };
+    let snapshot = load_session_snapshot(
+        transaction,
+        &statements.snapshot,
+        session_id,
+        &session,
+        snapshot_bytes,
+    )
+    .await?;
     Ok(loaded_session(
         session_id,
         &session,
         head_checksum,
-        &stored,
+        stored,
         snapshot,
     )?)
 }
@@ -286,6 +401,7 @@ fn verify_suffix(
 /// [`LoadWindow::FromSequence`]).
 async fn load_session_from_sequence(
     transaction: &Transaction<'_>,
+    statements: &LoadStatements,
     session_id: SessionId,
     snapshot_bytes: usize,
     from_sequence: u64,
@@ -297,21 +413,24 @@ async fn load_session_from_sequence(
         // there is nothing to chain from and this is a plain full load. The
         // cache is deliberately not consulted — the caller asked for a
         // window, and this path is not on the hot restore loop.
-        return load_session(transaction, session_id, snapshot_bytes, None).await;
+        return load_session(transaction, statements, session_id, snapshot_bytes, None).await;
     }
-    let Some(session) = load_session_row(transaction, session_id).await? else {
+    let Some(session) = load_session_row(transaction, &statements.session_row, session_id).await?
+    else {
         return Err(StoreError::Integrity {
             reason_code: FROM_SEQUENCE_WINDOW.gap,
         }
         .into());
     };
-    let stored = load_records_from(transaction, session_id, start).await?;
+    let stored =
+        load_records_from(transaction, &statements.records_from, session_id, start).await?;
     loaded_tail(
         transaction,
+        statements,
         session_id,
         snapshot_bytes,
         &session,
-        &stored,
+        stored,
         prior_checksum,
         start,
         FROM_SEQUENCE_WINDOW,
@@ -323,26 +442,37 @@ async fn load_session_from_sequence(
 /// the session has no snapshot ([`LoadWindow::SnapshotPlusTail`]).
 async fn load_session_snapshot_plus_tail(
     transaction: &Transaction<'_>,
+    statements: &LoadStatements,
     session_id: SessionId,
     snapshot_bytes: usize,
 ) -> Result<LoadedSession, Failure> {
-    let Some(session) = load_session_row(transaction, session_id).await? else {
+    let Some(session) = load_session_row(transaction, &statements.session_row, session_id).await?
+    else {
         return Ok(LoadedSession::empty(session_id));
     };
-    let Some(snapshot) = load_snapshot(transaction, session_id, snapshot_bytes).await? else {
-        return load_session(transaction, session_id, snapshot_bytes, None).await;
+    let Some(snapshot) = load_snapshot(
+        transaction,
+        &statements.snapshot,
+        session_id,
+        snapshot_bytes,
+    )
+    .await?
+    else {
+        return load_session(transaction, statements, session_id, snapshot_bytes, None).await;
     };
     let accelerated = accelerated_from(&snapshot).ok_or(StoreError::Integrity {
         reason_code: "snapshot_state_invalid",
     })?;
     let start = accelerated.sequence.saturating_add(1);
-    let stored = load_records_from(transaction, session_id, start).await?;
+    let stored =
+        load_records_from(transaction, &statements.records_from, session_id, start).await?;
     loaded_tail(
         transaction,
+        statements,
         session_id,
         snapshot_bytes,
         &session,
-        &stored,
+        stored,
         accelerated.head_checksum,
         start,
         SNAPSHOT_WINDOW,
@@ -357,29 +487,47 @@ async fn load_session_snapshot_plus_tail(
 )]
 async fn loaded_tail(
     transaction: &Transaction<'_>,
+    statements: &LoadStatements,
     session_id: SessionId,
     snapshot_bytes: usize,
     session: &SessionRow,
-    stored: &[StoredRecord],
+    stored: Vec<StoredRecord>,
     prior_checksum: Digest,
     start: u64,
     codes: WindowCodes,
 ) -> Result<LoadedSession, Failure> {
     if let Some(first) = stored.first() {
-        let prior_batch =
-            lookup_sequence_batch(transaction, session_id, start.saturating_sub(1)).await?;
+        let prior_batch = lookup_sequence_batch(
+            transaction,
+            &statements.sequence_batch,
+            session_id,
+            start.saturating_sub(1),
+        )
+        .await?;
         check_batch_alignment(first.batch_id, prior_batch, codes)?;
     }
-    let records = envelopes(stored);
-    verify_tail_records(
-        &records,
-        start,
-        prior_checksum,
-        session.current_sequence,
-        session.head_checksum,
-        codes,
-    )?;
-    let snapshot = load_session_snapshot(transaction, session_id, session, snapshot_bytes).await?;
+    // Same ownership rule as `load_session`: the verification copy lives in
+    // its own scope and is dropped before `loaded_session` moves the
+    // originals.
+    {
+        let records = envelopes(&stored);
+        verify_tail_records(
+            &records,
+            start,
+            prior_checksum,
+            session.current_sequence,
+            session.head_checksum,
+            codes,
+        )?;
+    }
+    let snapshot = load_session_snapshot(
+        transaction,
+        &statements.snapshot,
+        session_id,
+        session,
+        snapshot_bytes,
+    )
+    .await?;
     Ok(loaded_session(
         session_id,
         session,
@@ -394,7 +542,7 @@ fn loaded_session(
     session_id: SessionId,
     session: &SessionRow,
     head_checksum: Option<Digest>,
-    stored: &[StoredRecord],
+    stored: Vec<StoredRecord>,
     snapshot: Option<OpaqueSnapshot>,
 ) -> Result<LoadedSession, StoreError> {
     Ok(LoadedSession {
@@ -409,37 +557,58 @@ fn loaded_session(
 }
 
 /// Rebuild the stored batch boundaries from a contiguous run of records.
-fn group_batches(stored: &[StoredRecord]) -> Result<Vec<CommittedBatch>, StoreError> {
+///
+/// Takes the rows by value and *moves* each envelope into the batch it
+/// belongs to: the envelopes are already owned by the caller's `Vec` and
+/// nothing needs them afterwards, so cloning them here would double the
+/// per-record cost of every load.
+fn group_batches(stored: Vec<StoredRecord>) -> Result<Vec<CommittedBatch>, StoreError> {
     let mut batches = Vec::new();
-    let mut rest = stored;
-    while let Some(head) = rest.first() {
-        let batch_id = head.batch_id;
-        let first_sequence = head.envelope.sequence();
-        let span = rest
-            .iter()
-            .position(|row| row.batch_id != batch_id)
-            .unwrap_or(rest.len());
-        let (batch, remainder) = rest.split_at(span);
-        rest = remainder;
-        let records = batch
-            .iter()
-            .map(|row| row.envelope.clone())
-            .collect::<Vec<_>>();
-        let last_sequence = records
-            .last()
-            .map_or(first_sequence, RecordEnvelope::sequence);
-        batches.push(
-            CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records).map_err(
-                |_| StoreError::Integrity {
-                    reason_code: "committed_batch_invalid",
-                },
-            )?,
-        );
+    // The batch currently being accumulated: its id, its first sequence, and
+    // the envelopes moved into it so far.
+    let mut current: Option<(AppendBatchId, u64, Vec<RecordEnvelope>)> = None;
+    for row in stored {
+        let sequence = row.envelope.sequence();
+        let continues = current
+            .as_ref()
+            .is_some_and(|(batch_id, _, _)| *batch_id == row.batch_id);
+        if !continues && let Some((batch_id, first_sequence, records)) = current.take() {
+            batches.push(committed_batch(batch_id, first_sequence, records)?);
+        }
+        if let Some((_, _, records)) = current.as_mut() {
+            records.push(row.envelope);
+        } else {
+            current = Some((row.batch_id, sequence, vec![row.envelope]));
+        }
+    }
+    if let Some((batch_id, first_sequence, records)) = current {
+        batches.push(committed_batch(batch_id, first_sequence, records)?);
     }
     Ok(batches)
 }
 
-/// Clone the envelopes out of their stored rows.
+/// Assemble one rebuilt [`CommittedBatch`] from the records grouped into it.
+fn committed_batch(
+    batch_id: AppendBatchId,
+    first_sequence: u64,
+    records: Vec<RecordEnvelope>,
+) -> Result<CommittedBatch, StoreError> {
+    let last_sequence = records
+        .last()
+        .map_or(first_sequence, RecordEnvelope::sequence);
+    CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records).map_err(|_| {
+        StoreError::Integrity {
+            reason_code: "committed_batch_invalid",
+        }
+    })
+}
+
+/// Clone the envelopes out of their stored rows, for the verification
+/// helpers in [`finstack_ai_store_common`] — which take
+/// `&[RecordEnvelope]`, so a contiguous owned slice has to exist somewhere.
+///
+/// Every caller scopes the result so it is dropped before [`group_batches`]
+/// moves the originals: one copy per record is alive at a time, never two.
 fn envelopes(stored: &[StoredRecord]) -> Vec<RecordEnvelope> {
     stored
         .iter()
@@ -450,14 +619,11 @@ fn envelopes(stored: &[StoredRecord]) -> Vec<RecordEnvelope> {
 /// Read the session row, or `None` when the session does not exist.
 pub(crate) async fn load_session_row(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
 ) -> Result<Option<SessionRow>, Failure> {
     let row = transaction
-        .query_opt(
-            "SELECT current_sequence, head_checksum, snapshot_sequence, metadata \
-             FROM sessions WHERE session_id = $1",
-            &[&session_id.as_bytes().as_slice()],
-        )
+        .query_opt(statement, &[&session_id.as_bytes().as_slice()])
         .await
         .map_err(|error| Failure::from_driver(&error))?;
     let Some(row) = row else {
@@ -489,12 +655,13 @@ pub(crate) async fn load_session_row(
 /// `load_envelope_checksum`.
 pub(crate) async fn load_envelope_checksum(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
     sequence: u64,
 ) -> Result<Option<Digest>, Failure> {
     let row = transaction
         .query_opt(
-            "SELECT envelope_checksum FROM records WHERE session_id = $1 AND sequence = $2",
+            statement,
             &[
                 &session_id.as_bytes().as_slice(),
                 &i64_from_u64(sequence, "sequence")?,
@@ -513,15 +680,13 @@ pub(crate) async fn load_envelope_checksum(
 /// order, with the batch id each was committed in.
 async fn load_records_from(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
     from_sequence: u64,
 ) -> Result<Vec<StoredRecord>, Failure> {
     let rows = transaction
         .query(
-            &format!(
-                "SELECT {RECORD_COLUMNS}, batch_id FROM records \
-                 WHERE session_id = $1 AND sequence >= $2 ORDER BY sequence"
-            ),
+            statement,
             &[
                 &session_id.as_bytes().as_slice(),
                 &i64_from_u64(from_sequence, "from_sequence")?,
@@ -543,6 +708,7 @@ async fn load_records_from(
 /// The batch holding `sequence`, or `None` for sequence 0 / a missing record.
 async fn lookup_sequence_batch(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
     sequence: u64,
 ) -> Result<Option<AppendBatchId>, Failure> {
@@ -551,7 +717,7 @@ async fn lookup_sequence_batch(
     }
     let row = transaction
         .query_opt(
-            "SELECT batch_id FROM records WHERE session_id = $1 AND sequence = $2",
+            statement,
             &[
                 &session_id.as_bytes().as_slice(),
                 &i64_from_u64(sequence, "sequence")?,
@@ -570,6 +736,7 @@ async fn lookup_sequence_batch(
 /// sqlite's `load_session_extras`.
 async fn load_session_snapshot(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
     session: &SessionRow,
     snapshot_bytes: usize,
@@ -577,7 +744,7 @@ async fn load_session_snapshot(
     if session.snapshot_sequence.is_none() {
         return Ok(None);
     }
-    load_snapshot(transaction, session_id, snapshot_bytes).await
+    load_snapshot(transaction, statement, session_id, snapshot_bytes).await
 }
 
 /// Read the stored snapshot row, if any.
@@ -586,14 +753,12 @@ async fn load_session_snapshot(
 /// (write) transaction to admit and decode the prune-covering snapshot.
 pub(crate) async fn load_snapshot(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
     snapshot_bytes: usize,
 ) -> Result<Option<OpaqueSnapshot>, Failure> {
     let row = transaction
-        .query_opt(
-            "SELECT sequence, payload_cbor, digest FROM snapshots WHERE session_id = $1",
-            &[&session_id.as_bytes().as_slice()],
-        )
+        .query_opt(statement, &[&session_id.as_bytes().as_slice()])
         .await
         .map_err(|error| Failure::from_driver(&error))?;
     let Some(row) = row else {
@@ -612,13 +777,12 @@ pub(crate) async fn load_snapshot(
 /// Load a committed batch by id, with its records in sequence order.
 pub(crate) async fn load_batch(
     transaction: &Transaction<'_>,
+    header: &Statement,
+    records: &Statement,
     batch_id: AppendBatchId,
 ) -> Result<Option<LoadedBatch>, Failure> {
     let row = transaction
-        .query_opt(
-            "SELECT request_cbor, first_sequence, last_sequence FROM batches WHERE batch_id = $1",
-            &[&batch_id.as_bytes().as_slice()],
-        )
+        .query_opt(header, &[&batch_id.as_bytes().as_slice()])
         .await
         .map_err(|error| Failure::from_driver(&error))?;
     let Some(row) = row else {
@@ -630,18 +794,15 @@ pub(crate) async fn load_batch(
     let identity = decode::<AppendIdentity>(&request_cbor).map_err(protocol_error)?;
 
     let record_rows = transaction
-        .query(
-            &format!("SELECT {RECORD_COLUMNS} FROM records WHERE batch_id = $1 ORDER BY sequence"),
-            &[&batch_id.as_bytes().as_slice()],
-        )
+        .query(records, &[&batch_id.as_bytes().as_slice()])
         .await
         .map_err(|error| Failure::from_driver(&error))?;
-    let records = record_rows
+    let envelopes = record_rows
         .iter()
         .map(reconstruct_envelope)
         .collect::<Result<Vec<_>, _>>()?;
 
-    let committed = CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records)
+    let committed = CommittedBatch::try_new(batch_id, first_sequence, last_sequence, envelopes)
         .map_err(|_| StoreError::Integrity {
             reason_code: "committed_batch_invalid",
         })?;

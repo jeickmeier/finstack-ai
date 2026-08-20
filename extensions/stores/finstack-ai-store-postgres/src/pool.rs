@@ -3,17 +3,20 @@
 //!
 //! Deliberately hand-rolled rather than a `deadpool` dependency: a
 //! `tokio::sync::Semaphore` bounds the number of physical connections ever
-//! created to `pool_size`, and a plain `std::sync::Mutex<Vec<C>>` holds idle
-//! connections (a `std::sync::Mutex` rather than `tokio::sync::Mutex`
-//! because the critical sections here are pure, non-`await`-ing
-//! push/pop — using it lets [`PooledClient::drop`] return a connection to
-//! the pool synchronously, which an async mutex cannot do from `Drop`).
+//! created to `pool_size`, and a plain `std::sync::Mutex<Vec<Entry<C>>>`
+//! holds idle connections, each with the statements already prepared on it
+//! (see [`StatementCache`]). A `std::sync::Mutex` rather than
+//! `tokio::sync::Mutex` because the critical sections here are pure,
+//! non-`await`-ing push/pop — using it lets [`PooledClient::drop`] return a
+//! connection to the pool synchronously, which an async mutex cannot do
+//! from `Drop`.
 //!
 //! [`Pool`] is generic over the pooled connection type `C` purely so the
 //! bookkeeping (semaphore + idle queue + discard-on-drop) can be unit
 //! tested without a live server: production code only ever instantiates
 //! `Pool<tokio_postgres::Client>` (see `src/store.rs`).
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -21,6 +24,29 @@ use std::sync::Mutex as StdMutex;
 
 use finstack_ai_runtime::StoreError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio_postgres::Statement;
+
+/// Prepared statements already parsed on one physical connection, keyed by
+/// the `&'static str` SQL literal they were prepared from.
+///
+/// Postgres prepared statements are session-scoped, so the cache has to live
+/// and die with the connection rather than with a checkout: it rides in the
+/// pool's idle queue inside [`Entry`], is handed to the [`PooledClient`] at
+/// checkout, and travels back on return. A discarded or poisoned connection
+/// drops its cache with it, which is exactly right — the server-side
+/// statements went away with the session.
+///
+/// [`Statement`] is a cheap handle (an `Arc` internally), so cloning one out
+/// of the cache per call site costs a refcount bump, not a round trip.
+pub(crate) type StatementCache = HashMap<&'static str, Statement>;
+
+/// A pooled connection together with the statements prepared on it.
+struct Entry<C> {
+    /// The physical connection.
+    client: C,
+    /// Statements already parsed on `client`'s session.
+    statements: StatementCache,
+}
 
 /// A connection-factory future, boxed so it can be stored as a field.
 type ConnectFuture<C> = Pin<Box<dyn Future<Output = Result<C, StoreError>> + Send>>;
@@ -42,8 +68,8 @@ struct PoolInner<C> {
     /// checked out or newly connecting — an idle, un-checked-out connection
     /// does not hold a permit, see [`Pool::get`]).
     semaphore: Arc<Semaphore>,
-    /// Idle, ready-to-use connections.
-    idle: StdMutex<Vec<C>>,
+    /// Idle, ready-to-use connections, each with its statement cache.
+    idle: StdMutex<Vec<Entry<C>>>,
     /// Lazily creates a new physical connection.
     connect: ConnectFn<C>,
     /// Checks whether an idle connection is still usable. A connection can
@@ -99,7 +125,10 @@ impl<C: Send + 'static> Pool<C> {
             .idle
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        idle.push(client);
+        idle.push(Entry {
+            client,
+            statements: StatementCache::new(),
+        });
     }
 
     /// Check out a connection, waiting if `size` connections are already
@@ -130,8 +159,8 @@ impl<C: Send + 'static> Pool<C> {
                 reason_code: "postgres_pool_closed",
             })?;
 
-        let client = loop {
-            let idle_client = {
+        let entry = loop {
+            let idle_entry = {
                 let mut idle = self
                     .inner
                     .idle
@@ -140,19 +169,26 @@ impl<C: Send + 'static> Pool<C> {
                 idle.pop()
             };
 
-            match idle_client {
-                Some(client) if (self.inner.is_alive)(&client) => break client,
-                // Dead idle connection: drop `client` here (its Drop, if
-                // any, is the driver's normal close path) and loop back to
-                // try the next idle one instead of handing it out.
-                Some(_dead_client) => {}
-                None => break (self.inner.connect)().await?,
+            match idle_entry {
+                Some(entry) if (self.inner.is_alive)(&entry.client) => break entry,
+                // Dead idle connection: drop `entry` here (its Drop, if
+                // any, is the driver's normal close path, and its statement
+                // cache goes with the session it belonged to) and loop back
+                // to try the next idle one instead of handing it out.
+                Some(_dead_entry) => {}
+                None => {
+                    break Entry {
+                        client: (self.inner.connect)().await?,
+                        statements: StatementCache::new(),
+                    };
+                }
             }
         };
 
         Ok(PooledClient {
             inner: Arc::clone(&self.inner),
-            client: Some(client),
+            client: Some(entry.client),
+            statements: entry.statements,
             permit: Some(permit),
             discarded: false,
         })
@@ -167,11 +203,65 @@ impl<C: Send + 'static> Pool<C> {
 pub(crate) struct PooledClient<C> {
     inner: Arc<PoolInner<C>>,
     client: Option<C>,
+    /// Statements prepared on this physical connection (see
+    /// [`StatementCache`]). Travels back to the idle queue with the
+    /// connection, and is dropped with it when the checkout is discarded.
+    statements: StatementCache,
     permit: Option<OwnedSemaphorePermit>,
     discarded: bool,
 }
 
+impl PooledClient<tokio_postgres::Client> {
+    /// Return the [`Statement`] for `sql`, preparing it on this connection
+    /// the first time it is asked for and caching it thereafter.
+    ///
+    /// Statements are prepared on the *client*, not inside a transaction:
+    /// a `Parse` issued inside a transaction is rolled back with it, which
+    /// would leave the cache holding handles the server no longer knows
+    /// about. Preparing on the client means every entry stays valid for the
+    /// life of the session — and, because a `Transaction` runs on the very
+    /// same connection, the cached handles are directly usable inside one.
+    /// That is also why every call site prepares *before* opening its
+    /// transaction: `Client::transaction` borrows the client mutably for the
+    /// transaction's lifetime, so the cache is unreachable until it ends.
+    ///
+    /// # Errors
+    ///
+    /// Returns the driver error from `PREPARE`; call sites classify it with
+    /// [`crate::error::Failure::from_driver`] like any other statement
+    /// failure, so a wire-level failure here poisons the connection.
+    pub(crate) async fn prepared(
+        &mut self,
+        sql: &'static str,
+    ) -> Result<Statement, tokio_postgres::Error> {
+        if let Some(statement) = self.statements.get(sql) {
+            return Ok(statement.clone());
+        }
+        let prepared = {
+            #[allow(
+                clippy::unwrap_used,
+                reason = "client is only ever None after discard()/drop(), \
+                          neither of which leaves the PooledClient reachable"
+            )]
+            let client = self.client.as_ref().unwrap();
+            client.prepare(sql).await?
+        };
+        self.statements.insert(sql, prepared.clone());
+        Ok(prepared)
+    }
+}
+
 impl<C> PooledClient<C> {
+    /// Number of statements currently cached on this connection.
+    ///
+    /// Test-only: the cache is otherwise invisible, and the property worth
+    /// asserting is that it *travels with the physical connection* rather
+    /// than with the checkout.
+    #[cfg(test)]
+    pub(crate) fn cached_statement_count(&self) -> usize {
+        self.statements.len()
+    }
+
     /// Mark this connection as poisoned *in place*, without consuming the
     /// handle: it is dropped rather than returned to the idle queue when the
     /// handle itself is eventually dropped.
@@ -193,7 +283,9 @@ impl<C> PooledClient<C> {
         self.discarded = true;
         // Explicit drop makes the intent visible at the call site; the
         // `Drop` impl below is what actually skips returning the client to
-        // the idle queue once `discarded` is set.
+        // the idle queue once `discarded` is set. The statement cache is
+        // dropped with `self`, along with the session those statements were
+        // prepared on.
         drop(self.client.take());
         drop(self.permit.take());
     }
@@ -233,7 +325,13 @@ impl<C> Drop for PooledClient<C> {
                 .idle
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            idle.push(client);
+            // The statement cache goes back with the connection it belongs
+            // to, so the next checkout of this physical connection reuses
+            // the statements already prepared on its session.
+            idle.push(Entry {
+                client,
+                statements: std::mem::take(&mut self.statements),
+            });
         }
         // The permit (if still held) drops here, releasing the semaphore
         // slot regardless of whether the connection was returned or
@@ -270,6 +368,30 @@ mod tests {
 
     fn dead_marker_is_dead() -> IsAliveFn<u32> {
         Box::new(|client| *client != DEAD_MARKER)
+    }
+
+    /// A real-server connector for the two server-gated tests below.
+    fn postgres_connector(url: &str) -> ConnectFn<tokio_postgres::Client> {
+        let connect_url = url.to_owned();
+        Box::new(move || {
+            let url = connect_url.clone();
+            Box::pin(async move {
+                let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+                    .await
+                    .map_err(|_error| StoreError::Unavailable {
+                        reason_code: "postgres_unavailable",
+                    })?;
+                tokio::spawn(async move {
+                    let _ = connection.await;
+                });
+                Ok(client)
+            })
+        })
+    }
+
+    /// The production liveness check (see `crate::store::try_open`).
+    fn postgres_is_alive() -> IsAliveFn<tokio_postgres::Client> {
+        Box::new(|client: &tokio_postgres::Client| !client.is_closed())
     }
 
     #[tokio::test]
@@ -422,6 +544,58 @@ mod tests {
         );
     }
 
+    /// The per-connection prepared-statement cache: a statement prepared on
+    /// the *client* is usable inside a `Transaction` on that same
+    /// connection (which is why every op module prepares before it opens
+    /// its transaction), and the cache travels back to the idle queue with
+    /// the connection rather than dying with the checkout.
+    #[tokio::test]
+    async fn statements_are_cached_per_connection_and_usable_in_transactions() {
+        /// The statement this test prepares; a `const` so it is the
+        /// `&'static str` key `prepared` expects.
+        const SQL: &str = "SELECT $1::bigint + 1";
+
+        let Some(url) = std::env::var("FINSTACK_PG_TEST_URL").ok() else {
+            eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+            return;
+        };
+        let pool = Pool::new(4, postgres_connector(&url), postgres_is_alive());
+
+        let mut first = pool.get().await.expect("first checkout");
+        assert_eq!(first.cached_statement_count(), 0);
+        let statement = first.prepared(SQL).await.expect("prepare");
+        assert_eq!(first.cached_statement_count(), 1);
+
+        // The cached handle works inside a transaction started on the very
+        // same connection.
+        let transaction = first.transaction().await.expect("begin");
+        let value: i64 = transaction
+            .query_one(&statement, &[&41_i64])
+            .await
+            .expect("cached statement runs inside a transaction")
+            .get(0);
+        assert_eq!(value, 42);
+        transaction.commit().await.expect("commit");
+        drop(first);
+
+        // Checked back in, the same physical connection still carries its
+        // cache, so nothing is re-prepared.
+        let mut second = pool.get().await.expect("second checkout");
+        assert_eq!(
+            second.cached_statement_count(),
+            1,
+            "the cache must travel with the connection, not the checkout"
+        );
+        second.prepared(SQL).await.expect("cached prepare");
+        assert_eq!(second.cached_statement_count(), 1);
+        second.discard();
+
+        // A discarded connection takes its cache with it: the replacement
+        // starts empty, matching the fresh session it opened.
+        let third = pool.get().await.expect("third checkout");
+        assert_eq!(third.cached_statement_count(), 0);
+    }
+
     /// Same finding, against a real server: an idle pooled
     /// `tokio_postgres::Client` whose backend gets killed out from under it
     /// (server restart / network drop, simulated here with
@@ -434,25 +608,7 @@ mod tests {
             return;
         };
 
-        let connect_url = url.clone();
-        let connect: ConnectFn<tokio_postgres::Client> = Box::new(move || {
-            let url = connect_url.clone();
-            Box::pin(async move {
-                let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
-                    .await
-                    .map_err(|_error| StoreError::Unavailable {
-                        reason_code: "postgres_unavailable",
-                    })?;
-                tokio::spawn(async move {
-                    let _ = connection.await;
-                });
-                Ok(client)
-            })
-        });
-        let is_alive: IsAliveFn<tokio_postgres::Client> =
-            Box::new(|client: &tokio_postgres::Client| !client.is_closed());
-
-        let pool = Pool::new(4, connect, is_alive);
+        let pool = Pool::new(4, postgres_connector(&url), postgres_is_alive());
 
         let first = pool.get().await.expect("first checkout");
         let pid: i32 = first

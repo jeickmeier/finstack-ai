@@ -24,7 +24,7 @@ use finstack_ai_kernel::{
 use finstack_ai_protocol::encode_snapshot;
 use finstack_ai_runtime::{
     CommitCoordinator, IdempotencyHorizon, JournalStore, LoadFromRequest, LoadWindow,
-    OpaqueSnapshot, PruneRequest, SnapshotRequest, StoreError, StoreLimits,
+    OpaqueSnapshot, PruneRequest, ScanRequest, SnapshotRequest, StoreError, StoreLimits,
 };
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_test::store_fixtures::{draft, id, request};
@@ -381,6 +381,60 @@ async fn concurrent_prune_and_append_serialize_without_deadlock() {
         tail_sequences,
         vec![3, 4],
         "the pre-race tail record and the concurrently appended one are both present"
+    );
+
+    guard.cleanup(&connect(&url).await).await;
+}
+
+/// The fail-closed gap/checkpoint checks in `scan` must not fire on a
+/// legitimately pruned prefix: after a real prune, scanning from a sequence
+/// *below* the prune boundary still succeeds, returning the surviving tail.
+///
+/// The twin of `snapshot_scan_metadata.rs::scan_from_a_deleted_sequence_is_a_gap`
+/// — same missing rows, opposite verdict. What separates them is the session's
+/// `snapshot_sequence`: prune deletes `sequence < snapshot_sequence`, so a
+/// record absent below that boundary is expected, while one absent at or
+/// above it is a hole.
+#[tokio::test]
+async fn scanning_a_pruned_prefix_still_succeeds() {
+    let Some(url) = pg_test_url() else {
+        eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+        return;
+    };
+    let (store, _schema, guard, _head_checksum_at_two) =
+        Box::pin(scripted_session_with_aligned_snapshot(&url)).await;
+
+    let receipt = store
+        .prune(PruneRequest {
+            session_id: id::<SessionTag>(1),
+            horizon: IdempotencyHorizon {
+                expire_at: Timestamp::from_unix_ms(0).expect("ts"),
+            },
+        })
+        .await
+        .expect("aligned prune succeeds");
+    assert_eq!(receipt.pruned_through_sequence, 2);
+
+    // Sequence 1 is gone and its checkpoint row with it, yet both absences
+    // sit strictly below the prune boundary, so the scan must not report
+    // `scan_sequence_gap` or `scan_checkpoint_mismatch`.
+    let page = store
+        .scan(ScanRequest {
+            session_id: id::<SessionTag>(1),
+            from_sequence: 1,
+            limit: 8,
+        })
+        .await
+        .expect("scanning across a pruned prefix must still verify");
+    let sequences = page
+        .records
+        .iter()
+        .map(finstack_ai_kernel::RecordEnvelope::sequence)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sequences,
+        vec![2, 3],
+        "the retained boundary record and the tail after it"
     );
 
     guard.cleanup(&connect(&url).await).await;

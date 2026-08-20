@@ -37,7 +37,8 @@
 //! and none exists. The `40P01` → `Unavailable{postgres_serialization}`
 //! mapping is therefore defense in depth (a deadlock introduced by a future
 //! path, or by a lock Postgres takes on this transaction's behalf) rather
-//! than the handling of an expected outcome; the caller retries either way.
+//! than the handling of an expected outcome; either way it is reported as a
+//! transient `Unavailable` rather than retried here.
 //!
 //! ## Transaction handling
 //!
@@ -74,12 +75,88 @@ use finstack_ai_store_common::{
     SessionUsage, admit_append_limits, build_committed_batch, check_append_sequence,
     classify_record_reuse, protocol_error, request_cbor, request_identity,
 };
-use tokio_postgres::{Client, Transaction};
+use tokio_postgres::{Client, Statement, Transaction};
 
-use crate::error::{Failure, i64_from_u64};
-use crate::load::{id_from_bytes, load_batch, usize_from_i64};
+use crate::error::{Failure, commit_or_ambiguous, i64_from_u64, settle};
+use crate::load::{
+    SELECT_BATCH, SELECT_BATCH_RECORDS, id_from_bytes, load_batch, prepare, usize_from_i64,
+};
 use crate::pool::PooledClient;
-use crate::session::lock_session;
+use crate::session::{LOCK_SESSION_SQL, lock_session};
+
+/// Look up every request record id that is already stored, preserving
+/// multiplicity (see [`replay_by_record_reuse`]).
+const SELECT_RECORD_REUSE: &str = "SELECT wanted.record_id, records.batch_id \
+     FROM UNNEST($1::bytea[]) AS wanted(record_id) \
+     JOIN records ON records.record_id = wanted.record_id";
+
+/// Insert the batch header row.
+const INSERT_BATCH: &str = "INSERT INTO batches \
+     (batch_id, session_id, first_sequence, last_sequence, expected_sequence, request_cbor) \
+     VALUES ($1, $2, $3, $4, $5, $6)";
+
+/// Insert every record of the batch in one round trip (see
+/// [`insert_records`]).
+const INSERT_RECORDS: &str = "INSERT INTO records ( \
+        session_id, sequence, record_id, batch_id, lane_id, run_id, kind, \
+        format_version, kind_version, payload_cbor, timestamp, committed_at, \
+        payload_digest, previous_checksum, envelope_checksum, derived_event_ids) \
+     SELECT $1, sequence, record_id, $2, lane_id, run_id, kind, \
+            format_version, kind_version, payload_cbor, timestamp, NULL, \
+            payload_digest, previous_checksum, envelope_checksum, derived_event_ids \
+     FROM UNNEST( \
+        $3::bigint[], $4::bytea[], $5::bytea[], $6::bytea[], $7::text[], \
+        $8::int4[], $9::int4[], $10::bytea[], $11::bigint[], $12::bytea[], \
+        $13::bytea[], $14::bytea[], $15::bytea[]) \
+     AS unnested( \
+        sequence, record_id, lane_id, run_id, kind, format_version, kind_version, \
+        payload_cbor, timestamp, payload_digest, previous_checksum, \
+        envelope_checksum, derived_event_ids)";
+
+/// CAS the session head forward and maintain its committed footprint.
+const UPDATE_SESSION_HEAD: &str = "UPDATE sessions \
+     SET current_sequence = $1, head_checksum = $2, \
+         batch_count = batch_count + 1, record_count = record_count + $3 \
+     WHERE session_id = $4 AND current_sequence = $5";
+
+/// The statements one append prepares before opening its transaction (see
+/// [`crate::pool::PooledClient::prepared`] for why that ordering is forced).
+///
+/// The three session-*creation* statements (`store_totals` lock, the session
+/// insert, the session-count bump) are deliberately left as inline SQL: they
+/// run at most once per session, so preparing them on every connection would
+/// cost more round trips than it ever saves.
+struct AppendStatements {
+    /// [`crate::session::LOCK_SESSION_SQL`].
+    lock_session: Statement,
+    /// [`crate::load::SELECT_BATCH`].
+    select_batch: Statement,
+    /// [`crate::load::SELECT_BATCH_RECORDS`].
+    batch_records: Statement,
+    /// [`SELECT_RECORD_REUSE`].
+    record_reuse: Statement,
+    /// [`INSERT_BATCH`].
+    insert_batch: Statement,
+    /// [`INSERT_RECORDS`].
+    insert_records: Statement,
+    /// [`UPDATE_SESSION_HEAD`].
+    update_head: Statement,
+}
+
+impl AppendStatements {
+    /// Prepare (or reuse) every statement the append protocol needs.
+    async fn prepare(client: &mut PooledClient<Client>) -> Result<Self, Failure> {
+        Ok(Self {
+            lock_session: prepare(client, LOCK_SESSION_SQL).await?,
+            select_batch: prepare(client, SELECT_BATCH).await?,
+            batch_records: prepare(client, SELECT_BATCH_RECORDS).await?,
+            record_reuse: prepare(client, SELECT_RECORD_REUSE).await?,
+            insert_batch: prepare(client, INSERT_BATCH).await?,
+            insert_records: prepare(client, INSERT_RECORDS).await?,
+            update_head: prepare(client, UPDATE_SESSION_HEAD).await?,
+        })
+    }
+}
 
 /// Append `request` on `client`, per spec D4.
 ///
@@ -96,31 +173,36 @@ use crate::session::lock_session;
 /// [`StoreError::AmbiguousAcknowledgement`] when the connection dies during
 /// `COMMIT` (spec D5), and otherwise the mapped driver error — notably
 /// `Unavailable{postgres_serialization}` for serialization failures and
-/// deadlocks, which the *caller* retries; this function never retries
-/// internally.
+/// deadlocks.
+///
+/// This function never retries internally, and neither does the runtime's
+/// `CommitCoordinator`: it retries only `Conflict` and
+/// [`StoreError::AmbiguousAcknowledgement`], while `Unavailable` (including
+/// `postgres_serialization`) propagates as a hard error exactly as sqlite's
+/// `sqlite_busy` does. Serialization failures are reported as *transient*,
+/// and whether to retry them is the embedding application's policy
+/// decision; the idempotency contract makes retrying the same request safe.
 pub(crate) async fn append(
     client: &mut PooledClient<Client>,
     request: &AppendRequest,
     limits: &StoreLimits,
 ) -> Result<CommittedBatch, StoreError> {
-    // `client` deref-coerces to the `&mut Client` this needs; the borrow
-    // (and the transaction that borrows from it) ends with the statement,
-    // before `poison` touches the checkout itself.
-    let outcome = append_on_connection(client, request, limits).await;
-    match outcome {
-        Ok(batch) => Ok(batch),
-        Err(failure) => {
-            if failure.poison {
-                client.poison();
-            }
-            Err(failure.error)
-        }
-    }
+    // Statements are prepared first: `Client::transaction` borrows the
+    // client mutably, and the statement cache lives on the checkout.
+    let outcome = match AppendStatements::prepare(client).await {
+        // `client` deref-coerces to the `&mut Client` this needs; the borrow
+        // (and the transaction that borrows from it) ends with the
+        // statement, before `poison` touches the checkout itself.
+        Ok(statements) => append_on_connection(client, &statements, request, limits).await,
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
 }
 
 /// Drive one append transaction to `COMMIT` or `ROLLBACK`.
 async fn append_on_connection(
     client: &mut Client,
+    statements: &AppendStatements,
     request: &AppendRequest,
     limits: &StoreLimits,
 ) -> Result<CommittedBatch, Failure> {
@@ -129,7 +211,7 @@ async fn append_on_connection(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
-    let committed = match append_in_transaction(&transaction, request, limits).await {
+    let committed = match append_in_transaction(&transaction, statements, request, limits).await {
         Ok(committed) => committed,
         Err(mut failure) => {
             // The rollback must never shadow the original error, but a
@@ -144,35 +226,39 @@ async fn append_on_connection(
         }
     };
 
-    match transaction.commit().await {
-        Ok(()) => Ok(committed),
-        // Spec D5: no SQLSTATE means the server never reported an outcome,
-        // so the commit may or may not be durable. Report it as ambiguous
-        // and discard the connection; the caller recovers by retrying the
-        // same request, which either replays or commits it fresh.
-        Err(error) if error.code().is_none() => Err(Failure {
-            error: StoreError::AmbiguousAcknowledgement,
-            poison: true,
-        }),
-        Err(error) => Err(Failure::from_driver(&error)),
-    }
+    // Spec D5: a `COMMIT` that fails with no SQLSTATE means the server never
+    // reported an outcome, so the commit may or may not be durable. It is
+    // reported as ambiguous and the connection discarded; the embedding
+    // application recovers by retrying the same request, which either
+    // replays or commits it fresh. See [`commit_or_ambiguous`].
+    commit_or_ambiguous(transaction).await?;
+    Ok(committed)
 }
 
 /// The spec D4 protocol body, inside the transaction.
 async fn append_in_transaction(
     transaction: &Transaction<'_>,
+    statements: &AppendStatements,
     request: &AppendRequest,
     limits: &StoreLimits,
 ) -> Result<CommittedBatch, Failure> {
     let request_cbor = request_cbor(request)?;
-    let mut session = lock_session(transaction, request.session_id()).await?;
+    let mut session =
+        lock_session(transaction, &statements.lock_session, request.session_id()).await?;
     let mut session_created = false;
 
     // Runs at most twice: the second pass only happens when this writer lost
     // the session-create race, and it starts from a session row that is
     // now present and locked, so it cannot take the create path again.
     loop {
-        if let Some(existing) = load_batch(transaction, request.batch_id()).await? {
+        if let Some(existing) = load_batch(
+            transaction,
+            &statements.select_batch,
+            &statements.batch_records,
+            request.batch_id(),
+        )
+        .await?
+        {
             return if existing.request_cbor == request_cbor {
                 Ok(existing.committed)
             } else {
@@ -190,7 +276,7 @@ async fn append_in_transaction(
             .into());
         }
 
-        if let Some(replayed) = replay_by_record_reuse(transaction, request).await? {
+        if let Some(replayed) = replay_by_record_reuse(transaction, statements, request).await? {
             return Ok(replayed);
         }
 
@@ -215,7 +301,7 @@ async fn append_in_transaction(
         let sessions = lock_store_totals(transaction).await?;
         admit_append_limits(*limits, sessions, None, request.records().len())?;
         let created = create_session(transaction, request.session_id()).await?;
-        session = lock_session(transaction, request.session_id()).await?;
+        session = lock_session(transaction, &statements.lock_session, request.session_id()).await?;
         if session.is_none() {
             // Unreachable in practice: the row was either inserted here or
             // by the writer that won the race and committed before this
@@ -237,7 +323,7 @@ async fn append_in_transaction(
         reason_code: "missing_session_row",
     })?;
     let committed = build_committed_batch(request, session.head_checksum)?;
-    persist_committed_batch(transaction, request, &request_cbor, &committed).await?;
+    persist_committed_batch(transaction, statements, request, &request_cbor, &committed).await?;
     if session_created {
         bump_session_count(transaction).await?;
     }
@@ -309,6 +395,7 @@ async fn bump_session_count(transaction: &Transaction<'_>) -> Result<(), Failure
 /// `Ok(None)` means the records are fresh and the append proceeds.
 async fn replay_by_record_reuse(
     transaction: &Transaction<'_>,
+    statements: &AppendStatements,
     request: &AppendRequest,
 ) -> Result<Option<CommittedBatch>, Failure> {
     let record_ids = request
@@ -324,12 +411,7 @@ async fn replay_by_record_reuse(
     // here would report `mixed_record_id_reuse` where sqlite reports a
     // clean replay.
     let rows = transaction
-        .query(
-            "SELECT wanted.record_id, records.batch_id \
-             FROM UNNEST($1::bytea[]) AS wanted(record_id) \
-             JOIN records ON records.record_id = wanted.record_id",
-            &[&record_ids],
-        )
+        .query(&statements.record_reuse, &[&record_ids])
         .await
         .map_err(|error| Failure::from_driver(&error))?;
     let hits = rows
@@ -343,12 +425,16 @@ async fn replay_by_record_reuse(
     let Some(original_batch_id) = classify_record_reuse(&hits, request.records().len())? else {
         return Ok(None);
     };
-    let existing =
-        load_batch(transaction, original_batch_id)
-            .await?
-            .ok_or(StoreError::Integrity {
-                reason_code: "missing_record_batch_index",
-            })?;
+    let existing = load_batch(
+        transaction,
+        &statements.select_batch,
+        &statements.batch_records,
+        original_batch_id,
+    )
+    .await?
+    .ok_or(StoreError::Integrity {
+        reason_code: "missing_record_batch_index",
+    })?;
     let incoming = request_identity(request)?;
     if existing.identity.session_id == incoming.session_id
         && existing.identity.expected_sequence == incoming.expected_sequence
@@ -365,16 +451,14 @@ async fn replay_by_record_reuse(
 /// Write the batch row, its records, and the session head/counters.
 async fn persist_committed_batch(
     transaction: &Transaction<'_>,
+    statements: &AppendStatements,
     request: &AppendRequest,
     request_cbor: &[u8],
     committed: &CommittedBatch,
 ) -> Result<(), Failure> {
     transaction
         .execute(
-            "INSERT INTO batches \
-             (batch_id, session_id, first_sequence, last_sequence, expected_sequence, \
-              request_cbor) \
-             VALUES ($1, $2, $3, $4, $5, $6)",
+            &statements.insert_batch,
             &[
                 &request.batch_id().as_bytes().as_slice(),
                 &request.session_id().as_bytes().as_slice(),
@@ -387,8 +471,8 @@ async fn persist_committed_batch(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
-    insert_records(transaction, request, committed).await?;
-    update_session_head(transaction, request, committed).await
+    insert_records(transaction, statements, request, committed).await?;
+    update_session_head(transaction, statements, request, committed).await
 }
 
 /// Insert every record of the batch in one round trip.
@@ -402,6 +486,7 @@ async fn persist_committed_batch(
 /// backend rehydrates to the same envelopes.
 async fn insert_records(
     transaction: &Transaction<'_>,
+    statements: &AppendStatements,
     request: &AppendRequest,
     committed: &CommittedBatch,
 ) -> Result<(), Failure> {
@@ -442,21 +527,7 @@ async fn insert_records(
 
     transaction
         .execute(
-            "INSERT INTO records ( \
-                session_id, sequence, record_id, batch_id, lane_id, run_id, kind, \
-                format_version, kind_version, payload_cbor, timestamp, committed_at, \
-                payload_digest, previous_checksum, envelope_checksum, derived_event_ids) \
-             SELECT $1, sequence, record_id, $2, lane_id, run_id, kind, \
-                    format_version, kind_version, payload_cbor, timestamp, NULL, \
-                    payload_digest, previous_checksum, envelope_checksum, derived_event_ids \
-             FROM UNNEST( \
-                $3::bigint[], $4::bytea[], $5::bytea[], $6::bytea[], $7::text[], \
-                $8::int4[], $9::int4[], $10::bytea[], $11::bigint[], $12::bytea[], \
-                $13::bytea[], $14::bytea[], $15::bytea[]) \
-             AS unnested( \
-                sequence, record_id, lane_id, run_id, kind, format_version, kind_version, \
-                payload_cbor, timestamp, payload_digest, previous_checksum, \
-                envelope_checksum, derived_event_ids)",
+            &statements.insert_records,
             &[
                 &request.session_id().as_bytes().as_slice(),
                 &request.batch_id().as_bytes().as_slice(),
@@ -488,6 +559,7 @@ async fn insert_records(
 /// lost race.
 async fn update_session_head(
     transaction: &Transaction<'_>,
+    statements: &AppendStatements,
     request: &AppendRequest,
     committed: &CommittedBatch,
 ) -> Result<(), Failure> {
@@ -512,10 +584,7 @@ async fn update_session_head(
 
     let updated = transaction
         .execute(
-            "UPDATE sessions \
-             SET current_sequence = $1, head_checksum = $2, \
-                 batch_count = batch_count + 1, record_count = record_count + $3 \
-             WHERE session_id = $4 AND current_sequence = $5",
+            &statements.update_head,
             &[
                 &i64_from_u64(committed.last_sequence, "last_sequence")?,
                 &head_checksum.as_bytes().as_slice(),

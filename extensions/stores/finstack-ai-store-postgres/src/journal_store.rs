@@ -45,11 +45,14 @@ impl JournalStore for PostgresJournalStore {
     /// Multi-writer append over one pooled connection (spec D4/D5).
     ///
     /// Never retries internally: a serialization failure or deadlock
-    /// surfaces as `Unavailable{postgres_serialization}` and an
-    /// interrupted `COMMIT` as
-    /// [`StoreError::AmbiguousAcknowledgement`], both of which the caller
-    /// resolves by retrying the same request — which the idempotency
-    /// contract makes safe.
+    /// surfaces as the transient `Unavailable{postgres_serialization}` and
+    /// an interrupted `COMMIT` as
+    /// [`StoreError::AmbiguousAcknowledgement`]. The runtime's
+    /// `CommitCoordinator` retries the latter (along with `Conflict`) but
+    /// *not* `Unavailable`, which propagates as a hard error just as
+    /// sqlite's `sqlite_busy` does; whether to retry it is the embedding
+    /// application's policy. Retrying the same request is safe either way —
+    /// the idempotency contract guarantees it.
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         let pool = self.pool.clone();
         let limits = self.config.limits;
@@ -146,13 +149,21 @@ impl JournalStore for PostgresJournalStore {
     /// propagating an `Err` — per the port contract, `health()` is a status
     /// report, not a fallible operation.
     ///
-    /// The checkout is bounded by [`crate::config::PostgresStoreConfig::connect_timeout`]:
-    /// on an exhausted pool (every permit checked out and none returned),
-    /// `Pool::get` would otherwise wait on the semaphore indefinitely,
-    /// turning one stuck caller into a `health()` that never resolves. This
-    /// only bounds the health path — every other [`JournalStore`] method
-    /// still awaits `Pool::get` without a timeout, so their checkout
-    /// semantics are unchanged.
+    /// Both halves of the probe are bounded by
+    /// [`crate::config::PostgresStoreConfig::connect_timeout`]. The checkout
+    /// needs it because on an exhausted pool (every permit checked out and
+    /// none returned) `Pool::get` would otherwise wait on the semaphore
+    /// indefinitely, turning one stuck caller into a `health()` that never
+    /// resolves. The `SELECT 1` round trip needs it because a connection
+    /// whose backend is black-holed (a dropped network path with no RST, a
+    /// wedged server) never returns an error either — it simply never
+    /// answers. A probe that times out reports `ready: false` *and* discards
+    /// the connection: it may still deliver its answer later, so it must
+    /// never go back to the idle queue (spec D2).
+    ///
+    /// This only bounds the health path — every other [`JournalStore`]
+    /// method still awaits `Pool::get` and its statements without a timeout,
+    /// so their semantics are unchanged.
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
         let pool = self.pool.clone();
         let durable = matches!(self.config.durability, PostgresDurability::Durable);
@@ -165,17 +176,24 @@ impl JournalStore for PostgresJournalStore {
 
         Box::pin(async move {
             let ready = match tokio::time::timeout(checkout_bound, pool.get()).await {
-                Ok(Ok(pooled)) => match pooled.query_one("SELECT 1", &[]).await {
-                    Ok(_row) => true,
-                    Err(_error) => {
-                        // The probe query failed on an otherwise checked-out
+                Ok(Ok(pooled)) => {
+                    let probe =
+                        tokio::time::timeout(checkout_bound, pooled.query_one("SELECT 1", &[]))
+                            .await;
+                    if matches!(probe, Ok(Ok(_))) {
+                        true
+                    } else {
+                        // The probe query failed — or never answered within
+                        // `checkout_bound` — on an otherwise checked-out
                         // connection; treat it as poisoned per spec D2
-                        // rather than risk returning a broken connection to
-                        // the idle queue for the next caller.
+                        // rather than risk returning a broken (or
+                        // black-holed, with an unread `SELECT 1` reply still
+                        // in flight) connection to the idle queue for the
+                        // next caller.
                         pooled.discard();
                         false
                     }
-                },
+                }
                 // Either the checkout itself failed, or it did not resolve
                 // within `checkout_bound` (pool exhausted) — both report a
                 // not-ready store rather than propagating an `Err` or

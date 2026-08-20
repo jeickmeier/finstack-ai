@@ -59,12 +59,57 @@ use finstack_ai_runtime::{PruneReceipt, PruneRequest, StoreError};
 use finstack_ai_store_common::{
     accelerated_from, admit_prune_snapshot, outstanding_count, tombstone_count,
 };
-use tokio_postgres::{Client, Transaction};
+use tokio_postgres::{Client, Statement, Transaction};
 
-use crate::error::{Failure, i64_from_u64};
-use crate::load::load_snapshot;
+use crate::error::{Failure, commit_or_ambiguous, i64_from_u64, settle};
+use crate::load::{SELECT_SNAPSHOT, load_snapshot, prepare};
 use crate::pool::PooledClient;
-use crate::session::lock_session;
+use crate::session::{LOCK_SESSION_SQL, lock_session};
+
+/// Probe for a batch ending exactly at the snapshot sequence.
+const SELECT_BATCH_BOUNDARY: &str =
+    "SELECT COUNT(*) FROM batches WHERE session_id = $1 AND last_sequence = $2";
+
+/// Delete the snapshot-covered record prefix.
+const DELETE_RECORDS: &str = "DELETE FROM records WHERE session_id = $1 AND sequence < $2";
+
+/// Delete the batches wholly inside that prefix.
+const DELETE_BATCHES: &str = "DELETE FROM batches WHERE session_id = $1 AND last_sequence < $2";
+
+/// Subtract the deleted rows from the session's committed footprint.
+const UPDATE_FOOTPRINT: &str = "UPDATE sessions SET batch_count = batch_count - $1, record_count = record_count - $2 \
+     WHERE session_id = $3";
+
+/// Statements one prune prepares before opening its transaction (see
+/// [`crate::pool::PooledClient::prepared`] for why that ordering is forced).
+struct PruneStatements {
+    /// [`crate::session::LOCK_SESSION_SQL`].
+    lock_session: Statement,
+    /// [`crate::load::SELECT_SNAPSHOT`].
+    snapshot: Statement,
+    /// [`SELECT_BATCH_BOUNDARY`].
+    batch_boundary: Statement,
+    /// [`DELETE_RECORDS`].
+    delete_records: Statement,
+    /// [`DELETE_BATCHES`].
+    delete_batches: Statement,
+    /// [`UPDATE_FOOTPRINT`].
+    update_footprint: Statement,
+}
+
+impl PruneStatements {
+    /// Prepare (or reuse) every statement the prune path needs.
+    async fn prepare(client: &mut PooledClient<Client>) -> Result<Self, Failure> {
+        Ok(Self {
+            lock_session: prepare(client, LOCK_SESSION_SQL).await?,
+            snapshot: prepare(client, SELECT_SNAPSHOT).await?,
+            batch_boundary: prepare(client, SELECT_BATCH_BOUNDARY).await?,
+            delete_records: prepare(client, DELETE_RECORDS).await?,
+            delete_batches: prepare(client, DELETE_BATCHES).await?,
+            update_footprint: prepare(client, UPDATE_FOOTPRINT).await?,
+        })
+    }
+}
 
 /// Prune the snapshot-covered prefix of `request.session_id`.
 ///
@@ -88,21 +133,18 @@ pub(crate) async fn prune(
     request: &PruneRequest,
     snapshot_bytes: usize,
 ) -> Result<PruneReceipt, StoreError> {
-    let outcome = prune_on_connection(client, request, snapshot_bytes).await;
-    match outcome {
-        Ok(receipt) => Ok(receipt),
-        Err(failure) => {
-            if failure.poison {
-                client.poison();
-            }
-            Err(failure.error)
-        }
-    }
+    // Prepared before the transaction opens, as on every other op path.
+    let outcome = match PruneStatements::prepare(client).await {
+        Ok(statements) => prune_on_connection(client, &statements, request, snapshot_bytes).await,
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
 }
 
 /// Drive one prune transaction to `COMMIT` or `ROLLBACK`.
 async fn prune_on_connection(
     client: &mut Client,
+    statements: &PruneStatements,
     request: &PruneRequest,
     snapshot_bytes: usize,
 ) -> Result<PruneReceipt, Failure> {
@@ -111,25 +153,19 @@ async fn prune_on_connection(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
-    let receipt = match prune_in_transaction(&transaction, request, snapshot_bytes).await {
-        Ok(receipt) => receipt,
-        Err(mut failure) => {
-            if transaction.rollback().await.is_err() {
-                failure.poison = true;
+    let receipt =
+        match prune_in_transaction(&transaction, statements, request, snapshot_bytes).await {
+            Ok(receipt) => receipt,
+            Err(mut failure) => {
+                if transaction.rollback().await.is_err() {
+                    failure.poison = true;
+                }
+                return Err(failure);
             }
-            return Err(failure);
-        }
-    };
+        };
 
-    match transaction.commit().await {
-        Ok(()) => Ok(receipt),
-        // Spec D5: no SQLSTATE means the server never reported an outcome.
-        Err(error) if error.code().is_none() => Err(Failure {
-            error: StoreError::AmbiguousAcknowledgement,
-            poison: true,
-        }),
-        Err(error) => Err(Failure::from_driver(&error)),
-    }
+    commit_or_ambiguous(transaction).await?;
+    Ok(receipt)
 }
 
 /// The prune body, inside the transaction: lock the session row, admit and
@@ -137,24 +173,36 @@ async fn prune_on_connection(
 /// session's committed footprint.
 async fn prune_in_transaction(
     transaction: &Transaction<'_>,
+    statements: &PruneStatements,
     request: &PruneRequest,
     snapshot_bytes: usize,
 ) -> Result<PruneReceipt, Failure> {
-    let session =
-        lock_session(transaction, request.session_id)
-            .await?
-            .ok_or(StoreError::InvalidRequest {
-                reason_code: "prune_session_not_found",
-            })?;
-    let snapshot = load_snapshot(transaction, request.session_id, snapshot_bytes)
+    let session = lock_session(transaction, &statements.lock_session, request.session_id)
         .await?
         .ok_or(StoreError::InvalidRequest {
-            reason_code: "prune_requires_snapshot",
+            reason_code: "prune_session_not_found",
         })?;
+    let snapshot = load_snapshot(
+        transaction,
+        &statements.snapshot,
+        request.session_id,
+        snapshot_bytes,
+    )
+    .await?
+    .ok_or(StoreError::InvalidRequest {
+        reason_code: "prune_requires_snapshot",
+    })?;
     admit_prune_snapshot(snapshot.sequence(), session.current_sequence)?;
 
     let pruned_through = i64_from_u64(snapshot.sequence(), "snapshot_sequence")?;
-    if !batch_boundary_exists(transaction, request.session_id, pruned_through).await? {
+    if !batch_boundary_exists(
+        transaction,
+        &statements.batch_boundary,
+        request.session_id,
+        pruned_through,
+    )
+    .await?
+    {
         return Err(StoreError::InvalidRequest {
             reason_code: "prune_not_batch_aligned",
         }
@@ -169,14 +217,14 @@ async fn prune_in_transaction(
 
     let deleted_records = transaction
         .execute(
-            "DELETE FROM records WHERE session_id = $1 AND sequence < $2",
+            &statements.delete_records,
             &[&request.session_id.as_bytes().as_slice(), &pruned_through],
         )
         .await
         .map_err(|error| Failure::from_driver(&error))?;
     let deleted_batches = transaction
         .execute(
-            "DELETE FROM batches WHERE session_id = $1 AND last_sequence < $2",
+            &statements.delete_batches,
             &[&request.session_id.as_bytes().as_slice(), &pruned_through],
         )
         .await
@@ -190,8 +238,7 @@ async fn prune_in_transaction(
     })?;
     transaction
         .execute(
-            "UPDATE sessions SET batch_count = batch_count - $1, record_count = record_count - $2 \
-             WHERE session_id = $3",
+            &statements.update_footprint,
             &[
                 &batch_delta,
                 &record_delta,
@@ -218,14 +265,12 @@ async fn prune_in_transaction(
 /// change all three together.
 async fn batch_boundary_exists(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
     sequence: i64,
 ) -> Result<bool, Failure> {
     let count: i64 = transaction
-        .query_one(
-            "SELECT COUNT(*) FROM batches WHERE session_id = $1 AND last_sequence = $2",
-            &[&session_id.as_bytes().as_slice(), &sequence],
-        )
+        .query_one(statement, &[&session_id.as_bytes().as_slice(), &sequence])
         .await
         .map_err(|error| Failure::from_driver(&error))?
         .get(0);

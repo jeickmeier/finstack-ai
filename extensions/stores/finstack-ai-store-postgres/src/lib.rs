@@ -43,6 +43,23 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+/// The `records` column list, in the order `load::reconstruct_envelope`
+/// reads it.
+///
+/// A macro rather than a `const` so the three record-selecting statements
+/// can be assembled with `concat!` into `&'static str` literals: the
+/// per-connection statement cache (`pool::PooledClient::prepared`) is keyed
+/// by the SQL literal, and a `format!`ed `String` could never be that key.
+/// Defined in the crate root, before the `mod` declarations, so textual
+/// macro scoping makes it visible to every module below.
+macro_rules! record_columns {
+    () => {
+        "session_id, sequence, record_id, lane_id, run_id, kind, format_version, kind_version, \
+         payload_cbor, timestamp, payload_digest, previous_checksum, envelope_checksum, \
+         derived_event_ids"
+    };
+}
+
 mod append;
 mod config;
 mod error;

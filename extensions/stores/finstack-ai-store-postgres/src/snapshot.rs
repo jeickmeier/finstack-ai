@@ -53,14 +53,64 @@ use finstack_ai_store_common::{
     admit_snapshot_sequence, check_snapshot_size, encode_state_request, protocol_error,
     scan_next_sequence, scan_start, validate_scan_limit,
 };
-use tokio_postgres::{Client, IsolationLevel, Transaction};
+use tokio_postgres::{Client, IsolationLevel, Statement, Transaction};
 
-use crate::error::{Failure, i64_from_u64};
+use crate::error::{Failure, commit_or_ambiguous, i64_from_u64, settle};
 use crate::load::{
-    RECORD_COLUMNS, SessionRow, load_envelope_checksum, load_session_row, reconstruct_envelope,
+    SELECT_ENVELOPE_CHECKSUM, SELECT_SESSION_ROW, SessionRow, load_envelope_checksum,
+    load_session_row, prepare, reconstruct_envelope,
 };
 use crate::pool::PooledClient;
-use crate::session::lock_session;
+use crate::session::{LOCK_SESSION_SQL, lock_session};
+
+/// Upsert one session's snapshot row.
+const UPSERT_SNAPSHOT: &str = "INSERT INTO snapshots (session_id, sequence, payload_cbor, digest, timestamp) \
+     VALUES ($1, $2, $3, $4, 0) \
+     ON CONFLICT (session_id) DO UPDATE SET \
+         sequence = EXCLUDED.sequence, payload_cbor = EXCLUDED.payload_cbor, \
+         digest = EXCLUDED.digest, timestamp = EXCLUDED.timestamp";
+
+/// Point the session row at the snapshot just written.
+const UPDATE_SNAPSHOT_POINTER: &str =
+    "UPDATE sessions SET snapshot_sequence = $1 WHERE session_id = $2";
+
+/// Replace one session's metadata blob.
+const UPDATE_METADATA: &str = "UPDATE sessions SET metadata = $1 WHERE session_id = $2";
+
+/// One page of a scan: an indexed range read over `records`.
+const SELECT_SCAN_PAGE: &str = concat!(
+    "SELECT ",
+    record_columns!(),
+    " FROM records WHERE session_id = $1 AND sequence >= $2 ORDER BY sequence LIMIT $3"
+);
+
+/// Statements a `write_snapshot` prepares before opening its transaction.
+struct SnapshotStatements {
+    /// [`crate::session::LOCK_SESSION_SQL`].
+    lock_session: Statement,
+    /// [`UPSERT_SNAPSHOT`].
+    upsert: Statement,
+    /// [`UPDATE_SNAPSHOT_POINTER`].
+    pointer: Statement,
+}
+
+/// Statements a `write_metadata` prepares before opening its transaction.
+struct MetadataStatements {
+    /// [`crate::session::LOCK_SESSION_SQL`].
+    lock_session: Statement,
+    /// [`UPDATE_METADATA`].
+    update: Statement,
+}
+
+/// Statements a `scan` prepares before opening its transaction.
+struct ScanStatements {
+    /// [`crate::load::SELECT_SESSION_ROW`].
+    session_row: Statement,
+    /// [`SELECT_SCAN_PAGE`].
+    page: Statement,
+    /// [`crate::load::SELECT_ENVELOPE_CHECKSUM`].
+    envelope_checksum: Statement,
+}
 
 /// Replace the disposable replay snapshot for one session (spec D6 storage,
 /// D-common admission).
@@ -83,16 +133,13 @@ pub(crate) async fn write_snapshot(
     limits: &StoreLimits,
 ) -> Result<SnapshotReceipt, StoreError> {
     check_snapshot_size(request.snapshot.bytes().len(), limits.snapshot_bytes)?;
-    let outcome = write_snapshot_on_connection(client, request).await;
-    match outcome {
-        Ok(receipt) => Ok(receipt),
-        Err(failure) => {
-            if failure.poison {
-                client.poison();
-            }
-            Err(failure.error)
-        }
-    }
+    // Prepared before the transaction opens: `Client::transaction` borrows
+    // the client, and the statement cache lives on the checkout.
+    let outcome = match prepare_snapshot_statements(client).await {
+        Ok(statements) => write_snapshot_on_connection(client, &statements, request).await,
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
 }
 
 /// Encode a [`StateSnapshotRequest`] and write it through [`write_snapshot`].
@@ -124,9 +171,21 @@ pub(crate) async fn write_state_snapshot(
     .await
 }
 
+/// Prepare (or reuse) the statements a snapshot write needs.
+async fn prepare_snapshot_statements(
+    client: &mut PooledClient<Client>,
+) -> Result<SnapshotStatements, Failure> {
+    Ok(SnapshotStatements {
+        lock_session: prepare(client, LOCK_SESSION_SQL).await?,
+        upsert: prepare(client, UPSERT_SNAPSHOT).await?,
+        pointer: prepare(client, UPDATE_SNAPSHOT_POINTER).await?,
+    })
+}
+
 /// Drive one `write_snapshot` transaction to `COMMIT` or `ROLLBACK`.
 async fn write_snapshot_on_connection(
     client: &mut Client,
+    statements: &SnapshotStatements,
     request: &SnapshotRequest,
 ) -> Result<SnapshotReceipt, Failure> {
     let transaction = client
@@ -134,7 +193,7 @@ async fn write_snapshot_on_connection(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
-    let receipt = match write_snapshot_in_transaction(&transaction, request).await {
+    let receipt = match write_snapshot_in_transaction(&transaction, statements, request).await {
         Ok(receipt) => receipt,
         Err(mut failure) => {
             if transaction.rollback().await.is_err() {
@@ -144,15 +203,8 @@ async fn write_snapshot_on_connection(
         }
     };
 
-    match transaction.commit().await {
-        Ok(()) => Ok(receipt),
-        // Spec D5: no SQLSTATE means the server never reported an outcome.
-        Err(error) if error.code().is_none() => Err(Failure {
-            error: StoreError::AmbiguousAcknowledgement,
-            poison: true,
-        }),
-        Err(error) => Err(Failure::from_driver(&error)),
-    }
+    commit_or_ambiguous(transaction).await?;
+    Ok(receipt)
 }
 
 /// The snapshot-write body, inside the transaction: lock the session row,
@@ -160,14 +212,14 @@ async fn write_snapshot_on_connection(
 /// `snapshot_sequence` pointer.
 async fn write_snapshot_in_transaction(
     transaction: &Transaction<'_>,
+    statements: &SnapshotStatements,
     request: &SnapshotRequest,
 ) -> Result<SnapshotReceipt, Failure> {
-    let session =
-        lock_session(transaction, request.session_id)
-            .await?
-            .ok_or(StoreError::InvalidRequest {
-                reason_code: "snapshot_session_not_found",
-            })?;
+    let session = lock_session(transaction, &statements.lock_session, request.session_id)
+        .await?
+        .ok_or(StoreError::InvalidRequest {
+            reason_code: "snapshot_session_not_found",
+        })?;
     admit_snapshot_sequence(
         request.snapshot.sequence(),
         session.current_sequence,
@@ -177,11 +229,7 @@ async fn write_snapshot_in_transaction(
     let sequence = i64_from_u64(request.snapshot.sequence(), "snapshot_sequence")?;
     transaction
         .execute(
-            "INSERT INTO snapshots (session_id, sequence, payload_cbor, digest, timestamp) \
-             VALUES ($1, $2, $3, $4, 0) \
-             ON CONFLICT (session_id) DO UPDATE SET \
-                 sequence = EXCLUDED.sequence, payload_cbor = EXCLUDED.payload_cbor, \
-                 digest = EXCLUDED.digest, timestamp = EXCLUDED.timestamp",
+            &statements.upsert,
             &[
                 &request.session_id.as_bytes().as_slice(),
                 &sequence,
@@ -193,7 +241,7 @@ async fn write_snapshot_in_transaction(
         .map_err(|error| Failure::from_driver(&error))?;
     transaction
         .execute(
-            "UPDATE sessions SET snapshot_sequence = $1 WHERE session_id = $2",
+            &statements.pointer,
             &[&sequence, &request.session_id.as_bytes().as_slice()],
         )
         .await
@@ -222,6 +270,15 @@ async fn write_snapshot_in_transaction(
 /// reaches the session head but computes a different checksum than the one
 /// stored there is `head_checksum_mismatch`.
 ///
+/// This store is deliberately *stricter* than sqlite in two places where
+/// sqlite masks a missing record — a record absent at the requested start,
+/// and an absent checkpoint row before the page. Both are reported
+/// (`scan_sequence_gap` / `scan_checkpoint_mismatch`) unless the missing
+/// sequence falls inside the prefix a prune may legitimately have deleted;
+/// see [`pruned_prefix_covers`]. Failing closed on a hole in a live journal
+/// is the whole point of chain verification, so the divergence is intended
+/// rather than drift.
+///
 /// # Errors
 ///
 /// Returns [`StoreError::InvalidRequest`] (`scan_limit_zero` /
@@ -234,22 +291,30 @@ pub(crate) async fn scan(
     request: ScanRequest,
 ) -> Result<ScanPage, StoreError> {
     validate_scan_limit(request.limit)?;
-    let outcome = scan_on_connection(client, request).await;
-    match outcome {
-        Ok(page) => Ok(page),
-        Err(failure) => {
-            if failure.poison {
-                client.poison();
-            }
-            Err(failure.error)
-        }
-    }
+    // Prepared before the transaction opens, as everywhere else.
+    let outcome = match prepare_scan_statements(client).await {
+        Ok(statements) => scan_on_connection(client, &statements, request).await,
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
 }
 
 /// Run one scan inside a read-only, repeatable-read transaction, mirroring
 /// [`crate::load::load_on_connection`]'s isolation choice.
+async fn prepare_scan_statements(
+    client: &mut PooledClient<Client>,
+) -> Result<ScanStatements, Failure> {
+    Ok(ScanStatements {
+        session_row: prepare(client, SELECT_SESSION_ROW).await?,
+        page: prepare(client, SELECT_SCAN_PAGE).await?,
+        envelope_checksum: prepare(client, SELECT_ENVELOPE_CHECKSUM).await?,
+    })
+}
+
+/// Run one scan inside a read-only, repeatable-read transaction.
 async fn scan_on_connection(
     client: &mut Client,
+    statements: &ScanStatements,
     request: ScanRequest,
 ) -> Result<ScanPage, Failure> {
     let transaction = client
@@ -260,7 +325,7 @@ async fn scan_on_connection(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
-    let page = match scan_in_transaction(&transaction, request).await {
+    let page = match scan_in_transaction(&transaction, statements, request).await {
         Ok(page) => page,
         Err(mut failure) => {
             if transaction.rollback().await.is_err() {
@@ -281,6 +346,7 @@ async fn scan_on_connection(
 /// trip, then verify it exactly as sqlite's `scan_session` does.
 async fn scan_in_transaction(
     transaction: &Transaction<'_>,
+    statements: &ScanStatements,
     request: ScanRequest,
 ) -> Result<ScanPage, Failure> {
     let start = scan_start(request.from_sequence);
@@ -288,7 +354,9 @@ async fn scan_in_transaction(
     // sqlite's `scan_session` reaches the same outcome via an explicit
     // `session_exists` check; one round trip suffices here because the
     // whole scan runs inside one `READ ONLY REPEATABLE READ` transaction.
-    let Some(session) = load_session_row(transaction, request.session_id).await? else {
+    let Some(session) =
+        load_session_row(transaction, &statements.session_row, request.session_id).await?
+    else {
         return Ok(ScanPage {
             session_id: request.session_id,
             records: Arc::from([]),
@@ -299,10 +367,7 @@ async fn scan_in_transaction(
     let fetch_limit = i64::from(request.limit.saturating_add(1));
     let rows = transaction
         .query(
-            &format!(
-                "SELECT {RECORD_COLUMNS} FROM records \
-                 WHERE session_id = $1 AND sequence >= $2 ORDER BY sequence LIMIT $3"
-            ),
+            &statements.page,
             &[
                 &request.session_id.as_bytes().as_slice(),
                 &i64_from_u64(start, "from_sequence")?,
@@ -336,16 +401,33 @@ async fn scan_in_transaction(
         .take(limit)
         .map(reconstruct_envelope)
         .collect::<Result<Vec<_>, _>>()?;
-    if records
-        .first()
-        .is_some_and(|record| record.sequence() < start)
+    // A record missing *at* the requested start. The SQL asked for
+    // `sequence >= start`, so the first row coming back above `start` means
+    // the record at `start` is not stored. That is legitimate only when
+    // `start` falls inside the pruned prefix: `crate::prune::prune` deletes
+    // records with `sequence < snapshot_sequence`, so every sequence at or
+    // above `snapshot_sequence` must still exist, and a session with no
+    // snapshot has never been pruned at all. Anything else is a hole.
+    //
+    // This is deliberately stricter than sqlite, which masks a missing
+    // record at the page start entirely; postgres fails closed instead.
+    if let Some(first) = records.first()
+        && first.sequence() > start
+        && !pruned_prefix_covers(&session, start)
     {
         return Err(StoreError::Integrity {
             reason_code: "scan_sequence_gap",
         }
         .into());
     }
-    verify_scan_page(transaction, request.session_id, &records, &session).await?;
+    verify_scan_page(
+        transaction,
+        statements,
+        request.session_id,
+        &records,
+        &session,
+    )
+    .await?;
     let next_sequence = scan_next_sequence(&records, has_more);
     Ok(ScanPage {
         session_id: request.session_id,
@@ -354,13 +436,30 @@ async fn scan_in_transaction(
     })
 }
 
-/// Chain-verify a scan page, mirroring sqlite's `verify_scan_page` exactly:
+/// `true` when `sequence` falls inside the prefix a prune may already have
+/// deleted, so a record missing there is legitimate rather than a hole.
+///
+/// [`crate::prune::prune`] deletes records with
+/// `sequence < snapshot_sequence` — strictly less, so the record *at* the
+/// snapshot boundary is retained and every sequence at or above it must
+/// still be stored. A session whose `snapshot_sequence` is `NULL` has never
+/// been prunable at all, so nothing is covered.
+fn pruned_prefix_covers(session: &SessionRow, sequence: u64) -> bool {
+    session
+        .snapshot_sequence
+        .is_some_and(|boundary| sequence < boundary)
+}
+
+/// Chain-verify a scan page, mirroring sqlite's `verify_scan_page` — with
+/// two deliberate tightenings where sqlite masks a missing record (see the
+/// `None` arms below and the start-of-page check in `scan_in_transaction`):
 /// anchor the page's first record against the stored checksum of the record
 /// immediately before it (when one exists), walk the chain across the page,
 /// and — only when the page reaches the session's current head — compare
 /// the resulting checksum against the stored head checksum.
 async fn verify_scan_page(
     transaction: &Transaction<'_>,
+    statements: &ScanStatements,
     session_id: SessionId,
     records: &[RecordEnvelope],
     session: &SessionRow,
@@ -372,7 +471,14 @@ async fn verify_scan_page(
         None
     } else {
         let checkpoint = first.sequence().saturating_sub(1);
-        match load_envelope_checksum(transaction, session_id, checkpoint).await? {
+        match load_envelope_checksum(
+            transaction,
+            &statements.envelope_checksum,
+            session_id,
+            checkpoint,
+        )
+        .await?
+        {
             Some(stored) => {
                 if first.previous_checksum() != Some(stored) {
                     return Err(StoreError::Integrity {
@@ -382,7 +488,26 @@ async fn verify_scan_page(
                 }
                 Some(stored)
             }
-            None => first.previous_checksum(),
+            // No stored checkpoint before the page. Legitimate only when
+            // that sequence sits inside the pruned prefix (same boundary
+            // rule as `scan_in_transaction`: prune deletes
+            // `sequence < snapshot_sequence`, so anything at or above the
+            // boundary must still exist). There the fallback below is
+            // sound — the anchor really is gone, and the page is verified
+            // from its own first record forward, exactly as sqlite does.
+            //
+            // Otherwise the checkpoint row vanished from a live journal,
+            // and falling back to the record's *self-reported*
+            // `previous_checksum` would let the page anchor on a value
+            // nothing corroborates. Fail closed instead — again stricter
+            // than sqlite, which always falls back.
+            None if pruned_prefix_covers(session, checkpoint) => first.previous_checksum(),
+            None => {
+                return Err(StoreError::Integrity {
+                    reason_code: "scan_checkpoint_mismatch",
+                }
+                .into());
+            }
         }
     };
     let head = verify_chain_from(records, prior, Some(first.sequence())).map_err(protocol_error)?;
@@ -416,21 +541,28 @@ pub(crate) async fn write_metadata(
     client: &mut PooledClient<Client>,
     request: &WriteMetadataRequest,
 ) -> Result<MetadataReceipt, StoreError> {
-    let outcome = write_metadata_on_connection(client, request).await;
-    match outcome {
-        Ok(receipt) => Ok(receipt),
-        Err(failure) => {
-            if failure.poison {
-                client.poison();
-            }
-            Err(failure.error)
-        }
-    }
+    // Prepared before the transaction opens, as everywhere else.
+    let outcome = match prepare_metadata_statements(client).await {
+        Ok(statements) => write_metadata_on_connection(client, &statements, request).await,
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
+}
+
+/// Prepare (or reuse) the statements a metadata CAS needs.
+async fn prepare_metadata_statements(
+    client: &mut PooledClient<Client>,
+) -> Result<MetadataStatements, Failure> {
+    Ok(MetadataStatements {
+        lock_session: prepare(client, LOCK_SESSION_SQL).await?,
+        update: prepare(client, UPDATE_METADATA).await?,
+    })
 }
 
 /// Drive one `write_metadata` transaction to `COMMIT` or `ROLLBACK`.
 async fn write_metadata_on_connection(
     client: &mut Client,
+    statements: &MetadataStatements,
     request: &WriteMetadataRequest,
 ) -> Result<MetadataReceipt, Failure> {
     let transaction = client
@@ -438,7 +570,7 @@ async fn write_metadata_on_connection(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
-    let receipt = match write_metadata_in_transaction(&transaction, request).await {
+    let receipt = match write_metadata_in_transaction(&transaction, statements, request).await {
         Ok(receipt) => receipt,
         Err(mut failure) => {
             if transaction.rollback().await.is_err() {
@@ -448,28 +580,21 @@ async fn write_metadata_on_connection(
         }
     };
 
-    match transaction.commit().await {
-        Ok(()) => Ok(receipt),
-        // Spec D5: no SQLSTATE means the server never reported an outcome.
-        Err(error) if error.code().is_none() => Err(Failure {
-            error: StoreError::AmbiguousAcknowledgement,
-            poison: true,
-        }),
-        Err(error) => Err(Failure::from_driver(&error)),
-    }
+    commit_or_ambiguous(transaction).await?;
+    Ok(receipt)
 }
 
 /// The metadata-CAS body, inside the transaction.
 async fn write_metadata_in_transaction(
     transaction: &Transaction<'_>,
+    statements: &MetadataStatements,
     request: &WriteMetadataRequest,
 ) -> Result<MetadataReceipt, Failure> {
-    let session =
-        lock_session(transaction, request.session_id)
-            .await?
-            .ok_or(StoreError::InvalidRequest {
-                reason_code: "metadata_session_not_found",
-            })?;
+    let session = lock_session(transaction, &statements.lock_session, request.session_id)
+        .await?
+        .ok_or(StoreError::InvalidRequest {
+            reason_code: "metadata_session_not_found",
+        })?;
     if session.head_checksum != request.expected_head_checksum {
         return Err(StoreError::InvalidRequest {
             reason_code: "metadata_cas_mismatch",
@@ -478,7 +603,7 @@ async fn write_metadata_in_transaction(
     }
     transaction
         .execute(
-            "UPDATE sessions SET metadata = $1 WHERE session_id = $2",
+            &statements.update,
             &[
                 &request.metadata.as_bytes(),
                 &request.session_id.as_bytes().as_slice(),

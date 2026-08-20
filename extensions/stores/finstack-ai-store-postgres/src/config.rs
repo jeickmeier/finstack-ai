@@ -53,7 +53,16 @@ pub struct PostgresStoreConfig {
     pub pool_size: usize,
     /// Schema-management policy.
     pub schema_policy: SchemaPolicy,
-    /// Timeout applied when establishing a new pooled connection.
+    /// Timeout applied when establishing a new pooled connection (and, in
+    /// [`finstack_ai_runtime::JournalStore::health`], to the checkout and
+    /// `SELECT 1` probe).
+    ///
+    /// Must be non-zero: a zero timeout would expire before the connect
+    /// future is ever polled, making every open fail as
+    /// `Unavailable{postgres_unavailable}` and `health()` report `ready:
+    /// false` forever. Rejected by [`PostgresStoreConfig::validate`] with
+    /// `zero_postgres_connect_timeout`, mirroring sqlite's
+    /// `zero_sqlite_busy_timeout`.
     pub connect_timeout: Duration,
 }
 
@@ -79,13 +88,22 @@ impl PostgresStoreConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`StoreError::InvalidRequest`] when `pool_size` is zero, any
-    /// [`StoreLimits`] field is zero, or `schema` is not a valid lowercase
-    /// Postgres identifier.
+    /// Returns [`StoreError::InvalidRequest`] when `pool_size` is zero,
+    /// `connect_timeout` is zero, any [`StoreLimits`] field is zero, or
+    /// `schema` is not a valid lowercase Postgres identifier.
     pub fn validate(&self) -> Result<(), StoreError> {
         if self.pool_size == 0 {
             return Err(StoreError::InvalidRequest {
                 reason_code: "zero_pool_size",
+            });
+        }
+        // Twin of sqlite's `zero_sqlite_busy_timeout` guard
+        // (`extensions/stores/finstack-ai-store-sqlite/src/store.rs`): a zero
+        // timeout is never a caller's intent, and it would silently turn
+        // every connect into `Unavailable`.
+        if self.connect_timeout.is_zero() {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "zero_postgres_connect_timeout",
             });
         }
         self.limits.validate()?;
@@ -158,6 +176,19 @@ mod tests {
             error,
             StoreError::InvalidRequest {
                 reason_code: "zero_pool_size"
+            }
+        ));
+    }
+
+    #[test]
+    fn zero_connect_timeout_is_rejected() {
+        let mut config = config();
+        config.connect_timeout = Duration::ZERO;
+        let error = config.validate().unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::InvalidRequest {
+                reason_code: "zero_postgres_connect_timeout"
             }
         ));
     }

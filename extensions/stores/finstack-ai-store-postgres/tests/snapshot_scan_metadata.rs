@@ -496,10 +496,7 @@ async fn scan_verifies_page_from_stored_checkpoint() {
                 "UPDATE {schema}.records SET envelope_checksum = $1 \
                  WHERE session_id = $2 AND sequence = 2"
             ),
-            &[
-                &vec![0_u8; 32],
-                &id::<SessionTag>(1).as_bytes().as_slice(),
-            ],
+            &[&vec![0_u8; 32], &id::<SessionTag>(1).as_bytes().as_slice()],
         )
         .await
         .expect("corrupt sequence 2");
@@ -514,6 +511,65 @@ async fn scan_verifies_page_from_stored_checkpoint() {
         .expect_err("a corrupted record must fail the scan");
     assert!(
         matches!(error, StoreError::Integrity { .. }),
+        "unexpected error: {error:?}"
+    );
+
+    guard.cleanup(&client).await;
+}
+
+/// A record missing *at* the requested scan start fails closed with
+/// `Integrity{scan_sequence_gap}` when the session has never been pruned.
+///
+/// This is where the postgres store is deliberately stricter than sqlite,
+/// which masks the hole and returns the page starting at the next surviving
+/// record. Eight records in four batches, one mid-journal row deleted
+/// straight out of `records` (a hole this store's own writers can never
+/// produce), then a scan that starts exactly at the deleted sequence.
+#[tokio::test]
+async fn scan_from_a_deleted_sequence_is_a_gap() {
+    let Some(url) = pg_test_url() else {
+        eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+        return;
+    };
+    let (store, schema, guard) = store_over_fresh_schema(&url).await;
+    for batch in 0..4_u64 {
+        let first = batch * 2 + 1;
+        store
+            .append(request(
+                batch + 1,
+                1,
+                first,
+                vec![draft(first, 1), draft(first + 1, 1)],
+            ))
+            .await
+            .expect("batch appends");
+    }
+
+    let client = connect(&url).await;
+    let deleted = client
+        .execute(
+            &format!("DELETE FROM {schema}.records WHERE session_id = $1 AND sequence = 4"),
+            &[&id::<SessionTag>(1).as_bytes().as_slice()],
+        )
+        .await
+        .expect("delete sequence 4");
+    assert_eq!(deleted, 1, "the fixture must have removed exactly one row");
+
+    let error = store
+        .scan(ScanRequest {
+            session_id: id::<SessionTag>(1),
+            from_sequence: 4,
+            limit: 4,
+        })
+        .await
+        .expect_err("a record missing at the scan start must fail closed");
+    assert!(
+        matches!(
+            error,
+            StoreError::Integrity {
+                reason_code: "scan_sequence_gap"
+            }
+        ),
         "unexpected error: {error:?}"
     );
 

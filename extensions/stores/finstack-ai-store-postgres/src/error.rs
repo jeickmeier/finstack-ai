@@ -1,5 +1,7 @@
 use finstack_ai_runtime::StoreError;
 
+use crate::pool::PooledClient;
+
 /// SQLSTATE class prefix for integrity-constraint violations (23xxx).
 const CONSTRAINT_VIOLATION_CLASS: &str = "23";
 
@@ -18,8 +20,12 @@ const SERIALIZATION_FAILURE: &str = "40001";
 /// the `crate::append` module doc). The mapping is kept as defense in depth —
 /// a future path, or a lock the server takes on a transaction's behalf, could
 /// still deadlock. The store never retries internally: it reports
-/// `Unavailable{postgres_serialization}` and the caller retries the same
-/// `AppendRequest`, which the idempotency contract makes safe.
+/// `Unavailable{postgres_serialization}`, a *transient* error the runtime's
+/// `CommitCoordinator` does not retry either (it retries only `Conflict` and
+/// `AmbiguousAcknowledgement`; `Unavailable` propagates, exactly as sqlite's
+/// `sqlite_busy` does). Retry policy therefore belongs to the embedding
+/// application — retrying the same `AppendRequest` is safe under the
+/// idempotency contract.
 const DEADLOCK_DETECTED: &str = "40P01";
 
 /// A failure plus the disposition of the connection it happened on.
@@ -62,6 +68,58 @@ impl Failure {
             error: map_postgres_error(error),
             poison: error.code().is_none() || error.is_closed(),
         }
+    }
+}
+
+/// Settle an operation's outcome against the connection it ran on: poison
+/// the checkout when the failure demands it (spec D2/D5), then surface the
+/// caller-facing [`StoreError`].
+///
+/// Every op module ends the same way — the op body returns
+/// `Result<T, Failure>` on a checkout the caller still owns, and the
+/// disposition of that checkout is decided from the failure's poison flag.
+/// Lifting it here keeps the six call sites from drifting.
+///
+/// Generic over the pooled connection type for the same reason
+/// [`PooledClient`] is: production only ever settles a
+/// `PooledClient<tokio_postgres::Client>`.
+pub(crate) fn settle<T, C>(
+    outcome: Result<T, Failure>,
+    client: &mut PooledClient<C>,
+) -> Result<T, StoreError> {
+    match outcome {
+        Ok(value) => Ok(value),
+        Err(failure) => {
+            if failure.poison {
+                client.poison();
+            }
+            Err(failure.error)
+        }
+    }
+}
+
+/// Commit a write transaction, applying the spec D5 ambiguity rule.
+///
+/// A `COMMIT` that fails *without* a SQLSTATE means the server never
+/// reported an outcome: the transaction may or may not be durable, so it
+/// maps to [`StoreError::AmbiguousAcknowledgement`] and always poisons the
+/// connection. A `COMMIT` that fails *with* a SQLSTATE was decided by the
+/// server and is classified normally by [`Failure::from_driver`].
+///
+/// Only the write paths (append, prune, `write_snapshot`, `write_metadata`)
+/// use this. The read paths commit their read-only transactions with the
+/// plain [`Failure::from_driver`] mapping: nothing was written, so there is
+/// no durability outcome to be ambiguous about.
+pub(crate) async fn commit_or_ambiguous(
+    transaction: tokio_postgres::Transaction<'_>,
+) -> Result<(), Failure> {
+    match transaction.commit().await {
+        Ok(()) => Ok(()),
+        Err(error) if error.code().is_none() => Err(Failure {
+            error: StoreError::AmbiguousAcknowledgement,
+            poison: true,
+        }),
+        Err(error) => Err(Failure::from_driver(&error)),
     }
 }
 

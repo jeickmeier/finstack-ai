@@ -9,7 +9,7 @@
 //! semantics from drifting between the two.
 
 use finstack_ai_kernel::{Digest, SessionId};
-use tokio_postgres::Transaction;
+use tokio_postgres::{Statement, Transaction};
 
 use crate::error::{Failure, u64_from_i64};
 use crate::load::{digest_from_bytes, usize_from_i64};
@@ -28,6 +28,14 @@ pub(crate) struct LockedSession {
     pub(crate) record_count: usize,
 }
 
+/// The session-row `FOR UPDATE` lock statement.
+///
+/// Exposed as a `&'static str` so each write op can hand it to
+/// [`crate::pool::PooledClient::prepared`] before opening its transaction
+/// and pass the cached [`Statement`] in below.
+pub(crate) const LOCK_SESSION_SQL: &str = "SELECT current_sequence, head_checksum, \
+     snapshot_sequence, batch_count, record_count FROM sessions WHERE session_id = $1 FOR UPDATE";
+
 /// Take the per-session write lock, returning the row when it exists.
 ///
 /// This is the serialization point for all writers of one session: two
@@ -36,14 +44,11 @@ pub(crate) struct LockedSession {
 /// never contend.
 pub(crate) async fn lock_session(
     transaction: &Transaction<'_>,
+    statement: &Statement,
     session_id: SessionId,
 ) -> Result<Option<LockedSession>, Failure> {
     let row = transaction
-        .query_opt(
-            "SELECT current_sequence, head_checksum, snapshot_sequence, batch_count, \
-             record_count FROM sessions WHERE session_id = $1 FOR UPDATE",
-            &[&session_id.as_bytes().as_slice()],
-        )
+        .query_opt(statement, &[&session_id.as_bytes().as_slice()])
         .await
         .map_err(|error| Failure::from_driver(&error))?;
     let Some(row) = row else {
