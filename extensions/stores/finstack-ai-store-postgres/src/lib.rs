@@ -35,6 +35,15 @@
 mod config;
 mod error;
 
+// `schema` is temporarily `pub` (rather than a private `mod` with selective
+// `pub(crate)` re-exports) purely so the integration tests in `tests/` —
+// which compile as a separate crate — can drive `ensure_schema` directly
+// against a real server ahead of the connection pool landing in a later
+// task. See the module doc comment in `src/schema.rs` for the full
+// rationale; this should narrow back down once that pool exists.
+#[doc(hidden)]
+pub mod schema;
+
 pub use config::{
     DEFAULT_CONNECT_TIMEOUT, DEFAULT_POOL_SIZE, DEFAULT_SCHEMA, PostgresDurability,
     PostgresStoreConfig, SchemaPolicy,
