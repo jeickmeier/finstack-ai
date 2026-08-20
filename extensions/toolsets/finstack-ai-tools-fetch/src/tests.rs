@@ -1022,6 +1022,36 @@ async fn html_body_converts_to_markdown_under_markdown_mode() {
 }
 
 #[tokio::test]
+async fn markdown_mode_on_plain_text_body_passes_through_unchanged() {
+    // `mode: "markdown"` shares the Auto|Markdown routing arm with `Auto`;
+    // for a non-HTML essence there is no conversion step at all — the body
+    // is already (trivially valid) markdown, so it must inline unchanged,
+    // same as `Auto` would for `text/plain`.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = "plain text body, not html".to_owned();
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        body.as_bytes().to_vec(),
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","mode":"markdown"}}"#).as_bytes(),
+    );
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    assert_eq!(output["content"], body);
+    assert!(output.get("artifact").is_none(), "{output}");
+}
+
+#[tokio::test]
 async fn pinned_address_overrides_dns_for_hostnames() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

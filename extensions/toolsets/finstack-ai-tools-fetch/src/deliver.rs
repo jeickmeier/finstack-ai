@@ -106,6 +106,11 @@ async fn deliver_auto_or_markdown(
     if is_html {
         return match String::from_utf8(body) {
             Ok(text) => {
+                // `output_cap` is intentionally `max_result_budget` (the
+                // same effective cap every other inline path here already
+                // enforces), not `max_result_bytes - 4096`: keeping one
+                // budget concept avoids a second, HTML-only cap that would
+                // need its own justification and tests.
                 let inline_text = match html_to_markdown(&text, max_result_budget) {
                     Some(markdown) => markdown,
                     None => text,

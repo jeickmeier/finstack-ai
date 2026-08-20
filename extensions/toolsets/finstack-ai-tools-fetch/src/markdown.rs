@@ -13,7 +13,14 @@ use htmd::HtmlToMarkdown;
 /// Returns `None` when conversion fails, or when the converted Markdown's
 /// byte length exceeds `output_cap` — in either case the caller falls back
 /// to inlining the original text. Conversion is expected to run only on
-/// bodies already under the raw read cap.
+/// bodies already under the raw read cap. Callers pass the same
+/// `effective_cap`/`max_result_budget` used by every other inline delivery
+/// path here, not `max_result_bytes - 4096`, so there is only one budget
+/// concept to reason about.
+///
+/// Note: `htmd` treats `<title>` as an ordinary block element (only
+/// `script`/`style` are skipped), so a document's `<title>` text appears as
+/// a leading plain-text line ahead of the rest of the conversion.
 pub(crate) fn html_to_markdown(html: &str, output_cap: usize) -> Option<String> {
     let converter = HtmlToMarkdown::builder()
         // Explicit even though htmd drops these by default, to keep the
