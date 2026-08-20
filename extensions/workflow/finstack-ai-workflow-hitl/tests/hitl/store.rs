@@ -39,7 +39,7 @@ fn row(tenant: &str, interaction: &str, session: u64, requested_ms: i64) -> Inte
 /// Exercise the full contract against any `HitlInboxStore` implementation.
 /// Extracted as a plain function now so a later SQLite-backed store can reuse
 /// it against `&dyn HitlInboxStore` without duplicating the assertions.
-fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
+pub(crate) fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
     let a1 = row("tenant-a", "int-a1", 1, 1_000);
     let a2 = row("tenant-a", "int-a2", 2, 2_000);
     let b1 = row("tenant-b", "int-b1", 3, 1_500);
@@ -127,6 +127,69 @@ fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
         .expect_err("unknown interaction");
     assert!(matches!(err, HitlError::UnknownInteraction));
     assert_eq!(err.code(), "unknown_interaction");
+
+    assert_load_open_breaks_ties_by_interaction_id(store);
+    assert_expired_and_closed_rows_absent_from_load_active(store);
+}
+
+/// Coverage gap (a): two rows with identical `requested_at` and different
+/// `interaction_id` must come back from `load_open` in id order.
+fn assert_load_open_breaks_ties_by_interaction_id(store: &dyn HitlInboxStore) {
+    let c1 = row("tenant-c", "int-c2", 5, 7_000);
+    let c2 = row("tenant-c", "int-c1", 6, 7_000);
+    for r in [&c1, &c2] {
+        store.upsert(r).expect("upsert tie");
+    }
+    let open_c = store.load_open("tenant-c").expect("load_open c");
+    assert_eq!(
+        open_c
+            .iter()
+            .map(|r| r.interaction_id.as_ref())
+            .collect::<Vec<_>>(),
+        vec!["int-c1", "int-c2"],
+        "identical requested_at breaks ties by interaction_id"
+    );
+}
+
+/// Coverage gap (b): rows set to `Expired` or `Closed` must be absent from
+/// `load_active`.
+fn assert_expired_and_closed_rows_absent_from_load_active(store: &dyn HitlInboxStore) {
+    let d1 = row("tenant-d", "int-d1", 7, 8_000);
+    let d2 = row("tenant-d", "int-d2", 8, 8_500);
+    for r in [&d1, &d2] {
+        store.upsert(r).expect("upsert active gap");
+    }
+    store
+        .set_status(
+            "tenant-d",
+            "int-d1",
+            InteractionStatus::Expired,
+            None,
+            ts(9_500),
+        )
+        .expect("set_status expired");
+    store
+        .set_status(
+            "tenant-d",
+            "int-d2",
+            InteractionStatus::Closed,
+            None,
+            ts(9_500),
+        )
+        .expect("set_status closed");
+    let active_after = store.load_active().expect("load_active after");
+    let active_ids_after: Vec<&str> = active_after
+        .iter()
+        .map(|r| r.interaction_id.as_ref())
+        .collect();
+    assert!(
+        !active_ids_after.contains(&"int-d1"),
+        "expired row absent from load_active"
+    );
+    assert!(
+        !active_ids_after.contains(&"int-d2"),
+        "closed row absent from load_active"
+    );
 }
 
 #[test]

@@ -1816,7 +1816,10 @@ dependencies = [
 name = "finstack-ai-workflow-hitl"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-workflow-worker",
+ "rusqlite",
+ "tempfile",
  "thiserror",
 ]
 
