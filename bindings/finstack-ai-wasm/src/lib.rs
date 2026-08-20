@@ -749,6 +749,8 @@ mod tests {
             api_key: "sk-unused".into(),
             reasoning_effort: None,
             reasoning_summary: None,
+            media_tools: false,
+            openrouter_media: None,
             common: LinkedCommon::default(),
         }))
         .err()
@@ -760,6 +762,7 @@ mod tests {
             title: None,
             reasoning_effort: None,
             reasoning_summary: None,
+            media_tools: false,
             common: LinkedCommon::default(),
         }))
         .err()
@@ -768,6 +771,7 @@ mod tests {
             base_url: "https://api.anthropic.com".into(),
             model: "fixture-model".into(),
             api_key: None,
+            openrouter_media: None,
             common: LinkedCommon::default(),
         }))
         .err()
@@ -775,6 +779,7 @@ mod tests {
         let ollama = ready(Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
+            openrouter_media: None,
             common: LinkedCommon::default(),
         }))
         .err()

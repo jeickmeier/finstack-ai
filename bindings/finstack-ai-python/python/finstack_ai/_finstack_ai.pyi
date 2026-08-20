@@ -760,6 +760,10 @@ class Agent:
         api_key: str,
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
+        media_tools: bool = False,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
         toolsets: list[PythonToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
@@ -789,6 +793,20 @@ class Agent:
                 ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
                 provider default.
             reasoning_summary: Optional Responses ``reasoning.summary``.
+            media_tools: Register the native OpenAI media toolset
+                (``openai_generate_image``, ``openai_generate_speech``,
+                ``openai_transcribe_audio``) alongside the model, reusing
+                ``api_key``.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key, independent of ``api_key``.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -804,6 +822,9 @@ class Agent:
         Raises:
             ConfigurationError: The credential, model, capability set, or
                 port registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
         """
     @staticmethod
     async def openrouter(
@@ -817,6 +838,7 @@ class Agent:
         title: str | None = None,
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
+        media_tools: bool = False,
         toolsets: list[PythonToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
@@ -848,6 +870,9 @@ class Agent:
                 ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
                 provider default.
             reasoning_summary: Optional Responses ``reasoning.summary``.
+            media_tools: Register the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) alongside
+                the model, reusing ``api_key``, ``referer``, and ``title``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -873,6 +898,9 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         *,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
         toolsets: list[PythonToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
@@ -899,6 +927,16 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -914,6 +952,9 @@ class Agent:
         Raises:
             ConfigurationError: The endpoint, credential, model, capability
                 set, or port registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
         """
     @staticmethod
     async def ollama(
@@ -923,6 +964,9 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         *,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
         toolsets: list[PythonToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
@@ -942,6 +986,16 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -957,6 +1011,9 @@ class Agent:
         Raises:
             ConfigurationError: The endpoint, model, capability set, or port
                 registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
         """
     @staticmethod
     async def gateway(

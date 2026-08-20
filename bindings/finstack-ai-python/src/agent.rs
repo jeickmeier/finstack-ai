@@ -9,7 +9,7 @@ use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSet
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
     GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon, OllamaAgentSpec,
-    OpenAiAgentSpec, OpenRouterAgentSpec, Session,
+    OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
 };
 use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
@@ -17,7 +17,7 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
 use finstack_ai_tools_document::DocumentToolset;
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -65,10 +65,10 @@ impl PyAgent {
     /// `https://api.openai.com/v1/responses` and does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards provider auth, reasoning, and primary port components distinctly"
+        reason = "linked factory forwards provider auth, reasoning, media toolsets, and primary port components distinctly"
     )]
     fn openai(
         py: Python<'_>,
@@ -79,6 +79,10 @@ impl PyAgent {
         api_key: String,
         reasoning_effort: Option<String>,
         reasoning_summary: Option<String>,
+        media_tools: bool,
+        openrouter_media_api_key: Option<String>,
+        openrouter_media_referer: Option<String>,
+        openrouter_media_title: Option<String>,
         toolsets: Option<Vec<Py<PyPythonToolset>>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
@@ -88,6 +92,11 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
+        let openrouter_media = openrouter_media_spec(
+            openrouter_media_api_key,
+            openrouter_media_referer,
+            openrouter_media_title,
+        )?;
         let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
@@ -104,6 +113,8 @@ impl PyAgent {
                 api_key,
                 reasoning_effort,
                 reasoning_summary,
+                media_tools,
+                openrouter_media,
                 common: LinkedCommon {
                     instruction,
                     capabilities,
@@ -126,10 +137,10 @@ impl PyAgent {
     /// variables. `referer` and `title` set the non-secret attribution
     /// headers.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards provider auth, attribution, reasoning, and primary port components distinctly"
+        reason = "linked factory forwards provider auth, attribution, reasoning, media toolset, and primary port components distinctly"
     )]
     fn openrouter(
         py: Python<'_>,
@@ -142,6 +153,7 @@ impl PyAgent {
         title: Option<String>,
         reasoning_effort: Option<String>,
         reasoning_summary: Option<String>,
+        media_tools: bool,
         toolsets: Option<Vec<Py<PyPythonToolset>>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
@@ -169,6 +181,7 @@ impl PyAgent {
                 title,
                 reasoning_effort,
                 reasoning_summary,
+                media_tools,
                 common: LinkedCommon {
                     instruction,
                     capabilities,
@@ -190,10 +203,10 @@ impl PyAgent {
     /// required when `api_key` is set; the binding does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards provider auth and primary port components distinctly"
+        reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
     )]
     fn anthropic(
         py: Python<'_>,
@@ -203,6 +216,9 @@ impl PyAgent {
         instruction: Option<String>,
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
+        openrouter_media_api_key: Option<String>,
+        openrouter_media_referer: Option<String>,
+        openrouter_media_title: Option<String>,
         toolsets: Option<Vec<Py<PyPythonToolset>>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
@@ -212,6 +228,11 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
+        let openrouter_media = openrouter_media_spec(
+            openrouter_media_api_key,
+            openrouter_media_referer,
+            openrouter_media_title,
+        )?;
         let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
@@ -227,6 +248,7 @@ impl PyAgent {
                 base_url,
                 model,
                 api_key,
+                openrouter_media,
                 common: LinkedCommon {
                     instruction,
                     capabilities,
@@ -247,10 +269,10 @@ impl PyAgent {
     /// Python port lists are keyword-only. This factory does not accept an
     /// API key.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards primary port components distinctly"
+        reason = "linked factory forwards media toolset and primary port components distinctly"
     )]
     fn ollama(
         py: Python<'_>,
@@ -259,6 +281,9 @@ impl PyAgent {
         instruction: Option<String>,
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
+        openrouter_media_api_key: Option<String>,
+        openrouter_media_referer: Option<String>,
+        openrouter_media_title: Option<String>,
         toolsets: Option<Vec<Py<PyPythonToolset>>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
@@ -268,6 +293,11 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
+        let openrouter_media = openrouter_media_spec(
+            openrouter_media_api_key,
+            openrouter_media_referer,
+            openrouter_media_title,
+        )?;
         let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
@@ -282,6 +312,7 @@ impl PyAgent {
             let built = Agent::ollama(OllamaAgentSpec {
                 base_url,
                 model,
+                openrouter_media,
                 common: LinkedCommon {
                     instruction,
                     capabilities,
@@ -971,6 +1002,27 @@ fn child_runs_or_deny(py: Python<'_>, child_runs: Option<Py<PyChildRunPolicy>>) 
     child_runs.map_or(ChildRunPolicy::Deny, |policy| {
         policy.bind(py).borrow().to_rust()
     })
+}
+
+/// Build an optional `OpenRouter` media-toolset spec from the keyword-only
+/// binding arguments. `api_key = None` with `referer`/`title` set is a
+/// configuration error, since attribution without a credential is nonsensical.
+fn openrouter_media_spec(
+    api_key: Option<String>,
+    referer: Option<String>,
+    title: Option<String>,
+) -> PyResult<Option<OpenRouterMediaToolsSpec>> {
+    match api_key {
+        Some(api_key) => Ok(Some(OpenRouterMediaToolsSpec {
+            api_key,
+            referer,
+            title,
+        })),
+        None if referer.is_some() || title.is_some() => Err(PyValueError::new_err(
+            "openrouter_media_referer/openrouter_media_title require openrouter_media_api_key",
+        )),
+        None => Ok(None),
+    }
 }
 
 pub(crate) fn empty_model_settings() -> Result<ModelSettings, AgentRunError> {
