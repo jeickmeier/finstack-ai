@@ -202,9 +202,19 @@ fn truncate_chars(text: &str, max: usize) -> String {
     format!("{kept}...")
 }
 
+/// Delimiter marking where attacker/remote-controlled text begins in a
+/// rejection message (F-2): everything after it is bytes the remote
+/// endpoint sent, not something this crate asserted, so a reader (human or
+/// model) parsing the message can tell provenance apart at a glance. Wraps
+/// only the remote-derived detail — the fixed prefix/status text ahead of it
+/// is ours.
+const REMOTE_DETAIL_PREFIX: &str = "remote endpoint said: ";
+
 async fn endpoint_rejected(status: reqwest::StatusCode, response: reqwest::Response) -> ToolError {
     let message = match rejection_detail(response).await {
-        Some(detail) => format!("http fetch endpoint rejected the request with HTTP {status}: {detail}"),
+        Some(detail) => format!(
+            "http fetch endpoint rejected the request with HTTP {status}: {REMOTE_DETAIL_PREFIX}{detail}"
+        ),
         None => format!("http fetch endpoint rejected the request with HTTP {status}"),
     };
     tool_error(FETCH_TRANSPORT_FAILED, ErrorCategory::Tool, message)

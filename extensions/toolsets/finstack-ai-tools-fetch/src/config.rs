@@ -52,8 +52,8 @@ impl HostPattern {
     ///
     /// Returns [`HttpFetchError::Configuration`] when the entry is empty,
     /// contains characters that are never valid in a bare host (`*`, `/`,
-    /// `:`, `?`, `#`, `@`, whitespace) after stripping a `*.` prefix, or has
-    /// an empty dot-separated label.
+    /// `:`, `?`, `#`, `@`, whitespace, or any ASCII control character) after
+    /// stripping a `*.` prefix, or has an empty dot-separated label.
     pub fn parse(entry: &str) -> Result<Self, HttpFetchError> {
         let entry = entry.to_ascii_lowercase();
         let (wildcard, host) = match entry.strip_prefix("*.") {
@@ -61,7 +61,8 @@ impl HostPattern {
             None => (false, entry.as_str()),
         };
         let valid = !host.is_empty()
-            && !host.contains(['*', '/', ':', '?', '#', '@', ' '])
+            && !host.contains(['*', '/', ':', '?', '#', '@'])
+            && !host.chars().any(|c| c.is_ascii_control() || c.is_whitespace())
             && host.split('.').all(|label| !label.is_empty());
         if !valid {
             return Err(HttpFetchError::Configuration {
@@ -100,6 +101,13 @@ impl HostPattern {
 #[derive(Clone)]
 pub struct HttpFetchConfig {
     /// Deny-by-default host allowlist entries, parsed by [`HostPattern::parse`].
+    ///
+    /// Wildcard entries (`*.suffix`) are not checked against a public suffix
+    /// list: this crate has no PSL dependency, so `*.com` or `*.co.uk`
+    /// parses and matches every subdomain of that bare TLD, i.e. essentially
+    /// the whole web. Keep wildcard entries as specific as the deployment
+    /// allows — name a registrable domain (`*.example.com`), never a bare
+    /// public suffix.
     pub allowlist: Vec<String>,
     /// Maximum response body size in bytes. Default 2 MiB; hard ceiling 8 MiB.
     pub max_response_bytes: usize,

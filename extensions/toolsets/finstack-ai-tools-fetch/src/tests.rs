@@ -18,7 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-use super::{HostPattern, HttpFetchConfig, HttpFetchConfigSnapshot, HttpFetchToolset};
+use super::{HostPattern, HttpFetchConfig, HttpFetchConfigSnapshot, HttpFetchError, HttpFetchToolset};
 
 const HEADER_CANARY: &str = "fetch-secret-canary-091";
 
@@ -200,6 +200,23 @@ fn host_patterns_match_exact_and_wildcard() {
         "doc s.rs",
     ] {
         HostPattern::parse(bad).expect_err(bad);
+    }
+}
+
+#[test]
+fn host_patterns_reject_control_characters() {
+    // F-5-adjacent: HostPattern::parse rejected space but not tab/other
+    // ASCII control characters. A tab or newline smuggled into an allowlist
+    // entry (e.g. from a config file or JSON snapshot with an unnoticed
+    // control byte) must be rejected the same way whitespace already is.
+    for bad in ["docs\t.rs", "docs\n.rs", "docs\r.rs", "docs\x00.rs"] {
+        let error = HostPattern::parse(bad).expect_err(bad);
+        assert_eq!(
+            error,
+            HttpFetchError::Configuration {
+                reason: "invalid_allowlist_entry"
+            }
+        );
     }
 }
 
@@ -719,6 +736,9 @@ async fn non_success_status_reports_bounded_detail() {
     assert_eq!(error.code(), super::FETCH_TRANSPORT_FAILED);
     let message = error.to_string();
     assert!(message.contains("503"), "{message}");
+    // F-2: the remote-derived detail is delimited so a reader can tell it
+    // apart from text this crate asserted itself.
+    assert!(message.contains("remote endpoint said: "), "{message}");
     assert!(message.len() < 500, "{message}");
     assert!(!message.contains(TAIL_MARKER), "{message}");
 }
@@ -949,6 +969,40 @@ async fn cross_host_redirect_to_unlisted_host_is_denied() {
     let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
     let error = drive_to_error(&toolset, call).await;
     assert_eq!(error.code(), super::FETCH_HOST_NOT_ALLOWLISTED);
+}
+
+#[tokio::test]
+async fn redirect_to_allowlisted_host_resolving_private_is_blocked() {
+    // Exercises the hop-N vet path end to end: the redirect target
+    // ("internal.example") IS on the allowlist, so the allowlist check
+    // alone cannot save us here -- it's resolve_and_pin's re-vet of the
+    // *new* destination address, at the redirect hop and not just hop 0,
+    // that must catch a host that allowlists cleanly but resolves to a
+    // private address (e.g. compromised DNS, or a host that legitimately
+    // round-robins between public and internal addresses).
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_sequence(
+        listener,
+        None,
+        vec![(
+            302,
+            "Location: https://internal.example/x\r\n".to_owned(),
+            Vec::new(),
+        )],
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["internal.example"]))
+        .unwrap()
+        .with_resolver(Arc::new(ScriptedResolver(vec![SocketAddr::new(
+            "10.0.0.1".parse().unwrap(),
+            443,
+        )])));
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/a", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_DESTINATION_BLOCKED);
 }
 
 #[tokio::test]

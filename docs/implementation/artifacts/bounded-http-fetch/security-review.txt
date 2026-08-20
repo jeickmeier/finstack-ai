@@ -172,6 +172,17 @@ PASS  Redirect attack surface (TM-22)
       pipeline.rs:353 with max_redirects <= 5 by config ceiling
       (config.rs:26, 228). Evidence: tests.rs:824, 850, 877, 902.
 
+      TEST GAP CLOSED (2026-08-20): the redirect tests above covered
+      cross-host-to-unlisted-host denial and same-host follows, but not
+      an allowlisted redirect target that resolves to a private
+      address — the case that specifically exercises the hop-N
+      resolve_and_pin re-vet rather than the allowlist check alone.
+      Added redirect_to_allowlisted_host_resolving_private_is_blocked
+      (tests.rs): a loopback origin fixture 302s to
+      https://internal.example/x, which IS on the allowlist; the
+      scripted resolver answers 10.0.0.1 for it; asserts
+      FETCH_DESTINATION_BLOCKED. Passes.
+
 PASS  Header and credential isolation (TM-04, TM-22)
       Per-host headers are looked up by the current hop's exact host
       (pipeline.rs:254) against keys that config::validate has
@@ -256,7 +267,30 @@ PASS  Spec section 4.4 ordering
 LOWER-SEVERITY FINDINGS AND RESIDUAL RISK
 ================================================================
 
-MINOR  F-2  Untrusted response bytes reach the model context with no
+PARTIALLY CLOSED (2026-08-20)  F-2  Untrusted response bytes reach the model
+                context with no provenance marking.
+  Partial fix: pipeline.rs's endpoint_rejected now prefixes the bounded,
+  remote-derived rejection detail with a fixed "remote endpoint said: "
+  delimiter (REMOTE_DETAIL_PREFIX), so channel (a) — the non-2xx error
+  message — makes the boundary between this crate's own text and
+  attacker-controlled prose explicit rather than splicing the two
+  together undelimited. The delimiter sits inside the same
+  ERROR_DETAIL_CHARS (300-char) bound as before; the fixed prefix is
+  additional, not counted against that budget. Test
+  non_success_status_reports_bounded_detail (tests.rs) now asserts the
+  message contains "remote endpoint said: " in addition to the existing
+  bounding/redaction assertions.
+  NOT closed: channel (b), the success-content "content" field
+  (pipeline.rs), remains unwrapped per the spec's content contract —
+  ordinary tool output, not error text, so wrapping it would violate the
+  documented success-path shape. This is recorded as a framework-level
+  follow-up: if/when ToolResult gains a provenance/sensitivity channel
+  (as the original finding recommended), this toolset should be an early
+  adopter for the success path. Original finding text retained below for
+  the record.
+
+  --- original finding ---
+  Untrusted response bytes reach the model context with no
             provenance marking.
   Two channels. (a) On a non-2xx terminal status, up to 4096 bytes of
   the endpoint's body are read and up to 300 characters are
@@ -293,7 +327,37 @@ MINOR  F-3  Time is bounded per hop, not per call.
   one. Deployments that need a hard ceiling should set a run deadline
   — which IS honoured between hops (pipeline.rs:346).
 
-MINOR  F-4  Adversarial HTML nesting depth is untested against the
+FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
+                the htmd/html5ever conversion path.
+  Confirmed the concern first: a test generating a 100,000-level-deep
+  `<div>` document and calling html_to_markdown, run in isolation
+  (`cargo test -p finstack-ai-tools-fetch deeply_nested_html_does_not_crash
+  -- --nocapture`), reproduced the abort exactly as predicted — thread
+  overflowed its stack, SIGABRT, process aborted with exit signal 6
+  (not a returned error).
+  Fix: markdown.rs now runs exceeds_safe_nesting_depth, a single-pass
+  byte scan, before handing input to htmd/html5ever. It counts `<`
+  followed by an ASCII letter as depth += 1 and `</` as
+  depth.saturating_sub(1), with no tag-name tracking (so a run of
+  sibling void elements like consecutive <br> tags over-counts, which
+  can only make the guard reject more than strictly necessary, never
+  fewer). MAX_SCAN_DEPTH = 512, documented on the constant and in
+  html_to_markdown's doc comment. Over-cap returns None, same fallback
+  path already used for conversion failure and output-cap overflow, so
+  the caller falls back to its already-budget-checked inline-text path
+  rather than the whole fetch erroring.
+  Tests (markdown.rs): deeply_nested_html_does_not_crash (100,000
+  levels; asserts None — the guard trips) and
+  moderately_nested_html_still_converts (100 levels, well under the
+  512 cap; asserts Some and that the converted text is present), plus
+  the existing goldens/pathological-markup tests as regression
+  coverage. `cargo test -p finstack-ai-tools-fetch` (51 tests) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both pass
+  clean after the change. Original finding text retained below for the
+  record.
+
+  --- original finding ---
+  Adversarial HTML nesting depth is untested against the
             htmd/html5ever conversion path.
   markdown.rs:24-36 hands up to max_response_bytes (default 2 MiB,
   ceiling 8 MiB) of attacker-controlled markup to htmd 0.5 /
@@ -316,6 +380,17 @@ MINOR  F-4  Adversarial HTML nesting depth is untested against the
   the feature's largest new untrusted-input parser and belongs on the
   TM-18 / TM-16 radar for advisory watch.
 
+CLOSED (2026-08-20)  F-5-adjacent  HostPattern::parse rejected space but not
+                tab/other ASCII control characters in an allowlist entry.
+  Fix: config.rs's HostPattern::parse now rejects any entry containing a
+  char where c.is_ascii_control() or c.is_whitespace() is true (same
+  "invalid_allowlist_entry" reason as the other structural rejections),
+  replacing the narrower literal-space check. Test
+  host_patterns_reject_control_characters (tests.rs) covers tab,
+  newline, carriage return, and NUL. This does not change F-5 itself
+  (non-ASCII allowlist entries silently inert) — see below, still INFO
+  and unaddressed.
+
 INFO   F-5  Non-ASCII allowlist entries are silently inert.
   HostPattern::parse (config.rs:57) applies to_ascii_lowercase, which
   is a no-op on non-ASCII, and does not reject non-ASCII bytes. A
@@ -327,7 +402,20 @@ INFO   F-5  Non-ASCII allowlist entries are silently inert.
   HostPattern::parse with a distinct reason, or punycode the entry
   there.
 
-INFO   F-6  Allowlist patterns are not checked against a public
+CLOSED (2026-08-20)  F-6  Allowlist patterns are not checked against a
+                public suffix list. "*.com" or "*.co.uk" are accepted and
+                would allow essentially the whole web.
+  Fix: this is documentation-only, matching the deliberate
+  no-PSL-dependency posture — no behavior changed. HttpFetchConfig's
+  `allowlist` field doc (config.rs) now states plainly that wildcard
+  entries are not checked against a public suffix list, that `*.com`
+  parses and matches every subdomain of that bare TLD, and that entries
+  should name a registrable domain (e.g. `*.example.com`) rather than a
+  bare public suffix. Original finding text retained below for the
+  record.
+
+  --- original finding ---
+  Allowlist patterns are not checked against a public
   suffix list. "*.com" or "*.co.uk" are accepted and would allow
   essentially the whole web. This matches the deliberate
   no-PSL-dependency posture and is a deployment-configuration
