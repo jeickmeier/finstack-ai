@@ -12,8 +12,15 @@ readme = "README.md"
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-workflow-worker = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+finstack-ai-store-memory = { workspace = true }
+finstack-ai-test = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 
 [lints]
 workspace = true
