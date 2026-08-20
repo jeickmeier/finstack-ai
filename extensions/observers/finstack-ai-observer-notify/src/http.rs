@@ -1,7 +1,6 @@
 //! Shared outbound JSON POST helper. Sink URLs are bearer credentials.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use finstack_ai_runtime::{PortFuture, SecretString};
 use reqwest::redirect::Policy;
@@ -16,10 +15,10 @@ pub(crate) struct JsonPoster {
 
 impl JsonPoster {
     /// Validate the URL and build the HTTP client.
-    pub(crate) fn try_new(
-        url: SecretString,
-        request_timeout: Duration,
-    ) -> Result<Self, NotifyObserverError> {
+    ///
+    /// No client-level timeout is set: the observer's `DeliveryPolicy` is the
+    /// single owner of the per-request timeout.
+    pub(crate) fn try_new(url: SecretString) -> Result<Self, NotifyObserverError> {
         let parsed =
             reqwest::Url::parse(url.expose()).map_err(|_| NotifyObserverError::Configuration {
                 reason: "invalid_sink_url",
@@ -31,7 +30,6 @@ impl JsonPoster {
         }
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
-            .timeout(request_timeout)
             .build()
             .map_err(|_| NotifyObserverError::Configuration {
                 reason: "http_client_build_failed",

@@ -17,14 +17,17 @@ fn principal_label(principal: &PrincipalRef) -> PrincipalLabel {
 }
 
 fn kind_label(kind: &InteractionKind) -> Arc<str> {
-    match kind {
-        InteractionKind::Approval => Arc::from("approval"),
-        InteractionKind::Choice => Arc::from("choice"),
-        InteractionKind::Form => Arc::from("form"),
-        InteractionKind::FreeText => Arc::from("free_text"),
-        InteractionKind::Review => Arc::from("review"),
-        InteractionKind::Correction => Arc::from("correction"),
-        InteractionKind::Custom { name } => Arc::clone(name),
+    if let InteractionKind::Custom { name } = kind {
+        return Arc::clone(name);
+    }
+    // Derive the label from the kernel's own serde wire mapping so the two
+    // can never drift.
+    match serde_json::to_value(kind) {
+        Ok(value) => match value.get("kind").and_then(serde_json::Value::as_str) {
+            Some(label) => Arc::from(label),
+            None => Arc::from("unknown"),
+        },
+        Err(_) => Arc::from("unknown"),
     }
 }
 
@@ -79,7 +82,26 @@ pub fn project(event: &RunEvent) -> Option<InteractionNotification> {
                 reason: cancelled.reason().map(Arc::from),
             },
         ),
-        _ => return None,
+        // Exhaustive by name so the compiler forces a projection decision for
+        // every new kernel event variant.
+        RunEventBody::RunAccepted(_)
+        | RunEventBody::EffectRequested(_)
+        | RunEventBody::EffectDeferred(_)
+        | RunEventBody::EffectCompleted(_)
+        | RunEventBody::EffectFailed(_)
+        | RunEventBody::EffectCancelled(_)
+        | RunEventBody::MessageFinalized { .. }
+        | RunEventBody::ToolSettled { .. }
+        | RunEventBody::LimitReached { .. }
+        | RunEventBody::RunSuspended { .. }
+        | RunEventBody::RunCompleted { .. }
+        | RunEventBody::RunFailed { .. }
+        | RunEventBody::RunCancelled { .. }
+        | RunEventBody::ModelTextDelta(_)
+        | RunEventBody::ReasoningDelta(_)
+        | RunEventBody::ToolProgress(_)
+        | RunEventBody::QueueDepthWarning(_)
+        | RunEventBody::ProviderHeartbeat(_) => return None,
     };
     Some(InteractionNotification {
         event: event_kind,

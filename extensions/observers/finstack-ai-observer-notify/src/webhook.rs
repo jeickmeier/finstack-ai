@@ -1,7 +1,6 @@
 //! Generic JSON webhook sink.
 
 use core::fmt;
-use std::time::Duration;
 
 use finstack_ai_runtime::{PortFuture, SecretString};
 
@@ -18,18 +17,16 @@ pub struct WebhookSink {
 }
 
 impl WebhookSink {
-    /// Construct a webhook sink.
+    /// Construct a webhook sink. The observer's `DeliveryPolicy` owns the
+    /// per-request timeout.
     ///
     /// # Errors
     ///
     /// Rejects a non-http(s) or unparseable URL and HTTP-client build
     /// failures.
-    pub fn try_new(
-        url: SecretString,
-        request_timeout: Duration,
-    ) -> Result<Self, NotifyObserverError> {
+    pub fn try_new(url: SecretString) -> Result<Self, NotifyObserverError> {
         Ok(Self {
-            poster: JsonPoster::try_new(url, request_timeout)?,
+            poster: JsonPoster::try_new(url)?,
         })
     }
 }

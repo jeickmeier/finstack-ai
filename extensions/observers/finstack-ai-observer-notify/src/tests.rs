@@ -17,6 +17,17 @@ use super::{
 
 const CANARY: &str = "CANARY_SECRET_VALUE";
 
+/// Delivery now runs in a spawned task; poll counters until they settle.
+async fn wait_for(condition: impl Fn() -> bool) {
+    for _ in 0_u32..400 {
+        if condition() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(condition(), "condition not met within deadline");
+}
+
 fn id<T: IdTag>(value: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
     bytes[6] = 0x70;
@@ -351,8 +362,8 @@ async fn observe_delivers_interaction_events_and_ignores_the_rest() {
         ]))
         .await
         .expect("observe");
+    wait_for(|| observer.delivered() == 1).await;
     assert_eq!(seen.lock().expect("lock").len(), 1);
-    assert_eq!(observer.delivered(), 1);
     assert_eq!(observer.failed(), 0);
     assert_eq!(observer.dropped(), 0);
 }
@@ -377,8 +388,8 @@ async fn delivery_retries_then_records_failure_diagnostic() {
         .observe(Arc::from([event(requested_body())]))
         .await
         .expect("observe");
+    wait_for(|| observer.failed() == 1).await;
     assert_eq!(sink.attempts(), 2);
-    assert_eq!(observer.failed(), 1);
     assert_eq!(observer.delivered(), 0);
     assert_eq!(
         observer.last_diagnostic().expect("diag").code,
@@ -404,8 +415,24 @@ async fn queue_overflow_drops_and_stores_overflow_diagnostic() {
         ]))
         .await
         .expect("observe");
-    assert_eq!(observer.delivered() + observer.dropped(), 3);
+    wait_for(|| observer.delivered() + observer.dropped() == 3).await;
     assert!(observer.dropped() > 0);
+}
+
+#[test]
+fn block_bounded_backpressure_is_rejected() {
+    let (sink, _seen) = tests_support::capturing_sink();
+    assert!(
+        NotifyObserver::try_new(
+            sink,
+            DeliveryPolicy::default(),
+            8,
+            ObserverBackpressure::BlockBounded {
+                timeout: std::time::Duration::from_millis(20),
+            },
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -423,7 +450,6 @@ fn delivery_policy_clamps_are_enforced() {
 fn webhook_sink_debug_never_leaks_the_url() {
     let sink = super::WebhookSink::try_new(
         SecretString::try_new("https://hooks.example.com/T000/SECRETPART").expect("url"),
-        std::time::Duration::from_secs(5),
     )
     .expect("sink");
     let rendered = format!("{sink:?}");
@@ -435,13 +461,7 @@ fn webhook_sink_debug_never_leaks_the_url() {
 #[test]
 fn webhook_sink_rejects_non_http_urls() {
     for bad in ["ftp://x.example/hook", "not a url", "file:///etc/passwd"] {
-        assert!(
-            super::WebhookSink::try_new(
-                SecretString::try_new(bad).expect("secret"),
-                std::time::Duration::from_secs(5),
-            )
-            .is_err()
-        );
+        assert!(super::WebhookSink::try_new(SecretString::try_new(bad).expect("secret"),).is_err());
     }
 }
 
@@ -450,7 +470,6 @@ async fn webhook_sink_posts_notification_json_to_loopback() {
     let (address, received) = tests_support::spawn_loopback_http(200).await;
     let sink = super::WebhookSink::try_new(
         SecretString::try_new(format!("http://{address}/hook")).expect("url"),
-        std::time::Duration::from_secs(5),
     )
     .expect("sink");
     let notification = super::project(&event(requested_body())).expect("projected");
@@ -470,7 +489,6 @@ async fn webhook_sink_maps_server_errors_to_unavailable() {
     let (address, _received) = tests_support::spawn_loopback_http(500).await;
     let sink = super::WebhookSink::try_new(
         SecretString::try_new(format!("http://{address}/hook")).expect("url"),
-        std::time::Duration::from_secs(5),
     )
     .expect("sink");
     let notification = super::project(&event(requested_body())).expect("projected");
@@ -547,7 +565,6 @@ async fn slack_sink_posts_text_payload() {
     let (address, received) = tests_support::spawn_loopback_http(200).await;
     let sink = super::SlackSink::try_new(
         SecretString::try_new(format!("http://{address}/services/T0/B0/x")).expect("url"),
-        std::time::Duration::from_secs(5),
     )
     .expect("sink");
     sink.deliver(super::project(&event(requested_body())).expect("projected"))
@@ -566,7 +583,6 @@ async fn slack_sink_posts_text_payload() {
 fn slack_sink_debug_never_leaks_the_url() {
     let sink = super::SlackSink::try_new(
         SecretString::try_new("https://hooks.slack.com/services/T0/B0/SECRETPART").expect("url"),
-        std::time::Duration::from_secs(5),
     )
     .expect("sink");
     let rendered = format!("{sink:?}");

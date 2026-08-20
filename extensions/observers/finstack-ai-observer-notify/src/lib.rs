@@ -240,6 +240,7 @@ pub struct NotifyObserver {
     delivered: Arc<AtomicU64>,
     failed: Arc<AtomicU64>,
     diagnostic: Arc<Mutex<Option<ObserverDiagnostic>>>,
+    delivery_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl NotifyObserver {
@@ -247,13 +248,21 @@ impl NotifyObserver {
     ///
     /// # Errors
     ///
-    /// Rejects an invalid identity or queue bound.
+    /// Rejects an invalid identity, an invalid queue bound, or
+    /// [`ObserverBackpressure::BlockBounded`] — the queue's only consumer is
+    /// this observer's own drain, so blocking for capacity can never succeed
+    /// and would spin the caller's thread; use `DropProgress` or `Disconnect`.
     pub fn try_new(
         sink: Arc<dyn NotificationSink>,
         policy: DeliveryPolicy,
         queue_capacity: usize,
         backpressure: ObserverBackpressure,
     ) -> Result<Self, NotifyObserverError> {
+        if matches!(backpressure, ObserverBackpressure::BlockBounded { .. }) {
+            return Err(NotifyObserverError::Configuration {
+                reason: "unsupported_backpressure_block_bounded",
+            });
+        }
         Ok(Self {
             descriptor: ObserverDescriptor {
                 component: ComponentRef::new(
@@ -282,6 +291,7 @@ impl NotifyObserver {
             delivered: Arc::new(AtomicU64::new(0)),
             failed: Arc::new(AtomicU64::new(0)),
             diagnostic: Arc::new(Mutex::new(None)),
+            delivery_gate: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -327,6 +337,7 @@ impl Observer for NotifyObserver {
     }
 
     fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
+        let mut push_error = None;
         for event in batch.iter() {
             let Some(notification) = project(event) else {
                 continue;
@@ -335,11 +346,14 @@ impl Observer for NotifyObserver {
                 Ok(ObserverQueuePush::Accepted) => {}
                 Ok(ObserverQueuePush::Dropped) => self.record_overflow(false),
                 Err(error) => {
-                    self.record_overflow(true);
-                    return Box::pin(async move { Err(error) });
+                    // CapacityExceeded is already counted by the queue itself.
+                    self.record_overflow(!matches!(error, ObserverError::CapacityExceeded));
+                    push_error = Some(error);
+                    break;
                 }
             }
         }
+        // Drain even after a push error so accepted notifications still ship.
         let pending = match self.queue.drain() {
             Ok(pending) => pending,
             Err(error) => return Box::pin(async move { Err(error) }),
@@ -349,24 +363,52 @@ impl Observer for NotifyObserver {
         let delivered = Arc::clone(&self.delivered);
         let failed = Arc::clone(&self.failed);
         let diagnostic = Arc::clone(&self.diagnostic);
+        let gate = Arc::clone(&self.delivery_gate);
         Box::pin(async move {
-            for notification in pending {
-                let mut attempt = 0_u32;
-                loop {
-                    attempt += 1;
-                    let outcome = tokio::time::timeout(
-                        policy.request_timeout,
-                        sink.deliver(notification.clone()),
-                    )
+            if !pending.is_empty() {
+                // Deliver in a spawned task so a slow sink never stalls the
+                // subscription loop awaiting this future; the FIFO gate keeps
+                // batches delivering in observe order.
+                tokio::spawn(deliver_pending(
+                    sink, policy, pending, delivered, failed, diagnostic, gate,
+                ));
+            }
+            match push_error {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
+        })
+    }
+}
+
+async fn deliver_pending(
+    sink: Arc<dyn NotificationSink>,
+    policy: DeliveryPolicy,
+    pending: Vec<InteractionNotification>,
+    delivered: Arc<AtomicU64>,
+    failed: Arc<AtomicU64>,
+    diagnostic: Arc<Mutex<Option<ObserverDiagnostic>>>,
+    gate: Arc<tokio::sync::Mutex<()>>,
+) {
+    let _ordered = gate.lock().await;
+    for notification in pending {
+        let mut attempt = 0_u32;
+        loop {
+            attempt += 1;
+            let outcome =
+                tokio::time::timeout(policy.request_timeout, sink.deliver(notification.clone()))
                     .await;
-                    if matches!(outcome, Ok(Ok(()))) {
-                        delivered.fetch_add(1, Ordering::Relaxed);
-                        break;
-                    }
-                    if attempt < policy.max_attempts {
-                        tokio::time::sleep(policy.retry_backoff).await;
-                        continue;
-                    }
+            match outcome {
+                Ok(Ok(())) => {
+                    delivered.fetch_add(1, Ordering::Relaxed);
+                    break;
+                }
+                // A timed-out request may still have been received by the
+                // endpoint; retrying it would duplicate the notification.
+                Ok(Err(_)) if attempt < policy.max_attempts => {
+                    tokio::time::sleep(policy.retry_backoff).await;
+                }
+                Ok(Err(_)) | Err(_) => {
                     failed.fetch_add(1, Ordering::Relaxed);
                     if let Ok(mut slot) = diagnostic.lock() {
                         *slot = Some(NOTIFY_DELIVERY_FAILED);
@@ -374,8 +416,7 @@ impl Observer for NotifyObserver {
                     break;
                 }
             }
-            Ok(())
-        })
+        }
     }
 }
 
@@ -384,7 +425,7 @@ mod project;
 mod slack;
 mod webhook;
 
-pub use project::project;
+pub(crate) use project::project;
 pub use slack::{SlackSink, slack_text};
 pub use webhook::WebhookSink;
 
