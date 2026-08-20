@@ -644,8 +644,11 @@ impl Reopened {
 /// which the ingress rejected as `scope_mismatch` on every tick while the row
 /// was already `Expired` and invisible to `pending` — a permanent, silent
 /// stall (reproduced by this test before the default was fixed). This policy
-/// presents the credentials the host itself accepted the run with, which is
-/// what makes the expiry act below reach a terminal run.
+/// presents the credentials the host itself accepted the run with, so its
+/// refusal command is deliverable — but the run reaches terminal from the
+/// kernel's own deadline expiry (`ExpireIfDue` on attach), credentials or
+/// not; the ingress rewrites the at-or-after-deadline command into a plain
+/// expiry, and the test below asserts exactly that.
 struct RunPrincipalExpiry;
 
 impl ExpiryPolicy for RunPrincipalExpiry {
