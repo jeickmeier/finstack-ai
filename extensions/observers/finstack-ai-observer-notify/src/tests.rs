@@ -207,11 +207,46 @@ fn custom_kind_label_and_principal_assignee_project_safely() {
 }
 
 mod tests_support {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
     use finstack_ai_runtime::PortFuture;
 
     use crate::{InteractionNotification, NotificationSink, SinkError};
+
+    pub(crate) struct FailingSink {
+        attempts: AtomicU64,
+    }
+
+    impl FailingSink {
+        pub(crate) fn always() -> Self {
+            Self {
+                attempts: AtomicU64::new(0),
+            }
+        }
+
+        pub(crate) fn attempts(&self) -> u64 {
+            self.attempts.load(Ordering::Relaxed)
+        }
+    }
+
+    impl NotificationSink for FailingSink {
+        fn name(&self) -> &'static str {
+            "failing"
+        }
+
+        fn deliver(
+            &self,
+            _notification: InteractionNotification,
+        ) -> PortFuture<Result<(), SinkError>> {
+            self.attempts.fetch_add(1, Ordering::Relaxed);
+            Box::pin(async {
+                Err(SinkError::Unavailable {
+                    reason: "scripted_failure",
+                })
+            })
+        }
+    }
 
     pub(crate) struct CapturingSink {
         pub(crate) seen: Arc<Mutex<Vec<InteractionNotification>>>,
@@ -244,6 +279,96 @@ mod tests_support {
         });
         (sink, seen)
     }
+}
+
+#[tokio::test]
+async fn observe_delivers_interaction_events_and_ignores_the_rest() {
+    let (sink, seen) = tests_support::capturing_sink();
+    let observer = NotifyObserver::try_new(
+        sink,
+        DeliveryPolicy::default(),
+        8,
+        ObserverBackpressure::DropProgress,
+    )
+    .expect("observer");
+    observer
+        .observe(Arc::from([
+            event(requested_body()),
+            event(RunEventBody::QueueDepthWarning(QueueDepthWarning {
+                depth: 3,
+                limit: 8,
+            })),
+        ]))
+        .await
+        .expect("observe");
+    assert_eq!(seen.lock().expect("lock").len(), 1);
+    assert_eq!(observer.delivered(), 1);
+    assert_eq!(observer.failed(), 0);
+    assert_eq!(observer.dropped(), 0);
+}
+
+#[tokio::test]
+async fn delivery_retries_then_records_failure_diagnostic() {
+    let policy = DeliveryPolicy::try_new(
+        std::time::Duration::from_millis(200),
+        2,
+        std::time::Duration::from_millis(1),
+    )
+    .expect("policy");
+    let sink = Arc::new(tests_support::FailingSink::always());
+    let observer = NotifyObserver::try_new(
+        Arc::clone(&sink) as Arc<dyn super::NotificationSink>,
+        policy,
+        8,
+        ObserverBackpressure::DropProgress,
+    )
+    .expect("observer");
+    observer
+        .observe(Arc::from([event(requested_body())]))
+        .await
+        .expect("observe");
+    assert_eq!(sink.attempts(), 2);
+    assert_eq!(observer.failed(), 1);
+    assert_eq!(observer.delivered(), 0);
+    assert_eq!(
+        observer.last_diagnostic().expect("diag").code,
+        "notify_delivery_failed"
+    );
+}
+
+#[tokio::test]
+async fn queue_overflow_drops_and_stores_overflow_diagnostic() {
+    let (sink, _seen) = tests_support::capturing_sink();
+    let observer = NotifyObserver::try_new(
+        sink,
+        DeliveryPolicy::default(),
+        1,
+        ObserverBackpressure::DropProgress,
+    )
+    .expect("observer");
+    observer
+        .observe(Arc::from([
+            event(requested_body()),
+            event(requested_body()),
+            event(requested_body()),
+        ]))
+        .await
+        .expect("observe");
+    assert_eq!(observer.delivered() + observer.dropped(), 3);
+    assert!(observer.dropped() > 0);
+}
+
+#[test]
+fn delivery_policy_clamps_are_enforced() {
+    use std::time::Duration;
+    assert!(DeliveryPolicy::try_new(Duration::from_millis(500), 0, Duration::ZERO).is_err());
+    assert!(DeliveryPolicy::try_new(Duration::from_millis(1), 3, Duration::ZERO).is_err());
+    assert!(DeliveryPolicy::try_new(Duration::from_secs(61), 3, Duration::ZERO).is_err());
+    assert!(DeliveryPolicy::try_new(Duration::from_secs(5), 6, Duration::ZERO).is_err());
+    assert!(DeliveryPolicy::try_new(Duration::from_secs(5), 3, Duration::from_secs(11)).is_err());
+    assert!(
+        DeliveryPolicy::try_new(Duration::from_secs(5), 3, Duration::from_millis(500)).is_ok()
+    );
 }
 
 #[tokio::test]

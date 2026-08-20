@@ -33,8 +33,9 @@ use finstack_ai_kernel::{
     Version,
 };
 use finstack_ai_runtime::{
-    Observer, ObserverBackpressure, ObserverDescriptor, ObserverDiagnostic, ObserverError,
-    ObserverPayloadMode, ObserverQueue, PortFuture,
+    OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
+    ObserverDiagnostic, ObserverError, ObserverPayloadMode, ObserverQueue, ObserverQueuePush,
+    PortFuture,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -223,9 +224,17 @@ impl Default for DeliveryPolicy {
     }
 }
 
+/// Diagnostic stored when a notification exhausts its delivery attempts.
+pub const NOTIFY_DELIVERY_FAILED: ObserverDiagnostic = ObserverDiagnostic {
+    code: "notify_delivery_failed",
+    detail: "notification dropped after exhausting sink delivery attempts",
+};
+
 /// Announce-only interaction lifecycle observer.
 pub struct NotifyObserver {
     descriptor: ObserverDescriptor,
+    sink: Arc<dyn NotificationSink>,
+    policy: DeliveryPolicy,
     queue: ObserverQueue<InteractionNotification>,
     dropped: AtomicU64,
     delivered: Arc<AtomicU64>,
@@ -245,7 +254,6 @@ impl NotifyObserver {
         queue_capacity: usize,
         backpressure: ObserverBackpressure,
     ) -> Result<Self, NotifyObserverError> {
-        let _ = (sink, policy);
         Ok(Self {
             descriptor: ObserverDescriptor {
                 component: ComponentRef::new(
@@ -263,6 +271,8 @@ impl NotifyObserver {
                 payload_mode: ObserverPayloadMode::Full,
                 metadata: Metadata::empty(),
             },
+            sink,
+            policy,
             queue: ObserverQueue::try_new(queue_capacity, backpressure).map_err(|_| {
                 NotifyObserverError::Configuration {
                     reason: "invalid_queue_capacity",
@@ -298,6 +308,17 @@ impl NotifyObserver {
     pub fn last_diagnostic(&self) -> Option<ObserverDiagnostic> {
         self.diagnostic.lock().ok().and_then(|slot| *slot)
     }
+
+    /// Store the overflow diagnostic; `count_locally` covers queue errors the
+    /// queue's own `dropped()` counter does not record.
+    fn record_overflow(&self, count_locally: bool) {
+        if count_locally {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Ok(mut slot) = self.diagnostic.lock() {
+            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
+        }
+    }
 }
 
 impl Observer for NotifyObserver {
@@ -306,8 +327,55 @@ impl Observer for NotifyObserver {
     }
 
     fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
-        let _ = batch;
-        Box::pin(async { Ok(()) })
+        for event in batch.iter() {
+            let Some(notification) = project(event) else {
+                continue;
+            };
+            match self.queue.push(notification) {
+                Ok(ObserverQueuePush::Accepted) => {}
+                Ok(ObserverQueuePush::Dropped) => self.record_overflow(false),
+                Err(error) => {
+                    self.record_overflow(true);
+                    return Box::pin(async move { Err(error) });
+                }
+            }
+        }
+        let pending = match self.queue.drain() {
+            Ok(pending) => pending,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let sink = Arc::clone(&self.sink);
+        let policy = self.policy.clone();
+        let delivered = Arc::clone(&self.delivered);
+        let failed = Arc::clone(&self.failed);
+        let diagnostic = Arc::clone(&self.diagnostic);
+        Box::pin(async move {
+            for notification in pending {
+                let mut attempt = 0_u32;
+                loop {
+                    attempt += 1;
+                    let outcome = tokio::time::timeout(
+                        policy.request_timeout,
+                        sink.deliver(notification.clone()),
+                    )
+                    .await;
+                    if matches!(outcome, Ok(Ok(()))) {
+                        delivered.fetch_add(1, Ordering::Relaxed);
+                        break;
+                    }
+                    if attempt < policy.max_attempts {
+                        tokio::time::sleep(policy.retry_backoff).await;
+                        continue;
+                    }
+                    failed.fetch_add(1, Ordering::Relaxed);
+                    if let Ok(mut slot) = diagnostic.lock() {
+                        *slot = Some(NOTIFY_DELIVERY_FAILED);
+                    }
+                    break;
+                }
+            }
+            Ok(())
+        })
     }
 }
 
