@@ -310,6 +310,32 @@ impl Agent {
             )
             .await?;
             let terminal = recover_state(Arc::clone(&store), session_id).await?;
+            if terminal.terminal.is_none() {
+                if matches!(
+                    terminal.phase,
+                    Some(RunPhase::Sleeping | RunPhase::PreparingContext)
+                ) {
+                    // A `before_finalize` middleware superseded the submitted
+                    // `FinalizeAccepted` with a `Retry`: the kernel committed
+                    // `RetryScheduled` plus a timer effect, and the post-commit
+                    // action fires the timer. Wait for the timer to land the
+                    // run back in `PreparingContext` and continue the drive loop.
+                    let retry = wait_for_phase(
+                        handle,
+                        Arc::clone(&store),
+                        session_id,
+                        &[
+                            RunPhase::PreparingContext,
+                            RunPhase::Failed,
+                            RunPhase::Cancelled,
+                        ],
+                    )
+                    .await?;
+                    ensure_nonterminal_failure(&retry)?;
+                    continue;
+                }
+                return Err(AgentRunError::runtime_message("terminal state is missing"));
+            }
             let completed = match terminal
                 .terminal
                 .as_ref()
