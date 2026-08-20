@@ -16,6 +16,12 @@
 //! the freshly verified head on success. The map is only ever touched by the
 //! synchronous helpers in [`crate::store`], so its `std::sync::Mutex` is
 //! never held across an `.await`.
+//!
+//! Loads run concurrently, so the read and the write-back are not atomic:
+//! the cache read returns the *generation* it saw, and `remember_head`
+//! discards a write whose generation is stale. Without that guard a load
+//! that started before a concurrent load found corruption could write its
+//! head afterwards and permanently resurrect the invalidated proof.
 
 use std::sync::Arc;
 
@@ -131,9 +137,15 @@ impl PostgresJournalStore {
         let snapshot_bytes = self.config.limits.snapshot_bytes;
         let cache: VerifiedCache = Arc::clone(&self.verified);
         Box::pin(async move {
-            let cached = cached_head(&cache, session_id);
             let mut client = pool.get().await?;
-            let result = load(&mut client, session_id, snapshot_bytes, window, cached).await;
+            // Read the cache as late as possible — after the (potentially
+            // blocking) checkout — so the window in which another load can
+            // invalidate between the read and the write-back is as small as
+            // it can be. Correctness does not depend on that window being
+            // small: `remember_head` rejects a write whose generation is
+            // stale (see `crate::store`).
+            let read = cached_head(&cache, session_id);
+            let result = load(&mut client, session_id, snapshot_bytes, window, read.head).await;
             match &result {
                 // Only a full load establishes a proof over the *whole*
                 // chain. A window's tail was verified against a checksum the
@@ -143,6 +155,7 @@ impl PostgresJournalStore {
                 Ok(loaded) if matches!(window, LoadWindow::Full) => remember_head(
                     &cache,
                     session_id,
+                    read,
                     VerifiedHead {
                         sequence: loaded.head_sequence,
                         checksum: loaded.head_checksum,

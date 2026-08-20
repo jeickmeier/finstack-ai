@@ -17,10 +17,14 @@ const DISK_FULL: &str = "53100";
 const SERIALIZATION_FAILURE: &str = "40001";
 
 /// SQLSTATE for a server-detected deadlock. Like [`SERIALIZATION_FAILURE`]
-/// this is a *retryable* concurrency outcome, not a durable failure: the
-/// append transaction protocol (spec D4) can deadlock when two writers race
-/// to create the same session (one holds the new session row, the other
-/// holds `store_totals`). The store never retries internally — it reports
+/// this is a *retryable* concurrency outcome, not a durable failure.
+///
+/// No path in the current append protocol (spec D4) can produce a lock cycle:
+/// only session creation takes two locks, and it takes `store_totals` before
+/// touching the `sessions` row, so creators queue rather than deadlock (see
+/// the `crate::append` module doc). The mapping is kept as defense in depth —
+/// a future path, or a lock the server takes on a transaction's behalf, could
+/// still deadlock. The store never retries internally: it reports
 /// `Unavailable{postgres_serialization}` and the caller retries the same
 /// `AppendRequest`, which the idempotency contract makes safe.
 const DEADLOCK_DETECTED: &str = "40P01";

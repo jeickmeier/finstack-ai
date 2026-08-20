@@ -159,8 +159,14 @@ async fn load_returns_every_committed_batch_on_its_stored_boundaries() {
     guard.cleanup(&connect(&url).await).await;
 }
 
-/// A tampered `envelope_checksum` fails the load, drops the cached verified
-/// head, and a load after the bytes are restored verifies cleanly again.
+/// A tampered `envelope_checksum` fails the load *and* drops the cached
+/// verified head.
+///
+/// The drop is what the third load discriminates: after the head record is
+/// repaired, a *mid-journal* record is corrupted instead. A surviving cache
+/// entry would anchor on the (now valid again) head record and suffix-verify
+/// nothing, masking that corruption; only a genuinely dropped entry forces
+/// the full re-verification that catches it.
 #[tokio::test]
 async fn a_corrupt_envelope_checksum_fails_the_load_and_drops_the_cache() {
     let Some(url) = pg_test_url() else {
@@ -174,19 +180,33 @@ async fn a_corrupt_envelope_checksum_fails_the_load_and_drops_the_cache() {
     // First load verifies the full chain and caches the verified head.
     let clean = load_session_one(&store).await.expect("first load");
 
-    let original = stored_checksum(&client, &schema, 4).await;
+    // Corrupting the head record breaks the load however it is verified, so
+    // this step establishes only that the load fails and the entry is gone.
+    let head_bytes = stored_checksum(&client, &schema, 4).await;
     set_checksum(&client, &schema, 4, &[0xAB_u8; 32]).await;
     let error = load_session_one(&store)
         .await
-        .expect_err("a broken chain must fail the load");
+        .expect_err("a broken head must fail the load");
     assert!(
         matches!(error, StoreError::Integrity { .. }),
         "unexpected error: {error:?}"
     );
 
-    // The cache entry was dropped, so the repaired journal re-verifies in
-    // full rather than being trusted from a stale cached head.
-    set_checksum(&client, &schema, 4, &original).await;
+    // Repair the head and break sequence 2 instead: reachable only by a
+    // verification that actually walks the chain again.
+    set_checksum(&client, &schema, 4, &head_bytes).await;
+    let middle_bytes = stored_checksum(&client, &schema, 2).await;
+    set_checksum(&client, &schema, 2, &[0xCD_u8; 32]).await;
+    let error = load_session_one(&store)
+        .await
+        .expect_err("mid-journal corruption must be caught after the cache drop");
+    assert!(
+        matches!(error, StoreError::Integrity { .. }),
+        "unexpected error: {error:?}"
+    );
+
+    // Fully repaired, the journal loads exactly as it did before.
+    set_checksum(&client, &schema, 2, &middle_bytes).await;
     let repaired = load_session_one(&store).await.expect("repaired load");
     assert_eq!(repaired, clean);
 
