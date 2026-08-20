@@ -1096,7 +1096,9 @@ git add extensions/stores/finstack-ai-store-object-s3
 git commit -m "feat(stores): S3ObjectStore operations over loopback-tested SigV4 client"
 ```
 
----### Task 8: `ObjectArtifactStore` adapter crate
+---
+
+### Task 8: `ObjectArtifactStore` adapter crate
 
 **Files:**
 - Create: `extensions/stores/finstack-ai-store-artifact-object/Cargo.toml`, `src/lib.rs`, `README.md`
