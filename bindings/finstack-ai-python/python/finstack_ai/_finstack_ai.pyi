@@ -181,16 +181,22 @@ class HttpFetchToolset:
 
     Built from a JSON configuration document: ``allowlist`` (required,
     non-empty), and optional ``max_response_bytes``, ``request_timeout_ms``,
-    ``max_redirects``, ``per_host_headers``, ``user_agent``.
-    ``allow_loopback_http`` is also accepted for test-fixture parity with the
-    Rust config, but is documented as fixtures-only.
+    ``max_redirects``, ``per_host_headers``, ``user_agent``. The JSON document
+    does NOT accept ``allow_loopback_http`` (an unknown-key error if it does)
+    — that privilege is intentionally not data-configurable. Fixtures that
+    need it pass the keyword-only ``insecure_allow_loopback_http=True``
+    instead; it is applied to the parsed config after the JSON is parsed,
+    never read from the JSON payload itself. **Fixtures only. Never enable in
+    production.**
 
     This constructor never attaches an artifact store, so ``mode: "artifact"``
     and any binary (or invalid-UTF-8) response body always fail with
     ``fetch_limit_exceeded`` in v1 — there is no store to stage them to.
     """
 
-    def __init__(self, config_json: str) -> None: ...
+    def __init__(
+        self, config_json: str, *, insecure_allow_loopback_http: bool = False
+    ) -> None: ...
     @property
     def component(self) -> str: ...
     @property

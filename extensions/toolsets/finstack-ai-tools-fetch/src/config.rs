@@ -53,8 +53,17 @@ impl HostPattern {
     /// Returns [`HttpFetchError::Configuration`] when the entry is empty,
     /// contains characters that are never valid in a bare host (`*`, `/`,
     /// `:`, `?`, `#`, `@`, whitespace, or any ASCII control character) after
-    /// stripping a `*.` prefix, or has an empty dot-separated label.
+    /// stripping a `*.` prefix, has an empty dot-separated label, or
+    /// contains any non-ASCII byte (reason `allowlist_entry_not_ascii`):
+    /// the `url` crate always delivers hosts punycoded/lowercased, so a raw
+    /// Unicode entry (e.g. `bücher.example`) would parse here but then
+    /// never match anything — punycode it yourself before configuring it.
     pub fn parse(entry: &str) -> Result<Self, HttpFetchError> {
+        if !entry.is_ascii() {
+            return Err(HttpFetchError::Configuration {
+                reason: "allowlist_entry_not_ascii",
+            });
+        }
         let entry = entry.to_ascii_lowercase();
         let (wildcard, host) = match entry.strip_prefix("*.") {
             Some(rest) => (true, rest),
@@ -110,6 +119,17 @@ pub struct HttpFetchConfig {
     /// public suffix.
     pub allowlist: Vec<String>,
     /// Maximum response body size in bytes. Default 2 MiB; hard ceiling 8 MiB.
+    ///
+    /// This bounds the raw wire read and the inline (`content`) result, but
+    /// inline results are *additionally* bounded by the kernel's 1 MiB
+    /// `RawJson` ceiling (`finstack_ai_kernel::RAW_JSON_MAX_BYTES`), which
+    /// the toolset cannot configure past: a `max_response_bytes` above ~1
+    /// MiB still enforces (and advertises via `ToolSpec::max_result_bytes`)
+    /// an effective inline ceiling of 1 MiB, not the configured value.
+    /// Bodies that need to be larger than that require an artifact store
+    /// (`HttpFetchToolset::with_artifact_store`) — artifact refs staged
+    /// there are tiny JSON pointers, so they are unaffected by this
+    /// ceiling regardless of how large `max_response_bytes` is set.
     pub max_response_bytes: usize,
     /// Per-request timeout. Default 30 s; hard ceiling 120 s.
     pub request_timeout: Duration,
@@ -133,6 +153,14 @@ pub struct HttpFetchConfig {
     /// allowlist check whatsoever — the single largest privilege this
     /// crate can grant, and exactly the shape a prompt injection would
     /// aim for. Set it only in test configuration that never ships.
+    ///
+    /// Not settable via the JSON snapshot ([`HttpFetchConfigSnapshot`]) by
+    /// design: enabling this privilege must be a deliberate, code-reviewed
+    /// call site, not something that can arrive embedded in data (a config
+    /// file, a database row, or anything else that eventually flows into
+    /// `from_json`). Hosts that need it in fixtures (e.g. the Python
+    /// binding) set it explicitly, after `from_json`, in their own
+    /// construction code.
     pub allow_loopback_http: bool,
     /// Optional `User-Agent` override.
     pub user_agent: Option<String>,
@@ -282,6 +310,14 @@ pub(crate) fn validate(
 /// `request_timeout_ms` is milliseconds; every other numeric field maps
 /// 1:1 onto its [`HttpFetchConfig`] field. Unknown top-level keys are
 /// rejected rather than silently ignored.
+///
+/// Deliberately has no `allow_loopback_http` field: that privilege is
+/// code-only (see [`HttpFetchConfig::allow_loopback_http`]'s doc), never
+/// data-borne. Because this type derives `deny_unknown_fields`, a JSON
+/// document that still carries the old `allow_loopback_http` key now fails
+/// to parse — that's the point, not a bug. Hosts that need the fixture
+/// bypass (e.g. the Python binding) set the field on the returned
+/// [`HttpFetchConfig`] themselves, in code, after calling [`Self::from_json`].
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HttpFetchConfigSnapshot {
@@ -294,8 +330,6 @@ pub struct HttpFetchConfigSnapshot {
     max_redirects: Option<u64>,
     #[serde(default)]
     per_host_headers: Option<BTreeMap<String, BTreeMap<String, String>>>,
-    #[serde(default)]
-    allow_loopback_http: Option<bool>,
     #[serde(default)]
     user_agent: Option<String>,
 }
@@ -352,9 +386,7 @@ impl HttpFetchConfigSnapshot {
             request_timeout,
             max_redirects,
             per_host_headers,
-            allow_loopback_http: snapshot
-                .allow_loopback_http
-                .unwrap_or(defaults.allow_loopback_http),
+            allow_loopback_http: defaults.allow_loopback_http,
             user_agent: snapshot.user_agent,
         })
     }

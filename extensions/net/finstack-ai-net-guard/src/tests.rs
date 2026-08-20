@@ -39,6 +39,21 @@ fn loopback_http_is_allowed_only_when_policy_says_so() {
 }
 
 #[test]
+fn loopback_scope_is_exact_not_whole_127_8() {
+    // 127.77.1.2 is within 127.0.0.0/8 (IpAddr::is_loopback would accept it)
+    // but is not the exact conventional loopback address, so it must not be
+    // treated as loopback: plaintext http to it is forbidden even under the
+    // fixture policy.
+    let policy = UrlPolicy { allow_loopback_http: true };
+    parse_and_vet_url("http://127.77.1.2:8080/x", &policy).expect_err("not exact loopback");
+    // The exact addresses still work.
+    let vetted = parse_and_vet_url("http://127.0.0.1:8080/x", &policy).expect("exact loopback");
+    assert!(vetted.is_loopback);
+    let vetted = parse_and_vet_url("http://[::1]:8080/x", &policy).expect("exact ipv6 loopback");
+    assert!(vetted.is_loopback);
+}
+
+#[test]
 fn forbidden_components_and_schemes_are_rejected() {
     for bad in [
         "ftp://docs.rs/",
@@ -128,6 +143,23 @@ async fn literal_hosts_skip_resolution_but_not_the_deny_check() {
     // …but a private literal is blocked even then.
     let vetted = super::parse_and_vet_url("https://10.0.0.1/", &super::UrlPolicy { allow_loopback_http: false }).unwrap();
     resolve_and_pin(&vetted, &SystemResolver).await.expect_err("private literal");
+}
+
+#[tokio::test]
+async fn resolved_address_in_127_8_but_not_exact_loopback_is_still_blocked() {
+    // "localhost" vets as loopback (allow_loopback flows through to
+    // resolve_and_pin), but a resolved answer of 127.77.1.2 — in
+    // 127.0.0.0/8 yet not the exact 127.0.0.1 — must still be rejected:
+    // the allow-loopback carve-out is scoped to the exact address, not the
+    // whole block.
+    let policy = super::UrlPolicy { allow_loopback_http: true };
+    let vetted = super::parse_and_vet_url("http://localhost:9/", &policy).unwrap();
+    assert!(vetted.is_loopback);
+    let resolver = ScriptedResolver(vec![SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 77, 1, 2)),
+        9,
+    )]);
+    resolve_and_pin(&vetted, &resolver).await.expect_err("not exact loopback");
 }
 
 #[tokio::test]

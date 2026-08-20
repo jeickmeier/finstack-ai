@@ -13,6 +13,25 @@ use crate::vet::VettedUrl;
 /// Proxies (system/env, e.g. `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`) are
 /// also disabled, since this crate has no proxy support as a non-goal.
 ///
+/// ## Redirect loops
+///
+/// Because redirects are disabled here, the caller owns the hop loop, and
+/// with it the security invariant this client depends on: **every** hop —
+/// not just hop 0 — must re-run the full parse-and-vet → allowlist →
+/// resolve-and-pin sequence on the redirect target before building a new
+/// pinned client for it. Skipping re-vetting on later hops reopens exactly
+/// the DNS-rebinding/SSRF gap this module exists to close.
+///
+/// A related trap: any loopback or fixture-only bypass (e.g. an
+/// `allow_loopback_http`-style carve-out on the allowlist check) must be
+/// decided from the *original*, hop-0 URL and never recomputed per hop.
+/// Deciding it per hop would let an allowlisted public host 30x-redirect
+/// into a loopback destination and have the bypass apply there too. See
+/// `finstack-ai-tools-fetch`'s `host_allowed`/`origin_is_loopback`
+/// (`pipeline.rs`) for the reference implementation: `origin_is_loopback`
+/// is computed once from hop 0 and threaded unchanged through every
+/// subsequent hop's allowlist check.
+///
 /// # Errors
 ///
 /// [`NetGuardError::ClientBuildFailed`] if the client cannot be constructed.

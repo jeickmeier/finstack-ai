@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, Sensitivity};
 use finstack_ai_runtime::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ToolCallContext, ToolError,
-    stage_required_artifact,
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ToolCallContext,
+    ToolError, stage_required_artifact,
 };
 
 use crate::markdown::html_to_markdown;
@@ -65,9 +65,10 @@ fn is_inline_text_essence(essence: &str) -> bool {
 ///
 /// Returns [`ToolError`] with `FETCH_LIMIT_EXCEEDED` when an inline result
 /// would exceed `max_result_budget`, when the body is binary (or invalid
-/// UTF-8) and no artifact store is attached, or when `mode` is `artifact`
-/// and no store is attached. Returns `FETCH_TRANSPORT_FAILED` when artifact
-/// staging itself fails.
+/// UTF-8) and no artifact store is attached, when `mode` is `artifact` and
+/// no store is attached, or when the artifact store itself rejects staging
+/// with [`ArtifactError::TooLarge`]. Returns `FETCH_TRANSPORT_FAILED` when
+/// artifact staging fails for any other reason.
 pub(crate) async fn deliver(
     body: Vec<u8>,
     media_type: &str,
@@ -173,12 +174,17 @@ async fn stage_artifact(
         },
     )
     .await
-    .map_err(|_| {
-        tool_error(
+    .map_err(|error| match error {
+        ArtifactError::TooLarge { .. } => tool_error(
+            FETCH_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "fetch content exceeds the artifact store's byte limit",
+        ),
+        _ => tool_error(
             FETCH_TRANSPORT_FAILED,
             ErrorCategory::Tool,
             "fetch artifact staging failed",
-        )
+        ),
     })?;
     serde_json::to_value(&artifact).map_err(|_| {
         tool_error(

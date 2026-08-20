@@ -37,14 +37,33 @@ const TOOL_NAME: &str = "http_fetch";
 /// for the JSON wrapper around the fetched body).
 const RESULT_ENVELOPE_BYTES: u64 = 4_096;
 
+/// The kernel's `RawJson::parse` hard-caps every parsed document at this
+/// many bytes (`finstack_ai_kernel::RAW_JSON_MAX_BYTES`, currently 1 MiB),
+/// independent of whatever this toolset's own `max_response_bytes` is
+/// configured to. A local copy is kept (rather than importing the kernel
+/// constant directly into the arithmetic below) only so the `min` call
+/// reads as a self-contained ceiling computation; the value itself must
+/// stay equal to the kernel constant.
+const KERNEL_RAW_JSON_MAX_BYTES: u64 = finstack_ai_kernel::RAW_JSON_MAX_BYTES as u64;
+
 /// Compute the serialized-result ceiling from `max_response_bytes`: the same
 /// value reported as `ToolSpec::max_result_bytes` and enforced in `call()`
 /// against the actual serialized (JSON-escaped) output, so the two can never
 /// drift apart.
+///
+/// Clamped to [`KERNEL_RAW_JSON_MAX_BYTES`]: [`RawJson::parse`] (used below
+/// to normalize `call()`'s output) hard-caps at that many bytes regardless
+/// of this toolset's own configured limit, so advertising or enforcing a
+/// larger ceiling here would let a result pass this toolset's own
+/// over-ceiling check only to be rejected by `RawJson::parse` afterwards
+/// with a different, less specific error. Clamping means the over-ceiling
+/// check in `call()` fires first, with the toolset's own stable
+/// `FETCH_LIMIT_EXCEEDED` code, for any serialized output past 1 MiB.
 fn result_ceiling(max_response_bytes: usize) -> u64 {
     u64::try_from(max_response_bytes)
         .unwrap_or(u64::MAX)
         .saturating_add(RESULT_ENVELOPE_BYTES)
+        .min(KERNEL_RAW_JSON_MAX_BYTES)
 }
 
 /// Requested output shape for one `http_fetch` call.

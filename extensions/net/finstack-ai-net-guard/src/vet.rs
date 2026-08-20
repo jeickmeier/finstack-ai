@@ -1,6 +1,6 @@
 //! URL parsing and scheme/component policy.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use url::Url;
 
@@ -30,7 +30,13 @@ fn invalid(reason: &'static str) -> NetGuardError {
     NetGuardError::InvalidUrl { reason }
 }
 
-/// True for `localhost` and literal loopback addresses.
+/// True only for the exact loopback names/addresses: `localhost`,
+/// `127.0.0.1`, and `::1` (including the IPv4-mapped `::ffff:127.0.0.1`
+/// form, which canonicalizes to `127.0.0.1`). This is deliberately
+/// narrower than [`std::net::IpAddr::is_loopback`], which accepts the
+/// entire `127.0.0.0/8` block: only the single conventional loopback
+/// address per family is treated as loopback here, so e.g. `127.77.1.2`
+/// is NOT loopback even though the OS would route it locally.
 #[must_use]
 pub fn is_loopback_host(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
@@ -38,7 +44,10 @@ pub fn is_loopback_host(host: &str) -> bool {
             .trim_start_matches('[')
             .trim_end_matches(']')
             .parse::<IpAddr>()
-            .is_ok_and(|addr| addr.to_canonical().is_loopback())
+            .is_ok_and(|addr| {
+                let canonical = addr.to_canonical();
+                canonical == IpAddr::V4(Ipv4Addr::LOCALHOST) || canonical == IpAddr::V6(Ipv6Addr::LOCALHOST)
+            })
 }
 
 /// Parse and vet: https only (http iff loopback allowed and host is

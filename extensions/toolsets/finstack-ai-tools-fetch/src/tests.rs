@@ -221,6 +221,24 @@ fn host_patterns_reject_control_characters() {
 }
 
 #[test]
+fn host_patterns_reject_non_ascii_entries() {
+    // F-5: a raw Unicode allowlist entry parsed successfully but then never
+    // matched anything, because the `url` crate always delivers hosts
+    // punycoded. Reject it at construction instead, with a distinct reason
+    // so it's diagnosable as "you need to punycode this" rather than
+    // lumped in with the generic shape-invalid reason.
+    for bad in ["bücher.example", "*.bücher.example"] {
+        let error = HostPattern::parse(bad).expect_err(bad);
+        assert_eq!(
+            error,
+            HttpFetchError::Configuration {
+                reason: "allowlist_entry_not_ascii"
+            }
+        );
+    }
+}
+
+#[test]
 fn debug_redacts_per_host_headers() {
     let mut config = config_with(&["docs.rs"]);
     config.per_host_headers.insert(
@@ -298,7 +316,6 @@ fn snapshot_from_json_honors_every_field() {
         "request_timeout_ms": 5000,
         "max_redirects": 1,
         "per_host_headers": {"docs.rs": {"X-Test": "value"}},
-        "allow_loopback_http": true,
         "user_agent": "finstack-fetch-test/1.0"
     }"#;
     let config = HttpFetchConfigSnapshot::from_json(json).unwrap();
@@ -313,12 +330,32 @@ fn snapshot_from_json_honors_every_field() {
         config.per_host_headers.get("docs.rs"),
         Some(&vec![("X-Test".to_owned(), "value".to_owned())])
     );
-    assert!(config.allow_loopback_http);
+    // Not data-configurable: the snapshot always produces the code default
+    // regardless of what the JSON says (there's no field for it to say).
+    assert!(!config.allow_loopback_http);
     assert_eq!(
         config.user_agent.as_deref(),
         Some("finstack-fetch-test/1.0")
     );
     HttpFetchToolset::try_new(config).expect("valid snapshot constructs");
+}
+
+#[test]
+fn snapshot_from_json_rejects_allow_loopback_http_field() {
+    // allow_loopback_http is deliberately not part of the snapshot shape
+    // (it must be code-set, never data-borne — see the type's doc). With
+    // `deny_unknown_fields`, JSON still carrying the old key must now fail
+    // to parse rather than silently accepting or ignoring the privilege.
+    let error = HttpFetchConfigSnapshot::from_json(
+        br#"{"allowlist":["docs.rs"],"allow_loopback_http":true}"#,
+    )
+    .expect_err("legacy allow_loopback_http field must be rejected");
+    assert_eq!(
+        error,
+        super::HttpFetchError::Configuration {
+            reason: "invalid_config_json"
+        }
+    );
 }
 
 #[test]
@@ -556,6 +593,40 @@ async fn binary_body_with_store_is_staged_as_an_artifact() {
     assert_eq!(output["byte_length"], 4);
     assert!(output.get("artifact").is_some(), "{output}");
     assert!(output.get("content").is_none(), "{output}");
+}
+
+#[tokio::test]
+async fn artifact_store_too_large_maps_to_fetch_limit_exceeded() {
+    // Finding 2: ArtifactError::TooLarge from the store itself must map to
+    // this crate's own FETCH_LIMIT_EXCEEDED / ErrorCategory::Limit, not the
+    // generic FETCH_TRANSPORT_FAILED / ErrorCategory::Tool used for other
+    // staging failures -- a body too large for the store is a limit
+    // condition the caller can act on (shrink the body, raise the store's
+    // limit), not a transport fault.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![0_u8, 159, 146, 150]; // binary; always routes to staging
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: application/octet-stream\r\n".to_owned(),
+        body,
+    ));
+
+    let store = Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(2));
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"]))
+        .unwrap()
+        .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
+    assert!(
+        error.to_string().contains("artifact store's byte limit"),
+        "{error}"
+    );
 }
 
 #[tokio::test]
@@ -1287,6 +1358,46 @@ async fn serialized_result_over_ceiling_returns_fetch_limit_exceeded() {
     let spec = toolset.tools()[0].clone();
     let url = format!("http://127.0.0.1:{}/x", addr.port());
     let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
+}
+
+#[tokio::test]
+async fn inline_result_over_the_kernel_raw_json_ceiling_is_a_limit_error() {
+    // `max_response_bytes` is configured to 2 MiB here, comfortably above
+    // the kernel's 1 MiB `RawJson::parse` ceiling
+    // (`finstack_ai_kernel::RAW_JSON_MAX_BYTES`). Without the clamp in
+    // `result_ceiling`, a ~1.2 MiB plain-text body would pass this
+    // toolset's own raw-byte and inline-budget checks (both bounded by the
+    // configured 2 MiB) and then be handed to `RawJson::parse` in `call()`,
+    // which would reject it anyway but with a different failure shape than
+    // this crate's own `fetch_limit_exceeded`. With the clamp, `call()`'s
+    // own over-ceiling check (against `min(max_response_bytes + 4096,
+    // RAW_JSON_MAX_BYTES)`) fires first and returns the stable
+    // FETCH_LIMIT_EXCEEDED code -- not a generic/internal error, and not
+    // FETCH_INVALID_ARGUMENTS.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body_len = 1_200_000_usize; // ~1.2 MiB, past the 1 MiB kernel ceiling
+    let body = vec![b'a'; body_len];
+    assert!(body_len > finstack_ai_kernel::RAW_JSON_MAX_BYTES);
+    assert!(body_len < 2 * 1_048_576, "must clear the 2 MiB configured cap");
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        body,
+    ));
+
+    let config = HttpFetchConfig {
+        max_response_bytes: 2 * 1_048_576,
+        ..loopback_config(&["docs.rs"])
+    };
+    let toolset = HttpFetchToolset::try_new(config).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}","mode":"auto"}}"#).as_bytes());
     let error = drive_to_error(&toolset, call).await;
     assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
 }

@@ -1,7 +1,7 @@
 //! Destination vetting and DNS resolve-and-pin.
 
 use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 
 use crate::NetGuardError;
@@ -59,9 +59,17 @@ pub fn is_forbidden_destination(addr: IpAddr) -> bool {
     }
 }
 
+/// True only for the exact loopback addresses `127.0.0.1` and `::1` (after
+/// canonicalization, which collapses `::ffff:127.0.0.1` to `127.0.0.1`).
+/// Narrower than `IpAddr::is_loopback`, which accepts the whole
+/// `127.0.0.0/8` block — see `vet::is_loopback_host`.
+fn is_exact_loopback(addr: IpAddr) -> bool {
+    addr == IpAddr::V4(Ipv4Addr::LOCALHOST) || addr == IpAddr::V6(Ipv6Addr::LOCALHOST)
+}
+
 fn blocked(addr: IpAddr, allow_loopback: bool) -> bool {
     let addr = addr.to_canonical();
-    if allow_loopback && addr.is_loopback() {
+    if allow_loopback && is_exact_loopback(addr) {
         return false;
     }
     is_forbidden_destination(addr)
