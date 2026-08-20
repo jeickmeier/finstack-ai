@@ -14,6 +14,37 @@ use htmd::HtmlToMarkdown;
 /// means here and why the cap is heuristic rather than exact.
 const MAX_SCAN_DEPTH: usize = 512;
 
+/// HTML void elements (per the living standard, never have a closing tag)
+/// that must not push onto the depth-tracking stack in
+/// [`exceeds_safe_nesting_depth`].
+const VOID_ELEMENTS: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+    "source", "track", "wbr",
+];
+
+/// Parse an ASCII tag name (letters, digits, `-`, `:`) from the start of
+/// `bytes`, lowercased. Returns `(name, bytes_consumed)`; `name` is `None`
+/// when `bytes` does not start with a valid name character.
+fn parse_tag_name(bytes: &[u8]) -> (Option<String>, usize) {
+    let len = bytes
+        .iter()
+        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'-' || **b == b':')
+        .count();
+    if len == 0 {
+        (None, 0)
+    } else {
+        (
+            Some(String::from_utf8_lossy(&bytes[..len]).to_ascii_lowercase()),
+            len,
+        )
+    }
+}
+
+/// Byte offset of the next `>` in `bytes`, if any.
+fn find_gt(bytes: &[u8]) -> Option<usize> {
+    bytes.iter().position(|&b| b == b'>')
+}
+
 /// Cheap pre-parse guard against pathologically deep HTML (F-4): `htmd`'s
 /// underlying `html5ever` parse produces a DOM that is walked, and dropped,
 /// recursively, so a document with tens or hundreds of thousands of nested
@@ -21,36 +52,85 @@ const MAX_SCAN_DEPTH: usize = 512;
 /// returning an error — confirmed by a 100,000-level `<div>` document
 /// aborting with SIGABRT before this guard existed.
 ///
-/// This is a single-pass byte scan, not a real parser: it treats `<` followed
-/// by an ASCII letter as an opening-tag transition (depth += 1) and `</` as a
-/// closing-tag transition (depth = `depth.saturating_sub(1)`), without
-/// tracking tag names or void-element rules. That means a run of sibling
-/// void elements (e.g. many consecutive `<br>`) is over-counted as if it
-/// nested, which can only make this guard reject *more* documents than
-/// strictly necessary — never fewer. Every failure mode here is fail-closed:
-/// `html_to_markdown` returns `None` and the caller falls back to its
-/// already-budget-checked plain-text path, it does not error the whole
-/// fetch.
+/// This is a single-pass byte scan, not a real parser, but it does track a
+/// bounded stack of open tag names (lowercased) rather than a bare integer
+/// counter. That distinction matters: an earlier version of this guard
+/// counted `</` transitions as unconditional decrements, which is *wrong*
+/// for the direction that matters, because html5ever ignores an end tag
+/// that has no matching open element on its stack of open elements (per the
+/// HTML parsing spec's tree-construction algorithm) rather than treating it
+/// as a decrement. A document built from `<div></span>` repeated 100,000
+/// times therefore kept a naive counter at depth <= 1 while html5ever's real
+/// DOM nested 100,000 unclosed `<div>`s — the stack-exhaustion abort stayed
+/// reachable through that gap. This version fixes that: a closing tag pops
+/// the stack ONLY when its name equals the top of the stack; a mismatched or
+/// stray close is ignored (no pop), mirroring html5ever's ignore-unmatched
+/// behavior in the conservative direction. Void elements
+/// ([`VOID_ELEMENTS`]) and explicitly self-closing tags (`<x/>`) are
+/// recognized and never pushed, so they cannot inflate the tracked depth on
+/// their own.
+///
+/// Because closes only pop on an exact match, this now genuinely can only
+/// reject more documents than strictly necessary, never fewer: any push this
+/// scan misses would have to come from a tag html5ever also wouldn't count
+/// as an open element, and any close this scan fails to apply (a mismatched
+/// close) only leaves the tracked depth higher than reality, not lower.
+/// Known false-positive sources from that same conservative bias: implied
+/// closes handled by html5ever's tree-construction adoption-agency /
+/// implied-end-tag rules (e.g. a huge run of sibling `<li>`s that HTML
+/// treats as auto-closing one another, or misnesting patterns like
+/// `<b><i></b>`) are not modeled here, so a legitimate document using those
+/// patterns at extreme scale could trip this guard and fall back to
+/// plain-text delivery even though html5ever would have handled it without
+/// unbounded real nesting. That fallback is inline text, not an error, so
+/// this is an accepted, documented tradeoff.
 ///
 /// `MAX_SCAN_DEPTH` (512) is well above any HTML a legitimate document is
 /// likely to nest by hand or by templating, and well below the depth that
 /// risks stack exhaustion in the underlying parser/DOM-walk/Drop.
 fn exceeds_safe_nesting_depth(html: &str) -> bool {
     let bytes = html.as_bytes();
-    let mut depth: usize = 0;
+    let mut stack: Vec<String> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'<' {
-            if bytes.get(i + 1) == Some(&b'/') {
-                depth = depth.saturating_sub(1);
-            } else if bytes.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
-                depth += 1;
-                if depth > MAX_SCAN_DEPTH {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if bytes.get(i + 1) == Some(&b'/') {
+            // Closing tag: pop only on an exact match with the top of the
+            // stack (see the doc comment above for why an unconditional
+            // decrement is unsound here).
+            let (name, consumed) = parse_tag_name(&bytes[i + 2..]);
+            let after_name = i + 2 + consumed;
+            let tag_end = find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
+            if let Some(name) = name
+                && stack.last() == Some(&name)
+            {
+                stack.pop();
+            }
+            i = tag_end.max(i + 1);
+            continue;
+        }
+        if !bytes.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
+            i += 1;
+            continue;
+        }
+        // Opening tag.
+        let (name, consumed) = parse_tag_name(&bytes[i + 1..]);
+        let after_name = i + 1 + consumed;
+        let tag_end = find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
+        let self_closing = tag_end >= 2 && bytes.get(tag_end - 2) == Some(&b'/');
+        if let Some(name) = name {
+            let is_void = VOID_ELEMENTS.contains(&name.as_str());
+            if !self_closing && !is_void {
+                stack.push(name);
+                if stack.len() > MAX_SCAN_DEPTH {
                     return true;
                 }
             }
         }
-        i += 1;
+        i = tag_end.max(i + 1);
     }
     false
 }
@@ -191,5 +271,34 @@ mod tests {
         let result = html_to_markdown(&html, BIG_CAP);
         assert!(result.is_some(), "moderate nesting should still convert");
         assert!(result.unwrap().contains("text"));
+    }
+
+    /// Build a document with `count` repetitions of `<div></span>`: an
+    /// unclosed `<div>` immediately followed by a `</span>` close that
+    /// cannot match it. html5ever ignores an end tag with no matching open
+    /// element, so every `<div>` here stays open in the real DOM while the
+    /// `</span>` closes stay unmatched — exactly the mismatched-close
+    /// padding that bypassed the original (unconditional-decrement) guard.
+    fn mismatched_close_padding(count: usize) -> String {
+        "<div></span>".repeat(count)
+    }
+
+    #[test]
+    fn mismatched_close_padding_does_not_bypass_the_depth_guard() {
+        // Critical regression: an earlier version of `exceeds_safe_nesting_depth`
+        // decremented on ANY `</...>` sequence, so 100_000 repetitions of
+        // `<div></span>` kept its counter near 0 even though html5ever's
+        // real DOM nests 100_000 unclosed `<div>`s -- the stack-exhaustion
+        // abort stayed reachable. The fixed guard tracks a stack of open
+        // tag names and pops only on an exact match, so `</span>` never
+        // pops the `<div>` on top; the stack keeps growing and trips the
+        // cap well before conversion, returning `None`. Critically, this
+        // must not crash the process either way.
+        let html = mismatched_close_padding(100_000);
+        let result = html_to_markdown(&html, BIG_CAP);
+        assert!(
+            result.is_none(),
+            "expected the depth guard to trip on mismatched-close padding"
+        );
     }
 }

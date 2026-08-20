@@ -353,8 +353,44 @@ FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
   the existing goldens/pathological-markup tests as regression
   coverage. `cargo test -p finstack-ai-tools-fetch` (51 tests) and
   `cargo clippy -p finstack-ai-tools-fetch --all-targets` both pass
-  clean after the change. Original finding text retained below for the
-  record.
+  clean after the change.
+
+  UPDATE (2026-08-20, review pass): the initial guard above (a bare
+  integer counter, `depth += 1` on any `<tag`, `depth -= 1` on any
+  `</`) was found to be BYPASSABLE. html5ever ignores an end tag with
+  no matching open element on its stack of open elements, so it does
+  NOT treat a mismatched close as a decrement. A document built from
+  100,000 repetitions of `<div></span>` therefore kept the naive
+  counter near depth 0-1 (each `</span>` decremented it right back
+  down) while html5ever's real DOM nested 100,000 unclosed `<div>`s —
+  the stack-exhaustion abort this guard exists to prevent stayed fully
+  reachable. Reviewer compiled the guard directly and confirmed
+  `exceeds_safe_nesting_depth` returned `false` for that input.
+  Fix (this pass): replaced the bare counter with a bounded stack of
+  lowercased open tag names. A closing tag now pops the stack ONLY
+  when its name equals the top of the stack; a mismatched or stray
+  close is ignored (no pop), mirroring html5ever's ignore-unmatched
+  behavior in the conservative direction. Void elements (`br`, `img`,
+  `input`, etc.) and explicit self-closing tags (`<x/>`) are recognized
+  and never pushed. The cap trips the moment the stack itself would
+  exceed `MAX_SCAN_DEPTH` (512), so mismatched-close padding now GROWS
+  the tracked depth and trips the guard instead of masking it. The
+  "can only reject more documents than strictly necessary, never
+  fewer" claim in the doc comment now actually holds, with the
+  ignore-mismatched-closes rule stated as the reason, plus a
+  documented residual: implied-close patterns html5ever's
+  tree-construction algorithm handles specially (huge sibling `<li>`
+  runs, misnesting like `<b><i></b>`) are not modeled, so those could
+  in principle false-positive at extreme scale — accepted, since the
+  failure mode is a fallback to inline text, not an error or a crash.
+  New regression test `mismatched_close_padding_does_not_bypass_the_depth_guard`
+  (markdown.rs): 100,000 repetitions of `<div></span>` asserts `None`
+  (guard trips) and does not crash. All pre-existing depth-guard tests
+  (deeply_nested_html_does_not_crash, moderately_nested_html_still_converts)
+  and the full suite still pass; `cargo test -p finstack-ai-tools-fetch`
+  (54 tests at this point, other agents' work included) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
+  Original finding text retained below for the record.
 
   --- original finding ---
   Adversarial HTML nesting depth is untested against the
