@@ -1839,4 +1839,5 @@ pub fn finstack_ai::Extension::register(&self, &mut finstack_ai::Registrar) -> c
 impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
 pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub const fn finstack_ai::native_tokio_enabled() -> bool
 pub fn finstack_ai::outstanding_deferrals(&finstack_ai_kernel::state::KernelState) -> alloc::vec::Vec<finstack_ai::OutstandingDeferral>

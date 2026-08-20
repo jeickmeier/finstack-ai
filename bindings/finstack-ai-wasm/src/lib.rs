@@ -804,6 +804,45 @@ mod tests {
 
     #[test]
     fn linked_constructors_are_fail_closed_on_wasm_host() {
+        // `finstack-ai-wasm` depends on the `finstack-ai` facade with
+        // `default-features = false, features = ["wasm-host"]` (see this
+        // crate's `Cargo.toml`), and on that build the facade's linked
+        // constructors dispatch to a fail-closed `wasm-host`-only stub
+        // (`AGENT_RUN_UNSUPPORTED_PLAN`) rather than the real native
+        // providers (`crates/finstack-ai/src/agent/linked.rs`,
+        // `#[cfg(all(feature = "wasm-host", not(feature =
+        // "native-tokio")))]`).
+        //
+        // Cargo unifies features per package-per-target across an entire
+        // build, not per dependency edge. `cargo test --workspace` also
+        // builds several other members (`finstack-ai-provider-anthropic`,
+        // `finstack-ai-tools-mcp`, `finstack-ai-test`, `finstack-ai-wit`,
+        // `finstack-ai-plugin-host`, `examples/rust-minimal`, ...) that
+        // depend on `finstack-ai/native-tokio`, for the same host target
+        // this crate's tests build for. That unions `native-tokio` onto
+        // the single `finstack-ai` unit used everywhere in that build,
+        // including here, so the linked constructors resolve to the real
+        // native providers instead of the stub — expected Cargo behavior,
+        // not a wiring mistake in any one member's Cargo.toml. It cannot
+        // be detected here with a plain `#[cfg(feature = "native-tokio")]`
+        // — this crate never declares that feature itself, so such a cfg
+        // would be permanently dead code, not a reflection of what got
+        // unified into its `finstack-ai` dependency. It also never
+        // happens for an actual `wasm32-unknown-unknown` build (`mise run
+        // build-wasm`), where `finstack-ai-wasm` is compiled alone and
+        // nothing pulls in `native-tokio`.
+        //
+        // `finstack_ai::native_tokio_enabled()` reports the facade's own,
+        // post-unification `native-tokio` feature state (it's `cfg!` runs
+        // inside that crate, where the real value is visible), so this
+        // test uses it to skip the fail-closed assertions only when they
+        // do not apply — keeping the assertions themselves exercised by
+        // `cargo test -p finstack-ai-wasm --lib` and real wasm-target
+        // builds, which are the configurations where the fail-closed
+        // behavior is actually load-bearing.
+        if finstack_ai::native_tokio_enabled() {
+            return;
+        }
         let openai = ready(Agent::openai(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-unused".into(),
