@@ -72,13 +72,14 @@ fn replacement_rebases_and_additive_contributions_apply_on_top() {
     let texts = applied.iter().map(message_text).collect::<Vec<_>>();
     assert_eq!(
         texts,
-        vec!["replaced".to_owned(), "added-after-replace".to_owned()],
-        "Replace rebases the base payload; additive contributions still land, after it"
+        vec!["added-after-replace".to_owned(), "replaced".to_owned()],
+        "Replace rebases the base payload; additive contributions still land, \
+         inserted before its trailing user message"
     );
 }
 
 #[test]
-fn additive_contributions_append_after_the_base_when_nothing_replaced() {
+fn additive_contributions_insert_before_the_trailing_user_when_nothing_replaced() {
     let sources = test_sources();
     let fold = StageFold {
         instructions: vec![item("system-add")],
@@ -86,19 +87,62 @@ fn additive_contributions_append_after_the_base_when_nothing_replaced() {
         ..StageFold::default()
     };
 
-    let applied =
-        apply_context_prepared(&fold, &[user_message(4, "base")], &sources).expect("applied");
+    let applied = apply_context_prepared(
+        &fold,
+        &[user_message(3, "history"), user_message(4, "base")],
+        &sources,
+    )
+    .expect("applied");
 
     assert_eq!(
         applied.iter().map(message_text).collect::<Vec<_>>(),
         vec![
-            "base".to_owned(),
+            "history".to_owned(),
             "system-add".to_owned(),
-            "context-add".to_owned()
-        ]
+            "context-add".to_owned(),
+            "base".to_owned(),
+        ],
+        "instructions then context insert before the trailing current user, which stays last"
     );
     assert_eq!(applied[1].role(), MessageRole::System);
     assert_eq!(applied[2].role(), MessageRole::User);
+    assert_eq!(applied[3].role(), MessageRole::User);
+}
+
+/// When the base does not end with a user message (or is empty) there is no
+/// current-user slot to preserve, so additions fall back to the tail.
+#[test]
+fn additive_contributions_append_at_the_tail_without_a_trailing_user() {
+    let sources = test_sources();
+    let fold = StageFold {
+        instructions: vec![item("system-add")],
+        context: vec![item("context-add")],
+        ..StageFold::default()
+    };
+
+    let applied = apply_context_prepared(
+        &fold,
+        &[user_message(4, "base"), assistant_message(5, "reply")],
+        &sources,
+    )
+    .expect("applied");
+    assert_eq!(
+        applied.iter().map(message_text).collect::<Vec<_>>(),
+        vec![
+            "base".to_owned(),
+            "reply".to_owned(),
+            "system-add".to_owned(),
+            "context-add".to_owned(),
+        ],
+        "a non-user tail is not reshaped; additions append after it"
+    );
+
+    let applied_empty = apply_context_prepared(&fold, &[], &sources).expect("applied to empty");
+    assert_eq!(
+        applied_empty.iter().map(message_text).collect::<Vec<_>>(),
+        vec!["system-add".to_owned(), "context-add".to_owned()],
+        "an empty base takes the additions as the whole array"
+    );
 }
 
 #[test]

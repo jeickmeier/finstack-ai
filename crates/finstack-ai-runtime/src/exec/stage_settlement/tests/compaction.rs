@@ -166,6 +166,100 @@ fn a_compact_context_chain_lands_when_the_trailing_user_is_protected() {
     );
 }
 
+/// Composition: a `PrepareContext` `AddInstructions` fold inserts protected
+/// System messages *before* the trailing current user, so the no-provider
+/// `BeforeModel` source entries still end with a protected user entry and a
+/// compactor-role `CompactContext` over that context validates and lands,
+/// preserving the injected System items byte-identically.
+#[test]
+fn prepare_context_instructions_compose_with_a_before_model_compaction() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_prepare_context(&mut coordinator);
+    let sources = test_sources();
+    let instructions_driver = driver_for(
+        "fixture.instructions",
+        Stage::PrepareContext,
+        StageOutcome::AddInstructions(Arc::from([item("policy-instruction")])),
+    );
+
+    block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&instructions_driver),
+        &sources,
+        &test_profile(),
+        env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103),
+        prepare_context_settled(),
+    ))
+    .expect("prepare context settles with the instructions fold");
+
+    let context_messages = coordinator
+        .state()
+        .current_turn
+        .as_ref()
+        .expect("current turn")
+        .context
+        .messages
+        .to_vec();
+    assert_eq!(
+        context_messages
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>(),
+        vec!["policy-instruction".to_owned(), "hi".to_owned()],
+        "the instruction inserts before the trailing current user"
+    );
+    assert_eq!(context_messages[0].role(), MessageRole::System);
+
+    let draft = request_draft(context_messages.clone(), Vec::new());
+    let input = assembled_before_model_input(&draft);
+    // The no-provider structural fallback: the injected System entry is
+    // protected, and the current user — last again — is protected too.
+    assert!(
+        input.source_entries[0].protected
+            && input.source_entries[0].message.role() == MessageRole::System,
+        "the injected instruction must be a protected System source entry"
+    );
+    assert!(
+        input.source_entries.last().is_some_and(|entry| {
+            entry.protected && entry.message.role() == MessageRole::User
+        }),
+        "the trailing current user must stay last and structurally protected"
+    );
+
+    let compactor_driver = driver_from(
+        compactor_descriptor("fixture.compactor"),
+        StageOutcome::CompactContext(Box::new(evidence_correct_compaction(
+            &input,
+            &context_messages,
+        ))),
+    );
+    block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&compactor_driver),
+        &sources,
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+    ))
+    .expect("CompactContext must validate and land over an instruction-bearing context");
+
+    let committed = committed_model_request(&coordinator);
+    assert_eq!(
+        committed
+            .messages
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>(),
+        vec!["policy-instruction".to_owned(), "hi".to_owned()],
+        "the landed compaction must preserve the injected System item byte-identically"
+    );
+    assert_eq!(committed.messages[0].role(), MessageRole::System);
+    assert!(
+        coordinator.state().pending_model_effect.is_some(),
+        "a landed CompactContext must commit the model effect"
+    );
+}
+
 #[test]
 fn post_compaction_validator_may_not_add_context() {
     let mut coordinator = accepted_coordinator(RunLimits::empty());
