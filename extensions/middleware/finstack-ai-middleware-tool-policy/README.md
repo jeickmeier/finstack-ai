@@ -12,11 +12,12 @@ Four independent rules can be combined:
    unioned with a default allow set; tools outside that union are dropped. No
    role rule → no narrowing.
 
-2. **Write budget**: Per-run cap on `NonIdempotentWrite` tool calls. Once the
-   limit is reached, all write-classified tools are dropped from the retain
-   set. This is a visibility brake on what the model can still request, not
-   an audited ledger: it only counts calls the model can see in the draft
-   (tools filtered by earlier rules or prior stages do not count).
+2. **Write budget**: Per-run cap on non-`ReadOnly` tool calls (both
+   `IdempotentWrite` and `NonIdempotentWrite`). Once the limit is reached,
+   all non-`ReadOnly` tools are dropped from the retain set. This is a
+   visibility brake on what the model can still request, not an audited
+   ledger: it counts calls against the full tool list in the draft; only
+   tools absent from the draft entirely are excluded.
 
 3. **Jailbreak triggers**: Case-insensitive substring scan of `MessageRole::User`
    text and `MessageRole::Tool` tool result content (nested in `ToolResult`
@@ -34,8 +35,8 @@ Four independent rules can be combined:
 
 | Stage | Behavior |
 | --- | --- |
-| `before_model` | All four rules apply. Narrows the tool universe from `input.request.tools`. Returns `FilterTools(retain)` or `Fail`. |
-| `before_tool_batch` | Only role allowlist and child-depth gate apply (if configured); write budget and jailbreak scan do not run. Must return a complete allow set (derived from the role config alone, even if a depth gate subtracts from it). Returns `Continue` if no role allowlist is configured, otherwise `FilterTools(retain)` or `Fail`. |
+| `before_model` | All four rules apply. Narrows the tool universe from `input.request.tools`. Returns `Continue` when nothing narrows, `FilterTools(retain)` when a rule narrows, or `Fail` when a jailbreak trigger with `JailbreakAction::Fail` matches. |
+| `before_tool_batch` | Only role allowlist and child-depth gate apply (if configured); write budget and jailbreak scan do not run. Must return a complete allow set (derived from the role config alone, even if a depth gate subtracts from it). Returns `Continue` if no role allowlist is configured, otherwise `FilterTools(retain)`. Malformed payload is a hard `MiddlewareError`, not a stage outcome. |
 
 The `before_tool_batch` simplification exists because a filtered call becomes a
 synthetic denial (not a silent drop): a leaf can only emit a retain set it knows
@@ -48,14 +49,24 @@ tools, preserving completeness.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use finstack_ai_kernel::ToolId;
+use finstack_ai_kernel::{ComponentId, ToolId};
 use finstack_ai_middleware_tool_policy::{
     ToolPolicyConfig, ToolPolicyMiddleware, JailbreakAction,
 };
-use finstack_ai_kernel::AgentBuilder;
 
 fn tid(s: &str) -> ToolId {
     ToolId::parse(s).expect("tool id")
+}
+
+fn component_ref(id: &str, version: (u32, u32, u32)) -> finstack_ai::ComponentRef {
+    finstack_ai::ComponentRef::new(
+        ComponentId::parse(id).expect("component id"),
+        Some(finstack_ai_kernel::Version {
+            major: version.0,
+            minor: version.1,
+            patch: version.2,
+        }),
+    )
 }
 
 // Build configuration with all four rules.
@@ -96,24 +107,39 @@ let config = ToolPolicyConfig::try_new()
     .expect("gate");
 
 // Construct the middleware leaf.
-let middleware = ToolPolicyMiddleware::try_new(config).expect("leaf");
+let middleware = Arc::new(ToolPolicyMiddleware::try_new(config).expect("leaf"));
 
-// Register via AgentBuilder.
-builder.middleware(middleware).expect("register");
+// Register via NativeAgentBuilder.
+let component = component_ref("finstack.middleware.tool-policy", (1, 0, 0));
+builder.middleware(component, middleware);
 ```
 
 ## Stable error codes
 
-When any rule rejects a stage or the configuration is invalid, the leaf returns
-a failure with one of these stable codes in `ErrorDescriptor.code`:
+### Construction-time errors
 
-| Code | Reason |
-| --- | --- |
-| `tool_policy_jailbreak_triggered` | A jailbreak pattern matched and `JailbreakAction::Fail` was configured. The message displays `"tool policy jailbreak trigger matched"`. |
-| `tool_policy_configuration_invalid` | Configuration error during `ToolPolicyConfig::try_new` or `with_*` builder calls. Reasons include: `duplicate_rule`, `too_many_roles`, `too_many_tools`, `empty_role_name`, `role_name_too_long`, `role_name_contains_nul`, `too_many_patterns`, `empty_pattern`, `pattern_too_long`, `pattern_contains_nul`, `depth_exceeds_kernel_cap`, `empty_policy`, `invalid_configuration_encoding`, `invalid_component_id`. |
+Build-time configuration errors are returned as `ToolPolicyError::Configuration`
+with a stable `reason: &'static str`. These errors occur in the builder chain
+(`ToolPolicyConfig::try_new` and `with_*` methods). Possible reasons:
 
-The middleware invocation itself cannot fail after construction; all policy
-evaluation is pure and deterministic.
+- `duplicate_rule` — a rule slot (role, write, jailbreak, depth) already set
+- `too_many_roles` — exceeds 128 roles
+- `too_many_tools` — exceeds 1,024 tools per set
+- `too_many_patterns` — exceeds 64 jailbreak patterns
+- `empty_role_name`, `role_name_too_long`, `role_name_contains_nul` — role validation
+- `empty_pattern`, `pattern_too_long`, `pattern_contains_nul` — pattern validation
+- `depth_exceeds_kernel_cap` — depth exceeds kernel run-relation cap (16)
+- `empty_policy` — zero rules configured (no-op policy rejected)
+- `invalid_configuration_encoding`, `invalid_component_id` — serialization or identity errors
+
+### Runtime stage-failure codes
+
+When a jailbreak trigger with `JailbreakAction::Fail` matches during `before_model`,
+the stage fails with `ErrorDescriptor.code = "tool_policy_jailbreak_triggered"`.
+The message displays `"tool policy jailbreak trigger matched"`.
+
+After construction, all policy evaluation is pure and deterministic; no other runtime
+failures are possible.
 
 ## Source of truth
 
