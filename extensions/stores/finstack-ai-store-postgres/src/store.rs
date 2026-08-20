@@ -3,9 +3,10 @@
 //!
 //! ## TLS
 //!
-//! This crate depends on `tokio-postgres-rustls` + `rustls`, but this task
-//! wires only plaintext (`tokio_postgres::NoTls`) connections. Building a
-//! working `rustls::ClientConfig` requires a trust root store; the offline,
+//! This crate's v1 posture is plaintext-only: every pooled connection is
+//! opened with `tokio_postgres::NoTls`, and the crate depends on neither
+//! `rustls` nor `tokio-postgres-rustls`. Building a working
+//! `rustls::ClientConfig` requires a trust root store; the offline,
 //! reproducible option (bundling `webpki-roots`) and the "use the platform
 //! roots" option both add real complexity and a dependency decision that
 //! belongs to its own change, not this one. The plan's TLS risk note
@@ -13,8 +14,8 @@
 //! demands TLS (`require`, `verify-ca`, `verify-full`) is rejected up front
 //! in [`PostgresJournalStore::try_open`] with
 //! `StoreError::InvalidRequest{reason_code: "postgres_tls_unsupported"}`
-//! rather than silently connecting in plaintext. Wiring
-//! `tokio-postgres-rustls` is follow-up work.
+//! rather than silently connecting in plaintext. Wiring TLS support
+//! (`tokio-postgres-rustls` + `rustls`, or an equivalent) is follow-up work.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};

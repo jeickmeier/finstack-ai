@@ -3,9 +3,9 @@
 //! Three proofs, all skipping with a notice (exit 0) when
 //! `FINSTACK_PG_TEST_URL` is unset:
 //!
-//! 1. the shared six-port `JournalStore` conformance case runs against a real
-//!    Postgres store, so the port contract is proved by the *same* battery the
-//!    memory and sqlite stores answer to;
+//! 1. the shared single-port `JournalStore` conformance case runs against a
+//!    real Postgres store, so the port contract is proved by the *same*
+//!    battery the memory and sqlite stores answer to;
 //! 2. every activated journal-v1 record body (all 40 families) round-trips
 //!    through append + load byte-equal, envelope CBOR and payload digests
 //!    included;

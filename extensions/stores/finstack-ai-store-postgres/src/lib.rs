@@ -7,11 +7,20 @@
 //! ordering. Applications inject this crate explicitly. It is not the Agent,
 //! Python, or WASM default (no WASM support: native-tokio only).
 //!
-//! This crate currently provides configuration, error mapping, schema
+//! This crate provides the complete [`JournalStore`](finstack_ai_runtime::JournalStore)
+//! surface over `PostgreSQL`: configuration, error mapping, schema
 //! management, the connection pool, an open path with `health()`, the
-//! multi-writer `append` protocol, chain-verified `load`/`load_from`, and
-//! snapshot writes, `scan`, and the `write_metadata` CAS (see
-//! `src/snapshot.rs`).
+//! multi-writer `append` protocol, chain-verified `load`/`load_from`,
+//! snapshot writes, `scan`, the `write_metadata` CAS (see
+//! `src/snapshot.rs`), and the snapshot-aligned prefix `prune` (see
+//! `src/prune.rs`).
+//!
+//! Every pooled connection is opened with `tokio_postgres::NoTls`; a
+//! connection URL whose `sslmode` demands TLS is rejected up front by
+//! `try_open` rather than silently connecting in plaintext (see the TLS
+//! note on `src/store.rs`). Multiple writers, including across processes,
+//! may append to the same session concurrently: per-session ordering is
+//! enforced by Postgres row locks rather than client-side serialization.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]

@@ -1,10 +1,3 @@
-// This module's helpers are exercised by unit tests but not yet called from
-// non-test code: the schema/pool/append work that consumes them lands in a
-// later task per the crate's incremental build-out. Silencing dead_code here
-// (rather than adding a synthetic caller) keeps the interface exactly as
-// specified without dead scaffolding code.
-#![allow(dead_code, reason = "consumed by schema/pool/append in a later task")]
-
 use finstack_ai_runtime::StoreError;
 
 /// SQLSTATE class prefix for integrity-constraint violations (23xxx).

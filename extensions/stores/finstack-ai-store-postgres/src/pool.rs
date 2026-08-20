@@ -397,6 +397,31 @@ mod tests {
         );
     }
 
+    /// Reviewer finding: [`crate::journal_store`]'s `health()` wraps its
+    /// `Pool::get` checkout in `tokio::time::timeout` so an exhausted pool
+    /// reports `ready: false` instead of hanging forever. This exercises the
+    /// exact scenario that fix guards against, one level down: with the
+    /// pool's only permit checked out and never returned, a `get()` racing
+    /// against a short timeout must lose the race (time out) rather than
+    /// resolve — i.e. `get()` alone genuinely blocks on an exhausted pool,
+    /// which is why `health()` needs the timeout wrapper at all.
+    #[tokio::test]
+    async fn get_times_out_on_an_exhausted_pool() {
+        let (connect, _counter) = counting_connector();
+        let pool = Pool::new(1, connect, always_alive());
+
+        // Hold the pool's only permit for the lifetime of the test.
+        let _held = pool.get().await.expect("first checkout");
+
+        let waiting_pool = pool.clone();
+        let outcome = tokio::time::timeout(Duration::from_millis(50), waiting_pool.get()).await;
+
+        assert!(
+            outcome.is_err(),
+            "get() must not resolve while the pool's only permit is held"
+        );
+    }
+
     /// Same finding, against a real server: an idle pooled
     /// `tokio_postgres::Client` whose backend gets killed out from under it
     /// (server restart / network drop, simulated here with

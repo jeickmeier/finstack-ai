@@ -141,10 +141,18 @@ impl JournalStore for PostgresJournalStore {
 
     /// `SELECT 1` round-trip on a pooled connection (spec D6).
     ///
-    /// A probe failure (cannot check out a connection, or the query itself
-    /// fails) reports `ready: false` rather than propagating an `Err` — per
-    /// the port contract, `health()` is a status report, not a fallible
-    /// operation.
+    /// A probe failure (cannot check out a connection, the checkout itself
+    /// timing out, or the query failing) reports `ready: false` rather than
+    /// propagating an `Err` — per the port contract, `health()` is a status
+    /// report, not a fallible operation.
+    ///
+    /// The checkout is bounded by [`crate::config::PostgresStoreConfig::connect_timeout`]:
+    /// on an exhausted pool (every permit checked out and none returned),
+    /// `Pool::get` would otherwise wait on the semaphore indefinitely,
+    /// turning one stuck caller into a `health()` that never resolves. This
+    /// only bounds the health path — every other [`JournalStore`] method
+    /// still awaits `Pool::get` without a timeout, so their checkout
+    /// semantics are unchanged.
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
         let pool = self.pool.clone();
         let durable = matches!(self.config.durability, PostgresDurability::Durable);
@@ -153,10 +161,11 @@ impl JournalStore for PostgresJournalStore {
         } else {
             RELAXED_DETAIL
         });
+        let checkout_bound = self.config.connect_timeout;
 
         Box::pin(async move {
-            let ready = match pool.get().await {
-                Ok(pooled) => match pooled.query_one("SELECT 1", &[]).await {
+            let ready = match tokio::time::timeout(checkout_bound, pool.get()).await {
+                Ok(Ok(pooled)) => match pooled.query_one("SELECT 1", &[]).await {
                     Ok(_row) => true,
                     Err(_error) => {
                         // The probe query failed on an otherwise checked-out
@@ -167,7 +176,11 @@ impl JournalStore for PostgresJournalStore {
                         false
                     }
                 },
-                Err(_error) => false,
+                // Either the checkout itself failed, or it did not resolve
+                // within `checkout_bound` (pool exhausted) — both report a
+                // not-ready store rather than propagating an `Err` or
+                // hanging.
+                Ok(Err(_)) | Err(_) => false,
             };
             Ok(StoreHealth {
                 ready,
