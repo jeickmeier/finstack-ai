@@ -1020,12 +1020,12 @@ mod tests {
     use std::sync::Arc;
 
     use base64::Engine as _;
-    use finstack_ai_memory::InProcessArtifactStore;
     use finstack_ai_kernel::{
         Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
         OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
         ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
+    use finstack_ai_memory::InProcessArtifactStore;
     use finstack_ai_runtime::{
         ApprovalState, ArtifactStore, AuthorizationContext, CancellationSignal,
         JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, RunCallContext, ToolCatalogPlan,

@@ -25,11 +25,9 @@ use std::sync::Arc;
 
 use finstack_ai::runtime::{ContextProvider, JournalStore, Middleware, Model, ModelName, Toolset};
 use finstack_ai::{Agent, AgentRunRequest};
-use finstack_ai_memory::{
-    InProcessMemoryStore, MemoryContextProvider, MemoryScope, RecallConfig,
-};
 use finstack_ai_context_repository::RepositoryContextProvider;
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
+use finstack_ai_memory::{InProcessMemoryStore, MemoryContextProvider, MemoryScope, RecallConfig};
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_verify::VerifyMiddleware;
 use finstack_ai_native_examples::{

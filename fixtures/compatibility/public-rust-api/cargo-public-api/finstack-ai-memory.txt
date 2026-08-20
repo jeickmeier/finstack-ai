@@ -342,7 +342,7 @@ impl core::fmt::Debug for finstack_ai_memory::store::MemoryPage
 pub fn finstack_ai_memory::store::MemoryPage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_memory::store::MemoryPage
 impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryPage
-pub trait finstack_ai_memory::store::MemoryStore: core::marker::Send + core::marker::Sync
+pub trait finstack_ai_memory::store::MemoryStore: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_memory::store::MemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
@@ -754,7 +754,7 @@ pub trait finstack_ai_memory::MemoryExtractor: core::marker::Send + core::marker
 pub fn finstack_ai_memory::MemoryExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
 impl finstack_ai_memory::extract::MemoryExtractor for finstack_ai_memory::extract::RuleBasedExtractor
 pub fn finstack_ai_memory::extract::RuleBasedExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
-pub trait finstack_ai_memory::MemoryStore: core::marker::Send + core::marker::Sync
+pub trait finstack_ai_memory::MemoryStore: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_memory::MemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::MemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::MemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
