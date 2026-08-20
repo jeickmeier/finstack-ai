@@ -52,13 +52,13 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentInvocation, Digest, ErrorCategory, InvocationRecovery, Metadata, Stage,
-    Version,
+    ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory, InvocationRecovery,
+    Message, Metadata, RawJson, Stage, TextBlock, ToolResultBlock, Version,
 };
 use finstack_ai_runtime::{
-    MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask,
-    StageOutcome,
+    BeforeModelInput, MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext,
+    MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole, ModelRequestDraft,
+    OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
 };
 use thiserror::Error;
 
@@ -229,9 +229,117 @@ impl Middleware for RedactionMiddleware {
     fn invoke(
         &self,
         _ctx: MiddlewareContext,
-        _input: StageInput,
+        input: StageInput,
     ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
-        Box::pin(async move { Ok(StageOutcome::Continue) })
+        let middleware = self.clone();
+        Box::pin(async move {
+            match input {
+                StageInput::BeforeModel(before_model) => {
+                    Ok(middleware.redact_before_model(&before_model))
+                }
+                _ => Ok(StageOutcome::Continue),
+            }
+        })
+    }
+}
+
+impl RedactionMiddleware {
+    /// Rewrite the model-visible draft, replacing detected secrets with
+    /// markers. Unchanged drafts continue; every internal failure degrades
+    /// to passing the affected content through unmodified (fail-soft).
+    fn redact_before_model(&self, before_model: &BeforeModelInput) -> StageOutcome {
+        let (draft, changed) = self.redact_draft(&before_model.request);
+        if !changed {
+            return StageOutcome::Continue;
+        }
+        let Ok(bytes) = serde_json_canonicalizer::to_vec(&draft) else {
+            return StageOutcome::Continue;
+        };
+        RawJson::parse(bytes).map_or(StageOutcome::Continue, StageOutcome::Replace)
+    }
+
+    /// Redact every message of `draft`, reporting whether anything changed.
+    fn redact_draft(&self, draft: &ModelRequestDraft) -> (ModelRequestDraft, bool) {
+        let mut changed = false;
+        let mut messages: Vec<Message> = Vec::with_capacity(draft.messages.len());
+        for message in draft.messages.iter() {
+            let (rewritten, message_changed) = self.redact_message(message);
+            changed |= message_changed;
+            messages.push(rewritten);
+        }
+        if !changed {
+            return (draft.clone(), false);
+        }
+        (
+            ModelRequestDraft {
+                messages: messages.into(),
+                ..draft.clone()
+            },
+            true,
+        )
+    }
+
+    /// Redact one message's text-bearing blocks, preserving its identity
+    /// (id, role, timestamps, model, provider ids, metadata) exactly. A
+    /// rebuild failure falls back to the original message: unlike
+    /// document-ingest there is no must-strip invariant here — fail-soft
+    /// means unredacted pass-through, never an aborted run.
+    fn redact_message(&self, message: &Message) -> (Message, bool) {
+        let mut changed = false;
+        let mut blocks: Vec<ContentBlock> = Vec::with_capacity(message.content().len());
+        for block in message.content() {
+            let (rewritten, block_changed) = self.redact_block(block);
+            changed |= block_changed;
+            blocks.push(rewritten);
+        }
+        if !changed {
+            return (message.clone(), false);
+        }
+        match Message::try_new(
+            *message.id(),
+            message.role(),
+            blocks,
+            message.created_at(),
+            message.model().cloned(),
+            message.provider_ids().clone(),
+            message.metadata().clone(),
+        ) {
+            Ok(rebuilt) => (rebuilt, true),
+            Err(_) => (message.clone(), false),
+        }
+    }
+
+    /// Redact one content block. `Text` is rewritten directly; `ToolResult`
+    /// recurses one level into its nested content (tool results cannot nest
+    /// further tool blocks). Everything else — `Json`, `Opaque`, media, and
+    /// `ToolCall` arguments — passes through untouched (v1 scan surface).
+    fn redact_block(&self, block: &ContentBlock) -> (ContentBlock, bool) {
+        match block {
+            ContentBlock::Text(text) => match self.detectors.redact(text.text()) {
+                Some(redacted) => match TextBlock::try_new(redacted) {
+                    Ok(rewritten) => (ContentBlock::Text(rewritten), true),
+                    Err(_) => (block.clone(), false),
+                },
+                None => (block.clone(), false),
+            },
+            ContentBlock::ToolResult(result) => {
+                let mut changed = false;
+                let mut nested: Vec<ContentBlock> = Vec::with_capacity(result.content().len());
+                for inner in result.content() {
+                    let (rewritten, block_changed) = self.redact_block(inner);
+                    changed |= block_changed;
+                    nested.push(rewritten);
+                }
+                if !changed {
+                    return (block.clone(), false);
+                }
+                match ToolResultBlock::try_new(*result.tool_call_id(), nested, result.is_error()) {
+                    Ok(rebuilt) => (ContentBlock::ToolResult(rebuilt), true),
+                    Err(_) => (block.clone(), false),
+                }
+            }
+            other => (other.clone(), false),
+        }
     }
 }
 
