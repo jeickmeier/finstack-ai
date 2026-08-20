@@ -1734,6 +1734,7 @@ version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-store-memory",

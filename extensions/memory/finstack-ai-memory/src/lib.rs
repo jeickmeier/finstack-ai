@@ -35,9 +35,11 @@ pub mod toolset;
 pub use extract::{CandidateMemory, DEFAULT_MARKER, MemoryExtractor, RuleBasedExtractor};
 pub use observer::MemoryObserver;
 pub use provider::{MemoryContextProvider, RecallConfig};
+#[cfg(not(target_arch = "wasm32"))]
+pub use record::system_clock;
 pub use record::{
     ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
-    MemoryRecord, MemoryScope, RetentionPolicy, system_clock,
+    MemoryRecord, MemoryScope, RetentionPolicy,
 };
 pub use store::{
     InProcessArtifactStore, InProcessMemoryStore, MatchEvidence, MemoryHit, MemoryListing,
