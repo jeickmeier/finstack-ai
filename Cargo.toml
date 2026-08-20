@@ -11,6 +11,7 @@ members = [
     "bindings/finstack-ai-wasm",
     "extensions/stores/finstack-ai-store-common",
     "extensions/stores/finstack-ai-store-memory",
+    "extensions/stores/finstack-ai-store-postgres",
     "extensions/stores/finstack-ai-store-sqlite",
     "extensions/stores/finstack-ai-store-object-s3",
     "extensions/stores/finstack-ai-store-object-local",
@@ -119,7 +120,10 @@ tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring
 finstack-ai-test = { path = "crates/finstack-ai-test", version = "1.0.0" }
 finstack-ai-store-common = { path = "extensions/stores/finstack-ai-store-common", version = "1.0.0" }
 finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "1.0.0" }
+finstack-ai-store-postgres = { path = "extensions/stores/finstack-ai-store-postgres", version = "1.0.0" }
 finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "1.0.0" }
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+tokio-postgres-rustls = "0.13"
 finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-object-s3", version = "1.0.0" }
 finstack-ai-store-object-local = { path = "extensions/stores/finstack-ai-store-object-local", version = "1.0.0" }
 finstack-ai-store-artifact-object = { path = "extensions/stores/finstack-ai-store-artifact-object", version = "1.0.0" }
