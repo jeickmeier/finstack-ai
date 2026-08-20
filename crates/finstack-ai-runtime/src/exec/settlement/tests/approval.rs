@@ -216,6 +216,78 @@ fn per_call_journaled_deny_applies_after_sources_are_replaced() {
 }
 
 #[test]
+fn per_call_journaled_grants_for_later_calls_keep_earlier_grants() {
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = coordinator_at_before_tool_batch(&store, &["alpha", "beta"], None);
+    let catalog = catalog_for(&[
+        ("alpha", ApprovalRequirement::Policy),
+        ("beta", ApprovalRequirement::Required),
+    ]);
+    let sources = sources_at(1_600);
+    assert!(!prepare_opened(&mut coordinator, &catalog, &sources));
+    resolve_approval(&mut coordinator, true, "resolution-alpha", 900);
+    assert!(!prepare_opened(&mut coordinator, &catalog, &sources));
+    resolve_approval(&mut coordinator, true, "resolution-beta", 920);
+    let recovered = sources_at(1_700);
+    assert!(prepare_opened(&mut coordinator, &catalog, &recovered));
+    let plans = store.opened_tool_batch().expect("opened").calls;
+    assert_eq!(plans.len(), 2);
+    assert!(
+        plans
+            .iter()
+            .all(|assigned| matches!(assigned.plan, ToolCallPlan::Execute(_))),
+        "{plans:?}"
+    );
+}
+
+#[test]
+fn per_call_journaled_first_grant_parks_the_remaining_call() {
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = coordinator_at_before_tool_batch(&store, &["alpha", "beta"], None);
+    let catalog = catalog_for(&[
+        ("alpha", ApprovalRequirement::Policy),
+        ("beta", ApprovalRequirement::Required),
+    ]);
+    let sources = sources_at(1_600);
+    assert!(!prepare_opened(&mut coordinator, &catalog, &sources));
+    resolve_approval(&mut coordinator, true, "resolution-alpha", 900);
+    let recovered = sources_at(1_700);
+    assert!(!prepare_opened(&mut coordinator, &catalog, &recovered));
+    let prompt = pending_prompt(&coordinator);
+    assert!(prompt.contains("beta"), "{prompt}");
+    assert!(!prompt.contains("alpha"), "{prompt}");
+}
+
+#[test]
+fn per_call_journaled_deny_then_grant_after_sources_are_replaced() {
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = coordinator_at_before_tool_batch(&store, &["alpha", "beta"], None);
+    let catalog = catalog_for(&[
+        ("alpha", ApprovalRequirement::Policy),
+        ("beta", ApprovalRequirement::Required),
+    ]);
+    let sources = sources_at(1_600);
+    assert!(!prepare_opened(&mut coordinator, &catalog, &sources));
+    resolve_approval(&mut coordinator, false, "resolution-alpha", 900);
+    assert!(!prepare_opened(&mut coordinator, &catalog, &sources));
+    resolve_approval(&mut coordinator, true, "resolution-beta", 920);
+    let recovered = sources_at(1_700);
+    assert!(prepare_opened(&mut coordinator, &catalog, &recovered));
+    let plans = store.opened_tool_batch().expect("opened").calls;
+    assert_eq!(plans.len(), 2);
+    assert!(
+        matches!(plans[0].plan, ToolCallPlan::SyntheticClosure(_)),
+        "{:?}",
+        plans[0].plan
+    );
+    assert!(
+        matches!(plans[1].plan, ToolCallPlan::Execute(_)),
+        "{:?}",
+        plans[1].plan
+    );
+}
+
+#[test]
 fn get_video_not_required_runs_without_a_grant() {
     let store = Arc::new(MemoryStore::new());
     let mut coordinator = coordinator_at_before_tool_batch(&store, &["get_video"], None);

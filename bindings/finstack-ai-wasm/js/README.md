@@ -147,7 +147,8 @@ Terminate secrets at a trusted same-origin proxy. Optional application
 - `RunResult.trace`, `RunResult.activeCapabilities`
 - `Session`, `RunResult`, `Event`, `EventBatch`, `FinstackError`
 - `Capability`, `CapabilityActivation`, `CapabilityCatalogItem`, `ActiveCapability`,
-  `ApprovalGrantMode` (`Agent.create({ approvalGrant })`, default `per_call`)
+  `ApprovalGrantMode` (`Agent.create({ approvalGrant: ApprovalGrantMode.perCall() })`,
+  default `perCall`)
 - Host interfaces and `Js*` wrappers for model, toolset, context, middleware,
   observer, journal, clock, random, and artifacts
 - `normalizePrebetaShape(kind, value)`

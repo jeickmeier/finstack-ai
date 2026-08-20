@@ -19,7 +19,8 @@ use crate::{
 
 use super::SettlementSources;
 use super::interaction::{
-    ApprovalSubject, allocate_tool_opening, approval_cursor, request_approval_interaction,
+    ApprovalSubject, allocate_tool_opening, approval_cursor, journaled_approval_outcomes,
+    request_approval_interaction,
 };
 use super::tool::{generate_tool_id, generate_tool_ids};
 
@@ -108,13 +109,17 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         ToolBatchContinuation::ContinueModel
     };
     let cursor = approval_cursor(state);
+    let terminal = state.last_interaction_terminal.clone();
     sources.prepare_approval_cursor(cursor);
     let remaining_paid = paid_unpaid_ids(catalog, &calls, None);
-    sources.absorb_approval_terminal(
-        state.last_interaction_terminal.as_ref(),
-        cursor,
-        &remaining_paid,
-    );
+    let journaled =
+        if sources.needs_journaled_approval_absorb(remaining_paid.len(), terminal.as_ref(), cursor)
+        {
+            journaled_approval_outcomes(coordinator).await
+        } else {
+            Vec::new()
+        };
+    sources.absorb_approval_terminal(terminal.as_ref(), cursor, &remaining_paid, &journaled);
     let retained = match run_tool_batch_chain(coordinator, driver, cursor, &calls).await? {
         ToolBatchPolicy::Unchanged => None,
         ToolBatchPolicy::Retain(retained) => Some(retained),

@@ -12,6 +12,7 @@ import type { PrebetaKind } from "./host.js";
 
 export {
   Agent,
+  ApprovalGrantMode,
   Event,
   EventBatch,
   FinstackError,
@@ -32,7 +33,6 @@ export {
 export type {
   ActiveCapability,
   AgentOptions,
-  ApprovalGrantMode,
   Capability,
   CapabilityActivation,
   CapabilityCatalogItem,

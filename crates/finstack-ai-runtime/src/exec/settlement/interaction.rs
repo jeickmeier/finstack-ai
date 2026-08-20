@@ -1,14 +1,16 @@
+use std::collections::BTreeMap;
+
 use finstack_ai_kernel::{
     AllocatedIds, AppendBatchTag, ComponentId, ComponentRef, ContentBlock, EffectTag, EventTag,
-    InteractionExpired, InteractionKind, InteractionRequest, InteractionSettled, InteractionTag,
-    KernelInput, METADATA_MAX_BYTES, MessageTag, Metadata, RawJson, RecordTag, RequestInteraction,
-    Stage, StageCursor, TEXT_MAX_BYTES, TextBlock, ToolBatchTag, ToolCallId, ToolCallPlan,
-    TransitionEnv, Version,
+    InteractionExpired, InteractionId, InteractionKind, InteractionRequest, InteractionSettled,
+    InteractionTag, InteractionTerminalOutcome, KernelInput, METADATA_MAX_BYTES, MessageTag,
+    Metadata, RawJson, RecordBody, RecordTag, RequestInteraction, Stage, StageCursor,
+    TEXT_MAX_BYTES, TextBlock, ToolBatchTag, ToolCallId, ToolCallPlan, TransitionEnv, Version,
 };
 
 use crate::coordinator::CommitCoordinator;
 use crate::run_types::RunHandleError;
-use crate::{Clock, InteractionResumeAction, RandomSource, interaction_resume_action};
+use crate::{Clock, InteractionResumeAction, LoadRequest, RandomSource, interaction_resume_action};
 
 use super::SettlementSources;
 use super::tool::{generate_tool_id, generate_tool_ids};
@@ -206,6 +208,90 @@ fn approval_metadata(subjects: &[ApprovalSubject]) -> Result<Metadata, RunHandle
     Metadata::parse(bytes).map_err(|_| RunHandleError::InteractionSettlement {
         code: "approval_metadata_invalid",
     })
+}
+
+/// Replay committed approval parks after a process-local ledger is lost.
+///
+/// Reads `tool_call_ids` from each `InteractionRequested` Approval metadata
+/// and pairs it with the later resolved, expired, or cancelled record. A
+/// load or parse failure returns no pairs so those tools stay unpaid and
+/// re-prompt — never an unapproved execute.
+pub(super) async fn journaled_approval_outcomes(
+    coordinator: &CommitCoordinator,
+) -> Vec<(ToolCallId, InteractionTerminalOutcome)> {
+    let Some(session_id) = coordinator.state().session_id else {
+        return Vec::new();
+    };
+    let Ok(loaded) = coordinator
+        .journal_store()
+        .load(LoadRequest { session_id })
+        .await
+    else {
+        return Vec::new();
+    };
+    let mut pending = BTreeMap::<InteractionId, Vec<ToolCallId>>::new();
+    let mut outcomes = Vec::new();
+    for batch in loaded.committed_batches.iter() {
+        for record in batch.records.iter() {
+            match record.body() {
+                RecordBody::InteractionRequested(request)
+                    if matches!(request.kind(), InteractionKind::Approval) =>
+                {
+                    if let Some(ids) = tool_call_ids_from_metadata(request.metadata()) {
+                        pending.insert(request.interaction_id(), ids);
+                    }
+                }
+                RecordBody::InteractionResolved(resolution) => {
+                    if let Some(ids) = pending.remove(&resolution.interaction_id())
+                        && let Some(outcome) = approval_response_outcome(resolution.response())
+                    {
+                        outcomes.extend(ids.into_iter().map(|id| (id, outcome)));
+                    }
+                }
+                RecordBody::InteractionExpired(expired) => {
+                    if let Some(ids) = pending.remove(&expired.interaction_id) {
+                        outcomes.extend(
+                            ids.into_iter()
+                                .map(|id| (id, InteractionTerminalOutcome::Expired)),
+                        );
+                    }
+                }
+                RecordBody::InteractionCancelled(cancelled) => {
+                    if let Some(ids) = pending.remove(&cancelled.interaction_id()) {
+                        outcomes.extend(
+                            ids.into_iter()
+                                .map(|id| (id, InteractionTerminalOutcome::Cancelled)),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    outcomes
+}
+
+fn tool_call_ids_from_metadata(metadata: &Metadata) -> Option<Vec<ToolCallId>> {
+    let value: serde_json::Value = serde_json::from_str(metadata.as_raw_json().as_str()).ok()?;
+    let ids = value.get("tool_call_ids")?.as_array()?;
+    let mut parsed = Vec::with_capacity(ids.len());
+    for id in ids {
+        parsed.push(ToolCallId::parse(id.as_str()?).ok()?);
+    }
+    Some(parsed)
+}
+
+fn approval_response_outcome(response: &RawJson) -> Option<InteractionTerminalOutcome> {
+    let value: serde_json::Value = serde_json::from_str(response.as_str()).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    match object.get("approved").and_then(serde_json::Value::as_bool) {
+        Some(true) => Some(InteractionTerminalOutcome::Granted),
+        Some(false) => Some(InteractionTerminalOutcome::Denied),
+        None => None,
+    }
 }
 
 pub(crate) async fn request_tool_interaction<C: Clock, R: RandomSource>(

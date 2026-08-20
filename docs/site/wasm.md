@@ -37,7 +37,8 @@ platform error (`agent_run_unsupported_plan`), not a missing method.
 Do not read environment variables. `Agent.reResolve()` returns a new
 lock from reconstructed catalogs; in-flight runs keep the previous
 composition. Optional `approvalGrant` on `Agent.create` selects
-`per_call` (default) or `informed_batch`. `Policy` remains a mandatory
+`ApprovalGrantMode.perCall()` (default) or
+`ApprovalGrantMode.informedBatch()`. `Policy` remains a mandatory
 approval floor on every catalog.
 
 `Capability` stays instruction-only (`id`, `description`, `instructions`,

@@ -349,11 +349,11 @@ test("accepts per_call and informed_batch approval grants", async ({ page }) => 
     );
     const perCall = await window.finstackTest.Agent.create({
       model,
-      approvalGrant: "per_call",
+      approvalGrant: window.finstackTest.ApprovalGrantMode.perCall(),
     });
     const informed = await window.finstackTest.Agent.create({
       model,
-      approvalGrant: "informed_batch",
+      approvalGrant: window.finstackTest.ApprovalGrantMode.informedBatch(),
     });
     const omitted = await window.finstackTest.Agent.create({ model });
     const texts = [

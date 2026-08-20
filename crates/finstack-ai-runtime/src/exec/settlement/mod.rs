@@ -80,10 +80,10 @@ pub(crate) struct NestedSamplingPorts {
 
 /// Live, process-local approval grants for one run owner.
 ///
-/// Not kernel state. Crash recovery re-prompts unpaid `PerCall` tools when
-/// more than one paid call remains, rather than reconstructing earlier
-/// grants from the journal. A journaled approval terminal for the only
-/// remaining paid tool is absorbed so grant/deny after stop can resume.
+/// Not kernel state. Crash recovery rebuilds the ledger from committed
+/// `InteractionRequested` metadata (`tool_call_ids`) paired with later
+/// approval terminals. A missing or unreadable pair stays unpaid and
+/// re-prompts — never an unapproved execute.
 struct ApprovalGrantLedger {
     mode: ApprovalGrantMode,
     cursor: Option<StageCursor>,
@@ -159,11 +159,31 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
         self.lock_approval().reset_if_cursor_changed(cursor);
     }
 
+    pub(crate) fn needs_journaled_approval_absorb(
+        &self,
+        remaining_paid_len: usize,
+        terminal: Option<&InteractionTerminal>,
+        cursor: StageCursor,
+    ) -> bool {
+        let Some(terminal) = terminal else {
+            return false;
+        };
+        if terminal.kind != InteractionKind::Approval || terminal.cursor != cursor {
+            return false;
+        }
+        let ledger = self.lock_approval();
+        ledger.last_parked.is_none()
+            && ledger.consumed_terminal != Some(terminal.interaction_id)
+            && ledger.mode == ApprovalGrantMode::PerCall
+            && remaining_paid_len > 1
+    }
+
     pub(crate) fn absorb_approval_terminal(
         &self,
         terminal: Option<&InteractionTerminal>,
         cursor: StageCursor,
         remaining_paid: &[ToolCallId],
+        journaled: &[(ToolCallId, InteractionTerminalOutcome)],
     ) {
         let Some(terminal) = terminal else {
             return;
@@ -175,26 +195,13 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
         if ledger.consumed_terminal == Some(terminal.interaction_id) {
             return;
         }
-        let ids = match ledger.last_parked.take() {
-            Some(ids) => ids,
-            None if ledger.mode == ApprovalGrantMode::InformedBatch
-                || remaining_paid.len() == 1 =>
-            {
-                remaining_paid.to_vec()
-            }
-            None => {
-                ledger.consumed_terminal = Some(terminal.interaction_id);
-                return;
-            }
-        };
-        match terminal.outcome {
-            InteractionTerminalOutcome::Granted => {
-                ledger.granted.extend(ids);
-            }
-            InteractionTerminalOutcome::Denied
-            | InteractionTerminalOutcome::Expired
-            | InteractionTerminalOutcome::Cancelled => {
-                ledger.refused.extend(ids);
+        if let Some(ids) = ledger.last_parked.take() {
+            apply_approval_ids(&mut ledger, &ids, terminal.outcome);
+        } else if ledger.mode == ApprovalGrantMode::InformedBatch || remaining_paid.len() == 1 {
+            apply_approval_ids(&mut ledger, remaining_paid, terminal.outcome);
+        } else if !journaled.is_empty() {
+            for (id, outcome) in journaled {
+                apply_approval_ids(&mut ledger, std::slice::from_ref(id), *outcome);
             }
         }
         ledger.consumed_terminal = Some(terminal.interaction_id);
@@ -241,6 +248,30 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
         UuidV7Generator::new(self.clock.as_ref(), &self.progress_random)
             .generate()
             .map_err(id_source_error)
+    }
+}
+
+fn apply_approval_ids(
+    ledger: &mut ApprovalGrantLedger,
+    ids: &[ToolCallId],
+    outcome: InteractionTerminalOutcome,
+) {
+    match outcome {
+        InteractionTerminalOutcome::Granted => {
+            for id in ids {
+                if !ledger.refused.contains(id) {
+                    ledger.granted.insert(*id);
+                }
+            }
+        }
+        InteractionTerminalOutcome::Denied
+        | InteractionTerminalOutcome::Expired
+        | InteractionTerminalOutcome::Cancelled => {
+            for id in ids {
+                ledger.granted.remove(id);
+                ledger.refused.insert(*id);
+            }
+        }
     }
 }
 

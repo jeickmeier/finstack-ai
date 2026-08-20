@@ -44,12 +44,34 @@ export interface ActiveCapability {
 /**
  * How a run parks and releases paid-tool approvals.
  *
- * Maps onto Rust `RunPolicy.approval_grant`. Defaults to `per_call`: one
- * park per unpaid Policy or Required tool call. `informed_batch` parks
- * once listing every unpaid paid tool. Neither mode relaxes the `Policy`
+ * Maps onto Rust `RunPolicy.approval_grant`. Defaults to
+ * {@link ApprovalGrantMode.perCall}: one park per unpaid Policy or
+ * Required tool call. {@link ApprovalGrantMode.informedBatch} parks once
+ * listing every unpaid paid tool. Neither mode relaxes the `Policy`
  * catalog floor.
  */
-export type ApprovalGrantMode = "per_call" | "informed_batch";
+export declare class ApprovalGrantMode {
+    #private;
+    private constructor();
+    /**
+     * Park once per unpaid paid tool call.
+     *
+     * @returns A per-call grant mode consumed by {@link Agent.create}.
+     */
+    static perCall(): ApprovalGrantMode;
+    /**
+     * Park once listing every unpaid paid tool call.
+     *
+     * @returns An informed-batch grant mode consumed by {@link Agent.create}.
+     */
+    static informedBatch(): ApprovalGrantMode;
+    /**
+     * Wire token consumed by the WASM factory.
+     *
+     * @returns `per_call` or `informed_batch`.
+     */
+    toWire(): "per_call" | "informed_batch";
+}
 /**
  * Options for {@link Agent.create}.
  *
@@ -84,9 +106,10 @@ export interface AgentOptions {
     /** Optional trusted observer wrappers. */
     observers?: JsObserver[];
     /**
-     * Optional paid-tool approval grant mode. Defaults to `per_call`.
+     * Optional paid-tool approval grant mode. Defaults to
+     * {@link ApprovalGrantMode.perCall}.
      */
-    approvalGrant?: ApprovalGrantMode;
+    approvalGrant?: ApprovalGrantMode | "per_call" | "informed_batch";
 }
 /**
  * Provisional inspect phase for a stored session.
@@ -143,7 +166,7 @@ export declare class Agent {
      *     instructions: ["Always instruction."],
      *     activation: "always",
      *   }],
-     *   approvalGrant: "per_call",
+     *   approvalGrant: ApprovalGrantMode.perCall(),
      * });
      * const result = await agent.run("hello");
      * ```
