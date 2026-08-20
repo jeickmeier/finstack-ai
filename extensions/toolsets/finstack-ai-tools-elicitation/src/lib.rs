@@ -408,7 +408,7 @@ fn build_request(
 
 fn ask_user_spec() -> Result<ToolSpec, ElicitationError> {
     let input_schema = RawJson::parse(
-        br#"{"additionalProperties":false,"properties":{"kind":{"description":"Interaction profile; defaults to free_text.","enum":["free_text","choice","form"],"type":"string"},"options":{"description":"Allowed answers; required when kind is choice.","items":{"type":"string"},"minItems":1,"type":"array"},"prompt":{"description":"Question shown to the user.","minLength":1,"type":"string"},"response_schema":{"description":"JSON schema the answer must satisfy; required when kind is form.","type":"object"}},"required":["prompt"],"type":"object"}"#,
+        br#"{"additionalProperties":false,"properties":{"kind":{"description":"Interaction profile; defaults to free_text.","enum":["free_text","choice","form",null],"type":["string","null"]},"options":{"description":"Allowed answers; required when kind is choice.","items":{"type":"string"},"minItems":1,"type":["array","null"]},"prompt":{"description":"Question shown to the user.","minLength":1,"type":"string"},"response_schema":{"description":"JSON schema the answer must satisfy; required when kind is form.","type":["object","null"]}},"required":["prompt","kind","options","response_schema"],"type":"object"}"#,
     )
     .map_err(|_| ElicitationError::Configuration {
         reason: "invalid_ask_user_input_schema",
@@ -445,7 +445,7 @@ fn typed_tool(def: &ElicitationToolDef) -> Result<(ToolSpec, TypedTool), Elicita
         });
     };
     let input_schema = RawJson::parse(
-        br#"{"additionalProperties":false,"properties":{"context":{"description":"Call-specific details shown to the user beneath the registered prompt.","type":"string"}},"type":"object"}"#,
+        br#"{"additionalProperties":false,"properties":{"context":{"description":"Call-specific details shown to the user beneath the registered prompt.","type":["string","null"]}},"required":["context"],"type":"object"}"#,
     )
     .map_err(|_| ElicitationError::Configuration {
         reason: "invalid_typed_input_schema",

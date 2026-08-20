@@ -13,25 +13,26 @@ use finstack_ai::{
 };
 use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Version,
+    AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
+    SessionId, Version,
 };
 use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
 use finstack_ai_tools_document::DocumentToolset;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
 
 use crate::ConfigurationError;
 use crate::callbacks::{
     PyPythonContextProvider, PyPythonMiddleware, PyPythonModel, PyPythonObserver, PyPythonToolset,
 };
 use crate::capability::PyCapability;
+use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
     result_to_python_with_locator, run_request, stage_attachments,
 };
-use crate::elicitation::PyElicitationToolset;
 use crate::session::PySession;
 
 /// Toolset argument accepted by every agent factory.
@@ -673,6 +674,44 @@ impl PyAgent {
         .map_err(|error| agent_error(py, &error, None))
     }
 
+    /// Read back the bytes behind an artifact reference a tool returned.
+    ///
+    /// Toolsets that produce binary output stage it and return a reference
+    /// rather than inlining base64 the model cannot read, so generated
+    /// images and audio arrive as the `artifact` field of a tool result.
+    /// This resolves one of those references against the agent's own store.
+    #[pyo3(signature = (artifact,))]
+    fn read_artifact<'py>(
+        &self,
+        py: Python<'py>,
+        artifact: Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let json = py
+            .import("json")?
+            .call_method1("dumps", (artifact,))?
+            .extract::<String>()?;
+        let reference: ArtifactRef = serde_json::from_str(&json).map_err(|error| {
+            PyValueError::new_err(format!("invalid artifact reference: {error}"))
+        })?;
+        let store = Arc::clone(&self.artifact_store);
+        let bytes = py.detach(move || {
+            let runtime = pyo3_async_runtimes::tokio::get_runtime();
+            let _guard = runtime.enter();
+            runtime.block_on(store.get(
+                finstack_ai::runtime::ArtifactScope {
+                    tenant_scope: Arc::from("python-local"),
+                    session_id: SessionId::from_bytes([0_u8; 16]),
+                    run_id: None,
+                    sensitivity: Sensitivity::Internal,
+                },
+                reference,
+            ))
+        });
+        let bytes = bytes
+            .map_err(|error| PyValueError::new_err(format!("artifact read failed: {error}")))?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
     /// Execute one run and await its committed result.
     #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
     #[expect(
@@ -805,6 +844,7 @@ fn split_linked_ports(ports: LinkedPorts) -> (LinkedAgentPorts, Option<Py<PyAny>
     (
         LinkedAgentPorts {
             toolsets: ports.toolsets,
+            artifact_store: ports.artifact_store,
             context_providers: ports.context_providers,
             middleware: ports.middleware,
             observers: ports.observers,
@@ -840,6 +880,7 @@ fn wrap_linked_agent(
 
 struct LinkedPorts {
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
+    artifact_store: Option<Arc<dyn ArtifactStore>>,
     context_providers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)>,
     middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     observers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Observer>)>,
@@ -936,6 +977,7 @@ fn linked_ports(
     Ok((
         LinkedPorts {
             toolsets,
+            artifact_store: Some(Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>),
             context_providers: context_providers
                 .unwrap_or_default()
                 .into_iter()
@@ -994,6 +1036,7 @@ async fn build_python_agent(
             active_capabilities,
             ports: LinkedAgentPorts {
                 toolsets: ports.toolsets,
+                artifact_store: ports.artifact_store,
                 context_providers: ports.context_providers,
                 middleware: ports.middleware,
                 observers: ports.observers,

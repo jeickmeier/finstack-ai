@@ -306,9 +306,12 @@ impl ResolvedToolCatalog {
                     call,
                     tool.spec.execution,
                     tool.policy.failure_policy,
+                    // Terminal, and it has to read that way: a model told only
+                    // that approval was missing reissues the identical call and
+                    // re-prompts the approver until the run exhausts its cycles.
                     &ToolError::stable(
                         TOOL_APPROVAL_REQUIRED,
-                        "tool execution was not granted durable approval",
+                        "the approver refused this tool call; do not retry it, and continue without it",
                     ),
                 ))
             }

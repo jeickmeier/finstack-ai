@@ -635,8 +635,8 @@ pub(super) fn ensure_nonterminal_failure(
 ) -> Result<(), AgentRunError> {
     match state.terminal.as_ref() {
         Some(TerminalState::Failed(failed)) => Err(AgentRunError::runtime_message(format!(
-            "run failed: {}",
-            failed.error.code
+            "run failed: {}: {}",
+            failed.error.code, failed.error.message
         ))),
         Some(TerminalState::Cancelled(_)) => Err(AgentRunError::Cancelled),
         _ => Ok(()),

@@ -1,0 +1,64 @@
+pub mod finstack_ai_tools_elicitation
+pub enum finstack_ai_tools_elicitation::ElicitationError
+pub finstack_ai_tools_elicitation::ElicitationError::Configuration
+pub finstack_ai_tools_elicitation::ElicitationError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_elicitation::ElicitationError
+pub fn finstack_ai_tools_elicitation::ElicitationError::clone(&self) -> finstack_ai_tools_elicitation::ElicitationError
+impl core::cmp::Eq for finstack_ai_tools_elicitation::ElicitationError
+impl core::cmp::PartialEq for finstack_ai_tools_elicitation::ElicitationError
+pub fn finstack_ai_tools_elicitation::ElicitationError::eq(&self, &finstack_ai_tools_elicitation::ElicitationError) -> bool
+impl core::error::Error for finstack_ai_tools_elicitation::ElicitationError
+impl core::fmt::Debug for finstack_ai_tools_elicitation::ElicitationError
+pub fn finstack_ai_tools_elicitation::ElicitationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_elicitation::ElicitationError
+pub fn finstack_ai_tools_elicitation::ElicitationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_elicitation::ElicitationError
+pub enum finstack_ai_tools_elicitation::ElicitationKind
+pub finstack_ai_tools_elicitation::ElicitationKind::Choice
+pub finstack_ai_tools_elicitation::ElicitationKind::Form
+pub finstack_ai_tools_elicitation::ElicitationKind::FreeText
+impl core::clone::Clone for finstack_ai_tools_elicitation::ElicitationKind
+pub fn finstack_ai_tools_elicitation::ElicitationKind::clone(&self) -> finstack_ai_tools_elicitation::ElicitationKind
+impl core::cmp::Eq for finstack_ai_tools_elicitation::ElicitationKind
+impl core::cmp::PartialEq for finstack_ai_tools_elicitation::ElicitationKind
+pub fn finstack_ai_tools_elicitation::ElicitationKind::eq(&self, &finstack_ai_tools_elicitation::ElicitationKind) -> bool
+impl core::convert::From<finstack_ai_tools_elicitation::ElicitationKind> for finstack_ai_kernel::effects::interaction::InteractionKind
+pub fn finstack_ai_kernel::effects::interaction::InteractionKind::from(finstack_ai_tools_elicitation::ElicitationKind) -> Self
+impl core::fmt::Debug for finstack_ai_tools_elicitation::ElicitationKind
+pub fn finstack_ai_tools_elicitation::ElicitationKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_tools_elicitation::ElicitationKind
+impl core::marker::StructuralPartialEq for finstack_ai_tools_elicitation::ElicitationKind
+pub struct finstack_ai_tools_elicitation::ElicitationToolDef
+pub finstack_ai_tools_elicitation::ElicitationToolDef::description: alloc::string::String
+pub finstack_ai_tools_elicitation::ElicitationToolDef::kind: finstack_ai_tools_elicitation::ElicitationKind
+pub finstack_ai_tools_elicitation::ElicitationToolDef::name: alloc::string::String
+pub finstack_ai_tools_elicitation::ElicitationToolDef::prompt: alloc::string::String
+pub finstack_ai_tools_elicitation::ElicitationToolDef::response_schema: serde_json::value::Value
+pub finstack_ai_tools_elicitation::ElicitationToolDef::title: alloc::string::String
+impl core::clone::Clone for finstack_ai_tools_elicitation::ElicitationToolDef
+pub fn finstack_ai_tools_elicitation::ElicitationToolDef::clone(&self) -> finstack_ai_tools_elicitation::ElicitationToolDef
+impl core::fmt::Debug for finstack_ai_tools_elicitation::ElicitationToolDef
+pub fn finstack_ai_tools_elicitation::ElicitationToolDef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_elicitation::ElicitationToolset
+impl finstack_ai_tools_elicitation::ElicitationToolset
+pub fn finstack_ai_tools_elicitation::ElicitationToolset::builder() -> finstack_ai_tools_elicitation::ElicitationToolsetBuilder
+impl core::clone::Clone for finstack_ai_tools_elicitation::ElicitationToolset
+pub fn finstack_ai_tools_elicitation::ElicitationToolset::clone(&self) -> finstack_ai_tools_elicitation::ElicitationToolset
+impl core::fmt::Debug for finstack_ai_tools_elicitation::ElicitationToolset
+pub fn finstack_ai_tools_elicitation::ElicitationToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_elicitation::ElicitationToolset
+pub fn finstack_ai_tools_elicitation::ElicitationToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_elicitation::ElicitationToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_elicitation::ElicitationToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub struct finstack_ai_tools_elicitation::ElicitationToolsetBuilder
+impl finstack_ai_tools_elicitation::ElicitationToolsetBuilder
+pub fn finstack_ai_tools_elicitation::ElicitationToolsetBuilder::build(self) -> core::result::Result<finstack_ai_tools_elicitation::ElicitationToolset, finstack_ai_tools_elicitation::ElicitationError>
+pub fn finstack_ai_tools_elicitation::ElicitationToolsetBuilder::tool(self, finstack_ai_tools_elicitation::ElicitationToolDef) -> Self
+pub fn finstack_ai_tools_elicitation::ElicitationToolsetBuilder::with_ask_user(self) -> Self
+impl core::default::Default for finstack_ai_tools_elicitation::ElicitationToolsetBuilder
+pub fn finstack_ai_tools_elicitation::ElicitationToolsetBuilder::default() -> finstack_ai_tools_elicitation::ElicitationToolsetBuilder
+impl core::fmt::Debug for finstack_ai_tools_elicitation::ElicitationToolsetBuilder
+pub fn finstack_ai_tools_elicitation::ElicitationToolsetBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const finstack_ai_tools_elicitation::ELICITATION_INPUT_REQUIRED: &str
+pub const finstack_ai_tools_elicitation::ELICITATION_INVALID_ARGUMENTS: &str
+pub fn finstack_ai_tools_elicitation::interaction_request_from_tool_error(&finstack_ai_runtime::ports::tool::error::ToolError) -> core::option::Option<finstack_ai_kernel::effects::interaction::InteractionRequest>

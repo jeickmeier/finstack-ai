@@ -125,7 +125,21 @@ fn builder_exposes_free_form_ask_user_spec() {
     );
     let schema: serde_json::Value =
         serde_json::from_slice(spec.input_schema.as_bytes()).expect("schema json");
-    assert_eq!(schema["required"], serde_json::json!(["prompt"]));
+    // Strict function calling requires every property in `required`, so
+    // semantic optionality is carried by the nullable type instead.
+    assert_eq!(
+        schema["required"],
+        serde_json::json!(["prompt", "kind", "options", "response_schema"])
+    );
+    assert_eq!(schema["properties"]["prompt"]["type"], "string");
+    for optional in ["kind", "options", "response_schema"] {
+        assert!(
+            schema["properties"][optional]["type"]
+                .as_array()
+                .is_some_and(|types| types.iter().any(|kind| kind == "null")),
+            "{optional} must stay optional by being nullable"
+        );
+    }
 }
 
 #[test]

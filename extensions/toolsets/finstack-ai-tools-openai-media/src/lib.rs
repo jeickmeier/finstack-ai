@@ -191,7 +191,7 @@ impl OpenAiMediaToolset {
                 "Generate an image via OpenAI; returns a hosted URL when the model provides one, otherwise base64 image data.",
             ),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"size":{"type":"string"}},"required":["model","prompt"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"size":{"type":["string","null"]}},"required":["model","prompt","size"],"type":"object"}"#,
             )
             .map_err(|_| OpenAiMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",
@@ -224,7 +224,7 @@ impl OpenAiMediaToolset {
             title: Arc::from("OpenAI generate speech"),
             description: Arc::from("Synthesize speech from text via OpenAI."),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"input":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"},"voice":{"type":"string"}},"required":["model","input"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"input":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"},"voice":{"type":["string","null"]}},"required":["model","input","voice"],"type":"object"}"#,
             )
             .map_err(|_| OpenAiMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",

@@ -1419,6 +1419,7 @@ pub finstack_ai::LinkedAgent::default_timeout: core::time::Duration
 pub finstack_ai::LinkedAgent::model: finstack_ai_runtime::ports::model::identity::ModelName
 pub finstack_ai::LinkedAgent::settings: finstack_ai_runtime::ports::model::request::ModelSettings
 pub struct finstack_ai::LinkedAgentPorts
+pub finstack_ai::LinkedAgentPorts::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
 pub finstack_ai::LinkedAgentPorts::context_providers: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>)>
 pub finstack_ai::LinkedAgentPorts::middleware: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>)>
 pub finstack_ai::LinkedAgentPorts::observers: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>)>

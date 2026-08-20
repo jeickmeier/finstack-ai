@@ -21,6 +21,68 @@ pub(crate) fn error(
         .expect("frozen OpenRouter provider error is valid")
 }
 
+/// Largest error body read before the reason is extracted, so a malformed or
+/// hostile endpoint cannot stream an unbounded body into an error message.
+const ERROR_BODY_CAP: usize = 4096;
+
+/// Longest reason kept from an error body.
+const ERROR_DETAIL_CHARS: usize = 400;
+
+/// Build an HTTP-status failure that names the status and, when the endpoint
+/// explained itself, the reason it gave.
+///
+/// A bare status collapses every 4xx into one indistinguishable error, and the
+/// distinctions matter operationally: an unaffordable request comes back as
+/// `402` with a body naming the exact token ceiling the balance covers, which
+/// a caller can act on, while the status alone reads as an outage.
+pub(crate) fn http_error(endpoint: &'static str, status: u16, body: &[u8]) -> ModelError {
+    let retryable = matches!(status, 408 | 409 | 429 | 500..=599);
+    let metadata = Metadata::parse(format!(r#"{{"http_status":{status}}}"#))
+        .unwrap_or_else(|_| Metadata::empty());
+    let message = match rejection_detail(body) {
+        Some(detail) => format!("OpenRouter {endpoint} returned HTTP {status}: {detail}"),
+        None => format!("OpenRouter {endpoint} returned HTTP {status}"),
+    };
+    ModelError::try_new(
+        HTTP_ERROR,
+        ErrorCategory::Model,
+        retryable,
+        message,
+        metadata,
+    )
+    .expect("frozen OpenRouter HTTP error is valid")
+}
+
+/// Reduce an error response body to one short line.
+fn rejection_detail(body: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(&body[..body.len().min(ERROR_BODY_CAP)]);
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // OpenRouter reports failures as {"error":{"message":...}}; anything else
+    // is surfaced verbatim so an unexpected shape still reaches the caller.
+    let detail = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| text.to_owned());
+    let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+    if detail.is_empty() {
+        return None;
+    }
+    if detail.chars().count() <= ERROR_DETAIL_CHARS {
+        return Some(detail);
+    }
+    let kept: String = detail.chars().take(ERROR_DETAIL_CHARS).collect();
+    Some(format!("{kept}..."))
+}
+
 pub(crate) fn config_error(message: &'static str) -> ModelError {
     error(CONFIG_INVALID, ErrorCategory::Configuration, false, message)
 }
@@ -53,4 +115,42 @@ pub(crate) fn stream_limit_error() -> ModelError {
         false,
         "OpenRouter response exceeded a configured stream limit",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ERROR_DETAIL_CHARS, http_error};
+
+    #[test]
+    fn an_unaffordable_request_keeps_the_endpoints_own_reason() {
+        // A depleted balance is the common 402, and only the body says how
+        // many tokens the balance still covers.
+        let body = br#"{"error":{"message":"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 106851.","code":402}}"#;
+        let error = http_error("responses endpoint", 402, body);
+        assert!(
+            error.message().contains("can only afford 106851"),
+            "the payable ceiling must survive into the message: {}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn an_empty_body_still_names_the_status() {
+        let error = http_error("responses endpoint", 402, b"");
+        assert_eq!(
+            error.message(),
+            "OpenRouter responses endpoint returned HTTP 402"
+        );
+    }
+
+    #[test]
+    fn an_unexpected_body_shape_is_surfaced_verbatim_and_bounded() {
+        let body = "unstructured gateway failure ".repeat(500);
+        let error = http_error("models endpoint", 500, body.as_bytes());
+        assert!(error.message().contains("unstructured gateway failure"));
+        assert!(
+            error.message().chars().count() < ERROR_DETAIL_CHARS * 2,
+            "an unbounded body must not become an unbounded message"
+        );
+    }
 }

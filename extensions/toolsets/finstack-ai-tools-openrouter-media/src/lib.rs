@@ -34,13 +34,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use finstack_ai_kernel::{
-    ErrorCategory, Metadata, RawJson, RetrySafety, Timestamp, ToolExecutionMode, ToolId,
-    ValidatedToolCall,
+    ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, Timestamp, ToolExecutionMode,
+    ToolId, ValidatedToolCall,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, ToolCallContext,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor, verify_authority,
+    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
+    PortFuture, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
+    ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, stage_required_artifact,
+    verify_authority,
 };
 use futures_util::{StreamExt, stream};
 use serde::Deserialize;
@@ -50,6 +51,17 @@ const DEFAULT_ENDPOINT: &str = "https://openrouter.ai";
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 const MAX_RESULT_BYTES_CEILING: usize = 8 * 1_048_576;
 const MAX_AUDIO_DOWNLOAD_BYTES: usize = 25 * 1_048_576;
+/// Bytes of an error response body read before giving up on a reason.
+const ERROR_BODY_CAP: usize = 4096;
+/// Characters of endpoint reason kept in a tool-error message.
+const ERROR_DETAIL_CHARS: usize = 300;
+/// Sent when fetching caller-supplied audio, which is an arbitrary host
+/// rather than `OpenRouter`.
+const DOWNLOAD_USER_AGENT: &str = concat!(
+    "finstack-ai-tools-openrouter-media/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/jeickmeier/finstack-ai)"
+);
 
 #[cfg(not(test))]
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -141,6 +153,7 @@ pub struct OpenRouterMediaToolset {
     referer: Option<String>,
     title: Option<String>,
     max_result_bytes: usize,
+    artifact_store: Option<Arc<dyn ArtifactStore>>,
     client: reqwest::Client,
 }
 
@@ -149,6 +162,7 @@ impl std::fmt::Debug for OpenRouterMediaToolset {
         f.debug_struct("OpenRouterMediaToolset")
             .field("endpoint", &self.endpoint)
             .field("max_result_bytes", &self.max_result_bytes)
+            .field("artifact_store", &self.artifact_store.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -220,14 +234,14 @@ impl OpenRouterMediaToolset {
             title: Arc::from("OpenRouter generate image"),
             description: Arc::from("Generate images via OpenRouter; returns base64 image data."),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"type":"string"},"model":{"minLength":1,"type":"string"},"output_format":{"type":"string"},"prompt":{"minLength":1,"type":"string"},"resolution":{"type":"string"}},"required":["model","prompt"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 1:1. Null uses the model default.","type":["string","null"]},"model":{"description":"OpenRouter model id that produces image output, for example google/gemini-3-pro-image or openai/gpt-5-image. A text-only chat model id is rejected.","minLength":1,"type":"string"},"output_format":{"description":"Image container such as png or jpeg. Null uses the model default.","type":["string","null"]},"prompt":{"description":"Text description of the image to generate.","minLength":1,"type":"string"},"resolution":{"description":"Resolution token the chosen model accepts. Each model defines its own set, so prefer null unless a specific size is required: bytedance-seed/seedream-5-0-pro takes 512, 1K, 2K, or 4K, while other models take pixel pairs such as 1024x1024. A rejected value is reported with the accepted list.","type":["string","null"]}},"required":["aspect_ratio","model","output_format","prompt","resolution"],"type":"object"}"#,
             )
             .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",
             })?,
             output_schema: Some(
                 RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"b64_json":{"type":"string"},"media_type":{"type":"string"}},"required":["b64_json"],"type":"object"}"#,
+                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the image bytes. Present when the host configured an artifact store; pass it to tools that accept an artifact.","type":"object"},"b64_data":{"description":"Base64 image bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type","byte_length"],"type":"object"}"#,
                 )
                 .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                     reason: "invalid_output_schema",
@@ -252,10 +266,10 @@ impl OpenRouterMediaToolset {
             model_name: Arc::from(VIDEO_TOOL_NAME),
             title: Arc::from("OpenRouter generate video"),
             description: Arc::from(
-                "Submit one asynchronous video-generation job via OpenRouter; poll it with openrouter_get_video.",
+                "Submit one asynchronous video-generation job via OpenRouter; it returns a job id immediately, then poll that id with openrouter_get_video. Every call starts a new separately billed job, so call this at most once per requested video: if a job is already pending, poll its id instead of submitting again.",
             ),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"type":"string"},"duration":{"type":"integer"},"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"resolution":{"type":"string"}},"required":["model","prompt"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 9:16. Null uses the model default.","type":["string","null"]},"duration":{"description":"Clip length in seconds. Each model accepts a fixed set, most commonly 4 to 15; durations under 4 are supported by only a few models. Null uses the model default.","type":["integer","null"]},"model":{"description":"OpenRouter video model id, for example bytedance/seedance-2.0-mini, google/veo-3.1-fast, or openai/sora-2-pro. Video models are a separate catalogue from chat models; a chat model id is rejected.","minLength":1,"type":"string"},"prompt":{"description":"Text description of the video to generate.","minLength":1,"type":"string"},"resolution":{"description":"Resolution such as 480p, 720p, or 1080p. Must be supported by the chosen model. Null uses the model default.","type":["string","null"]}},"required":["aspect_ratio","duration","model","prompt","resolution"],"type":"object"}"#,
             )
             .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",
@@ -287,10 +301,10 @@ impl OpenRouterMediaToolset {
             model_name: Arc::from(VIDEO_STATUS_TOOL_NAME),
             title: Arc::from("OpenRouter get video"),
             description: Arc::from(
-                "Check one OpenRouter video job; returns download URLs when completed. Set wait_seconds (0-300, default 0) to keep polling inside this call until the job finishes or the time is up.",
+                "Check one OpenRouter video job; returns download URLs when completed. Set wait_seconds (0-300) to keep polling inside this call so one call covers the whole job. Generation commonly takes 30 seconds to several minutes, so prefer a single call with wait_seconds=300 over repeated short calls. A pending or in_progress result means that budget ran out, not that the job failed: call this tool again with the same id. Never submit a new job because one is still running.",
             ),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"id":{"minLength":1,"type":"string"},"wait_seconds":{"maximum":300,"minimum":0,"type":"integer"}},"required":["id"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"id":{"description":"Job id returned by openrouter_generate_video.","minLength":1,"type":"string"},"wait_seconds":{"description":"Seconds to keep polling inside this call before returning whatever status the job has. 0 or null returns immediately; 300 waits out a typical generation in a single call.","maximum":300,"minimum":0,"type":["integer","null"]}},"required":["id","wait_seconds"],"type":"object"}"#,
             )
             .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",
@@ -325,16 +339,18 @@ impl OpenRouterMediaToolset {
             id: speech_tool_id.clone(),
             model_name: Arc::from(SPEECH_TOOL_NAME),
             title: Arc::from("OpenRouter generate speech"),
-            description: Arc::from("Synthesize speech from text via OpenRouter."),
+            description: Arc::from(
+                "Synthesize speech from text via OpenRouter. Returns the audio as base64 with its media type.",
+            ),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"input":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"},"voice":{"type":"string"}},"required":["model","input"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"input":{"description":"Text to speak.","minLength":1,"type":"string"},"model":{"description":"OpenRouter text-to-speech model id, for example x-ai/grok-voice-tts-1.0, deepgram/aura-2, minimax/speech-2.8-turbo, or hexgrad/kokoro-82m. Chat model ids and OpenAI ids such as openai/tts-1 are rejected. The current list is GET /api/v1/models?output_modalities=speech.","minLength":1,"type":"string"},"response_format":{"description":"Audio container. Null selects mp3, a self-contained file any player opens; pcm returns headerless samples that most players cannot open on their own.","enum":["mp3","pcm",null],"type":["string","null"]},"voice":{"description":"Voice name accepted by the chosen model, for example eve for x-ai/grok-voice-tts-1.0. Null uses the model default.","type":["string","null"]}},"required":["input","model","response_format","voice"],"type":"object"}"#,
             )
             .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",
             })?,
             output_schema: Some(
                 RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"b64_audio":{"type":"string"},"media_type":{"type":"string"}},"required":["b64_audio","media_type"],"type":"object"}"#,
+                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the audio bytes. Present when the host configured an artifact store; pass it to tools that accept an artifact.","type":"object"},"b64_data":{"description":"Base64 audio bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type","byte_length"],"type":"object"}"#,
                 )
                 .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                     reason: "invalid_output_schema",
@@ -362,7 +378,7 @@ impl OpenRouterMediaToolset {
                 "Transcribe audio at an HTTPS URL via OpenRouter (the toolset downloads and base64-submits it; OpenRouter accepts no audio URLs).",
             ),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"audio_url":{"minLength":1,"type":"string"},"format":{"type":"string"},"model":{"minLength":1,"type":"string"}},"required":["model","audio_url"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"audio_url":{"description":"HTTPS URL of the audio to transcribe.","minLength":1,"type":"string"},"format":{"description":"Container format such as wav, mp3, flac, ogg, or m4a. The bytes must actually be in that container: headerless PCM labelled wav is rejected. Null derives the format from the URL extension.","type":["string","null"]},"model":{"description":"OpenRouter speech-to-text model id, for example openai/whisper-1 or deepgram/nova-3. Chat model ids are rejected by this endpoint.","minLength":1,"type":"string"}},"required":["audio_url","format","model"],"type":"object"}"#,
             )
             .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",
@@ -425,8 +441,19 @@ impl OpenRouterMediaToolset {
             referer: config.referer,
             title: config.title,
             max_result_bytes: config.max_result_bytes,
+            artifact_store: None,
             client,
         })
+    }
+
+    /// Stage generated audio and images instead of inlining them.
+    ///
+    /// With a store attached, image and speech results carry an `artifact`
+    /// reference and the model never receives the base64 payload.
+    #[must_use]
+    pub fn with_artifact_store(mut self, store: Arc<dyn ArtifactStore>) -> Self {
+        self.artifact_store = Some(store);
+        self
     }
 }
 
@@ -497,6 +524,8 @@ struct SpeechArguments {
     input: String,
     #[serde(default)]
     voice: Option<String>,
+    #[serde(default)]
+    response_format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -511,6 +540,66 @@ struct TranscribeArguments {
 #[derive(Deserialize)]
 struct TranscribeResponse {
     text: String,
+}
+
+/// Hand generated media back to the model without inlining the bytes.
+///
+/// Generated audio and images are hundreds of kilobytes that a model cannot
+/// read and must not have to carry; when a store is configured the bytes are
+/// staged and only the reference travels in the result. Without a store the
+/// payload is inlined as base64, still bounded by `max_result_bytes`.
+async fn deliver_media(
+    bytes: Vec<u8>,
+    media_type: &str,
+    name: &'static str,
+    store: Option<&Arc<dyn ArtifactStore>>,
+    ctx: &ToolCallContext,
+    max_result_bytes: usize,
+) -> Result<serde_json::Value, ToolError> {
+    let byte_length = bytes.len();
+    let Some(store) = store else {
+        if byte_length.saturating_mul(4) / 3 > max_result_bytes {
+            return Err(tool_error(
+                OPENROUTER_MEDIA_LIMIT_EXCEEDED,
+                ErrorCategory::Limit,
+                "openrouter media result exceeds the configured byte limit",
+            ));
+        }
+        return Ok(serde_json::json!({
+            "b64_data": BASE64_STANDARD.encode(bytes),
+            "media_type": media_type,
+            "byte_length": byte_length,
+        }));
+    };
+    let artifact = stage_required_artifact(
+        store.as_ref(),
+        ArtifactScope {
+            tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
+            session_id: ctx.run.locator.session_id,
+            run_id: Some(ctx.run.locator.run_id),
+            sensitivity: Sensitivity::Internal,
+        },
+        Bytes::from(bytes),
+        ArtifactMetadata {
+            kind: Arc::from("tool-output"),
+            media_type: Arc::from(media_type),
+            name: Some(Arc::from(name)),
+            attributes: Metadata::empty(),
+        },
+    )
+    .await
+    .map_err(|_| {
+        tool_error(
+            OPENROUTER_MEDIA_LIMIT_EXCEEDED,
+            ErrorCategory::Tool,
+            "openrouter media artifact staging failed",
+        )
+    })?;
+    Ok(serde_json::json!({
+        "artifact": artifact,
+        "media_type": media_type,
+        "byte_length": byte_length,
+    }))
 }
 
 impl Toolset for OpenRouterMediaToolset {
@@ -535,6 +624,7 @@ impl Toolset for OpenRouterMediaToolset {
         let referer = self.referer.clone();
         let title = self.title.clone();
         let max_result_bytes = self.max_result_bytes;
+        let artifact_store = self.artifact_store.clone();
         let image_tool_id = self.image_tool_id.clone();
         let video_tool_id = self.video_tool_id.clone();
         let video_status_tool_id = self.video_status_tool_id.clone();
@@ -551,6 +641,7 @@ impl Toolset for OpenRouterMediaToolset {
                     title.as_deref(),
                     &endpoint,
                     max_result_bytes,
+                    artifact_store.as_ref(),
                     &ctx,
                     call.call.arguments().as_bytes(),
                 )
@@ -585,6 +676,7 @@ impl Toolset for OpenRouterMediaToolset {
                     title.as_deref(),
                     &endpoint,
                     max_result_bytes,
+                    artifact_store.as_ref(),
                     &ctx,
                     call.call.arguments().as_bytes(),
                 )
@@ -653,6 +745,7 @@ async fn handle_image(
     title: Option<&str>,
     endpoint: &str,
     max_result_bytes: usize,
+    store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<serde_json::Value, ToolError> {
@@ -702,21 +795,23 @@ async fn handle_image(
             "openrouter media image response omitted image data",
         )
     })?;
-    let mut output = serde_json::Map::new();
-    output.insert("b64_json".into(), serde_json::Value::String(item.b64_json));
-    if let Some(media_type) = item.media_type {
-        output.insert("media_type".into(), serde_json::Value::String(media_type));
-    }
-    let value = serde_json::Value::Object(output);
-    let size = serde_json::to_vec(&value).map_or(usize::MAX, |bytes| bytes.len());
-    if size > max_result_bytes {
-        return Err(tool_error(
-            OPENROUTER_MEDIA_LIMIT_EXCEEDED,
-            ErrorCategory::Limit,
-            "openrouter media image result exceeds the configured byte limit",
-        ));
-    }
-    Ok(value)
+    let bytes = BASE64_STANDARD.decode(item.b64_json).map_err(|_| {
+        tool_error(
+            OPENROUTER_MEDIA_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "openrouter media image data is not valid base64",
+        )
+    })?;
+    let media_type = item.media_type.unwrap_or_else(|| "image/png".to_owned());
+    deliver_media(
+        bytes,
+        &media_type,
+        "openrouter-image",
+        store,
+        ctx,
+        max_result_bytes,
+    )
+    .await
 }
 
 async fn handle_video_submit(
@@ -838,6 +933,7 @@ async fn handle_speech(
     title: Option<&str>,
     endpoint: &str,
     max_result_bytes: usize,
+    store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<serde_json::Value, ToolError> {
@@ -847,9 +943,15 @@ async fn handle_speech(
             "openrouter media model or input is empty",
         ));
     }
+    // The endpoint defaults to headerless PCM, which is bytes no player
+    // opens as a file. Ask for mp3 unless the caller wants the raw samples.
+    let response_format = arguments
+        .response_format
+        .unwrap_or_else(|| "mp3".to_owned());
     let mut body = serde_json::json!({
         "model": arguments.model,
         "input": arguments.input,
+        "response_format": response_format,
     });
     if let Some(map) = body.as_object_mut()
         && let Some(voice) = arguments.voice
@@ -868,16 +970,70 @@ async fn handle_speech(
         MAX_RESULT_BYTES_CEILING,
     )
     .await?;
-    if bytes.len().saturating_mul(4) / 3 > max_result_bytes {
-        return Err(tool_error(
-            OPENROUTER_MEDIA_LIMIT_EXCEEDED,
-            ErrorCategory::Limit,
-            "openrouter media speech result exceeds the configured byte limit",
-        ));
-    }
-    let b64_audio = BASE64_STANDARD.encode(bytes);
     let media_type = content_type.unwrap_or_else(|| "audio/mpeg".to_owned());
-    Ok(serde_json::json!({ "b64_audio": b64_audio, "media_type": media_type }))
+    deliver_media(
+        bytes,
+        &media_type,
+        "openrouter-speech",
+        store,
+        ctx,
+        max_result_bytes,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send_bytes(
+    client: &reqwest::Client,
+    api_key: &str,
+    referer: Option<&str>,
+    title: Option<&str>,
+    method: reqwest::Method,
+    url: &str,
+    body: Option<&serde_json::Value>,
+    ctx: &ToolCallContext,
+    cap: usize,
+) -> Result<(Vec<u8>, Option<String>), ToolError> {
+    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
+        return Err(timeout_error());
+    }
+    let mut request = client
+        .request(method, url)
+        .header("Authorization", format!("Bearer {api_key}"));
+    if let Some(referer) = referer {
+        request = request.header("HTTP-Referer", referer);
+    }
+    if let Some(title) = title {
+        request = request.header("X-Title", title);
+    }
+    if let Some(body) = body {
+        request = request
+            .header("Content-Type", "application/json")
+            .json(body);
+    }
+    let send = request.send();
+    let response = tokio::select! {
+        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
+        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        result = send => result.map_err(|_| {
+            tool_error(
+                OPENROUTER_MEDIA_TRANSPORT_FAILED,
+                ErrorCategory::Tool,
+                "openrouter media request failed",
+            )
+        })?,
+    };
+    let status = response.status();
+    if !status.is_success() {
+        return Err(endpoint_rejected("endpoint", status, response).await);
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let bytes = fetch_bytes_bounded(response, cap).await?;
+    Ok((bytes, content_type))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -916,12 +1072,11 @@ async fn handle_transcribe(
             .filter(|ext| !ext.is_empty() && !ext.contains('/'))
             .map_or_else(|| "mp3".to_owned(), str::to_owned)
     });
+    // The endpoint takes the payload as a nested `input_audio` object; a
+    // flat `audio`/`format` pair is rejected as a missing object.
     let body = serde_json::json!({
         "model": arguments.model,
-        // "audio": documented best-guess field name for the base64 payload,
-        // pending verification against OpenRouter's live transcription docs.
-        "audio": b64_audio,
-        "format": format,
+        "input_audio": {"data": b64_audio, "format": format},
     });
     let response: TranscribeResponse = send_json(
         client,
@@ -981,71 +1136,9 @@ async fn send_json<T: for<'de> Deserialize<'de>>(
     };
     let status = response.status();
     if !status.is_success() {
-        return Err(tool_error(
-            OPENROUTER_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openrouter media endpoint rejected the request",
-        ));
+        return Err(endpoint_rejected("endpoint", status, response).await);
     }
     read_bounded_json(response, cap).await
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn send_bytes(
-    client: &reqwest::Client,
-    api_key: &str,
-    referer: Option<&str>,
-    title: Option<&str>,
-    method: reqwest::Method,
-    url: &str,
-    body: Option<&serde_json::Value>,
-    ctx: &ToolCallContext,
-    cap: usize,
-) -> Result<(Vec<u8>, Option<String>), ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
-    let mut request = client
-        .request(method, url)
-        .header("Authorization", format!("Bearer {api_key}"));
-    if let Some(referer) = referer {
-        request = request.header("HTTP-Referer", referer);
-    }
-    if let Some(title) = title {
-        request = request.header("X-Title", title);
-    }
-    if let Some(body) = body {
-        request = request
-            .header("Content-Type", "application/json")
-            .json(body);
-    }
-    let send = request.send();
-    let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
-        result = send => result.map_err(|_| {
-            tool_error(
-                OPENROUTER_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openrouter media request failed",
-            )
-        })?,
-    };
-    let status = response.status();
-    if !status.is_success() {
-        return Err(tool_error(
-            OPENROUTER_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openrouter media endpoint rejected the request",
-        ));
-    }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let bytes = fetch_bytes_bounded(response, cap).await?;
-    Ok((bytes, content_type))
 }
 
 async fn download_bytes(
@@ -1057,7 +1150,12 @@ async fn download_bytes(
     if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
         return Err(timeout_error());
     }
-    let send = client.get(url).send();
+    // Identify the client: hosts serving public media commonly answer an
+    // anonymous request with 403 rather than the file.
+    let send = client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, DOWNLOAD_USER_AGENT)
+        .send();
     let response = tokio::select! {
         () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
         () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
@@ -1071,11 +1169,7 @@ async fn download_bytes(
     };
     let status = response.status();
     if !status.is_success() {
-        return Err(tool_error(
-            OPENROUTER_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openrouter media audio host rejected the request",
-        ));
+        return Err(endpoint_rejected("audio host", status, response).await);
     }
     fetch_bytes_bounded(response, cap).await
 }
@@ -1247,6 +1341,80 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
+/// Reject an unsuccessful media response, naming the status and the endpoint's
+/// own reason.
+///
+/// The message is the model's only self-correction signal. A status alone does
+/// not say which argument was wrong, so the model reissues the identical call;
+/// because these tools are approval-gated, every retry also re-prompts the
+/// caller, and the run burns its cycles without progressing.
+async fn endpoint_rejected(
+    what: &'static str,
+    status: reqwest::StatusCode,
+    response: reqwest::Response,
+) -> ToolError {
+    let message = match rejection_detail(response).await {
+        Some(detail) => {
+            format!("openrouter media {what} rejected the request with HTTP {status}: {detail}")
+        }
+        None => format!("openrouter media {what} rejected the request with HTTP {status}"),
+    };
+    ToolError::try_new(
+        OPENROUTER_MEDIA_TRANSPORT_FAILED,
+        ErrorCategory::Tool,
+        false,
+        message,
+        Metadata::empty(),
+    )
+    .unwrap_or_else(Into::into)
+}
+
+/// Reduce an error response body to one short line.
+///
+/// Reads at most [`ERROR_BODY_CAP`] bytes so a hostile or malformed endpoint
+/// cannot stream an unbounded body into an error message.
+async fn rejection_detail(response: reqwest::Response) -> Option<String> {
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(Ok(chunk)) = stream.next().await {
+        let remaining = ERROR_BODY_CAP.saturating_sub(body.len());
+        if remaining == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    let text = String::from_utf8_lossy(&body);
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // OpenRouter reports failures as {"error":{"message":...}}; anything else
+    // is surfaced verbatim so an unexpected shape still reaches the model.
+    let detail = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| text.to_owned());
+    let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+    if detail.is_empty() {
+        return None;
+    }
+    Some(truncate_chars(&detail, ERROR_DETAIL_CHARS))
+}
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let kept: String = text.chars().take(max).collect();
+    format!("{kept}...")
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1267,6 +1435,12 @@ mod tests {
         OpenRouterMediaError, OpenRouterMediaToolset, SPEECH_TOOL_NAME, TRANSCRIBE_TOOL_NAME,
         VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME, validate_download_url,
     };
+
+    use finstack_ai_context_memory::InProcessArtifactStore;
+
+    use base64::Engine as _;
+
+    use crate::{ArtifactStore, BASE64_STANDARD};
 
     const CANARY: &str = "or-media-secret-canary-046";
 
@@ -1446,8 +1620,9 @@ mod tests {
         assert!(!result.is_error);
         let payload: serde_json::Value =
             serde_json::from_slice(result.output.as_bytes()).expect("json");
-        assert_eq!(payload["b64_json"], "aGVsbG8=");
+        assert_eq!(payload["b64_data"], "aGVsbG8=");
         assert_eq!(payload["media_type"], "image/png");
+        assert_eq!(payload["byte_length"], 5);
         let seen = seen_rx.recv().await.expect("request").to_ascii_lowercase();
         assert!(seen.contains("post /api/v1/images"));
         assert!(seen.contains(CANARY));
@@ -1482,6 +1657,106 @@ mod tests {
             panic!("expected limit error");
         };
         assert_eq!(error.code(), crate::OPENROUTER_MEDIA_LIMIT_EXCEEDED);
+        server.await.expect("server");
+    }
+
+    /// Generated media must not reach the model as inline base64.
+    ///
+    /// A model that receives hundreds of kilobytes of base64 it cannot read
+    /// gains nothing actionable from the result, and these tools are
+    /// approval-gated, so each reissued call re-prompts the caller.
+    #[tokio::test]
+    async fn a_configured_store_keeps_image_bytes_out_of_the_result() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, _seen_rx) = mpsc::unbounded_channel();
+        // Larger than max_result_bytes below: staging must not consult the cap.
+        let payload = vec![7_u8; 8_192];
+        let encoded = BASE64_STANDARD.encode(&payload);
+        let body = format!(r#"{{"data":[{{"b64_json":"{encoded}","media_type":"image/png"}}]}}"#);
+        let server = tokio::spawn(async move {
+            respond(
+                &listener,
+                &seen_tx,
+                200,
+                body.as_bytes(),
+                "application/json",
+            )
+            .await;
+        });
+        let store = Arc::new(InProcessArtifactStore::default());
+        let tools = OpenRouterMediaToolset::try_new(OpenRouterMediaConfig {
+            max_result_bytes: 1_024,
+            ..base_config(format!("http://{addr}"))
+        })
+        .expect("tools")
+        .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+        let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
+        let call = call_for(&spec, br#"{"model":"m","prompt":"a cat"}"#);
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(result) = item else {
+            panic!("expected completion");
+        };
+        let value: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
+        assert!(
+            value.get("b64_data").is_none(),
+            "staged results must not inline the payload: {value}"
+        );
+        assert_eq!(value["byte_length"], 8_192);
+        assert_eq!(value["media_type"], "image/png");
+        assert!(
+            !result
+                .output
+                .as_bytes()
+                .windows(64)
+                .any(|w| w == &encoded.as_bytes()[..64]),
+            "the encoded payload must not appear anywhere in the result"
+        );
+        let artifact: finstack_ai_kernel::ArtifactRef =
+            serde_json::from_value(value["artifact"].clone()).expect("artifact reference");
+        assert_eq!(artifact.blob().media_type(), "image/png");
+        server.await.expect("server");
+    }
+
+    /// A rejection has to carry the endpoint's reason, not just the status.
+    ///
+    /// These tools are approval-gated, and a model that cannot tell which
+    /// argument was wrong reissues the identical call, re-prompting the caller
+    /// on every attempt until the run exhausts its cycles.
+    #[tokio::test]
+    async fn rejection_surfaces_the_endpoint_reason() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, _seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(
+                &listener,
+                &seen_tx,
+                400,
+                br#"{"error":{"message":"tts-1 is not a valid model ID","code":400}}"#,
+                "application/json",
+            )
+            .await;
+        });
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), VIDEO_TOOL_NAME);
+        let call = call_for(&spec, br#"{"model":"m","prompt":"a dog running"}"#);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected rejection");
+        };
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_TRANSPORT_FAILED);
+        let message = error.message();
+        assert!(message.contains("400"), "status missing from {message}");
+        assert!(
+            message.contains("tts-1 is not a valid model ID"),
+            "endpoint reason missing from {message}"
+        );
         server.await.expect("server");
     }
 
@@ -1651,10 +1926,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn speech_tool_asks_for_a_playable_container_by_default() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(&listener, &seen_tx, 200, b"audio", "audio/mpeg").await;
+        });
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), SPEECH_TOOL_NAME);
+        let call = call_for(&spec, br#"{"model":"m","input":"hello"}"#);
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        stream.next().await.expect("item").expect("ok");
+        let seen = seen_rx.recv().await.expect("request");
+        // The endpoint's own default is headerless PCM, which is bytes no
+        // player opens as a file, so the tool asks for a container instead.
+        assert!(
+            seen.contains(r#""response_format":"mp3""#),
+            "speech must request a playable container: {seen}"
+        );
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn speech_tool_forwards_an_explicit_container() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(&listener, &seen_tx, 200, b"audio", "audio/pcm").await;
+        });
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), SPEECH_TOOL_NAME);
+        let call = call_for(
+            &spec,
+            br#"{"model":"m","input":"hello","response_format":"pcm"}"#,
+        );
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        stream.next().await.expect("item").expect("ok");
+        let seen = seen_rx.recv().await.expect("request");
+        assert!(
+            seen.contains(r#""response_format":"pcm""#),
+            "an explicit container must survive the default: {seen}"
+        );
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
     async fn transcribe_tool_downloads_then_submits_base64() {
         let audio_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let audio_addr = audio_listener.local_addr().expect("addr");
-        let (audio_tx, _audio_rx) = mpsc::unbounded_channel();
+        let (audio_tx, mut audio_rx) = mpsc::unbounded_channel();
         let audio_server = tokio::spawn(async move {
             respond(
                 &audio_listener,
@@ -1700,8 +2030,24 @@ mod tests {
             &base64::engine::general_purpose::STANDARD,
             b"hello-audio-bytes",
         );
+        // Media hosts commonly answer an anonymous request with 403 rather
+        // than the file: Wikimedia rejected a live download for exactly this.
+        let fetched = audio_rx.recv().await.expect("download request");
+        assert!(
+            fetched.to_ascii_lowercase().contains("user-agent:"),
+            "the audio download must identify the client: {fetched}"
+        );
         let seen = api_rx.recv().await.expect("request");
         assert!(seen.contains(&expected_b64));
+        assert!(
+            seen.to_ascii_lowercase()
+                .contains("post /api/v1/audio/transcriptions"),
+            "transcription must use the transcriptions route: {seen}"
+        );
+        assert!(
+            seen.contains(r#""input_audio":{"data":"#),
+            "payload must be nested under input_audio: {seen}"
+        );
         audio_server.await.expect("audio server");
         api_server.await.expect("api server");
     }
@@ -1817,6 +2163,57 @@ mod tests {
             "no HTTP must reach the fixture"
         );
         server.abort();
+    }
+
+    #[test]
+    fn media_tool_input_schemas_are_openai_strict_compatible() {
+        let optional = [
+            (
+                IMAGE_TOOL_NAME,
+                &["aspect_ratio", "output_format", "resolution"][..],
+            ),
+            (
+                VIDEO_TOOL_NAME,
+                &["aspect_ratio", "duration", "resolution"][..],
+            ),
+            (VIDEO_STATUS_TOOL_NAME, &["wait_seconds"][..]),
+            (SPEECH_TOOL_NAME, &["voice"][..]),
+            (TRANSCRIBE_TOOL_NAME, &["format"][..]),
+        ];
+        let tools = OpenRouterMediaToolset::try_new(base_config("https://openrouter.ai".into()))
+            .expect("tools");
+        for (name, optional_keys) in optional {
+            let spec = find_spec(&tools.tools(), name);
+            let schema: serde_json::Value =
+                serde_json::from_slice(spec.input_schema.as_bytes()).expect("schema");
+            let properties = schema["properties"].as_object().expect("properties");
+            let required = schema["required"]
+                .as_array()
+                .expect("required")
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(schema["additionalProperties"], false);
+            for key in properties.keys() {
+                assert!(
+                    required.contains(key.as_str()),
+                    "{name} omits {key} from required"
+                );
+            }
+            for key in optional_keys {
+                let empty = Vec::new();
+                let types = schema["properties"][key]["type"]
+                    .as_array()
+                    .unwrap_or(&empty)
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>();
+                assert!(
+                    types.contains(&"null"),
+                    "{name} {key} must be nullable for OpenAI strict mode"
+                );
+            }
+        }
     }
 
     #[test]

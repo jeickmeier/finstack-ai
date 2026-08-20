@@ -106,6 +106,7 @@ fn approval_schema() -> Result<RawJson, RunHandleError> {
 pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
+    tool_name: &str,
 ) -> Result<(), RunHandleError> {
     let interaction_id = generate_tool_id::<InteractionTag, _, _>(sources)?;
     let effect_id = generate_tool_id::<EffectTag, _, _>(sources)?;
@@ -120,11 +121,11 @@ pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
         effect_id,
         InteractionKind::Approval,
         vec![ContentBlock::Text(
-            TextBlock::try_new("approve the next tool action").map_err(|_| {
-                RunHandleError::InteractionSettlement {
+            TextBlock::try_new(format!("approve the next tool action: {tool_name}")).map_err(
+                |_| RunHandleError::InteractionSettlement {
                     code: "approval_prompt_invalid",
-                }
-            })?,
+                },
+            )?,
         )],
         approval_schema()?,
         ComponentRef::new(

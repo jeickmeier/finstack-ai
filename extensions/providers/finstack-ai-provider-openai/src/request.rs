@@ -1,6 +1,6 @@
 //! Private official `OpenAI` Responses request translation.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use base64::Engine;
@@ -129,12 +129,13 @@ impl ResponsesRequest {
                 }));
                 continue;
             }
+            let parameters = raw_value(&tool.input_schema)?;
             tools.push(WireTool {
                 kind: "function",
                 name: tool.model_name.to_string(),
                 description: tool.description.to_string(),
-                parameters: raw_value(&tool.input_schema)?,
-                strict: true,
+                strict: supports_strict(&parameters),
+                parameters,
             });
         }
         if matches!(draft.output, OutputSpec::JsonSchema { .. }) && text.is_none() {
@@ -157,6 +158,51 @@ impl ResponsesRequest {
             settings,
         })
     }
+}
+
+/// Whether `schema` satisfies the Responses `strict` function-calling subset.
+///
+/// `strict` is a claim about the schema rather than a preference: the endpoint
+/// rejects the *entire* request when any one tool violates the subset, so
+/// asserting it unconditionally lets a single non-conforming tool fail every
+/// run. Tools that cannot satisfy it — free-form objects, or a `required`
+/// array that omits declared properties — are sent unstrict instead.
+fn supports_strict(schema: &Value) -> bool {
+    match schema {
+        Value::Object(node) => {
+            if declares_object(node) && !object_node_is_strict(node) {
+                return false;
+            }
+            node.iter()
+                .filter(|(key, _)| key.as_str() != "required")
+                .all(|(_, value)| supports_strict(value))
+        }
+        Value::Array(items) => items.iter().all(supports_strict),
+        _ => true,
+    }
+}
+
+fn declares_object(node: &serde_json::Map<String, Value>) -> bool {
+    match node.get("type") {
+        Some(Value::String(name)) => name == "object",
+        Some(Value::Array(names)) => names.iter().any(|name| name.as_str() == Some("object")),
+        _ => false,
+    }
+}
+
+fn object_node_is_strict(node: &serde_json::Map<String, Value>) -> bool {
+    if node.get("additionalProperties") != Some(&Value::Bool(false)) {
+        return false;
+    }
+    let Some(Value::Object(properties)) = node.get("properties") else {
+        return false;
+    };
+    let required: BTreeSet<&str> = node
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|values| values.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    properties.keys().all(|key| required.contains(key.as_str()))
 }
 
 fn parse_settings(settings: &RawJson) -> Result<BTreeMap<String, Value>, ModelError> {
@@ -508,7 +554,7 @@ mod tests {
 
     #[test]
     fn encodes_responses_fields_flattened_tools_and_reasoning() {
-        let tools = Arc::from([tool("lookup", br#"{"type":"object"}"#)]);
+        let tools = Arc::from([tool("lookup", STRICT_SCHEMA)]);
         let mut draft =
             draft(br#"{"reasoning_effort":"low","reasoning_summary":"auto","temperature":0}"#);
         draft.tools = tools;
@@ -532,10 +578,49 @@ mod tests {
         assert!(value.get("reasoning_summary").is_none());
     }
 
+    /// A tool whose schema cannot meet the strict subset must not poison the
+    /// whole request: the endpoint rejects every tool when one is mislabelled.
+    #[test]
+    fn tools_outside_the_strict_subset_are_sent_unstrict() {
+        let mut draft = draft(b"{}");
+        draft.tools = Arc::from([
+            tool("conforming", STRICT_SCHEMA),
+            tool("free_form_object", br#"{"type":"object"}"#),
+            tool(
+                "partial_required",
+                br#"{"additionalProperties":false,"properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a"],"type":"object"}"#,
+            ),
+            tool(
+                "nested_free_form",
+                br#"{"additionalProperties":false,"properties":{"payload":{"type":"object"}},"required":["payload"],"type":"object"}"#,
+            ),
+        ]);
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["tools"][0]["strict"], true);
+        assert_eq!(value["tools"][1]["strict"], false);
+        assert_eq!(value["tools"][2]["strict"], false);
+        assert_eq!(value["tools"][3]["strict"], false);
+    }
+
+    #[test]
+    fn nullable_optional_properties_stay_strict() {
+        let mut draft = draft(b"{}");
+        draft.tools = Arc::from([tool(
+            "lookup",
+            br#"{"additionalProperties":false,"properties":{"limit":{"type":["integer","null"]},"query":{"type":"string"}},"required":["query","limit"],"type":"object"}"#,
+        )]);
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["tools"][0]["strict"], true);
+    }
+
     #[test]
     fn prompt_cache_key_is_rewritten_to_the_current_tool_catalog() {
         let mut draft = draft(br#"{"prompt_cache_key":"stale-previous-tools"}"#);
-        draft.tools = Arc::from([tool("lookup", br#"{"type":"object"}"#)]);
+        draft.tools = Arc::from([tool("lookup", STRICT_SCHEMA)]);
         let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
             .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
@@ -889,6 +974,9 @@ mod tests {
         )
         .expect("message")
     }
+
+    const STRICT_SCHEMA: &[u8] =
+        br#"{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}"#;
 
     fn tool(name: &str, schema: &[u8]) -> ToolSpec {
         ToolSpec {

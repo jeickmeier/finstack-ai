@@ -6,6 +6,7 @@ CancelledError
 Capability
 ChildRunPolicy
 ConfigurationError
+ElicitationToolset
 Event
 EventBatch
 EventBatchIterator

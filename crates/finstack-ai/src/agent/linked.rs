@@ -12,7 +12,7 @@ use finstack_ai_kernel::ComponentId;
 use finstack_ai_kernel::{AgentId, BundleId};
 use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
 use finstack_ai_runtime::{
-    ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
+    ArtifactStore, ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
 };
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::{JournalStore, Model};
@@ -57,6 +57,9 @@ pub struct LinkedAgentPorts {
     pub middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     /// Observer registrations.
     pub observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
+    /// Store for toolsets that stage bytes instead of inlining them. Without
+    /// it, generated audio and images travel as base64 the model cannot use.
+    pub artifact_store: Option<Arc<dyn ArtifactStore>>,
     /// Optional compiled output schema. Bindings convert host schema types.
     pub output_schema: Option<RawJson>,
 }
@@ -889,6 +892,10 @@ fn register_openrouter_media(
     .map_err(|error| {
         AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
     })?;
+    let toolset = match ports.artifact_store.clone() {
+        Some(store) => toolset.with_artifact_store(store),
+        None => toolset,
+    };
     ports.toolsets.push((
         component("python.toolset.openrouter_media")?,
         Arc::new(toolset),

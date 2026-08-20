@@ -120,6 +120,90 @@ fn error_provider() -> (Arc<dyn ContextProvider>, Arc<AtomicUsize>) {
     (provider, calls)
 }
 
+fn tool_result_message(ordinal: u64, text: &str) -> Message {
+    let result = finstack_ai_kernel::ToolResultBlock::try_new(
+        finstack_ai_kernel::ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789cd")
+            .expect("tool call id"),
+        vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
+        false,
+    )
+    .expect("tool result");
+    Message::try_new(
+        id(ordinal),
+        MessageRole::Tool,
+        vec![ContentBlock::ToolResult(result)],
+        timestamp(900),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("message")
+}
+
+/// A turn that has already produced tool messages must keep its prompt in
+/// front of them.
+///
+/// The facade hands `PrepareContext` the turn in chronological order, so once
+/// tools have run the user prompt is no longer the trailing message. Appending
+/// it after this turn's own assistant and tool messages replays the request
+/// after the work that answered it, and a model reading its finished tool
+/// results followed by the original request starts the task over: a live run
+/// resubmitted a paid video job it had already completed.
+#[test]
+fn an_in_flight_turn_keeps_the_prompt_ahead_of_its_own_tool_messages() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_prepare_context(&mut coordinator);
+    let (provider, _calls) = fixture_provider("repository-leaf", true);
+    coordinator.install_context_providers(Arc::from([provider]));
+    let sources = test_sources();
+
+    block_on(settle_facade_stage(
+        &mut coordinator,
+        None,
+        &sources,
+        &test_profile(),
+        env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103),
+        StageSettled {
+            cursor: StageCursor {
+                cycle: 0,
+                stage: Stage::PrepareContext,
+            },
+            outcome: ReducerStageOutcome::ContextPrepared {
+                messages: Arc::from([
+                    user_message(4, "generate the video"),
+                    assistant_message(5, "calling the tool"),
+                    tool_result_message(6, "the job finished"),
+                ]),
+            },
+        },
+    ))
+    .expect("settles");
+
+    let committed = coordinator
+        .state()
+        .current_turn
+        .as_ref()
+        .expect("current turn");
+    let texts: Vec<String> = committed
+        .context
+        .messages
+        .iter()
+        .map(message_text)
+        .collect();
+    let prompt = texts
+        .iter()
+        .position(|text| text == "generate the video")
+        .expect("prompt is retained");
+    let reply = texts
+        .iter()
+        .position(|text| text == "calling the tool")
+        .expect("assistant turn is retained");
+    assert!(
+        prompt < reply,
+        "the prompt must precede the turn answering it, got {texts:?}"
+    );
+}
+
 #[test]
 fn prepare_context_invokes_committed_providers_and_projects_protected() {
     let mut coordinator = accepted_coordinator(RunLimits::empty());

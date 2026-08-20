@@ -310,14 +310,19 @@ impl Agent {
             )
             .await?;
             let terminal = recover_state(Arc::clone(&store), session_id).await?;
-            let TerminalState::Completed(completed) = terminal
+            let completed = match terminal
                 .terminal
                 .as_ref()
                 .ok_or_else(|| AgentRunError::runtime_message("terminal state is missing"))?
-            else {
-                return Err(AgentRunError::runtime_message(
-                    "run did not complete successfully",
-                ));
+            {
+                TerminalState::Completed(completed) => completed,
+                TerminalState::Failed(failed) => {
+                    return Err(AgentRunError::runtime_message(format!(
+                        "run failed: {}: {}",
+                        failed.error.code, failed.error.message
+                    )));
+                }
+                TerminalState::Cancelled(_) => return Err(AgentRunError::Cancelled),
             };
             let message = terminal
                 .messages

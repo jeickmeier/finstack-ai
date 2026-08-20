@@ -128,8 +128,8 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         refused,
     )? {
         PlannedBatch::Ready(plans) => plans,
-        PlannedBatch::ApprovalRequired => {
-            request_approval_interaction(coordinator, sources).await?;
+        PlannedBatch::ApprovalRequired(tool_name) => {
+            request_approval_interaction(coordinator, sources, &tool_name).await?;
             return Ok(false);
         }
     };
@@ -141,8 +141,9 @@ enum PlannedBatch {
     /// One plan per source call, in source order.
     Ready(Vec<ToolCallPlan>),
     /// A call needs durable approval evidence the run does not have yet, so
-    /// no batch is planned at this cursor.
-    ApprovalRequired,
+    /// no batch is planned at this cursor. Carries that call's tool name so
+    /// the approval prompt can say what is being approved.
+    ApprovalRequired(String),
 }
 
 /// Decide one plan per source call, then check the coverage invariant.
@@ -170,9 +171,12 @@ fn plan_source_calls(
     let mut plans = Vec::with_capacity(calls.len());
     for call in calls {
         let policy = middleware_tool_policy(catalog, &call, retained);
+        let tool_name = call.tool_name().to_owned();
         match catalog.decide_plan(call, deadline, policy, granted, refused) {
             ToolCatalogPlan::Ready(plan) => plans.push(plan),
-            ToolCatalogPlan::RequireApproval => return Ok(PlannedBatch::ApprovalRequired),
+            ToolCatalogPlan::RequireApproval => {
+                return Ok(PlannedBatch::ApprovalRequired(tool_name));
+            }
         }
     }
     assert_plan_coverage(&plans, &source_call_ids)?;

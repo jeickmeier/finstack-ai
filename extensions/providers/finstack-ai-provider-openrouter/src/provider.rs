@@ -17,7 +17,7 @@ use reqwest::redirect::Policy;
 use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
-use crate::error::{CANCELLED, HTTP_ERROR, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error};
+use crate::error::{CANCELLED, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, http_error};
 use crate::request::{ResponsesRequest, serialize_request};
 use crate::sse::SseParser;
 use crate::stream::CompletionAssembly;
@@ -156,13 +156,9 @@ impl OpenRouterProvider {
             .await
             .map_err(|source| transport_error(&source))?;
         if !response.status().is_success() {
-            let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
-            return Err(error(
-                HTTP_ERROR,
-                ErrorCategory::Model,
-                retryable,
-                "OpenRouter models endpoint returned an unsuccessful status",
-            ));
+            let status = response.status().as_u16();
+            let body = response.bytes().await.unwrap_or_default();
+            return Err(http_error("models endpoint", status, &body));
         }
         let cap = self.config.max_stream_bytes();
         let mut body = Vec::new();
@@ -312,13 +308,9 @@ impl Model for OpenRouterProvider {
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
-                let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
-                return Err(error(
-                    HTTP_ERROR,
-                    ErrorCategory::Model,
-                    retryable,
-                    "OpenRouter endpoint returned an unsuccessful status",
-                ));
+                let status = response.status().as_u16();
+                let body = response.bytes().await.unwrap_or_default();
+                return Err(http_error("responses endpoint", status, &body));
             }
             let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
             let structured = matches!(request.draft.output, OutputSpec::JsonSchema { .. });

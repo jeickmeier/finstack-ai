@@ -27,6 +27,7 @@ pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaConfig::fmt(&self, &mu
 pub struct finstack_ai_tools_openrouter_media::OpenRouterMediaToolset
 impl finstack_ai_tools_openrouter_media::OpenRouterMediaToolset
 pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::try_new(finstack_ai_tools_openrouter_media::OpenRouterMediaConfig) -> core::result::Result<Self, finstack_ai_tools_openrouter_media::OpenRouterMediaError>
+pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
 impl core::fmt::Debug for finstack_ai_tools_openrouter_media::OpenRouterMediaToolset
 pub fn finstack_ai_tools_openrouter_media::OpenRouterMediaToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_openrouter_media::OpenRouterMediaToolset

@@ -1199,6 +1199,24 @@ class Agent:
         Returns:
             ``id: description`` lines under the 8 KiB registration ceiling.
         """
+    def read_artifact(self, artifact: dict[str, Any]) -> bytes:
+        """Read back the bytes behind an artifact reference a tool returned.
+
+        Toolsets that produce binary output stage it and return a reference
+        instead of inlining base64 the model cannot read, so a generated
+        image or audio clip arrives as the ``artifact`` field of a tool
+        result rather than as data. Pass that value here to get the bytes.
+
+        Args:
+            artifact: The ``artifact`` object from a tool result.
+
+        Returns:
+            The staged bytes.
+
+        Raises:
+            ValueError: If ``artifact`` is not a valid reference, or the
+                bytes are no longer present in this agent's store.
+        """
     async def re_resolve(self) -> Agent:
         """Compose a new agent from reconstructed catalogs.
 

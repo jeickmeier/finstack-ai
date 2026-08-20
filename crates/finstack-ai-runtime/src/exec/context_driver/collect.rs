@@ -146,19 +146,19 @@ fn context_request(
     }
 }
 
+/// Split off the current user turn, but only when it is already trailing.
+///
+/// Provider items belong in front of the turn the user is waiting on, which
+/// is why that message is re-appended after them. Once the turn has produced
+/// tool calls, the array continues past the prompt into this turn's own
+/// assistant and tool messages, and the prompt is no longer the tail. Moving
+/// it there anyway would replay the request after the work answering it, and
+/// a model reading its own finished tool results followed by the request
+/// starts the task over.
 fn split_current_user(messages: &[Message]) -> (Option<&Message>, Vec<Message>) {
-    let current_user = messages
-        .iter()
-        .rposition(|message| message.role() == MessageRole::User);
-    match current_user {
-        Some(index) => {
-            let current = &messages[index];
-            let mut history = Vec::with_capacity(messages.len().saturating_sub(1));
-            history.extend(messages[..index].iter().cloned());
-            history.extend(messages[index + 1..].iter().cloned());
-            (Some(current), history)
-        }
-        None => (None, messages.to_vec()),
+    match messages.split_last() {
+        Some((last, head)) if last.role() == MessageRole::User => (Some(last), head.to_vec()),
+        _ => (None, messages.to_vec()),
     }
 }
 

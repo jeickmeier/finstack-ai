@@ -117,7 +117,7 @@ impl SubagentToolset {
                 START_ID,
                 START_NAME,
                 "Start a child agent from the frozen allow-list.",
-                br#"{"additionalProperties":false,"properties":{"agent_id":{"type":"string"},"input":{"type":"string"},"placement":{"enum":["compatible_lane_in_parent_session","isolated_child_session"],"type":"string"}},"required":["agent_id","input"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"agent_id":{"type":"string"},"input":{"type":"string"},"placement":{"enum":["compatible_lane_in_parent_session","isolated_child_session",null],"type":["string","null"]}},"required":["agent_id","input","placement"],"type":"object"}"#,
             )?,
             tool_spec(
                 STATUS_ID,
