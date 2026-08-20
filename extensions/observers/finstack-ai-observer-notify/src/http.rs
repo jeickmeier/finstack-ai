@@ -20,11 +20,10 @@ impl JsonPoster {
         url: SecretString,
         request_timeout: Duration,
     ) -> Result<Self, NotifyObserverError> {
-        let parsed = reqwest::Url::parse(url.expose()).map_err(|_| {
-            NotifyObserverError::Configuration {
+        let parsed =
+            reqwest::Url::parse(url.expose()).map_err(|_| NotifyObserverError::Configuration {
                 reason: "invalid_sink_url",
-            }
-        })?;
+            })?;
         if parsed.scheme() != "https" && parsed.scheme() != "http" {
             return Err(NotifyObserverError::Configuration {
                 reason: "invalid_sink_url_scheme",

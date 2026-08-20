@@ -83,7 +83,10 @@ fn requested_request(kind: InteractionKind, assignee: Option<AssigneeHint>) -> I
         kind,
         prompt,
         RawJson::parse(format!("{{\"marker\":\"{CANARY}\"}}")).expect("schema"),
-        ComponentRef::new(ComponentId::parse("policy.approval").expect("component"), None),
+        ComponentRef::new(
+            ComponentId::parse("policy.approval").expect("component"),
+            None,
+        ),
         Version {
             major: 1,
             minor: 0,
@@ -188,8 +191,8 @@ fn custom_kind_label_and_principal_assignee_project_safely() {
             PrincipalRef::try_new("oidc", "user-1", Some("tenant")).expect("principal"),
         )),
     );
-    let notification = super::project(&event(RunEventBody::InteractionRequested(request)))
-        .expect("projected");
+    let notification =
+        super::project(&event(RunEventBody::InteractionRequested(request))).expect("projected");
     match &notification.detail {
         NotificationDetail::Requested { kind, assignee, .. } => {
             assert_eq!(kind.as_ref(), "escalation");
@@ -253,9 +256,8 @@ mod tests_support {
                     .into_owned();
             };
             *captured.lock().expect("lock") = Some(body);
-            let response = format!(
-                "HTTP/1.1 {status} NA\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-            );
+            let response =
+                format!("HTTP/1.1 {status} NA\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
             stream.write_all(response.as_bytes()).await.expect("write");
             stream.flush().await.expect("flush");
         });
@@ -319,8 +321,8 @@ mod tests_support {
         }
     }
 
-    pub(crate) fn capturing_sink()
-    -> (Arc<CapturingSink>, Arc<Mutex<Vec<InteractionNotification>>>) {
+    pub(crate) fn capturing_sink() -> (Arc<CapturingSink>, Arc<Mutex<Vec<InteractionNotification>>>)
+    {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::new(CapturingSink {
             seen: Arc::clone(&seen),
@@ -414,9 +416,7 @@ fn delivery_policy_clamps_are_enforced() {
     assert!(DeliveryPolicy::try_new(Duration::from_secs(61), 3, Duration::ZERO).is_err());
     assert!(DeliveryPolicy::try_new(Duration::from_secs(5), 6, Duration::ZERO).is_err());
     assert!(DeliveryPolicy::try_new(Duration::from_secs(5), 3, Duration::from_secs(11)).is_err());
-    assert!(
-        DeliveryPolicy::try_new(Duration::from_secs(5), 3, Duration::from_millis(500)).is_ok()
-    );
+    assert!(DeliveryPolicy::try_new(Duration::from_secs(5), 3, Duration::from_millis(500)).is_ok());
 }
 
 #[test]
@@ -531,8 +531,8 @@ fn verify_review_interaction_produces_a_review_notification() {
         InteractionKind::Review,
         Some(AssigneeHint::Role(Arc::from("reviewer"))),
     );
-    let notification = super::project(&event(RunEventBody::InteractionRequested(request)))
-        .expect("projected");
+    let notification =
+        super::project(&event(RunEventBody::InteractionRequested(request))).expect("projected");
     assert!(matches!(
         notification.detail,
         NotificationDetail::Requested { ref kind, .. } if kind.as_ref() == "review"

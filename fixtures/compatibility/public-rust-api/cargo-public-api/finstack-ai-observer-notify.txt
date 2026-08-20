@@ -1,0 +1,165 @@
+pub mod finstack_ai_observer_notify
+pub enum finstack_ai_observer_notify::AssigneeLabel
+pub finstack_ai_observer_notify::AssigneeLabel::Principal(finstack_ai_observer_notify::PrincipalLabel)
+pub finstack_ai_observer_notify::AssigneeLabel::Queue(alloc::sync::Arc<str>)
+pub finstack_ai_observer_notify::AssigneeLabel::Role(alloc::sync::Arc<str>)
+impl core::clone::Clone for finstack_ai_observer_notify::AssigneeLabel
+pub fn finstack_ai_observer_notify::AssigneeLabel::clone(&self) -> finstack_ai_observer_notify::AssigneeLabel
+impl core::cmp::Eq for finstack_ai_observer_notify::AssigneeLabel
+impl core::cmp::PartialEq for finstack_ai_observer_notify::AssigneeLabel
+pub fn finstack_ai_observer_notify::AssigneeLabel::eq(&self, &finstack_ai_observer_notify::AssigneeLabel) -> bool
+impl core::fmt::Debug for finstack_ai_observer_notify::AssigneeLabel
+pub fn finstack_ai_observer_notify::AssigneeLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::AssigneeLabel
+impl serde_core::ser::Serialize for finstack_ai_observer_notify::AssigneeLabel
+pub fn finstack_ai_observer_notify::AssigneeLabel::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum finstack_ai_observer_notify::InteractionEventKind
+pub finstack_ai_observer_notify::InteractionEventKind::Cancelled
+pub finstack_ai_observer_notify::InteractionEventKind::Expired
+pub finstack_ai_observer_notify::InteractionEventKind::Requested
+pub finstack_ai_observer_notify::InteractionEventKind::Resolved
+impl core::clone::Clone for finstack_ai_observer_notify::InteractionEventKind
+pub fn finstack_ai_observer_notify::InteractionEventKind::clone(&self) -> finstack_ai_observer_notify::InteractionEventKind
+impl core::cmp::Eq for finstack_ai_observer_notify::InteractionEventKind
+impl core::cmp::PartialEq for finstack_ai_observer_notify::InteractionEventKind
+pub fn finstack_ai_observer_notify::InteractionEventKind::eq(&self, &finstack_ai_observer_notify::InteractionEventKind) -> bool
+impl core::fmt::Debug for finstack_ai_observer_notify::InteractionEventKind
+pub fn finstack_ai_observer_notify::InteractionEventKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_observer_notify::InteractionEventKind
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::InteractionEventKind
+impl serde_core::ser::Serialize for finstack_ai_observer_notify::InteractionEventKind
+pub fn finstack_ai_observer_notify::InteractionEventKind::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum finstack_ai_observer_notify::NotificationDetail
+pub finstack_ai_observer_notify::NotificationDetail::Cancelled
+pub finstack_ai_observer_notify::NotificationDetail::Cancelled::principal: core::option::Option<finstack_ai_observer_notify::PrincipalLabel>
+pub finstack_ai_observer_notify::NotificationDetail::Cancelled::reason: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_observer_notify::NotificationDetail::Expired
+pub finstack_ai_observer_notify::NotificationDetail::Expired::expired_at: finstack_ai_kernel::primitives::time::Timestamp
+pub finstack_ai_observer_notify::NotificationDetail::Requested
+pub finstack_ai_observer_notify::NotificationDetail::Requested::assignee: core::option::Option<finstack_ai_observer_notify::AssigneeLabel>
+pub finstack_ai_observer_notify::NotificationDetail::Requested::delegatable: bool
+pub finstack_ai_observer_notify::NotificationDetail::Requested::expires_at: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai_observer_notify::NotificationDetail::Requested::kind: alloc::sync::Arc<str>
+pub finstack_ai_observer_notify::NotificationDetail::Resolved
+pub finstack_ai_observer_notify::NotificationDetail::Resolved::comment: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_observer_notify::NotificationDetail::Resolved::principal: finstack_ai_observer_notify::PrincipalLabel
+pub finstack_ai_observer_notify::NotificationDetail::Resolved::resolution_id: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_observer_notify::NotificationDetail
+pub fn finstack_ai_observer_notify::NotificationDetail::clone(&self) -> finstack_ai_observer_notify::NotificationDetail
+impl core::cmp::Eq for finstack_ai_observer_notify::NotificationDetail
+impl core::cmp::PartialEq for finstack_ai_observer_notify::NotificationDetail
+pub fn finstack_ai_observer_notify::NotificationDetail::eq(&self, &finstack_ai_observer_notify::NotificationDetail) -> bool
+impl core::fmt::Debug for finstack_ai_observer_notify::NotificationDetail
+pub fn finstack_ai_observer_notify::NotificationDetail::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::NotificationDetail
+impl serde_core::ser::Serialize for finstack_ai_observer_notify::NotificationDetail
+pub fn finstack_ai_observer_notify::NotificationDetail::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum finstack_ai_observer_notify::NotifyObserverError
+pub finstack_ai_observer_notify::NotifyObserverError::Configuration
+pub finstack_ai_observer_notify::NotifyObserverError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_observer_notify::NotifyObserverError
+pub fn finstack_ai_observer_notify::NotifyObserverError::clone(&self) -> finstack_ai_observer_notify::NotifyObserverError
+impl core::cmp::Eq for finstack_ai_observer_notify::NotifyObserverError
+impl core::cmp::PartialEq for finstack_ai_observer_notify::NotifyObserverError
+pub fn finstack_ai_observer_notify::NotifyObserverError::eq(&self, &finstack_ai_observer_notify::NotifyObserverError) -> bool
+impl core::error::Error for finstack_ai_observer_notify::NotifyObserverError
+impl core::fmt::Debug for finstack_ai_observer_notify::NotifyObserverError
+pub fn finstack_ai_observer_notify::NotifyObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_observer_notify::NotifyObserverError
+pub fn finstack_ai_observer_notify::NotifyObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::NotifyObserverError
+pub enum finstack_ai_observer_notify::SinkError
+pub finstack_ai_observer_notify::SinkError::Unavailable
+pub finstack_ai_observer_notify::SinkError::Unavailable::reason: &'static str
+impl core::clone::Clone for finstack_ai_observer_notify::SinkError
+pub fn finstack_ai_observer_notify::SinkError::clone(&self) -> finstack_ai_observer_notify::SinkError
+impl core::cmp::Eq for finstack_ai_observer_notify::SinkError
+impl core::cmp::PartialEq for finstack_ai_observer_notify::SinkError
+pub fn finstack_ai_observer_notify::SinkError::eq(&self, &finstack_ai_observer_notify::SinkError) -> bool
+impl core::error::Error for finstack_ai_observer_notify::SinkError
+impl core::fmt::Debug for finstack_ai_observer_notify::SinkError
+pub fn finstack_ai_observer_notify::SinkError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_observer_notify::SinkError
+pub fn finstack_ai_observer_notify::SinkError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::SinkError
+pub struct finstack_ai_observer_notify::DeliveryPolicy
+impl finstack_ai_observer_notify::DeliveryPolicy
+pub fn finstack_ai_observer_notify::DeliveryPolicy::try_new(core::time::Duration, u32, core::time::Duration) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
+impl core::clone::Clone for finstack_ai_observer_notify::DeliveryPolicy
+pub fn finstack_ai_observer_notify::DeliveryPolicy::clone(&self) -> finstack_ai_observer_notify::DeliveryPolicy
+impl core::cmp::Eq for finstack_ai_observer_notify::DeliveryPolicy
+impl core::cmp::PartialEq for finstack_ai_observer_notify::DeliveryPolicy
+pub fn finstack_ai_observer_notify::DeliveryPolicy::eq(&self, &finstack_ai_observer_notify::DeliveryPolicy) -> bool
+impl core::default::Default for finstack_ai_observer_notify::DeliveryPolicy
+pub fn finstack_ai_observer_notify::DeliveryPolicy::default() -> Self
+impl core::fmt::Debug for finstack_ai_observer_notify::DeliveryPolicy
+pub fn finstack_ai_observer_notify::DeliveryPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::DeliveryPolicy
+pub struct finstack_ai_observer_notify::InteractionNotification
+pub finstack_ai_observer_notify::InteractionNotification::detail: finstack_ai_observer_notify::NotificationDetail
+pub finstack_ai_observer_notify::InteractionNotification::event: finstack_ai_observer_notify::InteractionEventKind
+pub finstack_ai_observer_notify::InteractionNotification::interaction_id: finstack_ai_kernel::primitives::ids::InteractionId
+pub finstack_ai_observer_notify::InteractionNotification::run_id: finstack_ai_kernel::primitives::ids::RunId
+pub finstack_ai_observer_notify::InteractionNotification::session_id: finstack_ai_kernel::primitives::ids::SessionId
+pub finstack_ai_observer_notify::InteractionNotification::timestamp: finstack_ai_kernel::primitives::time::Timestamp
+impl core::clone::Clone for finstack_ai_observer_notify::InteractionNotification
+pub fn finstack_ai_observer_notify::InteractionNotification::clone(&self) -> finstack_ai_observer_notify::InteractionNotification
+impl core::cmp::Eq for finstack_ai_observer_notify::InteractionNotification
+impl core::cmp::PartialEq for finstack_ai_observer_notify::InteractionNotification
+pub fn finstack_ai_observer_notify::InteractionNotification::eq(&self, &finstack_ai_observer_notify::InteractionNotification) -> bool
+impl core::fmt::Debug for finstack_ai_observer_notify::InteractionNotification
+pub fn finstack_ai_observer_notify::InteractionNotification::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::InteractionNotification
+impl serde_core::ser::Serialize for finstack_ai_observer_notify::InteractionNotification
+pub fn finstack_ai_observer_notify::InteractionNotification::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_observer_notify::NotifyObserver
+impl finstack_ai_observer_notify::NotifyObserver
+pub fn finstack_ai_observer_notify::NotifyObserver::delivered(&self) -> u64
+pub fn finstack_ai_observer_notify::NotifyObserver::dropped(&self) -> u64
+pub fn finstack_ai_observer_notify::NotifyObserver::failed(&self) -> u64
+pub fn finstack_ai_observer_notify::NotifyObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic>
+pub fn finstack_ai_observer_notify::NotifyObserver::try_new(alloc::sync::Arc<dyn finstack_ai_observer_notify::NotificationSink>, finstack_ai_observer_notify::DeliveryPolicy, usize, finstack_ai_runtime::ports::observer::queue::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
+impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_observer_notify::NotifyObserver
+pub fn finstack_ai_observer_notify::NotifyObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
+pub fn finstack_ai_observer_notify::NotifyObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
+pub struct finstack_ai_observer_notify::PrincipalLabel
+pub finstack_ai_observer_notify::PrincipalLabel::issuer: alloc::sync::Arc<str>
+pub finstack_ai_observer_notify::PrincipalLabel::subject: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_observer_notify::PrincipalLabel
+pub fn finstack_ai_observer_notify::PrincipalLabel::clone(&self) -> finstack_ai_observer_notify::PrincipalLabel
+impl core::cmp::Eq for finstack_ai_observer_notify::PrincipalLabel
+impl core::cmp::PartialEq for finstack_ai_observer_notify::PrincipalLabel
+pub fn finstack_ai_observer_notify::PrincipalLabel::eq(&self, &finstack_ai_observer_notify::PrincipalLabel) -> bool
+impl core::fmt::Debug for finstack_ai_observer_notify::PrincipalLabel
+pub fn finstack_ai_observer_notify::PrincipalLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_notify::PrincipalLabel
+impl serde_core::ser::Serialize for finstack_ai_observer_notify::PrincipalLabel
+pub fn finstack_ai_observer_notify::PrincipalLabel::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_observer_notify::SlackSink
+impl finstack_ai_observer_notify::SlackSink
+pub fn finstack_ai_observer_notify::SlackSink::try_new(finstack_ai_runtime::ports::model::provider_util::secret::SecretString, core::time::Duration) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
+impl core::fmt::Debug for finstack_ai_observer_notify::SlackSink
+pub fn finstack_ai_observer_notify::SlackSink::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_observer_notify::NotificationSink for finstack_ai_observer_notify::SlackSink
+pub fn finstack_ai_observer_notify::SlackSink::deliver(&self, finstack_ai_observer_notify::InteractionNotification) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_observer_notify::SinkError>>
+pub fn finstack_ai_observer_notify::SlackSink::name(&self) -> &'static str
+pub struct finstack_ai_observer_notify::WebhookSink
+impl finstack_ai_observer_notify::WebhookSink
+pub fn finstack_ai_observer_notify::WebhookSink::try_new(finstack_ai_runtime::ports::model::provider_util::secret::SecretString, core::time::Duration) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
+impl core::fmt::Debug for finstack_ai_observer_notify::WebhookSink
+pub fn finstack_ai_observer_notify::WebhookSink::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_observer_notify::NotificationSink for finstack_ai_observer_notify::WebhookSink
+pub fn finstack_ai_observer_notify::WebhookSink::deliver(&self, finstack_ai_observer_notify::InteractionNotification) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_observer_notify::SinkError>>
+pub fn finstack_ai_observer_notify::WebhookSink::name(&self) -> &'static str
+pub const finstack_ai_observer_notify::NOTIFY_DELIVERY_FAILED: finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic
+pub trait finstack_ai_observer_notify::NotificationSink: core::marker::Send + core::marker::Sync + 'static
+pub fn finstack_ai_observer_notify::NotificationSink::deliver(&self, finstack_ai_observer_notify::InteractionNotification) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_observer_notify::SinkError>>
+pub fn finstack_ai_observer_notify::NotificationSink::name(&self) -> &'static str
+impl finstack_ai_observer_notify::NotificationSink for finstack_ai_observer_notify::SlackSink
+pub fn finstack_ai_observer_notify::SlackSink::deliver(&self, finstack_ai_observer_notify::InteractionNotification) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_observer_notify::SinkError>>
+pub fn finstack_ai_observer_notify::SlackSink::name(&self) -> &'static str
+impl finstack_ai_observer_notify::NotificationSink for finstack_ai_observer_notify::WebhookSink
+pub fn finstack_ai_observer_notify::WebhookSink::deliver(&self, finstack_ai_observer_notify::InteractionNotification) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_observer_notify::SinkError>>
+pub fn finstack_ai_observer_notify::WebhookSink::name(&self) -> &'static str
+pub fn finstack_ai_observer_notify::project(&finstack_ai_kernel::events::envelope::RunEvent) -> core::option::Option<finstack_ai_observer_notify::InteractionNotification>
+pub fn finstack_ai_observer_notify::slack_text(&finstack_ai_observer_notify::InteractionNotification) -> alloc::string::String
