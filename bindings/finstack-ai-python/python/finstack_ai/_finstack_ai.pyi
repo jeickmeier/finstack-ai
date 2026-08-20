@@ -849,8 +849,10 @@ class Agent:
         """Build a Rust-backed OpenRouter Responses agent.
 
         The native client posts to
-        ``https://openrouter.ai/api/v1/responses`` with ``store=false``.
-        Keyword-only ``toolsets``, ``context_providers``, ``middleware``,
+        ``https://openrouter.ai/api/v1/responses`` and omits ``store``
+        entirely (the request is stateless; ``store`` is a reserved
+        provider-settings field). Keyword-only ``toolsets``,
+        ``context_providers``, ``middleware``,
         ``observers``, and ``output_type`` register the same trusted T2
         Python ports as :meth:`Agent.from_python`. This factory does not
         read environment variables and does not accept a generic
