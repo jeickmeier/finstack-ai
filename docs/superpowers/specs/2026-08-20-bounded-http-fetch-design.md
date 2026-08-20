@@ -216,9 +216,9 @@ pub struct HttpFetchConfig {
 `HostPattern` parses either an exact host (`docs.rs`) or an explicit
 subdomain wildcard (`*.wikipedia.org`). A wildcard matches proper subdomains
 only — never the bare apex; list the apex separately when wanted. Matching is
-ASCII-case-insensitive on the exact host string; no IDNA/punycode
-normalization in v1 (a non-ASCII host in a URL fails the match unless the
-allowlist entry is byte-identical). Ports are not part of patterns: HTTPS
+ASCII-case-insensitive and operates on the URL parser's ASCII/punycode host
+form (the `url` crate applies IDNA); allowlist entries must be ASCII or
+punycode — a Unicode entry never matches. Ports are not part of patterns: HTTPS
 URLs may use 443 only; loopback-HTTP fixtures may use any port.
 `HttpFetchConfig::try_new` clamps nothing — out-of-ceiling values are
 construction errors, matching the fail-closed shell precedent.
