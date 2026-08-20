@@ -167,9 +167,9 @@ impl BillingObserver {
     ///
     /// # Arguments
     ///
-    /// * `queue_capacity` - Bounded diagnostics-queue capacity (1..=1_000_000).
+    /// * `queue_capacity` - Bounded diagnostics-queue capacity (`1..=1_000_000`).
     /// * `backpressure` - Queue policy applied when the bound is reached.
-    /// * `max_entries` - Distinct (session, run, model) keys retained (1..=1_000_000).
+    /// * `max_entries` - Distinct (session, run, model) keys retained (`1..=1_000_000`).
     ///
     /// # Errors
     ///
