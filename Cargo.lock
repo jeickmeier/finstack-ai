@@ -1819,6 +1819,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "finstack-ai-workflow-local",
  "finstack-ai-workflow-worker",

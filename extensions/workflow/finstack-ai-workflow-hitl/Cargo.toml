@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 finstack-ai-store-memory = { workspace = true }
+finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-test = { workspace = true }
 finstack-ai-workflow-local = { workspace = true }
 tempfile = { workspace = true }
