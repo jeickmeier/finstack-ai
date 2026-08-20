@@ -87,6 +87,24 @@ pub fn finstack_ai_runtime::AgentInvokeError::fmt(&self, &mut core::fmt::Formatt
 impl core::fmt::Display for finstack_ai_runtime::AgentInvokeError
 pub fn finstack_ai_runtime::AgentInvokeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::AgentInvokeError
+pub enum finstack_ai_runtime::ApprovalGrantMode
+pub finstack_ai_runtime::ApprovalGrantMode::InformedBatch
+pub finstack_ai_runtime::ApprovalGrantMode::PerCall
+impl core::clone::Clone for finstack_ai_runtime::ApprovalGrantMode
+pub fn finstack_ai_runtime::ApprovalGrantMode::clone(&self) -> finstack_ai_runtime::ApprovalGrantMode
+impl core::cmp::Eq for finstack_ai_runtime::ApprovalGrantMode
+impl core::cmp::PartialEq for finstack_ai_runtime::ApprovalGrantMode
+pub fn finstack_ai_runtime::ApprovalGrantMode::eq(&self, &finstack_ai_runtime::ApprovalGrantMode) -> bool
+impl core::default::Default for finstack_ai_runtime::ApprovalGrantMode
+pub fn finstack_ai_runtime::ApprovalGrantMode::default() -> finstack_ai_runtime::ApprovalGrantMode
+impl core::fmt::Debug for finstack_ai_runtime::ApprovalGrantMode
+pub fn finstack_ai_runtime::ApprovalGrantMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::ApprovalGrantMode
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ApprovalGrantMode
+impl serde_core::ser::Serialize for finstack_ai_runtime::ApprovalGrantMode
+pub fn finstack_ai_runtime::ApprovalGrantMode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ApprovalGrantMode
+pub fn finstack_ai_runtime::ApprovalGrantMode::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_runtime::ApprovalRequirement
 pub finstack_ai_runtime::ApprovalRequirement::NotRequired
 pub finstack_ai_runtime::ApprovalRequirement::Policy
@@ -104,6 +122,19 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::ApprovalRequirement
 pub fn finstack_ai_runtime::ApprovalRequirement::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ApprovalRequirement
 pub fn finstack_ai_runtime::ApprovalRequirement::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_runtime::ApprovalState
+pub finstack_ai_runtime::ApprovalState::Granted
+pub finstack_ai_runtime::ApprovalState::Refused
+pub finstack_ai_runtime::ApprovalState::Unpaid
+impl core::clone::Clone for finstack_ai_runtime::ApprovalState
+pub fn finstack_ai_runtime::ApprovalState::clone(&self) -> finstack_ai_runtime::ApprovalState
+impl core::cmp::Eq for finstack_ai_runtime::ApprovalState
+impl core::cmp::PartialEq for finstack_ai_runtime::ApprovalState
+pub fn finstack_ai_runtime::ApprovalState::eq(&self, &finstack_ai_runtime::ApprovalState) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ApprovalState
+pub fn finstack_ai_runtime::ApprovalState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::ApprovalState
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ApprovalState
 pub enum finstack_ai_runtime::ArtifactError
 pub finstack_ai_runtime::ArtifactError::Integrity
 pub finstack_ai_runtime::ArtifactError::Integrity::message: alloc::sync::Arc<str>
@@ -732,6 +763,19 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::PromptCacheImpact
 pub fn finstack_ai_runtime::PromptCacheImpact::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::PromptCacheImpact
 pub fn finstack_ai_runtime::PromptCacheImpact::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_runtime::ResolveDraftMediaError
+pub finstack_ai_runtime::ResolveDraftMediaError::Limit
+pub finstack_ai_runtime::ResolveDraftMediaError::MissingResolver
+pub finstack_ai_runtime::ResolveDraftMediaError::Resolve(finstack_ai_runtime::MediaResolveError)
+impl core::clone::Clone for finstack_ai_runtime::ResolveDraftMediaError
+pub fn finstack_ai_runtime::ResolveDraftMediaError::clone(&self) -> finstack_ai_runtime::ResolveDraftMediaError
+impl core::cmp::Eq for finstack_ai_runtime::ResolveDraftMediaError
+impl core::cmp::PartialEq for finstack_ai_runtime::ResolveDraftMediaError
+pub fn finstack_ai_runtime::ResolveDraftMediaError::eq(&self, &finstack_ai_runtime::ResolveDraftMediaError) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ResolveDraftMediaError
+pub fn finstack_ai_runtime::ResolveDraftMediaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::ResolveDraftMediaError
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ResolveDraftMediaError
 pub enum finstack_ai_runtime::ResolvedMedia
 pub finstack_ai_runtime::ResolvedMedia::Bytes
 pub finstack_ai_runtime::ResolvedMedia::Bytes::bytes: alloc::sync::Arc<[u8]>
@@ -2754,7 +2798,7 @@ pub const finstack_ai_runtime::ResolvedToolCatalog::MAX_RESOURCES: usize
 pub const finstack_ai_runtime::ResolvedToolCatalog::MAX_TOOLS: usize
 pub fn finstack_ai_runtime::ResolvedToolCatalog::by_id(&self, &finstack_ai_kernel::primitives::ids::ToolId) -> core::option::Option<&alloc::sync::Arc<finstack_ai_runtime::ResolvedTool>>
 pub fn finstack_ai_runtime::ResolvedToolCatalog::by_name(&self, &str) -> core::option::Option<&alloc::sync::Arc<finstack_ai_runtime::ResolvedTool>>
-pub fn finstack_ai_runtime::ResolvedToolCatalog::decide_plan(&self, finstack_ai_kernel::content::tool::ToolCallBlock, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>, core::option::Option<finstack_ai_runtime::ToolPolicyDecision>, bool, bool) -> finstack_ai_runtime::ToolCatalogPlan
+pub fn finstack_ai_runtime::ResolvedToolCatalog::decide_plan(&self, finstack_ai_kernel::content::tool::ToolCallBlock, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>, core::option::Option<finstack_ai_runtime::ToolPolicyDecision>, finstack_ai_runtime::ApprovalState) -> finstack_ai_runtime::ToolCatalogPlan
 pub fn finstack_ai_runtime::ResolvedToolCatalog::is_empty(&self) -> bool
 pub fn finstack_ai_runtime::ResolvedToolCatalog::len(&self) -> usize
 pub fn finstack_ai_runtime::ResolvedToolCatalog::plan_call(&self, finstack_ai_kernel::content::tool::ToolCallBlock, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>, core::option::Option<finstack_ai_runtime::ToolPolicyDecision>) -> finstack_ai_kernel::records::tools::ToolCallPlan
@@ -2799,6 +2843,7 @@ pub fn finstack_ai_runtime::RunHandle::timer_diagnostics(&self) -> finstack_ai_r
 impl core::clone::Clone for finstack_ai_runtime::RunHandle
 pub fn finstack_ai_runtime::RunHandle::clone(&self) -> finstack_ai_runtime::RunHandle
 pub struct finstack_ai_runtime::RunTaskConfig
+pub finstack_ai_runtime::RunTaskConfig::approval_grant: finstack_ai_runtime::ApprovalGrantMode
 pub finstack_ai_runtime::RunTaskConfig::command_capacity: usize
 pub finstack_ai_runtime::RunTaskConfig::event_hub: finstack_ai_runtime::EventHubConfig
 pub finstack_ai_runtime::RunTaskConfig::shutdown_deadline: core::time::Duration
@@ -3493,6 +3538,7 @@ pub fn finstack_ai_runtime::interaction_resume_action(&finstack_ai_kernel::state
 pub fn finstack_ai_runtime::journal_export_jsonl<T: serde_core::ser::Serialize>(&[T], finstack_ai_runtime::ObserverPayloadMode) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ObserverError>
 pub fn finstack_ai_runtime::model_resume_action(&finstack_ai_kernel::state::KernelState) -> finstack_ai_runtime::ModelResumeAction
 pub fn finstack_ai_runtime::observer_events_jsonl(&[finstack_ai_kernel::events::envelope::RunEvent], finstack_ai_runtime::ObserverPayloadMode) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ObserverError>
+pub async fn finstack_ai_runtime::resolve_draft_media(core::option::Option<&alloc::sync::Arc<dyn finstack_ai_runtime::MediaResolver>>, &finstack_ai_runtime::ModelRequestDraft, usize) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_runtime::ResolvedMedia>, finstack_ai_runtime::ResolveDraftMediaError>
 pub fn finstack_ai_runtime::resolve_model_context_profile(finstack_ai_runtime::ModelContextProfile, core::option::Option<&finstack_ai_runtime::ModelContextProfileOverride>, core::option::Option<&finstack_ai_runtime::ModelContextProfileOverride>, bool) -> core::result::Result<finstack_ai_runtime::LockedModelContextProfile, finstack_ai_runtime::ModelError>
 pub fn finstack_ai_runtime::secret_is_valid(&str) -> bool
 pub async fn finstack_ai_runtime::stage_required_artifact(&dyn finstack_ai_runtime::ArtifactStore, finstack_ai_runtime::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::ArtifactMetadata) -> core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::ArtifactError>

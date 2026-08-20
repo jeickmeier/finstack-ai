@@ -293,6 +293,7 @@ impl RunTaskOwner {
         let assembler = model_config.validate()?;
         validate_model_binding(model.as_ref(), &profile)?;
         let sources = SettlementSources::try_new(clock, random)?;
+        sources.set_approval_grant(run_config.approval_grant);
         let runtime_clock = sources.clock();
         let run_cancellation = CancellationSignal::new();
         let model_cancellation = run_cancellation.child();
@@ -490,6 +491,7 @@ impl RunTaskOwner {
             .map_err(|_| RunHandleError::InvalidConfiguration)?;
         validate_model_binding(model.as_ref(), &profile)?;
         let mut sources = SettlementSources::try_new(clock, random)?;
+        sources.set_approval_grant(run_config.approval_grant);
         let runtime_clock = sources.clock();
         let run_cancellation = CancellationSignal::new();
         let model_cancellation = run_cancellation.child();

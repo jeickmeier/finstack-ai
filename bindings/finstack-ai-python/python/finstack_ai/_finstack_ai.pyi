@@ -519,6 +519,41 @@ class ChildRunPolicy:
             An allow policy consumed by the agent factories.
         """
 
+class ApprovalGrantMode:
+    """How a run parks and releases paid-tool approvals.
+
+    Maps onto Rust ``RunPolicy.approval_grant``. The default for every
+    factory is :meth:`per_call`: one park per unpaid Policy or Required
+    tool call. :meth:`informed_batch` parks once listing every unpaid
+    paid tool. Neither mode relaxes the ``Policy`` approval floor on
+    the catalog.
+
+    Examples:
+        >>> from finstack_ai import ApprovalGrantMode
+        >>> ApprovalGrantMode.per_call() is not None
+        True
+        >>> ApprovalGrantMode.informed_batch() is not None
+        True
+    """
+
+    @staticmethod
+    def per_call() -> ApprovalGrantMode:
+        """Park once per unpaid paid tool call.
+
+        Returns:
+            A per-call grant mode consumed by the agent factories as
+            ``RunPolicy.approval_grant``.
+        """
+
+    @staticmethod
+    def informed_batch() -> ApprovalGrantMode:
+        """Park once listing every unpaid paid tool call.
+
+        Returns:
+            An informed-batch grant mode consumed by the agent factories
+            as ``RunPolicy.approval_grant``.
+        """
+
 class MemoryExternalIdentityMap:
     """In-process external identity map."""
 
@@ -790,6 +825,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed official OpenAI Responses agent.
 
@@ -835,6 +871,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -865,6 +903,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed OpenRouter Responses agent.
 
@@ -877,7 +916,11 @@ class Agent:
         Python ports as :meth:`Agent.from_python`. This factory does not
         read environment variables and does not accept a generic
         ``base_url``. Output is capped at 128,000 tokens while the linked
-        context window is 1,050,000 tokens.
+        context window is 1,050,000 tokens. This factory does not attach
+        a ``MediaResolver``. Vision, file, and audio input require a
+        host-built Rust provider with ``with_media_resolver``. ADR-049
+        rejected FFI resolvers on linked constructors. ``media_tools``
+        registers outbound media-generation tools only.
 
         Args:
             model: OpenRouter model name.
@@ -903,6 +946,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -929,6 +974,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed Anthropic Messages agent.
 
@@ -967,6 +1013,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -995,6 +1043,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a keyless Rust-backed native Ollama agent.
 
@@ -1026,6 +1075,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1056,6 +1107,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed agent that dispatches to a dedicated provider.
 
@@ -1086,6 +1138,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1111,6 +1165,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed T4 E2B sandbox agent.
 
@@ -1135,6 +1190,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1156,6 +1213,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
     ) -> Agent:
@@ -1173,6 +1231,8 @@ class Agent:
             observers: Optional trusted observer callbacks.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
             sqlite_path: Optional SQLite file path. ``None`` keeps the
                 in-memory journal. ``:memory:`` requires
                 :attr:`SqliteDurability.Relaxed`.

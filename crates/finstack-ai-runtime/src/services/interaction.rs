@@ -1,6 +1,54 @@
-//! Interaction resume classification for outstanding typed requests.
+//! Interaction resume classification and response-schema validation.
 
 use finstack_ai_kernel::{KernelState, RunPhase, Timestamp};
+
+#[cfg(any(test, feature = "native-tokio"))]
+use std::collections::BTreeMap;
+
+#[cfg(any(test, feature = "native-tokio"))]
+use finstack_ai_kernel::{RawJson, ValidationOutcome};
+#[cfg(any(test, feature = "native-tokio"))]
+use thiserror::Error;
+
+#[cfg(any(test, feature = "native-tokio"))]
+use crate::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
+
+/// Fail-closed interaction-response validation failure.
+#[cfg(any(test, feature = "native-tokio"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub(crate) enum InteractionResponseError {
+    /// The parked request's response schema cannot be compiled.
+    #[error("interaction response schema is invalid")]
+    InvalidSchema,
+    /// The resolution payload does not satisfy the parked schema.
+    #[error("interaction response does not satisfy the parked schema")]
+    InvalidResponse,
+}
+
+/// Validate one resolution payload against the parked request schema.
+///
+/// Compiles `schema` with [`JsonSchemaToolValidatorCompiler`] and does not
+/// commit any kernel input. Callers must invoke this before
+/// [`finstack_ai_kernel::KernelInput::InteractionSettled`].
+///
+/// # Errors
+///
+/// Returns [`InteractionResponseError::InvalidSchema`] when the parked schema
+/// cannot be compiled, and [`InteractionResponseError::InvalidResponse`] when
+/// `response` fails the compiled schema.
+#[cfg(any(test, feature = "native-tokio"))]
+pub(crate) fn validate_interaction_response(
+    schema: &RawJson,
+    response: &RawJson,
+) -> Result<(), InteractionResponseError> {
+    let validator = JsonSchemaToolValidatorCompiler
+        .compile(schema, &BTreeMap::new())
+        .map_err(|_| InteractionResponseError::InvalidSchema)?;
+    match validator.validate(response) {
+        ValidationOutcome::Valid => Ok(()),
+        ValidationOutcome::Invalid { .. } => Err(InteractionResponseError::InvalidResponse),
+    }
+}
 
 /// First-pass classification of an outstanding typed interaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,8 +107,44 @@ mod tests {
     use super::*;
     use finstack_ai_kernel::{
         InteractionKind, InteractionRequest, InteractionTerminal, InteractionTerminalOutcome,
-        PendingInteraction, Stage, StageCursor,
+        PendingInteraction, RawJson, Stage, StageCursor,
     };
+
+    #[test]
+    fn free_text_schema_rejects_numeric_answer() {
+        let schema = RawJson::parse(
+            r#"{"additionalProperties":false,"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}"#,
+        )
+        .expect("schema");
+        let response = RawJson::parse(r#"{"answer":1}"#).expect("response");
+        assert_eq!(
+            validate_interaction_response(&schema, &response),
+            Err(InteractionResponseError::InvalidResponse)
+        );
+    }
+
+    #[test]
+    fn typed_object_schema_rejects_string_answer() {
+        let schema = RawJson::parse(
+            r#"{"additionalProperties":false,"properties":{"answer":{"properties":{"confirmed":{"type":"boolean"}},"required":["confirmed"],"type":"object"}},"required":["answer"],"type":"object"}"#,
+        )
+        .expect("schema");
+        let response = RawJson::parse(r#"{"answer":"nope"}"#).expect("response");
+        assert_eq!(
+            validate_interaction_response(&schema, &response),
+            Err(InteractionResponseError::InvalidResponse)
+        );
+    }
+
+    #[test]
+    fn matching_string_answer_is_accepted() {
+        let schema = RawJson::parse(
+            r#"{"additionalProperties":false,"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}"#,
+        )
+        .expect("schema");
+        let response = RawJson::parse(r#"{"answer":"250k USD"}"#).expect("response");
+        assert_eq!(validate_interaction_response(&schema, &response), Ok(()));
+    }
 
     fn timestamp(ms: i64) -> Timestamp {
         Timestamp::from_unix_ms(ms).expect("timestamp")

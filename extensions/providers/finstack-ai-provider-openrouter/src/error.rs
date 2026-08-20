@@ -1,5 +1,6 @@
 use finstack_ai_kernel::{ErrorCategory, Metadata};
 use finstack_ai_runtime::ModelError;
+use futures_util::StreamExt;
 
 pub(crate) const CONFIG_INVALID: &str = "openrouter_config_invalid";
 pub(crate) const REQUEST_INVALID: &str = "openrouter_request_invalid";
@@ -23,7 +24,27 @@ pub(crate) fn error(
 
 /// Largest error body read before the reason is extracted, so a malformed or
 /// hostile endpoint cannot stream an unbounded body into an error message.
-const ERROR_BODY_CAP: usize = 4096;
+pub(crate) const ERROR_BODY_CAP: usize = 4096;
+
+/// Read at most [`ERROR_BODY_CAP`] bytes from a rejected HTTP response.
+///
+/// A hostile or malformed endpoint can otherwise stream an unbounded body
+/// through `Response::bytes` into an error path.
+pub(crate) async fn read_error_body(response: reqwest::Response) -> Vec<u8> {
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else {
+            break;
+        };
+        let remaining = ERROR_BODY_CAP.saturating_sub(body.len());
+        if remaining == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    body
+}
 
 /// Longest reason kept from an error body.
 const ERROR_DETAIL_CHARS: usize = 400;

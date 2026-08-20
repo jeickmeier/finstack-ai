@@ -10,7 +10,7 @@ use crate::executor;
 use crate::{JsJournalStore, JsModel, JsToolset};
 
 use super::attachments::stage_attachments;
-use super::build::{build_agent, inspect_session_inner};
+use super::build::{build_agent, inspect_session_inner, parse_approval_grant};
 use super::capabilities::{catalog_array, parse_active_capabilities, parse_capabilities};
 use super::errors::{agent_error, session_error};
 use super::request::run_request;
@@ -37,6 +37,7 @@ impl Agent {
     ///
     /// Linked provider constructors (`openai`, `anthropic`, and peers) are
     /// native-only. Browser hosts use this method with a JS model adapter.
+    /// `approval_grant` accepts `per_call` (default) or `informed_batch`.
     ///
     /// # Errors
     ///
@@ -56,6 +57,7 @@ impl Agent {
         context_providers: Option<Vec<crate::JsContextProvider>>,
         middleware: Option<Vec<crate::JsMiddleware>>,
         observers: Option<Vec<crate::JsObserver>>,
+        approval_grant: Option<String>,
     ) -> js_sys::Promise {
         let model_port = model.port();
         let model_component = model.component();
@@ -92,6 +94,10 @@ impl Agent {
                 Ok(active) => active,
                 Err(error) => return js_sys::Promise::reject(&error),
             };
+        let approval_grant = match parse_approval_grant(approval_grant.as_deref()) {
+            Ok(mode) => mode,
+            Err(error) => return js_sys::Promise::reject(&error),
+        };
         executor::drive(async move {
             build_agent(
                 model_name,
@@ -105,6 +111,7 @@ impl Agent {
                 store,
                 capabilities,
                 active_capabilities,
+                approval_grant,
             )
             .await
             .map(JsValue::from)

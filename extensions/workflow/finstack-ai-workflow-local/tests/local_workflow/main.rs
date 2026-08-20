@@ -16,12 +16,13 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::testing::ManualDriveAction;
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, Clock, CommitCoordinator, EventHubConfig, ExternalClock,
-    JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelDeferral, ModelResponse,
-    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall, ResolvedToolCatalog,
-    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolCallDelta,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem,
-    ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration, WorkflowSession, WorkflowWait,
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, Clock, CommitCoordinator,
+    EventHubConfig, ExternalClock, JournalStore, JsonSchemaToolValidatorCompiler, Model,
+    ModelDeferral, ModelResponse, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
+    ModelToolCall, ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+    SideEffectClass, ToolCallDelta, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec,
+    ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
+    WorkflowSession, WorkflowWait,
 };
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,

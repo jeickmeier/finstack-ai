@@ -3,13 +3,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::approval_grant::PyApprovalGrantMode;
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
 use finstack_ai::{
-    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
-    GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon, OllamaAgentSpec,
-    OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
+    Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
+    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
+    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
 };
 use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
@@ -85,7 +86,7 @@ impl PyAgent {
     /// `https://api.openai.com/v1/responses` and does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, reasoning, media toolsets, and primary port components distinctly"
@@ -109,6 +110,7 @@ impl PyAgent {
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -126,6 +128,7 @@ impl PyAgent {
             output_type,
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
             let built = Agent::openai(OpenAiAgentSpec {
@@ -141,6 +144,7 @@ impl PyAgent {
                     active_capabilities,
                     ports,
                     child_runs,
+                    approval_grant,
                 },
             })
             .await;
@@ -155,9 +159,11 @@ impl PyAgent {
     /// `api_key` is required and keyword-only. The factory always targets
     /// `https://openrouter.ai/api/v1/responses` and does not read environment
     /// variables. `referer` and `title` set the non-secret attribution
-    /// headers.
+    /// headers. Does not attach a `MediaResolver`; vision, file, and audio
+    /// input require a host-built provider. ADR-049 rejected FFI resolvers.
+    /// `media_tools` registers outbound media-generation tools only.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, attribution, reasoning, media toolset, and primary port components distinctly"
@@ -180,6 +186,7 @@ impl PyAgent {
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -192,6 +199,7 @@ impl PyAgent {
             output_type,
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
             let built = Agent::openrouter(OpenRouterAgentSpec {
@@ -208,6 +216,7 @@ impl PyAgent {
                     active_capabilities,
                     ports,
                     child_runs,
+                    approval_grant,
                 },
             })
             .await;
@@ -223,7 +232,7 @@ impl PyAgent {
     /// required when `api_key` is set; the binding does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
@@ -245,6 +254,7 @@ impl PyAgent {
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -262,6 +272,7 @@ impl PyAgent {
             output_type,
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
             let built = Agent::anthropic(AnthropicAgentSpec {
@@ -275,6 +286,7 @@ impl PyAgent {
                     active_capabilities,
                     ports,
                     child_runs,
+                    approval_grant,
                 },
             })
             .await;
@@ -289,7 +301,7 @@ impl PyAgent {
     /// Python port lists are keyword-only. This factory does not accept an
     /// API key.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards media toolset and primary port components distinctly"
@@ -310,6 +322,7 @@ impl PyAgent {
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -327,6 +340,7 @@ impl PyAgent {
             output_type,
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
             let built = Agent::ollama(OllamaAgentSpec {
@@ -339,6 +353,7 @@ impl PyAgent {
                     active_capabilities,
                     ports,
                     child_runs,
+                    approval_grant,
                 },
             })
             .await;
@@ -354,7 +369,7 @@ impl PyAgent {
     /// required. `openai_chat` is a configuration error. The binding does
     /// not read environment variables.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards gateway route, auth, and primary port components distinctly"
@@ -377,6 +392,7 @@ impl PyAgent {
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -389,6 +405,7 @@ impl PyAgent {
             output_type,
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
             let built = Agent::gateway(GatewayAgentSpec {
@@ -405,6 +422,7 @@ impl PyAgent {
                     active_capabilities,
                     ports,
                     child_runs,
+                    approval_grant,
                 },
             })
             .await;
@@ -419,7 +437,7 @@ impl PyAgent {
     /// `api_key` is required and keyword-only. The binding does not read
     /// environment variables.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, endpoint = None, template = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, endpoint = None, template = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards e2b route and primary port components distinctly"
@@ -439,6 +457,7 @@ impl PyAgent {
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -451,6 +470,7 @@ impl PyAgent {
             output_type,
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
             let built = Agent::e2b_sandbox(E2bSandboxAgentSpec {
@@ -464,6 +484,7 @@ impl PyAgent {
                     active_capabilities,
                     ports,
                     child_runs,
+                    approval_grant,
                 },
             })
             .await;
@@ -475,7 +496,7 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, sqlite_path = None, sqlite_durability = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python callback factory forwards all primary port components distinctly"
@@ -492,6 +513,7 @@ impl PyAgent {
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
         sqlite_path: Option<String>,
         sqlite_durability: Option<PySqliteDurability>,
     ) -> PyResult<Bound<'py, PyAny>> {
@@ -509,6 +531,7 @@ impl PyAgent {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
         let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let built = build_python_agent(
                 model_name,
@@ -518,6 +541,7 @@ impl PyAgent {
                 capabilities,
                 active_capabilities,
                 child_runs,
+                approval_grant,
                 (sqlite_path, sqlite_durability),
                 artifact_store,
                 attachment_index,
@@ -1010,6 +1034,7 @@ async fn build_python_agent(
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
     child_runs: ChildRunPolicy,
+    approval_grant: ApprovalGrantMode,
     sqlite: (Option<String>, Option<PySqliteDurability>),
     artifact_store: Arc<InProcessArtifactStore>,
     attachment_index: Arc<AttachmentIndex>,
@@ -1043,6 +1068,7 @@ async fn build_python_agent(
                 output_schema: output.as_ref().map(|value| value.schema.clone()),
             },
             child_runs,
+            approval_grant,
         },
         model_name,
         empty_model_settings()?,
@@ -1063,6 +1089,15 @@ async fn build_python_agent(
 fn child_runs_or_deny(py: Python<'_>, child_runs: Option<Py<PyChildRunPolicy>>) -> ChildRunPolicy {
     child_runs.map_or(ChildRunPolicy::Deny, |policy| {
         policy.bind(py).borrow().to_rust()
+    })
+}
+
+fn approval_grant_or_per_call(
+    py: Python<'_>,
+    approval_grant: Option<Py<PyApprovalGrantMode>>,
+) -> ApprovalGrantMode {
+    approval_grant.map_or(ApprovalGrantMode::PerCall, |mode| {
+        mode.bind(py).borrow().to_rust()
     })
 }
 

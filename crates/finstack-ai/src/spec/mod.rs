@@ -10,6 +10,8 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize, de};
 use thiserror::Error;
 
+pub use finstack_ai_runtime::ApprovalGrantMode;
+
 #[cfg(test)]
 mod tests;
 
@@ -175,6 +177,23 @@ pub enum ChildRunPolicy {
 }
 
 /// Serializable run-policy subset owned by agent composition.
+///
+/// [`Self::approval_grant`] selects how paid-tool approvals park and
+/// release. It does not relax [`finstack_ai_runtime::ApprovalRequirement::Policy`]:
+/// that floor still applies on every catalog. Existing specs that omit
+/// `approval_grant` deserialize as [`ApprovalGrantMode::PerCall`].
+///
+/// # Examples
+///
+/// ```
+/// use finstack_ai::{ApprovalGrantMode, RunPolicy};
+///
+/// let policy = RunPolicy {
+///     approval_grant: ApprovalGrantMode::InformedBatch,
+///     ..RunPolicy::default()
+/// };
+/// assert_eq!(policy.approval_grant, ApprovalGrantMode::InformedBatch);
+/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunPolicy {
@@ -184,6 +203,22 @@ pub struct RunPolicy {
     /// Child-run admission policy, denied by default.
     #[serde(default)]
     pub child_runs: ChildRunPolicy,
+    /// How paid-tool approvals are parked and released.
+    ///
+    /// [`ApprovalGrantMode::PerCall`] (default) parks once per unpaid
+    /// Policy or Required tool call. [`ApprovalGrantMode::InformedBatch`]
+    /// parks once listing every remaining unpaid paid tool. Neither mode
+    /// can weaken [`finstack_ai_runtime::ApprovalRequirement::Policy`].
+    #[serde(default, skip_serializing_if = "approval_grant_is_per_call")]
+    pub approval_grant: ApprovalGrantMode,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires fn(&T) -> bool"
+)]
+fn approval_grant_is_per_call(mode: &ApprovalGrantMode) -> bool {
+    matches!(mode, ApprovalGrantMode::PerCall)
 }
 
 /// Strict immutable agent specification.

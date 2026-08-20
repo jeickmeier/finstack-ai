@@ -1,9 +1,9 @@
 use finstack_ai_kernel::{
     AllocatedIds, AppendBatchTag, ComponentId, ComponentRef, ContentBlock, EffectTag, EventTag,
     InteractionExpired, InteractionKind, InteractionRequest, InteractionSettled, InteractionTag,
-    InteractionTerminalOutcome, KernelInput, MessageTag, Metadata, RawJson, RecordTag,
-    RequestInteraction, Stage, StageCursor, TextBlock, ToolBatchTag, ToolCallPlan, TransitionEnv,
-    Version,
+    KernelInput, METADATA_MAX_BYTES, MessageTag, Metadata, RawJson, RecordTag, RequestInteraction,
+    Stage, StageCursor, TEXT_MAX_BYTES, TextBlock, ToolBatchTag, ToolCallId, ToolCallPlan,
+    TransitionEnv, Version,
 };
 
 use crate::coordinator::CommitCoordinator;
@@ -58,41 +58,21 @@ fn tool_opening_counts(plans: &[ToolCallPlan]) -> Result<ToolOpeningCounts, RunH
     })
 }
 
-fn approval_cursor(state: &finstack_ai_kernel::KernelState) -> StageCursor {
+pub(super) fn approval_cursor(state: &finstack_ai_kernel::KernelState) -> StageCursor {
     StageCursor {
         cycle: state.cycle,
         stage: Stage::BeforeToolBatch,
     }
 }
 
-pub(super) fn approval_released_for_current_cursor(
-    state: &finstack_ai_kernel::KernelState,
-) -> bool {
-    state
-        .last_interaction_terminal
-        .as_ref()
-        .is_some_and(|terminal| {
-            terminal.kind == InteractionKind::Approval
-                && terminal.outcome == InteractionTerminalOutcome::Granted
-                && terminal.cursor == approval_cursor(state)
-        })
+/// One unpaid paid tool included in an approval park.
+pub(super) struct ApprovalSubject {
+    pub(super) tool_call_id: ToolCallId,
+    pub(super) tool_name: String,
+    pub(super) arguments: RawJson,
 }
 
-pub(super) fn approval_refused_for_current_cursor(state: &finstack_ai_kernel::KernelState) -> bool {
-    state
-        .last_interaction_terminal
-        .as_ref()
-        .is_some_and(|terminal| {
-            terminal.kind == InteractionKind::Approval
-                && matches!(
-                    terminal.outcome,
-                    InteractionTerminalOutcome::Denied
-                        | InteractionTerminalOutcome::Expired
-                        | InteractionTerminalOutcome::Cancelled
-                )
-                && terminal.cursor == approval_cursor(state)
-        })
-}
+const ARGS_DISPLAY_MAX: usize = 8 * 1024;
 
 fn approval_schema() -> Result<RawJson, RunHandleError> {
     RawJson::parse(
@@ -106,7 +86,7 @@ fn approval_schema() -> Result<RawJson, RunHandleError> {
 pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
-    tool_name: &str,
+    subjects: &[ApprovalSubject],
 ) -> Result<(), RunHandleError> {
     let interaction_id = generate_tool_id::<InteractionTag, _, _>(sources)?;
     let effect_id = generate_tool_id::<EffectTag, _, _>(sources)?;
@@ -121,11 +101,11 @@ pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
         effect_id,
         InteractionKind::Approval,
         vec![ContentBlock::Text(
-            TextBlock::try_new(format!("approve the next tool action: {tool_name}")).map_err(
-                |_| RunHandleError::InteractionSettlement {
+            TextBlock::try_new(approval_prompt(subjects)?).map_err(|_| {
+                RunHandleError::InteractionSettlement {
                     code: "approval_prompt_invalid",
-                },
-            )?,
+                }
+            })?,
         )],
         approval_schema()?,
         ComponentRef::new(
@@ -148,12 +128,84 @@ pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
         None,
         expires_at,
         false,
-        Metadata::empty(),
+        approval_metadata(subjects)?,
     )
     .map_err(|_| RunHandleError::InteractionSettlement {
         code: "approval_request_invalid",
     })?;
+    sources.record_parked_approval(
+        subjects
+            .iter()
+            .map(|subject| subject.tool_call_id)
+            .collect(),
+    );
     submit_interaction_request(coordinator, sources, request).await
+}
+
+fn approval_prompt(subjects: &[ApprovalSubject]) -> Result<String, RunHandleError> {
+    if subjects.is_empty() {
+        return Err(RunHandleError::InteractionSettlement {
+            code: "approval_subjects_missing",
+        });
+    }
+    let header = if subjects.len() == 1 {
+        "approve the next tool action:"
+    } else {
+        "approve the next tool actions:"
+    };
+    let reserved = header.len()
+        + subjects
+            .iter()
+            .map(|subject| subject.tool_name.len() + 8)
+            .sum::<usize>();
+    let args_budget = TEXT_MAX_BYTES.saturating_sub(reserved).max(subjects.len());
+    let per_args = (args_budget / subjects.len()).min(ARGS_DISPLAY_MAX);
+    let mut prompt = String::from(header);
+    for subject in subjects {
+        prompt.push('\n');
+        prompt.push_str(&subject.tool_name);
+        prompt.push(' ');
+        prompt.push_str(&truncated_args(subject.arguments.as_str(), per_args));
+    }
+    if prompt.len() > TEXT_MAX_BYTES {
+        return Err(RunHandleError::InteractionSettlement {
+            code: "approval_prompt_invalid",
+        });
+    }
+    Ok(prompt)
+}
+
+fn truncated_args(args: &str, max: usize) -> String {
+    if args.len() <= max {
+        return args.to_owned();
+    }
+    let keep = max.saturating_sub(3);
+    let mut end = keep;
+    while end > 0 && !args.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &args[..end])
+}
+
+fn approval_metadata(subjects: &[ApprovalSubject]) -> Result<Metadata, RunHandleError> {
+    let ids = subjects
+        .iter()
+        .map(|subject| subject.tool_call_id.to_string())
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({ "tool_call_ids": ids });
+    let bytes = serde_json_canonicalizer::to_vec(&value).map_err(|_| {
+        RunHandleError::InteractionSettlement {
+            code: "approval_metadata_invalid",
+        }
+    })?;
+    if bytes.len() > METADATA_MAX_BYTES {
+        return Err(RunHandleError::InteractionSettlement {
+            code: "approval_metadata_invalid",
+        });
+    }
+    Metadata::parse(bytes).map_err(|_| RunHandleError::InteractionSettlement {
+        code: "approval_metadata_invalid",
+    })
 }
 
 pub(crate) async fn request_tool_interaction<C: Clock, R: RandomSource>(

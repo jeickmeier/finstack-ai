@@ -31,6 +31,17 @@ pub enum ToolPolicyDecision {
     Deny,
 }
 
+/// Per-call approval evidence used by [`ResolvedToolCatalog::decide_plan`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalState {
+    /// No grant or refusal has been recorded for this call yet.
+    Unpaid,
+    /// A granting terminal released this call.
+    Granted,
+    /// The approver refused this call, or the request expired or was cancelled.
+    Refused,
+}
+
 /// Single-boundary catalog planning outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
@@ -61,7 +72,10 @@ pub struct ToolExecutionPolicy {
 pub struct ToolsetRegistration {
     /// Direct executable Toolset.
     pub toolset: Arc<dyn Toolset>,
-    /// Required policy keyed by every tool id in this Toolset.
+    /// Required host policy keyed by every tool id in this Toolset.
+    ///
+    /// Host [`ToolPolicyDecision::Allow`] cannot weaken a tool that
+    /// declared [`crate::ApprovalRequirement::Policy`].
     pub policies: BTreeMap<ToolId, ToolExecutionPolicy>,
     /// Optional component invocation keyed by tool id.
     pub components: BTreeMap<ToolId, ComponentInvocation>,
@@ -238,16 +252,17 @@ impl ResolvedToolCatalog {
     /// Produce the sole validated/synthetic planning outcome for one source call.
     ///
     /// Approval-required tools return [`ToolCatalogPlan::RequireApproval`] until
-    /// a granting terminal for the current cursor is supplied. Denied or expired
-    /// approvals close with a diagnostic synthetic and never become `Execute`.
+    /// this call's [`ApprovalState`] is [`ApprovalState::Granted`]. Denied or
+    /// expired approvals close with a diagnostic synthetic and never become
+    /// `Execute`. [`crate::ApprovalRequirement::Policy`] is a mandatory floor
+    /// and cannot be weakened by host [`ToolPolicyDecision::Allow`].
     #[must_use]
     pub fn decide_plan(
         &self,
         call: ToolCallBlock,
         deadline: Option<Timestamp>,
         middleware: Option<ToolPolicyDecision>,
-        approval_granted: bool,
-        approval_refused: bool,
+        approval: ApprovalState,
     ) -> ToolCatalogPlan {
         let Some(tool) = self.by_name(call.tool_name()) else {
             return ToolCatalogPlan::Ready(synthetic(
@@ -272,10 +287,10 @@ impl ResolvedToolCatalog {
             ));
         }
         let declared_floor = match tool.spec.approval.requirement {
-            crate::ApprovalRequirement::Required => ToolPolicyDecision::RequireApproval,
-            crate::ApprovalRequirement::Policy | crate::ApprovalRequirement::NotRequired => {
-                ToolPolicyDecision::Allow
+            crate::ApprovalRequirement::Required | crate::ApprovalRequirement::Policy => {
+                ToolPolicyDecision::RequireApproval
             }
+            crate::ApprovalRequirement::NotRequired => ToolPolicyDecision::Allow,
         };
         let effective = tool
             .policy
@@ -289,7 +304,7 @@ impl ResolvedToolCatalog {
                 tool.policy.failure_policy,
                 &ToolError::stable(TOOL_POLICY_DENIED, "tool execution was denied by policy"),
             )),
-            ToolPolicyDecision::RequireApproval if approval_granted => {
+            ToolPolicyDecision::RequireApproval if approval == ApprovalState::Granted => {
                 ToolCatalogPlan::Ready(ToolCallPlan::Execute(ValidatedToolCall {
                     call,
                     tool_id: tool.spec.id.clone(),
@@ -301,7 +316,7 @@ impl ResolvedToolCatalog {
                     failure_policy: tool.policy.failure_policy,
                 }))
             }
-            ToolPolicyDecision::RequireApproval if approval_refused => {
+            ToolPolicyDecision::RequireApproval if approval == ApprovalState::Refused => {
                 ToolCatalogPlan::Ready(synthetic(
                     call,
                     tool.spec.execution,
@@ -339,7 +354,7 @@ impl ResolvedToolCatalog {
         deadline: Option<Timestamp>,
         middleware: Option<ToolPolicyDecision>,
     ) -> ToolCallPlan {
-        match self.decide_plan(call.clone(), deadline, middleware, false, false) {
+        match self.decide_plan(call.clone(), deadline, middleware, ApprovalState::Unpaid) {
             ToolCatalogPlan::Ready(plan) => plan,
             ToolCatalogPlan::RequireApproval => synthetic(
                 call,

@@ -247,7 +247,8 @@ impl NativeAgentBuilder {
 
     /// Replace run and child-invocation policy.
     ///
-    /// Child runs default to [`crate::ChildRunPolicy::Deny`].
+    /// Child runs default to [`crate::ChildRunPolicy::Deny`]. Paid-tool
+    /// approvals default to [`crate::ApprovalGrantMode::PerCall`].
     ///
     /// # Arguments
     ///

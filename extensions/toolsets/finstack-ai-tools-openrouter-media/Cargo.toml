@@ -22,10 +22,10 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["net", "time"] }
 
 [dev-dependencies]
-finstack-ai-context-memory = { path = "../../context/finstack-ai-context-memory" }
+finstack-ai-context-memory = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync"] }
 
 [lints]

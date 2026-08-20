@@ -14,12 +14,12 @@ use finstack_ai_kernel::{
     Usage,
 };
 use finstack_ai_runtime::{
-    Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError, JournalStore,
-    LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelError, ModelName,
-    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem,
-    ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolSpec,
-    WorkflowSession, resolve_model_context_profile,
+    ApprovalGrantMode, Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError,
+    JournalStore, LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelError,
+    ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
+    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
+    RunTaskOwner, SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
+    ToolSpec, WorkflowSession, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModelAction, ScriptedModelPlan};
@@ -236,6 +236,7 @@ pub(crate) async fn spawn_model_owner(
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,

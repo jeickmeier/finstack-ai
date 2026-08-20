@@ -61,4 +61,5 @@ impl core::fmt::Debug for finstack_ai_tools_elicitation::ElicitationToolsetBuild
 pub fn finstack_ai_tools_elicitation::ElicitationToolsetBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const finstack_ai_tools_elicitation::ELICITATION_INPUT_REQUIRED: &str
 pub const finstack_ai_tools_elicitation::ELICITATION_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_elicitation::ELICITATION_REQUEST_TOO_LARGE: &str
 pub fn finstack_ai_tools_elicitation::interaction_request_from_tool_error(&finstack_ai_runtime::ports::tool::error::ToolError) -> core::option::Option<finstack_ai_kernel::effects::interaction::InteractionRequest>

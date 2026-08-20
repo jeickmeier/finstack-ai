@@ -79,7 +79,7 @@ impl ResponsesRequest {
         resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     ) -> Result<Self, ModelError> {
         draft.validate()?;
-        if draft.model != model.name {
+        if draft.model != *model.name() {
             return Err(request_error("requested model is not configured"));
         }
         let (instructions, input) =
@@ -149,8 +149,11 @@ impl ResponsesRequest {
             instructions,
             input,
             stream: true,
-            max_output_tokens: draft.limits.max_output_tokens.min(model.max_output_tokens),
-            parallel_tool_calls: (!tools.is_empty()).then_some(model.parallel_tool_calls),
+            max_output_tokens: draft
+                .limits
+                .max_output_tokens
+                .min(model.max_output_tokens()),
+            parallel_tool_calls: (!tools.is_empty()).then_some(model.parallel_tool_calls()),
             tools,
             text,
             reasoning,
@@ -370,7 +373,7 @@ fn map_user_content(
             ContentBlock::Text(value) => text.push_str(value.text()),
             ContentBlock::Json(value) => text.push_str(value.value().as_str()),
             ContentBlock::Image(media) => {
-                if !model.input_images {
+                if !model.input_images() {
                     return Err(request_error("model is not configured for image input"));
                 }
                 flush(&mut parts, &mut text);
@@ -380,7 +383,7 @@ fn map_user_content(
                 }));
             }
             ContentBlock::File(media) => {
-                if !model.input_files {
+                if !model.input_files() {
                     return Err(request_error("model is not configured for file input"));
                 }
                 flush(&mut parts, &mut text);
@@ -390,7 +393,7 @@ fn map_user_content(
                 }));
             }
             ContentBlock::Audio(media) => {
-                if !model.input_audio {
+                if !model.input_audio() {
                     return Err(request_error("model is not configured for audio input"));
                 }
                 flush(&mut parts, &mut text);
@@ -432,19 +435,26 @@ fn media_reference_audio(
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
 ) -> Result<(String, String), ModelError> {
     match resolved.get(media.blob().id()) {
-        Some(ResolvedMedia::Bytes { media_type, bytes }) => {
-            let format = media_type.rsplit('/').next().unwrap_or("mp3").to_owned();
-            Ok((
-                base64::engine::general_purpose::STANDARD.encode(bytes),
-                format,
-            ))
-        }
+        Some(ResolvedMedia::Bytes { media_type, bytes }) => Ok((
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+            audio_wire_format(media_type).to_owned(),
+        )),
         Some(ResolvedMedia::Url(_)) => Err(request_error(
             "audio input requires resolved bytes, not a URL",
         )),
         None => Err(request_error(
             "media content requires a configured media resolver",
         )),
+    }
+}
+
+/// Map a media type onto the Responses `input_audio` format token.
+///
+/// `audio/mpeg` (and `mpga` / `x-mpeg`) are aliases for `mp3`.
+fn audio_wire_format(media_type: &str) -> &str {
+    match media_type.rsplit('/').next().unwrap_or("mp3") {
+        "mpeg" | "mpga" | "x-mpeg" => "mp3",
+        other => other,
     }
 }
 
@@ -996,6 +1006,54 @@ mod tests {
             value["input"][0]["content"][0]["input_audio"]["data"],
             base64::engine::general_purpose::STANDARD.encode(b"data")
         );
+    }
+
+    #[test]
+    fn audio_mpeg_maps_to_mp3_format() {
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "audio/mpeg", 4, None, None::<&str>)
+                .expect("blob");
+        let media = finstack_ai_kernel::MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::Audio(media.clone())],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from(media.blob().id()),
+            ResolvedMedia::Bytes {
+                media_type: Arc::from("audio/mpeg"),
+                bytes: Arc::from(b"data".as_slice()),
+            },
+        );
+        let request = ResponsesRequest::try_from_draft(
+            &draft,
+            &model().with_input_audio(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(
+            value["input"][0]["content"][0]["input_audio"]["format"],
+            "mp3"
+        );
+    }
+
+    #[test]
+    fn audio_mpeg_aliases_map_to_mp3() {
+        assert_eq!(audio_wire_format("audio/mpeg"), "mp3");
+        assert_eq!(audio_wire_format("audio/mpga"), "mp3");
+        assert_eq!(audio_wire_format("audio/x-mpeg"), "mp3");
+        assert_eq!(audio_wire_format("audio/wav"), "wav");
     }
 
     fn model() -> OpenRouterModelConfig {

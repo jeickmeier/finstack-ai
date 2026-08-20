@@ -5,6 +5,7 @@ from typing import TypedDict, cast
 from . import _finstack_ai as _native
 from ._finstack_ai import (
     Agent,
+    ApprovalGrantMode,
     Attachment,
     CallbackContext,
     Capability,
@@ -185,6 +186,7 @@ def parse_document(
 
 __all__ = [
     "Agent",
+    "ApprovalGrantMode",
     "Attachment",
     "BuildMetadata",
     "CallbackContext",

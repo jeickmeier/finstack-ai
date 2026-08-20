@@ -36,6 +36,7 @@ async fn run_runtime_chunks(count: usize, response_text: &str) -> RuntimeProject
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,

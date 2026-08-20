@@ -123,7 +123,14 @@ mod native {
                 .with_ports(model, profile, catalog)
                 .with_capability_owners(agent.capability_index().as_arc_owners())
                 .with_middleware_chain(Arc::clone(agent.resolved.run_plan().middleware_chain()))
-                .with_context_providers(providers))
+                .with_context_providers(providers)
+                .with_approval_grant(
+                    agent
+                        .resolved
+                        .spec()
+                        .map(|spec| spec.policy.approval_grant)
+                        .unwrap_or_default(),
+                ))
         })
     }
 

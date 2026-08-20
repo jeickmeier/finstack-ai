@@ -238,6 +238,7 @@ async fn interaction_survives_worker_restart() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,

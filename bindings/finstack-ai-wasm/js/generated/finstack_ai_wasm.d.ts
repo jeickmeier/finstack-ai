@@ -25,12 +25,13 @@ export class Agent {
      *
      * Linked provider constructors (`openai`, `anthropic`, and peers) are
      * native-only. Browser hosts use this method with a JS model adapter.
+     * `approval_grant` accepts `per_call` (default) or `informed_batch`.
      *
      * # Errors
      *
      * Returns a structured host error when configuration is invalid.
      */
-    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null, context_providers?: JsContextProvider[] | null, middleware?: JsMiddleware[] | null, observers?: JsObserver[] | null): Promise<any>;
+    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null, context_providers?: JsContextProvider[] | null, middleware?: JsMiddleware[] | null, observers?: JsObserver[] | null, approval_grant?: string | null): Promise<any>;
     /**
      * Create a live session on this agent's journal store.
      *
@@ -713,7 +714,7 @@ export interface InitOutput {
     readonly __wbg_session_free: (a: number, b: number) => void;
     readonly agent_capabilityCatalog: (a: number, b: number) => void;
     readonly agent_compactCapabilityCatalog: (a: number, b: number) => void;
-    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => number;
+    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => number;
     readonly agent_createSession: (a: number, b: number, c: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
     readonly agent_openSession: (a: number, b: number, c: number, d: number, e: number) => number;

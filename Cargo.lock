@@ -1586,6 +1586,7 @@ name = "finstack-ai-tools-openai-media"
 version = "1.0.0"
 dependencies = [
  "base64",
+ "finstack-ai-context-memory",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",

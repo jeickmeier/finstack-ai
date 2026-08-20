@@ -32,6 +32,7 @@ export {
 export type {
   ActiveCapability,
   AgentOptions,
+  ApprovalGrantMode,
   Capability,
   CapabilityActivation,
   CapabilityCatalogItem,

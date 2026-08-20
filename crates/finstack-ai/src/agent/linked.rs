@@ -17,7 +17,7 @@ use finstack_ai_runtime::{
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::{JournalStore, Model};
 
-use crate::{CapabilitySpec, ChildRunPolicy, RunPolicy};
+use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy, RunPolicy};
 
 use super::builder::NativeAgentBuilder;
 use super::handle::Agent;
@@ -89,6 +89,8 @@ pub struct LinkedCommon {
     pub ports: LinkedAgentPorts,
     /// Child-run policy. Bindings default this to Deny.
     pub child_runs: ChildRunPolicy,
+    /// Paid-tool approval grant mode. Bindings default this to `PerCall`.
+    pub approval_grant: ApprovalGrantMode,
 }
 
 /// `OpenRouter` media-toolset registration for any linked constructor.
@@ -227,6 +229,7 @@ impl NativeAgentBuilder {
             active_capabilities,
             ports,
             child_runs,
+            approval_grant,
         } = common;
         for (component, toolset) in ports.toolsets {
             self = self.toolset(component, toolset);
@@ -251,6 +254,7 @@ impl NativeAgentBuilder {
         }
         self = self.policy(RunPolicy {
             child_runs,
+            approval_grant,
             ..RunPolicy::default()
         });
         let agent = self.build().await?;
@@ -287,6 +291,17 @@ impl Agent {
     ///
     /// Always targets `https://openrouter.ai/api/v1/responses`. Does not read
     /// environment variables.
+    ///
+    /// Does not attach a [`finstack_ai_runtime::MediaResolver`]. Vision, file,
+    /// and audio input require a host-built provider with
+    /// `with_media_resolver`. ADR-049 rejected FFI resolvers on linked
+    /// constructors. `spec.media_tools` registers outbound media-generation
+    /// tools only.
+    ///
+    /// # Arguments
+    ///
+    /// * `spec` - Model name, Bearer credential, optional attribution and
+    ///   reasoning fields, media-generation flag, and shared linked ports.
     ///
     /// # Errors
     ///
@@ -388,20 +403,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     );
     let mut common = spec.common;
     if let Some(api_key_for_tools) = api_key_for_tools {
-        use finstack_ai_tools_openai_media::{OpenAiMediaConfig, OpenAiMediaToolset};
-
-        let toolset = OpenAiMediaToolset::try_new(OpenAiMediaConfig {
-            api_key: api_key_for_tools,
-            endpoint: String::new(),
-            max_result_bytes: LINKED_MEDIA_MAX_RESULT_BYTES,
-        })
-        .map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
-        common
-            .ports
-            .toolsets
-            .push((component("python.toolset.openai_media")?, Arc::new(toolset)));
+        register_openai_media(&mut common.ports, api_key_for_tools)?;
     }
     if let Some(media) = spec.openrouter_media {
         register_openrouter_media(&mut common.ports, media)?;
@@ -437,6 +439,7 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
         .with_authentication(Authentication::Bearer(
             SecretString::try_new(spec.api_key).map_err(|_| secret_configuration_error())?,
         ))
+        .map_err(|error| model_configuration_error(&error))?
         .with_attribution(spec.referer.as_deref(), spec.title.as_deref())
         .map_err(|error| model_configuration_error(&error))?;
     let model_config = OpenRouterModelConfig::try_new(
@@ -449,7 +452,7 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
     )
     .map_err(|error| model_configuration_error(&error))?
     .with_reasoning(true);
-    let model_name = model_config.name.clone();
+    let model_name = model_config.name().clone();
     let provider: Arc<dyn Model> = Arc::new(
         OpenRouterProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
@@ -872,6 +875,33 @@ fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
         })?,
         Some(super::PREVIEW_ENGINE_VERSION),
     ))
+}
+
+/// Register the `OpenAI` media toolset, attaching the host artifact store
+/// when the linked ports already have one.
+#[cfg(feature = "native-tokio")]
+fn register_openai_media(
+    ports: &mut LinkedAgentPorts,
+    api_key: String,
+) -> Result<(), AgentRunError> {
+    use finstack_ai_tools_openai_media::{OpenAiMediaConfig, OpenAiMediaToolset};
+
+    let toolset = OpenAiMediaToolset::try_new(OpenAiMediaConfig {
+        api_key,
+        endpoint: String::new(),
+        max_result_bytes: LINKED_MEDIA_MAX_RESULT_BYTES,
+    })
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    let toolset = match ports.artifact_store.clone() {
+        Some(store) => toolset.with_artifact_store(store),
+        None => toolset,
+    };
+    ports
+        .toolsets
+        .push((component("python.toolset.openai_media")?, Arc::new(toolset)));
+    Ok(())
 }
 
 /// Register the `OpenRouter` media toolset on any linked constructor.

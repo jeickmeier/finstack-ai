@@ -12,12 +12,14 @@ use crate::coordinator::CommitCoordinator;
 use crate::middleware_driver::StageDriver;
 use crate::run_types::RunHandleError;
 use crate::stage_settlement::{ToolBatchPolicy, run_tool_batch_chain, submit_folded};
-use crate::{Clock, RandomSource, ResolvedToolCatalog, ToolCatalogPlan, ToolPolicyDecision};
+use crate::{
+    ApprovalGrantMode, ApprovalState, Clock, RandomSource, ResolvedToolCatalog, ToolCatalogPlan,
+    ToolPolicyDecision,
+};
 
 use super::SettlementSources;
 use super::interaction::{
-    allocate_tool_opening, approval_refused_for_current_cursor,
-    approval_released_for_current_cursor, request_approval_interaction,
+    ApprovalSubject, allocate_tool_opening, approval_cursor, request_approval_interaction,
 };
 use super::tool::{generate_tool_id, generate_tool_ids};
 
@@ -100,17 +102,19 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         .accepted
         .as_ref()
         .and_then(finstack_ai_kernel::RunAccepted::effective_deadline);
-    let granted = approval_released_for_current_cursor(state);
-    let refused = approval_refused_for_current_cursor(state);
     let continuation = if state.final_result.is_some() {
         ToolBatchContinuation::Finalize
     } else {
         ToolBatchContinuation::ContinueModel
     };
-    let cursor = StageCursor {
-        cycle: state.cycle,
-        stage: Stage::BeforeToolBatch,
-    };
+    let cursor = approval_cursor(state);
+    sources.prepare_approval_cursor(cursor);
+    let remaining_paid = paid_unpaid_ids(catalog, &calls, None);
+    sources.absorb_approval_terminal(
+        state.last_interaction_terminal.as_ref(),
+        cursor,
+        &remaining_paid,
+    );
     let retained = match run_tool_batch_chain(coordinator, driver, cursor, &calls).await? {
         ToolBatchPolicy::Unchanged => None,
         ToolBatchPolicy::Retain(retained) => Some(retained),
@@ -119,17 +123,14 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
             return Ok(false);
         }
     };
-    let plans = match plan_source_calls(
-        catalog,
-        calls,
-        deadline,
-        retained.as_ref(),
-        granted,
-        refused,
-    )? {
+    let plans = match plan_source_calls(catalog, calls, deadline, retained.as_ref(), sources)? {
         PlannedBatch::Ready(plans) => plans,
-        PlannedBatch::ApprovalRequired(tool_name) => {
-            request_approval_interaction(coordinator, sources, &tool_name).await?;
+        PlannedBatch::ApprovalRequired(subjects) => {
+            let parked = match sources.approval_grant() {
+                ApprovalGrantMode::PerCall => &subjects[..1],
+                ApprovalGrantMode::InformedBatch => subjects.as_slice(),
+            };
+            request_approval_interaction(coordinator, sources, parked).await?;
             return Ok(false);
         }
     };
@@ -140,10 +141,9 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
 enum PlannedBatch {
     /// One plan per source call, in source order.
     Ready(Vec<ToolCallPlan>),
-    /// A call needs durable approval evidence the run does not have yet, so
-    /// no batch is planned at this cursor. Carries that call's tool name so
-    /// the approval prompt can say what is being approved.
-    ApprovalRequired(String),
+    /// One or more unpaid paid calls need a durable approval park. Source
+    /// order is preserved so `PerCall` can take the first unpaid call.
+    ApprovalRequired(Vec<ApprovalSubject>),
 }
 
 /// Decide one plan per source call, then check the coverage invariant.
@@ -156,31 +156,55 @@ enum PlannedBatch {
 ///
 /// Returns [`TOOL_PLAN_COVERAGE_MISMATCH`] when the plans do not cover the
 /// source calls exactly once each, in source order.
-fn plan_source_calls(
+fn plan_source_calls<C: Clock, R: RandomSource>(
     catalog: &ResolvedToolCatalog,
     calls: Vec<ToolCallBlock>,
     deadline: Option<finstack_ai_kernel::Timestamp>,
     retained: Option<&BTreeSet<ToolId>>,
-    granted: bool,
-    refused: bool,
+    sources: &SettlementSources<C, R>,
 ) -> Result<PlannedBatch, RunHandleError> {
     let source_call_ids = calls
         .iter()
         .map(|call| *call.tool_call_id())
         .collect::<Vec<_>>();
     let mut plans = Vec::with_capacity(calls.len());
+    let mut unpaid = Vec::new();
     for call in calls {
         let policy = middleware_tool_policy(catalog, &call, retained);
-        let tool_name = call.tool_name().to_owned();
-        match catalog.decide_plan(call, deadline, policy, granted, refused) {
+        let approval = sources.approval_state(call.tool_call_id());
+        let subject = ApprovalSubject {
+            tool_call_id: *call.tool_call_id(),
+            tool_name: call.tool_name().to_owned(),
+            arguments: call.arguments().clone(),
+        };
+        match catalog.decide_plan(call, deadline, policy, approval) {
             ToolCatalogPlan::Ready(plan) => plans.push(plan),
-            ToolCatalogPlan::RequireApproval => {
-                return Ok(PlannedBatch::ApprovalRequired(tool_name));
-            }
+            ToolCatalogPlan::RequireApproval => unpaid.push(subject),
         }
+    }
+    if !unpaid.is_empty() {
+        return Ok(PlannedBatch::ApprovalRequired(unpaid));
     }
     assert_plan_coverage(&plans, &source_call_ids)?;
     Ok(PlannedBatch::Ready(plans))
+}
+
+fn paid_unpaid_ids(
+    catalog: &ResolvedToolCatalog,
+    calls: &[ToolCallBlock],
+    retained: Option<&BTreeSet<ToolId>>,
+) -> Vec<ToolCallId> {
+    calls
+        .iter()
+        .filter(|call| {
+            let policy = middleware_tool_policy(catalog, call, retained);
+            matches!(
+                catalog.decide_plan((*call).clone(), None, policy, ApprovalState::Unpaid),
+                ToolCatalogPlan::RequireApproval
+            )
+        })
+        .map(|call| *call.tool_call_id())
+        .collect()
 }
 
 /// Settle the cursor as `ToolBatchPrepared`, opening the batch.

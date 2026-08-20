@@ -25,6 +25,7 @@ pub fn finstack_ai_tools_openai_media::OpenAiMediaConfig::fmt(&self, &mut core::
 pub struct finstack_ai_tools_openai_media::OpenAiMediaToolset
 impl finstack_ai_tools_openai_media::OpenAiMediaToolset
 pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::try_new(finstack_ai_tools_openai_media::OpenAiMediaConfig) -> core::result::Result<Self, finstack_ai_tools_openai_media::OpenAiMediaError>
+pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
 impl core::fmt::Debug for finstack_ai_tools_openai_media::OpenAiMediaToolset
 pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_openai_media::OpenAiMediaToolset

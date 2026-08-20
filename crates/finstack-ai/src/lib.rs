@@ -107,6 +107,7 @@ pub use result::{
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use session::{Lane, Session};
 pub use spec::{
-    AGENT_SPEC_SCHEMA_VERSION, AgentBuilder, AgentSpec, AgentSpecError, CapabilityActivation,
-    CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec, RunPolicy,
+    AGENT_SPEC_SCHEMA_VERSION, AgentBuilder, AgentSpec, AgentSpecError, ApprovalGrantMode,
+    CapabilityActivation, CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec,
+    RunPolicy,
 };

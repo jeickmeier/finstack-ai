@@ -11,7 +11,10 @@ mod sse;
 
 pub use anthropic_messages::AnthropicMessagesAssembly;
 pub use credentials::{Authentication, CredentialReference, CredentialRejected, CredentialStore};
-pub use media::{MediaResolveError, MediaResolveKind, MediaResolver, ResolvedMedia};
+pub use media::{
+    MediaResolveError, MediaResolveKind, MediaResolver, ResolveDraftMediaError, ResolvedMedia,
+    resolve_draft_media,
+};
 pub use ndjson::{NdjsonError, NdjsonParser};
 pub use ollama_chat::{OllamaChatAssembly, OllamaReplayEntry};
 pub use openai_responses::OpenAiResponsesAssembly;

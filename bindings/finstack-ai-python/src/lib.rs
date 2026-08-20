@@ -22,6 +22,7 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 mod agent;
+mod approval_grant;
 #[cfg(feature = "benchmark-fixture")]
 mod benchmark_fixture;
 #[cfg(feature = "callback-fixture")]
@@ -45,6 +46,7 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
 use agent::PyAgent;
+use approval_grant::PyApprovalGrantMode;
 use callbacks::{
     PyCallbackContext, PyPythonContextProvider, PyPythonMiddleware, PyPythonModel,
     PyPythonObserver, PyPythonToolset,
@@ -110,6 +112,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyAgent>()?;
     module.add_class::<PyCapability>()?;
     module.add_class::<PyChildRunPolicy>()?;
+    module.add_class::<PyApprovalGrantMode>()?;
     module.add_class::<PyRun>()?;
     module.add_class::<PyAttachment>()?;
     module.add_class::<PyEventIterator>()?;

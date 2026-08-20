@@ -12,10 +12,10 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::testing::ManualDriveAction;
 use finstack_ai_runtime::{
-    Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, Model, ModelStreamLimits,
-    ModelTaskConfig, ResolvedToolCatalog, RunHandleError, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, SideEffectClass, ToolDeferral, ToolReconcileResult, ToolResult,
-    ToolStreamLimits, ToolTaskConfig,
+    ApprovalGrantMode, Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, Model,
+    ModelStreamLimits, ModelTaskConfig, ResolvedToolCatalog, RunHandleError, RunTaskConfig,
+    RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolDeferral, ToolReconcileResult,
+    ToolResult, ToolStreamLimits, ToolTaskConfig,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{FixedClock, ScriptedModel, ScriptedToolPlan, ScriptedToolset};
@@ -42,6 +42,7 @@ pub(crate) fn owner_run_config() -> RunTaskConfig {
             max_subscribers: 8,
         },
         shutdown_deadline: StdDuration::from_millis(500),
+        approval_grant: ApprovalGrantMode::PerCall,
     }
 }
 

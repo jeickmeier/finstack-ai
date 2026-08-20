@@ -1,8 +1,8 @@
 use super::*;
 use finstack_ai_kernel::{
     ContentBlock, Digest, EffectId, EffectOutputContract, EffectOutputKind, InteractionId, LaneId,
-    OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
-    ToolCallId, ToolFailurePolicy,
+    METADATA_MAX_BYTES, OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId,
+    ToolCallBlock, ToolCallId, ToolFailurePolicy,
 };
 use finstack_ai_runtime::{
     ApprovalRequirement, AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext,
@@ -233,6 +233,21 @@ async fn completed_output(
     }
 }
 
+async fn completed_error(
+    toolset: &ElicitationToolset,
+    tool_name: &str,
+    arguments: &[u8],
+) -> ToolError {
+    toolset
+        .call(
+            context("tenant-a"),
+            validated_call(toolset, tool_name, arguments),
+        )
+        .await
+        .err()
+        .expect("resumed call must fail")
+}
+
 #[tokio::test]
 async fn resumed_ask_user_returns_the_answer_as_tool_result() {
     let toolset = free_form_toolset();
@@ -255,6 +270,55 @@ async fn resumed_typed_tool_returns_the_structured_answer() {
     )
     .await;
     assert_eq!(output, serde_json::json!({"answer": {"confirmed": true}}));
+}
+
+#[tokio::test]
+async fn resumed_ask_user_rejects_numeric_answer_for_free_text() {
+    let toolset = free_form_toolset();
+    let error = completed_error(
+        &toolset,
+        "ask_user",
+        br#"{"prompt":"What is the position limit?","answer":1}"#,
+    )
+    .await;
+    assert_eq!(error.code(), ELICITATION_INVALID_ARGUMENTS);
+    assert_eq!(error.category(), ErrorCategory::Validation);
+}
+
+#[tokio::test]
+async fn resumed_typed_tool_rejects_string_answer() {
+    let toolset = typed_toolset();
+    let error = completed_error(
+        &toolset,
+        "confirm_trade_params",
+        br#"{"context":"Buy 100 AAPL @ market.","answer":"nope"}"#,
+    )
+    .await;
+    assert_eq!(error.code(), ELICITATION_INVALID_ARGUMENTS);
+    assert_eq!(error.category(), ErrorCategory::Validation);
+}
+
+#[tokio::test]
+async fn oversized_park_request_does_not_yield_interaction_required() {
+    let toolset = free_form_toolset();
+    let prompt = "x".repeat(METADATA_MAX_BYTES);
+    let arguments = serde_json::to_vec(&serde_json::json!({ "prompt": prompt })).expect("args");
+    let error = toolset
+        .call(
+            context("tenant-a"),
+            validated_call(&toolset, "ask_user", &arguments),
+        )
+        .await
+        .err()
+        .expect("must fail closed");
+    assert_ne!(error.code(), TOOL_INTERACTION_REQUIRED);
+    assert_ne!(error.code(), ELICITATION_INPUT_REQUIRED);
+    assert!(
+        error.code() == ELICITATION_REQUEST_TOO_LARGE
+            || error.code() == ELICITATION_INVALID_ARGUMENTS,
+        "oversized park must be a typed limit or validation error, got {}",
+        error.code()
+    );
 }
 
 #[tokio::test]

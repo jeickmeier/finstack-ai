@@ -15,6 +15,7 @@ async fn failed_model_request_append_never_executes_the_model() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,
@@ -133,6 +134,7 @@ async fn malformed_stream_settles_as_failure_without_partial_durable_success() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,
@@ -195,6 +197,7 @@ async fn an_expired_committed_deadline_prevents_provider_execution() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,

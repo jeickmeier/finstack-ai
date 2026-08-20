@@ -68,6 +68,7 @@ export class Agent {
      *
      * Linked provider constructors (`openai`, `anthropic`, and peers) are
      * native-only. Browser hosts use this method with a JS model adapter.
+     * `approval_grant` accepts `per_call` (default) or `informed_batch`.
      *
      * # Errors
      *
@@ -81,9 +82,10 @@ export class Agent {
      * @param {JsContextProvider[] | null} [context_providers]
      * @param {JsMiddleware[] | null} [middleware]
      * @param {JsObserver[] | null} [observers]
+     * @param {string | null} [approval_grant]
      * @returns {Promise<any>}
      */
-    static create(model, toolsets, instruction, store, capabilities_json, active_capabilities_json, context_providers, middleware, observers) {
+    static create(model, toolsets, instruction, store, capabilities_json, active_capabilities_json, context_providers, middleware, observers, approval_grant) {
         _assertClass(model, JsModel);
         const ptr0 = passArrayJsValueToWasm0(toolsets, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
@@ -104,7 +106,9 @@ export class Agent {
         var len6 = WASM_VECTOR_LEN;
         var ptr7 = isLikeNone(observers) ? 0 : passArrayJsValueToWasm0(observers, wasm.__wbindgen_export);
         var len7 = WASM_VECTOR_LEN;
-        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7);
+        var ptr8 = isLikeNone(approval_grant) ? 0 : passStringToWasm0(approval_grant, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len8 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8);
         return takeObject(ret);
     }
     /**

@@ -182,6 +182,7 @@ impl RunTaskOwner {
             .transpose()?;
         validate_model_binding(model.as_ref(), &profile)?;
         let mut sources = SettlementSources::try_new(clock, random)?;
+        sources.set_approval_grant(run_config.approval_grant);
         let run_cancellation = CancellationSignal::new();
         let parent = run_cancellation.child();
         if let Some(catalog) = catalog.clone() {

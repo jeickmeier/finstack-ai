@@ -14,20 +14,24 @@ mod tool;
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::{EventId, Id, IdTag};
+use finstack_ai_kernel::{
+    EventId, Id, IdTag, InteractionId, InteractionKind, InteractionTerminal,
+    InteractionTerminalOutcome, StageCursor, ToolCallId,
+};
 
 use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 use crate::{
-    CancellationSignal, Clock, IdGenerationError, LockedModelContextProfile,
-    MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelContextProfileOverride, ModelError,
-    ModelRequestDraft, ModelResumeAction, ModelTerminal, RandomSource, ResolvedToolCatalog,
-    TOOL_RECONCILIATION_UNSUPPORTED, ToolError, ToolResumeAction, UuidV7Generator,
-    resolve_model_context_profile,
+    ApprovalGrantMode, ApprovalState, CancellationSignal, Clock, IdGenerationError,
+    LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, Model,
+    ModelContextProfileOverride, ModelError, ModelRequestDraft, ModelResumeAction, ModelTerminal,
+    RandomSource, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED, ToolError,
+    ToolResumeAction, UuidV7Generator, resolve_model_context_profile,
 };
 
 pub(crate) use cancel::drain_idle_cancellation;
@@ -74,11 +78,61 @@ pub(crate) struct NestedSamplingPorts {
     pub(crate) cancellation: CancellationSignal,
 }
 
+/// Live, process-local approval grants for one run owner.
+///
+/// Not kernel state. Crash recovery re-prompts unpaid `PerCall` tools when
+/// more than one paid call remains, rather than reconstructing earlier
+/// grants from the journal. A journaled approval terminal for the only
+/// remaining paid tool is absorbed so grant/deny after stop can resume.
+struct ApprovalGrantLedger {
+    mode: ApprovalGrantMode,
+    cursor: Option<StageCursor>,
+    granted: BTreeSet<ToolCallId>,
+    refused: BTreeSet<ToolCallId>,
+    last_parked: Option<Vec<ToolCallId>>,
+    consumed_terminal: Option<InteractionId>,
+}
+
+impl ApprovalGrantLedger {
+    fn new(mode: ApprovalGrantMode) -> Self {
+        Self {
+            mode,
+            cursor: None,
+            granted: BTreeSet::new(),
+            refused: BTreeSet::new(),
+            last_parked: None,
+            consumed_terminal: None,
+        }
+    }
+
+    fn reset_if_cursor_changed(&mut self, cursor: StageCursor) {
+        if self.cursor == Some(cursor) {
+            return;
+        }
+        self.cursor = Some(cursor);
+        self.granted.clear();
+        self.refused.clear();
+        self.last_parked = None;
+        self.consumed_terminal = None;
+    }
+
+    fn state_for(&self, id: &ToolCallId) -> ApprovalState {
+        if self.granted.contains(id) {
+            ApprovalState::Granted
+        } else if self.refused.contains(id) {
+            ApprovalState::Refused
+        } else {
+            ApprovalState::Unpaid
+        }
+    }
+}
+
 pub(crate) struct SettlementSources<C, R> {
     clock: Arc<C>,
     random: R,
     progress_random: ProgressRandom,
     nested_sampling: Option<NestedSamplingPorts>,
+    approval: Mutex<ApprovalGrantLedger>,
 }
 
 impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
@@ -89,7 +143,75 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             random,
             progress_random,
             nested_sampling: None,
+            approval: Mutex::new(ApprovalGrantLedger::new(ApprovalGrantMode::PerCall)),
         })
+    }
+
+    pub(crate) fn set_approval_grant(&self, mode: ApprovalGrantMode) {
+        self.lock_approval().mode = mode;
+    }
+
+    pub(crate) fn approval_grant(&self) -> ApprovalGrantMode {
+        self.lock_approval().mode
+    }
+
+    pub(crate) fn prepare_approval_cursor(&self, cursor: StageCursor) {
+        self.lock_approval().reset_if_cursor_changed(cursor);
+    }
+
+    pub(crate) fn absorb_approval_terminal(
+        &self,
+        terminal: Option<&InteractionTerminal>,
+        cursor: StageCursor,
+        remaining_paid: &[ToolCallId],
+    ) {
+        let Some(terminal) = terminal else {
+            return;
+        };
+        if terminal.kind != InteractionKind::Approval || terminal.cursor != cursor {
+            return;
+        }
+        let mut ledger = self.lock_approval();
+        if ledger.consumed_terminal == Some(terminal.interaction_id) {
+            return;
+        }
+        let ids = match ledger.last_parked.take() {
+            Some(ids) => ids,
+            None if ledger.mode == ApprovalGrantMode::InformedBatch
+                || remaining_paid.len() == 1 =>
+            {
+                remaining_paid.to_vec()
+            }
+            None => {
+                ledger.consumed_terminal = Some(terminal.interaction_id);
+                return;
+            }
+        };
+        match terminal.outcome {
+            InteractionTerminalOutcome::Granted => {
+                ledger.granted.extend(ids);
+            }
+            InteractionTerminalOutcome::Denied
+            | InteractionTerminalOutcome::Expired
+            | InteractionTerminalOutcome::Cancelled => {
+                ledger.refused.extend(ids);
+            }
+        }
+        ledger.consumed_terminal = Some(terminal.interaction_id);
+    }
+
+    pub(crate) fn approval_state(&self, id: &ToolCallId) -> ApprovalState {
+        self.lock_approval().state_for(id)
+    }
+
+    pub(crate) fn record_parked_approval(&self, ids: Vec<ToolCallId>) {
+        self.lock_approval().last_parked = Some(ids);
+    }
+
+    fn lock_approval(&self) -> std::sync::MutexGuard<'_, ApprovalGrantLedger> {
+        self.approval
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(crate) fn attach_nested_sampling(&mut self, ports: NestedSamplingPorts) {

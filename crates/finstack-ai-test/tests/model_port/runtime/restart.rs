@@ -37,6 +37,7 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,
@@ -127,6 +128,7 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,

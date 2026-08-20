@@ -12,15 +12,15 @@ use finstack_ai_kernel::{
     ToolExecutionMode, ToolFailurePolicy, ToolProgress, ToolResultBlock, Usage, ValidationOutcome,
 };
 use finstack_ai_runtime::{
-    ApprovalRequirement, CommitCoordinator, CommitCoordinatorError, EventBatchConfig, EventFilter,
-    EventHubConfig, EventLagPolicy, EventSubscriptionConfig, JournalStore,
-    JsonSchemaToolValidatorCompiler, LoadRequest, Model, ModelStreamLimits, ModelTaskConfig,
-    ProgressCoalescing, ResolvedToolCatalog, RunHandleError, RunStatus, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, StoreError, TOOL_RECONCILIATION_UNSUPPORTED,
-    ToolDeferralSupport, ToolError, ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult,
-    ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamItem, ToolStreamLimits,
-    ToolTaskConfig, ToolTerminal, ToolValidator, ToolValidatorCompiler, Toolset,
-    ToolsetRegistration, UsageDelta, tool_resume_action,
+    ApprovalGrantMode, ApprovalRequirement, CommitCoordinator, CommitCoordinatorError,
+    EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionConfig,
+    JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest, Model, ModelStreamLimits,
+    ModelTaskConfig, ProgressCoalescing, ResolvedToolCatalog, RunHandleError, RunStatus,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, StoreError,
+    TOOL_RECONCILIATION_UNSUPPORTED, ToolDeferralSupport, ToolError, ToolExecutionPolicy,
+    ToolPolicyDecision, ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler,
+    ToolStreamItem, ToolStreamLimits, ToolTaskConfig, ToolTerminal, ToolValidator,
+    ToolValidatorCompiler, Toolset, ToolsetRegistration, UsageDelta, tool_resume_action,
 };
 use finstack_ai_test::{
     FixedClock, ManualClock, ScriptedModel, ScriptedToolAction, ScriptedToolPlan, ScriptedToolset,

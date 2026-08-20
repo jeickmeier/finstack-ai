@@ -25,12 +25,15 @@ and maps optional `referer`/`title` keywords to the non-secret
 routing (a `provider` object, a `models` fallback array, and
 `:nitro`/`:floor` model-name suffixes) passes through model settings
 unchanged rather than through dedicated constructor arguments. The
-factories do not read environment variables. `Agent.gateway()` stays as
-a thin dispatcher onto the three dedicated crates. Supported
-`wire_protocol` values are `openai_responses`, `anthropic_messages`, and
-`ollama_chat`. `openai_chat` is a configuration error. There is no
-multi-protocol gateway crate. `Agent.e2b_sandbox()` is the T4 sandbox
-constructor on both bindings; see [toolsets](toolset.md).
+factories do not read environment variables. Linked constructors do not
+attach a `MediaResolver`; vision, file, and audio **input** require a
+host-built provider. ADR-049 rejected FFI resolvers on those factories.
+`Agent.gateway()` stays as a thin dispatcher onto the three dedicated
+crates. Supported `wire_protocol` values are `openai_responses`,
+`anthropic_messages`, and `ollama_chat`. `openai_chat` is a
+configuration error. There is no multi-protocol gateway crate.
+`Agent.e2b_sandbox()` is the T4 sandbox constructor on both bindings;
+see [toolsets](toolset.md).
 
 Two native media toolsets are registrable from any linked constructor.
 `finstack-ai-tools-openrouter-media` publishes five tools —
@@ -65,13 +68,16 @@ provider also advertises per-model `InputCapabilities` toggles
 advertise and enforce which `ContentBlock` variants are accepted: draft
 translation rejects a media block with that crate's `*_request_invalid`
 error when its modality flag is off, even if the block resolved
-successfully. The OpenRouter catalog fetch can set these flags
-automatically from `architecture.input_modalities`. The supported
-modalities differ by provider:
+successfully. The OpenRouter catalog fetch can set image and file flags
+from `architecture.input_modalities`. OpenRouter Responses `input_audio`
+is unverified and opt-in: it is off by default and is never enabled by
+catalog fetch. Hosts enable it only with `with_input_audio(true)` after
+confirming the target model. The supported modalities differ by
+provider:
 
 | Provider | Images | Files / documents | Audio |
 | --- | --- | --- | --- |
-| `finstack-ai-provider-openrouter` | Yes | Yes | Yes (unverified on Responses; see crate README) |
+| `finstack-ai-provider-openrouter` | Yes | Yes | Opt-in only; Responses `input_audio` is unverified |
 | `finstack-ai-provider-openai` | Yes | Yes | Yes |
 | `finstack-ai-provider-anthropic` | Yes | Yes (documents) | No |
 | `finstack-ai-provider-ollama` | Yes (base64 only) | No | No |

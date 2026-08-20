@@ -17,12 +17,12 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_kernel::{InteractionResolutionCommand, ToolFailurePolicy};
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig, IdGenerationError,
-    InteractionRouter, JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest,
-    LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft, ModelRequestLimits,
-    ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
-    ModelToolCall, RandomSource, ResolvedToolCatalog, RunHandle, RunHandleError, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditError, SecurityAuditEvent,
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
+    IdGenerationError, InteractionRouter, JournalStore, JsonSchemaToolValidatorCompiler,
+    LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft,
+    ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits,
+    ModelTaskConfig, ModelToolCall, RandomSource, ResolvedToolCatalog, RunHandle, RunHandleError,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditError, SecurityAuditEvent,
     SecurityAuditGate, SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink,
     SideEffectClass, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport,
     ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem,
@@ -406,6 +406,7 @@ pub(crate) async fn spawn_owner(
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,
@@ -597,6 +598,63 @@ pub(crate) fn resolve_command(
 ) -> InteractionResolutionCommand {
     InteractionResolutionCommand::try_new(locator(), resolution(interaction_id, approved))
         .expect("command")
+}
+
+pub(crate) fn free_text_schema() -> RawJson {
+    RawJson::parse(
+        r#"{"additionalProperties":false,"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}"#,
+    )
+    .expect("schema")
+}
+
+pub(crate) fn request_with_schema(schema: RawJson) -> InteractionRequest {
+    InteractionRequest::try_new(
+        1,
+        id::<InteractionTag>(501),
+        id::<EffectTag>(502),
+        InteractionKind::FreeText,
+        vec![ContentBlock::Text(
+            TextBlock::try_new("resolve the outstanding interaction").expect("prompt"),
+        )],
+        schema,
+        ComponentRef::new(
+            ComponentId::parse("finstack.policy.approval").expect("component"),
+            Some(Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            }),
+        ),
+        Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        None,
+        None,
+        false,
+        Metadata::empty(),
+    )
+    .expect("request")
+}
+
+pub(crate) fn resolve_command_with_response(
+    interaction_id: InteractionId,
+    response: RawJson,
+) -> InteractionResolutionCommand {
+    InteractionResolutionCommand::try_new(
+        locator(),
+        InteractionResolution::try_new(
+            interaction_id,
+            "resolution-1",
+            principal(),
+            authorization(),
+            response,
+            None::<&str>,
+        )
+        .expect("resolution"),
+    )
+    .expect("command")
 }
 
 pub(crate) struct RecordingSink {

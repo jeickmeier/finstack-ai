@@ -12,9 +12,9 @@ use finstack_ai_kernel::{
 use finstack_ai_kernel::{KernelState, RecordBody};
 use finstack_ai_runtime::testing::ManualDriveAction;
 use finstack_ai_runtime::{
-    Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, Model, ModelDeferral,
-    ModelError, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RunHandleError, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, TextDelta,
+    ApprovalGrantMode, Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, Model,
+    ModelDeferral, ModelError, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RunHandleError,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, TextDelta,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{FixedClock, ScriptedModelAction, ScriptedModelPlan};
@@ -41,6 +41,7 @@ pub(crate) fn owner_run_config() -> RunTaskConfig {
             max_subscribers: 8,
         },
         shutdown_deadline: StdDuration::from_millis(250),
+        approval_grant: ApprovalGrantMode::PerCall,
     }
 }
 

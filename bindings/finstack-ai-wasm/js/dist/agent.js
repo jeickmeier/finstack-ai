@@ -21,7 +21,8 @@ export class Agent {
      * to opt into a host journal. State remains in WASM until an explicit snapshot
      * or inspect. Reload restore is inspect, not continue-the-run.
      *
-     * @param options - Model, optional toolsets, instruction, store, and capabilities.
+     * @param options - Model, optional toolsets, instruction, store, capabilities,
+     * and approval grant.
      * @returns A resolved Agent handle.
      * @throws {FinstackError} When configuration is invalid.
      * @example
@@ -38,6 +39,7 @@ export class Agent {
      *     instructions: ["Always instruction."],
      *     activation: "always",
      *   }],
+     *   approvalGrant: "per_call",
      * });
      * const result = await agent.run("hello");
      * ```
@@ -51,7 +53,7 @@ export class Agent {
                 ? undefined
                 : JSON.stringify(options.capabilities), options.activeCapabilities === undefined
                 ? undefined
-                : JSON.stringify(options.activeCapabilities), (options.contextProviders ?? []).map((provider) => wasmContextProviderHandle(provider)), (options.middleware ?? []).map((middleware) => wasmMiddlewareHandle(middleware)), (options.observers ?? []).map((observer) => wasmObserverHandle(observer)));
+                : JSON.stringify(options.activeCapabilities), (options.contextProviders ?? []).map((provider) => wasmContextProviderHandle(provider)), (options.middleware ?? []).map((middleware) => wasmMiddlewareHandle(middleware)), (options.observers ?? []).map((observer) => wasmObserverHandle(observer)), options.approvalGrant);
             return new Agent(handle);
         }
         catch (error) {

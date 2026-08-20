@@ -148,19 +148,23 @@ impl OpenRouterConfig {
 
     /// Insert one named credential entry and select it.
     ///
-    /// # Panics
+    /// # Arguments
     ///
-    /// Panics only if the reserved `default` credential name is rejected.
-    #[must_use]
-    pub fn with_authentication(self, authentication: Authentication) -> Self {
+    /// * `authentication` - Bearer or API-key credential stored under the
+    ///   reserved `default` name.
+    ///
+    /// # Errors
+    ///
+    /// Returns `openrouter_config_invalid` if the reserved `default`
+    /// credential name is rejected.
+    pub fn with_authentication(self, authentication: Authentication) -> Result<Self, ModelError> {
         let mut store = CredentialStore::empty();
         store
             .insert(DEFAULT_CREDENTIAL_NAME, authentication)
-            .expect("default credential name");
-        self.with_credential_store(
-            store,
-            CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME).expect("default credential name"),
-        )
+            .map_err(|_| config_error("default credential name is invalid"))?;
+        let reference = CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME)
+            .map_err(|_| config_error("default credential name is invalid"))?;
+        Ok(self.with_credential_store(store, reference))
     }
 
     /// Bind an explicit host-supplied credential store and reference.
@@ -230,14 +234,12 @@ impl OpenRouterConfig {
 
     /// Attach a host-supplied media resolver enabling image/audio/file input.
     ///
-    /// Audio input in particular is mapped to the `OpenRouter` Responses
-    /// `input_audio` item type per this crate's [Task 16 brief][`with_input_audio`];
-    /// `OpenRouter`'s support for audio input on the Responses endpoint
-    /// (as opposed to the documented `chat/completions` path) is unverified,
-    /// so hosts should enable [`OpenRouterModelConfig::with_input_audio`]
-    /// only after confirming the target model actually accepts it.
-    ///
-    /// [`with_input_audio`]: OpenRouterModelConfig::with_input_audio
+    /// Image and file input follow catalog `architecture.input_modalities`
+    /// when a catalog is applied. `OpenRouter` Responses `input_audio` is
+    /// unverified and opt-in: it stays off by default and is never enabled
+    /// by catalog fetch. Hosts should call
+    /// [`OpenRouterModelConfig::with_input_audio`] with `true` only after
+    /// confirming the target model accepts audio on `POST /api/v1/responses`.
     #[must_use]
     pub fn with_media_resolver(mut self, resolver: Arc<dyn MediaResolver>) -> Self {
         self.media_resolver = Some(resolver);
@@ -361,28 +363,17 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
     reason = "each flag is an independent, host-toggled capability advertisement"
 )]
 pub struct OpenRouterModelConfig {
-    /// Provider model name (opaque; `:nitro` / `:floor` suffixes are allowed).
-    pub name: ModelName,
-    /// Maximum canonical request bytes.
-    pub hard_input_bytes: u64,
-    /// Total provider context window.
-    pub context_window_tokens: u64,
-    /// Maximum generated tokens.
-    pub max_output_tokens: u64,
-    /// Reserved output margin.
-    pub reserved_output_tokens: u64,
-    /// Conservative framing overhead.
-    pub provider_overhead_tokens: u64,
-    /// Native parallel tool-call support.
-    pub parallel_tool_calls: bool,
-    /// Whether the configured model advertises reasoning content.
-    pub reasoning: bool,
-    /// Whether the configured model accepts image input.
-    pub input_images: bool,
-    /// Whether the configured model accepts audio input.
-    pub input_audio: bool,
-    /// Whether the configured model accepts file input.
-    pub input_files: bool,
+    name: ModelName,
+    hard_input_bytes: u64,
+    context_window_tokens: u64,
+    max_output_tokens: u64,
+    reserved_output_tokens: u64,
+    provider_overhead_tokens: u64,
+    parallel_tool_calls: bool,
+    reasoning: bool,
+    input_images: bool,
+    input_audio: bool,
+    input_files: bool,
 }
 
 impl OpenRouterModelConfig {
@@ -406,7 +397,7 @@ impl OpenRouterModelConfig {
     ///     256,
     /// )
     /// .expect("model");
-    /// assert!(!model.reasoning);
+    /// assert!(!model.reasoning());
     /// ```
     pub fn try_new(
         name: impl AsRef<str>,
@@ -417,17 +408,13 @@ impl OpenRouterModelConfig {
         provider_overhead_tokens: u64,
     ) -> Result<Self, ModelError> {
         let name = ModelName::try_new(name)?;
-        if hard_input_bytes == 0
-            || context_window_tokens == 0
-            || max_output_tokens == 0
-            || reserved_output_tokens == 0
-            || max_output_tokens > context_window_tokens
-            || reserved_output_tokens
-                .checked_add(provider_overhead_tokens)
-                .is_none_or(|total| total > context_window_tokens)
-        {
-            return Err(config_error("provider model context profile is invalid"));
-        }
+        validate_context_profile(
+            hard_input_bytes,
+            context_window_tokens,
+            max_output_tokens,
+            reserved_output_tokens,
+            provider_overhead_tokens,
+        )?;
         Ok(Self {
             name,
             hard_input_bytes,
@@ -441,6 +428,72 @@ impl OpenRouterModelConfig {
             input_audio: false,
             input_files: false,
         })
+    }
+
+    /// Provider model name (opaque; `:nitro` / `:floor` suffixes are allowed).
+    #[must_use]
+    pub const fn name(&self) -> &ModelName {
+        &self.name
+    }
+
+    /// Maximum canonical request bytes.
+    #[must_use]
+    pub const fn hard_input_bytes(&self) -> u64 {
+        self.hard_input_bytes
+    }
+
+    /// Total provider context window.
+    #[must_use]
+    pub const fn context_window_tokens(&self) -> u64 {
+        self.context_window_tokens
+    }
+
+    /// Maximum generated tokens.
+    #[must_use]
+    pub const fn max_output_tokens(&self) -> u64 {
+        self.max_output_tokens
+    }
+
+    /// Reserved output margin.
+    #[must_use]
+    pub const fn reserved_output_tokens(&self) -> u64 {
+        self.reserved_output_tokens
+    }
+
+    /// Conservative framing overhead.
+    #[must_use]
+    pub const fn provider_overhead_tokens(&self) -> u64 {
+        self.provider_overhead_tokens
+    }
+
+    /// Native parallel tool-call support.
+    #[must_use]
+    pub const fn parallel_tool_calls(&self) -> bool {
+        self.parallel_tool_calls
+    }
+
+    /// Whether the configured model advertises reasoning content.
+    #[must_use]
+    pub const fn reasoning(&self) -> bool {
+        self.reasoning
+    }
+
+    /// Whether the configured model accepts image input.
+    #[must_use]
+    pub const fn input_images(&self) -> bool {
+        self.input_images
+    }
+
+    /// Whether the configured model accepts audio input.
+    #[must_use]
+    pub const fn input_audio(&self) -> bool {
+        self.input_audio
+    }
+
+    /// Whether the configured model accepts file input.
+    #[must_use]
+    pub const fn input_files(&self) -> bool {
+        self.input_files
     }
 
     /// Set parallel tool-call capability.
@@ -466,9 +519,11 @@ impl OpenRouterModelConfig {
 
     /// Advertise audio input support for this model only.
     ///
-    /// `OpenRouter`'s support for `input_audio` on the Responses endpoint is
-    /// unverified (see [`OpenRouterConfig::with_media_resolver`]); enable
-    /// only after confirming the target model actually accepts it.
+    /// `OpenRouter` Responses `input_audio` is unverified and opt-in. It stays
+    /// off by default and is never enabled by catalog fetch. Call
+    /// `with_input_audio(true)` only after confirming the target model
+    /// accepts audio on `POST /api/v1/responses`. See
+    /// [`OpenRouterConfig::with_media_resolver`].
     #[must_use]
     pub const fn with_input_audio(mut self, enabled: bool) -> Self {
         self.input_audio = enabled;
@@ -512,7 +567,24 @@ impl OpenRouterModelConfig {
         }
     }
 
-    pub(crate) fn apply_capabilities(&mut self, update: &ModelCapabilities) {
+    /// Overlay advertised capabilities from a host-supplied snapshot.
+    ///
+    /// Re-runs the same context-profile ceiling checks as [`Self::try_new`].
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero/overflowing ceilings or safety margins outside the window.
+    pub(crate) fn apply_capabilities(
+        &mut self,
+        update: &ModelCapabilities,
+    ) -> Result<(), ModelError> {
+        validate_context_profile(
+            update.context_profile.hard_input_bytes,
+            update.context_profile.context_window_tokens,
+            update.context_profile.max_output_tokens,
+            update.context_profile.reserved_output_tokens,
+            update.context_profile.provider_overhead_tokens,
+        )?;
         self.reasoning = update.reasoning;
         self.hard_input_bytes = update.context_profile.hard_input_bytes;
         self.context_window_tokens = update.context_profile.context_window_tokens;
@@ -523,7 +595,29 @@ impl OpenRouterModelConfig {
         self.input_images = update.input.images;
         self.input_audio = update.input.audio;
         self.input_files = update.input.files;
+        Ok(())
     }
+}
+
+fn validate_context_profile(
+    hard_input_bytes: u64,
+    context_window_tokens: u64,
+    max_output_tokens: u64,
+    reserved_output_tokens: u64,
+    provider_overhead_tokens: u64,
+) -> Result<(), ModelError> {
+    if hard_input_bytes == 0
+        || context_window_tokens == 0
+        || max_output_tokens == 0
+        || reserved_output_tokens == 0
+        || max_output_tokens > context_window_tokens
+        || reserved_output_tokens
+            .checked_add(provider_overhead_tokens)
+            .is_none_or(|total| total > context_window_tokens)
+    {
+        return Err(config_error("provider model context profile is invalid"));
+    }
+    Ok(())
 }
 
 pub(crate) fn estimator_ref() -> TokenEstimatorRef {
@@ -565,6 +659,7 @@ mod tests {
         let config = OpenRouterConfig::try_new("https://openrouter.test")
             .expect("config")
             .with_authentication(Authentication::Bearer(secret.clone()))
+            .expect("authentication")
             .with_headers(vec![header.clone()]);
 
         for rendered in [
@@ -611,7 +706,8 @@ mod tests {
         let secret = SecretString::try_new(CANARY).expect("secret");
         let config = OpenRouterConfig::try_new("http://127.0.0.1:8080")
             .expect("local endpoint")
-            .with_authentication(Authentication::Bearer(secret.clone()));
+            .with_authentication(Authentication::Bearer(secret.clone()))
+            .expect("authentication");
         assert_eq!(
             config.header_map().expect_err("HTTP credential").code(),
             crate::error::CONFIG_INVALID
@@ -626,7 +722,8 @@ mod tests {
         let secret = SecretString::try_new(CANARY).expect("secret");
         let config = OpenRouterConfig::try_new("https://openrouter.test")
             .expect("config")
-            .with_authentication(Authentication::ApiKey(secret));
+            .with_authentication(Authentication::ApiKey(secret))
+            .expect("authentication");
         assert_eq!(
             config.header_map().expect_err("api key").code(),
             crate::error::CONFIG_INVALID
@@ -678,5 +775,47 @@ mod tests {
             config.models_url().expect("models").path(),
             "/api/v1/models"
         );
+    }
+
+    #[test]
+    fn apply_capabilities_rejects_invalid_ceilings_without_mutating() {
+        let mut model = OpenRouterModelConfig::try_new(
+            "openai/gpt-test",
+            1_000_000,
+            128_000,
+            4_096,
+            4_096,
+            256,
+        )
+        .expect("model");
+        let original = model.clone();
+        let mut update = model.capabilities();
+        update.context_profile.hard_input_bytes = 0;
+        assert_eq!(
+            model
+                .apply_capabilities(&update)
+                .expect_err("invalid")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+        assert_eq!(model, original);
+    }
+
+    #[test]
+    fn apply_capabilities_can_opt_in_audio() {
+        let mut model = OpenRouterModelConfig::try_new(
+            "openai/gpt-test",
+            1_000_000,
+            128_000,
+            4_096,
+            4_096,
+            256,
+        )
+        .expect("model");
+        assert!(!model.input_audio());
+        let mut update = model.capabilities();
+        update.input.audio = true;
+        model.apply_capabilities(&update).expect("apply");
+        assert!(model.input_audio());
     }
 }

@@ -14,14 +14,15 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_kernel::{PendingModelEffect, RunEvent};
 use finstack_ai_runtime::{
-    CommitCoordinator, ContextProvider, EventBatchConfig, EventFilter, EventHubConfig,
-    EventLagPolicy, EventSubscriptionConfig, LaneAppendIds, LockedModelContextProfile, Model,
-    ModelCapabilities, ModelContextProfileOverride, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits,
-    ModelSettings, ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, Observer, PortFuture,
-    ProgressCoalescing, ReconcileContext, RunHandle, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, SessionError, SessionRuntime, StructuredOutputCapability,
-    ToolStreamLimits, ToolTaskConfig, UuidV7Generator, resolve_model_context_profile,
+    ApprovalGrantMode, CommitCoordinator, ContextProvider, EventBatchConfig, EventFilter,
+    EventHubConfig, EventLagPolicy, EventSubscriptionConfig, LaneAppendIds,
+    LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
+    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
+    ModelWarmupContext, Observer, PortFuture, ProgressCoalescing, ReconcileContext, RunHandle,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SessionError, SessionRuntime,
+    StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig, UuidV7Generator,
+    resolve_model_context_profile,
 };
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -298,10 +299,15 @@ impl Agent {
             .into();
         coordinator.install_context_providers(providers);
         let observer_count = self.resolved.run_plan().observers().len();
+        let approval_grant = self
+            .resolved
+            .spec()
+            .map(|spec| spec.policy.approval_grant)
+            .unwrap_or_default();
         let owner = if self.tools.is_empty() {
             Box::pin(RunTaskOwner::spawn_with_model(
                 coordinator,
-                run_task_config(observer_count),
+                run_task_config(observer_count, approval_grant),
                 model_task_config(),
                 ready_model,
                 prepared.profile.clone(),
@@ -313,7 +319,7 @@ impl Agent {
         } else {
             Box::pin(RunTaskOwner::spawn_with_model_and_tools(
                 coordinator,
-                run_task_config(observer_count),
+                run_task_config(observer_count, approval_grant),
                 model_task_config(),
                 tool_task_config(),
                 ready_model,
@@ -870,7 +876,7 @@ fn text_message(
     })
 }
 
-fn run_task_config(observer_count: usize) -> RunTaskConfig {
+fn run_task_config(observer_count: usize, approval_grant: ApprovalGrantMode) -> RunTaskConfig {
     RunTaskConfig {
         command_capacity: DEFAULT_QUEUE_CAPACITY,
         event_hub: EventHubConfig {
@@ -878,6 +884,7 @@ fn run_task_config(observer_count: usize) -> RunTaskConfig {
             max_subscribers: 4usize.saturating_add(observer_count),
         },
         shutdown_deadline: Duration::from_secs(2),
+        approval_grant,
     }
 }
 

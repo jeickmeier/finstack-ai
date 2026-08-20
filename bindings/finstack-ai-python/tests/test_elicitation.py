@@ -54,7 +54,12 @@ def test_ask_user_parks_and_the_answer_reaches_the_model() -> None:
                 "tool_calls": [
                     {
                         "name": "ask_user",
-                        "arguments": {"prompt": "What is the position limit?"},
+                        "arguments": {
+                            "prompt": "What is the position limit?",
+                            "kind": None,
+                            "options": None,
+                            "response_schema": None,
+                        },
                     }
                 ],
             }
@@ -149,6 +154,120 @@ def test_typed_elicitation_tool_uses_registered_schema() -> None:
 
     assert asyncio.run(exercise()) == "confirmed"
     assert model_calls == 2
+
+
+def test_ask_user_rejects_non_string_answer() -> None:
+    model_calls = 0
+
+    async def model_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        del context, request
+        nonlocal model_calls
+        model_calls += 1
+        return {
+            "text": "",
+            "completion_id": "elicit-reject-1",
+            "tool_calls": [
+                {
+                    "name": "ask_user",
+                    "arguments": {
+                        "prompt": "What is the position limit?",
+                        "kind": None,
+                        "options": None,
+                        "response_schema": None,
+                    },
+                }
+            ],
+        }
+
+    async def exercise() -> None:
+        toolset = finstack_ai.ElicitationToolset(ask_user=True)
+        agent = await finstack_ai.Agent.from_python(
+            finstack_ai.PythonModel(
+                model_callback,
+                component="python.model.elicit-reject",
+                provider="python-fixture",
+                model="python-fixture-model",
+            ),
+            [toolset],
+            "Ask the user when information is missing.",
+        )
+        run = agent.start("size the position")
+        pending = await _wait_for_interaction(run)
+        try:
+            await run.resolve_interaction(_resolution(pending, {"answer": 1}))
+        except finstack_ai.RuntimeError:
+            still = await run.list_interactions()
+            assert still, "invalid resolve must not commit"
+            await run.cancel()
+            return
+        raise AssertionError("non-string free-text answer must be rejected")
+
+    asyncio.run(exercise())
+    assert model_calls == 1
+
+
+def test_typed_elicitation_rejects_string_answer() -> None:
+    model_calls = 0
+
+    async def model_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        del context, request
+        nonlocal model_calls
+        model_calls += 1
+        return {
+            "text": "",
+            "completion_id": "typed-reject-1",
+            "tool_calls": [
+                {
+                    "name": "confirm_trade_params",
+                    "arguments": {"context": "Buy 100 AAPL @ market."},
+                }
+            ],
+        }
+
+    async def exercise() -> None:
+        toolset = finstack_ai.ElicitationToolset(
+            tools=[
+                {
+                    "name": "confirm_trade_params",
+                    "title": "Confirm trade parameters",
+                    "description": "Ask the operator to confirm trade parameters.",
+                    "prompt": "Please confirm the trade parameters.",
+                    "kind": "form",
+                    "response_schema": {
+                        "type": "object",
+                        "properties": {"confirmed": {"type": "boolean"}},
+                        "required": ["confirmed"],
+                    },
+                }
+            ]
+        )
+        agent = await finstack_ai.Agent.from_python(
+            finstack_ai.PythonModel(
+                model_callback,
+                component="python.model.typed-elicit-reject",
+                provider="python-fixture",
+                model="python-fixture-model",
+            ),
+            [toolset],
+            "Confirm before executing.",
+        )
+        run = agent.start("buy 100 AAPL")
+        pending = await _wait_for_interaction(run)
+        try:
+            await run.resolve_interaction(_resolution(pending, {"answer": "nope"}))
+        except finstack_ai.RuntimeError:
+            still = await run.list_interactions()
+            assert still, "invalid resolve must not commit"
+            await run.cancel()
+            return
+        raise AssertionError("typed tool string answer must be rejected")
+
+    asyncio.run(exercise())
+    assert model_calls == 1
 
 
 def test_elicitation_toolset_requires_at_least_one_tool() -> None:

@@ -47,6 +47,8 @@ struct Architecture {
 /// Models without a usable `context_length` are skipped. `max_output_tokens`
 /// prefers `top_provider.max_completion_tokens`, falling back to one quarter
 /// of the context window, and is always clamped inside the window.
+/// Image and file input follow `architecture.input_modalities`. Audio does
+/// not: hosts opt in via [`OpenRouterModelConfig::with_input_audio`].
 ///
 /// # Errors
 ///
@@ -95,11 +97,13 @@ pub fn model_configs_from_catalog_json(
             // fails closed if every entry turns out unusable.
             continue;
         };
+        // Images and files follow catalog architecture. Audio stays off:
+        // OpenRouter's Responses `input_audio` support is unverified, so hosts
+        // opt in explicitly via [`OpenRouterModelConfig::with_input_audio`].
         let config = config
             .with_parallel_tool_calls(supports("tools"))
             .with_reasoning(supports("reasoning") || supports("include_reasoning"))
             .with_input_images(modality("image"))
-            .with_input_audio(modality("audio"))
             .with_input_files(modality("file"));
         configs.push(config);
     }
@@ -150,22 +154,41 @@ mod tests {
             2,
             "the malformed (empty-id) entry must be skipped, not abort the parse"
         );
-        assert_eq!(configs[0].name.as_str(), "openai/gpt-5");
-        assert_eq!(configs[0].context_window_tokens, 400_000);
-        assert_eq!(configs[0].max_output_tokens, 128_000);
-        assert!(configs[0].parallel_tool_calls);
-        assert!(configs[0].reasoning);
-        assert!(configs[0].input_images && !configs[0].input_audio);
-        assert_eq!(configs[1].name.as_str(), "mistral/basic");
-        assert_eq!(configs[1].max_output_tokens, 32_768 / 4);
-        assert!(!configs[1].parallel_tool_calls);
-        assert!(!configs[1].reasoning);
+        assert_eq!(configs[0].name().as_str(), "openai/gpt-5");
+        assert_eq!(configs[0].context_window_tokens(), 400_000);
+        assert_eq!(configs[0].max_output_tokens(), 128_000);
+        assert!(configs[0].parallel_tool_calls());
+        assert!(configs[0].reasoning());
+        assert!(configs[0].input_images() && !configs[0].input_audio());
+        assert_eq!(configs[1].name().as_str(), "mistral/basic");
+        assert_eq!(configs[1].max_output_tokens(), 32_768 / 4);
+        assert!(!configs[1].parallel_tool_calls());
+        assert!(!configs[1].reasoning());
         for config in &configs {
             assert!(
-                config.reserved_output_tokens + config.provider_overhead_tokens
-                    <= config.context_window_tokens
+                config.reserved_output_tokens() + config.provider_overhead_tokens()
+                    <= config.context_window_tokens()
             );
         }
+    }
+
+    #[test]
+    fn catalog_does_not_enable_audio_from_architecture() {
+        let body = br#"{
+          "data": [{
+            "id": "google/gemini-audio",
+            "context_length": 32768,
+            "architecture": {"input_modalities": ["text", "image", "audio", "file"]}
+          }]
+        }"#;
+        let configs = model_configs_from_catalog_json(body, 1_000_000).expect("configs");
+        assert_eq!(configs.len(), 1);
+        assert!(configs[0].input_images());
+        assert!(configs[0].input_files());
+        assert!(
+            !configs[0].input_audio(),
+            "catalog audio must stay off; hosts opt in via with_input_audio"
+        );
     }
 
     #[test]

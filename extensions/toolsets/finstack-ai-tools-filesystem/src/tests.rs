@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::future::Future;
 #[cfg(unix)]
 use std::sync::Barrier;
@@ -5,13 +6,15 @@ use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     ArtifactId, ArtifactRef, BlobRef, Digest, EffectId, EffectOutputContract, EffectOutputKind,
-    LaneId, OperationLocator, PrincipalRef, RetrySafety, RunId, SessionId, ToolBatchId,
+    LaneId, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolExecutionMode, ToolFailurePolicy,
 };
 use finstack_ai_runtime::{
-    ArtifactError, ArtifactScope, ArtifactStore, AuthorizationContext, CancellationSignal,
-    PendingToolEffect, PortFuture, ReconcileContext, RunCallContext, SideEffectClass,
-    ToolReconcileResult, ToolStreamItem, Toolset,
+    ApprovalState, ArtifactError, ArtifactScope, ArtifactStore, AuthorizationContext,
+    CancellationSignal, JsonSchemaToolValidatorCompiler, PendingToolEffect, PortFuture,
+    ReconcileContext, ResolvedToolCatalog, RunCallContext, SideEffectClass, ToolCatalogPlan,
+    ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolStreamItem, Toolset,
+    ToolsetRegistration,
 };
 use futures_util::StreamExt;
 use tempfile::TempDir;
@@ -144,6 +147,74 @@ fn specifications_are_generated_once_and_reused() {
     assert_eq!(write.execution, ToolExecutionMode::Sequential);
     assert_eq!(edit.execution, ToolExecutionMode::Sequential);
     assert_eq!(read.execution, ToolExecutionMode::Parallel);
+}
+
+fn host_allow_catalog(toolset: Arc<dyn Toolset>) -> ResolvedToolCatalog {
+    let policies = toolset
+        .tools()
+        .iter()
+        .map(|spec| {
+            (
+                spec.id.clone(),
+                ToolExecutionPolicy {
+                    failure_policy: ToolFailurePolicy::ReturnToModel,
+                    approval: ToolPolicyDecision::Allow,
+                    max_concurrency: 1,
+                },
+            )
+        })
+        .collect();
+    ResolvedToolCatalog::try_new(
+        [ToolsetRegistration {
+            toolset,
+            policies,
+            components: BTreeMap::new(),
+        }],
+        &BTreeMap::new(),
+        &JsonSchemaToolValidatorCompiler,
+    )
+    .expect("catalog")
+}
+
+fn unpaid_plan(catalog: &ResolvedToolCatalog, name: &str, args: &[u8]) -> ToolCatalogPlan {
+    catalog.decide_plan(
+        ToolCallBlock::try_new(
+            ToolCallId::from_bytes([9; 16]),
+            name,
+            RawJson::parse(args).expect("args"),
+        )
+        .expect("call"),
+        None,
+        None,
+        ApprovalState::Unpaid,
+    )
+}
+
+#[test]
+fn policy_write_and_edit_require_approval_under_host_allow() {
+    let root = TempDir::new().expect("root");
+    let toolset = Arc::new(FileSystemToolset::try_new(root.path()).expect("filesystem"));
+    let catalog = host_allow_catalog(toolset);
+    assert_eq!(
+        unpaid_plan(
+            &catalog,
+            "filesystem_write",
+            br#"{"path":"out.txt","content":"hi"}"#,
+        ),
+        ToolCatalogPlan::RequireApproval
+    );
+    assert_eq!(
+        unpaid_plan(
+            &catalog,
+            "filesystem_edit",
+            br#"{"path":"out.txt","old":"a","new":"b"}"#,
+        ),
+        ToolCatalogPlan::RequireApproval
+    );
+    assert!(matches!(
+        unpaid_plan(&catalog, "filesystem_read", br#"{"path":"out.txt"}"#),
+        ToolCatalogPlan::Ready(finstack_ai_kernel::ToolCallPlan::Execute(_))
+    ));
 }
 
 #[tokio::test]

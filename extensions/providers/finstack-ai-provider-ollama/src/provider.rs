@@ -6,12 +6,12 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use finstack_ai_kernel::{ContentBlock, ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_runtime::{
-    MediaResolver, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelStreamItem,
-    ModelTokenEstimate, OllamaChatAssembly, OllamaReplayEntry, ReconcileContext, ResolvedMedia,
-    StreamNormError, StreamNormKind,
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, OllamaChatAssembly,
+    OllamaReplayEntry, ReconcileContext, ResolveDraftMediaError, StreamNormError, StreamNormKind,
+    resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -144,48 +144,14 @@ impl OllamaProvider {
     }
 }
 
-/// Resolve every distinct media block in `draft`, bounding both each
-/// resolved payload and the running aggregate across the draft by
-/// `max_stream_bytes` (ADR-049) so a caller cannot smuggle an oversized
-/// request past per-blob checks by splitting it across many blobs.
-async fn resolve_draft_media(
-    media_resolver: Option<&Arc<dyn MediaResolver>>,
-    draft: &ModelRequestDraft,
-    max_stream_bytes: usize,
-) -> Result<BTreeMap<Arc<str>, ResolvedMedia>, ModelError> {
-    let mut media_by_id = BTreeMap::new();
-    let mut aggregate_bytes: usize = 0;
-    for message in draft.messages.iter() {
-        for block in message.content() {
-            let ContentBlock::Image(media) = block else {
-                continue;
-            };
-            let id: Arc<str> = Arc::from(media.blob().id());
-            if media_by_id.contains_key(&id) {
-                continue;
-            }
-            let Some(media_resolver) = media_resolver else {
-                return Err(crate::error::request_error(
-                    "media content requires a configured media resolver",
-                ));
-            };
-            let payload = media_resolver
-                .resolve(media.blob())
-                .await
-                .map_err(map_resolve)?;
-            if let ResolvedMedia::Bytes { bytes, .. } = &payload {
-                if bytes.len() > max_stream_bytes {
-                    return Err(crate::error::stream_limit_error());
-                }
-                aggregate_bytes = aggregate_bytes.saturating_add(bytes.len());
-                if aggregate_bytes > max_stream_bytes {
-                    return Err(crate::error::stream_limit_error());
-                }
-            }
-            media_by_id.insert(id, payload);
+fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
+    match error {
+        ResolveDraftMediaError::MissingResolver => {
+            crate::error::request_error("media content requires a configured media resolver")
         }
+        ResolveDraftMediaError::Resolve(inner) => map_resolve(inner),
+        ResolveDraftMediaError::Limit => crate::error::stream_limit_error(),
     }
-    Ok(media_by_id)
 }
 
 fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
@@ -305,7 +271,8 @@ impl Model for OllamaProvider {
             let model = model?;
             let resolved_media =
                 resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes)
-                    .await?;
+                    .await
+                    .map_err(map_draft_media)?;
             let prepared = ChatRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -541,6 +508,9 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 
 #[cfg(test)]
 mod tests {
+    use finstack_ai_kernel::ContentBlock;
+    use finstack_ai_runtime::{MediaResolver, ResolvedMedia};
+
     use super::*;
 
     #[test]

@@ -11,9 +11,9 @@ use tokio::sync::Notify;
 
 use super::*;
 use crate::{
-    CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, LoadedSession, PortFuture,
-    RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth,
+    ApprovalGrantMode, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, LoadedSession,
+    PortFuture, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 
 struct BlockingStore {
@@ -163,6 +163,7 @@ fn bounded_channel_applies_backpressure() {
                     max_subscribers: 4,
                 },
                 shutdown_deadline: Duration::from_millis(100),
+                approval_grant: ApprovalGrantMode::PerCall,
             },
         )
         .expect("owner");
@@ -208,6 +209,7 @@ fn shutdown_is_idempotent_and_handle_drop_does_not_cancel() {
                     max_subscribers: 4,
                 },
                 shutdown_deadline: Duration::from_millis(100),
+                approval_grant: ApprovalGrantMode::PerCall,
             },
         )
         .expect("owner");
@@ -242,6 +244,7 @@ fn shutdown_deadline_aborts_active_store_wait() {
                     max_subscribers: 4,
                 },
                 shutdown_deadline: Duration::from_millis(5),
+                approval_grant: ApprovalGrantMode::PerCall,
             },
         )
         .expect("owner");
@@ -277,6 +280,7 @@ fn repeated_idle_owners_join_every_owned_task_without_abort() {
                         max_subscribers: 1,
                     },
                     shutdown_deadline: Duration::from_millis(100),
+                    approval_grant: ApprovalGrantMode::PerCall,
                 },
             )
             .expect("owner");

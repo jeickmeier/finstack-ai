@@ -33,15 +33,46 @@ pub struct ModelRequestLimits {
 }
 
 /// Approval policy floor carried as model-visible tool metadata.
+///
+/// [`ApprovalRequirement::Policy`] is a mandatory floor on every resolved
+/// catalog. Host `Allow` cannot weaken it. The floor applies to catalogs
+/// assembled by `Agent` constructors, `Agent::builder`, workflow
+/// sessions, and any other host that registers tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalRequirement {
-    /// Defer to resolved host policy.
+    /// Mandatory approval floor on every resolved catalog.
+    ///
+    /// Host `Allow` cannot weaken this requirement. The floor is not
+    /// limited to `Agent` constructors.
     Policy,
     /// Approval is mandatory and cannot be weakened.
     Required,
     /// No tool-declared approval floor; stricter policy may still apply.
     NotRequired,
+}
+
+/// How a run parks and releases paid-tool approvals before a batch opens.
+///
+/// `PerCall` is the default: one park per unpaid [`ApprovalRequirement::Policy`]
+/// or [`ApprovalRequirement::Required`] call. `InformedBatch` parks once for
+/// every remaining unpaid paid tool.
+///
+/// # Examples
+///
+/// ```
+/// use finstack_ai_runtime::ApprovalGrantMode;
+///
+/// assert_eq!(ApprovalGrantMode::default(), ApprovalGrantMode::PerCall);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalGrantMode {
+    /// Park once per unpaid paid tool call.
+    #[default]
+    PerCall,
+    /// Park once listing every unpaid paid tool call.
+    InformedBatch,
 }
 
 /// Data-only tool approval metadata.

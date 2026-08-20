@@ -290,7 +290,22 @@ impl crate::Toolset for FixtureToolset {
 }
 
 fn catalog() -> ResolvedToolCatalog {
-    let specs: Arc<[ToolSpec]> = TOOL_NAMES.iter().copied().map(tool_spec).collect();
+    catalog_from_specs(TOOL_NAMES.iter().copied().map(tool_spec).collect())
+}
+
+fn catalog_for(entries: &[(&str, ApprovalRequirement)]) -> ResolvedToolCatalog {
+    let specs: Arc<[ToolSpec]> = entries
+        .iter()
+        .map(|(name, requirement)| {
+            let mut spec = tool_spec(name);
+            spec.approval.requirement = *requirement;
+            spec
+        })
+        .collect();
+    catalog_from_specs(specs)
+}
+
+fn catalog_from_specs(specs: Arc<[ToolSpec]>) -> ResolvedToolCatalog {
     let policies = specs
         .iter()
         .map(|spec| {
@@ -388,10 +403,14 @@ fn retain(names: &[&str]) -> StageOutcome {
 // -- driving a coordinator to BeforeToolBatch ---------------------------
 
 fn tool_call(ordinal: u64, name: &str) -> ToolCallBlock {
+    tool_call_with(ordinal, name, b"{}")
+}
+
+fn tool_call_with(ordinal: u64, name: &str, arguments: &[u8]) -> ToolCallBlock {
     ToolCallBlock::try_new(
         fixed_id(ordinal),
         name,
-        RawJson::parse(b"{}").expect("arguments"),
+        RawJson::parse(arguments).expect("arguments"),
     )
     .expect("tool call")
 }
@@ -409,6 +428,18 @@ fn model_output_contract() -> EffectOutputContract {
 fn coordinator_at_before_tool_batch(
     store: &Arc<MemoryStore>,
     names: &[&str],
+    deadline: Option<Timestamp>,
+) -> CommitCoordinator {
+    let calls = names
+        .iter()
+        .map(|name| (*name, b"{}".as_slice()))
+        .collect::<Vec<_>>();
+    coordinator_at_before_tool_batch_calls(store, &calls, deadline)
+}
+
+fn coordinator_at_before_tool_batch_calls(
+    store: &Arc<MemoryStore>,
+    calls: &[(&str, &[u8])],
     deadline: Option<Timestamp>,
 ) -> CommitCoordinator {
     let mut coordinator = CommitCoordinator::new(Arc::clone(store) as Arc<dyn JournalStore>);
@@ -475,7 +506,7 @@ fn coordinator_at_before_tool_batch(
         }),
     ))
     .expect("model request");
-    settle_model_with_tool_calls(&mut coordinator, names);
+    settle_model_with_tool_calls(&mut coordinator, calls);
     block_on(coordinator.submit(
         env(1_500, &[609], &[], &[], &[], &[], &[], 606),
         KernelInput::StageSettled(StageSettled {
@@ -497,24 +528,26 @@ fn coordinator_at_before_tool_batch(
 
 /// Settle the outstanding model effect with an assistant message carrying
 /// one tool call per name, ordinals 301, 302, ... in source order.
-fn settle_model_with_tool_calls(coordinator: &mut CommitCoordinator, names: &[&str]) {
+fn settle_model_with_tool_calls(coordinator: &mut CommitCoordinator, calls: &[(&str, &[u8])]) {
     let pending = coordinator
         .state()
         .pending_model_effect
         .as_ref()
         .expect("pending model effect")
         .clone();
-    let call_ordinals = (0..names.len())
+    let call_ordinals = (0..calls.len())
         .map(|index| 301 + u64::try_from(index).expect("index"))
         .collect::<Vec<_>>();
     let mut content = vec![ContentBlock::Text(
         TextBlock::try_new("calling").expect("text"),
     )];
     content.extend(
-        names
+        calls
             .iter()
             .zip(&call_ordinals)
-            .map(|(name, ordinal)| ContentBlock::ToolCall(tool_call(*ordinal, name))),
+            .map(|((name, arguments), ordinal)| {
+                ContentBlock::ToolCall(tool_call_with(*ordinal, name, arguments))
+            }),
     );
     let assistant = Message::try_new(
         fixed_id(617),

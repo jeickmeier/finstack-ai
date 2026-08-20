@@ -22,13 +22,13 @@ use crate::event_hub::{
 };
 use crate::host_driver;
 use crate::{
-    Clock, InputCapabilities, JournalStore, LoadRequest, LoadedSession, Model, ModelCapabilities,
-    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelProgress,
-    ModelRequest, ModelRequestDraft, ModelResponse, ModelSettings, ModelStreamItem,
-    ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, PortFuture, RandomSource,
-    RunTaskConfig, SameIdentityRetryPolicy, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth, StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    Usage, resolve_model_context_profile,
+    ApprovalGrantMode, Clock, InputCapabilities, JournalStore, LoadRequest, LoadedSession, Model,
+    ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream,
+    ModelName, ModelProgress, ModelRequest, ModelRequestDraft, ModelResponse, ModelSettings,
+    ModelStreamItem, ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, PortFuture,
+    RandomSource, RunTaskConfig, SameIdentityRetryPolicy, SnapshotReceipt, SnapshotRequest,
+    StoreError, StoreHealth, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
+    TokenEstimatorSource, Usage, resolve_model_context_profile,
 };
 
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -377,6 +377,7 @@ fn run_config() -> RunTaskConfig {
             max_subscribers: 4,
         },
         shutdown_deadline: Duration::from_millis(50),
+        approval_grant: ApprovalGrantMode::PerCall,
     }
 }
 

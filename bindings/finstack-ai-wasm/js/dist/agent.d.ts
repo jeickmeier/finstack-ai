@@ -42,6 +42,15 @@ export interface ActiveCapability {
     source: "always" | "application" | "model";
 }
 /**
+ * How a run parks and releases paid-tool approvals.
+ *
+ * Maps onto Rust `RunPolicy.approval_grant`. Defaults to `per_call`: one
+ * park per unpaid Policy or Required tool call. `informed_batch` parks
+ * once listing every unpaid paid tool. Neither mode relaxes the `Policy`
+ * catalog floor.
+ */
+export type ApprovalGrantMode = "per_call" | "informed_batch";
+/**
  * Options for {@link Agent.create}.
  *
  * Host objects inherit page authority and are not a sandbox.
@@ -74,6 +83,10 @@ export interface AgentOptions {
     middleware?: JsMiddleware[];
     /** Optional trusted observer wrappers. */
     observers?: JsObserver[];
+    /**
+     * Optional paid-tool approval grant mode. Defaults to `per_call`.
+     */
+    approvalGrant?: ApprovalGrantMode;
 }
 /**
  * Provisional inspect phase for a stored session.
@@ -112,7 +125,8 @@ export declare class Agent {
      * to opt into a host journal. State remains in WASM until an explicit snapshot
      * or inspect. Reload restore is inspect, not continue-the-run.
      *
-     * @param options - Model, optional toolsets, instruction, store, and capabilities.
+     * @param options - Model, optional toolsets, instruction, store, capabilities,
+     * and approval grant.
      * @returns A resolved Agent handle.
      * @throws {FinstackError} When configuration is invalid.
      * @example
@@ -129,6 +143,7 @@ export declare class Agent {
      *     instructions: ["Always instruction."],
      *     activation: "always",
      *   }],
+     *   approvalGrant: "per_call",
      * });
      * const result = await agent.run("hello");
      * ```

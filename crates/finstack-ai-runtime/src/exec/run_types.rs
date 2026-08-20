@@ -6,7 +6,10 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::coordinator::{CommitCoordinatorError, CommitOutcome};
-use crate::{EventHubConfig, Metadata, ModelStreamAssembler, ModelStreamLimits, ToolStreamLimits};
+use crate::{
+    ApprovalGrantMode, EventHubConfig, Metadata, ModelStreamAssembler, ModelStreamLimits,
+    ToolStreamLimits,
+};
 
 /// Observable lifecycle of one owned runtime task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +67,8 @@ pub struct RunTaskConfig {
     pub event_hub: EventHubConfig,
     /// Maximum time the owner waits before aborting owned tasks.
     pub shutdown_deadline: Duration,
+    /// How paid-tool approvals are parked and released.
+    pub approval_grant: ApprovalGrantMode,
 }
 
 impl RunTaskConfig {

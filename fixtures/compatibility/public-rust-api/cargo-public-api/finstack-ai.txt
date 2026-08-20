@@ -1,5 +1,6 @@
 pub mod finstack_ai
 pub use finstack_ai::ActiveCapability
+pub use finstack_ai::ApprovalGrantMode
 pub use finstack_ai::CapabilityActivationSource
 pub use finstack_ai::ExternalIdentityKey
 pub use finstack_ai::ExternalIdentityMap
@@ -1429,6 +1430,7 @@ impl core::default::Default for finstack_ai::LinkedAgentPorts
 pub fn finstack_ai::LinkedAgentPorts::default() -> finstack_ai::LinkedAgentPorts
 pub struct finstack_ai::LinkedCommon
 pub finstack_ai::LinkedCommon::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
+pub finstack_ai::LinkedCommon::approval_grant: finstack_ai_runtime::ports::model::request::ApprovalGrantMode
 pub finstack_ai::LinkedCommon::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
 pub finstack_ai::LinkedCommon::child_runs: finstack_ai::ChildRunPolicy
 pub finstack_ai::LinkedCommon::instruction: core::option::Option<alloc::string::String>
@@ -1735,6 +1737,7 @@ pub fn finstack_ai::ResolvedRunPlan::toolsets(&self) -> &[finstack_ai::ResolvedC
 impl core::clone::Clone for finstack_ai::ResolvedRunPlan
 pub fn finstack_ai::ResolvedRunPlan::clone(&self) -> finstack_ai::ResolvedRunPlan
 pub struct finstack_ai::RunPolicy
+pub finstack_ai::RunPolicy::approval_grant: finstack_ai_runtime::ports::model::request::ApprovalGrantMode
 pub finstack_ai::RunPolicy::child_runs: finstack_ai::ChildRunPolicy
 pub finstack_ai::RunPolicy::run_override_allowlist: alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ComponentId>
 impl core::clone::Clone for finstack_ai::RunPolicy

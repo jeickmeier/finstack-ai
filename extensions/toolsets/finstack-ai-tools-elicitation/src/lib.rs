@@ -25,17 +25,19 @@
 )]
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, ContentBlock, EffectId, ErrorCategory, InteractionId,
-    InteractionKind, InteractionRequest, Metadata, RawJson, RetrySafety, TextBlock,
-    ToolExecutionMode, ToolId, ValidatedToolCall, Version,
+    InteractionKind, InteractionRequest, Metadata, RawJson, RawJsonError, RetrySafety, TextBlock,
+    ToolExecutionMode, ToolId, ValidatedToolCall, ValidationOutcome, Version,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, TOOL_INTERACTION_REQUIRED,
-    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec,
-    ToolStreamItem, Toolset, ToolsetDescriptor,
+    ApprovalMetadata, ApprovalRequirement, JsonSchemaToolValidatorCompiler, PortFuture,
+    SideEffectClass, TOOL_INTERACTION_REQUIRED, ToolCallContext, ToolDeferralSupport, ToolError,
+    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, ToolValidatorCompiler, Toolset,
+    ToolsetDescriptor,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -51,6 +53,8 @@ const MAX_RESULT_BYTES: u64 = 65_536;
 pub const ELICITATION_INPUT_REQUIRED: &str = TOOL_INTERACTION_REQUIRED;
 /// Stable invalid-elicitation-argument code.
 pub const ELICITATION_INVALID_ARGUMENTS: &str = "elicitation_invalid_arguments";
+/// Stable limit code when the park request cannot fit in error metadata.
+pub const ELICITATION_REQUEST_TOO_LARGE: &str = "elicitation_request_too_large";
 
 /// Elicitation toolset failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -192,7 +196,7 @@ impl ElicitationToolset {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum AskUserKind {
     FreeText,
@@ -239,7 +243,15 @@ impl Toolset for ElicitationToolset {
             // forbid unknown properties, so a present `answer` key can only
             // come from the resolution overlay.
             if let Some(answer) = resumed_answer(call.call.arguments()) {
-                return completed_answer(&answer);
+                let schema = if ask_user && tool_name == ASK_USER_NAME {
+                    ask_user_wrapped_schema(call.call.arguments())?
+                } else if let Some(tool) = typed.iter().find(|tool| tool.name.as_ref() == tool_name)
+                {
+                    tool.response_schema.clone()
+                } else {
+                    return Err(invalid_arguments("elicitation tool is not registered"));
+                };
+                return completed_answer(&answer, &schema);
             }
             let request = if ask_user && tool_name == ASK_USER_NAME {
                 ask_user_request(ctx.run.effect_id, call.call.arguments(), component)?
@@ -258,12 +270,27 @@ fn resumed_answer(arguments: &RawJson) -> Option<serde_json::Value> {
     value.get("answer").cloned()
 }
 
-fn completed_answer(answer: &serde_json::Value) -> Result<ToolEventStream, ToolError> {
+fn completed_answer(
+    answer: &serde_json::Value,
+    schema: &RawJson,
+) -> Result<ToolEventStream, ToolError> {
     let output = serde_json_canonicalizer::to_vec(&serde_json::json!({ "answer": answer }))
         .map_err(|_| invalid_arguments("elicitation answer is not json"))?;
+    let output = RawJson::parse(output)
+        .map_err(|_| invalid_arguments("elicitation answer normalization failed"))?;
+    let validator = JsonSchemaToolValidatorCompiler
+        .compile(schema, &BTreeMap::new())
+        .map_err(|_| invalid_arguments("elicitation response schema is invalid"))?;
+    if matches!(
+        validator.validate(&output),
+        ValidationOutcome::Invalid { .. }
+    ) {
+        return Err(invalid_arguments(
+            "elicitation answer does not satisfy the response schema",
+        ));
+    }
     let result = ToolResult {
-        output: RawJson::parse(output)
-            .map_err(|_| invalid_arguments("elicitation answer normalization failed"))?,
+        output,
         is_error: false,
     };
     Ok(Box::pin(stream::once(async move {
@@ -290,16 +317,20 @@ pub fn interaction_request_from_tool_error(error: &ToolError) -> Option<Interact
     serde_json::from_slice(error.metadata().as_bytes()).ok()
 }
 
-fn ask_user_request(
-    effect_id: EffectId,
-    arguments: &RawJson,
-    component: ComponentRef,
-) -> Result<InteractionRequest, ToolError> {
-    let arguments: AskUserArguments = serde_json::from_slice(arguments.as_bytes())
+fn ask_user_arguments_ignoring_answer(arguments: &RawJson) -> Result<AskUserArguments, ToolError> {
+    let mut value: serde_json::Value = serde_json::from_slice(arguments.as_bytes())
         .map_err(|_| invalid_arguments("ask_user arguments are invalid"))?;
-    let kind = arguments.kind.unwrap_or(AskUserKind::FreeText);
-    let (interaction_kind, schema_value) = match kind {
-        AskUserKind::FreeText => (
+    if let Some(object) = value.as_object_mut() {
+        object.remove("answer");
+    }
+    serde_json::from_value(value).map_err(|_| invalid_arguments("ask_user arguments are invalid"))
+}
+
+fn ask_user_wrapped_schema_value(
+    arguments: &AskUserArguments,
+) -> Result<(InteractionKind, serde_json::Value), ToolError> {
+    match arguments.kind.unwrap_or(AskUserKind::FreeText) {
+        AskUserKind::FreeText => Ok((
             InteractionKind::FreeText,
             serde_json::json!({
                 "type": "object",
@@ -307,13 +338,14 @@ fn ask_user_request(
                 "properties": {"answer": {"type": "string"}},
                 "required": ["answer"]
             }),
-        ),
+        )),
         AskUserKind::Choice => {
             let options = arguments
                 .options
+                .clone()
                 .filter(|options| !options.is_empty())
                 .ok_or_else(|| invalid_arguments("choice elicitation requires options"))?;
-            (
+            Ok((
                 InteractionKind::Choice,
                 serde_json::json!({
                     "type": "object",
@@ -321,20 +353,36 @@ fn ask_user_request(
                     "properties": {"answer": {"type": "string", "enum": options}},
                     "required": ["answer"]
                 }),
-            )
+            ))
         }
         AskUserKind::Form => {
             let schema = arguments
                 .response_schema
+                .clone()
                 .filter(serde_json::Value::is_object)
                 .ok_or_else(|| invalid_arguments("form elicitation requires a response schema"))?;
-            (InteractionKind::Form, wrap_answer_schema(&schema))
+            Ok((InteractionKind::Form, wrap_answer_schema(&schema)))
         }
-    };
+    }
+}
+
+fn ask_user_wrapped_schema(arguments: &RawJson) -> Result<RawJson, ToolError> {
+    let parsed = ask_user_arguments_ignoring_answer(arguments)?;
+    let (_, schema_value) = ask_user_wrapped_schema_value(&parsed)?;
+    canonical_schema(&schema_value)
+}
+
+fn ask_user_request(
+    effect_id: EffectId,
+    arguments: &RawJson,
+    component: ComponentRef,
+) -> Result<InteractionRequest, ToolError> {
+    let parsed = ask_user_arguments_ignoring_answer(arguments)?;
+    let (interaction_kind, schema_value) = ask_user_wrapped_schema_value(&parsed)?;
     build_request(
         effect_id,
         interaction_kind,
-        prompt_blocks(&arguments.prompt, None)?,
+        prompt_blocks(&parsed.prompt, None)?,
         canonical_schema(&schema_value)?,
         component,
     )
@@ -503,7 +551,8 @@ fn validate_call_context(ctx: &ToolCallContext, call: &ValidatedToolCall) -> Res
     if !call
         .tool_id
         .as_str()
-        .starts_with(&format!("{TOOL_ID_PREFIX}."))
+        .strip_prefix(TOOL_ID_PREFIX)
+        .is_some_and(|rest| rest.starts_with('.'))
     {
         return Err(invalid_arguments("elicitation call identity is invalid"));
     }
@@ -522,19 +571,29 @@ fn validate_call_context(ctx: &ToolCallContext, call: &ValidatedToolCall) -> Res
     Ok(())
 }
 
+fn park_request_metadata(request: &InteractionRequest) -> Result<Metadata, ToolError> {
+    let bytes = serde_json::to_vec(request)
+        .map_err(|_| invalid_arguments("elicitation request is not json"))?;
+    Metadata::parse(bytes).map_err(|error| match error {
+        RawJsonError::SourceTooLarge { .. } | RawJsonError::CanonicalTooLarge { .. } => {
+            request_too_large()
+        }
+        _ => invalid_arguments("elicitation request metadata is invalid"),
+    })
+}
+
 fn interaction_required_error(request: &InteractionRequest) -> ToolError {
-    let metadata = serde_json::to_vec(request)
-        .ok()
-        .and_then(|bytes| Metadata::parse(bytes).ok())
-        .unwrap_or_else(Metadata::empty);
-    ToolError::try_new(
-        ELICITATION_INPUT_REQUIRED,
-        ErrorCategory::Tool,
-        false,
-        "elicitation tool requested user input",
-        metadata,
-    )
-    .unwrap_or_else(Into::into)
+    match park_request_metadata(request) {
+        Ok(metadata) => ToolError::try_new(
+            ELICITATION_INPUT_REQUIRED,
+            ErrorCategory::Tool,
+            false,
+            "elicitation tool requested user input",
+            metadata,
+        )
+        .unwrap_or_else(Into::into),
+        Err(error) => error,
+    }
 }
 
 fn invalid_arguments(message: &'static str) -> ToolError {
@@ -543,6 +602,17 @@ fn invalid_arguments(message: &'static str) -> ToolError {
         ErrorCategory::Validation,
         false,
         message,
+        Metadata::empty(),
+    )
+    .unwrap_or_else(Into::into)
+}
+
+fn request_too_large() -> ToolError {
+    ToolError::try_new(
+        ELICITATION_REQUEST_TOO_LARGE,
+        ErrorCategory::Limit,
+        false,
+        "elicitation request exceeds metadata limits",
         Metadata::empty(),
     )
     .unwrap_or_else(Into::into)

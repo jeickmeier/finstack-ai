@@ -36,7 +36,9 @@ constructors as Python. wasm-host methods exist; fail-closed is a Rust
 platform error (`agent_run_unsupported_plan`), not a missing method.
 Do not read environment variables. `Agent.reResolve()` returns a new
 lock from reconstructed catalogs; in-flight runs keep the previous
-composition.
+composition. Optional `approvalGrant` on `Agent.create` selects
+`per_call` (default) or `informed_batch`. `Policy` remains a mandatory
+approval floor on every catalog.
 
 `Capability` stays instruction-only (`id`, `description`, `instructions`,
 `activation`), matching Python. See [capabilities](capabilities.md).

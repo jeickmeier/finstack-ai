@@ -6,18 +6,20 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use finstack_ai_kernel::{ContentBlock, ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_runtime::{
-    MediaResolver, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelStreamItem,
-    ModelTokenEstimate, ReconcileContext, ResolvedMedia,
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
+    ResolveDraftMediaError, resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
 use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
-use crate::error::{CANCELLED, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, http_error};
+use crate::error::{
+    CANCELLED, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, http_error, read_error_body,
+};
 use crate::request::{ResponsesRequest, serialize_request};
 use crate::sse::SseParser;
 use crate::stream::CompletionAssembly;
@@ -130,7 +132,7 @@ impl OpenRouterProvider {
         let configured = models
             .get_mut(model)
             .ok_or_else(|| crate::error::request_error("requested model is not configured"))?;
-        configured.apply_capabilities(&update);
+        configured.apply_capabilities(&update)?;
         Ok(())
     }
 
@@ -157,7 +159,7 @@ impl OpenRouterProvider {
             .map_err(|source| transport_error(&source))?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let body = response.bytes().await.unwrap_or_default();
+            let body = read_error_body(response).await;
             return Err(http_error("models endpoint", status, &body));
         }
         let cap = self.config.max_stream_bytes();
@@ -188,7 +190,7 @@ fn catalog_from_models(
 ) -> Result<BTreeMap<ModelName, OpenRouterModelConfig>, ModelError> {
     let mut by_name = BTreeMap::new();
     for model in models {
-        if by_name.insert(model.name.clone(), model).is_some() {
+        if by_name.insert(model.name().clone(), model).is_some() {
             return Err(crate::error::config_error(
                 "provider contains a duplicate model name",
             ));
@@ -286,7 +288,8 @@ impl Model for OpenRouterProvider {
             let model = model?;
             let resolved_media =
                 resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes)
-                    .await?;
+                    .await
+                    .map_err(map_draft_media)?;
             let wire = ResponsesRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -309,7 +312,7 @@ impl Model for OpenRouterProvider {
             };
             if !response.status().is_success() {
                 let status = response.status().as_u16();
-                let body = response.bytes().await.unwrap_or_default();
+                let body = read_error_body(response).await;
                 return Err(http_error("responses endpoint", status, &body));
             }
             let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
@@ -423,51 +426,14 @@ async fn drive_response(
     }
 }
 
-/// Resolve every distinct media block in `draft`, bounding both each
-/// resolved payload and the running aggregate across the draft by
-/// `max_stream_bytes` (ADR-049) so a caller cannot smuggle an oversized
-/// request past per-blob checks by splitting it across many blobs.
-async fn resolve_draft_media(
-    media_resolver: Option<&Arc<dyn MediaResolver>>,
-    draft: &ModelRequestDraft,
-    max_stream_bytes: usize,
-) -> Result<BTreeMap<Arc<str>, ResolvedMedia>, ModelError> {
-    let mut resolved_media = BTreeMap::new();
-    let mut aggregate_bytes: usize = 0;
-    for message in draft.messages.iter() {
-        for block in message.content() {
-            let (ContentBlock::Image(media)
-            | ContentBlock::Audio(media)
-            | ContentBlock::File(media)) = block
-            else {
-                continue;
-            };
-            let id: Arc<str> = Arc::from(media.blob().id());
-            if resolved_media.contains_key(&id) {
-                continue;
-            }
-            let Some(media_resolver) = media_resolver else {
-                return Err(crate::error::request_error(
-                    "media content requires a configured media resolver",
-                ));
-            };
-            let payload = media_resolver
-                .resolve(media.blob())
-                .await
-                .map_err(map_resolve)?;
-            if let ResolvedMedia::Bytes { bytes, .. } = &payload {
-                if bytes.len() > max_stream_bytes {
-                    return Err(crate::error::stream_limit_error());
-                }
-                aggregate_bytes = aggregate_bytes.saturating_add(bytes.len());
-                if aggregate_bytes > max_stream_bytes {
-                    return Err(crate::error::stream_limit_error());
-                }
-            }
-            resolved_media.insert(id, payload);
+fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
+    match error {
+        ResolveDraftMediaError::MissingResolver => {
+            crate::error::request_error("media content requires a configured media resolver")
         }
+        ResolveDraftMediaError::Resolve(inner) => map_resolve(inner),
+        ResolveDraftMediaError::Limit => crate::error::stream_limit_error(),
     }
-    Ok(resolved_media)
 }
 
 fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
@@ -513,16 +479,19 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use finstack_ai_kernel::{
-        BlobRef, EffectId, LaneId, MediaRef, Message, MessageId, ModelRequestId, OperationLocator,
-        PrincipalRef, ProviderIds, RunId, SessionId, Timestamp,
+        BlobRef, ContentBlock, EffectId, LaneId, MediaRef, Message, MessageId, ModelRequestId,
+        OperationLocator, PrincipalRef, ProviderIds, RunId, SessionId, Timestamp,
     };
     use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, MediaResolveError, ModelCallContext,
-        ModelRequestDraft, ModelRequestLimits, ModelSettings, PortFuture, RunCallContext,
-        StructuredOutputCapability,
+        AuthorizationContext, CancellationSignal, MediaResolveError, MediaResolver,
+        ModelCallContext, ModelRequestDraft, ModelRequestLimits, ModelSettings, PortFuture,
+        ResolvedMedia, RunCallContext, StructuredOutputCapability,
     };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[derive(Debug)]
     struct OversizedResolver;
@@ -616,7 +585,7 @@ mod tests {
             256,
         )
         .expect("model");
-        let name = model.name.clone();
+        let name = model.name().clone();
         let provider = OpenRouterProvider::try_new(config, vec![model]).expect("provider");
         let result = provider.request(media_request(name)).await;
         let Err(error) = result else {
@@ -689,7 +658,7 @@ mod tests {
             256,
         )
         .expect("model");
-        let name = model.name.clone();
+        let name = model.name().clone();
         let provider = OpenRouterProvider::try_new(config, vec![model]).expect("provider");
         let result = provider.request(two_blob_media_request(name)).await;
         let Err(error) = result else {
@@ -723,7 +692,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn fetch_model_catalog_round_trips_through_replace() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let body = br#"{"data":[{"id":"openai/gpt-5","context_length":400000,"top_provider":{"max_completion_tokens":128000},"supported_parameters":["tools"]}]}"#;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -755,5 +723,74 @@ mod tests {
         let names = provider.descriptor().models;
         assert_eq!(names.len(), 1);
         assert_eq!(names[0].as_str(), "openai/gpt-5");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_model_catalog_caps_error_body() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut buffer = [0_u8; 4_096];
+            let _ = socket.read(&mut buffer).await;
+            socket
+                .write_all(
+                    b"HTTP/1.1 500 Internal Server Error\r\nTransfer-Encoding: chunked\r\n\r\n",
+                )
+                .await
+                .expect("headers");
+            let chunk = format!("400\r\n{}\r\n", "x".repeat(1024));
+            loop {
+                if socket.write_all(chunk.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let config = OpenRouterConfig::try_new(format!("http://{address}")).expect("config");
+        let seed = OpenRouterModelConfig::try_new("seed", 1, 128, 16, 16, 8).expect("seed");
+        let provider = OpenRouterProvider::try_new(config, vec![seed]).expect("provider");
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            provider.fetch_model_catalog(1_000_000),
+        )
+        .await
+        .expect("capped error body must not hang")
+        .expect_err("http error");
+        assert_eq!(error.code(), crate::error::HTTP_ERROR);
+        assert!(
+            error.message().chars().count() < crate::error::ERROR_BODY_CAP,
+            "error message must stay bounded: {}",
+            error.message()
+        );
+        server.abort();
+    }
+
+    #[test]
+    fn refresh_model_metadata_rejects_invalid_ceilings() {
+        let config = OpenRouterConfig::try_new("http://127.0.0.1:9").expect("config");
+        let model = OpenRouterModelConfig::try_new(
+            "openai/gpt-test",
+            1_000_000,
+            128_000,
+            4_096,
+            4_096,
+            256,
+        )
+        .expect("model");
+        let name = model.name().clone();
+        let provider = OpenRouterProvider::try_new(config, vec![model]).expect("provider");
+        let original = provider.capabilities(&name);
+        let mut update = original.clone();
+        update.context_profile.max_output_tokens = 0;
+        assert_eq!(
+            provider
+                .refresh_model_metadata(&name, update)
+                .expect_err("invalid")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+        assert_eq!(provider.capabilities(&name), original);
     }
 }

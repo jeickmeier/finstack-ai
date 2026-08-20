@@ -63,8 +63,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
-        false,
-        false,
+        finstack_ai_runtime::ApprovalState::Unpaid,
     );
     assert_eq!(validations.load(Ordering::Acquire), 1);
     assert_eq!(
@@ -76,8 +75,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         tool_call(78, "catalog-host-guard", br#"{"value":1}"#),
         None,
         None,
-        false,
-        false,
+        finstack_ai_runtime::ApprovalState::Unpaid,
     );
     assert_eq!(validations.load(Ordering::Acquire), 2);
     assert_eq!(
@@ -89,8 +87,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
-        true,
-        false,
+        finstack_ai_runtime::ApprovalState::Granted,
     );
     assert!(matches!(
         granted,
@@ -101,8 +98,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
-        false,
-        true,
+        finstack_ai_runtime::ApprovalState::Refused,
     );
     let finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::SyntheticClosure(closure)) =
         refused
@@ -155,6 +151,49 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
     assert_eq!(call.deadline, Some(timestamp(9_000)));
     assert_eq!(validations.load(Ordering::Acquire), 7);
     assert_eq!(compilation_counter.load(Ordering::Acquire), 6);
+}
+
+#[test]
+fn catalog_policy_floor_cannot_be_weakened_by_host_allow() {
+    let mut policy = tool_spec("catalog-policy-floor");
+    policy.approval.requirement = ApprovalRequirement::Policy;
+    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([policy.clone()]);
+    let toolset: Arc<dyn Toolset> = Arc::new(ScriptedToolset::new(Arc::clone(&tools), Vec::new()));
+    let catalog = ResolvedToolCatalog::try_new(
+        [ToolsetRegistration {
+            toolset,
+            policies: BTreeMap::from([(
+                policy.id.clone(),
+                ToolExecutionPolicy {
+                    failure_policy: ToolFailurePolicy::ReturnToModel,
+                    approval: ToolPolicyDecision::Allow,
+                    max_concurrency: 1,
+                },
+            )]),
+            components: BTreeMap::new(),
+        }],
+        &BTreeMap::new(),
+        &JsonSchemaToolValidatorCompiler,
+    )
+    .expect("catalog");
+    assert_eq!(
+        catalog.decide_plan(
+            tool_call(91, "catalog-policy-floor", br#"{"value":1}"#),
+            None,
+            None,
+            finstack_ai_runtime::ApprovalState::Unpaid,
+        ),
+        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+    );
+    assert!(matches!(
+        catalog.decide_plan(
+            tool_call(91, "catalog-policy-floor", br#"{"value":1}"#),
+            None,
+            None,
+            finstack_ai_runtime::ApprovalState::Granted,
+        ),
+        finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::Execute(_))
+    ));
 }
 
 #[test]

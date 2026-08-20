@@ -1,7 +1,7 @@
 import type { PrebetaKind } from "./host.js";
 export { Agent, Event, EventBatch, FinstackError, Lane, Locator, MemoryExternalIdentityMap, Run, RunResult, Session, } from "./agent.js";
 export { POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, decodeFrame, decodeFrameLength, encodeFrame, } from "./remote.js";
-export type { ActiveCapability, AgentOptions, Capability, CapabilityActivation, CapabilityCatalogItem, EventOptions, ExternalIdentitySnapshot, LaneInspectSnapshot, RunOptions, RunResultSnapshot, SessionInspectPhase, SessionInspectSnapshot, SessionSnapshot, } from "./agent.js";
+export type { ActiveCapability, AgentOptions, ApprovalGrantMode, Capability, CapabilityActivation, CapabilityCatalogItem, EventOptions, ExternalIdentitySnapshot, LaneInspectSnapshot, RunOptions, RunResultSnapshot, SessionInspectPhase, SessionInspectSnapshot, SessionSnapshot, } from "./agent.js";
 export type { HostArtifactStore, HostCallOptions, HostClock, HostContextProvider, HostJournalStore, HostMiddleware, HostModel, HostModelCompletion, HostModelResult, HostObserver, HostRandomSource, HostToolResult, HostToolset, PrebetaKind, } from "./host.js";
 export { JsArtifactStore, JsClock, JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsRandomSource, JsToolset, createHostClock, createHostRandomSource, createMemoryArtifactStore, createMemoryJournalStore, } from "./adapters.js";
 export type { JsContextProviderOptions, JsJournalStoreOptions, JsMiddlewareOptions, JsModelOptions, JsObserverOptions, JsToolsetOptions, } from "./adapters.js";

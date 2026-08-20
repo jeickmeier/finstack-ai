@@ -6,11 +6,11 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use finstack_ai_kernel::{ContentBlock, ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_runtime::{
-    MediaResolver, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelStreamItem,
-    ModelTokenEstimate, ReconcileContext, ResolvedMedia,
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
+    ResolveDraftMediaError, resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -243,7 +243,9 @@ impl Model for OpenAiProvider {
         Box::pin(async move {
             let model = model?;
             let resolved_media =
-                resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes).await?;
+                resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes)
+                    .await
+                    .map_err(map_draft_media)?;
             let wire = ResponsesRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -384,48 +386,14 @@ async fn drive_response(
     }
 }
 
-/// Resolve every distinct media block in `draft`, bounding both each
-/// resolved payload and the running aggregate across the draft by
-/// `max_stream_bytes` (ADR-049) so a caller cannot smuggle an oversized
-/// request past per-blob checks by splitting it across many blobs.
-async fn resolve_draft_media(
-    resolver: Option<&Arc<dyn MediaResolver>>,
-    draft: &ModelRequestDraft,
-    max_stream_bytes: usize,
-) -> Result<BTreeMap<Arc<str>, ResolvedMedia>, ModelError> {
-    let mut resolved_media = BTreeMap::new();
-    let mut aggregate_bytes: usize = 0;
-    for message in draft.messages.iter() {
-        for block in message.content() {
-            let (ContentBlock::Image(media)
-            | ContentBlock::Audio(media)
-            | ContentBlock::File(media)) = block
-            else {
-                continue;
-            };
-            let id: Arc<str> = Arc::from(media.blob().id());
-            if resolved_media.contains_key(&id) {
-                continue;
-            }
-            let Some(resolver) = resolver else {
-                return Err(crate::error::request_error(
-                    "media content requires a configured media resolver",
-                ));
-            };
-            let payload = resolver.resolve(media.blob()).await.map_err(map_resolve)?;
-            if let ResolvedMedia::Bytes { bytes, .. } = &payload {
-                if bytes.len() > max_stream_bytes {
-                    return Err(crate::error::stream_limit_error());
-                }
-                aggregate_bytes = aggregate_bytes.saturating_add(bytes.len());
-                if aggregate_bytes > max_stream_bytes {
-                    return Err(crate::error::stream_limit_error());
-                }
-            }
-            resolved_media.insert(id, payload);
+fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
+    match error {
+        ResolveDraftMediaError::MissingResolver => {
+            crate::error::request_error("media content requires a configured media resolver")
         }
+        ResolveDraftMediaError::Resolve(inner) => map_resolve(inner),
+        ResolveDraftMediaError::Limit => crate::error::stream_limit_error(),
     }
-    Ok(resolved_media)
 }
 
 fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
@@ -472,14 +440,14 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 #[cfg(test)]
 mod tests {
     use finstack_ai_kernel::{
-        BlobRef, EffectId, LaneId, MediaRef, Message, MessageId, MessageRole, ModelRequestId,
-        OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId,
-        Timestamp,
+        BlobRef, ContentBlock, EffectId, LaneId, MediaRef, Message, MessageId, MessageRole,
+        ModelRequestId, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId,
+        SessionId, Timestamp,
     };
     use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, MediaResolveError, ModelCallContext,
-        ModelRequest, ModelRequestLimits, ModelSettings, PortFuture, RunCallContext,
-        StructuredOutputCapability,
+        AuthorizationContext, CancellationSignal, MediaResolveError, MediaResolver,
+        ModelCallContext, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
+        PortFuture, ResolvedMedia, RunCallContext, StructuredOutputCapability,
     };
 
     use super::*;
