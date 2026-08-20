@@ -1479,12 +1479,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-store-common"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-protocol",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+]
+
+[[package]]
 name = "finstack-ai-store-memory"
 version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
+ "finstack-ai-test",
 ]
 
 [[package]]
@@ -1525,6 +1538,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
  "finstack-ai-test",
  "rusqlite",
  "serde",

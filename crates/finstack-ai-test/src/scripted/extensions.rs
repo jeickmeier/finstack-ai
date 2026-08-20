@@ -322,6 +322,18 @@ impl JournalStore for FaultJournalStore {
         self.inner.load(request)
     }
 
+    fn load_from(
+        &self,
+        request: finstack_ai_runtime::LoadFromRequest,
+    ) -> PortFuture<Result<LoadedSession, StoreError>> {
+        // Delegate instead of using the trait default so wrapped stores keep
+        // their own unified gap/split window semantics.
+        if let Some(error) = self.take_fault(StoreOperation::Load) {
+            return Box::pin(async move { Err(error) });
+        }
+        self.inner.load_from(request)
+    }
+
     fn write_snapshot(
         &self,
         request: SnapshotRequest,
@@ -395,6 +407,15 @@ impl JournalStore for AmbiguousAckAfterCommitStore {
 
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
         self.inner.load(request)
+    }
+
+    fn load_from(
+        &self,
+        request: finstack_ai_runtime::LoadFromRequest,
+    ) -> PortFuture<Result<LoadedSession, StoreError>> {
+        // Delegate instead of using the trait default so wrapped stores keep
+        // their own unified gap/split window semantics.
+        self.inner.load_from(request)
     }
 
     fn write_snapshot(
