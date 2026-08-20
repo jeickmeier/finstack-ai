@@ -36,6 +36,14 @@ pub const SNAPSHOT_WINDOW: WindowCodes = WindowCodes {
 /// Returns an empty slice when every batch ends before `start` (the caller's
 /// tail verification decides whether that is the empty-at-head case or a gap).
 ///
+/// Equivalence contract: this function and [`check_batch_alignment`] answer
+/// the same question — "does `start` sit on a batch boundary?" — from
+/// different evidence. Use this one when the candidate batches are in hand
+/// (memory-style backends); use [`check_batch_alignment`] when only the batch
+/// ids of the records at `start` and `start - 1` are cheap to fetch
+/// (sql-style backends). On well-formed journals the two must classify every
+/// start identically; a change to one alignment rule must change both.
+///
 /// # Errors
 ///
 /// Returns [`StoreError::Integrity`] with `codes.split` when `start` falls
@@ -77,6 +85,9 @@ pub fn select_tail_batches(
 /// `start_batch` is the batch holding the record at the window start;
 /// `prior_batch` is the batch holding the record immediately before it, when
 /// that record exists.
+///
+/// Equivalence contract: see [`select_tail_batches`] — the two functions are
+/// alternate evidence shapes for the same alignment rule and must agree.
 ///
 /// # Errors
 ///

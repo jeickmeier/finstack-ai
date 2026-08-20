@@ -397,6 +397,9 @@ impl WorkerCtx {
                 },
             )?;
             admit_prune_snapshot(snapshot.sequence(), session.current_sequence)?;
+            // Alignment rule twin: the memory store enforces the same
+            // "snapshot ends exactly at a batch's last_sequence" predicate over
+            // its in-memory batch list (lib.rs prune_sync); change both together.
             let aligned: i64 = transaction
                 .query_row(
                     "SELECT COUNT(*) FROM batches

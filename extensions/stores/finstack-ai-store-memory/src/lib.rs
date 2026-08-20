@@ -358,6 +358,9 @@ impl MemoryJournalStore {
                 reason_code: "prune_requires_snapshot",
             })?;
         admit_prune_snapshot(snapshot.sequence(), session.head_sequence)?;
+        // Alignment rule twin: the sqlite store enforces the same
+        // "snapshot ends exactly at a batch's last_sequence" predicate via SQL
+        // in its prune (store.rs); change both together.
         let aligned = session
             .batches
             .iter()
