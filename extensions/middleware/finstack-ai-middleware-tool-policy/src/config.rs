@@ -8,17 +8,17 @@ use serde::Serialize;
 use thiserror::Error;
 
 /// Maximum number of roles in a [`RoleAllowlist`].
-pub const MAX_ROLES: usize = 128;
+pub(crate) const MAX_ROLES: usize = 128;
 /// Maximum number of tools in any tool set (mirrors `ModelRequestDraft::MAX_TOOLS`).
-pub const MAX_TOOLS_PER_SET: usize = 1_024;
+pub(crate) const MAX_TOOLS_PER_SET: usize = 1_024;
 /// Maximum number of jailbreak trigger patterns.
-pub const MAX_PATTERNS: usize = 64;
+pub(crate) const MAX_PATTERNS: usize = 64;
 /// Maximum byte length of a single jailbreak trigger pattern.
-pub const MAX_PATTERN_BYTES: usize = 256;
+pub(crate) const MAX_PATTERN_BYTES: usize = 256;
 /// Maximum byte length of a role name.
-pub const MAX_ROLE_NAME_BYTES: usize = 256;
+pub(crate) const MAX_ROLE_NAME_BYTES: usize = 256;
 /// Maximum run-relation depth accepted by the kernel (`RunRelation.depth` cap).
-pub const MAX_KERNEL_DEPTH: u16 = 16;
+pub(crate) const MAX_KERNEL_DEPTH: u16 = 16;
 
 /// Tool-policy leaf construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
