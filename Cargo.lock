@@ -1353,6 +1353,7 @@ dependencies = [
  "criterion",
  "finstack-ai",
  "finstack-ai-kernel",
+ "finstack-ai-provider-gemini",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-runtime",
@@ -1370,8 +1371,11 @@ name = "finstack-ai-provider-gemini"
 version = "1.0.0"
 dependencies = [
  "base64",
+ "criterion",
+ "finstack-ai",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
+ "finstack-ai-store-memory",
  "finstack-ai-test",
  "futures-util",
  "reqwest",

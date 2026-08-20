@@ -27,6 +27,7 @@ tokio = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 finstack-ai = { workspace = true, features = ["native-tokio"] }
+finstack-ai-provider-gemini = { workspace = true }
 finstack-ai-provider-openai = { workspace = true }
 finstack-ai-provider-ollama = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
