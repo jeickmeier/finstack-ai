@@ -5,10 +5,19 @@ Bounded, allowlisted HTTP `GET` fetch toolset for finstack-ai. Deny-by-default:
 and every numeric limit is a construction-time error rather than a silent
 clamp when it exceeds the crate's hard ceiling.
 
-This task-5 slice provides the configuration layer only — `HostPattern`
-parsing/matching and `HttpFetchConfig` validation. The `Toolset` port
-implementation (request execution, redirect handling, response streaming)
-lands separately.
+This crate implements the full bounded-fetch pipeline: `HostPattern`
+parsing/matching and `HttpFetchConfig` validation; resolve-and-pin address
+vetting and redirect re-vetting on every hop (via `finstack-ai-net-guard`);
+bounded response reads that error rather than silently truncate; HTML →
+Markdown conversion for inline delivery; and artifact staging for
+responses that exceed the inline budget.
+
+**`allow_loopback_http` is for test fixtures only — never enable it in
+production.** When set, a vetted URL that resolves to a loopback host
+skips the allowlist check entirely, so a model-supplied URL could reach
+any loopback port unchecked. It exists solely to let fixture servers on
+`127.0.0.1`/`localhost` run in tests without enumerating every ephemeral
+port in the allowlist.
 
 ```rust
 use finstack_ai_tools_fetch::{HttpFetchConfig, HttpFetchToolset};

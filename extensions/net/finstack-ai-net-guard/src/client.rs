@@ -10,6 +10,8 @@ use crate::vet::VettedUrl;
 
 /// Build a reqwest client pinned to the vetted address. Redirects are
 /// disabled; callers follow them manually so every hop is re-vetted.
+/// Proxies (system/env, e.g. `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`) are
+/// also disabled, since this crate has no proxy support as a non-goal.
 ///
 /// # Errors
 ///
@@ -23,6 +25,11 @@ pub fn pinned_client(
         .http1_only()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
+        // Disable env/system proxies: reqwest enables them by default, and
+        // a proxy would receive the unpinned hostname, re-resolve it itself,
+        // and bypass the `.resolve()` address pin below — reopening the
+        // DNS-rebinding TOCTOU this client exists to close.
+        .no_proxy()
         .resolve(&vetted.host, addr)
         .build()
         .map_err(|_| NetGuardError::ClientBuildFailed)

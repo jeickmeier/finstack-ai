@@ -7,6 +7,7 @@ use std::fmt;
 use std::time::Duration;
 
 use reqwest::header::{HeaderName, HeaderValue};
+use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
@@ -118,6 +119,12 @@ pub struct HttpFetchConfig {
     /// what lets fixture servers on `127.0.0.1`/`localhost` run without
     /// adding every ephemeral test port to the allowlist; it has no effect
     /// on non-loopback hosts, which are always allowlist-gated.
+    ///
+    /// **Fixtures only. Never enable in production.** With this set to
+    /// `true`, a model-supplied URL can reach ANY loopback port with no
+    /// allowlist check whatsoever — the single largest privilege this
+    /// crate can grant, and exactly the shape a prompt injection would
+    /// aim for. Set it only in test configuration that never ships.
     pub allow_loopback_http: bool,
     /// Optional `User-Agent` override.
     pub user_agent: Option<String>,
@@ -256,6 +263,93 @@ pub(crate) fn validate(
     };
 
     Ok((config, patterns))
+}
+
+/// JSON snapshot of an [`HttpFetchConfig`], for hosts (e.g. the Python
+/// binding) that receive configuration as a JSON document rather than
+/// constructing the Rust struct directly.
+///
+/// Snapshots one JSON document at construction; there is no run-time
+/// re-scan. Absent fields take [`HttpFetchConfig::default`]'s values.
+/// `request_timeout_ms` is milliseconds; every other numeric field maps
+/// 1:1 onto its [`HttpFetchConfig`] field. Unknown top-level keys are
+/// rejected rather than silently ignored.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpFetchConfigSnapshot {
+    allowlist: Vec<String>,
+    #[serde(default)]
+    max_response_bytes: Option<u64>,
+    #[serde(default)]
+    request_timeout_ms: Option<u64>,
+    #[serde(default)]
+    max_redirects: Option<u64>,
+    #[serde(default)]
+    per_host_headers: Option<BTreeMap<String, BTreeMap<String, String>>>,
+    #[serde(default)]
+    allow_loopback_http: Option<bool>,
+    #[serde(default)]
+    user_agent: Option<String>,
+}
+
+impl HttpFetchConfigSnapshot {
+    /// Parse `bytes` as an `HttpFetchConfig` JSON snapshot.
+    ///
+    /// This only parses and shape-checks the document (numeric fields fit
+    /// in their target width); the returned config still needs
+    /// [`crate::HttpFetchToolset::try_new`] (which calls [`validate`]) to
+    /// enforce ceilings and cross-field rules such as the non-empty
+    /// allowlist.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HttpFetchError::Configuration`] when `bytes` is not valid
+    /// JSON, the document has an unknown top-level key, or a numeric field
+    /// does not fit in its target width (`usize` for
+    /// `max_response_bytes`/`max_redirects`, `u64` milliseconds for
+    /// `request_timeout_ms`).
+    pub fn from_json(bytes: &[u8]) -> Result<HttpFetchConfig, HttpFetchError> {
+        let snapshot: Self =
+            serde_json::from_slice(bytes).map_err(|_| HttpFetchError::Configuration {
+                reason: "invalid_config_json",
+            })?;
+        let defaults = HttpFetchConfig::default();
+
+        let max_response_bytes = match snapshot.max_response_bytes {
+            Some(value) => usize::try_from(value).map_err(|_| HttpFetchError::Configuration {
+                reason: "max_response_bytes_out_of_range",
+            })?,
+            None => defaults.max_response_bytes,
+        };
+        let request_timeout = match snapshot.request_timeout_ms {
+            Some(value) => Duration::from_millis(value),
+            None => defaults.request_timeout,
+        };
+        let max_redirects = match snapshot.max_redirects {
+            Some(value) => usize::try_from(value).map_err(|_| HttpFetchError::Configuration {
+                reason: "max_redirects_out_of_range",
+            })?,
+            None => defaults.max_redirects,
+        };
+        let per_host_headers = snapshot
+            .per_host_headers
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(host, headers)| (host, headers.into_iter().collect()))
+            .collect();
+
+        Ok(HttpFetchConfig {
+            allowlist: snapshot.allowlist,
+            max_response_bytes,
+            request_timeout,
+            max_redirects,
+            per_host_headers,
+            allow_loopback_http: snapshot
+                .allow_loopback_http
+                .unwrap_or(defaults.allow_loopback_http),
+            user_agent: snapshot.user_agent,
+        })
+    }
 }
 
 impl fmt::Debug for PatternKind {

@@ -38,8 +38,23 @@ TM-01 (retrieved content as data), TM-16 (parser/size DoS), TM-20
 FINDINGS REQUIRING ROUTING
 ================================================================
 
-IMPORTANT  F-1  Environment/system HTTP proxy is inherited, and it
+FIXED (2026-08-20)  F-1  Environment/system HTTP proxy is inherited, and it
                 bypasses the address pin.
+  Fix: pinned_client (net-guard/src/client.rs) now calls .no_proxy() on
+  the reqwest::Client builder, with a comment explaining that env/system
+  proxies would receive the unpinned hostname, re-resolve it themselves,
+  and bypass the .resolve() pin below, reopening the DNS-rebinding
+  TOCTOU. The function's doc comment was updated to state proxies are
+  disabled. Verified by inspection (the change is a single builder call)
+  and by running the full existing suites for both crates
+  (`cargo test -p finstack-ai-net-guard`, `cargo test -p
+  finstack-ai-tools-fetch`) to confirm no regression. An automated test
+  asserting a set HTTPS_PROXY is ignored was not added: both crates are
+  #![forbid(unsafe_code)], and std::env::set_var is unsafe in this
+  toolchain, so an env-var-based proxy test is not possible in-crate.
+  Original finding text retained below for the record.
+
+  --- original finding ---
   net-guard/src/client.rs:22-28 builds the client with
   reqwest::Client::builder() and never calls .no_proxy(). In
   reqwest 0.13.2 the builder default is auto_sys_proxy: true
@@ -319,7 +334,20 @@ INFO   F-6  Allowlist patterns are not checked against a public
   concern, but the config documentation should say plainly that
   wildcard entries must name a registrable domain.
 
-INFO   F-7  Documentation of the fixtures-only loopback posture is
+FIXED (2026-08-20)  F-7  Documentation of the fixtures-only loopback
+  posture is incomplete. The brief requires that the config doc state a
+  config with fixtures enabled must never reach production.
+  config.rs's allow_loopback_http doc comment now states plainly
+  "Fixtures only. Never enable in production." and repeats the
+  loopback-privilege rationale; README.md was rewritten to drop the
+  stale "task-5 slice ... configuration layer only" description in
+  favor of an accurate crate summary (deny-by-default allowlisted HTTPS
+  fetch, resolve-and-pin, bounded reads, HTML->markdown, artifact
+  staging) and now carries the same fixtures-only warning. Original
+  finding text retained below for the record.
+
+  --- original finding ---
+  Documentation of the fixtures-only loopback posture is
   incomplete. The brief requires that the config doc state a config
   with fixtures enabled must never reach production. config.rs:114-121
   and pipeline.rs:146-158 explain the bypass and its origin-gating
@@ -335,9 +363,9 @@ INFO   F-7  Documentation of the fixtures-only loopback posture is
   documentation does not warn loudly enough.
 
 Residual risk disposition
-- F-1 voids resolve-and-pin under a configured proxy; until fixed,
-  deployments must not set HTTP(S)_PROXY for the host process, and
-  that constraint is currently undocumented.
+- F-1 (FIXED 2026-08-20): pinned_client now calls .no_proxy(), so
+  env/system proxies no longer void resolve-and-pin. No further
+  deployment constraint on HTTP(S)_PROXY is needed.
 - Egress is only as tight as the deployer's allowlist; the framework
   cannot judge whether an allowlisted host is itself hostile. A
   compromised allowlisted host can serve prompt injection (F-2) and
