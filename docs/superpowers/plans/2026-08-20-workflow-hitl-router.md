@@ -206,7 +206,7 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_hitl_inbox (
 );
 ```
 
-Never touch `PRAGMA user_version` (kernel-owned in shared files). Map store failures to `StoreUnavailable`/`StoreIntegrity` with codes following the worker's naming (`"hitl_open"`, `"hitl_upsert"`, `"hitl_row"`, …).
+Never touch `PRAGMA user_version` (kernel-owned in shared files). Map store failures to `StoreUnavailable`/`StoreIntegrity` with codes following the worker's naming, backend-prefixed (`"sqlite_hitl_open"`, `"sqlite_hitl_upsert"`, `"sqlite_hitl_row"`, …; the prefix was added during the final review wave).
 
 - [ ] **Step 1: Write the failing test** — `tests/hitl/sqlite.rs`: run the exact Task 2 assertions against `SqliteHitlStore::open(tempdir.path().join("hitl.sqlite"))` (extract the assertion body into a shared `fn exercise_store(store: &dyn HitlInboxStore)` in `tests/hitl/store.rs` and call it from both); plus a persistence check — drop the store, reopen the same path, rows and statuses survive; plus co-location — open a `SqliteWorkerStore` on the same file first, then `SqliteHitlStore::open` on it, both operate without error.
 - [ ] **Step 2: Run to verify failure** — `cargo test -p finstack-ai-workflow-hitl sqlite` → compile failure.

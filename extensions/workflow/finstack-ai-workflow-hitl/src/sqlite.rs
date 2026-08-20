@@ -8,6 +8,13 @@
 //! version. It holds a hint only, so a binary that does not understand a
 //! column simply ignores it. Future changes must therefore be **additive and
 //! nullable**, and must never repurpose or drop an existing column.
+//!
+//! Every failure code this store raises is prefixed `sqlite_hitl_`, matching
+//! the backend-prefix scheme [`crate::MemoryHitlStore`] uses (`memory_hitl_`)
+//! and the worker's own sqlite store (`sqlite_wake_`, `sqlite_worker_`). The
+//! prefix tells a caller which backend failed; the backend-agnostic codes
+//! raised by the router itself (`hitl_locator`, `hitl_request_decode`, …)
+//! deliberately carry no prefix. These codes stabilize at publish.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -59,19 +66,22 @@ impl SqliteHitlStore {
     /// be created.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, HitlError> {
         let path = path.as_ref().to_path_buf();
-        let conn = Connection::open(&path)
-            .map_err(|_| HitlError::StoreUnavailable { code: "hitl_open" })?;
+        let conn = Connection::open(&path).map_err(|_| HitlError::StoreUnavailable {
+            code: "sqlite_hitl_open",
+        })?;
         conn.busy_timeout(Duration::from_secs(1))
             .map_err(|_| HitlError::StoreUnavailable {
-                code: "hitl_busy_timeout",
+                code: "sqlite_hitl_busy_timeout",
             })?;
         if !is_memory_path(&path) {
             conn.pragma_update(None, "journal_mode", "WAL")
-                .map_err(|_| HitlError::StoreUnavailable { code: "hitl_wal" })?;
+                .map_err(|_| HitlError::StoreUnavailable {
+                    code: "sqlite_hitl_wal",
+                })?;
         }
         conn.execute_batch(HITL_DDL)
             .map_err(|_| HitlError::StoreUnavailable {
-                code: "hitl_schema",
+                code: "sqlite_hitl_schema",
             })?;
         Ok(Self {
             path,
@@ -90,7 +100,7 @@ impl SqliteHitlStore {
         body: impl FnOnce(&Connection) -> Result<T, HitlError>,
     ) -> Result<T, HitlError> {
         let conn = self.conn.lock().map_err(|_| HitlError::StoreUnavailable {
-            code: "hitl_lock_poisoned",
+            code: "sqlite_hitl_lock_poisoned",
         })?;
         body(&conn)
     }
@@ -115,20 +125,31 @@ struct RawInteractionRow {
 /// Decode one row, mapping parse failures to [`HitlError::StoreIntegrity`].
 fn decode_row(raw: RawInteractionRow) -> Result<InteractionRow, HitlError> {
     let session_id: SessionId =
-        Id::parse(&raw.session_id).map_err(|_| HitlError::StoreIntegrity { code: "hitl_id" })?;
-    let lane_id: LaneId =
-        Id::parse(&raw.lane_id).map_err(|_| HitlError::StoreIntegrity { code: "hitl_id" })?;
-    let run_id: RunId =
-        Id::parse(&raw.run_id).map_err(|_| HitlError::StoreIntegrity { code: "hitl_id" })?;
-    let requested_at = Timestamp::from_unix_ms(raw.requested_at_unix_ms)
-        .map_err(|_| HitlError::StoreIntegrity { code: "hitl_time" })?;
+        Id::parse(&raw.session_id).map_err(|_| HitlError::StoreIntegrity {
+            code: "sqlite_hitl_id",
+        })?;
+    let lane_id: LaneId = Id::parse(&raw.lane_id).map_err(|_| HitlError::StoreIntegrity {
+        code: "sqlite_hitl_id",
+    })?;
+    let run_id: RunId = Id::parse(&raw.run_id).map_err(|_| HitlError::StoreIntegrity {
+        code: "sqlite_hitl_id",
+    })?;
+    let requested_at = Timestamp::from_unix_ms(raw.requested_at_unix_ms).map_err(|_| {
+        HitlError::StoreIntegrity {
+            code: "sqlite_hitl_time",
+        }
+    })?;
     let expires_at = raw
         .expires_at_unix_ms
         .map(Timestamp::from_unix_ms)
         .transpose()
-        .map_err(|_| HitlError::StoreIntegrity { code: "hitl_time" })?;
-    let updated_at = Timestamp::from_unix_ms(raw.updated_at_unix_ms)
-        .map_err(|_| HitlError::StoreIntegrity { code: "hitl_time" })?;
+        .map_err(|_| HitlError::StoreIntegrity {
+            code: "sqlite_hitl_time",
+        })?;
+    let updated_at =
+        Timestamp::from_unix_ms(raw.updated_at_unix_ms).map_err(|_| HitlError::StoreIntegrity {
+            code: "sqlite_hitl_time",
+        })?;
     let status = InteractionStatus::parse(&raw.status)?;
     Ok(InteractionRow {
         tenant_scope: raw.tenant_scope.into(),
@@ -156,9 +177,9 @@ fn query_rows(
     sql: &str,
     args: &[&dyn rusqlite::ToSql],
 ) -> Result<Vec<InteractionRow>, HitlError> {
-    let mut stmt = conn
-        .prepare(sql)
-        .map_err(|_| HitlError::StoreUnavailable { code: "hitl_row" })?;
+    let mut stmt = conn.prepare(sql).map_err(|_| HitlError::StoreUnavailable {
+        code: "sqlite_hitl_row",
+    })?;
     let rows = stmt
         .query_map(args, |row| {
             Ok((
@@ -176,7 +197,9 @@ fn query_rows(
                 row.get::<_, i64>(11)?,
             ))
         })
-        .map_err(|_| HitlError::StoreUnavailable { code: "hitl_row" })?;
+        .map_err(|_| HitlError::StoreUnavailable {
+            code: "sqlite_hitl_row",
+        })?;
     let mut out = Vec::new();
     for row in rows {
         let (
@@ -192,7 +215,9 @@ fn query_rows(
             status,
             resolved_by,
             updated_at_unix_ms,
-        ) = row.map_err(|_| HitlError::StoreIntegrity { code: "hitl_row" })?;
+        ) = row.map_err(|_| HitlError::StoreIntegrity {
+            code: "sqlite_hitl_row",
+        })?;
         out.push(decode_row(RawInteractionRow {
             tenant_scope,
             session_id,
@@ -236,7 +261,7 @@ impl HitlInboxStore for SqliteHitlStore {
                 ],
             )
             .map_err(|_| HitlError::StoreUnavailable {
-                code: "hitl_upsert",
+                code: "sqlite_hitl_upsert",
             })?;
             Ok(())
         })
@@ -299,7 +324,7 @@ impl HitlInboxStore for SqliteHitlStore {
                     ],
                 )
                 .map_err(|_| HitlError::StoreUnavailable {
-                    code: "hitl_status_update",
+                    code: "sqlite_hitl_status_update",
                 })?;
             if changed == 0 {
                 return Err(HitlError::UnknownInteraction);
