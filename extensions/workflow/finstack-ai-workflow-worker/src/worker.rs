@@ -70,6 +70,22 @@ pub struct TickReport {
     pub sessions_resumed: usize,
     /// Resumed sessions that parked again instead of terminating.
     pub sessions_reparked: usize,
+    /// Parked interactions whose committed deadline had passed and which this
+    /// tick drove the kernel into expiring.
+    ///
+    /// Counted for the *expiry itself*, which the runtime commits while the
+    /// session attaches — so a session is counted here even when the drive
+    /// that follows cannot reach a new wait within the budget and is also
+    /// counted in [`TickReport::failures`]. A later tick over the same row
+    /// finds nothing pending to expire and does not count it again.
+    ///
+    /// A buffered response that arrives for an interaction whose deadline has
+    /// already passed does *not* avoid this counter. The interaction ingress is
+    /// fail-closed on a late answer and settles it `Expired` rather than
+    /// `Granted`, so the expiry is real and is counted here as well as in
+    /// [`TickReport::sessions_resumed`]. Only a response the ingress actually
+    /// accepts — one submitted before the deadline — leaves this counter alone.
+    pub sessions_expired: usize,
     /// Per-item failures isolated during the tick.
     pub failures: usize,
 }
@@ -97,6 +113,33 @@ fn is_recorded_wait(wait: &WorkflowWait, row: &WakeRow) -> bool {
         WorkflowWait::Terminal { .. } => return false,
     };
     pending == row.pending_id.as_ref()
+}
+
+/// Whether `row` is a parked interaction whose committed deadline has passed.
+///
+/// The deadline is a *semantic* event, not an authorization: nobody has to
+/// answer, so no principal and no evidence are involved. The runtime settles
+/// it credential-free through
+/// `InteractionResumeAction::ExpireIfDue`
+/// (`crates/finstack-ai-runtime/src/services/interaction.rs`), applied by
+/// `apply_interaction_resume`
+/// (`crates/finstack-ai-runtime/src/exec/settlement/interaction.rs`) inside
+/// every `RunTaskOwner` constructor. The worker therefore submits no input of
+/// its own for expiry: attaching the session with a clock past the deadline
+/// is the whole mechanism.
+fn expiry_due(row: &WakeRow, now: Timestamp) -> bool {
+    row.reason == WakeReason::Interaction && row.expires_at.is_some_and(|deadline| deadline <= now)
+}
+
+/// Whether the session's pending interaction is the one `row` was parked on.
+fn pending_matches_row(session: &WorkflowSession, row: &WakeRow) -> bool {
+    session
+        .last_state()
+        .pending_interaction
+        .as_ref()
+        .is_some_and(|pending| {
+            pending.request.interaction_id().to_canonical_string() == row.pending_id.as_ref()
+        })
 }
 
 /// Whether the journal's own timer for `wait` is still in the future.
@@ -477,7 +520,13 @@ impl WorkflowWorker {
                 Arc::clone(&row.pending_id),
             );
             let entry = inbox.get(&key);
-            if row.reason != WakeReason::Timer && entry.is_none() {
+            // A past-deadline interaction is due on the clock alone, exactly
+            // like a timer: nobody is going to answer it, and the kernel's own
+            // expiry can only fire once the session is attached. Interaction
+            // rows without a deadline, and every other inbox-driven reason,
+            // still wait for a buffered response.
+            let expiring = expiry_due(&row, now);
+            if row.reason != WakeReason::Timer && entry.is_none() && !expiring {
                 continue;
             }
             // Both the lease this takes out and the backoff written below are
@@ -498,7 +547,12 @@ impl WorkflowWorker {
             if !won {
                 continue;
             }
-            if let Ok(terminal) = Box::pin(self.resume_row(&row, entry, claim_now)).await {
+            let mut expired = false;
+            let outcome = Box::pin(self.resume_row(&row, entry, claim_now, &mut expired)).await;
+            if expired {
+                report.sessions_expired += 1;
+            }
+            if let Ok(terminal) = outcome {
                 report.sessions_resumed += 1;
                 if !terminal {
                     report.sessions_reparked += 1;
@@ -526,6 +580,7 @@ impl WorkflowWorker {
         row: &WakeRow,
         inbox_entry: Option<&InboxRow>,
         now: Timestamp,
+        expired: &mut bool,
     ) -> Result<bool, WorkerError> {
         let factory =
             self.ports
@@ -573,7 +628,33 @@ impl WorkflowWorker {
             }
             return Err(error);
         }
+        // Only meaningful on the expiry path: whether the interaction this row
+        // was parked on is *still* pending as the owner respawns. The respawn
+        // is what applies `ExpireIfDue`, so comparing across it is what tells
+        // an expiry this tick performed apart from one an earlier tick already
+        // did — a re-tick over a row whose resume failed after the expiry must
+        // not count it a second time.
+        //
+        // A row can be due on both counts at once: a resolution buffered before
+        // the deadline, ticked after it. That still counts as an expiry, and
+        // deliberately so — the resolution does not win. The interaction
+        // ingress is fail-closed on a late answer: `interaction_settled_input`
+        // (`crates/finstack-ai-runtime/src/driver/ingress/shared.rs`) rewrites
+        // a resolution submitted at or after `expires_at` into
+        // `InteractionSettled::Expired` before it ever reaches the reducer, so
+        // the `submit_response` above commits the expiry itself and the
+        // interaction is settled `Expired`, not `Granted`. Counting it is
+        // therefore truthful: an expiry really was committed, by this tick, for
+        // this row. Gating on `inbox_entry.is_none()` here would *under*-report
+        // exactly that case.
+        let was_pending = expiry_due(row, now) && pending_matches_row(&session, row);
         session.respawn_owner().await?;
+        if was_pending {
+            // `respawn_owner` refreshes *before* it spawns, so the state it
+            // leaves behind predates the expiry commit the spawn just made.
+            session.ensure_owner().await?;
+            *expired = !pending_matches_row(&session, row);
+        }
         let wait = self.drive_past_wait(&mut session, row, now).await?;
         let terminal = matches!(wait, WorkflowWait::Terminal { .. });
         park(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;

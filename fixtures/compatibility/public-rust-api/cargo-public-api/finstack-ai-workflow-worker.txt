@@ -161,6 +161,7 @@ pub struct finstack_ai_workflow_worker::TickReport
 pub finstack_ai_workflow_worker::TickReport::cron_fires: usize
 pub finstack_ai_workflow_worker::TickReport::failures: usize
 pub finstack_ai_workflow_worker::TickReport::runs_started: usize
+pub finstack_ai_workflow_worker::TickReport::sessions_expired: usize
 pub finstack_ai_workflow_worker::TickReport::sessions_reparked: usize
 pub finstack_ai_workflow_worker::TickReport::sessions_resumed: usize
 impl core::clone::Clone for finstack_ai_workflow_worker::TickReport
@@ -176,6 +177,7 @@ impl core::marker::Copy for finstack_ai_workflow_worker::TickReport
 impl core::marker::StructuralPartialEq for finstack_ai_workflow_worker::TickReport
 pub struct finstack_ai_workflow_worker::WakeRow
 pub finstack_ai_workflow_worker::WakeRow::attempts: u32
+pub finstack_ai_workflow_worker::WakeRow::expires_at: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
 pub finstack_ai_workflow_worker::WakeRow::lane_id: finstack_ai_kernel::primitives::ids::LaneId
 pub finstack_ai_workflow_worker::WakeRow::lease_expires_at: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
 pub finstack_ai_workflow_worker::WakeRow::leased_by: core::option::Option<alloc::sync::Arc<str>>

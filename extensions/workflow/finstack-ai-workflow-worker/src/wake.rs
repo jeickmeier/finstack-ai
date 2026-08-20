@@ -68,6 +68,19 @@ pub struct WakeRow {
     /// until `record_failure` pushes it forward as a retry backoff. Either
     /// way, a set value gates dueness — see [`wake_due`].
     pub wake_at: Option<Timestamp>,
+    /// Semantic deadline of the parked wait, when it has one. Written at park
+    /// time for [`WakeReason::Interaction`] rows from the committed
+    /// `InteractionRequest`'s `expires_at`; `None` means the wait carries no
+    /// deadline and can only ever be woken by the inbox.
+    ///
+    /// This is deliberately *not* `wake_at`: `wake_at` is the retry gate that
+    /// `record_failure` owns, and overloading it would make a backed-off row
+    /// forget its deadline (and a deadline'd row invisible to inbox delivery
+    /// until the deadline). The deadline never gates
+    /// [`WakeIndexStore::load_due`]; the tick reads it after the fact to
+    /// decide whether a parked interaction with no buffered response is due
+    /// for the kernel's own expiry.
+    pub expires_at: Option<Timestamp>,
     /// Identifier of the pending effect this row resumes.
     pub pending_id: Arc<str>,
     /// Worker currently holding the claim lease, if any.

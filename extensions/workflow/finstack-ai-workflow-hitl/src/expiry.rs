@@ -6,6 +6,27 @@
 //! everything — see its documentation for why no router-authored credential
 //! can be admitted by the runtime.
 //!
+//! # Declining is not the same as never expiring
+//!
+//! An unanswered interaction still expires without this battery, and without
+//! any credential at all: the workflow worker's tick drives the kernel's own
+//! semantic expiry (`InteractionResumeAction::ExpireIfDue`) for a parked
+//! interaction whose committed `expires_at` has passed. `park` indexes that
+//! deadline on `WakeRow::expires_at`, the tick claims the row on the clock
+//! alone once it is past, and attaching the session is what commits
+//! `InteractionSettled::Expired` — no principal, no authorization evidence,
+//! because a deadline is a semantic event rather than an authorized answer.
+//! Each one is counted in `TickReport::sessions_expired`.
+//!
+//! So the choice a policy makes is not "expire or stall forever". It is
+//! whether the run receives an *authored refusal payload* — which needs the
+//! run's own credentials, hence a host policy — or the kernel's own
+//! credential-free expiry. Declining gets the latter, which is why declining
+//! is safe. After a worker-driven expiry the interaction no longer classifies
+//! as that wait, so the next [`crate::HitlRouter::sweep`] reconciles the
+//! inbox row to `Closed` (the journal stays the authority; the `Expired`
+//! status on a row only ever comes from a host policy's delivered refusal).
+//!
 //! # Why an expiry resolution needs the run's own credentials
 //!
 //! A resolution reaches the journal through the runtime's interaction
@@ -67,9 +88,15 @@ pub trait ExpiryPolicy: Send + Sync {
 ///
 /// This battery holds no credential the interaction ingress will admit (see
 /// the module documentation), so it declines rather than forging one. The
-/// row stays `Open` and visible in [`crate::HitlRouter::pending`], the run
-/// stays parked on its interaction, and an operator can still resolve it —
-/// the state an unexpired-but-unanswered interaction is actually in.
+/// row stays `Open` and visible in [`crate::HitlRouter::pending`] and an
+/// operator can still resolve it, right up to the deadline.
+///
+/// Declining does not strand the run. Past the deadline the worker's tick
+/// expires the interaction through the kernel's own credential-free path and
+/// the run proceeds; the next sweep then reconciles this row to `Closed`. The
+/// only thing a declining policy gives up is the chance to hand the run an
+/// authored refusal payload instead of a plain expiry — see the module
+/// documentation.
 ///
 /// An earlier version of this policy refused expired approvals under a
 /// synthetic `("finstack.workflow.hitl", "expiry", Some(tenant))` principal.
@@ -79,7 +106,7 @@ pub trait ExpiryPolicy: Send + Sync {
 /// already left the pending view, with no operator-visible trace. A policy
 /// that declines is strictly safer than one that lies.
 ///
-/// # Enabling expiry
+/// # Enabling an authored refusal
 ///
 /// A host that accepted the run holds the principal and evidence the ingress
 /// requires, and can install a policy that presents them via

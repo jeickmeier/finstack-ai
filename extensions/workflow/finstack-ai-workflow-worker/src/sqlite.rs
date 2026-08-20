@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_worker_wake (
   workflow_kind TEXT NOT NULL,
   reason TEXT NOT NULL,
   wake_at_unix_ms INTEGER,
+  expires_at_unix_ms INTEGER,
   pending_id TEXT NOT NULL,
   leased_by TEXT,
   lease_expires_unix_ms INTEGER,
@@ -99,6 +100,15 @@ impl SqliteWorkerStore {
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_worker_schema",
             })?;
+        // `CREATE TABLE IF NOT EXISTS` leaves a file written by an older
+        // binary without the newer nullable columns, so each one is added
+        // here and its "duplicate column name" failure ignored. Additive and
+        // nullable, per the schema policy above: an old binary keeps reading
+        // the file, and a new binary reads a missing value as `NULL`.
+        for column in WAKE_ADDED_COLUMNS {
+            let sql = format!("ALTER TABLE finstack_workflow_worker_wake ADD COLUMN {column}");
+            drop(conn.execute_batch(&sql));
+        }
         Ok(Self {
             path,
             conn: Mutex::new(conn),
@@ -138,6 +148,11 @@ impl SqliteWorkerStore {
     }
 }
 
+/// Nullable wake columns added after the table's first release. Each is
+/// applied with `ALTER TABLE ... ADD COLUMN` on open, ignoring the failure
+/// when it is already present.
+const WAKE_ADDED_COLUMNS: &[&str] = &["expires_at_unix_ms INTEGER"];
+
 /// Raw columns for one wake row, as read from sqlite before decoding.
 struct RawWakeRow {
     tenant_scope: String,
@@ -147,6 +162,7 @@ struct RawWakeRow {
     workflow_kind: String,
     reason: String,
     wake_at_unix_ms: Option<i64>,
+    expires_at_unix_ms: Option<i64>,
     pending_id: String,
     leased_by: Option<String>,
     lease_expires_unix_ms: Option<i64>,
@@ -173,6 +189,13 @@ fn decode_wake_row(raw: RawWakeRow) -> Result<WakeRow, WorkerError> {
         .map_err(|_| WorkerError::StoreIntegrity {
             code: "sqlite_wake_time",
         })?;
+    let expires_at = raw
+        .expires_at_unix_ms
+        .map(Timestamp::from_unix_ms)
+        .transpose()
+        .map_err(|_| WorkerError::StoreIntegrity {
+            code: "sqlite_wake_time",
+        })?;
     let lease_expires_at = raw
         .lease_expires_unix_ms
         .map(Timestamp::from_unix_ms)
@@ -191,6 +214,7 @@ fn decode_wake_row(raw: RawWakeRow) -> Result<WakeRow, WorkerError> {
         workflow_kind: raw.workflow_kind.into(),
         reason,
         wake_at,
+        expires_at,
         pending_id: raw.pending_id.into(),
         leased_by: raw.leased_by.map(Into::into),
         lease_expires_at,
@@ -219,10 +243,11 @@ fn query_wake_rows(
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, Option<i64>>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<i64>>(9)?,
-                row.get::<_, i64>(10)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, i64>(11)?,
             ))
         })
         .map_err(|_| WorkerError::StoreUnavailable {
@@ -238,6 +263,7 @@ fn query_wake_rows(
             workflow_kind,
             reason,
             wake_at_unix_ms,
+            expires_at_unix_ms,
             pending_id,
             leased_by,
             lease_expires_unix_ms,
@@ -253,6 +279,7 @@ fn query_wake_rows(
             workflow_kind,
             reason,
             wake_at_unix_ms,
+            expires_at_unix_ms,
             pending_id,
             leased_by,
             lease_expires_unix_ms,
@@ -263,7 +290,8 @@ fn query_wake_rows(
 }
 
 const WAKE_SELECT: &str = "SELECT tenant_scope, session_id, lane_id, run_id, workflow_kind, reason,
-       wake_at_unix_ms, pending_id, leased_by, lease_expires_unix_ms, attempts
+       wake_at_unix_ms, expires_at_unix_ms, pending_id, leased_by, lease_expires_unix_ms,
+       attempts
 FROM finstack_workflow_worker_wake";
 
 impl WakeIndexStore for SqliteWorkerStore {
@@ -272,8 +300,9 @@ impl WakeIndexStore for SqliteWorkerStore {
             conn.execute(
                 "INSERT OR REPLACE INTO finstack_workflow_worker_wake (
                     tenant_scope, session_id, lane_id, run_id, workflow_kind, reason,
-                    wake_at_unix_ms, pending_id, leased_by, lease_expires_unix_ms, attempts
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    wake_at_unix_ms, expires_at_unix_ms, pending_id, leased_by,
+                    lease_expires_unix_ms, attempts
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     row.tenant_scope.as_ref(),
                     row.session_id.to_canonical_string(),
@@ -282,6 +311,7 @@ impl WakeIndexStore for SqliteWorkerStore {
                     row.workflow_kind.as_ref(),
                     row.reason.as_str(),
                     row.wake_at.map(Timestamp::as_unix_ms),
+                    row.expires_at.map(Timestamp::as_unix_ms),
                     row.pending_id.as_ref(),
                     row.leased_by.as_deref(),
                     row.lease_expires_at.map(Timestamp::as_unix_ms),
@@ -723,6 +753,7 @@ mod tests {
             workflow_kind: Arc::from("research"),
             reason: WakeReason::Timer,
             wake_at: Some(ts(due_ms)),
+            expires_at: None,
             pending_id: Arc::from("effect-1"),
             leased_by: None,
             lease_expires_at: None,
@@ -757,6 +788,97 @@ mod tests {
         store.upsert(&row).expect("upsert");
         let loaded = store.load_tenant("tenant-a").expect("load");
         assert_eq!(loaded, vec![row]);
+    }
+
+    /// The interaction deadline round-trips and never gates dueness: it is
+    /// read by the tick after the fact, not by the store's due predicate.
+    #[test]
+    fn an_interaction_deadline_round_trips_without_gating_dueness() {
+        let dir = tempfile::tempdir().expect("dir");
+        let store = SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
+
+        let mut row = timer_row("tenant-a", 7, 0);
+        row.reason = WakeReason::Interaction;
+        row.wake_at = None;
+        row.expires_at = Some(ts(9_000));
+        store.upsert(&row).expect("upsert");
+
+        let due = store.load_due(ts(1_000)).expect("load_due");
+        assert_eq!(
+            due,
+            vec![row.clone()],
+            "still inbox-driven before the deadline"
+        );
+        assert_eq!(
+            store.load_tenant("tenant-a").expect("tenant"),
+            vec![row],
+            "and the deadline survives the round trip"
+        );
+    }
+
+    /// A file written by a binary that predates `expires_at_unix_ms` is opened
+    /// and used without a migration step.
+    #[test]
+    fn an_older_wake_table_gains_the_deadline_column_on_open() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("old.sqlite");
+        let legacy = rusqlite::Connection::open(&path).expect("open");
+        legacy
+            .execute_batch(
+                "CREATE TABLE finstack_workflow_worker_wake (
+                   tenant_scope TEXT NOT NULL,
+                   session_id TEXT NOT NULL,
+                   lane_id TEXT NOT NULL,
+                   run_id TEXT NOT NULL,
+                   workflow_kind TEXT NOT NULL,
+                   reason TEXT NOT NULL,
+                   wake_at_unix_ms INTEGER,
+                   pending_id TEXT NOT NULL,
+                   leased_by TEXT,
+                   lease_expires_unix_ms INTEGER,
+                   attempts INTEGER NOT NULL,
+                   PRIMARY KEY (tenant_scope, session_id)
+                 );",
+            )
+            .expect("legacy schema");
+        let legacy_row = timer_row("tenant-a", 9, 1_000);
+        legacy
+            .execute(
+                "INSERT INTO finstack_workflow_worker_wake VALUES
+                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 0)",
+                rusqlite::params![
+                    legacy_row.tenant_scope.as_ref(),
+                    legacy_row.session_id.to_canonical_string(),
+                    legacy_row.lane_id.to_canonical_string(),
+                    legacy_row.run_id.to_canonical_string(),
+                    legacy_row.workflow_kind.as_ref(),
+                    legacy_row.reason.as_str(),
+                    legacy_row.wake_at.map(Timestamp::as_unix_ms),
+                    legacy_row.pending_id.as_ref(),
+                ],
+            )
+            .expect("legacy row");
+        drop(legacy);
+
+        let store = SqliteWorkerStore::open(&path).expect("open");
+        let mut row = timer_row("tenant-a", 8, 1_000);
+        row.reason = WakeReason::Interaction;
+        row.expires_at = Some(ts(4_000));
+        store.upsert(&row).expect("upsert");
+        let loaded = store.load_tenant("tenant-a").expect("tenant");
+        let found = loaded
+            .iter()
+            .find(|candidate| candidate.session_id == row.session_id)
+            .expect("row");
+        assert_eq!(found.expires_at, Some(ts(4_000)));
+        let legacy_loaded = loaded
+            .iter()
+            .find(|candidate| candidate.session_id == legacy_row.session_id)
+            .expect("legacy row");
+        assert_eq!(
+            legacy_loaded.expires_at, None,
+            "a row written before the column reads back as deadline-less"
+        );
     }
 
     /// `load_due`'s SQL predicate must agree with [`crate::wake::wake_due`]

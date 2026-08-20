@@ -118,6 +118,15 @@ pub(crate) fn env(
 }
 
 pub(crate) fn accepted() -> RunAccepted {
+    accepted_with_deadline(None)
+}
+
+/// Accepted root run whose effective deadline is `deadline`. The runtime
+/// copies that deadline into an approval `InteractionRequest`'s `expires_at`
+/// (`crates/finstack-ai-runtime/src/exec/settlement/interaction.rs`), so the
+/// expiry spec picks its deadline here rather than editing a committed
+/// request.
+pub(crate) fn accepted_with_deadline(deadline: Option<Timestamp>) -> RunAccepted {
     let run_id = id(3);
     RunAccepted::try_new(
         run_id,
@@ -132,7 +141,7 @@ pub(crate) fn accepted() -> RunAccepted {
             None,
         )
         .expect("security"),
-        None,
+        deadline,
         RunLimits::empty(),
         RunPropagationPolicy {
             cancellation: CancellationPropagation::Cascade,
@@ -329,13 +338,24 @@ pub(crate) async fn drive_to_after_model(
     store: &Arc<MemoryJournalStore>,
     tools: Arc<[ToolSpec]>,
 ) {
+    drive_to_after_model_with_deadline(handle, store, tools, None).await;
+}
+
+/// Same as [`drive_to_after_model`], but the accepted run carries `deadline`
+/// as its effective deadline.
+pub(crate) async fn drive_to_after_model_with_deadline(
+    handle: &RunHandle,
+    store: &Arc<MemoryJournalStore>,
+    tools: Arc<[ToolSpec]>,
+    deadline: Option<Timestamp>,
+) {
     handle
         .submit(
             env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
             KernelInput::AcceptRun(AcceptRun {
                 session_id: id(1),
                 lane_id: id(2),
-                accepted: accepted(),
+                accepted: accepted_with_deadline(deadline),
             }),
         )
         .await
