@@ -163,8 +163,15 @@ pub(crate) fn user_message() -> Message {
 }
 
 pub(crate) fn stage(stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
+    stage_at(0, stage, outcome)
+}
+
+/// Same as [`stage`] but for an explicit model cycle, needed once a run has
+/// looped back through `Stage::AfterToolBatch` and its cycle has advanced
+/// past `0`.
+pub(crate) fn stage_at(cycle: u64, stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
     KernelInput::StageSettled(finstack_ai_kernel::StageSettled {
-        cursor: StageCursor { cycle: 0, stage },
+        cursor: StageCursor { cycle, stage },
         outcome,
     })
 }

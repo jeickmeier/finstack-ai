@@ -1,6 +1,5 @@
 //! End-to-end proofs that a response delivered while the worker is down is
-//! picked up and applied on a later tick, driven entirely through
-//! `WorkflowWorker::tick`.
+//! resumed on a later tick, driven entirely through `WorkflowWorker::tick`.
 //!
 //! Both fixtures here settle inside `Stage::BeforeToolBatch` (a tool-call
 //! approval interaction, and a deferred tool completion). Resolving either
@@ -10,47 +9,35 @@
 //! sets it regardless of `ToolBatchContinuation`), and advancing past that
 //! phase requires an externally submitted
 //! `KernelInput::StageSettled { cursor: .. AfterModel | AfterToolBatch .., outcome: Continue }`.
-//! That decision is made by an application-level facade
+//! That decision is normally made by an application-level facade
 //! (`crates/finstack-ai/src/agent/drive.rs` is the only non-test caller of
 //! `settle_facade_stage`/`settle_facade_stage_with_model` in the workspace);
 //! neither `finstack-ai-runtime`'s `RunTaskOwner` task loop nor
 //! `WorkflowSession::ensure_owner`/`respawn_owner` submits it on its own, and
 //! `finstack-ai-workflow-worker` depends on neither `finstack-ai` nor any
-//! other source of that decision. Confirmed empirically: attaching a session,
-//! resolving the interaction directly, then polling
-//! `ensure_owner`/`classify_wait` for 200 iterations (4s) leaves
-//! `phase == AfterToolBatch` and `classify_wait == None` throughout — the run
-//! never reaches a new park-able wait or terminal state.
-//!
-//! This means `WorkflowWorker::tick` can never report `sessions_resumed == 1`
-//! for either scenario: `resume_row`'s `drive_past_wait` genuinely cannot
-//! find a new wait within its budget, so it always returns
-//! `WorkerError::Driver(DriveTimeout)`, which the tick loop counts as a
-//! failure and backs off — exactly the outcome Task 9 already proved and
-//! accepted in `tick_keeps_the_inbox_entry_when_the_resume_cannot_park`
-//! (`tests/worker/tick.rs`). This is a brief-reality mismatch from
-//! `task-10-brief.md` Step 1, which specifies `sessions_resumed == 1` and a
-//! drained inbox; see `task-10-report.md` for the full writeup. What these
-//! tests instead prove — the maximal true claim — is the part that *is*
-//! achievable and is the actual point of `deliver_interaction`/
-//! `deliver_external`: the response is durably buffered while the worker is
-//! down (a pre-delivery tick claims nothing), and once delivered it *is*
-//! applied to the journal on the very next tick that claims the row — the
-//! interaction resolves / the effect settles — even though the run cannot
-//! reach a new park-able wait in this single tick, so the row is preserved
-//! (not dropped) for a future tick once an external stage decision unblocks
-//! `AfterToolBatch`.
+//! other source of that decision. This is *not* a bug in `WorkflowWorker`:
+//! it is a genuinely separate responsibility, so each test's middle act
+//! proves the worker's own contract on its own terms — a claimed row whose
+//! run cannot reach a new wait within budget is a counted failure with its
+//! response preserved for redelivery, exactly like Task 9's
+//! `tick_keeps_the_inbox_entry_when_the_resume_cannot_park`
+//! (`tests/worker/tick.rs`) — before a final act
+//! (`drive_past_missing_facade_decisions`) stands in for that missing
+//! facade, so the very same worker can be shown driving the very same run
+//! the rest of the way to `sessions_resumed == 1` with a drained inbox and a
+//! deleted wake row, matching the brief's original assertions in full.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AuthorizationEvidence, ComponentId, ContentBlock, ExternalEffectCompletion,
-    ExternalEffectCompletionCommand, ExternalEffectOutcome, ExternalHandleRef,
-    InteractionResolution, InteractionResolutionCommand, Metadata, PrincipalRef, ProviderIds,
-    RawJson, ReconciliationPolicy, ReducerStageOutcome, RetrySafety, RunPhase, Stage,
-    ToolExecutionMode, ToolFailurePolicy, ToolId, ToolResultBlock, Usage,
+    AuthorizationEvidence, ComponentId, ContentBlock, Digest, EffectOutputContract,
+    EffectOutputKind, ExternalEffectCompletion, ExternalEffectCompletionCommand,
+    ExternalEffectOutcome, ExternalHandleRef, InteractionResolution, InteractionResolutionCommand,
+    Message, Metadata, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
+    ReducerStageOutcome, RetrySafety, RunPhase, Stage, ToolExecutionMode, ToolFailurePolicy,
+    ToolId, ToolResultBlock, Usage,
 };
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig, ExternalClock,
@@ -61,6 +48,7 @@ use finstack_ai_runtime::{
     ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
     WorkflowSession, WorkflowWait,
 };
+use finstack_ai_store_memory::MemoryJournalStore;
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
     ScriptedToolset,
@@ -72,9 +60,173 @@ use finstack_ai_workflow_worker::{
 };
 
 use crate::helpers::{
-    CounterRandom, completed_plan, drive_to_after_model, env, locator, locked_profile,
-    memory_store, profile, stage, timestamp, wait_state,
+    CounterRandom, completed_plan, draft, drive_to_after_model, env, locator, locked_profile,
+    memory_store, profile, stage, stage_at, timestamp, wait_state,
 };
+
+/// Stands in for the missing application-level facade (see the module doc):
+/// spawns a temporary raw owner on `journal` and submits the exact sequence
+/// of `StageSettled` decisions (`AfterToolBatch` -> `PrepareContext` ->
+/// `BeforeModel` -> `AfterModel` -> `BeforeFinalize`) that carries a run from
+/// `RunPhase::AfterToolBatch` — where the worker's own failed tick left it —
+/// through the second model cycle and on to `RunPhase::Completed`. `tools`
+/// must be the same catalog-bound spec list the fixture's run was built
+/// with; `model`'s plan queue must have exactly one unconsumed plan left
+/// (the follow-up "done" completion).
+#[expect(
+    clippy::too_many_lines,
+    reason = "replicates the full BeforeToolBatch -> ... -> BeforeFinalize facade sequence"
+)]
+async fn drive_past_missing_facade_decisions(
+    journal: &Arc<MemoryJournalStore>,
+    model: &Arc<dyn Model>,
+    tools: &Arc<[ToolSpec]>,
+    catalog: &Arc<ResolvedToolCatalog>,
+    clock: &ExternalClock,
+    seed: u64,
+) {
+    let dyn_journal = Arc::clone(journal) as Arc<dyn JournalStore>;
+    let recovered_coordinator = CommitCoordinator::recover(Arc::clone(&dyn_journal), locator().session_id)
+        .await
+        .expect("recover for facade");
+    let facade = RunTaskOwner::spawn_with_model_and_tools(
+        recovered_coordinator,
+        RunTaskConfig {
+            command_capacity: 8,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
+            shutdown_deadline: Duration::from_millis(500),
+        },
+        ModelTaskConfig {
+            job_capacity: 2,
+            result_capacity: 2,
+            stream_limits: ModelStreamLimits::default(),
+            warmup_deadline: None,
+            warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
+        },
+        ToolTaskConfig {
+            job_capacity: 8,
+            result_capacity: 8,
+            global_max_concurrency: 2,
+            stream_limits: ToolStreamLimits::default(),
+        },
+        Arc::clone(model),
+        locked_profile(),
+        Arc::clone(catalog),
+        clock.clone(),
+        CounterRandom(std::sync::atomic::AtomicU64::new(seed)),
+    )
+    .await
+    .expect("facade owner");
+
+    let before_facade = CommitCoordinator::recover(Arc::clone(&dyn_journal), locator().session_id)
+        .await
+        .expect("recover");
+    assert_eq!(
+        before_facade.state().phase,
+        Some(RunPhase::AfterToolBatch),
+        "the facade only needs to unblock AfterToolBatch"
+    );
+    let cycle = before_facade.state().cycle;
+
+    facade
+        .handle()
+        .submit(
+            env(3_100, &[300], &[], &[], &[], &[], &[], 301),
+            stage_at(cycle, Stage::AfterToolBatch, ReducerStageOutcome::Continue),
+        )
+        .await
+        .expect("after tool batch");
+    wait_state(journal, |state| {
+        state.phase == Some(RunPhase::PreparingContext)
+    })
+    .await;
+
+    let next_cycle = cycle + 1;
+    let messages: Arc<[Message]> = Arc::from(
+        CommitCoordinator::recover(Arc::clone(&dyn_journal), locator().session_id)
+            .await
+            .expect("recover")
+            .state()
+            .messages
+            .as_slice(),
+    );
+    facade
+        .handle()
+        .submit(
+            env(3_200, &[302, 303], &[], &[], &[304], &[], &[], 305),
+            stage_at(
+                next_cycle,
+                Stage::PrepareContext,
+                ReducerStageOutcome::ContextPrepared {
+                    messages: Arc::clone(&messages),
+                },
+            ),
+        )
+        .await
+        .expect("context prepared");
+
+    let raw = RawJson::parse(
+        draft(messages, Arc::clone(tools))
+            .canonical_bytes()
+            .expect("canonical"),
+    )
+    .expect("raw");
+    facade
+        .handle()
+        .submit(
+            env(3_300, &[306, 307], &[308], &[309], &[], &[310], &[], 311),
+            stage_at(
+                next_cycle,
+                Stage::BeforeModel,
+                ReducerStageOutcome::ModelRequestPrepared {
+                    request: raw,
+                    component: None,
+                    output_contract: EffectOutputContract {
+                        kind: EffectOutputKind::ModelResponse,
+                        schema_version: 1,
+                        schema_digest: Digest::raw_json(b"model-response"),
+                    },
+                    retry_safety: RetrySafety::SafeToRetry,
+                    deadline: Some(timestamp(5_000)),
+                },
+            ),
+        )
+        .await
+        .expect("model request");
+    wait_state(journal, |state| state.phase == Some(RunPhase::AfterModel)).await;
+
+    facade
+        .handle()
+        .submit(
+            env(3_400, &[312], &[], &[], &[], &[], &[], 313),
+            stage_at(next_cycle, Stage::AfterModel, ReducerStageOutcome::Continue),
+        )
+        .await
+        .expect("after model, cycle 2");
+    wait_state(journal, |state| {
+        state.phase == Some(RunPhase::BeforeFinalize)
+    })
+    .await;
+
+    facade
+        .handle()
+        .submit(
+            env(3_500, &[314, 315], &[316], &[], &[], &[], &[], 317),
+            stage_at(
+                next_cycle,
+                Stage::BeforeFinalize,
+                ReducerStageOutcome::FinalizeAccepted,
+            ),
+        )
+        .await
+        .expect("finalize");
+    wait_state(journal, |state| state.terminal.is_some()).await;
+    drop(facade);
+}
 
 /// Completion command settling a deferred *tool* effect. Unlike the generic
 /// `completion_command` fixture in `helpers/mod.rs` (built for a deferred
@@ -322,16 +474,22 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     .register_ports(
         "research",
         Arc::new(BindPorts {
-            model,
-            catalog: Some(catalog),
+            model: Arc::clone(&model),
+            catalog: Some(Arc::clone(&catalog)),
         }),
     )
     .build();
 
     // No response has been delivered yet: the row is a non-timer wait, so
-    // the claim gate must skip it, claiming nothing.
+    // the claim gate must skip it, claiming nothing (src/worker.rs's
+    // `tick_wake` gate on a missing inbox entry).
     let before = Box::pin(worker.tick()).await.expect("before delivery");
     assert_eq!(before.sessions_resumed, 0);
+    assert_eq!(before.failures, 0);
+    assert!(
+        store.load_all().expect("inbox").is_empty(),
+        "no response has been delivered yet"
+    );
 
     worker
         .deliver_external(
@@ -364,6 +522,28 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     );
     let rows = store.load_tenant("tenant-a").expect("rows");
     assert_eq!(rows.len(), 1, "the row survives for a later tick");
+
+    // THIRD ACT: prove the worker's own claim is genuine, not merely a
+    // permanent-retry design. Once *something else* supplies the missing
+    // stage decisions the worker cannot make on its own, the very same
+    // worker resumes the run to completion, drains the inbox, and clears
+    // the wake row — exactly the brief's original assertions.
+    drive_past_missing_facade_decisions(&journal, &model, &tools, &catalog, &clock, 745).await;
+
+    clock.jump(120_000).expect("past backoff");
+    let completed = Box::pin(worker.tick()).await.expect("resume to completion");
+    assert_eq!(
+        completed.sessions_resumed, 1,
+        "the resume is claimed and driven to completion"
+    );
+    assert!(
+        store.load_all().expect("inbox").is_empty(),
+        "the consumed response is drained from the inbox"
+    );
+    assert!(
+        store.load_tenant("tenant-a").expect("rows").is_empty(),
+        "the wake row is deleted once the run reaches a terminal state"
+    );
 }
 
 #[tokio::test]
@@ -545,14 +725,22 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
     .register_ports(
         "research",
         Arc::new(BindPorts {
-            model,
-            catalog: Some(catalog),
+            model: Arc::clone(&model),
+            catalog: Some(Arc::clone(&catalog)),
         }),
     )
     .build();
 
+    // No response has been delivered yet: the row is a non-timer wait, so
+    // the claim gate must skip it, claiming nothing (src/worker.rs's
+    // `tick_wake` gate on a missing inbox entry).
     let before = Box::pin(worker.tick()).await.expect("no response yet");
     assert_eq!(before.sessions_resumed, 0);
+    assert_eq!(before.failures, 0);
+    assert!(
+        store.load_all().expect("inbox").is_empty(),
+        "no response has been delivered yet"
+    );
 
     let command = InteractionResolutionCommand::try_new(
         locator(),
@@ -594,4 +782,26 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
     );
     let rows = store.load_tenant("tenant-a").expect("rows");
     assert_eq!(rows.len(), 1, "the row survives for a later tick");
+
+    // THIRD ACT: prove the worker's own claim is genuine, not merely a
+    // permanent-retry design. Once *something else* supplies the missing
+    // stage decisions the worker cannot make on its own, the very same
+    // worker resumes the run to completion, drains the inbox, and clears
+    // the wake row — exactly the brief's original assertions.
+    drive_past_missing_facade_decisions(&journal, &model, &tools, &catalog, &clock, 705).await;
+
+    clock.jump(120_000).expect("past backoff");
+    let completed = Box::pin(worker.tick()).await.expect("resume to completion");
+    assert_eq!(
+        completed.sessions_resumed, 1,
+        "the resume is claimed and driven to completion"
+    );
+    assert!(
+        store.load_all().expect("inbox").is_empty(),
+        "the consumed response is drained from the inbox"
+    );
+    assert!(
+        store.load_tenant("tenant-a").expect("rows").is_empty(),
+        "the wake row is deleted once the run reaches a terminal state"
+    );
 }
