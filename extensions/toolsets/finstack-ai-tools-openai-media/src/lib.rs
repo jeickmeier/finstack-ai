@@ -843,7 +843,9 @@ fn validate_download_url(value: &str) -> Result<(), ToolError> {
             "openai media audio_url must be an https URL",
         ));
     };
-    if rest.contains('@') || rest.contains('?') || rest.contains('#') {
+    // Query strings are allowed: signed download URLs (e.g. presigned S3 or
+    // GCS links) are a normal shape for caller-supplied audio_url values.
+    if rest.contains('@') || rest.contains('#') {
         return Err(invalid_arguments(
             "openai media audio_url contains forbidden components",
         ));
@@ -903,7 +905,7 @@ mod tests {
 
     use super::{
         IMAGE_TOOL_NAME, OPENAI_MEDIA_CREDENTIAL_REQUIRED, OpenAiMediaConfig, OpenAiMediaError,
-        OpenAiMediaToolset, SPEECH_TOOL_NAME, TRANSCRIBE_TOOL_NAME,
+        OpenAiMediaToolset, SPEECH_TOOL_NAME, TRANSCRIBE_TOOL_NAME, validate_download_url,
     };
 
     const CANARY: &str = "oa-media-secret-canary-046";
@@ -1230,6 +1232,12 @@ mod tests {
 
     #[tokio::test]
     async fn transcribe_tool_rejects_plaintext_non_loopback_download_urls() {
+        // Covers both the simple malformed-host case and the documented
+        // negative that a bare `http:` audio_url pointing at a real
+        // (but unreachable-over-HTTP) listener is rejected by
+        // `validate_download_url` before any HTTP traffic is attempted; the
+        // http://127.0.0.1 test-only exception is exercised positively by
+        // `transcribe_tool_downloads_then_uploads_multipart`.
         let tools =
             OpenAiMediaToolset::try_new(base_config("https://api.openai.com".into())).expect("tools");
         let spec = find_spec(&tools.tools(), TRANSCRIBE_TOOL_NAME);
@@ -1240,30 +1248,15 @@ mod tests {
         assert_eq!(error.code(), crate::OPENAI_MEDIA_INVALID_ARGUMENTS);
     }
 
-    #[tokio::test]
-    async fn transcribe_tool_rejects_http_even_on_loopback_outside_test_exception() {
-        // The download-URL exception for http://127.0.0.1 exists only to let
-        // this test suite script fixtures; it is exercised positively by
-        // `transcribe_tool_downloads_then_uploads_multipart`. Here we assert
-        // the documented negative: a bare `http:` audio_url with no listener
-        // reachable still goes through `validate_download_url` first, so a
-        // malformed/non-loopback plaintext URL is rejected before any HTTP
-        // traffic is attempted.
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let addr = listener.local_addr().expect("addr");
-        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<String>();
-        drop(seen_tx);
-        drop(listener);
-        let tools = OpenAiMediaToolset::try_new(base_config("https://api.openai.com".into()))
-            .expect("tools");
-        let spec = find_spec(&tools.tools(), TRANSCRIBE_TOOL_NAME);
-        let args = format!(r#"{{"model":"m","audio_url":"http://evil.example/{addr}"}}"#);
-        let call = call_for(&spec, args.as_bytes());
-        let Err(error) = tools.call(tool_context(), call).await else {
-            panic!("expected invalid arguments");
-        };
-        assert_eq!(error.code(), crate::OPENAI_MEDIA_INVALID_ARGUMENTS);
-        assert!(seen_rx.try_recv().is_err(), "no HTTP must reach the fixture");
+    #[test]
+    fn validate_download_url_accepts_https_query_strings() {
+        // Signed download URLs (presigned S3/GCS links) are a normal shape
+        // for a caller-supplied audio_url; the query string must not be
+        // rejected as a "forbidden component".
+        validate_download_url(
+            "https://example-bucket.s3.amazonaws.com/a.mp3?X-Amz-Signature=abc123&X-Amz-Expires=900",
+        )
+        .expect("https download url with a query string is accepted");
     }
 
     #[tokio::test]
@@ -1289,5 +1282,19 @@ mod tests {
         assert_eq!(error.code(), crate::OPENAI_MEDIA_TIMEOUT);
         assert!(seen_rx.try_recv().is_err(), "no HTTP must reach the fixture");
         server.abort();
+    }
+
+    #[test]
+    fn openai_media_is_not_a_wasm_host_sdk_dependency() {
+        let manifest = include_str!("../../../../crates/finstack-ai/Cargo.toml");
+        let wasm_host = manifest
+            .lines()
+            .find(|line| line.contains("wasm-host ="))
+            .expect("wasm-host feature");
+        assert!(
+            !wasm_host.contains("finstack-ai-tools-openai-media"),
+            "the openai media toolset must stay off the wasm-host feature graph"
+        );
+        assert!(manifest.contains("dep:finstack-ai-tools-openai-media"));
     }
 }

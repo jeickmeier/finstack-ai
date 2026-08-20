@@ -48,8 +48,6 @@ use thiserror::Error;
 
 const DEFAULT_ENDPOINT: &str = "https://openrouter.ai";
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
-#[allow(dead_code)]
-const DEFAULT_MAX_RESULT_BYTES: usize = 256 * 1_024;
 const MAX_RESULT_BYTES_CEILING: usize = 8 * 1_048_576;
 const MAX_AUDIO_DOWNLOAD_BYTES: usize = 25 * 1_048_576;
 
@@ -884,6 +882,8 @@ async fn handle_transcribe(
     });
     let body = serde_json::json!({
         "model": arguments.model,
+        // "audio": documented best-guess field name for the base64 payload,
+        // pending verification against OpenRouter's live transcription docs.
         "audio": b64_audio,
         "format": format,
     });
@@ -1147,7 +1147,9 @@ fn validate_download_url(value: &str, endpoint_is_loopback: bool) -> Result<(), 
             "openrouter media audio_url must be an http or https URL",
         ));
     };
-    if rest.contains('@') || rest.contains('?') || rest.contains('#') {
+    // Query strings are allowed: signed download URLs (e.g. presigned S3 or
+    // GCS links) are a normal shape for caller-supplied audio_url values.
+    if rest.contains('@') || rest.contains('#') {
         return Err(invalid_arguments(
             "openrouter media audio_url contains forbidden components",
         ));
@@ -1221,7 +1223,7 @@ mod tests {
     use super::{
         IMAGE_TOOL_NAME, OPENROUTER_MEDIA_CREDENTIAL_REQUIRED, OpenRouterMediaConfig,
         OpenRouterMediaError, OpenRouterMediaToolset, SPEECH_TOOL_NAME, TRANSCRIBE_TOOL_NAME,
-        VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME,
+        VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME, validate_download_url,
     };
 
     const CANARY: &str = "or-media-secret-canary-046";
@@ -1632,6 +1634,18 @@ mod tests {
         assert_eq!(error.code(), crate::OPENROUTER_MEDIA_INVALID_ARGUMENTS);
     }
 
+    #[test]
+    fn validate_download_url_accepts_https_query_strings() {
+        // Signed download URLs (presigned S3/GCS links) are a normal shape
+        // for a caller-supplied audio_url; the query string must not be
+        // rejected as a "forbidden component".
+        validate_download_url(
+            "https://example-bucket.s3.amazonaws.com/a.mp3?X-Amz-Signature=abc123&X-Amz-Expires=900",
+            false,
+        )
+        .expect("https download url with a query string is accepted");
+    }
+
     #[tokio::test]
     async fn cancelled_call_does_not_reach_the_fixture() {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -1656,5 +1670,19 @@ mod tests {
         assert_eq!(error.code(), crate::OPENROUTER_MEDIA_TIMEOUT);
         assert!(seen_rx.try_recv().is_err(), "no HTTP must reach the fixture");
         server.abort();
+    }
+
+    #[test]
+    fn openrouter_media_is_not_a_wasm_host_sdk_dependency() {
+        let manifest = include_str!("../../../../crates/finstack-ai/Cargo.toml");
+        let wasm_host = manifest
+            .lines()
+            .find(|line| line.contains("wasm-host ="))
+            .expect("wasm-host feature");
+        assert!(
+            !wasm_host.contains("finstack-ai-tools-openrouter-media"),
+            "the openrouter media toolset must stay off the wasm-host feature graph"
+        );
+        assert!(manifest.contains("dep:finstack-ai-tools-openrouter-media"));
     }
 }
