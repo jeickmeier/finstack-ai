@@ -874,7 +874,9 @@ git add extensions/workflow/finstack-ai-workflow-local
 git commit -m "Let cron stores enumerate due schedules across tenants"
 ```
 
----### Task 8: `park()` and test scaffolding for kernel-backed tests
+---
+
+### Task 8: `park()` and test scaffolding for kernel-backed tests
 
 **Files:**
 - Create: `extensions/workflow/finstack-ai-workflow-worker/src/park.rs`
