@@ -1439,6 +1439,7 @@ dependencies = [
  "finstack-ai-test",
  "finstack-ai-tools-document",
  "finstack-ai-tools-elicitation",
+ "finstack-ai-tools-fetch",
  "futures-util",
  "pyo3",
  "pyo3-async-runtimes",

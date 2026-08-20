@@ -30,6 +30,7 @@ use crate::callbacks::{
 use crate::capability::PyCapability;
 use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
+use crate::fetch::PyHttpFetchToolset;
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
     result_to_python_with_locator, run_request, stage_attachments,
@@ -43,6 +44,8 @@ pub(crate) enum PyToolsetArg {
     Python(Py<PyPythonToolset>),
     /// Rust elicitation toolset.
     Elicitation(Py<PyElicitationToolset>),
+    /// Rust bounded HTTP fetch toolset.
+    HttpFetch(Py<PyHttpFetchToolset>),
 }
 
 impl PyToolsetArg {
@@ -50,6 +53,7 @@ impl PyToolsetArg {
         match self {
             Self::Python(toolset) => toolset.bind(py).borrow().registration(),
             Self::Elicitation(toolset) => toolset.bind(py).borrow().registration(),
+            Self::HttpFetch(toolset) => toolset.bind(py).borrow().registration(),
         }
     }
 }

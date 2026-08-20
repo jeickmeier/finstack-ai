@@ -3,12 +3,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
     Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata, OperationLocator,
     PrincipalRef, RawJson, RunId, SessionId, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, ValidatedToolCall,
 };
-use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_net_guard::{HostResolver, UrlPolicy, parse_and_vet_url};
 use finstack_ai_runtime::{
     ArtifactStore, AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,
@@ -18,7 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-use super::{HostPattern, HttpFetchConfig, HttpFetchToolset};
+use super::{HostPattern, HttpFetchConfig, HttpFetchConfigSnapshot, HttpFetchToolset};
 
 const HEADER_CANARY: &str = "fetch-secret-canary-091";
 
@@ -59,7 +59,10 @@ fn tool_context() -> crate::ToolCallContext {
 
 /// `tool_context()` with a caller-supplied deadline and cancellation signal,
 /// for exercising the pipeline's cancellation/deadline gate.
-fn tool_context_with(deadline: Option<Timestamp>, cancellation: CancellationSignal) -> crate::ToolCallContext {
+fn tool_context_with(
+    deadline: Option<Timestamp>,
+    cancellation: CancellationSignal,
+) -> crate::ToolCallContext {
     crate::ToolCallContext {
         run: RunCallContext {
             deadline,
@@ -254,6 +257,70 @@ async fn unknown_argument_fields_are_rejected() {
     assert_eq!(error.code(), super::FETCH_INVALID_ARGUMENTS);
 }
 
+// --- Task 11: `HttpFetchConfigSnapshot::from_json` -----------------------
+
+#[test]
+fn snapshot_from_json_applies_defaults_for_absent_fields() {
+    let config = HttpFetchConfigSnapshot::from_json(br#"{"allowlist":["docs.rs"]}"#).unwrap();
+    let defaults = HttpFetchConfig::default();
+    assert_eq!(config.allowlist, vec!["docs.rs".to_owned()]);
+    assert_eq!(config.max_response_bytes, defaults.max_response_bytes);
+    assert_eq!(config.request_timeout, defaults.request_timeout);
+    assert_eq!(config.max_redirects, defaults.max_redirects);
+    assert!(config.per_host_headers.is_empty());
+    assert!(!config.allow_loopback_http);
+    assert!(config.user_agent.is_none());
+    HttpFetchToolset::try_new(config).expect("valid snapshot constructs");
+}
+
+#[test]
+fn snapshot_from_json_honors_every_field() {
+    let json = br#"{
+        "allowlist": ["docs.rs", "*.wikipedia.org"],
+        "max_response_bytes": 1024,
+        "request_timeout_ms": 5000,
+        "max_redirects": 1,
+        "per_host_headers": {"docs.rs": {"X-Test": "value"}},
+        "allow_loopback_http": true,
+        "user_agent": "finstack-fetch-test/1.0"
+    }"#;
+    let config = HttpFetchConfigSnapshot::from_json(json).unwrap();
+    assert_eq!(
+        config.allowlist,
+        vec!["docs.rs".to_owned(), "*.wikipedia.org".to_owned()]
+    );
+    assert_eq!(config.max_response_bytes, 1024);
+    assert_eq!(config.request_timeout, Duration::from_secs(5));
+    assert_eq!(config.max_redirects, 1);
+    assert_eq!(
+        config.per_host_headers.get("docs.rs"),
+        Some(&vec![("X-Test".to_owned(), "value".to_owned())])
+    );
+    assert!(config.allow_loopback_http);
+    assert_eq!(
+        config.user_agent.as_deref(),
+        Some("finstack-fetch-test/1.0")
+    );
+    HttpFetchToolset::try_new(config).expect("valid snapshot constructs");
+}
+
+#[test]
+fn snapshot_from_json_rejects_unknown_fields() {
+    HttpFetchConfigSnapshot::from_json(br#"{"allowlist":["docs.rs"],"surprise":true}"#)
+        .expect_err("unknown top-level key is rejected");
+}
+
+#[test]
+fn snapshot_from_json_rejects_invalid_json() {
+    HttpFetchConfigSnapshot::from_json(b"not json").expect_err("malformed json is rejected");
+}
+
+#[test]
+fn snapshot_with_empty_allowlist_still_fails_at_try_new() {
+    let config = HttpFetchConfigSnapshot::from_json(br#"{"allowlist":[]}"#).unwrap();
+    HttpFetchToolset::try_new(config).expect_err("empty allowlist is deny-by-default");
+}
+
 // --- Task 7: request pipeline -------------------------------------------
 
 /// A fixture config with `allow_loopback_http: true`, letting loopback
@@ -301,7 +368,8 @@ impl HostResolver for ScriptedResolver {
         &self,
         _host: &str,
         _port: u16,
-    ) -> Pin<Box<dyn std::future::Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + '_>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + '_>>
+    {
         let addrs = self.0.clone();
         Box::pin(async move { Ok(addrs) })
     }
@@ -311,7 +379,13 @@ impl HostResolver for ScriptedResolver {
 async fn fetch_returns_inline_text() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve_once(listener, None, 200, "Content-Type: text/plain\r\n".to_owned(), b"hello".to_vec()));
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        b"hello".to_vec(),
+    ));
 
     let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
     let spec = toolset.tools()[0].clone();
@@ -779,7 +853,12 @@ fn loopback_redirect_bypass_requires_loopback_origin() {
     // Non-loopback origin (e.g. hop 0 was an allowlisted public host that
     // redirected to loopback): the bypass must NOT apply, and an empty
     // pattern list must deny.
-    assert!(!crate::pipeline::host_allowed(&loopback, false, &config, &[]));
+    assert!(!crate::pipeline::host_allowed(
+        &loopback,
+        false,
+        &config,
+        &[]
+    ));
 }
 
 #[tokio::test]
@@ -791,7 +870,11 @@ async fn same_host_redirect_is_followed() {
         None,
         vec![
             (302, "Location: /b\r\n".to_owned(), Vec::new()),
-            (200, "Content-Type: text/plain\r\n".to_owned(), b"moved-ok".to_vec()),
+            (
+                200,
+                "Content-Type: text/plain\r\n".to_owned(),
+                b"moved-ok".to_vec(),
+            ),
         ],
     ));
 
@@ -889,7 +972,11 @@ async fn headers_do_not_cross_hosts_on_redirect() {
     tokio::spawn(serve_sequence(
         listener_b,
         Some(tx_b),
-        vec![(200, "Content-Type: text/plain\r\n".to_owned(), b"ok".to_vec())],
+        vec![(
+            200,
+            "Content-Type: text/plain\r\n".to_owned(),
+            b"ok".to_vec(),
+        )],
     ));
 
     let mut config = loopback_config(&["docs.rs"]);

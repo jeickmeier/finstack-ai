@@ -27,7 +27,7 @@ mod markdown;
 mod pipeline;
 mod toolset;
 
-pub use config::{HostPattern, HttpFetchConfig, HttpFetchError};
+pub use config::{HostPattern, HttpFetchConfig, HttpFetchConfigSnapshot, HttpFetchError};
 pub use toolset::HttpFetchToolset;
 
 // Brought into the crate root so `tests.rs` can name them as `crate::X`,

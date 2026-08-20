@@ -34,6 +34,7 @@ mod document;
 mod elicitation;
 mod errors;
 mod events;
+mod fetch;
 mod json_bridge;
 mod locator;
 mod protocol;
@@ -128,6 +129,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyPythonModel>()?;
     module.add_class::<PyPythonToolset>()?;
     module.add_class::<elicitation::PyElicitationToolset>()?;
+    module.add_class::<fetch::PyHttpFetchToolset>()?;
     module.add_class::<PyPythonContextProvider>()?;
     module.add_class::<PyPythonMiddleware>()?;
     module.add_class::<PyPythonObserver>()?;
