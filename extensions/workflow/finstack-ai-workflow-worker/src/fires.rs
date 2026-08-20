@@ -133,8 +133,16 @@ mod tests {
             started_session: None,
         };
         store.record_claimed(&row).expect("claim");
-        store.record_claimed(&row).expect("idempotent re-claim");
-        assert_eq!(store.load_unstarted().expect("unstarted"), vec![row.clone()]);
+        let mut replay = row.clone();
+        replay.fired_at = ts(2_500);
+        store
+            .record_claimed(&replay)
+            .expect("idempotent re-claim (different fired_at, same key)");
+        assert_eq!(
+            store.load_unstarted().expect("unstarted"),
+            vec![row.clone()],
+            "record_claimed must keep the first row (INSERT OR IGNORE), not the replay"
+        );
         store
             .mark_started("tenant-a", "nightly", 7, "session-9")
             .expect("start");

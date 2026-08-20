@@ -132,8 +132,16 @@ mod tests {
             received_at: ts(3_000),
         };
         store.insert(&row).expect("insert");
-        store.insert(&row).expect("redelivery replaces");
-        assert_eq!(store.load_all().expect("all"), vec![row.clone()]);
+        let mut redelivery = row.clone();
+        redelivery.payload = Arc::from(&br#"{"approved":false}"#[..]);
+        store
+            .insert(&redelivery)
+            .expect("redelivery replaces (different payload, same key)");
+        assert_eq!(
+            store.load_all().expect("all"),
+            vec![redelivery.clone()],
+            "insert must keep the replacement row (INSERT OR REPLACE), not the original"
+        );
         store
             .delete("tenant-a", id(1), "interaction-1")
             .expect("consume");
