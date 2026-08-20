@@ -20,19 +20,11 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
 const DEFAULT_CREDENTIAL_NAME: &str = "default";
-#[allow(
-    dead_code,
-    reason = "read once request-building support lands in a later task"
-)]
 const GENERATIVE_LANGUAGE_API_VERSION: &str = "v1beta";
-#[allow(
-    dead_code,
-    reason = "read once request-building support lands in a later task"
-)]
 const VERTEX_API_VERSION: &str = "v1";
 const MAX_LABEL_BYTES: usize = 255;
 
-fn config_error(message: &'static str) -> ModelError {
+pub(crate) fn config_error(message: &'static str) -> ModelError {
     error(
         GEMINI_CONFIG_INVALID,
         ErrorCategory::Configuration,
@@ -118,25 +110,9 @@ pub struct GeminiConfig {
     credentials: CredentialStore,
     credential: Option<CredentialReference>,
     headers: Arc<[SecretHeader]>,
-    #[allow(
-        dead_code,
-        reason = "read once request-building support lands in a later task"
-    )]
     request_timeout: Duration,
-    #[allow(
-        dead_code,
-        reason = "read once request-building support lands in a later task"
-    )]
     max_event_bytes: usize,
-    #[allow(
-        dead_code,
-        reason = "read once request-building support lands in a later task"
-    )]
     max_stream_bytes: usize,
-    #[allow(
-        dead_code,
-        reason = "read once request-building support lands in a later task"
-    )]
     media_resolver: Option<Arc<dyn MediaResolver>>,
 }
 
@@ -287,10 +263,22 @@ impl GeminiConfig {
         self
     }
 
-    #[allow(
-        dead_code,
-        reason = "called once request-building support lands in a later task"
-    )]
+    pub(crate) const fn request_timeout(&self) -> Duration {
+        self.request_timeout
+    }
+
+    pub(crate) const fn max_event_bytes(&self) -> usize {
+        self.max_event_bytes
+    }
+
+    pub(crate) const fn max_stream_bytes(&self) -> usize {
+        self.max_stream_bytes
+    }
+
+    pub(crate) fn media_resolver(&self) -> Option<Arc<dyn MediaResolver>> {
+        self.media_resolver.clone()
+    }
+
     fn resolved_authentication(&self) -> Result<Authentication, ModelError> {
         let Some(reference) = &self.credential else {
             return Ok(Authentication::None);
@@ -301,10 +289,6 @@ impl GeminiConfig {
             .ok_or_else(|| config_error("named credential is missing"))
     }
 
-    #[allow(
-        dead_code,
-        reason = "called once request-building support lands in a later task"
-    )]
     pub(crate) fn header_map(&self) -> Result<HeaderMap, ModelError> {
         let url =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
@@ -345,10 +329,6 @@ impl GeminiConfig {
         Ok(headers)
     }
 
-    #[allow(
-        dead_code,
-        reason = "called once request-building support lands in a later task"
-    )]
     pub(crate) fn model_url(&self, model: &ModelName) -> Result<Url, ModelError> {
         let name = model.as_str();
         if name.contains('/') || name.contains(':') {

@@ -10,19 +10,11 @@ use finstack_ai_runtime::{ModelError, SseEvent, SseEventParser, SseParseError};
 
 use crate::error::{GEMINI_STREAM_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED, error};
 
-#[allow(
-    dead_code,
-    reason = "consumed once streaming request support lands in a later task"
-)]
-fn stream_error(message: &'static str) -> ModelError {
+pub(crate) fn stream_error(message: &'static str) -> ModelError {
     error(GEMINI_STREAM_INVALID, ErrorCategory::Model, false, message)
 }
 
-#[allow(
-    dead_code,
-    reason = "consumed once streaming request support lands in a later task"
-)]
-fn stream_limit_error() -> ModelError {
+pub(crate) fn stream_limit_error() -> ModelError {
     error(
         GEMINI_STREAM_LIMIT_EXCEEDED,
         ErrorCategory::Limit,
@@ -31,18 +23,10 @@ fn stream_limit_error() -> ModelError {
     )
 }
 
-#[allow(
-    dead_code,
-    reason = "constructed once streaming request support lands in a later task"
-)]
 pub(crate) struct GeminiSse {
     inner: SseEventParser,
 }
 
-#[allow(
-    dead_code,
-    reason = "called once streaming request support lands in a later task"
-)]
 impl GeminiSse {
     pub(crate) fn new(max_event_bytes: usize) -> Self {
         Self {
@@ -77,10 +61,6 @@ impl GeminiSse {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "called once streaming request support lands in a later task"
-)]
 fn map_parse(error: SseParseError) -> ModelError {
     match error {
         SseParseError::Limit => stream_limit_error(),

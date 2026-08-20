@@ -23,11 +23,9 @@
 
 mod config;
 mod error;
-#[allow(
-    dead_code,
-    reason = "consumed once the provider port implementation lands in a later task"
-)]
+mod provider;
 mod request;
 mod sse;
 
 pub use config::{GeminiConfig, GeminiEndpoint, GeminiModelConfig, SecretHeader};
+pub use provider::GeminiProvider;
