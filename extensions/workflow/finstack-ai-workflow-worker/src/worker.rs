@@ -491,7 +491,10 @@ impl WorkflowWorker {
             // future tick claiming the same row. The wake row itself is
             // untouched: the caller's `back_off` still records the failure
             // and the run stays parked on its original wait.
-            if matches!(error, WorkerError::Driver(WorkflowDriverError::UnknownLocator)) {
+            if matches!(
+                error,
+                WorkerError::Driver(WorkflowDriverError::UnknownLocator)
+            ) {
                 self.inbox.delete(
                     entry.tenant_scope.as_ref(),
                     entry.session_id,

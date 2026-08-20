@@ -105,9 +105,12 @@ impl SqliteWorkerStore {
         &self,
         body: impl FnOnce(&Connection) -> Result<T, WorkerError>,
     ) -> Result<T, WorkerError> {
-        let conn = self.conn.lock().map_err(|_| WorkerError::StoreUnavailable {
-            code: "sqlite_worker_lock_poisoned",
-        })?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_worker_lock_poisoned",
+            })?;
         body(&conn)
     }
 
@@ -115,9 +118,12 @@ impl SqliteWorkerStore {
         &self,
         body: impl FnOnce(&mut Connection) -> Result<T, WorkerError>,
     ) -> Result<T, WorkerError> {
-        let mut conn = self.conn.lock().map_err(|_| WorkerError::StoreUnavailable {
-            code: "sqlite_worker_lock_poisoned",
-        })?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_worker_lock_poisoned",
+            })?;
         body(&mut conn)
     }
 }
@@ -188,9 +194,11 @@ fn query_wake_rows(
     sql: &str,
     args: &[&dyn rusqlite::ToSql],
 ) -> Result<Vec<WakeRow>, WorkerError> {
-    let mut stmt = conn.prepare(sql).map_err(|_| WorkerError::StoreUnavailable {
-        code: "sqlite_wake_row",
-    })?;
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|_| WorkerError::StoreUnavailable {
+            code: "sqlite_wake_row",
+        })?;
     let rows = stmt
         .query_map(args, |row| {
             Ok((
@@ -445,9 +453,10 @@ fn decode_fire_row(
     status: &str,
     started_session: Option<String>,
 ) -> Result<FireRow, WorkerError> {
-    let fired_at = Timestamp::from_unix_ms(fired_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
-        code: "sqlite_fire_time",
-    })?;
+    let fired_at =
+        Timestamp::from_unix_ms(fired_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
+            code: "sqlite_fire_time",
+        })?;
     Ok(FireRow {
         tenant_scope: tenant_scope.into(),
         schedule_id: schedule_id.into(),
@@ -604,9 +613,11 @@ impl InboxStore for SqliteWorkerStore {
     fn load_all(&self) -> Result<Vec<InboxRow>, WorkerError> {
         self.with_conn(|conn| {
             let sql = format!("{INBOX_SELECT} ORDER BY tenant_scope, session_id, pending_id");
-            let mut stmt = conn.prepare(&sql).map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_inbox_query",
-            })?;
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_query",
+                })?;
             let rows = stmt
                 .query_map([], |row| {
                     Ok((
@@ -650,11 +661,7 @@ impl InboxStore for SqliteWorkerStore {
             conn.execute(
                 "DELETE FROM finstack_workflow_worker_inbox
                  WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3",
-                params![
-                    tenant_scope,
-                    session_id.to_canonical_string(),
-                    pending_id,
-                ],
+                params![tenant_scope, session_id.to_canonical_string(), pending_id,],
             )
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_inbox_delete",
@@ -712,7 +719,9 @@ mod tests {
         let path = dir.path().join("worker.sqlite");
         let first = SqliteWorkerStore::open(&path).expect("first");
         let second = SqliteWorkerStore::open(&path).expect("second");
-        first.upsert(&timer_row("tenant-a", 1, 1_000)).expect("upsert");
+        first
+            .upsert(&timer_row("tenant-a", 1, 1_000))
+            .expect("upsert");
         let won_first = first
             .try_claim("tenant-a", id(1), "worker-a", ts(1_500), 60_000)
             .expect("first");
@@ -737,18 +746,28 @@ mod tests {
     fn expired_lease_is_reclaimed_and_renew_requires_holder() {
         let dir = tempfile::tempdir().expect("dir");
         let store = SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
-        store.upsert(&timer_row("tenant-a", 1, 1_000)).expect("upsert");
-        assert!(store
-            .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
-            .expect("claim"));
-        assert!(store
-            .renew("tenant-a", id(1), "worker-a", ts(1_500), 1_000)
-            .expect("holder renews"));
-        assert!(!store
-            .renew("tenant-a", id(1), "worker-b", ts(1_500), 1_000)
-            .expect("stranger cannot renew"));
-        assert!(store
-            .try_claim("tenant-a", id(1), "worker-b", ts(9_000), 1_000)
-            .expect("expired lease reclaimed"));
+        store
+            .upsert(&timer_row("tenant-a", 1, 1_000))
+            .expect("upsert");
+        assert!(
+            store
+                .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
+                .expect("claim")
+        );
+        assert!(
+            store
+                .renew("tenant-a", id(1), "worker-a", ts(1_500), 1_000)
+                .expect("holder renews")
+        );
+        assert!(
+            !store
+                .renew("tenant-a", id(1), "worker-b", ts(1_500), 1_000)
+                .expect("stranger cannot renew")
+        );
+        assert!(
+            store
+                .try_claim("tenant-a", id(1), "worker-b", ts(9_000), 1_000)
+                .expect("expired lease reclaimed")
+        );
     }
 }

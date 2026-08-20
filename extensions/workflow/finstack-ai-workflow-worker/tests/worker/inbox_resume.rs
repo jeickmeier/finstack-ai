@@ -86,9 +86,10 @@ async fn drive_past_missing_facade_decisions(
     seed: u64,
 ) {
     let dyn_journal = Arc::clone(journal) as Arc<dyn JournalStore>;
-    let recovered_coordinator = CommitCoordinator::recover(Arc::clone(&dyn_journal), locator().session_id)
-        .await
-        .expect("recover for facade");
+    let recovered_coordinator =
+        CommitCoordinator::recover(Arc::clone(&dyn_journal), locator().session_id)
+            .await
+            .expect("recover for facade");
     let facade = RunTaskOwner::spawn_with_model_and_tools(
         recovered_coordinator,
         RunTaskConfig {
@@ -445,7 +446,11 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     let mut session = WorkflowSession::trusted(journal.clone(), locator(), clock.clone(), 741)
         .await
         .expect("attach")
-        .with_ports(Arc::clone(&model), locked_profile(), Some(Arc::clone(&catalog)));
+        .with_ports(
+            Arc::clone(&model),
+            locked_profile(),
+            Some(Arc::clone(&catalog)),
+        );
     let WorkflowWait::DeferredEffect { effect_id, .. } =
         session.drive_until_wait().await.expect("deferred")
     else {
@@ -625,20 +630,18 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
                         arguments_delta: Arc::from(arguments.as_str()),
                         provider_call_id: None,
                     }))),
-                    ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(
-                        ModelResponse {
-                            assistant_content: Arc::from([]),
-                            tool_calls: Arc::from([ModelToolCall {
-                                name: Arc::from("echo"),
-                                arguments,
-                                provider_call_id: None,
-                            }]),
-                            usage: Usage::empty(),
-                            provider_ids: ProviderIds::empty(),
-                            completion_id: Arc::from("completion-tools"),
-                            continuation_state: None,
-                        },
-                    ))),
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                        assistant_content: Arc::from([]),
+                        tool_calls: Arc::from([ModelToolCall {
+                            name: Arc::from("echo"),
+                            arguments,
+                            provider_call_id: None,
+                        }]),
+                        usage: Usage::empty(),
+                        provider_ids: ProviderIds::empty(),
+                        completion_id: Arc::from("completion-tools"),
+                        continuation_state: None,
+                    }))),
                 ],
             },
             completed_plan("done"),
@@ -682,10 +685,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
         .handle()
         .submit(
             env(2_100, &[7], &[], &[], &[], &[], &[], 105),
-            stage(
-                Stage::AfterModel,
-                ReducerStageOutcome::Continue,
-            ),
+            stage(Stage::AfterModel, ReducerStageOutcome::Continue),
         )
         .await
         .expect("after model");
@@ -695,15 +695,14 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
     .await;
     drop(owner);
 
-    let mut session = WorkflowSession::trusted(
-        journal.clone(),
-        locator(),
-        clock.clone(),
-        701,
-    )
-    .await
-    .expect("attach")
-    .with_ports(Arc::clone(&model), locked_profile(), Some(Arc::clone(&catalog)));
+    let mut session = WorkflowSession::trusted(journal.clone(), locator(), clock.clone(), 701)
+        .await
+        .expect("attach")
+        .with_ports(
+            Arc::clone(&model),
+            locked_profile(),
+            Some(Arc::clone(&catalog)),
+        );
     let WorkflowWait::Interaction { interaction_id, .. } =
         session.drive_until_wait().await.expect("interaction")
     else {

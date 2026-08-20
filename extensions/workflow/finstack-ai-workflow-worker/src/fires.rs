@@ -69,7 +69,10 @@ pub struct FireRow {
 /// Stable idempotency key for a claimed fire: `tenant:schedule:fire_count`.
 #[must_use]
 pub fn idempotency_key(row: &FireRow) -> String {
-    format!("{}:{}:{}", row.tenant_scope, row.schedule_id, row.fire_count)
+    format!(
+        "{}:{}:{}",
+        row.tenant_scope, row.schedule_id, row.fire_count
+    )
 }
 
 /// Adapter table recording claimed cron fires.

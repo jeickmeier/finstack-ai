@@ -46,9 +46,7 @@ impl InboxKind {
         match value {
             "interaction" => Ok(Self::Interaction),
             "external" => Ok(Self::External),
-            _ => Err(WorkerError::StoreIntegrity {
-                code: "inbox_kind",
-            }),
+            _ => Err(WorkerError::StoreIntegrity { code: "inbox_kind" }),
         }
     }
 }

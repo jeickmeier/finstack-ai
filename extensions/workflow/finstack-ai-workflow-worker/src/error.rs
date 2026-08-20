@@ -60,10 +60,7 @@ mod tests {
 
     #[test]
     fn codes_are_stable() {
-        assert_eq!(
-            WorkerError::StoreUnavailable { code: "x" }.code(),
-            "x"
-        );
+        assert_eq!(WorkerError::StoreUnavailable { code: "x" }.code(), "x");
         assert_eq!(WorkerError::TimeOverflow.code(), "time_overflow");
         assert_eq!(WorkerError::NotParked.code(), "not_parked");
     }

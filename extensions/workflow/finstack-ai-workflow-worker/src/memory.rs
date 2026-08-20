@@ -185,11 +185,7 @@ impl FireStore for MemoryWorkerStore {
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "memory_worker_lock_poisoned",
             })?;
-        let key = (
-            Arc::from(tenant_scope),
-            Arc::from(schedule_id),
-            fire_count,
-        );
+        let key = (Arc::from(tenant_scope), Arc::from(schedule_id), fire_count);
         if let Some(row) = fires.get_mut(&key) {
             row.status = FireStatus::Started;
             row.started_session = Some(Arc::from(started_session));
@@ -319,16 +315,22 @@ mod tests {
         store
             .upsert(&timer_row("tenant-a", 1, 1_000))
             .expect("upsert");
-        assert!(store
-            .try_claim("tenant-a", id(1), "worker-a", ts(1_500), 1_000)
-            .expect("first claim"));
-        assert!(!store
-            .try_claim("tenant-a", id(1), "worker-b", ts(1_600), 1_000)
-            .expect("held"));
+        assert!(
+            store
+                .try_claim("tenant-a", id(1), "worker-a", ts(1_500), 1_000)
+                .expect("first claim")
+        );
+        assert!(
+            !store
+                .try_claim("tenant-a", id(1), "worker-b", ts(1_600), 1_000)
+                .expect("held")
+        );
         assert!(store.load_due(ts(1_600)).expect("hidden").is_empty());
-        assert!(store
-            .try_claim("tenant-a", id(1), "worker-b", ts(2_600), 1_000)
-            .expect("expired lease is claimable"));
+        assert!(
+            store
+                .try_claim("tenant-a", id(1), "worker-b", ts(2_600), 1_000)
+                .expect("expired lease is claimable")
+        );
     }
 
     #[test]
@@ -337,9 +339,11 @@ mod tests {
         store
             .upsert(&timer_row("tenant-a", 1, 1_000))
             .expect("upsert");
-        assert!(store
-            .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
-            .expect("claim"));
+        assert!(
+            store
+                .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
+                .expect("claim")
+        );
         store
             .record_failure("tenant-a", id(1), ts(5_000))
             .expect("failure");

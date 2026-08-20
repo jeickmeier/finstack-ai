@@ -12,17 +12,17 @@ use finstack_ai_kernel::{
     ExternalEffectOutcome, ExternalHandleRef, Id, IdTag, InteractionKind, InteractionRequest,
     InteractionTag, KernelInput, KernelState, Message, MessageRole, Metadata, OperationLocator,
     OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
-    ReducerStageOutcome, RequestInteraction, RetryClassification, RetryDirective,
-    RetrySafety, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
-    RunSecurityContext, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv, Usage, Version,
+    ReducerStageOutcome, RequestInteraction, RetryClassification, RetryDirective, RetrySafety,
+    RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Stage,
+    StageCursor, TextBlock, Timestamp, TransitionEnv, Usage, Version,
 };
 use finstack_ai_runtime::{
     Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError, JournalStore,
-    LockedModelContextProfile, Model, ModelContextProfile, ModelDeferral, ModelError,
-    ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
-    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolSpec, WorkflowSession, WorkflowWait, classify_wait, resolve_model_context_profile,
+    LockedModelContextProfile, Model, ModelContextProfile, ModelDeferral, ModelError, ModelName,
+    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem,
+    ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig, RunTaskOwner,
+    SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolSpec,
+    WorkflowSession, WorkflowWait, classify_wait, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
@@ -752,10 +752,7 @@ pub(crate) async fn continue_retry_cycle_out_of_band(
         )
         .await
         .expect("model request");
-    wait_state(store, |state| {
-        state.phase == Some(RunPhase::BeforeFinalize)
-    })
-    .await;
+    wait_state(store, |state| state.phase == Some(RunPhase::BeforeFinalize)).await;
     drop(owner);
 }
 
@@ -782,7 +779,11 @@ pub(crate) async fn finalize_out_of_band(store: &Arc<MemoryJournalStore>) {
     coordinator
         .submit(
             env(3_000, &[900, 901], &[902], &[], &[], &[], &[], 903),
-            stage_at(cycle, Stage::BeforeFinalize, ReducerStageOutcome::FinalizeAccepted),
+            stage_at(
+                cycle,
+                Stage::BeforeFinalize,
+                ReducerStageOutcome::FinalizeAccepted,
+            ),
         )
         .await
         .expect("finalize out of band");
