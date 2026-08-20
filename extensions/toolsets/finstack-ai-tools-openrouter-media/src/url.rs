@@ -1,14 +1,41 @@
 //! Caller-supplied download URL validation and address-pinned fetches.
+//!
+//! Backed by `finstack-ai-net-guard`'s vetted-egress primitives: URL
+//! parsing/vetting (`parse_and_vet_url`), DNS resolve-and-pin
+//! (`resolve_and_pin`), a redirect-disabled address-pinned client
+//! (`pinned_client`), and a bounded body read (`read_body_bounded`). This
+//! replaces the crate's former private copy of the same pipeline.
+//!
+//! Two behaviors are adopted from net-guard beyond legacy parity, both
+//! strictly tightening and controller-ruled safe:
+//!
+//! - Literal or resolved unspecified (`0.0.0.0`), broadcast, and multicast
+//!   addresses are now denied. No legitimate media host is `0.0.0.0` or a
+//!   multicast address.
+//! - Outbound env/system proxies are disabled (`.no_proxy()`, applied by
+//!   `pinned_client`). A proxy would receive the unpinned hostname and
+//!   re-resolve it itself, bypassing the address pin below (security
+//!   finding F-1).
+//!
+//! One structural delta: net-guard's `parse_and_vet_url` restricts `https`
+//! to port 443 and enforces userinfo/fragment rejection structurally
+//! (rather than the crate's former substring scan for `@`/`#`). Both are
+//! stricter than the legacy checks; no existing test exercises a non-443
+//! `https` download URL or a query string containing `@`/`#`, so this does
+//! not change observable behavior for any covered caller-supplied URL.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
 use finstack_ai_kernel::ErrorCategory;
+use finstack_ai_net_guard::{
+    NetGuardError, SystemResolver, UrlPolicy, VettedUrl, is_forbidden_destination,
+    is_loopback_host, parse_and_vet_url, pinned_client, read_body_bounded, resolve_and_pin,
+};
 use finstack_ai_runtime::{ToolCallContext, ToolError};
 
-use crate::config::is_loopback_host;
 use crate::http::{
-    REQUEST_TIMEOUT, deadline_elapsed, endpoint_rejected, fetch_bytes_bounded, invalid_arguments,
-    timeout_error, tool_error, wait_deadline,
+    REQUEST_TIMEOUT, deadline_elapsed, endpoint_rejected, invalid_arguments, timeout_error,
+    tool_error, wait_deadline,
 };
 
 /// Sent when fetching caller-supplied audio, which is an arbitrary host
@@ -21,168 +48,78 @@ const DOWNLOAD_USER_AGENT: &str = concat!(
 
 pub(crate) const MAX_AUDIO_DOWNLOAD_BYTES: usize = 25 * 1_048_576;
 
-pub(crate) fn validate_download_url(
-    value: &str,
+fn download_url_policy(endpoint_is_loopback: bool) -> UrlPolicy {
+    UrlPolicy {
+        allow_loopback_http: endpoint_is_loopback,
+    }
+}
+
+/// Map a net-guard vetting/resolution failure onto the crate's stable
+/// `openrouter_media_invalid_arguments` code. All three variants
+/// (malformed/forbidden URL, blocked destination, DNS failure) were
+/// argument-validation failures under the crate's former private checks.
+fn invalid_download_url() -> ToolError {
+    invalid_arguments("openrouter media audio_url is not allowed")
+}
+
+/// Map every other net-guard failure (client construction, transport,
+/// oversize body) onto the crate's existing transport/limit codes.
+#[allow(clippy::needless_pass_by_value)] // used as a `map_err` function pointer
+fn map_net_guard_error(error: NetGuardError) -> ToolError {
+    match error {
+        NetGuardError::InvalidUrl { .. }
+        | NetGuardError::DestinationBlocked { .. }
+        | NetGuardError::ResolutionFailed => invalid_download_url(),
+        NetGuardError::ClientBuildFailed | NetGuardError::TransportFailed => tool_error(
+            crate::config::OPENROUTER_MEDIA_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "openrouter media audio download failed",
+        ),
+        NetGuardError::LimitExceeded => tool_error(
+            crate::config::OPENROUTER_MEDIA_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "openrouter media response exceeds the configured byte limit",
+        ),
+    }
+}
+
+/// True when a literal address (or the bare string `localhost`) violates
+/// destination policy. `resolve_and_pin` performs the equivalent check for
+/// resolved and literal hostnames alike, but only after an async DNS
+/// resolution step and only using `VettedUrl::is_loopback` (which net-guard
+/// scopes to the `http` scheme). The crate's former private checks applied
+/// this synchronously, and to *any* scheme, so `validate_download_url`
+/// keeps a synchronous literal check here for parity: the loopback
+/// allowance is computed from the endpoint policy and the URL's own host,
+/// not from the scheme.
+fn reject_literal_destination(
+    vetted: &VettedUrl,
     endpoint_is_loopback: bool,
 ) -> Result<(), ToolError> {
-    let parsed = parse_download_url(value, endpoint_is_loopback)?;
-    reject_literal_download_host(parsed.host, parsed.allow_loopback)
-}
-
-struct ParsedDownloadUrl<'a> {
-    host: &'a str,
-    port: u16,
-    allow_loopback: bool,
-}
-
-fn parse_download_url(
-    value: &str,
-    endpoint_is_loopback: bool,
-) -> Result<ParsedDownloadUrl<'_>, ToolError> {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return Err(invalid_arguments(
-            "openrouter media audio_url must be an http or https URL",
-        ));
-    };
-    // Query strings are allowed: signed download URLs (e.g. presigned S3 or
-    // GCS links) are a normal shape for caller-supplied audio_url values.
-    if rest.contains('@') || rest.contains('#') {
-        return Err(invalid_arguments(
-            "openrouter media audio_url contains forbidden components",
-        ));
-    }
-    let https = scheme.eq_ignore_ascii_case("https");
-    let http = scheme.eq_ignore_ascii_case("http");
-    if !https && !http {
-        return Err(invalid_arguments(
-            "openrouter media audio_url must be an http or https URL",
-        ));
-    }
-    let default_port = if https { 443 } else { 80 };
-    let (host, port) = split_download_host_port(rest, default_port)
-        .ok_or_else(|| invalid_arguments("openrouter media audio_url host is missing"))?;
-    let allow_loopback = endpoint_is_loopback && is_loopback_host(host);
-    if http && !allow_loopback {
-        return Err(invalid_arguments(
-            "openrouter media audio_url must be https (plaintext HTTP is allowed only for loopback fixtures when the toolset endpoint is also loopback)",
-        ));
-    }
-    Ok(ParsedDownloadUrl {
-        host,
-        port,
-        allow_loopback,
-    })
-}
-
-fn forbidden_download_host() -> ToolError {
-    invalid_arguments("openrouter media audio_url host is not allowed")
-}
-
-pub(crate) fn is_forbidden_destination(addr: IpAddr) -> bool {
-    match addr.to_canonical() {
-        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
-    }
-}
-
-fn destination_blocked(addr: IpAddr, allow_loopback: bool) -> bool {
-    let addr = addr.to_canonical();
-    if allow_loopback && addr.is_loopback() {
-        return false;
-    }
-    is_forbidden_destination(addr)
-}
-
-fn reject_literal_download_host(host: &str, allow_loopback: bool) -> Result<(), ToolError> {
-    if !allow_loopback && host.eq_ignore_ascii_case("localhost") {
-        return Err(forbidden_download_host());
-    }
-    if let Ok(addr) = host.parse::<IpAddr>()
-        && destination_blocked(addr, allow_loopback)
-    {
-        return Err(forbidden_download_host());
+    let allow_loopback = endpoint_is_loopback && is_loopback_host(&vetted.host);
+    let bare_host = vetted
+        .host
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    if let Ok(addr) = bare_host.parse::<IpAddr>() {
+        let canonical = addr.to_canonical();
+        let blocked = !(allow_loopback && canonical.is_loopback()) && is_forbidden_destination(addr);
+        if blocked {
+            return Err(invalid_download_url());
+        }
+    } else if !allow_loopback && vetted.host.eq_ignore_ascii_case("localhost") {
+        return Err(invalid_download_url());
     }
     Ok(())
 }
 
-fn split_download_host_port(rest: &str, default_port: u16) -> Option<(&str, u16)> {
-    if let Some(after) = rest.strip_prefix('[') {
-        let (host, tail) = after.split_once(']')?;
-        if host.is_empty() {
-            return None;
-        }
-        let port = match tail.strip_prefix(':') {
-            Some(port_and_path) => {
-                let port_str = port_and_path.split(['/', '?']).next().unwrap_or("");
-                if port_str.is_empty() {
-                    default_port
-                } else {
-                    port_str.parse().ok()?
-                }
-            }
-            None => default_port,
-        };
-        return Some((host, port));
-    }
-    let authority = rest
-        .split(['/', '?'])
-        .next()
-        .filter(|part| !part.is_empty())?;
-    if authority.parse::<IpAddr>().is_ok() {
-        return Some((authority, default_port));
-    }
-    match authority.rsplit_once(':') {
-        Some((host, port_str)) if !host.is_empty() => Some((host, port_str.parse().ok()?)),
-        _ => Some((authority, default_port)),
-    }
-}
-
-pub(crate) fn select_vetted_download_addr(
-    addrs: impl IntoIterator<Item = SocketAddr>,
-    allow_loopback: bool,
-) -> Result<SocketAddr, ToolError> {
-    let mut chosen = None;
-    for addr in addrs {
-        if destination_blocked(addr.ip(), allow_loopback) {
-            return Err(forbidden_download_host());
-        }
-        if chosen.is_none() {
-            chosen = Some(addr);
-        }
-    }
-    chosen.ok_or_else(forbidden_download_host)
-}
-
-pub(crate) async fn resolve_download_target(
-    url: &str,
+pub(crate) fn validate_download_url(
+    value: &str,
     endpoint_is_loopback: bool,
-) -> Result<(&str, SocketAddr), ToolError> {
-    let parsed = parse_download_url(url, endpoint_is_loopback)?;
-    reject_literal_download_host(parsed.host, parsed.allow_loopback)?;
-    if let Ok(ip) = parsed.host.parse::<IpAddr>() {
-        return Ok((parsed.host, SocketAddr::new(ip, parsed.port)));
-    }
-    let resolved = tokio::net::lookup_host((parsed.host, parsed.port))
-        .await
-        .map_err(|_| invalid_arguments("openrouter media audio_url host could not be resolved"))?;
-    let vetted = select_vetted_download_addr(resolved, parsed.allow_loopback)?;
-    Ok((parsed.host, vetted))
-}
-
-fn pinned_download_client(host: &str, vetted: SocketAddr) -> Result<reqwest::Client, ToolError> {
-    reqwest::Client::builder()
-        .http1_only()
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .resolve(host, vetted)
-        .build()
-        .map_err(|_| {
-            tool_error(
-                crate::config::OPENROUTER_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openrouter media audio download failed",
-            )
-        })
+) -> Result<(), ToolError> {
+    let vetted = parse_and_vet_url(value, &download_url_policy(endpoint_is_loopback))
+        .map_err(|_| invalid_download_url())?;
+    reject_literal_destination(&vetted, endpoint_is_loopback)
 }
 
 pub(crate) async fn download_bytes(
@@ -194,12 +131,17 @@ pub(crate) async fn download_bytes(
     if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
         return Err(timeout_error());
     }
-    let (host, vetted) = resolve_download_target(url, endpoint_is_loopback).await?;
-    let client = pinned_download_client(host, vetted)?;
+    let policy = download_url_policy(endpoint_is_loopback);
+    let vetted = parse_and_vet_url(url, &policy).map_err(map_net_guard_error)?;
+    reject_literal_destination(&vetted, endpoint_is_loopback)?;
+    let addr = resolve_and_pin(&vetted, &SystemResolver)
+        .await
+        .map_err(map_net_guard_error)?;
+    let client = pinned_client(&vetted, addr, REQUEST_TIMEOUT).map_err(map_net_guard_error)?;
     // Identify the client: hosts serving public media commonly answer an
     // anonymous request with 403 rather than the file.
     let send = client
-        .get(url)
+        .get(vetted.url.as_str())
         .header(reqwest::header::USER_AGENT, DOWNLOAD_USER_AGENT)
         .send();
     let response = tokio::select! {
@@ -217,5 +159,7 @@ pub(crate) async fn download_bytes(
     if !status.is_success() {
         return Err(endpoint_rejected("audio host", status, response).await);
     }
-    fetch_bytes_bounded(response, cap).await
+    read_body_bounded(response, cap)
+        .await
+        .map_err(map_net_guard_error)
 }

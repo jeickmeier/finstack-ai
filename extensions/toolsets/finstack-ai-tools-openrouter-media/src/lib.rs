@@ -563,10 +563,7 @@ mod tests {
 
     use crate::ArtifactStore;
     use crate::http::{BASE64_STANDARD, base64_encoded_len};
-    use crate::url::{
-        is_forbidden_destination, resolve_download_target, select_vetted_download_addr,
-        validate_download_url,
-    };
+    use crate::url::validate_download_url;
 
     const CANARY: &str = "or-media-secret-canary-046";
 
@@ -1283,31 +1280,18 @@ mod tests {
         validate_download_url("https://localhost/a.mp3", false).expect_err("localhost must fail");
     }
 
-    #[tokio::test]
-    async fn resolve_download_target_rejects_localhost() {
-        resolve_download_target("https://localhost/a.mp3", false)
-            .await
-            .expect_err("localhost hostname must fail closed");
-    }
-
-    #[test]
-    fn hostname_resolving_to_a_private_address_is_rejected() {
-        let private = "10.0.0.1:443".parse().expect("rfc1918 fixture address");
-        select_vetted_download_addr(std::iter::once(private), false)
-            .expect_err("hostname that resolves to RFC1918 must fail");
-        assert!(is_forbidden_destination(
-            "192.168.1.1".parse().expect("rfc1918")
-        ));
-        assert!(is_forbidden_destination(
-            "172.16.0.1".parse().expect("rfc1918")
-        ));
-        assert!(is_forbidden_destination(
-            "fc00::1".parse().expect("unique local")
-        ));
-        assert!(!is_forbidden_destination(
-            "1.1.1.1".parse().expect("public")
-        ));
-    }
+    // `resolve_download_target_rejects_localhost` and
+    // `hostname_resolving_to_a_private_address_is_rejected` were dropped:
+    // both exercised the crate's former private resolve/select helpers,
+    // which are now `finstack-ai-net-guard`'s `resolve_and_pin` and
+    // `is_forbidden_destination` (private-address and localhost-rejection
+    // behavior is covered by that crate's own test suite —
+    // `extensions/net/finstack-ai-net-guard/src/tests.rs`:
+    // `one_private_address_rejects_the_whole_set`,
+    // `literal_hosts_skip_resolution_but_not_the_deny_check`,
+    // `forbidden_destination_covers_private_ranges`). Localhost rejection
+    // at the URL-vetting layer remains covered here by
+    // `validate_download_url_rejects_https_loopback_and_link_local`.
 
     #[test]
     fn base64_encoded_len_uses_div_ceil() {
