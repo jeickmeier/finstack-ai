@@ -61,17 +61,30 @@ impl HitlRouter {
 
     /// Replace the expiry policy consulted by [`HitlRouter::sweep`].
     ///
+    /// A policy installed here decides **this router's row disposition** —
+    /// its [`crate::InteractionStatus`] and `resolved_by` — and not what the
+    /// waiting run receives.
+    ///
     /// The default [`ApprovalExpiry`] declines everything, so *this sweep*
-    /// delivers nothing until a host installs a policy here. That does not
-    /// keep unanswered interactions alive: past the deadline the worker's
-    /// tick expires them through the kernel's own credential-free path. A
-    /// policy is how a host substitutes an authored refusal payload for that
-    /// plain expiry. Whatever the policy returns is
-    /// delivered under the host's own responsibility: the resolution must
-    /// carry the principal and authorization evidence the run was accepted
-    /// with, or the runtime's ingress rejects it on every tick while the
-    /// inbox row has already been marked `Expired`. See [`ApprovalExpiry`]
-    /// for the exact requirement.
+    /// delivers nothing until a host installs a policy. That does not keep
+    /// unanswered interactions alive: past the deadline the worker's tick
+    /// expires them through the kernel's own credential-free path, whether or
+    /// not a policy exists.
+    ///
+    /// Nor does installing a policy substitute an authored refusal payload
+    /// for that expiry. A sweep may only offer a row once `now >=
+    /// expires_at`, the worker submits the buffered command with the same
+    /// clock, and the interaction ingress rewrites any resolution submitted
+    /// at or after the deadline into `InteractionSettled::Expired` before the
+    /// reducer sees it — so the payload is discarded and the journal records
+    /// a plain expiry with no resolution identity. See the
+    /// [`crate::ApprovalExpiry`] documentation and its module for the full
+    /// chain, and `tests/hitl/uc05.rs` for it asserted end to end.
+    ///
+    /// Whatever the policy returns is still delivered under the host's own
+    /// responsibility: it must carry the principal and authorization evidence
+    /// the run was accepted with, or the delivery is refused by the ingress
+    /// for a second, independent reason.
     #[must_use]
     pub fn with_expiry_policy(mut self, policy: Arc<dyn ExpiryPolicy>) -> Self {
         self.expiry = policy;
@@ -92,6 +105,30 @@ impl HitlRouter {
     ///
     /// Delivery happens before the status transition: if the worker rejects
     /// the command the row stays `Open` and the call can be retried.
+    ///
+    /// # `Delivered` means buffered, not accepted
+    ///
+    /// This router hands the command to the worker's inbox and marks the row
+    /// [`crate::InteractionStatus::Delivered`]. Whether the *journal* accepts
+    /// it is decided later, by the runtime's interaction ingress, which
+    /// admits a resolution only when its principal **and** its authorization
+    /// evidence exactly equal the run's own `RunAccepted` security context —
+    /// the credentials the host presented when it accepted the run
+    /// (`authorization_matches`,
+    /// `crates/finstack-ai-runtime/src/driver/ingress/shared.rs`).
+    ///
+    /// Deliver a mismatched principal, policy version, or decision id and the
+    /// failure is permanent and invisible from here: every tick rejects the
+    /// buffered command as `scope_mismatch`, nothing is ever settled, the run
+    /// stays parked on `RunPhase::AwaitingInteraction`, and the row sits at
+    /// `Delivered` — out of [`HitlRouter::pending`], so out of the operator's
+    /// view. The worker's retry backoff never gives up, so this does not
+    /// self-heal. Pass the accepted run's own principal and evidence through;
+    /// a host that cannot should leave the row `Open` rather than deliver.
+    ///
+    /// Note also that a resolution submitted at or after the request's
+    /// `expires_at` is rewritten into an expiry by that same ingress, so a
+    /// late answer settles the interaction without its payload.
     ///
     /// If the final [`HitlInboxStore::set_status`] fails after a successful
     /// delivery the row stays `Open` and visible in [`HitlRouter::pending`]
@@ -171,13 +208,16 @@ impl HitlRouter {
     /// a policy that declines leaves the row `Open` for the next sweep.
     ///
     /// The default [`ApprovalExpiry`] declines every row, so a sweep expires
-    /// nothing until a host installs a policy whose credentials the runtime's
-    /// interaction ingress admits — see [`HitlRouter::with_expiry_policy`].
-    /// The `Expired` stamp is only as truthful as that policy: this router
-    /// cannot see whether the tick will accept the resolution it delivered.
-    /// `Expired` therefore only ever means "a host policy authored a refusal
-    /// for this row"; an interaction the worker's tick expired on its own
-    /// arrives here as a reconcile, and is closed by the branch above.
+    /// nothing until a host installs a policy — see
+    /// [`HitlRouter::with_expiry_policy`]. `Expired` is a statement about
+    /// *this row*, not about the run: it means "a host policy authored an
+    /// expiry for this row". The payload that policy authored does not reach
+    /// the run, because by the time a sweep may offer the row its deadline
+    /// has passed and the interaction ingress rewrites the delivered
+    /// resolution into a plain `InteractionSettled::Expired`. An interaction
+    /// the worker's tick expired with no policy installed instead arrives
+    /// here as a reconcile and is closed by the branch above. Either way the
+    /// journal — not this inbox — is the authority on what settled the run.
     ///
     /// The first row that errors aborts the pass. Each transition is
     /// independently durable, so rows already transitioned stay that way and

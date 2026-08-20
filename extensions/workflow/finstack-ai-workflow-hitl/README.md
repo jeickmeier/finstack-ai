@@ -1,10 +1,14 @@
 # finstack-ai-workflow-hitl
 
 Human-in-the-loop router battery over `finstack-ai-workflow-worker`. It
-durably captures every interaction a session parks on, exposes it as a
-per-tenant inbox, and turns an authorized operator decision — or an
-expiry policy's decision — into a resolution the worker buffers for the
-next tick.
+durably captures an interaction a session parks on **through its own
+`park`**, exposes it as a per-tenant inbox, and turns an authorized
+operator decision into a resolution the worker buffers for the next tick.
+
+Two things it is not: it does not capture interactions a session parks on
+inside the worker's own tick (see [Limitations](#limitations)), and its
+`ExpiryPolicy` hook does not decide what an expired run receives (see
+[`ExpiryPolicy`](#expirypolicy--a-row-disposition-hook-not-a-run-outcome-hook)).
 
 The inbox is a hint. The kernel journal stays authoritative: nothing in
 this crate closes an interaction that the journal has not actually
@@ -20,9 +24,18 @@ for ownership boundaries.
 
 ```text
 Open ──resolve──▶ Delivered ──reconcile──▶ Closed
-  │
-  └──sweep (host ExpiryPolicy)──▶ Expired
+  │                                          ▲
+  └──sweep (host ExpiryPolicy)──▶ Expired    │
+                                             │
+  (no policy installed: the worker's tick expires the interaction on the
+   journal, and the next sweep reconciles the row here) ──────────────────┘
 ```
+
+These are **row** states. They describe this inbox, not the run: the
+journal's own settlement is the authority for what actually happened. In
+particular `Expired` means "a policy authored an expiry for this row", not
+"the run received that policy's payload" — see
+[`ExpiryPolicy`](#expirypolicy--a-row-disposition-hook-not-a-run-outcome-hook).
 
 - **`park`** — the safe entry point. It composes
   `finstack_ai_workflow_worker::park` with [`capture`], so the wake row is
@@ -85,51 +98,113 @@ the kernel treats `None` as "inherit", which this battery cannot verify.
 Install a stricter authorizer with `HitlRouter::with_authorizer` — e.g.
 one that also checks role or explicit interaction assignment.
 
-### `ExpiryPolicy` — fail-closed by default
+Tenant equality is a floor, not a sufficient check. Authorize against the
+run's **accepted principal** where you can: that is the only principal the
+runtime will admit (next section), so a resolution this battery authorizes
+on tenant alone can still be rejected by the ingress on every tick.
+
+### Resolve credentials — `Delivered` is not `accepted`
+
+`resolve` delivers into the worker's inbox and marks the row `Delivered`.
+That means **durably buffered**, and nothing more. The runtime's
+interaction ingress admits a resolution only when its principal *and*
+authorization evidence exactly equal the run's own `RunAccepted` security
+context — the credentials the host presented when it accepted the run
+(`authorization_matches`,
+`crates/finstack-ai-runtime/src/driver/ingress/shared.rs`).
+
+Deliver a mismatched principal or mismatched policy-version/decision-id
+evidence and the failure is silent and permanent from this inbox's point
+of view: every tick rejects the buffered command as `scope_mismatch`, the
+worker never settles anything, the run stays parked on
+`RunPhase::AwaitingInteraction`, and the row sits at `Delivered` forever —
+out of `pending()`, so out of the operator's view. The worker's retry
+backoff never gives up, so this does not self-heal.
+
+Pass the accepted run's own principal and evidence through to `resolve`.
+If a host cannot, it should not deliver at all — leave the row `Open`,
+where an operator can still see it, and let the deadline expire the
+interaction through the worker (below).
+
+### `ExpiryPolicy` — a row-disposition hook, not a run-outcome hook
 
 `HitlRouter::sweep` never invents a decision on a past-deadline row; it
 asks the installed `ExpiryPolicy`, and `Ok(None)` leaves the row `Open`
 for the next sweep. The shipped default, **`ApprovalExpiry`, declines
 every row** — a sweep against a fresh `HitlRouter` expires nothing.
 
-This is deliberate, not an oversight. A resolution only reaches the
-kernel journal through the runtime's interaction ingress, which admits it
-only when the resolution's principal and authorization evidence exactly
-match the run's own `RunAccepted` security context — the credentials the
-host presented when it *accepted* the run. That is per-run data. It is
-not on the inbox row, not in the committed `InteractionRequest` (the
-runtime's own approval request sets `assignee_hint: None`), and not
-reachable from this crate's synchronous `sweep`. No principal this
-battery authors can satisfy that check, so an earlier version of
-`ApprovalExpiry` that refused under a synthetic
-`("finstack.workflow.hitl", "expiry", Some(tenant))` principal produced a
-resolution the ingress rejected as `scope_mismatch` on every tick: the
-row was already stamped `Expired` and gone from `pending`, while the run
-stalled on `RunPhase::AwaitingInteraction` forever with no operator-visible
-trace. A policy that declines is strictly safer than one that lies about
-what it delivered.
+**What a policy can and cannot do.** A policy's authored payload reaches
+the journal *as that payload* only if it is submitted **before** the
+deadline. A sweep cannot arrange that: by construction it only hands a
+row to the policy once `now >= expires_at`. The worker then submits the
+buffered command with its own clock, which under a single shared clock —
+what a real host has — is also `>= expires_at`. And the runtime's
+interaction ingress is fail-closed on a late answer:
+`interaction_settled_input`
+(`crates/finstack-ai-runtime/src/driver/ingress/shared.rs`) rewrites any
+resolution whose `submitted_at` is at or after the pending request's
+`expires_at` into `InteractionSettled::Expired` before the reducer sees
+it. The authored payload is discarded, and the journal records a plain
+expiry with no resolution identity.
 
-A host that itself accepted the run holds the credentials the ingress
-requires, and can install a policy that presents them via
-`HitlRouter::with_expiry_policy`. `tests/hitl/uc05.rs` proves such a
-policy end to end, through a real tick, to a terminal run. See the
-rustdoc on `ApprovalExpiry`, `ExpiryPolicy`, and
-`HitlRouter::with_expiry_policy` for the exact ingress check, and
-[the design spec §2.4](../../../docs/superpowers/specs/2026-08-20-workflow-hitl-router-design.md)
-for the amended decision record.
+So an `ExpiryPolicy` controls **this router's row** — its status and its
+`resolved_by` — and not the run's outcome. `tests/hitl/uc05.rs`
+(`uc05_expiry_end_to_end`) runs exactly this on one clock and asserts it:
+the policy delivers, the row becomes `Expired` with the policy's
+principal recorded, and the journal's terminal outcome is nonetheless
+`Expired` rather than `Denied`, with `resolution_identities` empty.
 
-**Credential-free expiry is the worker's job, and it is implemented.**
+The API stays — it is a published surface, and the row annotation is
+genuinely useful for a host's own inbox reporting. Just do not read
+`Expired`/`resolved_by` as a claim about what the run received.
+
+**What actually settles the run is the worker, credential-free.**
 `finstack-ai-workflow-worker` persists the committed request's deadline on
 `WakeRow::expires_at` at park time, and its tick claims a past-deadline
 interaction row on the clock alone — attaching the session is what commits
 the expiry, because the runtime applies `ExpireIfDue` inside every run
 owner constructor; no input is submitted and no credentials are presented.
-Each committed expiry is counted in `TickReport::sessions_expired`. So an
-unanswered interaction expires regardless of this battery's default: a
-declining `ApprovalExpiry` means "no authored refusal payload", not "never
-expires". After a worker-driven expiry the sweep reconciles the inbox row
-to `Closed`; the `Expired` status only ever comes from a host policy's
-delivered refusal.
+Each committed expiry is counted in `TickReport::sessions_expired`. An
+unanswered interaction therefore expires whether or not a policy is
+installed, and a declining `ApprovalExpiry` costs the run nothing. With no
+policy installed the next sweep reconciles the row to `Closed`.
+
+**Why declining is the right default.** A resolution reaches the journal
+only through the ingress check above, which also requires the resolution's
+principal and authorization evidence to exactly match the run's own
+`RunAccepted` security context — the credentials the host presented when
+it *accepted* the run. That is per-run data: not on the inbox row, not in
+the committed `InteractionRequest` (the runtime's own approval request
+sets `assignee_hint: None`), and not reachable from this crate's
+synchronous `sweep`. An earlier `ApprovalExpiry` that refused under a
+synthetic `("finstack.workflow.hitl", "expiry", Some(tenant))` principal
+produced a resolution the ingress rejected as `scope_mismatch` on every
+tick: the row was already stamped `Expired` and gone from `pending`,
+while the run stalled on `RunPhase::AwaitingInteraction` forever with no
+operator-visible trace. Declining is strictly safer than lying.
+
+See the rustdoc on `ApprovalExpiry`, `ExpiryPolicy`, and
+`HitlRouter::with_expiry_policy`, and
+[the design spec §2.4](../../../docs/superpowers/specs/2026-08-20-workflow-hitl-router-design.md)
+for the amended decision record.
+
+## Limitations
+
+- **Interactions the worker's tick parks on are not captured.** This
+  battery captures at its own `park`. When the worker's tick resumes a
+  session and that session parks on a *new* interaction, the worker's own
+  `finstack_ai_workflow_worker::park` writes the wake row with no HITL
+  capture, so the new interaction never appears in `pending()` and
+  `resolve()` answers `HitlError::UnknownInteraction`. The run is not
+  lost — it is parked and wake-indexed as usual — but it is invisible to
+  this inbox. Workaround: the host delivers the resolution to the worker
+  directly with `WorkflowWorker::deliver_interaction`, bypassing the
+  router. A structural fix (capturing from the worker's re-park) is
+  tracked separately.
+- **`Delivered` means "durably buffered", not "accepted".** A resolution
+  whose credentials the runtime's ingress refuses is rejected on every
+  tick, forever, while the row reads `Delivered` — see
+  [Resolve credentials](#resolve-credentials--delivered-is-not-accepted).
 
 ## Non-goals
 
