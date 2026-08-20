@@ -1474,6 +1474,7 @@ dependencies = [
  "finstack-ai-context-memory",
  "finstack-ai-kernel",
  "finstack-ai-middleware-document-ingest",
+ "finstack-ai-middleware-tool-policy",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
  "finstack-ai-store-memory",

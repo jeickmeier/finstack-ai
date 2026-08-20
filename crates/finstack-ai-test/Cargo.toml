@@ -27,6 +27,7 @@ criterion = { workspace = true }
 finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-context-memory = { workspace = true }
 finstack-ai-middleware-document-ingest = { workspace = true }
+finstack-ai-middleware-tool-policy = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
