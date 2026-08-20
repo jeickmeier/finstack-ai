@@ -52,7 +52,7 @@ Build it from the root with `uv build --package finstack-ai` or
 `uv sync` at the repository root creates `.venv` with editable
 `finstack-ai[pydantic]` plus notebook kernel packages. Register
 `finstack-ai-notebooks` from that environment; see
-[examples/python-minimal/notebooks/README.md](examples/python-minimal/notebooks/README.md).
+[examples/python-notebooks/README.md](examples/python-notebooks/README.md).
 
 ## Workspace layout
 

@@ -1,6 +1,6 @@
 # Python learning notebooks
 
-Nine notebooks that teach `finstack_ai.Agent` as the composition root.
+Ten notebooks that teach `finstack_ai.Agent` as the composition root.
 There is no Python `Harness` type. A harness is the recipe: pick a
 provider factory, attach trusted Python ports, run, and inspect events.
 
@@ -39,7 +39,7 @@ uv run python -m ipykernel install --user --name=finstack-ai-notebooks \
 Or launch Jupyter from that environment:
 
 ```bash
-uv run jupyter notebook examples/python-minimal/notebooks
+uv run jupyter notebook examples/python-notebooks
 ```
 
 Verification (`uv run python scripts/docs/notebooks.py` from the repository root):
@@ -53,7 +53,7 @@ uv run python scripts/docs/notebooks.py
 | Notebook | Trust | Network |
 | --- | --- | --- |
 | [01_orientation.ipynb](01_orientation.ipynb) | Import only | None |
-| [02_first_agent.ipynb](02_first_agent.ipynb) | [T2](../../../docs/site/security-trust-levels.md) callback | None |
+| [02_first_agent.ipynb](02_first_agent.ipynb) | [T2](../../docs/site/security-trust-levels.md) callback | None |
 | [03_tools_and_structured_output.ipynb](03_tools_and_structured_output.ipynb) | T2 callback + Pydantic extra | None |
 | [04_runs_events_sessions.ipynb](04_runs_events_sessions.ipynb) | T2 callback | None |
 | [05_ollama_and_harness.ipynb](05_ollama_and_harness.ipynb) | T1 provider + T2 ports | Construct-only unless local Ollama has `gemma4:26b` |
@@ -61,13 +61,14 @@ uv run python scripts/docs/notebooks.py
 | [07_anthropic.ipynb](07_anthropic.ipynb) | T1 provider + T2 ports | Construct-only unless a key is set in the notebook or `ANTHROPIC_API_KEY` |
 | [08_document_ingestion.ipynb](08_document_ingestion.ipynb) | T2 callback | None |
 | [09_openrouter.ipynb](09_openrouter.ipynb) | T1 provider + T2 ports | Construct-only unless a key is set in the notebook or `OPENROUTER_API_KEY`. Set `OPENROUTER_MODEL`, `OPENROUTER_REFERER`, `OPENROUTER_TITLE`, `OPENROUTER_REASONING_EFFORT`, and `OPENROUTER_REASONING_SUMMARY` in the first code cell |
+| [10_elicitation.ipynb](10_elicitation.ipynb) | T2 callback | None |
 
 T1 native providers and T2 Python callbacks run in-process. They are not
-isolated. See [trust levels](../../../docs/site/security-trust-levels.md).
+isolated. See [trust levels](../../docs/site/security-trust-levels.md).
 
 ## Live cells
 
-Notebooks 01–04 and 08 stay offline. 05 constructs `Agent.ollama` with
+Notebooks 01–04, 08, and 10 stay offline. 05 constructs `Agent.ollama` with
 `gemma4:26b` (or `OLLAMA_MODEL`) and runs live when that model is
 installed at `http://127.0.0.1:11434`; otherwise the live cell skips
 and lists installed models. 06, 07, and 09 construct offline and run
@@ -84,5 +85,5 @@ Paste a key in the first code cell, or keep using the environment:
 
 ```bash
 OPENAI_API_KEY=... \
-  uv run jupyter notebook examples/python-minimal/notebooks/06_openai.ipynb
+  uv run jupyter notebook examples/python-notebooks/06_openai.ipynb
 ```

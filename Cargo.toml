@@ -19,6 +19,7 @@ members = [
     "extensions/toolsets/finstack-ai-tools-openrouter-media",
     "extensions/toolsets/finstack-ai-tools-openai-media",
     "extensions/toolsets/finstack-ai-tools-calculator",
+    "extensions/toolsets/finstack-ai-tools-elicitation",
     "extensions/toolsets/finstack-ai-tools-document",
     "extensions/toolsets/finstack-ai-tools-filesystem",
     "extensions/toolsets/finstack-ai-tools-mcp",
@@ -120,6 +121,7 @@ finstack-ai-sandbox-e2b = { path = "extensions/toolsets/finstack-ai-sandbox-e2b"
 finstack-ai-tools-openrouter-media = { path = "extensions/toolsets/finstack-ai-tools-openrouter-media", version = "1.0.0" }
 finstack-ai-tools-openai-media = { path = "extensions/toolsets/finstack-ai-tools-openai-media", version = "1.0.0" }
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "1.0.0" }
+finstack-ai-tools-elicitation = { path = "extensions/toolsets/finstack-ai-tools-elicitation", version = "1.0.0" }
 finstack-ai-tools-document = { path = "extensions/toolsets/finstack-ai-tools-document", version = "1.0.0" }
 anydoc = "0.1"
 pdf-inspector = { version = "1.14", default-features = false }
@@ -161,6 +163,7 @@ serde_path_to_error = "0.1.20"
 # network resolvers (TDD §15.3 / PR-005 fixture harness).
 jsonschema = { version = "0.40.2", default-features = false }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+flamegraph = "0.6.13"
 # Kernel value-type dependencies (PR-006 / TDD §3.3). The kernel stores UUID
 # bytes without depending on `uuid` (keeps wasm-bindgen out of ARCH001). Runtime
 # owns UUIDv7 generation via injected clock/random and the `uuid` crate.

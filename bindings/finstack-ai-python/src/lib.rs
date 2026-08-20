@@ -30,6 +30,7 @@ mod callbacks;
 mod capability;
 mod child_policy;
 mod document;
+mod elicitation;
 mod errors;
 mod events;
 mod json_bridge;
@@ -123,6 +124,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyCallbackContext>()?;
     module.add_class::<PyPythonModel>()?;
     module.add_class::<PyPythonToolset>()?;
+    module.add_class::<elicitation::PyElicitationToolset>()?;
     module.add_class::<PyPythonContextProvider>()?;
     module.add_class::<PyPythonMiddleware>()?;
     module.add_class::<PyPythonObserver>()?;

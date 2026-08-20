@@ -67,9 +67,9 @@ same ingress as `WorkflowSession::complete_external`.
 
 ## Learning notebooks
 
-The [notebook series](../../examples/python-minimal/notebooks/) teaches
+The [notebook series](../../examples/python-notebooks/) teaches
 `Agent` as the composition root. There is no Python `Harness` type.
-Notebooks 01–04 stay offline. 05 constructs a local Ollama agent and runs
+Notebooks 01–04, 08, and 10 stay offline. 05 constructs a local Ollama agent and runs
 live when the server is reachable. 06–07 construct linked providers
 offline and run live only when `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
 is set. Notebook 06 takes `OPENAI_MODEL` from its first code cell

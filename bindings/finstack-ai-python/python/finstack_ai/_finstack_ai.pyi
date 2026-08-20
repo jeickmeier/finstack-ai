@@ -156,6 +156,26 @@ class PythonModel:
     @property
     def model(self) -> str: ...
 
+class ElicitationToolset:
+    """Human-in-the-loop elicitation toolset backed by the Rust implementation.
+
+    ``ask_user=True`` exposes the free-form ``ask_user`` tool; ``tools``
+    registers typed per-workflow elicitation tools whose response schemas are
+    fixed at registration. Calls park the run as a pending interaction; the
+    resolution response becomes the tool result.
+    """
+
+    def __init__(
+        self,
+        *,
+        ask_user: bool = False,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> None: ...
+    @property
+    def component(self) -> str: ...
+    @property
+    def tool_count(self) -> int: ...
+
 class PythonToolset:
     """Trusted coarse Python implementation of the Rust Toolset port.
 
@@ -764,7 +784,7 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
@@ -839,7 +859,7 @@ class Agent:
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
         media_tools: bool = False,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
@@ -903,7 +923,7 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
@@ -969,7 +989,7 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
@@ -1030,7 +1050,7 @@ class Agent:
         hard_input_bytes: int | None = None,
         auth: str | None = None,
         api_key: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
@@ -1085,7 +1105,7 @@ class Agent:
         api_key: str,
         endpoint: str | None = None,
         template: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
@@ -1126,7 +1146,7 @@ class Agent:
     @staticmethod
     async def from_python(
         model: PythonModel,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         instruction: str | None = None,
         output_type: Any | None = None,
         capabilities: list[Capability] | None = None,

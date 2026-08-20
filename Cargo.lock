@@ -1356,6 +1356,7 @@ name = "finstack-ai-provider-openrouter"
 version = "1.0.0"
 dependencies = [
  "base64",
+ "criterion",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -1383,6 +1384,7 @@ dependencies = [
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "finstack-ai-tools-document",
+ "finstack-ai-tools-elicitation",
  "futures-util",
  "pyo3",
  "pyo3-async-runtimes",
@@ -1528,6 +1530,21 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "finstack-ai-tools-elicitation"
+version = "1.0.0"
+dependencies = [
+ "criterion",
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

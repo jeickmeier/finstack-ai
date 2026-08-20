@@ -2831,3 +2831,9 @@ Expected: PASS. Fix anything flagged before claiming completion.
 git add docs CHANGELOG.md extensions/providers/finstack-ai-provider-openrouter/README.md
 git commit -m "Document OpenRouter media generation and media input"
 ```
+
+---
+
+### Task 21: OpenRouter example notebook (added mid-execution by the user; restored after an accidental revert)
+
+Create `examples/python-notebooks/09_openrouter.ipynb` modeled on 06_openai/07_anthropic: orientation + availability probe; first agent via Agent.openrouter (api_key, referer/title attribution); reasoning kwargs; provider routing (provider object / models fallback via the sibling notebooks' settings surface, else :nitro/:floor suffixes with a note); media generation (media_tools=True incl. the openrouter_get_video wait_seconds pattern; openrouter_media_* kwargs on other factories; OpenRouter-billed); markdown note that media input is host-side Rust (MediaResolver, ADR-049) with the Responses-audio caveat. Live cells gated on OPENROUTER_API_KEY like the siblings; verify with nbconvert --execute (key unset); match siblings' committed output state; update the notebooks README index. Commit "Add the OpenRouter example notebook".

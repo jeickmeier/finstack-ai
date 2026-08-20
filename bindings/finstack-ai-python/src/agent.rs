@@ -31,7 +31,26 @@ use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
     result_to_python_with_locator, run_request, stage_attachments,
 };
+use crate::elicitation::PyElicitationToolset;
 use crate::session::PySession;
+
+/// Toolset argument accepted by every agent factory.
+#[derive(FromPyObject)]
+pub(crate) enum PyToolsetArg {
+    /// Trusted Python callback toolset.
+    Python(Py<PyPythonToolset>),
+    /// Rust elicitation toolset.
+    Elicitation(Py<PyElicitationToolset>),
+}
+
+impl PyToolsetArg {
+    fn registration(&self, py: Python<'_>) -> (ComponentRef, Arc<dyn Toolset>) {
+        match self {
+            Self::Python(toolset) => toolset.bind(py).borrow().registration(),
+            Self::Elicitation(toolset) => toolset.bind(py).borrow().registration(),
+        }
+    }
+}
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 30.0;
 pub(crate) const DEFAULT_MAX_CYCLES: u64 = 16;
@@ -83,7 +102,7 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
-        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
@@ -154,7 +173,7 @@ impl PyAgent {
         reasoning_effort: Option<String>,
         reasoning_summary: Option<String>,
         media_tools: bool,
-        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
@@ -219,7 +238,7 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
-        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
@@ -284,7 +303,7 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
-        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
@@ -351,7 +370,7 @@ impl PyAgent {
         hard_input_bytes: Option<u64>,
         auth: Option<String>,
         api_key: Option<String>,
-        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
@@ -413,7 +432,7 @@ impl PyAgent {
         api_key: String,
         endpoint: Option<String>,
         template: Option<String>,
-        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
@@ -463,7 +482,7 @@ impl PyAgent {
     fn from_python<'py>(
         py: Python<'py>,
         model: &Bound<'py, PyPythonModel>,
-        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        toolsets: Option<Vec<PyToolsetArg>>,
         instruction: Option<String>,
         output_type: Option<Py<PyAny>>,
         capabilities: Option<Vec<Py<PyCapability>>>,
@@ -890,7 +909,7 @@ fn document_ingest_ports() -> Result<DocumentIngestPorts, AgentRunError> {
 
 fn linked_ports(
     py: Python<'_>,
-    toolsets: Option<Vec<Py<PyPythonToolset>>>,
+    toolsets: Option<Vec<PyToolsetArg>>,
     context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
     middleware: Option<Vec<Py<PyPythonMiddleware>>>,
     observers: Option<Vec<Py<PyPythonObserver>>>,
@@ -905,7 +924,7 @@ fn linked_ports(
     let mut toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = toolsets
         .unwrap_or_default()
         .into_iter()
-        .map(|toolset| toolset.bind(py).borrow().registration())
+        .map(|toolset| toolset.registration(py))
         .collect();
     toolsets.push(document_toolset);
     let mut middleware: Vec<(ComponentRef, Arc<dyn Middleware>)> = middleware
