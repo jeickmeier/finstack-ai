@@ -22,6 +22,7 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 mod config;
+mod deliver;
 mod pipeline;
 mod toolset;
 

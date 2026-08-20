@@ -8,9 +8,10 @@ use finstack_ai_kernel::{
     PrincipalRef, RawJson, RunId, SessionId, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, ValidatedToolCall,
 };
+use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_net_guard::{HostResolver, UrlPolicy, parse_and_vet_url};
 use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,
+    ArtifactStore, AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,
 };
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -369,12 +370,12 @@ async fn oversize_body_is_a_limit_error() {
 }
 
 #[tokio::test]
-async fn lossy_utf8_expansion_past_max_response_bytes_is_a_limit_error() {
-    // Invalid UTF-8 bytes each expand to a 3-byte U+FFFD replacement under
-    // `String::from_utf8_lossy`, so a raw body that fits the byte cap can
-    // still produce an oversized `content` string. 60 raw bytes of 0xFF
-    // pass a 64-byte `effective_cap`, but expand to 180 bytes of lossy
-    // text, which must be rejected against `max_response_bytes` (64).
+async fn invalid_utf8_body_without_store_is_an_error() {
+    // Task 9 semantics: a body that fails `String::from_utf8` is routed as
+    // binary rather than force-decoded with `String::from_utf8_lossy` (that
+    // lossy path is now `mode: "text"` only). With no artifact store
+    // attached, binary content is refused rather than staged. 60 raw bytes
+    // of 0xFF fit the byte cap but are not valid UTF-8.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let body = vec![0xFF_u8; 60];
@@ -390,6 +391,163 @@ async fn lossy_utf8_expansion_past_max_response_bytes_is_a_limit_error() {
     let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
     let error = drive_to_error(&toolset, call).await;
     assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
+    assert!(error.to_string().contains("binary"), "{error}");
+}
+
+// --- Task 9: mode handling and artifact staging -------------------------
+
+#[tokio::test]
+async fn binary_body_with_store_is_staged_as_an_artifact() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![0_u8, 159, 146, 150];
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: application/octet-stream\r\n".to_owned(),
+        body,
+    ));
+
+    let store = Arc::new(InProcessArtifactStore::default());
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"]))
+        .unwrap()
+        .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    assert_eq!(output["byte_length"], 4);
+    assert!(output.get("artifact").is_some(), "{output}");
+    assert!(output.get("content").is_none(), "{output}");
+}
+
+#[tokio::test]
+async fn binary_body_without_store_is_a_limit_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![0_u8, 159, 146, 150];
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: application/octet-stream\r\n".to_owned(),
+        body,
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
+    assert!(error.to_string().contains("binary"), "{error}");
+}
+
+#[tokio::test]
+async fn artifact_mode_stages_a_text_body_when_a_store_is_attached() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        b"hello".to_vec(),
+    ));
+
+    let store = Arc::new(InProcessArtifactStore::default());
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"]))
+        .unwrap()
+        .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","mode":"artifact"}}"#).as_bytes(),
+    );
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    assert!(output.get("artifact").is_some(), "{output}");
+    assert!(output.get("content").is_none(), "{output}");
+}
+
+#[tokio::test]
+async fn json_body_inlines_under_auto_mode() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: application/json\r\n".to_owned(),
+        b"{\"a\":1}".to_vec(),
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    assert_eq!(output["content"], "{\"a\":1}");
+    assert!(output.get("artifact").is_none(), "{output}");
+}
+
+#[tokio::test]
+async fn max_bytes_argument_below_config_cap_is_honored_as_the_inline_budget() {
+    // Body is valid UTF-8 (so it would otherwise inline) and sized between
+    // the caller's `max_bytes` and the config's `max_response_bytes`, so the
+    // raw-read cap (`effective_cap = min(config, max_bytes)`) both bounds the
+    // read and becomes the inline-result budget: a 40-byte body must be
+    // rejected against a `max_bytes: 8` argument even though it is well
+    // under the 64-byte config cap.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![b'x'; 40];
+    tokio::spawn(serve_once(listener, None, 200, String::new(), body));
+
+    let config = HttpFetchConfig {
+        max_response_bytes: 64,
+        ..loopback_config(&["docs.rs"])
+    };
+    let toolset = HttpFetchToolset::try_new(config).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","max_bytes":8}}"#).as_bytes(),
+    );
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
+}
+
+#[tokio::test]
+async fn text_mode_on_binary_body_inlines_lossy_text() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![0_u8, 159, 146, 150];
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: application/octet-stream\r\n".to_owned(),
+        body,
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","mode":"text"}}"#).as_bytes(),
+    );
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    let content = output["content"].as_str().expect("content string");
+    assert!(content.contains('\u{FFFD}'), "{content}");
+    assert!(output.get("artifact").is_none(), "{output}");
 }
 
 #[tokio::test]
@@ -441,12 +599,24 @@ async fn per_host_headers_are_sent_to_the_matching_host() {
     let listener_with = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr_with = listener_with.local_addr().unwrap();
     let (tx_with, mut rx_with) = mpsc::unbounded_channel();
-    tokio::spawn(serve_once(listener_with, Some(tx_with), 200, String::new(), b"ok".to_vec()));
+    tokio::spawn(serve_once(
+        listener_with,
+        Some(tx_with),
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        b"ok".to_vec(),
+    ));
 
     let listener_without = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr_without = listener_without.local_addr().unwrap();
     let (tx_without, mut rx_without) = mpsc::unbounded_channel();
-    tokio::spawn(serve_once(listener_without, Some(tx_without), 200, String::new(), b"ok".to_vec()));
+    tokio::spawn(serve_once(
+        listener_without,
+        Some(tx_without),
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        b"ok".to_vec(),
+    ));
 
     let mut config = loopback_config(&["docs.rs"]);
     config.per_host_headers.insert(
@@ -543,7 +713,7 @@ async fn same_host_redirect_is_followed() {
         None,
         vec![
             (302, "Location: /b\r\n".to_owned(), Vec::new()),
-            (200, String::new(), b"moved-ok".to_vec()),
+            (200, "Content-Type: text/plain\r\n".to_owned(), b"moved-ok".to_vec()),
         ],
     ));
 
@@ -641,7 +811,7 @@ async fn headers_do_not_cross_hosts_on_redirect() {
     tokio::spawn(serve_sequence(
         listener_b,
         Some(tx_b),
-        vec![(200, String::new(), b"ok".to_vec())],
+        vec![(200, "Content-Type: text/plain\r\n".to_owned(), b"ok".to_vec())],
     ));
 
     let mut config = loopback_config(&["docs.rs"]);
@@ -668,7 +838,13 @@ async fn headers_do_not_cross_hosts_on_redirect() {
 async fn pinned_address_overrides_dns_for_hostnames() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve_once(listener, None, 200, String::new(), b"pinned".to_vec()));
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        b"pinned".to_vec(),
+    ));
 
     let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"]))
         .unwrap()

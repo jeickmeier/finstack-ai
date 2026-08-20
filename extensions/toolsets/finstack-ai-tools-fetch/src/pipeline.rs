@@ -13,12 +13,13 @@ use finstack_ai_net_guard::{
     HostResolver, NetGuardError, SystemResolver, UrlPolicy, VettedUrl, parse_and_vet_url,
     pinned_client, read_body_bounded, resolve_and_pin,
 };
-use finstack_ai_runtime::{ToolCallContext, ToolError};
+use finstack_ai_runtime::{ArtifactStore, ToolCallContext, ToolError};
 use futures_util::StreamExt;
 use reqwest::header::{HeaderName, HeaderValue};
 
 use crate::config::HostPattern;
-use crate::toolset::{FetchArguments, FetchMode};
+use crate::deliver::{DeliveredContent, deliver};
+use crate::toolset::FetchArguments;
 use crate::{
     FETCH_DESTINATION_BLOCKED, FETCH_HOST_NOT_ALLOWLISTED, FETCH_INVALID_ARGUMENTS,
     FETCH_LIMIT_EXCEEDED, FETCH_REDIRECT_DENIED, FETCH_TIMEOUT, FETCH_TRANSPORT_FAILED,
@@ -318,6 +319,7 @@ pub(crate) async fn execute_fetch(
     state: &FetchState,
     ctx: &ToolCallContext,
     args: FetchArguments,
+    artifact_store: Option<&Arc<dyn ArtifactStore>>,
 ) -> Result<serde_json::Value, ToolError> {
     let policy = UrlPolicy {
         allow_loopback_http: state.config.allow_loopback_http,
@@ -380,36 +382,34 @@ pub(crate) async fn execute_fetch(
         .await
         .map_err(|e| map_vet_error(&e))?;
     let byte_length = body.len();
-    let content = String::from_utf8_lossy(&body).into_owned();
 
-    // Lossy UTF-8 repair replaces each invalid byte with U+FFFD (3 bytes in
-    // UTF-8), so an adversarial/binary body can expand up to ~3x past the
-    // `effective_cap` we just enforced on the raw bytes — silently blowing
-    // through the `max_response_bytes + envelope` ceiling the ToolSpec
-    // advertises. Re-check the *encoded* length here and refuse rather than
-    // ship an oversized result. Task 9 replaces this whole inline-text path
-    // with content-type routing (binary bodies go to an artifact or a
-    // refusal instead of being force-decoded as text).
-    if content.len() > state.config.max_response_bytes {
-        return Err(tool_error(
-            FETCH_LIMIT_EXCEEDED,
-            ErrorCategory::Limit,
-            "fetch content exceeds the configured byte limit",
-        ));
-    }
+    // The inline-result budget is the same effective cap already enforced
+    // on the raw read: a caller's `max_bytes` bounds the inline result too,
+    // not just the byte count read off the wire.
+    let delivered = deliver(
+        body,
+        &media_type,
+        args.mode,
+        artifact_store,
+        ctx,
+        effective_cap,
+    )
+    .await?;
 
-    // `args.mode` will select text/markdown/artifact shaping once Task 9/10
-    // land; every mode inlines text for now.
-    match args.mode {
-        FetchMode::Auto | FetchMode::Text | FetchMode::Markdown | FetchMode::Artifact => {}
-    }
-
-    Ok(serde_json::json!({
+    let mut output = serde_json::json!({
         "url": args.url,
         "final_url": final_url,
         "status": status.as_u16(),
         "media_type": media_type,
         "byte_length": byte_length,
-        "content": content,
-    }))
+    });
+    match delivered {
+        DeliveredContent::Inline(text) => {
+            output["content"] = serde_json::Value::String(text);
+        }
+        DeliveredContent::Artifact(artifact) => {
+            output["artifact"] = artifact;
+        }
+    }
+    Ok(output)
 }

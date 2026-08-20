@@ -186,6 +186,7 @@ impl Toolset for HttpFetchToolset {
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let expected_id = self.tool_id.clone();
         let state = Arc::clone(&self.state);
+        let artifact_store = self.artifact_store.clone();
         Box::pin(async move {
             validate_call_context(&ctx, &call, &expected_id)?;
             let arguments: FetchArguments =
@@ -196,7 +197,7 @@ impl Toolset for HttpFetchToolset {
                         "http fetch arguments are invalid",
                     )
                 })?;
-            let value = execute_fetch(&state, &ctx, arguments).await?;
+            let value = execute_fetch(&state, &ctx, arguments, artifact_store.as_ref()).await?;
             let output = serde_json::to_vec(&value).map_err(|_| {
                 tool_error(
                     FETCH_INVALID_ARGUMENTS,
