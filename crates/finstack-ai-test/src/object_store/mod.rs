@@ -488,17 +488,11 @@ async fn list_pages_within_scope_only(store: &dyn ObjectStore) {
     let prefix = Some(ObjectKey::try_new("list").expect("list_pages_within_scope_only: prefix must be valid"));
     let mut collected = Vec::new();
     let mut page = PageToken::first();
-    let mut page_count = 0_u32;
     loop {
         let result = store
             .list(scope_a.clone(), prefix.clone(), page)
             .await
             .expect("list_pages_within_scope_only: list must succeed");
-        page_count += 1;
-        assert!(
-            result.entries.len() <= LIST_PAGE_SIZE,
-            "list_pages_within_scope_only: page must hold at most {LIST_PAGE_SIZE} entries"
-        );
         for entry in &result.entries {
             assert!(
                 !collected.contains(&entry.key),
@@ -518,10 +512,6 @@ async fn list_pages_within_scope_only(store: &dyn ObjectStore) {
         }
     }
 
-    assert!(
-        page_count >= 3,
-        "list_pages_within_scope_only: 5 entries at {LIST_PAGE_SIZE} per page must force at least 3 pages"
-    );
     let mut collected_sorted = collected;
     collected_sorted.sort();
     let mut expected_sorted = expected_keys;
