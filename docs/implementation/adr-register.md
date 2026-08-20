@@ -110,6 +110,7 @@ Index last reconciled: 2026-08-18 (ADR-048 accepted for shared authority and pro
 | ADR-047 | SEC-INV-005; TM-04 |
 | ADR-048 | SEC-INV-001, SEC-INV-004; TM-02, TM-04 |
 | ADR-050 | SEC-INV-004; TM-04, TM-16, TM-20 |
+| ADR-051 | SEC-INV-005; TM-04 |
 
 ## Change control
 
@@ -461,6 +462,9 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-20 | ADR-050 | Decision | me@jeickmeier.com | — | Accepted | `ObjectStore` host-supplied service; scoped fail-closed keys; frozen `object_*` codes; per-store `ArtifactStoreLimits`; hand-rolled SigV4 with `hmac` as the only new dependency; 64 MiB adapter default / 5 GiB object default | — | me@jeickmeier.com |
 | 2026-08-20 | ADR-050 | Record | me@jeickmeier.com | — | Standalone | ADR-050-object-store-contract.md | — | me@jeickmeier.com |
 | 2026-08-20 | ADR-050 | Implementation | me@jeickmeier.com | — | In progress | `ObjectStore` and its data model land in `finstack-ai-runtime`; `S3ObjectStore`/`LocalObjectStore`/`ObjectArtifactStore` land as sibling extension-crate tasks; no evidence id | — | me@jeickmeier.com |
+| 2026-08-20 | ADR-051 | Decision | me@jeickmeier.com | — | Accepted | Dedicated native `finstack-ai-provider-gemini` crate and public factory `Agent.gemini`; always-streaming `streamGenerateContent?alt=sse`; Vertex AI as an endpoint/auth variant, not a fourth protocol; opaque `continuation_state` thought-signature replay; `functionCall.id` preserved as `provider_call_id`; grounding/code-execution via `gemini.google_search`/`gemini.code_execution` settings keys surfaced as `ContentBlock::Opaque`; context caching pass-through accounting only; `Agent::gateway` gains a `"gemini_generate_content"` wire-protocol arm | — | me@jeickmeier.com |
+| 2026-08-20 | ADR-051 | Record | me@jeickmeier.com | — | Standalone | ADR-051-gemini-native-provider.md | — | me@jeickmeier.com |
+| 2026-08-20 | ADR-051 | Implementation | me@jeickmeier.com | — | Not started | Decision record only; leaf crate implementation is later tasks in the same plan; no evidence id | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -515,6 +519,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-047 | [ADR-047-retire-multi-protocol-gateway.md](adrs/ADR-047-retire-multi-protocol-gateway.md) | me@jeickmeier.com | Missing: local uncommitted crate deletion; `Agent::gateway` remains a dispatcher; no evidence id | ADR-047 standalone record; Phase 14 / PR-094 | 2026-08-18 |
 | ADR-048 | [ADR-048-shared-authority-and-provider-secret.md](adrs/ADR-048-shared-authority-and-provider-secret.md) | me@jeickmeier.com | Missing: local `verify_authority`, `provider_util` types, and leaf usage; no evidence id | ADR-048 standalone record; Phase 14 / PR-085 | 2026-08-18 |
 | ADR-050 | [ADR-050-object-store-contract.md](adrs/ADR-050-object-store-contract.md) | me@jeickmeier.com | Missing: local `ObjectStore` trait, S3/local backends, and `ObjectArtifactStore` adapter; no evidence id | ADR-050 standalone record; `docs/superpowers/plans/2026-08-19-object-store.md` | 2026-08-20 |
+| ADR-051 | [ADR-051-gemini-native-provider.md](adrs/ADR-051-gemini-native-provider.md) | me@jeickmeier.com | Missing: decision record only; leaf crate implementation is later tasks in the same plan; no evidence id | ADR-051 standalone record; `docs/superpowers/plans/2026-08-20-gemini-provider.md` | 2026-08-20 |
 
 ## Supersession log
 
