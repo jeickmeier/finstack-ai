@@ -58,8 +58,18 @@ typed field on events, so the observer correlates:
   clean up — `EffectFailed` carries usage too and is aggregated the same way).
 
 The pending-origin map is bounded (`MAX_PENDING_EFFECTS = 4096`). When full, a
-new model effect's origin is not tracked; its eventual completion aggregates
-under `model: None` and bumps `unattributed_effects`.
+new model effect's origin is not tracked and a `billing_pending_saturated`
+diagnostic is stored; its eventual completion aggregates under `model: None`
+and bumps `unattributed_effects`.
+
+`unattributed_effects` counts only **model** effects (output contract kind
+`ModelResponse`) that settle (`EffectCompleted`/`EffectFailed`) without a
+tracked pending origin — whether because the origin was never recorded (no
+matching `EffectRequested`, or the pending map was saturated) or because it
+was deferred and later completed. Non-model (tool, context) effects settling
+with no pending origin is expected by design — they are never
+origin-tracked — so it never bumps `unattributed_effects`; they still
+aggregate usage/effects/uncosted under `(session, run, None)` per §3.2.
 
 ### 3.2 Aggregation
 
@@ -118,6 +128,7 @@ impl BillingObserver {
 impl Observer for BillingObserver { /* descriptor(), observe() — sync ingest under mutex, Box::pin(async Ok) */ }
 
 pub const BILLING_LEDGER_SATURATED: ObserverDiagnostic; // code "billing_ledger_saturated"
+pub const BILLING_PENDING_SATURATED: ObserverDiagnostic; // code "billing_pending_saturated"
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpendEntry {

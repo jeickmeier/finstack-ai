@@ -27,8 +27,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentRef, EffectId, EffectInput, EffectKind, Metadata, RunEvent, RunEventBody,
-    RunEventKind, RunId, SessionId, Usage, Version,
+    ComponentId, ComponentRef, EffectId, EffectInput, EffectKind, EffectOutputKind, Metadata,
+    RunEvent, RunEventBody, RunEventKind, RunId, SessionId, Usage, Version,
 };
 use finstack_ai_runtime::{
     OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
@@ -41,6 +41,13 @@ use thiserror::Error;
 pub const BILLING_LEDGER_SATURATED: ObserverDiagnostic = ObserverDiagnostic {
     code: "billing_ledger_saturated",
     detail: "billing ledger entry bound reached; new attribution keys dropped",
+};
+
+/// Diagnostic stored when the pending-attribution bound rejects tracking a
+/// new model effect.
+pub const BILLING_PENDING_SATURATED: ObserverDiagnostic = ObserverDiagnostic {
+    code: "billing_pending_saturated",
+    detail: "billing pending-attribution bound reached; new model effects will aggregate unattributed",
 };
 
 /// Maximum distinct attribution keys accepted by the ledger.
@@ -131,9 +138,12 @@ pub struct UsageEntry {
     pub input_tokens: u64,
     /// Accumulated output tokens.
     pub output_tokens: u64,
-    /// Settled effects observed for this key.
+    /// Settled effects observed for this key. Includes non-model (tool,
+    /// context) effects that settle with usage; those always key on
+    /// `model: None` since only model requests are attribution-tracked.
     pub effects: u64,
-    /// Settled effects that carried no cost amount.
+    /// Settled effects that carried no cost amount. Includes non-model
+    /// (tool, context) effects that settle with usage but no cost.
     pub uncosted_effects: u64,
 }
 
@@ -144,7 +154,9 @@ pub struct LedgerSnapshot {
     pub spend: Vec<SpendEntry>,
     /// Usage rows ordered by (session, run, model).
     pub usage: Vec<UsageEntry>,
-    /// Settled effects whose origin could not be tracked.
+    /// Model effects whose request origin was not tracked when they
+    /// settled. Non-model (tool, context) effects never contribute here;
+    /// they always settle under `model: None` by design.
     pub unattributed_effects: u64,
     /// Events ignored because the ledger reached its entry bound.
     pub overflowed_events: u64,
@@ -226,6 +238,10 @@ impl BillingObserver {
     }
 
     /// Snapshot the ledger. Returns an empty snapshot when state is poisoned.
+    ///
+    /// The ledger assumes at-most-once settlement delivery: a duplicate
+    /// `EffectCompleted` (or `EffectFailed`) for the same effect id is folded
+    /// in again and double-counts usage, cost, and effect tallies.
     #[must_use]
     pub fn snapshot(&self) -> LedgerSnapshot {
         let Ok(state) = self.state.lock() else {
@@ -313,19 +329,17 @@ impl BillingObserver {
             return;
         };
         let mut saturated = false;
+        let mut pending_saturated = false;
         match event.kind() {
             RunEventKind::EffectCompleted => {
                 if let RunEventBody::EffectCompleted(body) = event.body() {
-                    let origin = state.pending.remove(&body.effect_id());
-                    if origin.is_none() {
-                        state.unattributed_effects = state.unattributed_effects.saturating_add(1);
-                    }
-                    saturated = !settle(
+                    saturated = !settle_effect(
                         &mut state,
                         self.max_entries,
                         event.session_id(),
                         event.run_id(),
-                        origin,
+                        body.effect_id(),
+                        body.output_contract().kind == EffectOutputKind::ModelResponse,
                         body.usage(),
                     );
                 }
@@ -335,32 +349,30 @@ impl BillingObserver {
                     && body.kind() == EffectKind::Model
                 {
                     if state.pending.len() >= MAX_PENDING_EFFECTS {
-                        return;
+                        pending_saturated = true;
+                    } else {
+                        let provider = body.component().map(|invocation| {
+                            ComponentRef::new(invocation.component.clone(), Some(invocation.version))
+                        });
+                        let model = match body.input() {
+                            EffectInput::Model { request } => parse_model_name(request.as_str()),
+                            _ => None,
+                        };
+                        state
+                            .pending
+                            .insert(body.effect_id(), EffectOrigin { provider, model });
                     }
-                    let provider = body.component().map(|invocation| {
-                        ComponentRef::new(invocation.component.clone(), Some(invocation.version))
-                    });
-                    let model = match body.input() {
-                        EffectInput::Model { request } => parse_model_name(request.as_str()),
-                        _ => None,
-                    };
-                    state
-                        .pending
-                        .insert(body.effect_id(), EffectOrigin { provider, model });
                 }
             }
             RunEventKind::EffectFailed => {
                 if let RunEventBody::EffectFailed(body) = event.body() {
-                    let origin = state.pending.remove(&body.effect_id());
-                    if origin.is_none() {
-                        state.unattributed_effects = state.unattributed_effects.saturating_add(1);
-                    }
-                    saturated = !settle(
+                    saturated = !settle_effect(
                         &mut state,
                         self.max_entries,
                         event.session_id(),
                         event.run_id(),
-                        origin,
+                        body.effect_id(),
+                        body.output_contract().kind == EffectOutputKind::ModelResponse,
                         body.usage(),
                     );
                 }
@@ -375,6 +387,9 @@ impl BillingObserver {
         drop(state);
         if saturated && let Ok(mut slot) = self.diagnostic.lock() {
             *slot = Some(BILLING_LEDGER_SATURATED);
+        }
+        if pending_saturated && let Ok(mut slot) = self.diagnostic.lock() {
+            *slot = Some(BILLING_PENDING_SATURATED);
         }
     }
 
@@ -406,6 +421,27 @@ impl Observer for BillingObserver {
         let _ = self.queue.drain();
         Box::pin(async { Ok(()) })
     }
+}
+
+/// Remove any pending origin tracked for `effect_id` and fold the settled
+/// effect into the ledger. Bumps `unattributed_effects` only when `is_model`
+/// is true and no pending origin was found — non-model (tool, context)
+/// effects are never attribution-tracked, so their settlement without a
+/// pending origin is expected, not a miss.
+fn settle_effect(
+    state: &mut LedgerState,
+    max_entries: usize,
+    session_id: SessionId,
+    run_id: RunId,
+    effect_id: EffectId,
+    is_model: bool,
+    usage: Option<&Usage>,
+) -> bool {
+    let origin = state.pending.remove(&effect_id);
+    if origin.is_none() && is_model {
+        state.unattributed_effects = state.unattributed_effects.saturating_add(1);
+    }
+    settle(state, max_entries, session_id, run_id, origin, usage)
 }
 
 /// Fold one settled effect into the ledger. `usage` may be absent.
@@ -471,7 +507,9 @@ fn render_component(component: &ComponentRef) -> String {
     }
 }
 
-/// Append one JSON value as a line to `out`.
+/// Append one JSON value as a line to `out`. The `Result` is deliberately
+/// discarded: every row here is a map of strings and decimal strings, which
+/// cannot realistically fail to serialize.
 fn push_line(out: &mut String, value: &serde_json::Value) {
     if let Ok(text) = serde_json::to_string(value) {
         out.push_str(&text);

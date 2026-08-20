@@ -73,3 +73,4 @@ impl core::fmt::Debug for finstack_ai_observer_billing::UsageEntry
 pub fn finstack_ai_observer_billing::UsageEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_observer_billing::UsageEntry
 pub const finstack_ai_observer_billing::BILLING_LEDGER_SATURATED: finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic
+pub const finstack_ai_observer_billing::BILLING_PENDING_SATURATED: finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic

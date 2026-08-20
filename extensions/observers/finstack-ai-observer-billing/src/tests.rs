@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentInvocation, CostAmount, Digest, EffectCompleted, EffectInput, EffectKind,
-    EffectOutputContract, EffectOutputKind, EffectRequested, EffectTag, EventTag, Id, IdTag,
-    InvocationRecovery, LaneTag, ModelRequestTag, ProviderIds, RUN_EVENT_KIND_VERSION,
-    RUN_EVENT_SCHEMA_VERSION, RawJson, RetrySafety, RunEvent, RunEventBody, RunTag, Sensitivity,
-    SessionTag, Timestamp, TurnTag, Usage, Version,
+    ComponentId, ComponentInvocation, CostAmount, Digest, EffectCompleted, EffectDeferred,
+    EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested, EffectTag,
+    EventTag, ExternalHandleRef, Id, IdTag, InvocationRecovery, LaneTag, ModelRequestTag,
+    ProviderIds, RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RawJson, ReconciliationPolicy,
+    RetrySafety, RunEvent, RunEventBody, RunTag, Sensitivity, SessionTag, Timestamp, ToolBatchTag,
+    ToolCallTag, TurnTag, Usage, Version,
 };
 use finstack_ai_runtime::{Observer, ObserverBackpressure};
 use finstack_ai_test::check_observer_conformance;
@@ -26,6 +27,14 @@ fn model_contract() -> EffectOutputContract {
         kind: EffectOutputKind::ModelResponse,
         schema_version: 1,
         schema_digest: Digest::raw_json(b"schema"),
+    }
+}
+
+fn tool_contract() -> EffectOutputContract {
+    EffectOutputContract {
+        kind: EffectOutputKind::ToolResult,
+        schema_version: 1,
+        schema_digest: Digest::raw_json(b"tool-schema"),
     }
 }
 
@@ -102,6 +111,61 @@ fn requested(effect: u64, request_json: &str) -> RunEventBody {
 
 fn cost(unit: &str, micros: u64, policy: &str) -> CostAmount {
     CostAmount::try_new(unit, micros, policy).expect("cost")
+}
+
+fn tool_completed(effect: u64, usage_value: Option<Usage>) -> RunEventBody {
+    RunEventBody::EffectCompleted(
+        EffectCompleted::try_new(
+            id::<EffectTag>(effect),
+            tool_contract(),
+            RawJson::parse("{}").expect("json"),
+            usage_value,
+            vec![],
+            ProviderIds::empty(),
+            None::<&str>,
+            None,
+        )
+        .expect("completed"),
+    )
+}
+
+fn deferred(effect: u64) -> RunEventBody {
+    RunEventBody::EffectDeferred(EffectDeferred {
+        effect_id: id::<EffectTag>(effect),
+        handle: ExternalHandleRef::try_new(
+            ComponentId::parse("finstack.model.demo").expect("component"),
+            "job-1",
+            RawJson::parse("{}").expect("json"),
+        )
+        .expect("handle"),
+        reconciliation: ReconciliationPolicy::Poll,
+        next_poll_at: None,
+        expires_at: None,
+        output_contract: model_contract(),
+    })
+}
+
+/// Durable tool-effect event on session 1 / run 3 with the given effect id.
+fn tool_event(sequence: u64, effect: u64, body: RunEventBody) -> RunEvent {
+    RunEvent::try_durable(
+        RUN_EVENT_SCHEMA_VERSION,
+        RUN_EVENT_KIND_VERSION,
+        id::<EventTag>(sequence),
+        id::<SessionTag>(1),
+        id::<LaneTag>(2),
+        id::<RunTag>(3),
+        Some(id::<TurnTag>(4)),
+        None,
+        Some(id::<ToolBatchTag>(6)),
+        Some(id::<EffectTag>(effect)),
+        Some(id::<ToolCallTag>(7)),
+        sequence,
+        sequence,
+        Timestamp::from_unix_ms(1_000).expect("timestamp"),
+        Sensitivity::Confidential,
+        body,
+    )
+    .expect("event")
 }
 
 #[tokio::test]
@@ -328,4 +392,95 @@ async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
     assert_eq!(summary["kind"], "summary");
     assert_eq!(summary["unattributed_effects"], "0");
     assert!(!text.contains(CANARY));
+}
+
+#[tokio::test]
+async fn pending_map_saturation_is_diagnosed_and_new_origins_are_unattributed() {
+    let billing =
+        BillingObserver::try_new(16_384, ObserverBackpressure::DropProgress, 1_000_000)
+            .expect("billing");
+    // Fill the pending-attribution bound (4096) with distinct model-effect
+    // requests that never settle, then request one more to trip saturation.
+    let mut events = Vec::with_capacity(4_100);
+    let mut sequence = 1_u64;
+    for effect in 1..=4_096_u64 {
+        events.push(model_event(
+            sequence,
+            effect,
+            requested(effect, r#"{"model":"demo-model-1"}"#),
+        ));
+        sequence += 1;
+    }
+    // This 4097th request finds the pending map full and is rejected.
+    let over_cap_effect = 5_000_u64;
+    events.push(model_event(
+        sequence,
+        over_cap_effect,
+        requested(over_cap_effect, r#"{"model":"demo-model-1"}"#),
+    ));
+    sequence += 1;
+    billing
+        .observe(Arc::from(events.into_boxed_slice()))
+        .await
+        .expect("observe");
+    assert_eq!(
+        billing.last_diagnostic().expect("diagnostic").code,
+        "billing_pending_saturated"
+    );
+    // The rejected effect's completion lands with no attributed origin.
+    billing
+        .observe(Arc::from([model_event(
+            sequence,
+            over_cap_effect,
+            completed(over_cap_effect, Some(usage(1, 1, None))),
+        )]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    assert_eq!(snapshot.unattributed_effects, 1);
+    let row = snapshot
+        .usage
+        .iter()
+        .find(|row| row.model.is_none())
+        .expect("unattributed usage row");
+    assert_eq!(row.effects, 1);
+}
+
+#[tokio::test]
+async fn deferred_model_effect_still_settles_as_unattributed() {
+    let billing =
+        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    billing
+        .observe(Arc::from([
+            model_event(1, 7, requested(7, r#"{"model":"demo-model-1"}"#)),
+            model_event(2, 7, deferred(7)),
+            model_event(3, 7, completed(7, Some(usage(1, 1, None)))),
+        ]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    let row = snapshot.usage.first().expect("usage row");
+    assert!(row.model.is_none());
+    assert_eq!(snapshot.unattributed_effects, 1);
+}
+
+#[tokio::test]
+async fn tool_effect_settlement_aggregates_as_non_model_and_is_never_unattributed() {
+    let billing =
+        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    billing
+        .observe(Arc::from([tool_event(
+            1,
+            7,
+            tool_completed(7, Some(usage(1, 1, None))),
+        )]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    assert_eq!(snapshot.unattributed_effects, 0);
+    let row = snapshot.usage.first().expect("usage row");
+    assert!(row.model.is_none());
+    assert_eq!(row.input_tokens, 1);
+    assert_eq!(row.effects, 1);
+    assert_eq!(row.uncosted_effects, 1);
 }
