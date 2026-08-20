@@ -1,0 +1,80 @@
+pub mod finstack_ai_completion_ingress
+pub enum finstack_ai_completion_ingress::CompletionIngressConfigError
+pub finstack_ai_completion_ingress::CompletionIngressConfigError::DuplicateKeyId
+pub finstack_ai_completion_ingress::CompletionIngressConfigError::InvalidKeyId
+pub finstack_ai_completion_ingress::CompletionIngressConfigError::KeyTooShort
+impl core::clone::Clone for finstack_ai_completion_ingress::CompletionIngressConfigError
+pub fn finstack_ai_completion_ingress::CompletionIngressConfigError::clone(&self) -> finstack_ai_completion_ingress::CompletionIngressConfigError
+impl core::cmp::Eq for finstack_ai_completion_ingress::CompletionIngressConfigError
+impl core::cmp::PartialEq for finstack_ai_completion_ingress::CompletionIngressConfigError
+pub fn finstack_ai_completion_ingress::CompletionIngressConfigError::eq(&self, &finstack_ai_completion_ingress::CompletionIngressConfigError) -> bool
+impl core::error::Error for finstack_ai_completion_ingress::CompletionIngressConfigError
+impl core::fmt::Debug for finstack_ai_completion_ingress::CompletionIngressConfigError
+pub fn finstack_ai_completion_ingress::CompletionIngressConfigError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_completion_ingress::CompletionIngressConfigError
+pub fn finstack_ai_completion_ingress::CompletionIngressConfigError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_completion_ingress::CompletionIngressConfigError
+impl core::marker::StructuralPartialEq for finstack_ai_completion_ingress::CompletionIngressConfigError
+pub enum finstack_ai_completion_ingress::IngressError
+pub finstack_ai_completion_ingress::IngressError::Rejected
+pub finstack_ai_completion_ingress::IngressError::Unavailable
+pub finstack_ai_completion_ingress::IngressError::Unavailable::reason_code: &'static str
+impl core::clone::Clone for finstack_ai_completion_ingress::IngressError
+pub fn finstack_ai_completion_ingress::IngressError::clone(&self) -> finstack_ai_completion_ingress::IngressError
+impl core::cmp::Eq for finstack_ai_completion_ingress::IngressError
+impl core::cmp::PartialEq for finstack_ai_completion_ingress::IngressError
+pub fn finstack_ai_completion_ingress::IngressError::eq(&self, &finstack_ai_completion_ingress::IngressError) -> bool
+impl core::error::Error for finstack_ai_completion_ingress::IngressError
+impl core::fmt::Debug for finstack_ai_completion_ingress::IngressError
+pub fn finstack_ai_completion_ingress::IngressError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_completion_ingress::IngressError
+pub fn finstack_ai_completion_ingress::IngressError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_completion_ingress::IngressError
+pub enum finstack_ai_completion_ingress::MintError
+pub finstack_ai_completion_ingress::MintError::Encoding
+impl core::clone::Clone for finstack_ai_completion_ingress::MintError
+pub fn finstack_ai_completion_ingress::MintError::clone(&self) -> finstack_ai_completion_ingress::MintError
+impl core::cmp::Eq for finstack_ai_completion_ingress::MintError
+impl core::cmp::PartialEq for finstack_ai_completion_ingress::MintError
+pub fn finstack_ai_completion_ingress::MintError::eq(&self, &finstack_ai_completion_ingress::MintError) -> bool
+impl core::error::Error for finstack_ai_completion_ingress::MintError
+impl core::fmt::Debug for finstack_ai_completion_ingress::MintError
+pub fn finstack_ai_completion_ingress::MintError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_completion_ingress::MintError
+pub fn finstack_ai_completion_ingress::MintError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_completion_ingress::MintError
+impl core::marker::StructuralPartialEq for finstack_ai_completion_ingress::MintError
+pub struct finstack_ai_completion_ingress::CallbackToken(_)
+impl finstack_ai_completion_ingress::CallbackToken
+pub fn finstack_ai_completion_ingress::CallbackToken::as_str(&self) -> &str
+impl core::clone::Clone for finstack_ai_completion_ingress::CallbackToken
+pub fn finstack_ai_completion_ingress::CallbackToken::clone(&self) -> finstack_ai_completion_ingress::CallbackToken
+impl core::cmp::Eq for finstack_ai_completion_ingress::CallbackToken
+impl core::cmp::PartialEq for finstack_ai_completion_ingress::CallbackToken
+pub fn finstack_ai_completion_ingress::CallbackToken::eq(&self, &finstack_ai_completion_ingress::CallbackToken) -> bool
+impl core::fmt::Debug for finstack_ai_completion_ingress::CallbackToken
+pub fn finstack_ai_completion_ingress::CallbackToken::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_completion_ingress::CallbackToken
+pub struct finstack_ai_completion_ingress::CompletionGrant
+pub finstack_ai_completion_ingress::CompletionGrant::authorization: finstack_ai_kernel::primitives::identity::AuthorizationEvidence
+pub finstack_ai_completion_ingress::CompletionGrant::effect_id: finstack_ai_kernel::primitives::ids::EffectId
+pub finstack_ai_completion_ingress::CompletionGrant::expires_at: finstack_ai_kernel::primitives::time::Timestamp
+pub finstack_ai_completion_ingress::CompletionGrant::locator: finstack_ai_kernel::records::run::external::OperationLocator
+pub finstack_ai_completion_ingress::CompletionGrant::principal: finstack_ai_kernel::primitives::identity::PrincipalRef
+impl core::clone::Clone for finstack_ai_completion_ingress::CompletionGrant
+pub fn finstack_ai_completion_ingress::CompletionGrant::clone(&self) -> finstack_ai_completion_ingress::CompletionGrant
+pub struct finstack_ai_completion_ingress::CompletionIngress
+impl finstack_ai_completion_ingress::CompletionIngress
+pub async fn finstack_ai_completion_ingress::CompletionIngress::deliver(&self, &str, &[u8], finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_runtime::driver::ingress::types::ExternalRouteOutcome, finstack_ai_completion_ingress::IngressError>
+pub fn finstack_ai_completion_ingress::CompletionIngress::mint(&self, &finstack_ai_completion_ingress::CompletionGrant) -> core::result::Result<finstack_ai_completion_ingress::CallbackToken, finstack_ai_completion_ingress::MintError>
+pub fn finstack_ai_completion_ingress::CompletionIngress::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, alloc::sync::Arc<finstack_ai_runtime::services::audit::SecurityAuditGate>, finstack_ai_completion_ingress::CompletionIngressConfig) -> core::result::Result<Self, finstack_ai_completion_ingress::CompletionIngressConfigError>
+pub fn finstack_ai_completion_ingress::CompletionIngress::with_horizon(self, finstack_ai_runtime::ports::journal::IdempotencyHorizon) -> Self
+pub struct finstack_ai_completion_ingress::CompletionIngressConfig
+pub finstack_ai_completion_ingress::CompletionIngressConfig::additional_verification_keys: alloc::vec::Vec<(alloc::string::String, finstack_ai_runtime::ports::model::provider_util::secret::SecretString)>
+pub finstack_ai_completion_ingress::CompletionIngressConfig::key: finstack_ai_runtime::ports::model::provider_util::secret::SecretString
+pub finstack_ai_completion_ingress::CompletionIngressConfig::key_id: alloc::string::String
+impl core::clone::Clone for finstack_ai_completion_ingress::CompletionIngressConfig
+pub fn finstack_ai_completion_ingress::CompletionIngressConfig::clone(&self) -> finstack_ai_completion_ingress::CompletionIngressConfig
+impl core::fmt::Debug for finstack_ai_completion_ingress::CompletionIngressConfig
+pub fn finstack_ai_completion_ingress::CompletionIngressConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const finstack_ai_completion_ingress::MIN_KEY_BYTES: usize
