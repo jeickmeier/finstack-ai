@@ -298,6 +298,7 @@ fn run(effect_id: finstack_ai_kernel::EffectId) -> RunCallContext {
         deadline: None,
         budget_scope_id: None,
         cancellation: CancellationSignal::new(),
+        relation_depth: 0,
     }
 }
 

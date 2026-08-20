@@ -88,6 +88,55 @@ fn accept_input(limits: RunLimits) -> KernelInput {
     })
 }
 
+/// A `ChildAgent` acceptance one level below `acceptance`'s root, for
+/// asserting that `relation_depth` at the stage boundary is the accepted
+/// run's real relation depth rather than a stubbed `0`.
+fn child_acceptance(limits: RunLimits) -> RunAccepted {
+    let root = acceptance(RunLimits::empty());
+    let child_run_id = id(9);
+    let relation = RunRelation::try_new(
+        root.relation().root_run_id(),
+        Some(root.run_id()),
+        Some(id::<finstack_ai_kernel::EffectTag>(10)),
+        RunRelationKind::ChildAgent,
+        1,
+        None,
+        None::<&str>,
+    )
+    .expect("child relation");
+    RunAccepted::try_new(
+        child_run_id,
+        relation,
+        root.security().clone(),
+        None,
+        limits,
+        root.propagation(),
+        root.resolved_agent_lock_digest(),
+        Some(&root),
+    )
+    .expect("child accepted")
+}
+
+fn child_accept_input(limits: RunLimits) -> KernelInput {
+    KernelInput::AcceptRun(AcceptRun {
+        session_id: id::<SessionTag>(1),
+        lane_id: id::<LaneTag>(2),
+        accepted: child_acceptance(limits),
+    })
+}
+
+/// An accepted, `BeforeRun`-phase coordinator whose accepted run is a
+/// `ChildAgent` at relation depth 1, over an in-memory journal.
+fn accepted_child_coordinator(limits: RunLimits) -> CommitCoordinator {
+    let mut coordinator = CommitCoordinator::new(Arc::new(MemoryStore::new()));
+    block_on(coordinator.submit(
+        env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+        child_accept_input(limits),
+    ))
+    .expect("accept child");
+    coordinator
+}
+
 fn user_message(ordinal: u64, text: &str) -> Message {
     Message::try_new(
         id(ordinal),
@@ -208,6 +257,45 @@ impl crate::middleware::Middleware for Counting {
         self.calls.fetch_add(1, Ordering::Relaxed);
         Box::pin(async { Ok(StageOutcome::Continue) })
     }
+}
+
+/// Records `ctx.run.relation_depth` from the last invocation.
+struct CapturingDepth {
+    descriptor: MiddlewareDescriptor,
+    captured: Arc<Mutex<Option<u16>>>,
+}
+
+impl crate::middleware::Middleware for CapturingDepth {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn invoke(
+        &self,
+        ctx: crate::middleware::MiddlewareContext,
+        _input: crate::middleware::StageInput,
+    ) -> PortFuture<Result<StageOutcome, crate::middleware::MiddlewareError>> {
+        *self.captured.lock().expect("lock") = Some(ctx.run.relation_depth);
+        Box::pin(async { Ok(StageOutcome::Continue) })
+    }
+}
+
+fn capturing_depth_driver(
+    component: &str,
+    stage: Stage,
+    captured: &Arc<Mutex<Option<u16>>>,
+) -> StageDriver {
+    let middleware: Arc<dyn crate::middleware::Middleware> = Arc::new(CapturingDepth {
+        descriptor: descriptor(component, stage),
+        captured: Arc::clone(captured),
+    });
+    StageDriver::new(
+        Arc::new(
+            ResolvedMiddlewareChain::try_new(vec![MiddlewareRegistration { middleware }])
+                .expect("chain"),
+        ),
+        CancellationSignal::new(),
+    )
 }
 
 fn counting_driver(component: &str, stage: Stage, calls: &Arc<AtomicUsize>) -> StageDriver {

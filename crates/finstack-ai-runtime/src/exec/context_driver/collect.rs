@@ -71,6 +71,7 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
             deadline: seed.deadline,
             budget_scope_id: seed.budget_scope_id,
             cancellation: driver.cancellation().child(),
+            relation_depth: seed.relation_depth,
         };
         let contribution = committed_context_call(
             driver,

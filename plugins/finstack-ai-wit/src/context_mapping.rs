@@ -413,6 +413,7 @@ mod tests {
             deadline: None,
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
+            relation_depth: 0,
         }
     }
 

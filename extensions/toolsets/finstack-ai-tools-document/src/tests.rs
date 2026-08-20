@@ -203,6 +203,7 @@ fn call_context() -> ToolCallContext {
             deadline: None,
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
+            relation_depth: 0,
         },
         tool_batch_id: ToolBatchId::from_bytes([5; 16]),
         tool_call_id: ToolCallId::from_bytes([6; 16]),

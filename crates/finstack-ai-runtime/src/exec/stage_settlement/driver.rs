@@ -368,6 +368,7 @@ async fn invoke_stage_chain(
         deadline: seed.deadline,
         budget_scope_id: seed.budget_scope_id,
         cancellation: driver.cancellation().child(),
+        relation_depth: seed.relation_depth,
     };
     let mut ctx = MiddlewareStageContext::new(run, driver.chain().digest(), cursor);
     if let Some(resume) = resume {

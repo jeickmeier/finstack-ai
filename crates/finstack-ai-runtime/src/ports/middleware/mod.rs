@@ -39,10 +39,10 @@ pub use port::Middleware;
 #[cfg(test)]
 pub(crate) use types::parse_stage;
 pub use types::{
-    BeforeModelInput, CompactedSummary, CompactionCheckpoint, CompactionEvidence,
-    CompactionModelRequest, CompactionModelResume, CompactionResult, CompactionSourceEntry,
-    MiddlewareContext, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, OrderTier,
-    PromptCacheImpact, StageInput, StageMask, StageOutcome, stage_name,
+    BeforeModelInput, BeforeToolBatchInput, CompactedSummary, CompactionCheckpoint,
+    CompactionEvidence, CompactionModelRequest, CompactionModelResume, CompactionResult,
+    CompactionSourceEntry, MiddlewareContext, MiddlewareDescriptor, MiddlewareOrder,
+    MiddlewareRole, OrderTier, PromptCacheImpact, StageInput, StageMask, StageOutcome, stage_name,
 };
 #[cfg(test)]
 pub(crate) use validate::validate_compaction_model_effect;

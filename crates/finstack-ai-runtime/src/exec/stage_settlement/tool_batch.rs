@@ -2,14 +2,14 @@ use std::collections::BTreeSet;
 
 use finstack_ai_kernel::{ErrorDescriptor, Stage, StageCursor, ToolCallBlock, ToolId};
 
+use crate::ResolvedToolCatalog;
 use crate::coordinator::CommitCoordinator;
-use crate::middleware::StageInput;
+use crate::middleware::{BeforeToolBatchInput, StageInput};
 use crate::middleware_driver::{
     MIDDLEWARE_STAGE_UNLANDABLE, StageDriver, StageFold, StageTerminal,
 };
 use crate::run_types::RunHandleError;
 
-use super::codec::canonical;
 use super::driver::run_stage_chain;
 use super::stage_error;
 
@@ -52,6 +52,7 @@ pub(crate) enum ToolBatchPolicy {
 /// dropped, exactly as [`apply_fold`] rejects one it cannot land.
 pub(crate) async fn run_tool_batch_chain(
     coordinator: &CommitCoordinator,
+    catalog: &ResolvedToolCatalog,
     driver: Option<&StageDriver>,
     cursor: StageCursor,
     calls: &[ToolCallBlock],
@@ -64,9 +65,14 @@ pub(crate) async fn run_tool_batch_chain(
     let Some(driver) = driver.filter(|driver| driver.is_active(Stage::BeforeToolBatch)) else {
         return Ok(ToolBatchPolicy::Unchanged);
     };
-    let input = StageInput::BeforeToolBatch {
-        value: canonical(&calls)?,
-    };
+    let input = StageInput::BeforeToolBatch(Box::new(BeforeToolBatchInput {
+        calls: calls.to_vec().into(),
+        tools: catalog
+            .tools()
+            .map(|tool| tool.spec.clone())
+            .collect::<Vec<_>>()
+            .into(),
+    }));
     let fold = run_stage_chain(coordinator, Some(driver), cursor, input).await?;
     tool_batch_policy(&fold)
 }

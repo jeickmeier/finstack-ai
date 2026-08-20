@@ -120,7 +120,7 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
             Vec::new()
         };
     sources.absorb_approval_terminal(terminal.as_ref(), cursor, &remaining_paid, &journaled);
-    let retained = match run_tool_batch_chain(coordinator, driver, cursor, &calls).await? {
+    let retained = match run_tool_batch_chain(coordinator, catalog, driver, cursor, &calls).await? {
         ToolBatchPolicy::Unchanged => None,
         ToolBatchPolicy::Retain(retained) => Some(retained),
         ToolBatchPolicy::Fail(descriptor) => {

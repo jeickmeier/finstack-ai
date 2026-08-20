@@ -39,6 +39,7 @@ members = [
     "extensions/middleware/finstack-ai-middleware-verify",
     "extensions/middleware/finstack-ai-middleware-document-ingest",
     "extensions/middleware/finstack-ai-middleware-redaction",
+    "extensions/middleware/finstack-ai-middleware-tool-policy",
     "extensions/observers/finstack-ai-observer-log",
     "extensions/observers/finstack-ai-observer-otel",
     "extensions/observers/finstack-ai-observer-metrics",
@@ -158,6 +159,7 @@ finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstac
 finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "1.0.0" }
 # ASCII-only patterns; no unicode-* features needed. Already in-tree transitively.
 regex = { version = "1.13", default-features = false, features = ["std", "perf"] }
+finstack-ai-middleware-tool-policy = { path = "extensions/middleware/finstack-ai-middleware-tool-policy", version = "1.0.0" }
 finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "1.0.0" }
 finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "1.0.0" }
 finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "1.0.0" }

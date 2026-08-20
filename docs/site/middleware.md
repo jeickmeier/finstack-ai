@@ -82,11 +82,34 @@ error of its own to reuse.
 
 ## Shipping leaves
 
-| Leaf | Status |
-| --- | --- |
-| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | Battery. A pluggable `EvidenceVerifier` judges the terminal candidate; `Accept` lands it, `Bounce` retries (`RetryClassification::Verification`), `Reject` fails it. `RequestInteraction` has been removed from the API — see [What can be applied, and where](#what-can-be-applied-and-where) above for why a middleware outcome can't carry a pause for human approval. |
-| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
-| [`finstack-ai-middleware-instructions`](../../extensions/middleware/finstack-ai-middleware-instructions/README.md) | Tenant/policy instruction injection at `prepare_context`. See [Policy instructions](#policy-instructions-finstackmiddlewareinstructions). |
+| Leaf | Stages | Outcome | Purpose |
+| --- | --- | --- | --- |
+| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | `before_model`, `before_finalize` | `Continue` / `Retry` / `Fail` | Battery. A pluggable `EvidenceVerifier` judges the terminal candidate; `Accept` lands it, `Bounce` retries (`RetryClassification::Verification`), `Reject` fails it. `RequestInteraction` has been removed from the API — see [What can be applied, and where](#what-can-be-applied-and-where) above for why a middleware outcome can't carry a pause for human approval. |
+| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | `before_model` | `CompactContext` / `RequestCompactionModel` | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
+| [`finstack-ai-middleware-instructions`](../../extensions/middleware/finstack-ai-middleware-instructions/README.md) | `prepare_context` | `AddInstructions` | Tenant/policy instruction injection at `prepare_context`. See [Policy instructions](#policy-instructions-finstackmiddlewareinstructions). |
+| [`finstack-ai-middleware-tool-policy`](../../extensions/middleware/finstack-ai-middleware-tool-policy/README.md) | `before_model`, `before_tool_batch` | `FilterTools` / `Fail` | Policy-driven tool narrowing: role allowlists, write budgets, jailbreak triggers, and child-depth gates. |
+
+### The `before_tool_batch` payload
+
+Python and JS middleware authors receive one JSON object per stage
+invocation, tagged by `"stage"`. At `before_tool_batch` that object is:
+
+```json
+{
+  "stage": "before_tool_batch",
+  "calls": [ /* the batch's source ToolCallBlock entries, in source order */ ],
+  "tools": [ /* the resolved tool universe visible to this run's catalog,
+                including side-effect classes, in catalog order */ ]
+}
+```
+
+This previously carried a bare `calls` array with no universe attached, so a
+guest middleware could see what the model called but not what it was allowed
+to call. `tools` now mirrors the shape `before_model` already exposes via
+`request.tools`, letting a guest narrow the real catalog the same way a
+native leaf does — see
+[`finstack-ai-middleware-tool-policy`](../../extensions/middleware/finstack-ai-middleware-tool-policy/README.md)
+for the reference implementation of that narrowing.
 
 ### How summarize compaction completes
 

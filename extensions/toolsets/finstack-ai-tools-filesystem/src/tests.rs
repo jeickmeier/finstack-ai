@@ -52,6 +52,7 @@ fn context() -> ToolCallContext {
             deadline: None,
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
+            relation_depth: 0,
         },
         tool_batch_id: id(5, |value| ToolBatchId::parse(value).expect("batch")),
         tool_call_id: id(6, |value| ToolCallId::parse(value).expect("call")),

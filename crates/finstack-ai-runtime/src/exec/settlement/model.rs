@@ -64,6 +64,7 @@ pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
             deadline: seed.pending.requested.deadline(),
             budget_scope_id: seed.budget_scope_id,
             cancellation: cancellation.child(),
+            relation_depth: coordinator.accepted_relation_depth(),
         },
         original_input_digest: seed.pending.requested.input_digest(),
     };

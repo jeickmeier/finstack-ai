@@ -151,6 +151,7 @@ fn middleware_ctx(resume: Option<CompactionModelResume>) -> MiddlewareContext {
             deadline: None,
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
+            relation_depth: 0,
         },
         chain_digest: Digest::raw_json(b"chain"),
         chain_index: 0,

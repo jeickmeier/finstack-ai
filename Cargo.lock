@@ -1251,6 +1251,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-middleware-tool-policy"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-middleware-verify"
 version = "1.0.0"
 dependencies = [
@@ -1656,6 +1669,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
+ "finstack-ai-middleware-tool-policy",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
  "finstack-ai-store-artifact-object",

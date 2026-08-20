@@ -403,7 +403,9 @@ mod eval_tests {
 - [ ] **Step 4: Run tests to verify pass.**
 - [ ] **Step 5: Commit** — `git commit -m "feat: tool-policy eval core for role allowlists and child-depth gates"`
 
----### Task 4: `before_model` — full evaluation (adds write budget + jailbreak scan) and wiring into `invoke`
+---
+
+### Task 4: `before_model` — full evaluation (adds write budget + jailbreak scan) and wiring into `invoke`
 
 **Files:**
 - Modify: `src/eval.rs`, `src/lib.rs`

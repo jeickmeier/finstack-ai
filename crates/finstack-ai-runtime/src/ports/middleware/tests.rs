@@ -638,3 +638,23 @@ fn compaction_child_model_requires_exact_committed_relation_and_input() {
     validate_compaction_model_effect(&parent, &child_envelope, &wrong)
         .expect("opaque parent resume state");
 }
+
+#[test]
+fn before_tool_batch_input_serializes_with_stage_tag_calls_and_tools() {
+    let input = StageInput::BeforeToolBatch(Box::new(BeforeToolBatchInput {
+        calls: Arc::from([]),
+        tools: Arc::from([]),
+    }));
+    let json = serde_json::to_value(&input).expect("serialize");
+    assert_eq!(json["stage"], "before_tool_batch");
+    assert!(json["calls"].is_array());
+    assert!(json["tools"].is_array());
+    assert_eq!(input.stage(), Stage::BeforeToolBatch);
+
+    let round_tripped: StageInput =
+        serde_json::from_value(json).expect("deserialize before_tool_batch");
+    assert_eq!(
+        round_tripped, input,
+        "the internally-tagged BeforeToolBatch variant must round-trip through serde_json"
+    );
+}

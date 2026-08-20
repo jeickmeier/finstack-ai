@@ -26,3 +26,4 @@ include!("session.rs");
 include!("subagent.rs");
 include!("property.rs");
 include!("document_ingest.rs");
+include!("tool_policy.rs");

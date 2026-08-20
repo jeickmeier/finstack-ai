@@ -222,6 +222,7 @@ async fn reconcile_due_tool<C: Clock, R: RandomSource>(
                     deadline: seed.requested.deadline(),
                     budget_scope_id: seed.budget_scope_id,
                     cancellation: cancellation.child(),
+                    relation_depth: coordinator.accepted_relation_depth(),
                 },
                 original_input_digest: seed.requested.input_digest(),
             },

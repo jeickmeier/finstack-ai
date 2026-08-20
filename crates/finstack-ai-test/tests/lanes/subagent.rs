@@ -191,6 +191,7 @@ fn tool_context(parent: &AgentRun) -> finstack_ai_runtime::ToolCallContext {
             deadline: None,
             budget_scope_id: None,
             cancellation: finstack_ai_runtime::CancellationSignal::new(),
+            relation_depth: 0,
         },
         tool_batch_id: finstack_ai_kernel::ToolBatchId::from_bytes([8; 16]),
         tool_call_id: finstack_ai_kernel::ToolCallId::from_bytes([9; 16]),
