@@ -38,11 +38,16 @@ fn kind_token(kind: &InteractionKind) -> Arc<str> {
 /// `Open` with `requested_at == updated_at == now`, and re-capturing the
 /// same interaction upserts the same key.
 ///
+/// Re-capture is status-preserving: if a row already exists and is no longer
+/// `Open`, its status and `resolved_by` are carried over. A worker restart
+/// re-parks an unresolved session on the same interaction, and that must not
+/// revive a row that was already delivered, expired, or closed.
+///
 /// # Errors
 ///
 /// Returns [`HitlError::StoreIntegrity`] with code `"hitl_request_encode"`
 /// when the request envelope fails to serialize, and store failures from
-/// [`HitlInboxStore::upsert`].
+/// [`HitlInboxStore::load`] or [`HitlInboxStore::upsert`].
 pub fn capture(
     store: &dyn HitlInboxStore,
     checkpoint: &WorkflowCheckpoint,
@@ -55,18 +60,25 @@ pub fn capture(
     let encoded = serde_json::to_vec(request).map_err(|_| HitlError::StoreIntegrity {
         code: "hitl_request_encode",
     })?;
+    let interaction_id: Arc<str> = Arc::from(request.interaction_id().to_canonical_string());
+    let settled = store
+        .load(checkpoint.tenant_scope.as_ref(), interaction_id.as_ref())?
+        .filter(|existing| existing.status != InteractionStatus::Open);
+    let (status, resolved_by) = settled.map_or((InteractionStatus::Open, None), |existing| {
+        (existing.status, existing.resolved_by)
+    });
     store.upsert(&InteractionRow {
         tenant_scope: Arc::clone(&checkpoint.tenant_scope),
         session_id: checkpoint.session_id,
         lane_id: checkpoint.lane_id,
         run_id: checkpoint.run_id,
-        interaction_id: Arc::from(request.interaction_id().to_canonical_string()),
+        interaction_id,
         kind: kind_token(request.kind()),
         requested_at: now,
         expires_at: request.expires_at(),
         request: Arc::from(encoded),
-        status: InteractionStatus::Open,
-        resolved_by: None,
+        status,
+        resolved_by,
         updated_at: now,
     })?;
     Ok(true)

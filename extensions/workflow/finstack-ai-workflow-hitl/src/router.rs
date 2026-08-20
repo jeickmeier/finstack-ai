@@ -1,15 +1,17 @@
 //! Host-facing router over the HITL inbox and the workflow worker.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
     AuthorizationEvidence, InteractionRequest, InteractionResolution, InteractionResolutionCommand,
     OperationLocator, PrincipalRef, RawJson, Timestamp,
 };
-use finstack_ai_workflow_worker::{WakeIndexStore, WorkflowWorker};
+use finstack_ai_workflow_worker::{WakeIndexStore, WakeReason, WorkflowWorker};
 
 use crate::authorize::{ResolveAuthorizer, TenantAuthorizer};
 use crate::error::HitlError;
+use crate::expiry::{ApprovalExpiry, ExpiryPolicy, SweepReport};
 use crate::row::{InteractionRow, InteractionStatus};
 use crate::store::HitlInboxStore;
 
@@ -28,11 +30,13 @@ pub struct HitlRouter {
     wake: Arc<dyn WakeIndexStore>,
     /// Authorization hook consulted before every resolution.
     authorizer: Arc<dyn ResolveAuthorizer>,
+    /// Policy consulted for every interaction that crosses its deadline.
+    expiry: Arc<dyn ExpiryPolicy>,
 }
 
 impl HitlRouter {
     /// Router over an inbox, a worker, and the worker's wake index, using the
-    /// default [`TenantAuthorizer`].
+    /// default [`TenantAuthorizer`] and [`ApprovalExpiry`].
     #[must_use]
     pub fn new(
         store: Arc<dyn HitlInboxStore>,
@@ -44,6 +48,7 @@ impl HitlRouter {
             worker,
             wake,
             authorizer: Arc::new(TenantAuthorizer),
+            expiry: Arc::new(ApprovalExpiry),
         }
     }
 
@@ -54,10 +59,11 @@ impl HitlRouter {
         self
     }
 
-    /// Wake index this router shares with the worker.
+    /// Replace the expiry policy consulted by [`HitlRouter::sweep`].
     #[must_use]
-    pub fn wake_index(&self) -> &Arc<dyn WakeIndexStore> {
-        &self.wake
+    pub fn with_expiry_policy(mut self, policy: Arc<dyn ExpiryPolicy>) -> Self {
+        self.expiry = policy;
+        self
     }
 
     /// Open interactions for one tenant, oldest first (host inbox view).
@@ -74,6 +80,15 @@ impl HitlRouter {
     ///
     /// Delivery happens before the status transition: if the worker rejects
     /// the command the row stays `Open` and the call can be retried.
+    ///
+    /// If the final [`HitlInboxStore::set_status`] fails after a successful
+    /// delivery the row stays `Open` and visible in [`HitlRouter::pending`]
+    /// even though the command is already buffered; the worker inbox's keyed
+    /// upsert makes the retry harmless.
+    ///
+    /// Once-only resolution is enforced by the journal's settlement, not by
+    /// this inbox: [`HitlError::NotOpen`] is a serial-use guard against
+    /// double submission, not a concurrency guarantee.
     ///
     /// # Errors
     ///
@@ -112,6 +127,138 @@ impl HitlRouter {
             })?;
         self.authorizer.authorize(&row, &request, &principal)?;
 
+        let subject = self.deliver(
+            &row,
+            &request,
+            resolution_id,
+            principal,
+            evidence,
+            payload,
+            note,
+            now,
+        )?;
+        self.store.set_status(
+            tenant_scope,
+            interaction_id,
+            InteractionStatus::Delivered,
+            Some(subject.as_ref()),
+            now,
+        )
+    }
+
+    /// Reconcile the inbox against the wake index, then expire what is past
+    /// its deadline.
+    ///
+    /// Reconcile runs first and wins: any active (`Open` or `Delivered`) row
+    /// with no matching `Interaction` wake row was already settled out of
+    /// band — a tick consumed it — so it is closed rather than refused, and
+    /// nothing is delivered for it. Every remaining `Open` row whose
+    /// `expires_at` has arrived is handed to the [`ExpiryPolicy`]; a
+    /// resolution is delivered to the worker under the idempotent id
+    /// `"hitl-expiry-<interaction_id>"` and the row becomes `Expired`, while
+    /// a policy that declines leaves the row `Open` for the next sweep.
+    ///
+    /// The first row that errors aborts the pass. Each transition is
+    /// independently durable, so rows already transitioned stay that way and
+    /// re-running the sweep is safe.
+    ///
+    /// # Errors
+    ///
+    /// Returns store failures from [`HitlInboxStore::load_active`] or
+    /// [`HitlInboxStore::set_status`], [`HitlError::Worker`] when the wake
+    /// index or delivery fails, [`HitlError::StoreIntegrity`] with code
+    /// `"hitl_request_decode"` or `"hitl_locator"` for an undecodable row,
+    /// [`HitlError::InvalidResolution`] when the kernel rejects the policy's
+    /// resolution, and whatever the policy itself returns.
+    pub fn sweep(&self, now: Timestamp) -> Result<SweepReport, HitlError> {
+        let mut report = SweepReport::default();
+        let mut wake_ids: BTreeMap<Arc<str>, BTreeSet<Arc<str>>> = BTreeMap::new();
+
+        for row in self.store.load_active()? {
+            if !wake_ids.contains_key(row.tenant_scope.as_ref()) {
+                let pending = self
+                    .wake
+                    .load_tenant(row.tenant_scope.as_ref())?
+                    .into_iter()
+                    .filter(|wake| wake.reason == WakeReason::Interaction)
+                    .map(|wake| wake.pending_id)
+                    .collect();
+                wake_ids.insert(Arc::clone(&row.tenant_scope), pending);
+            }
+            let awaited = wake_ids
+                .get(row.tenant_scope.as_ref())
+                .is_some_and(|pending| pending.contains(row.interaction_id.as_ref()));
+
+            if !awaited {
+                self.store.set_status(
+                    row.tenant_scope.as_ref(),
+                    row.interaction_id.as_ref(),
+                    InteractionStatus::Closed,
+                    row.resolved_by.as_deref(),
+                    now,
+                )?;
+                report.reconciled += 1;
+                continue;
+            }
+            if row.status != InteractionStatus::Open
+                || row.expires_at.is_none_or(|deadline| deadline > now)
+            {
+                continue;
+            }
+            if self.expire_row(&row, now)? {
+                report.expired += 1;
+            }
+        }
+        Ok(report)
+    }
+
+    /// Deliver the expiry policy's resolution for one past-deadline row and
+    /// mark it `Expired`. Returns `false` when the policy declines.
+    fn expire_row(&self, row: &InteractionRow, now: Timestamp) -> Result<bool, HitlError> {
+        let request: InteractionRequest =
+            serde_json::from_slice(row.request.as_ref()).map_err(|_| {
+                HitlError::StoreIntegrity {
+                    code: "hitl_request_decode",
+                }
+            })?;
+        let Some(resolution) = self.expiry.expire(row, &request)? else {
+            return Ok(false);
+        };
+        let subject = self.deliver(
+            row,
+            &request,
+            &format!("hitl-expiry-{}", row.interaction_id),
+            resolution.principal,
+            resolution.evidence,
+            resolution.payload,
+            None,
+            now,
+        )?;
+        self.store.set_status(
+            row.tenant_scope.as_ref(),
+            row.interaction_id.as_ref(),
+            InteractionStatus::Expired,
+            Some(subject.as_ref()),
+            now,
+        )?;
+        Ok(true)
+    }
+
+    /// Build the resolution command for `row` and buffer it in the worker
+    /// inbox. Returns the resolving principal's subject, for the caller's
+    /// status transition.
+    #[allow(clippy::too_many_arguments)]
+    fn deliver(
+        &self,
+        row: &InteractionRow,
+        request: &InteractionRequest,
+        resolution_id: &str,
+        principal: PrincipalRef,
+        evidence: AuthorizationEvidence,
+        payload: RawJson,
+        note: Option<&str>,
+        now: Timestamp,
+    ) -> Result<Arc<str>, HitlError> {
         let locator = OperationLocator::try_new(
             row.tenant_scope.as_ref(),
             row.session_id,
@@ -138,14 +285,7 @@ impl HitlRouter {
                 code: "hitl_resolution",
             }
         })?;
-
         self.worker.deliver_interaction(&command, now)?;
-        self.store.set_status(
-            tenant_scope,
-            interaction_id,
-            InteractionStatus::Delivered,
-            Some(subject.as_ref()),
-            now,
-        )
+        Ok(subject)
     }
 }

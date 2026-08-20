@@ -112,11 +112,27 @@ pub(crate) fn approval_request(
     effect_id: Id<EffectTag>,
     expires_at: Option<Timestamp>,
 ) -> InteractionRequest {
+    interaction_request(
+        interaction_id,
+        effect_id,
+        InteractionKind::Approval,
+        expires_at,
+    )
+}
+
+/// Same envelope as [`approval_request`] with a caller-chosen kind, so specs
+/// can exercise the non-approval branches of kind-sensitive policies.
+pub(crate) fn interaction_request(
+    interaction_id: Id<InteractionTag>,
+    effect_id: Id<EffectTag>,
+    kind: InteractionKind,
+    expires_at: Option<Timestamp>,
+) -> InteractionRequest {
     InteractionRequest::try_new(
         1,
         interaction_id,
         effect_id,
-        InteractionKind::Approval,
+        kind,
         vec![ContentBlock::Text(
             TextBlock::try_new("approve the next tool action:\necho {\"value\":1}").expect("prompt"),
         )],
@@ -221,6 +237,43 @@ fn capture_is_idempotent_on_recapture() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].requested_at, timestamp(4_000));
     assert_eq!(rows[0].expires_at, None);
+}
+
+#[test]
+fn recapture_preserves_a_settled_row() {
+    let interaction_id: Id<InteractionTag> = id(50);
+    let wait = WorkflowWait::Interaction {
+        interaction_id,
+        request: approval_request(interaction_id, id(51), None),
+    };
+    let inbox = MemoryHitlStore::new();
+    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(2_000)).expect("first"));
+    inbox
+        .set_status(
+            "tenant-a",
+            &interaction_id.to_canonical_string(),
+            InteractionStatus::Delivered,
+            Some("subject"),
+            timestamp(3_000),
+        )
+        .expect("deliver");
+
+    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(4_000)).expect("recapture"));
+
+    let row = inbox
+        .load("tenant-a", &interaction_id.to_canonical_string())
+        .expect("load")
+        .expect("row");
+    assert_eq!(
+        row.status,
+        InteractionStatus::Delivered,
+        "a re-park after a restart must not revive a settled row"
+    );
+    assert_eq!(row.resolved_by.as_deref(), Some("subject"));
+    assert!(
+        inbox.load_open("tenant-a").expect("open").is_empty(),
+        "the settled row stays out of the pending view"
+    );
 }
 
 /// Commit an interaction request directly onto a freshly accepted run,
