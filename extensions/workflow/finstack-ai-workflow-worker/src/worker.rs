@@ -21,6 +21,7 @@ use finstack_ai_runtime::{
     classify_wait,
 };
 use finstack_ai_workflow_local::{CronFire, CronSchedule, CronScheduleStore};
+use serde::Serialize;
 
 use crate::error::WorkerError;
 use crate::fires::{FireRow, FireStatus, FireStore, idempotency_key};
@@ -224,6 +225,76 @@ impl WorkflowWorker {
     #[must_use]
     pub const fn clock(&self) -> &ExternalClock {
         &self.clock
+    }
+
+    /// Durably record one interaction response for a future tick.
+    ///
+    /// No live session is required: the response is buffered in the inbox
+    /// and consumed the next time [`Self::tick`] resumes the parked session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError::StoreIntegrity`] with code `"inbox_encode"`
+    /// when the command cannot be serialized, and adapter-table failures
+    /// from [`InboxStore::insert`].
+    pub fn deliver_interaction(
+        &self,
+        command: &InteractionResolutionCommand,
+        received_at: Timestamp,
+    ) -> Result<(), WorkerError> {
+        self.deliver(
+            &command.locator,
+            command.resolution.interaction_id().to_canonical_string(),
+            InboxKind::Interaction,
+            command,
+            received_at,
+        )
+    }
+
+    /// Durably record one external completion for a future tick.
+    ///
+    /// No live session is required: the response is buffered in the inbox
+    /// and consumed the next time [`Self::tick`] resumes the parked session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkerError::StoreIntegrity`] with code `"inbox_encode"`
+    /// when the command cannot be serialized, and adapter-table failures
+    /// from [`InboxStore::insert`].
+    pub fn deliver_external(
+        &self,
+        command: &ExternalEffectCompletionCommand,
+        received_at: Timestamp,
+    ) -> Result<(), WorkerError> {
+        self.deliver(
+            &command.locator,
+            command.completion.effect_id.to_canonical_string(),
+            InboxKind::External,
+            command,
+            received_at,
+        )
+    }
+
+    /// Shared encode-and-insert path for both `deliver_*` methods.
+    fn deliver<T: Serialize>(
+        &self,
+        locator: &OperationLocator,
+        pending_id: String,
+        kind: InboxKind,
+        command: &T,
+        received_at: Timestamp,
+    ) -> Result<(), WorkerError> {
+        let payload = serde_json::to_vec(command).map_err(|_| WorkerError::StoreIntegrity {
+            code: "inbox_encode",
+        })?;
+        self.inbox.insert(&InboxRow {
+            tenant_scope: Arc::clone(&locator.tenant_scope),
+            session_id: locator.session_id,
+            pending_id: Arc::from(pending_id),
+            kind,
+            payload: Arc::from(payload.as_slice()),
+            received_at,
+        })
     }
 
     /// Run one tick: claim due cron fires, bridge them into runs, then

@@ -1667,6 +1667,7 @@ dependencies = [
  "finstack-ai-test",
  "finstack-ai-workflow-local",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",
