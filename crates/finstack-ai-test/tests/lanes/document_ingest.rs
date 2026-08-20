@@ -36,11 +36,18 @@ fn staging_scope() -> ArtifactScope {
     }
 }
 
-async fn document_ingest_agent() -> (
+/// Shared scaffolding for every document-ingest lane test: builds a fresh
+/// journal store, scripted model, attachment index, and an `Agent` wired
+/// with `DocumentIngestMiddleware` + `DocumentToolset` over the caller's
+/// `artifact_store`. `label` disambiguates component/agent ids across tests
+/// that call this more than once in the same binary.
+async fn document_ingest_agent_with_store(
+    label: &str,
+    artifact_store: Arc<dyn ArtifactStore>,
+) -> (
     Agent,
     Arc<dyn finstack_ai_runtime::JournalStore>,
     Arc<ScriptedModel>,
-    Arc<InProcessArtifactStore>,
     Arc<AttachmentIndex>,
 ) {
     use finstack_ai_kernel::{AgentId, BundleId};
@@ -58,12 +65,11 @@ async fn document_ingest_agent() -> (
         scripted_profile(),
         vec![completed_plan("acknowledged")],
     ));
-    let artifact_store = Arc::new(InProcessArtifactStore::default());
     let attachment_index = Arc::new(AttachmentIndex::default());
 
     let middleware = Arc::new(
         DocumentIngestMiddleware::try_new(
-            Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>,
+            Arc::clone(&artifact_store),
             Arc::clone(&attachment_index),
         )
         .expect("document ingest middleware"),
@@ -71,22 +77,24 @@ async fn document_ingest_agent() -> (
     let toolset = Arc::new(
         DocumentToolset::try_new()
             .expect("document toolset")
-            .with_artifact_store(Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>),
+            .with_artifact_store(Arc::clone(&artifact_store)),
     );
 
     let agent = Agent::builder(
-        AgentId::parse("test.agent.document-ingest").expect("agent id"),
-        BundleId::parse("test.bundle.document-ingest").expect("bundle id"),
+        AgentId::parse(format!("test.agent.document-ingest-{label}")).expect("agent id"),
+        BundleId::parse(format!("test.bundle.document-ingest-{label}")).expect("bundle id"),
         (
             ComponentRef::new(
-                ComponentId::parse("test.model.document-ingest").expect("model id"),
+                ComponentId::parse(format!("test.model.document-ingest-{label}"))
+                    .expect("model id"),
                 Some(COMPONENT_VERSION),
             ),
             Arc::clone(&model) as Arc<dyn Model>,
         ),
         (
             ComponentRef::new(
-                ComponentId::parse("test.store.document-ingest").expect("store id"),
+                ComponentId::parse(format!("test.store.document-ingest-{label}"))
+                    .expect("store id"),
                 Some(COMPONENT_VERSION),
             ),
             Arc::clone(&store),
@@ -111,6 +119,19 @@ async fn document_ingest_agent() -> (
     .await
     .expect("agent");
 
+    (agent, store, model, attachment_index)
+}
+
+async fn document_ingest_agent() -> (
+    Agent,
+    Arc<dyn finstack_ai_runtime::JournalStore>,
+    Arc<ScriptedModel>,
+    Arc<dyn ArtifactStore>,
+    Arc<AttachmentIndex>,
+) {
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(InProcessArtifactStore::default());
+    let (agent, store, model, attachment_index) =
+        document_ingest_agent_with_store("csv", Arc::clone(&artifact_store)).await;
     (agent, store, model, artifact_store, attachment_index)
 }
 
@@ -224,71 +245,9 @@ async fn large_attachment_stages_through_the_object_backed_artifact_store() {
     let object_store = Arc::new(FakeObjectStore::default());
     let artifact_store: Arc<dyn ArtifactStore> =
         Arc::new(ObjectArtifactStore::new(object_store));
-    let attachment_index = Arc::new(AttachmentIndex::default());
 
-    let store: Arc<dyn finstack_ai_runtime::JournalStore> = Arc::new(
-        MemoryJournalStore::try_new(MemoryStoreLimits {
-            sessions: 8,
-            batches_per_session: 64,
-            records_per_session: 512,
-            snapshot_bytes: 8_192,
-        })
-        .expect("journal store"),
-    );
-    let model = Arc::new(ScriptedModel::from_plans(
-        scripted_profile(),
-        vec![completed_plan("acknowledged")],
-    ));
-
-    let middleware = Arc::new(
-        DocumentIngestMiddleware::try_new(
-            Arc::clone(&artifact_store),
-            Arc::clone(&attachment_index),
-        )
-        .expect("document ingest middleware"),
-    );
-    let toolset = Arc::new(
-        DocumentToolset::try_new()
-            .expect("document toolset")
-            .with_artifact_store(Arc::clone(&artifact_store)),
-    );
-
-    let agent = Agent::builder(
-        AgentId::parse("test.agent.document-ingest-large").expect("agent id"),
-        BundleId::parse("test.bundle.document-ingest-large").expect("bundle id"),
-        (
-            ComponentRef::new(
-                ComponentId::parse("test.model.document-ingest-large").expect("model id"),
-                Some(COMPONENT_VERSION),
-            ),
-            Arc::clone(&model) as Arc<dyn Model>,
-        ),
-        (
-            ComponentRef::new(
-                ComponentId::parse("test.store.document-ingest-large").expect("store id"),
-                Some(COMPONENT_VERSION),
-            ),
-            Arc::clone(&store),
-        ),
-    )
-    .toolset(
-        ComponentRef::new(
-            ComponentId::parse("finstack.tools.document").expect("toolset id"),
-            Some(COMPONENT_VERSION),
-        ),
-        toolset,
-    )
-    .middleware(
-        ComponentRef::new(
-            ComponentId::parse("finstack.middleware.document-ingest").expect("middleware id"),
-            Some(COMPONENT_VERSION),
-        ),
-        middleware,
-    )
-    .policy(RunPolicy::default())
-    .build()
-    .await
-    .expect("agent");
+    let (agent, _store, _model, attachment_index) =
+        document_ingest_agent_with_store("large", Arc::clone(&artifact_store)).await;
 
     let artifact = artifact_store
         .stage_put(
