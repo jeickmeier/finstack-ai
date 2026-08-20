@@ -33,16 +33,17 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
-    OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest,
-    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
+    OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
+    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
     WriteMetadataRequest,
 };
 use finstack_ai_store_common::{
-    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, SessionUsage, WindowCodes, accelerated_from,
-    admit_append_limits, admit_prune_snapshot, admit_snapshot_sequence, build_committed_batch,
-    check_append_sequence, check_snapshot_size, classify_record_reuse, encode_state_request,
-    outstanding_count, scan_next_sequence, scan_start, select_tail_batches, tombstone_count,
-    validate_scan_limit, verify_full_head, verify_tail_records,
+    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, SessionUsage, VerifiedHead, VerifiedHeadCache,
+    VerifiedRead, WindowCodes, accelerated_from, admit_append_limits, admit_prune_snapshot,
+    admit_snapshot_sequence, build_committed_batch, check_append_sequence, check_snapshot_size,
+    classify_record_reuse, encode_state_request, outstanding_count, scan_next_sequence, scan_start,
+    select_tail_batches, tombstone_count, validate_scan_limit, verify_full_head,
+    verify_head_against_cache, verify_tail_records,
 };
 
 /// Required resource ceilings for [`MemoryJournalStore`].
@@ -52,6 +53,13 @@ pub type MemoryStoreLimits = StoreLimits;
 pub struct MemoryJournalStore {
     limits: MemoryStoreLimits,
     inner: Mutex<Inner>,
+    /// Process-local chain-verification cache (spec D9), keyed by session.
+    ///
+    /// A separate lock from `inner`. Whenever both are taken, `inner` is
+    /// taken first and the cache lock is released inside that critical
+    /// section; the cache never reaches back for `inner`, so the two cannot
+    /// deadlock.
+    verified: VerifiedHeadCache,
 }
 
 impl MemoryJournalStore {
@@ -64,6 +72,7 @@ impl MemoryJournalStore {
         Ok(Self {
             limits: limits.validate()?,
             inner: Mutex::new(Inner::default()),
+            verified: VerifiedHeadCache::new(),
         })
     }
 
@@ -149,26 +158,17 @@ impl MemoryJournalStore {
         let head_checksum = committed.records.last().map(RecordEnvelope::checksum);
         let batch_id = request.batch_id();
         let session_id = request.session_id();
-        let record_entries = request
-            .records()
-            .iter()
-            .map(|record| {
-                (
-                    record.record_id(),
-                    RecordIndexEntry {
-                        batch_id,
-                        draft: record.clone(),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
+        let record_entries = record_index_entries(&request, batch_id);
 
         let session = inner.sessions.entry(session_id).or_default();
         session.head_sequence = last_sequence;
         session.head_checksum = head_checksum;
         session.records += request.records().len();
         session.batches.push(committed.clone());
-        session.mark_verified();
+        let head = VerifiedHead {
+            sequence: session.head_sequence,
+            checksum: session.head_checksum,
+        };
         for (record_id, entry) in record_entries {
             inner.records_by_id.insert(record_id, entry);
         }
@@ -179,15 +179,62 @@ impl MemoryJournalStore {
                 committed: committed.clone(),
             },
         );
+        drop(inner);
+        // The chain this append extended was built by this process from the
+        // session's own head, so its head is verified by construction.
+        let read = self.verified.read(session_id);
+        self.verified.remember(session_id, read, head);
         Ok(committed)
     }
 
+    /// Verify one session's chain, using (and maintaining) the shared
+    /// verified-head cache.
+    ///
+    /// The cache never changes the outcome: [`verify_head_against_cache`]
+    /// falls back to a full verification whenever the cached anchor is not
+    /// usable, so the reason codes are those of an uncached verification.
+    fn verify_session_head(
+        &self,
+        session_id: SessionId,
+        session: &SessionData,
+        read: VerifiedRead,
+    ) -> Result<Option<Digest>, StoreError> {
+        let records = flatten_records(session);
+        match verify_head_against_cache(
+            &records,
+            session.head_sequence,
+            session.head_checksum,
+            read.head,
+        ) {
+            Ok(head) => {
+                self.verified.remember(
+                    session_id,
+                    read,
+                    VerifiedHead {
+                        sequence: session.head_sequence,
+                        checksum: head,
+                    },
+                );
+                Ok(head)
+            }
+            Err(error) => {
+                // Spec D9(b): an integrity failure invalidates whatever this
+                // process believed it had verified for this session.
+                if matches!(error, StoreError::Integrity { .. }) {
+                    self.verified.invalidate(session_id);
+                }
+                Err(error)
+            }
+        }
+    }
+
     fn load_sync(&self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
+        let read = self.verified.read(request.session_id);
         let inner = self.lock()?;
         let Some(session) = inner.sessions.get(&request.session_id) else {
             return Ok(LoadedSession::empty(request.session_id));
         };
-        verify_session(session)?;
+        self.verify_session_head(request.session_id, session, read)?;
         let snapshot = session.snapshot.clone();
         Ok(LoadedSession {
             session_id: request.session_id,
@@ -229,7 +276,13 @@ impl MemoryJournalStore {
                 reason_code: "load_from_sequence_gap",
             });
         };
-        loaded_from_batches(session_id, session, start, prior_checksum, FROM_SEQUENCE_WINDOW)
+        loaded_from_batches(
+            session_id,
+            session,
+            start,
+            prior_checksum,
+            FROM_SEQUENCE_WINDOW,
+        )
     }
 
     fn load_snapshot_plus_tail(&self, session_id: SessionId) -> Result<LoadedSession, StoreError> {
@@ -258,18 +311,16 @@ impl MemoryJournalStore {
 
     fn scan_sync(&self, request: ScanRequest) -> Result<ScanPage, StoreError> {
         validate_scan_limit(request.limit)?;
-        let mut inner = self.lock()?;
-        let Some(session) = inner.sessions.get_mut(&request.session_id) else {
+        let read = self.verified.read(request.session_id);
+        let inner = self.lock()?;
+        let Some(session) = inner.sessions.get(&request.session_id) else {
             return Ok(ScanPage {
                 session_id: request.session_id,
                 records: Arc::from([]),
                 next_sequence: None,
             });
         };
-        if !session.head_is_verified() {
-            verify_session(session)?;
-            session.mark_verified();
-        }
+        self.verify_session_head(request.session_id, session, read)?;
         let start = scan_start(request.from_sequence);
         let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
         let (records, saw_more) = slice_records(session, start, limit);
@@ -384,9 +435,20 @@ impl MemoryJournalStore {
             .iter()
             .map(|batch| batch.records.len())
             .sum();
-        session.verified_head = None;
-        verify_session(session)?;
-        session.mark_verified();
+        // The retained journal is a different chain prefix than the one the
+        // cached proof described, so the proof is dropped and the pruned
+        // journal re-verified in full before a new one is recorded.
+        self.verified.invalidate(request.session_id);
+        let head = VerifiedHead {
+            sequence: session.head_sequence,
+            checksum: session.head_checksum,
+        };
+        let records = flatten_records(session);
+        let stored_head = session.head_checksum;
+        drop(inner);
+        verify_full_head(&records, stored_head)?;
+        let read = self.verified.read(request.session_id);
+        self.verified.remember(request.session_id, read, head);
         let _ = request.horizon;
         Ok(PruneReceipt {
             pruned_through_sequence,
@@ -489,17 +551,6 @@ struct SessionData {
     records: usize,
     batches: Vec<CommittedBatch>,
     snapshot: Option<OpaqueSnapshot>,
-    verified_head: Option<(u64, Option<Digest>)>,
-}
-
-impl SessionData {
-    fn head_is_verified(&self) -> bool {
-        self.verified_head == Some((self.head_sequence, self.head_checksum))
-    }
-
-    fn mark_verified(&mut self) {
-        self.verified_head = Some((self.head_sequence, self.head_checksum));
-    }
 }
 
 struct BatchIndexEntry {
@@ -511,11 +562,6 @@ struct RecordIndexEntry {
     batch_id: AppendBatchId,
     #[allow(dead_code)]
     draft: RecordDraft,
-}
-
-fn verify_session(session: &SessionData) -> Result<(), StoreError> {
-    let records = flatten_records(session);
-    verify_full_head(&records, session.head_checksum).map(|_| ())
 }
 
 fn loaded_from_batches(
@@ -548,6 +594,26 @@ fn loaded_from_batches(
         snapshot: snapshot.clone(),
         accelerated: snapshot.as_ref().and_then(accelerated_from),
     })
+}
+
+/// Build the by-record-id index entries one append contributes.
+fn record_index_entries(
+    request: &AppendRequest,
+    batch_id: AppendBatchId,
+) -> Vec<(RecordId, RecordIndexEntry)> {
+    request
+        .records()
+        .iter()
+        .map(|record| {
+            (
+                record.record_id(),
+                RecordIndexEntry {
+                    batch_id,
+                    draft: record.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {

@@ -10,10 +10,11 @@ use finstack_ai_runtime::{
 };
 use finstack_ai_store_common::{
     FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, check_batch_alignment, scan_next_sequence,
-    scan_start, validate_scan_limit, verify_full_head, verify_tail_records,
+    scan_start, validate_scan_limit, verify_head_against_cache, verify_tail_records,
 };
 pub(crate) use finstack_ai_store_common::{
-    accelerated_from, encode_state_request, outstanding_count, tombstone_count,
+    VerifiedHead, VerifiedHeadCache, VerifiedRead, accelerated_from, encode_state_request,
+    outstanding_count, tombstone_count,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -39,13 +40,6 @@ pub(crate) struct SessionRow {
 pub(crate) struct StoredRecord {
     pub(crate) batch_id: AppendBatchId,
     pub(crate) envelope: RecordEnvelope,
-}
-
-/// Process-local proof that a session journal was verified through this head.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct VerifiedHead {
-    pub(crate) sequence: u64,
-    pub(crate) checksum: Option<Digest>,
 }
 
 pub(crate) fn load_batch(
@@ -311,13 +305,16 @@ pub(crate) fn load_session(
     let (metadata, head_sequence, snapshot) =
         load_session_extras(connection, session_id, snapshot_bytes)?;
     let stored_head = session_head_checksum(connection, session_id)?;
-    let head_checksum = if cached
-        .is_some_and(|head| head.sequence == head_sequence && head.checksum == stored_head)
-    {
-        confirm_cached_head(&stored, stored_head)?;
-        stored_head
-    } else {
-        verify_stored_session(connection, session_id, &stored)?
+    // The cache is a pure optimization: `verify_head_against_cache` falls
+    // back to a full verification whenever the cached anchor is not usable,
+    // so the accept/reject decision and its reason code are exactly those of
+    // an uncached load.
+    let head_checksum = {
+        let records = stored
+            .iter()
+            .map(|row| row.envelope.clone())
+            .collect::<Vec<_>>();
+        verify_head_against_cache(&records, head_sequence, stored_head, cached)?
     };
     let committed_batches = group_batches(&stored)?;
     Ok(LoadedSession {
@@ -329,19 +326,6 @@ pub(crate) fn load_session(
         snapshot: snapshot.clone(),
         accelerated: snapshot.as_ref().and_then(accelerated_from),
     })
-}
-
-fn confirm_cached_head(
-    stored: &[StoredRecord],
-    expected: Option<Digest>,
-) -> Result<(), StoreError> {
-    let last = stored.last().map(|row| row.envelope.checksum());
-    if last != expected {
-        return Err(StoreError::Integrity {
-            reason_code: "head_checksum_mismatch",
-        });
-    }
-    Ok(())
 }
 
 pub(crate) fn load_session_window(
@@ -445,7 +429,14 @@ fn loaded_tail(
         .map(|row| row.envelope.clone())
         .collect::<Vec<_>>();
     let stored_head = session_head_checksum(connection, session_id)?;
-    verify_tail_records(&records, start, prior_checksum, head_sequence, stored_head, codes)?;
+    verify_tail_records(
+        &records,
+        start,
+        prior_checksum,
+        head_sequence,
+        stored_head,
+        codes,
+    )?;
     let committed_batches = group_batches(stored)?;
     Ok(LoadedSession {
         session_id,
@@ -648,19 +639,6 @@ fn verify_scan_page(
         });
     }
     Ok(())
-}
-
-pub(crate) fn verify_stored_session(
-    connection: &Connection,
-    session_id: SessionId,
-    stored: &[StoredRecord],
-) -> Result<Option<Digest>, StoreError> {
-    let records = stored
-        .iter()
-        .map(|row| row.envelope.clone())
-        .collect::<Vec<_>>();
-    let stored_head = session_head_checksum(connection, session_id)?;
-    verify_full_head(&records, stored_head)
 }
 
 fn group_batches(stored: &[StoredRecord]) -> Result<Vec<CommittedBatch>, StoreError> {

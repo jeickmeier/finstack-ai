@@ -28,6 +28,7 @@ mod append;
 mod error;
 mod scan;
 mod snapshot;
+mod verified;
 mod window;
 
 pub use append::{
@@ -40,7 +41,8 @@ pub use snapshot::{
     accelerated_from, admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size,
     encode_state_request, outstanding_count, tombstone_count,
 };
+pub use verified::{VerifiedHead, VerifiedHeadCache, VerifiedRead, verify_head_against_cache};
 pub use window::{
-    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, check_batch_alignment,
-    select_tail_batches, verify_full_head, verify_tail_records,
+    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, check_batch_alignment, select_tail_batches,
+    verify_full_head, verify_tail_records,
 };

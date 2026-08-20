@@ -41,7 +41,7 @@
 //! [`crate::session::lock_session`] — the same lock [`crate::append::append`]
 //! and [`crate::snapshot::write_snapshot`] take — so a prune and a concurrent
 //! append/snapshot-write/metadata-write of the same session serialize rather
-//! than race. Prune never touches this process's [`crate::store::VerifiedCache`]
+//! than race. Prune never touches this process's verified-head cache
 //! entry for the session: it only ever deletes an already-pruned prefix the
 //! cache's suffix proof does not depend on, so the cached head stays valid
 //! for the next load (spec D9).

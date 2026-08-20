@@ -17,15 +17,13 @@
 //! rather than silently connecting in plaintext. Wiring TLS support
 //! (`tokio-postgres-rustls` + `rustls`, or an equivalent) is follow-up work.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
-use finstack_ai_kernel::SessionId;
 use finstack_ai_runtime::StoreError;
+use finstack_ai_store_common::VerifiedHeadCache;
 
 use crate::config::{PostgresDurability, PostgresStoreConfig};
 use crate::error::map_postgres_error;
-use crate::load::VerifiedHead;
 use crate::pool::Pool;
 use crate::schema::ensure_schema;
 
@@ -56,116 +54,12 @@ pub struct PostgresJournalStore {
     /// Process-local chain-verification cache (spec D9), keyed by session.
     ///
     /// `Arc` because every port method returns a `'static` future that must
-    /// own what it touches; a `std::sync::Mutex` (never held across an
-    /// `.await` — see [`VerifiedCache`]) because the guarded map operations
-    /// are pure memory work that no async runtime needs to see.
-    pub(crate) verified: VerifiedCache,
-}
-
-/// Shared handle to the per-session [`VerifiedHead`] cache.
-///
-/// Every slot carries a generation counter so a load that started before an
-/// invalidation cannot write its (now unproven) head afterwards — see
-/// [`remember_head`].
-pub(crate) type VerifiedCache = Arc<Mutex<HashMap<SessionId, CacheSlot>>>;
-
-/// One session's cache slot: the proof, plus the generation it belongs to.
-///
-/// The slot outlives the proof it held: [`invalidate_head`] clears `head` but
-/// keeps (and bumps) `generation`, so the invalidation is still visible to a
-/// load that read the slot before it happened.
-pub(crate) struct CacheSlot {
-    /// Bumped by every invalidation of this session.
-    generation: u64,
-    /// The verified head, or `None` once invalidated.
-    head: Option<VerifiedHead>,
-}
-
-/// A cache read: the proof (if any) plus the generation it was read at.
-///
-/// The generation must be handed back to [`remember_head`], which discards
-/// the write when an invalidation intervened.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct VerifiedRead {
-    /// Generation of the slot at the time of the read.
-    pub(crate) generation: u64,
-    /// The cached proof, or `None` when there is none to use.
-    pub(crate) head: Option<VerifiedHead>,
-}
-
-/// Take the cache lock, recovering from poisoning rather than propagating it.
-///
-/// The guarded sections are `HashMap` operations that cannot leave the map
-/// half-updated, so a panic elsewhere never makes the contents unsafe to
-/// read; and the crate forbids `unwrap`/`panic` in non-test code.
-fn lock(cache: &VerifiedCache) -> std::sync::MutexGuard<'_, HashMap<SessionId, CacheSlot>> {
-    cache.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// Read the cached verified head for `session_id`, with its generation.
-///
-/// A session with no slot reads as generation 0 and no proof, which is the
-/// generation a first [`remember_head`] must present.
-pub(crate) fn cached_head(cache: &VerifiedCache, session_id: SessionId) -> VerifiedRead {
-    let map = lock(cache);
-    map.get(&session_id).map_or(
-        VerifiedRead {
-            generation: 0,
-            head: None,
-        },
-        |slot| VerifiedRead {
-            generation: slot.generation,
-            head: slot.head,
-        },
-    )
-}
-
-/// Record `head` as verified for `session_id`, unless an invalidation landed
-/// since `read.generation` was observed.
-///
-/// Without this check a load that read the cache *before* a concurrent load
-/// found corruption could write its own head afterwards, resurrecting a proof
-/// the invalidation was meant to destroy — and, because that head anchors
-/// every later suffix verification, the corrupt prefix would never be re-read
-/// for the life of the process.
-pub(crate) fn remember_head(
-    cache: &VerifiedCache,
-    session_id: SessionId,
-    read: VerifiedRead,
-    head: VerifiedHead,
-) {
-    let mut map = lock(cache);
-    let generation = map.get(&session_id).map_or(0, |slot| slot.generation);
-    if generation != read.generation {
-        // An invalidation intervened: this proof describes a journal state
-        // that has since been called into question. Drop it; the next load
-        // verifies in full.
-        return;
-    }
-    map.insert(
-        session_id,
-        CacheSlot {
-            generation,
-            head: Some(head),
-        },
-    );
-}
-
-/// Drop any cached proof for `session_id` (spec D9: on an `Integrity`
-/// result, or when the observed head fell below the cached sequence).
-///
-/// The slot is kept as a tombstone with a bumped generation so in-flight
-/// loads that already read it cannot write over the invalidation.
-pub(crate) fn invalidate_head(cache: &VerifiedCache, session_id: SessionId) {
-    let mut map = lock(cache);
-    let generation = map.get(&session_id).map_or(0, |slot| slot.generation);
-    map.insert(
-        session_id,
-        CacheSlot {
-            generation: generation.saturating_add(1),
-            head: None,
-        },
-    );
+    /// own what it touches; the container's `std::sync::Mutex` (never held
+    /// across an `.await`) guards operations that are pure memory work no
+    /// async runtime needs to see. Its generation guard is what makes a
+    /// concurrent read/write-back pair safe — see
+    /// [`finstack_ai_store_common::VerifiedHeadCache`].
+    pub(crate) verified: Arc<VerifiedHeadCache>,
 }
 
 impl PostgresJournalStore {
@@ -213,7 +107,7 @@ impl PostgresJournalStore {
         Ok(Self {
             pool,
             config,
-            verified: Arc::new(Mutex::new(HashMap::new())),
+            verified: Arc::new(VerifiedHeadCache::new()),
         })
     }
 }
@@ -283,88 +177,7 @@ pub(crate) async fn connect_and_prepare(
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_kernel::{Digest, SessionTag};
-    use finstack_ai_test::store_fixtures::id;
-
     use super::*;
-
-    fn empty_cache() -> VerifiedCache {
-        Arc::new(Mutex::new(HashMap::new()))
-    }
-
-    fn head(sequence: u64) -> VerifiedHead {
-        VerifiedHead {
-            sequence,
-            checksum: Some(Digest::raw_json(b"{}")),
-        }
-    }
-
-    /// The ordinary sequence — read, then write back — caches the head.
-    #[test]
-    fn a_head_read_at_the_current_generation_is_cached() {
-        let cache = empty_cache();
-        let session = id::<SessionTag>(1);
-
-        let read = cached_head(&cache, session);
-        assert!(read.head.is_none());
-        remember_head(&cache, session, read, head(10));
-
-        assert_eq!(cached_head(&cache, session).head, Some(head(10)));
-    }
-
-    /// A load that read the cache before a concurrent load invalidated it
-    /// must not resurrect the proof afterwards: otherwise the corrupt prefix
-    /// that caused the invalidation would never be verified again.
-    #[test]
-    fn a_write_racing_an_invalidation_is_discarded() {
-        let cache = empty_cache();
-        let session = id::<SessionTag>(1);
-        remember_head(&cache, session, cached_head(&cache, session), head(10));
-
-        // Load Y reads the cache…
-        let stale = cached_head(&cache, session);
-        assert_eq!(stale.head, Some(head(10)));
-        // …load X finds corruption and invalidates…
-        invalidate_head(&cache, session);
-        // …and load Y, which knows nothing about that, tries to write back.
-        remember_head(&cache, session, stale, head(10));
-
-        let after = cached_head(&cache, session);
-        assert!(
-            after.head.is_none(),
-            "the invalidation must survive a racing write"
-        );
-        // The next load reads at the bumped generation and can cache again.
-        remember_head(&cache, session, after, head(12));
-        assert_eq!(cached_head(&cache, session).head, Some(head(12)));
-    }
-
-    /// Invalidation is not lost when it happens before anything was cached
-    /// (the tombstone slot carries the bumped generation).
-    #[test]
-    fn invalidating_an_uncached_session_still_blocks_a_racing_write() {
-        let cache = empty_cache();
-        let session = id::<SessionTag>(1);
-
-        let stale = cached_head(&cache, session);
-        invalidate_head(&cache, session);
-        remember_head(&cache, session, stale, head(10));
-
-        assert!(cached_head(&cache, session).head.is_none());
-    }
-
-    /// Sessions do not share a generation.
-    #[test]
-    fn invalidation_is_scoped_to_one_session() {
-        let cache = empty_cache();
-        let (first, second) = (id::<SessionTag>(1), id::<SessionTag>(2));
-        let read = cached_head(&cache, second);
-        invalidate_head(&cache, first);
-        remember_head(&cache, second, read, head(3));
-
-        assert_eq!(cached_head(&cache, second).head, Some(head(3)));
-        assert!(cached_head(&cache, first).head.is_none());
-    }
 
     #[test]
     fn detects_sslmode_require() {

@@ -28,11 +28,16 @@
 //! [`VerifiedHead`] records that this process already verified a session's
 //! chain through some sequence. Because the journal is append-only, that
 //! proof stays valid no matter how many other writers extend the chain, so a
-//! later load only has to verify the records *after* the cached head — see
-//! [`verify_against_cache`]. The cache is never allowed to change an outcome:
-//! any suffix verification failure falls back to a full verification, which
-//! owns the reason codes. The store drops the entry on any `Integrity` result
-//! and overwrites it after every successful load (spec D9).
+//! later load only has to verify the records *after* the cached head. Both
+//! the decision (suffix versus full verification) and the cache container
+//! live in [`finstack_ai_store_common`] — see
+//! [`verify_head_against_cache`] and
+//! [`finstack_ai_store_common::VerifiedHeadCache`] — so all three backends
+//! share one mechanism. The cache is never allowed to change an outcome: any
+//! suffix verification failure falls back to a full verification, which owns
+//! the reason codes. This crate keeps only the call-site policy: the store
+//! drops the entry on any `Integrity` result and overwrites it after every
+//! successful *full* load (spec D9).
 //!
 //! ## Connection disposition
 //!
@@ -46,9 +51,10 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_protocol::decode;
 use finstack_ai_runtime::{LoadWindow, LoadedSession, OpaqueSnapshot, StoreError};
+pub(crate) use finstack_ai_store_common::VerifiedHead;
 use finstack_ai_store_common::{
     AppendIdentity, FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, accelerated_from,
-    check_batch_alignment, protocol_error, verify_full_head, verify_tail_records,
+    check_batch_alignment, protocol_error, verify_head_against_cache, verify_tail_records,
 };
 use tokio_postgres::{Client, IsolationLevel, Statement, Transaction};
 
@@ -130,15 +136,6 @@ pub(crate) async fn prepare(
         .prepared(sql)
         .await
         .map_err(|error| Failure::from_driver(&error))
-}
-
-/// Process-local proof that a session journal was verified through this head.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct VerifiedHead {
-    /// Sequence of the last verified record (0 for an empty journal).
-    pub(crate) sequence: u64,
-    /// Checksum of that record, `None` for an empty journal.
-    pub(crate) checksum: Option<Digest>,
 }
 
 /// A stored record plus the batch it was committed in.
@@ -318,7 +315,12 @@ async fn load_session(
     // unavoidable, but only one is ever alive at a time.
     let head_checksum = {
         let records = envelopes(&stored);
-        verify_against_cache(&records, &session, cached)?
+        verify_head_against_cache(
+            &records,
+            session.current_sequence,
+            session.head_checksum,
+            cached,
+        )?
     };
     let snapshot = load_session_snapshot(
         transaction,
@@ -335,66 +337,6 @@ async fn load_session(
         stored,
         snapshot,
     )?)
-}
-
-/// Verify only the records after a cached verified head, when there is one.
-///
-/// The cache is a pure optimization: it is used only when it demonstrably
-/// anchors on a stored record, and any failure of the cheap suffix check
-/// falls through to the full verification, so reason codes and accept/reject
-/// decisions are exactly those of an uncached load.
-fn verify_against_cache(
-    records: &[RecordEnvelope],
-    session: &SessionRow,
-    cached: Option<VerifiedHead>,
-) -> Result<Option<Digest>, StoreError> {
-    // A cached sequence *above* the observed head means the journal was
-    // pruned or reset behind this process's back (spec D9(a)): the proof no
-    // longer describes this journal, so re-verify in full.
-    if let Some(cached) = cached
-        && cached.sequence >= 1
-        && cached.sequence <= session.current_sequence
-        && let Some(prior) = cached.checksum
-        && verify_suffix(records, cached.sequence, prior, session).is_ok()
-    {
-        return Ok(session.head_checksum);
-    }
-    verify_full_head(records, session.head_checksum)
-}
-
-/// Verify the records after `verified_sequence` against the stored head.
-fn verify_suffix(
-    records: &[RecordEnvelope],
-    verified_sequence: u64,
-    verified_checksum: Digest,
-    session: &SessionRow,
-) -> Result<(), StoreError> {
-    let split = records
-        .iter()
-        .position(|record| record.sequence() > verified_sequence)
-        .unwrap_or(records.len());
-    // The prefix must still end on the exact record this process verified;
-    // otherwise the cached proof is not about these bytes.
-    let anchored = split
-        .checked_sub(1)
-        .and_then(|index| records.get(index))
-        .is_some_and(|record| {
-            record.sequence() == verified_sequence && record.checksum() == verified_checksum
-        });
-    if !anchored {
-        return Err(StoreError::Integrity {
-            reason_code: "postgres_stale_verified_head",
-        });
-    }
-    let tail = records.get(split..).unwrap_or(&[]);
-    verify_tail_records(
-        tail,
-        verified_sequence.saturating_add(1),
-        verified_checksum,
-        session.current_sequence,
-        session.head_checksum,
-        FROM_SEQUENCE_WINDOW,
-    )
 }
 
 /// Load the batch-aligned tail from `from_sequence` (spec D9,
@@ -916,116 +858,7 @@ pub(crate) fn digest_from_bytes(bytes: &[u8]) -> Result<Digest, StoreError> {
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_store_common::build_committed_batch;
-    use finstack_ai_test::store_fixtures::{draft, request};
-
     use super::*;
-
-    /// Sequences 1-2 in one batch, 3-4 in the next, correctly chained.
-    fn chained_records() -> Vec<RecordEnvelope> {
-        let first = build_committed_batch(&request(1, 1, 1, vec![draft(1, 1), draft(2, 1)]), None)
-            .expect("first batch");
-        let prior = first.records[1].checksum();
-        let second = build_committed_batch(
-            &request(2, 1, 3, vec![draft(3, 1), draft(4, 1)]),
-            Some(prior),
-        )
-        .expect("second batch");
-        first
-            .records
-            .iter()
-            .chain(second.records.iter())
-            .cloned()
-            .collect()
-    }
-
-    /// A session row over `records`, with the head they actually chain to.
-    fn session_over(records: &[RecordEnvelope]) -> SessionRow {
-        SessionRow {
-            current_sequence: records.last().map_or(0, RecordEnvelope::sequence),
-            head_checksum: records.last().map(RecordEnvelope::checksum),
-            snapshot_sequence: None,
-            metadata: Metadata::empty(),
-        }
-    }
-
-    /// The proof from an earlier load still covers a journal another writer
-    /// extended: only the new tail needs verifying, and the load succeeds.
-    #[test]
-    fn a_cached_head_verifies_only_the_appended_tail() {
-        let records = chained_records();
-        let session = session_over(&records);
-        let cached = VerifiedHead {
-            sequence: 2,
-            checksum: Some(records[1].checksum()),
-        };
-        verify_suffix(&records, 2, records[1].checksum(), &session).expect("suffix verifies");
-        assert_eq!(
-            verify_against_cache(&records, &session, Some(cached)).expect("cached load"),
-            session.head_checksum
-        );
-    }
-
-    /// A cached head that no longer anchors on a stored record (the prefix
-    /// changed underneath it) is not trusted: the load falls back to full
-    /// verification instead of accepting the stale proof.
-    #[test]
-    fn a_stale_cached_head_falls_back_to_full_verification() {
-        let records = chained_records();
-        let session = session_over(&records);
-        let stale = VerifiedHead {
-            sequence: 2,
-            checksum: Some(Digest::raw_json(b"{}")),
-        };
-        assert!(matches!(
-            verify_suffix(&records, 2, Digest::raw_json(b"{}"), &session),
-            Err(StoreError::Integrity {
-                reason_code: "postgres_stale_verified_head"
-            })
-        ));
-        // The full verification still accepts this (intact) journal.
-        assert_eq!(
-            verify_against_cache(&records, &session, Some(stale)).expect("full fallback"),
-            session.head_checksum
-        );
-    }
-
-    /// A cached sequence above the observed head means the journal was pruned
-    /// or reset behind this process's back (spec D9(a)): the proof is ignored
-    /// and the shortened journal re-verified in full.
-    #[test]
-    fn a_cached_head_above_the_observed_head_is_ignored() {
-        let records = chained_records();
-        let truncated = records.get(..2).expect("prefix").to_vec();
-        let session = session_over(&truncated);
-        let cached = VerifiedHead {
-            sequence: 4,
-            checksum: records.last().map(RecordEnvelope::checksum),
-        };
-        assert_eq!(
-            verify_against_cache(&truncated, &session, Some(cached)).expect("full re-verify"),
-            session.head_checksum
-        );
-    }
-
-    /// The cache never turns a broken chain into a successful load: the
-    /// suffix check fails and the full verification reports the mismatch.
-    #[test]
-    fn a_cached_head_cannot_mask_a_broken_head() {
-        let records = chained_records();
-        let mut session = session_over(&records);
-        session.head_checksum = Some(Digest::raw_json(b"{}"));
-        let cached = VerifiedHead {
-            sequence: 2,
-            checksum: Some(records[1].checksum()),
-        };
-        assert!(matches!(
-            verify_against_cache(&records, &session, Some(cached)),
-            Err(StoreError::Integrity {
-                reason_code: "head_checksum_mismatch"
-            })
-        ));
-    }
 
     #[test]
     fn digest_round_trips_through_its_stored_bytes() {

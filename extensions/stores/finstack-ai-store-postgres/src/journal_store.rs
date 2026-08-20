@@ -12,15 +12,16 @@
 //!
 //! `load`/`load_from` own the spec D9 cache lifecycle: read the cached proof
 //! before the load, drop it on any `Integrity` result, and replace it with
-//! the freshly verified head on success. The map is only ever touched by the
-//! synchronous helpers in [`crate::store`], so its `std::sync::Mutex` is
-//! never held across an `.await`.
+//! the freshly verified head on success. The cache container itself lives in
+//! [`finstack_ai_store_common`]; its `std::sync::Mutex` is only ever taken by
+//! synchronous calls, never across an `.await`.
 //!
 //! Loads run concurrently, so the read and the write-back are not atomic:
-//! the cache read returns the *generation* it saw, and `remember_head`
-//! discards a write whose generation is stale. Without that guard a load
-//! that started before a concurrent load found corruption could write its
-//! head afterwards and permanently resurrect the invalidated proof.
+//! the cache read returns the *generation* it saw, and
+//! [`finstack_ai_store_common::VerifiedHeadCache::remember`] discards a write
+//! whose generation is stale. Without that guard a load that started before a
+//! concurrent load found corruption could write its head afterwards and
+//! permanently resurrect the invalidated proof.
 
 use std::sync::Arc;
 
@@ -31,15 +32,14 @@ use finstack_ai_runtime::{
     SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
+use finstack_ai_store_common::{VerifiedHead, VerifiedHeadCache};
+
 use crate::append::append;
 use crate::config::PostgresDurability;
-use crate::load::{VerifiedHead, load};
+use crate::load::load;
 use crate::prune;
 use crate::snapshot;
-use crate::store::{
-    DURABLE_DETAIL, PostgresJournalStore, RELAXED_DETAIL, VerifiedCache, cached_head,
-    invalidate_head, remember_head,
-};
+use crate::store::{DURABLE_DETAIL, PostgresJournalStore, RELAXED_DETAIL};
 
 impl JournalStore for PostgresJournalStore {
     /// Multi-writer append over one pooled connection (spec D4/D5).
@@ -220,16 +220,16 @@ impl PostgresJournalStore {
     ) -> PortFuture<Result<LoadedSession, StoreError>> {
         let pool = self.pool.clone();
         let snapshot_bytes = self.config.limits.snapshot_bytes;
-        let cache: VerifiedCache = Arc::clone(&self.verified);
+        let cache: Arc<VerifiedHeadCache> = Arc::clone(&self.verified);
         Box::pin(async move {
             let mut client = pool.get().await?;
             // Read the cache as late as possible — after the (potentially
             // blocking) checkout — so the window in which another load can
             // invalidate between the read and the write-back is as small as
             // it can be. Correctness does not depend on that window being
-            // small: `remember_head` rejects a write whose generation is
-            // stale (see `crate::store`).
-            let read = cached_head(&cache, session_id);
+            // small: `VerifiedHeadCache::remember` rejects a write whose
+            // generation is stale.
+            let read = cache.read(session_id);
             let result = load(&mut client, session_id, snapshot_bytes, window, read.head).await;
             match &result {
                 // Only a full load establishes a proof over the *whole*
@@ -237,8 +237,7 @@ impl PostgresJournalStore {
                 // caller supplied, which says nothing about the prefix it
                 // omitted, so caching its head would let a later full load
                 // skip records this process never verified.
-                Ok(loaded) if matches!(window, LoadWindow::Full) => remember_head(
-                    &cache,
+                Ok(loaded) if matches!(window, LoadWindow::Full) => cache.remember(
                     session_id,
                     read,
                     VerifiedHead {
@@ -249,7 +248,7 @@ impl PostgresJournalStore {
                 Ok(_windowed) => {}
                 // Spec D9(b): any integrity failure invalidates whatever this
                 // process believed it had verified for this session.
-                Err(StoreError::Integrity { .. }) => invalidate_head(&cache, session_id),
+                Err(StoreError::Integrity { .. }) => cache.invalidate(session_id),
                 Err(_other) => {}
             }
             result
