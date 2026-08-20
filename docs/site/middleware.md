@@ -78,6 +78,7 @@ settlement that can carry them.
 | --- | --- |
 | [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | In-repo fixture. Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
 | [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
+| [`finstack-ai-middleware-instructions`](../../extensions/middleware/finstack-ai-middleware-instructions/README.md) | Tenant/policy instruction injection at `prepare_context`. See [Policy instructions](#policy-instructions-finstackmiddlewareinstructions). |
 
 ### How summarize compaction completes
 
@@ -102,6 +103,35 @@ a landed compaction result drops its derived summaries and checkpoint,
 and a chain producing both a replacement and a compaction would apply a
 projection validated against the original message array on top of the
 replacement array. Sliding-window compaction does not use those fields.
+
+## Policy instructions (`finstack.middleware.instructions`)
+
+`finstack-ai-middleware-instructions` injects tenant/policy instructions —
+a compliance footer, an as-of date, a locale tag, tenant rules — at
+`prepare_context` via `AddInstructions`. All text is frozen into
+`PolicyInstructionsConfig` at construction, so the leaf is pure and
+`RecomputeSafe`; the configuration digest changes whenever the policy text
+changes. Injected items land as protected System messages appended after the
+current user message, which the context compactor must preserve
+byte-identically. Register per tenant at agent build time:
+
+```rust
+let policy = InstructionsMiddleware::try_new(PolicyInstructionsConfig {
+    entries: vec![
+        PolicyEntry {
+            label: "compliance-footer".to_owned(),
+            text: "All outputs are for tenant-a internal use only.".to_owned(),
+        },
+        PolicyEntry {
+            label: "as-of".to_owned(),
+            text: "Treat 2026-08-20 as the current date.".to_owned(),
+        },
+    ],
+})?;
+builder.middleware(component_ref, Arc::new(policy));
+```
+
+Stable error code: `instructions_configuration_invalid`.
 
 ## Stable codes
 

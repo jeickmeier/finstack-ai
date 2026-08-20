@@ -11,7 +11,10 @@ fn entry(label: &str, text: &str) -> PolicyEntry {
 fn valid_config_passes_validation() {
     let config = PolicyInstructionsConfig {
         entries: vec![
-            entry("compliance-footer", "All outputs are for tenant-a internal use only."),
+            entry(
+                "compliance-footer",
+                "All outputs are for tenant-a internal use only.",
+            ),
             entry("as-of", "Treat 2026-08-20 as the current date."),
         ],
     };
@@ -31,7 +34,9 @@ fn empty_entries_are_rejected() {
 #[test]
 fn more_than_sixteen_entries_are_rejected() {
     let config = PolicyInstructionsConfig {
-        entries: (0..17).map(|i| entry(&format!("rule-{i}"), "text")).collect(),
+        entries: (0..17)
+            .map(|i| entry(&format!("rule-{i}"), "text"))
+            .collect(),
     };
     let error = config.validate().expect_err("too many");
     assert_eq!(
