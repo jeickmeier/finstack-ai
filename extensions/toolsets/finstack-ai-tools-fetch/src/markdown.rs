@@ -93,8 +93,15 @@ struct DepthTree {
     /// document, and it can only ever *over*-trip.
     exceeded: Cell<bool>,
     /// Set when a structural operation is impossible to honour (e.g. a
-    /// sibling insertion for a node the tree builder never parented). Only
-    /// used to avoid panicking; asserted never to fire in the tests.
+    /// sibling insertion for a node the tree builder never parented). Used
+    /// both to avoid panicking (`RcDom` panics in this situation; this
+    /// crate must not) and, since leaving the node unparented would
+    /// otherwise silently drop it and its descendants from
+    /// `max_element_depth`'s reachability walk — an under-trip — to also
+    /// trip [`Self::exceeded`] directly, so an unexpected shape fails
+    /// closed. Asserted never to fire in the tests; kept as a distinct flag
+    /// (rather than folded into `exceeded`) purely so the tests can tell
+    /// the two conditions apart.
     saw_unexpected_shape: Cell<bool>,
 }
 
@@ -285,9 +292,16 @@ impl TreeSink for DepthSink {
         };
         let parent = self.tree.nodes.borrow().get(*sibling).and_then(|n| n.parent);
         let Some(parent) = parent else {
-            // `RcDom` panics here; this crate must not. Recorded so the
-            // (deliberately conservative) behaviour is visible in tests.
+            // `RcDom` panics here; this crate must not. This is not a
+            // conservative (over-trip) fallback: leaving `node` (and every
+            // descendant later attached under it) unparented drops it from
+            // `max_element_depth`'s walk entirely, since that walk only
+            // reaches nodes reachable from the root. That is an
+            // *under*-trip, and the last shape that could defeat the guard.
+            // So this branch must fail closed: trip `exceeded` directly
+            // rather than merely recording that the shape was seen.
             self.tree.saw_unexpected_shape.set(true);
+            self.tree.exceeded.set(true);
             return;
         };
         self.tree.detach(node);
@@ -385,6 +399,34 @@ impl TreeSink for DepthSink {
             .get(*target)
             .is_some_and(|node| node.mathml_annotation_xml_integration_point)
     }
+
+    /// `RcDom` deep-clones the `<option>` subtree into a sibling
+    /// `<selectedcontent>` element whenever the tree builder decides one
+    /// applies (see `markup5ever`'s
+    /// `get_a_selects_enabled_selectedcontent`), which duplicates whatever
+    /// depth the `<option>` subtree already has. `TreeSink`'s default is a
+    /// no-op, which would make that duplicated depth invisible to this
+    /// guard -- an under-trip.
+    ///
+    /// This crate does not attempt to model the clone (reproducing
+    /// `RcDom`'s exact selectedcontent-eligibility and deep-copy logic here
+    /// would be exactly the kind of parser-shaped code this design was
+    /// built to avoid). Instead it fails closed: any call to this hook
+    /// trips the guard outright, so a document that exercises this path is
+    /// rejected rather than silently under-measured.
+    ///
+    /// As of `markup5ever_rcdom` 0.38.0 this hook is inert in practice --
+    /// an upstream bug in `get_a_selects_enabled_selectedcontent`
+    /// destructures the wrong node and always returns `None`, so html5ever
+    /// never actually calls it today (confirmed by instrumentation). That
+    /// is exactly why this override exists rather than being left as the
+    /// no-op default: a patch-level upstream fix to that bug would silently
+    /// reintroduce a real clone, and without this override that would be a
+    /// seventh under-trip discovered the same way the first six were.
+    fn maybe_clone_an_option_into_selectedcontent(&self, _option: &NodeId) {
+        self.tree.saw_unexpected_shape.set(true);
+        self.tree.exceeded.set(true);
+    }
 }
 
 /// Pre-parse guard against pathologically deep HTML (F-4).
@@ -419,9 +461,19 @@ impl TreeSink for DepthSink {
 /// tracking and the foreign-content breakout list, RCDATA/rawtext/script
 /// tokenizer-state switching, implied end tags, foster parenting and the
 /// adoption agency algorithm are executed by html5ever itself, exactly as
-/// they are for `RcDom`. There is no separate model of HTML left in this
-/// file to diverge from html5ever, and therefore no residual divergence
-/// class of the kind that produced bypasses 1–6.
+/// they are for `RcDom`. There is no separate model of *HTML's parsing
+/// rules* left in this file to diverge from html5ever the way the
+/// tokenizer-only and byte-scanner approximations did.
+///
+/// That is narrower than saying there is no divergence risk at all.
+/// [`DepthSink`] is still a hand-written implementation of the `TreeSink`
+/// *contract* html5ever drives, alongside `RcDom`'s -- and every hook of
+/// that contract this sink gets wrong is exactly the same class of bug that
+/// produced bypasses 1–6, just moved one layer up (from "does this
+/// approximate HTML" to "does this correctly mirror what `RcDom` does with
+/// each tree-mutation callback"). The `maybe_clone_an_option_into_selectedcontent`
+/// gap fixed below was precisely that: not a parsing-rule divergence, but a
+/// `TreeSink`-contract one. See "Residuals" for the ones known today.
 ///
 /// # Why parsing here is safe when `htmd`'s parse is not
 ///
@@ -455,10 +507,10 @@ impl TreeSink for DepthSink {
 ///
 /// # Residuals
 ///
-/// Three. None can cause an under-trip; the first and third can only make
+/// Four. None can cause an under-trip; the first and second can only make
 /// this guard reject a document `htmd` would have survived, producing a
-/// plain-text fallback rather than an error, and the second affects only
-/// the (advisory) early-exit estimate:
+/// plain-text fallback rather than an error, and the third affects only the
+/// (advisory) early-exit estimate:
 ///   - `<template>` contents are attached as an ordinary child here, while
 ///     `RcDom` keeps them off the child list (so neither its depth walk nor
 ///     `htmd`'s markdown walk descends into them).
@@ -468,9 +520,21 @@ impl TreeSink for DepthSink {
 ///     estimate: the authoritative number is the exact recomputation above,
 ///     which reads the final parent/child links and is unaffected.
 ///   - `TreeSink::append_before_sibling` for a parentless sibling — which
-///     `RcDom` treats as a panic-worthy invariant violation and this sink
-///     ignores — would drop a subtree from the measurement; it is recorded
-///     in `saw_unexpected_shape` and asserted never to fire in the tests.
+///     `RcDom` treats as a panic-worthy invariant violation this sink must
+///     not replicate — trips the guard outright instead of attempting the
+///     insertion. This *used* to be a fifth, under-trip-shaped residual
+///     (the sink recorded `saw_unexpected_shape` and silently dropped the
+///     subtree from the measurement); it is now fail-closed, so it is only
+///     ever an over-trip risk, asserted never to fire in the tests.
+///   - `TreeSink::maybe_clone_an_option_into_selectedcontent` — the hook
+///     `RcDom` uses to deep-clone an `<option>` subtree into a sibling
+///     `<selectedcontent>` element — is not modelled here; any call to it
+///     trips the guard outright rather than risking an unmeasured clone.
+///     As of `markup5ever_rcdom` 0.38.0 an upstream bug means html5ever
+///     never actually calls this hook, so it does not fire in practice
+///     today, but a future upstream patch could change that, which is why
+///     it is handled explicitly rather than left on the (silently
+///     no-op) `TreeSink` default.
 ///
 /// The differential test
 /// (`differential_guard_never_under_trips_against_the_real_parser`) and the
@@ -786,10 +850,15 @@ mod tests {
         // set to a namespace-less tokenizer name, so it never pushed and
         // the document sailed through into a real SIGABRT.
         let html = format!("<svg>{}", "<input>".repeat(100_000));
+        // Asserting the guard directly (not just that conversion produced
+        // `None`), since `None` is also produced by an output-cap miss or a
+        // genuine `htmd` conversion failure -- neither of which is what
+        // this regression is about.
         assert!(
-            html_to_markdown(&html, BIG_CAP).is_none(),
+            super::exceeds_safe_nesting_depth(&html),
             "expected the depth guard to trip on foreign-content open padding"
         );
+        assert!(html_to_markdown(&html, BIG_CAP).is_none());
     }
 
     #[test]
@@ -799,10 +868,13 @@ mod tests {
         // normally drives that switch), so it read the `<!--` as
         // comment-start and swallowed the entire rest of the document.
         let html = format!("<title><!--</title>{}", "<div>".repeat(100_000));
+        // As above: assert the guard itself, not just the `None` outcome it
+        // shares with the output-cap and conversion-failure paths.
         assert!(
-            html_to_markdown(&html, BIG_CAP).is_none(),
+            super::exceeds_safe_nesting_depth(&html),
             "expected the depth guard to trip on a rawtext + unterminated-comment prefix"
         );
+        assert!(html_to_markdown(&html, BIG_CAP).is_none());
     }
 
     #[test]
@@ -868,6 +940,47 @@ mod tests {
             "one past the cap must trip"
         );
         assert!(html_to_markdown(&one_past, BIG_CAP).is_none());
+    }
+
+    #[test]
+    fn parentless_sibling_shape_trips_the_guard() {
+        // Fix for the parentless-sibling branch of `append_before_sibling`:
+        // it used to only record `saw_unexpected_shape` and return, which
+        // left the passed-in node (and anything later attached under it)
+        // unreachable from the root -- an under-trip. This drives the
+        // sink's `TreeSink::append_before_sibling` directly (rather than
+        // hunting for real HTML that makes html5ever's tree builder call it
+        // in this shape, which the differential/generative tests below
+        // confirm never happens in practice) and asserts both flags trip.
+        use html5ever::interface::tree_builder::{NodeOrText, TreeSink};
+        use html5ever::{LocalName, Namespace, QualName};
+
+        let tree = std::rc::Rc::new(super::DepthTree::new());
+        let sink = super::DepthSink {
+            tree: std::rc::Rc::clone(&tree),
+        };
+        let div_name = || {
+            QualName::new(
+                None,
+                Namespace::from("http://www.w3.org/1999/xhtml"),
+                LocalName::from("div"),
+            )
+        };
+        // A node that exists in the arena but was never attached to any
+        // parent -- the shape `append_before_sibling` cannot honour.
+        let orphan_sibling = tree.push_node(Some(div_name()), false);
+        let new_node = tree.push_node(Some(div_name()), false);
+
+        assert!(!tree.exceeded.get(), "sanity: nothing has tripped yet");
+        sink.append_before_sibling(&orphan_sibling, NodeOrText::AppendNode(new_node));
+        assert!(
+            tree.saw_unexpected_shape.get(),
+            "the parentless-sibling shape must still be recorded"
+        );
+        assert!(
+            tree.exceeded.get(),
+            "the parentless-sibling shape must fail closed and trip the guard"
+        );
     }
 
     // --- Differential test against the real parser -------------------------
@@ -1079,7 +1192,7 @@ mod tests {
     /// unbalanced rawtext and foreign openers so the generator can also
     /// build shapes nobody has hand-written yet.
     fn push_random_token(doc: &mut String, rng: &mut Lcg) {
-        match rng.below(24) {
+        match rng.below(29) {
             // Plain non-void open (~42%): the main depth-building token.
             0..=9 => {
                 let name = rng.choose(FUZZ_NON_VOID_NAMES);
@@ -1192,12 +1305,56 @@ mod tests {
             // Foreign content using breakout names and a self-closing
             // slash, both of which *do* terminate the element there -- the
             // negative control for the two cases above.
-            _ => {
+            23 => {
                 doc.push_str("<svg><path/>");
                 doc.push('<');
                 doc.push_str(rng.choose(FUZZ_FOREIGN_BREAKOUT));
                 doc.push_str("></svg>");
             },
+            // Table insertion mode: a `<div>` appearing directly inside
+            // `<table>` (before any row/cell) is *foster parented* --
+            // relocated to just before the table in the table's own
+            // parent's child list -- rather than appended where a naive
+            // sink would put it. `append`/`append_before_sibling` here
+            // just mirror whatever html5ever tells them, so this exercises
+            // the path where html5ever's target parent/sibling diverges
+            // from "wherever we were about to attach". Closing the table
+            // immediately afterward returns insertion mode to normal, so
+            // (unlike a bare unclosed `<table>`) this does not flatten
+            // every token generated for the rest of the document.
+            24 => doc.push_str("<table><div></table>"),
+            // `<template>` open, with content, closed: exercises
+            // `get_template_contents` (the contents node this sink attaches
+            // as an ordinary child in `create_element`, unlike `RcDom`,
+            // which keeps it off the child list -- the first documented
+            // residual). Left *unclosed* this token would be far more
+            // disruptive than that residual describes: while a template
+            // stays open, `RcDom` routes everything generated afterward
+            // into its content document fragment rather than the normal
+            // tree, which makes it invisible to `real_dom_max_depth`'s
+            // ordinary child walk -- silently deleting the rest of the
+            // corpus item's depth from the reference oracle. Closing it
+            // keeps the token's effect local to itself.
+            25 => doc.push_str("<template><div></template>"),
+            // Adoption-agency shape: a formatting element (`<b>`) left
+            // open around a block element (`<p>`), closed out of the
+            // naive nesting order, is the textbook trigger for the
+            // adoption agency algorithm, which calls `reparent_children`
+            // -- the second documented residual (a stale early-exit
+            // estimate, corrected by the exact recomputation at parse
+            // end). `<p>` stays open afterward, so later tokens keep
+            // nesting normally rather than the corpus flattening.
+            26 => doc.push_str("<b><p></b>"),
+            // MathML annotation-xml integration point: an `<annotation-xml>`
+            // with a `text/html`/`application/xhtml+xml` `encoding`
+            // attribute is where `is_mathml_annotation_xml_integration_point`
+            // must answer `true` so ordinary HTML content re-enters the
+            // tree instead of staying in the MathML namespace.
+            27 => doc.push_str("<math><annotation-xml encoding=\"text/html\">"),
+            // SVG foreignObject integration point: also re-admits ordinary
+            // HTML content inside foreign content, exercised via the same
+            // hook from the SVG side.
+            _ => doc.push_str("<svg><foreignObject>"),
         }
     }
 
@@ -1232,15 +1389,16 @@ mod tests {
             bits.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]),
             "below(2) never produced a run of three -- still periodic"
         );
-        // And the wider bound must actually cover its whole range.
+        // And the wider bound must actually cover its whole range (29 is
+        // `push_random_token`'s current alphabet size).
         let mut rng = Lcg(0x5EED_00F4_0000_0002);
-        let mut seen = [false; 24];
+        let mut seen = [false; 29];
         for _ in 0..2_000 {
-            seen[rng.below(24)] = true;
+            seen[rng.below(29)] = true;
         }
         assert!(
             seen.iter().all(|hit| *hit),
-            "below(24) left holes in its range"
+            "below(29) left holes in its range"
         );
     }
 

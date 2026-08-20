@@ -668,6 +668,99 @@ FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
   `cargo test -p finstack-ai-tools-fetch` (70 tests),
   `cargo clippy -p finstack-ai-tools-fetch --all-targets` and
   `cargo deny check licenses` all clean.
+
+  UPDATE 6 (2026-08-20, sixth review pass — no approach change, follow-ups
+  from a final review that found no new bypass): the review that closed out
+  UPDATE 5 hardened the two bypass-6 regressions
+  (foreign_content_open_padding_does_not_bypass_the_depth_guard,
+  rawtext_unterminated_comment_prefix_does_not_bypass_the_depth_guard) into
+  a full 6,025-document generated corpus plus 25 hand-targeted documents
+  and found the guard clean throughout — no seventh under-trip. That
+  review's verdict was explicitly not "provably exhaustive," and it routed
+  six follow-ups, all applied in this pass:
+  (1) `saw_unexpected_shape`'s parentless-sibling branch in
+  `append_before_sibling` was FAIL-OPEN, not "deliberately conservative" as
+  the old doc comment claimed: returning without attaching drops the
+  passed-in node, and everything later attached under it, from
+  `max_element_depth`'s root-reachability walk — an under-trip, and the
+  last remaining path that could have defeated the guard, though it never
+  fired across the corpus (0 of 6,025). Fixed: that branch now also sets
+  `exceeded`, so an unexpected shape trips the guard instead of silently
+  discarding a subtree. Doc comment on the field corrected to say so.
+  Regression test `parentless_sibling_shape_trips_the_guard` drives
+  `DepthSink`/`DepthTree` directly (constructing an orphaned sibling node
+  and calling `TreeSink::append_before_sibling` on it) since no real HTML
+  input is known to make html5ever's tree builder call this hook in this
+  shape — consistent with it having never fired in either corpus.
+  (2) `impl TreeSink for DepthSink` was missing
+  `maybe_clone_an_option_into_selectedcontent`, the hook `RcDom` uses to
+  deep-clone an `<option>` subtree into a sibling `<selectedcontent>`
+  element; the `TreeSink` default is a silent no-op, which would make that
+  duplicated depth invisible to this guard. It is inert today only because
+  of an upstream bug in `markup5ever_rcdom` 0.38.0
+  (`get_a_selects_enabled_selectedcontent` destructures the wrong node and
+  always returns `None`) — confirmed by instrumentation that html5ever DOES
+  still call the hook regardless of that bug, so a future patch-level fix
+  to the upstream bug would silently reintroduce a real, unmeasured clone.
+  Fixed: the hook is now implemented to fail closed (trips `exceeded`
+  outright on any call) rather than modeling the clone, with the reasoning
+  above recorded in the doc comment.
+  (3) Nothing detected an html5ever/markup5ever version split. The guard's
+  exactness depends on this crate and `htmd` resolving the SAME html5ever
+  build; `deny.toml` only had `multiple-versions = "warn"`, which does not
+  gate, and the differential/generative tests exercise the workspace's own
+  `markup5ever_rcdom`, not htmd's copy, so a resolver split would go
+  completely undetected by CI. Fixed: `deny.toml`'s `[bans]` now carries
+  `{ name = "html5ever", deny-multiple-versions = true }` and the same for
+  `markup5ever`, so `cargo deny check` hard-fails on a version split
+  instead of warning. Verified `cargo deny check` still passes clean today
+  (`Cargo.lock` resolves exactly one `html5ever 0.38.0` / `markup5ever
+  0.38.0`).
+  (4) The two bypass-6 headline tests
+  (foreign_content_open_padding_does_not_bypass_the_depth_guard,
+  rawtext_unterminated_comment_prefix_does_not_bypass_the_depth_guard)
+  asserted only `html_to_markdown(...).is_none()`, which an output-cap miss
+  or a genuine conversion failure would also satisfy vacuously. Fixed: both
+  now assert `exceeds_safe_nesting_depth(...)` directly, matching the
+  pattern the variant tests already used, with the `is_none()` check kept
+  as a secondary assertion.
+  (5) The doc comment overclaimed "no residual divergence class of the
+  kind that produced bypasses 1-6" — the sink is still a hand-written
+  `TreeSink`-contract implementation alongside `RcDom`'s, and the
+  `selectedcontent` gap in (2) was exactly that class of bug, one layer up
+  from HTML-parsing-rule approximation. Reworded to state that narrower,
+  accurate claim. The "Residuals" list was three items describing only
+  over-trip/estimate-staleness risk; reconciled to four, folding in the
+  now-fail-closed parentless-sibling path (no longer under-trip-shaped) and
+  the new `maybe_clone_an_option_into_selectedcontent` override.
+  (6) The generative fuzzer's token alphabet had no `<table>` (foster
+  parenting), `<template>` (`get_template_contents`), adoption-agency shape
+  (`<b><p>`), or MathML/SVG integration-point shapes
+  (`annotation-xml`/`foreignObject`) — the exact new attack surface this
+  design (a real `TreeSink` implementation) introduced over the
+  tokenizer-only approach, previously unexercised. Added all five to
+  `push_random_token`. The `<table>` and `<template>` shapes needed care to
+  keep self-contained (`<table><div></table>`,
+  `<template><div></template>`) rather than left open: an unclosed
+  `<table>` puts the tree builder in "in table" insertion mode for the rest
+  of the document, and an unclosed `<template>` routes everything generated
+  afterward into a content fragment `RcDom`'s ordinary child walk does not
+  reach — both would have made most of a large generated document
+  invisible to `real_dom_max_depth`, the reference oracle, causing the
+  boundary-probing assertions to fail not because the guard was wrong but
+  because the corpus stopped generating measurable depth. Verified this
+  concretely: an unclosed `<table>` token at 3.4% probability flattened
+  every 8,980-token document in the corpus to real depth under 100 (down
+  from the prior 837-992 range); closing both shapes restored a spread of
+  real depths from the low teens up through ~990, straddling the 512 cap
+  as the boundary assertions require. `lcg_high_bits_are_not_visibly_periodic`
+  updated for the alphabet's new size (24 -> 29). All boundary/distribution
+  assertions (`above_cap > 0`, `below_cap > 0`, `near_boundary > 0`) still
+  pass.
+  Tests: `cargo test -p finstack-ai-tools-fetch` (71 tests — the new
+  `parentless_sibling_shape_trips_the_guard` unit test, all else unchanged
+  in count), `cargo clippy -p finstack-ai-tools-fetch --all-targets`, and
+  `cargo deny check` all clean.
   Original finding text retained below for the record.
 
   --- original finding ---
