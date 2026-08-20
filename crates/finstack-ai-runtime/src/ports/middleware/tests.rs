@@ -374,6 +374,7 @@ fn before_finalize_accepts_interaction_but_rejects_replacement() {
     };
     let input = StageInput::BeforeFinalize {
         candidate: RawJson::parse(b"{\"answer\":42}").expect("candidate"),
+        result_message: None,
     };
     assert_eq!(
         validate_stage_outcome(

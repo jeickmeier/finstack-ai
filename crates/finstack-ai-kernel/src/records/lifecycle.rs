@@ -119,6 +119,8 @@ pub enum RetryClassification {
     Validation,
     /// Framework failure retry.
     Framework,
+    /// Before-finalize verification retry.
+    Verification,
 }
 
 /// Normalized retry decision accepted at `before_finalize`.

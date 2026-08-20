@@ -106,6 +106,25 @@ unpublished.
   (`load_from_splits_batch` / `snapshot_splits_batch`) instead of returning a
   reconstructed batch that splits a committed one; unify the memory store's
   hole-at-start code to the `gap` reason codes.
+- Kernel gains `RetryClassification::Verification` and admits a `Retry` of
+  that classification at `before_finalize` over a `Completed` candidate (not
+  only a `Failed` one), synthesizing a retryable `candidate_rejected`
+  (`Validation`) prior error since a bounced-but-otherwise-successful
+  candidate has no middleware error to reuse. Runtime's
+  `StageInput::BeforeFinalize` gains `result_message: Option<RawJson>`, the
+  canonical `Message` JSON for a `Completed` candidate (`None` for `Failed`).
+  `Agent::run`'s drive loop continues to the next cycle, instead of erroring,
+  when its `FinalizeAccepted` is superseded by a middleware retry.
+  **Breaking:** `finstack-ai-middleware-verify` is promoted from an in-repo,
+  unpublishable fixture to a released battery. `VerifyDecision` and
+  `RequestInteraction` are removed from its API; the crate now exposes
+  `EvidenceKind`, `EvidenceFinding`, `Verdict` (`Accept` / `Bounce` /
+  `Reject`), the pluggable `EvidenceVerifier` trait, `VerifyPolicy`, and
+  `VerifyMiddleware`. It runs at both `before_model` and `before_finalize`,
+  feeding the verifier byte-identical JCS-canonical `Message` JSON at both
+  call sites; a `Bounce` retries with `RetryClassification::Verification`
+  and a `Reject` fails the run with the stable, non-retryable
+  `verify_rejected` code.
 
 ### Changed
 
@@ -162,7 +181,6 @@ unpublished.
 - `Agent.gateway` is a thin dispatcher onto the three dedicated providers.
   `openai_chat` is a configuration error.
 - Subagent tool `subagent_await` is renamed `subagent_status`.
-- `finstack-ai-middleware-verify` is an in-repo fixture (`publish = false`).
 - Maintainer helpers live under `scripts/` (formerly `tools/`) so the
   directory is not confused with product toolsets.
 

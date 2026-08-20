@@ -264,6 +264,10 @@ pub enum StageInput {
     BeforeFinalize {
         /// Candidate terminal value before any terminal record exists.
         candidate: RawJson,
+        /// JCS-canonical `Message` the Completed candidate's `message_id`
+        /// resolves to, or `None` for a Failed candidate.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result_message: Option<RawJson>,
     },
 }
 

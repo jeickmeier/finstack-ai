@@ -286,18 +286,7 @@ impl Agent {
                     StageIds::retry(),
                 )
                 .await?;
-                let retry = wait_for_phase(
-                    handle,
-                    Arc::clone(&store),
-                    session_id,
-                    &[
-                        RunPhase::PreparingContext,
-                        RunPhase::Failed,
-                        RunPhase::Cancelled,
-                    ],
-                )
-                .await?;
-                ensure_nonterminal_failure(&retry)?;
+                await_retry_cycle(handle, Arc::clone(&store), session_id).await?;
                 continue;
             }
 
@@ -310,6 +299,31 @@ impl Agent {
             )
             .await?;
             let terminal = recover_state(Arc::clone(&store), session_id).await?;
+            if terminal.terminal.is_none() {
+                if matches!(
+                    terminal.phase,
+                    Some(RunPhase::Sleeping | RunPhase::PreparingContext)
+                ) {
+                    // A `before_finalize` middleware superseded the submitted
+                    // `FinalizeAccepted` with a `Retry`: the kernel committed
+                    // `RetryScheduled` plus a timer effect, and the post-commit
+                    // action fires the timer. Wait for the timer to land the
+                    // run back in `PreparingContext` and continue the drive loop.
+                    //
+                    // The phase set is a proxy for "a retry landed", exhaustive
+                    // today because the fold admits only `Fail`/`Retry`
+                    // terminals at `before_finalize` and a landed retry moves
+                    // through exactly `Sleeping` then `PreparingContext`. A new
+                    // phase on that path must be added here too; the error
+                    // below names the phase so a mismatch is diagnosable.
+                    await_retry_cycle(handle, Arc::clone(&store), session_id).await?;
+                    continue;
+                }
+                return Err(AgentRunError::runtime_message(format!(
+                    "finalize settled without a terminal state (phase: {:?})",
+                    terminal.phase
+                )));
+            }
             let completed = match terminal
                 .terminal
                 .as_ref()
@@ -404,4 +418,28 @@ impl Agent {
         host.seed_active(run_id, complete.into());
         Ok(())
     }
+}
+
+/// Wait out a `before_finalize` retry: the run must land back in
+/// `PreparingContext` (or terminally fail/cancel) before the drive loop
+/// takes another cycle. Shared by the structured-output validation retry
+/// and the middleware-superseded finalize paths so their wait semantics
+/// cannot drift.
+async fn await_retry_cycle(
+    handle: &RunHandle,
+    store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    session_id: finstack_ai_kernel::SessionId,
+) -> Result<(), AgentRunError> {
+    let retry = wait_for_phase(
+        handle,
+        store,
+        session_id,
+        &[
+            RunPhase::PreparingContext,
+            RunPhase::Failed,
+            RunPhase::Cancelled,
+        ],
+    )
+    .await?;
+    ensure_nonterminal_failure(&retry)
 }

@@ -405,6 +405,40 @@ fn accepted_coordinator(limits: RunLimits) -> CommitCoordinator {
     coordinator
 }
 
+/// A dispatcher that swallows every post-commit action without executing it.
+///
+/// A drive that commits past a pending model or timer effect needs a
+/// dispatcher installed at all: without one the coordinator permanently
+/// faults (`effect_driver_unavailable`) on the *next* submit once such an
+/// effect is requested, exactly as
+/// `coordinator::tests::commit_order::unsupported_driver_faults_only_after_committed_request`
+/// pins. This mirrors that suite's own `RecordingDispatcher`, minus the
+/// recording: the settlement under test supplies `ModelSettled` and
+/// `TimerFired` directly, out of band, so nothing needs to actually run.
+struct NoopDispatcher;
+
+impl crate::coordinator::PostCommitDispatcher for NoopDispatcher {
+    fn dispatch(
+        &self,
+        _dispatch: crate::coordinator::RuntimeDispatch,
+    ) -> PortFuture<Result<(), crate::coordinator::DispatchError>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+/// An accepted coordinator with a no-op dispatcher installed, for drives that
+/// commit a model or timer effect and then settle it directly.
+fn accepted_coordinator_with_dispatcher(limits: RunLimits) -> CommitCoordinator {
+    let mut coordinator = CommitCoordinator::new(Arc::new(MemoryStore::new()));
+    coordinator.install_dispatcher(Arc::new(NoopDispatcher));
+    block_on(coordinator.submit(
+        env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+        accept_input(limits),
+    ))
+    .expect("accept");
+    coordinator
+}
+
 /// Drive `coordinator` through `BeforeRun` so the next cursor is
 /// `PrepareContext`.
 fn drive_to_prepare_context(coordinator: &mut CommitCoordinator) {

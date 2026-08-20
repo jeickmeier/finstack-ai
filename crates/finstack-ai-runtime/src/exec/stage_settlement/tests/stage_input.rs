@@ -117,12 +117,20 @@ fn before_finalize_stage_input_is_the_live_terminal_candidate() {
         None,
     )
     .expect("before finalize input");
-    let StageInput::BeforeFinalize { candidate: value } = input else {
+    let StageInput::BeforeFinalize {
+        candidate: value,
+        result_message,
+    } = input
+    else {
         panic!("wrong variant");
     };
     let decoded: finstack_ai_kernel::TerminalCandidate =
         serde_json::from_slice(value.as_bytes()).expect("candidate");
     assert_eq!(decoded, candidate);
+    assert!(
+        result_message.is_none(),
+        "no matching message in state.messages means no result message"
+    );
 
     let error = stage_input(
         &finstack_ai_kernel::KernelState::default(),
@@ -134,6 +142,76 @@ fn before_finalize_stage_input_is_the_live_terminal_candidate() {
     .expect_err("no candidate to observe");
     assert!(matches!(&error, RunHandleError::Middleware { code }
         if code.as_ref() == "middleware_stage_input_invalid"));
+}
+
+#[test]
+fn before_finalize_stage_input_carries_the_completed_result_message() {
+    let message = assistant_message(23, "final answer");
+    let candidate = finstack_ai_kernel::TerminalCandidate::Completed {
+        cycle: 0,
+        turn_id: id(20),
+        model_request_id: id(21),
+        effect_id: id(22),
+        message_id: *message.id(),
+        result_digest: Digest::raw_json(b"{}"),
+    };
+    let state = finstack_ai_kernel::KernelState {
+        terminal_candidate: Some(candidate),
+        messages: Arc::new(vec![message.clone()]),
+        ..finstack_ai_kernel::KernelState::default()
+    };
+
+    let input = stage_input(
+        &state,
+        Stage::BeforeFinalize,
+        &ReducerStageOutcome::FinalizeAccepted,
+        &test_profile(),
+        None,
+    )
+    .expect("before finalize input");
+    let StageInput::BeforeFinalize { result_message, .. } = input else {
+        panic!("wrong variant");
+    };
+    assert_eq!(
+        result_message,
+        Some(canonical_message(&message).expect("canonical")),
+        "the Completed candidate's message must round-trip as the result message"
+    );
+}
+
+#[test]
+fn before_finalize_stage_input_has_no_result_message_for_a_failed_candidate() {
+    let error = finstack_ai_kernel::ErrorDescriptor::new(
+        "model_failed",
+        "model call failed",
+        finstack_ai_kernel::ErrorCategory::Validation,
+        false,
+    )
+    .expect("descriptor");
+    let candidate = finstack_ai_kernel::TerminalCandidate::Failed {
+        cycle: 0,
+        turn_id: None,
+        model_request_id: None,
+        effect_id: None,
+        error,
+    };
+    let state = finstack_ai_kernel::KernelState {
+        terminal_candidate: Some(candidate),
+        ..finstack_ai_kernel::KernelState::default()
+    };
+
+    let input = stage_input(
+        &state,
+        Stage::BeforeFinalize,
+        &ReducerStageOutcome::FinalizeAccepted,
+        &test_profile(),
+        None,
+    )
+    .expect("before finalize input");
+    let StageInput::BeforeFinalize { result_message, .. } = input else {
+        panic!("wrong variant");
+    };
+    assert!(result_message.is_none(), "Failed candidates have no result message");
 }
 
 #[test]

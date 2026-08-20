@@ -1257,6 +1257,8 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
+ "serde",
+ "serde_json_canonicalizer",
  "thiserror",
  "tokio",
 ]

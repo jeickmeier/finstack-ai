@@ -273,6 +273,7 @@ async fn wrong_stage_input_is_rejected() {
             ctx(),
             StageInput::BeforeFinalize {
                 candidate: RawJson::parse(br#""candidate""#).expect("candidate"),
+                result_message: None,
             },
         )
         .await

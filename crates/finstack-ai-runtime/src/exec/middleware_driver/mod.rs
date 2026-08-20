@@ -91,9 +91,10 @@
 //!   would need a second kernel input the fold has no way to emit.
 //! - `RequestInteraction` — an interaction does not consume a stage cursor, so
 //!   there is no single settlement that both opens the interaction and settles
-//!   the stage. This is reachable today: `finstack-ai-middleware-verify`
-//!   configured with `VerifyDecision::RequestInteraction` fails its run rather
-//!   than prompting.
+//!   the stage. No in-tree component returns it any more:
+//!   `finstack-ai-middleware-verify` dropped its interaction mode when it was
+//!   promoted to a battery, so only an out-of-tree component can reach this
+//!   refusal.
 //! - `RequestCompactionModel` — see below.
 //!
 //! ## Compaction landing

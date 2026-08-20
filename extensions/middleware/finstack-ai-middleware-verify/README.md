@@ -1,20 +1,109 @@
 # finstack-ai-middleware-verify
 
-In-repo fixture `before_finalize` middleware. It can accept a candidate
-(`Continue`), `Fail`, or `RequestInteraction`. It never writes a store
-and cannot `Replace`, `AddInstructions`, `AddContext`, or
-`CompactContext`.
+Evidence-verifier battery for `before_finalize`. It wraps one pure,
+deterministic `EvidenceVerifier` and runs it at two stages:
 
-> **`RequestInteraction` does not work.** That mode currently fails the
-> run with `middleware_stage_unlandable` instead of prompting: an
-> interaction does not consume a stage cursor, so the aggregate fold has
-> no settlement that can carry it. `Continue` and `Fail` work. See
-> [Shipping leaves](../../../docs/site/middleware.md#shipping-leaves).
+- `before_finalize` judges the terminal candidate's canonical assistant
+  `Message`. `Verdict::Accept` continues; `Verdict::Bounce` requests a
+  semantic `RetryClassification::Verification` retry (`StageOutcome::Retry`);
+  `Verdict::Reject` fails the run with the stable, non-retryable
+  `verify_rejected` code.
+- `before_model` re-derives the same verdict, statelessly, from the trailing
+  draft message of a bounced cycle, and renders any `Bounce`/`Reject`
+  findings as one bounded, truncated `AddContext` feedback item so the model
+  sees what was wrong on its next attempt.
 
-This crate is a T1 native adapter. It is not isolated.
+The middleware never writes a store and cannot `Replace`,
+`AddInstructions`, or `CompactContext`.
+
+## What it verifies
+
+A verifier is anything implementing `EvidenceVerifier`:
 
 ```rust
-use finstack_ai_middleware_verify::VerifyMiddleware;
-
-let middleware = VerifyMiddleware::try_accept().expect("verify");
+pub trait EvidenceVerifier: Send + Sync + fmt::Debug {
+    fn verifier_id(&self) -> &str;
+    fn verify(&self, message: &finstack_ai_kernel::RawJson) -> Verdict;
+}
 ```
+
+`verify` receives the assistant candidate as JCS-canonical `Message` JSON —
+**byte-identical at both call sites**: the runtime's own `before_finalize`
+`result_message` encoding and the crate's stateless `before_model`
+re-derivation use the same canonicalizer
+(`finstack-ai-runtime::stage_settlement::codec::canonical_message`, mirrored
+here via `serde_json_canonicalizer`). A verifier does not need to know which
+stage it was called from.
+
+`Verdict` carries `Vec<EvidenceFinding>` on its non-`Accept` arms.
+`EvidenceFinding::try_new(kind, note)` pairs an `EvidenceKind`
+(`Citation` | `Test` | `Artifact`) with a bounded, non-secret note; oversized
+notes are truncated rather than rejected.
+
+## The bounce loop
+
+1. The candidate lands at `before_finalize`. The verifier returns
+   `Verdict::Bounce(findings)`.
+2. `VerifyMiddleware` turns that into `StageOutcome::Retry` carrying a
+   `RetryDirective { classification: Verification, backoff, policy_version }`
+   from the configured `VerifyPolicy`.
+3. The kernel commits `RetryScheduled` — for a `Completed` candidate this is
+   the one case where a *terminal, non-failed* candidate is still admitted
+   into a retry; the kernel synthesizes a `candidate_rejected`
+   (retryable, `Validation`) prior error since there is no middleware error
+   to reuse.
+4. A timer gates the next cycle. `Agent::run`'s drive loop continues past a
+   `FinalizeAccepted` that gets superseded by this retry instead of erroring.
+5. On the new cycle, at `before_model`, the same verifier re-judges the
+   trailing draft message (byte-identical canonical JSON) and, if still not
+   `Accept`, contributes one `AddContext` item summarizing the findings so
+   the model has feedback for its next attempt. Nothing about the bounce is
+   journaled beyond the `RetryScheduled` record — recovery just re-runs the
+   pure verifier.
+
+## The determinism obligation
+
+`EvidenceVerifier::verify` must be a pure function of its input message: the
+same canonical JSON must always produce the same `Verdict`. Stage
+invocations are never individually journaled, so after a crash the entire
+chain re-runs from its first component, including components that already
+ran. A verifier with hidden state, wall-clock reads, or network calls will
+diverge between the original run and its replay. Verifiers needing
+committed, effect-bearing checks (running a test suite, fetching a source)
+do not belong here — see the runtime-owned-phase pattern in
+[ADR-042](../../../docs/implementation/adrs/ADR-042-model-assisted-compaction-runtime-phase.md)
+for the model this crate deliberately does not follow.
+
+## `RequestInteraction` is gone
+
+The former `VerifyDecision::RequestInteraction` mode has been removed
+outright rather than kept as a documented dead end. Pausing a run for human
+approval has no single-settlement shape at any stage — see
+[Shipping leaves](../../../docs/site/middleware.md#shipping-leaves) and the
+stage/outcome matrix on that page for why the fold has nowhere for it to
+land. Approval-gated finalize, if ever wanted, needs a kernel input of its
+own, not a middleware outcome.
+
+## Usage
+
+```rust
+use std::sync::Arc;
+use finstack_ai_middleware_verify::{EvidenceVerifier, Verdict, VerifyMiddleware, VerifyPolicy};
+
+#[derive(Debug)]
+struct CitationsPresent;
+impl EvidenceVerifier for CitationsPresent {
+    fn verifier_id(&self) -> &str { "citations-present-v1" }
+    fn verify(&self, message: &finstack_ai_kernel::RawJson) -> Verdict {
+        // pure content check over the canonical assistant message …
+        Verdict::Accept
+    }
+}
+
+let middleware = VerifyMiddleware::try_new(
+    Arc::new(CitationsPresent),
+    VerifyPolicy::try_new(finstack_ai_kernel::Duration::from_millis(250), "verify-policy-v1")?,
+)?;
+```
+
+This crate is a T1 native adapter. It is not isolated.

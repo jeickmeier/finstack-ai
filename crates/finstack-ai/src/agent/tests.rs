@@ -1,15 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
     ActiveCapability, ActiveToolCallStatus, AgentId, ArtifactId, ArtifactRef,
     AuthorizationEvidence, BlobRef, BundleId, CapabilityActivationSource, CapabilityId,
-    ChildPlacement, ChildRunLocator, ComponentId, ComponentRef, ContentBlock, Digest, EffectId,
-    EffectTag, ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome,
-    MediaRef, OperationLocator, ProviderIds, RawJson, RunEventClass, RunPhase, RunSecurityContext,
-    RunTag, TerminalState, TextBlock, ToolExecutionMode, ToolId, Usage, Version,
+    ChildPlacement, ChildRunLocator, ComponentId, ComponentInvocation, ComponentRef, ContentBlock,
+    Digest, EffectId, EffectTag, ExternalEffectCompletion, ExternalEffectCompletionCommand,
+    ExternalEffectOutcome, InvocationRecovery, MediaRef, OperationLocator, ProviderIds, RawJson,
+    RecordBody, RetryClassification, RetryDirective, RunEventClass, RunPhase, RunSecurityContext,
+    RunTag, Stage, TerminalState, TextBlock, ToolExecutionMode, ToolId, Usage, Version,
 };
 use finstack_ai_kernel::{
     BudgetRequest, ExternalHandleRef, Metadata, ReconciliationPolicy, RetrySafety,
@@ -17,11 +18,12 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::{
     AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata, ApprovalRequirement,
     ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalRouteOutcome,
-    JournalStore, LoadRequest, Model, ModelContextProfile, ModelDeferral, ModelName, ModelResponse,
-    ModelStreamItem, ModelToolCall, NoopObserver, Observer, ObserverDescriptor, ObserverError,
-    ObserverPayloadMode, PortFuture, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
-    ToolCallDelta, ToolDeferral, ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset,
-    child_relation_digest,
+    JournalStore, LoadRequest, Middleware, MiddlewareContext, MiddlewareDescriptor,
+    MiddlewareError, MiddlewareOrder, MiddlewareRole, Model, ModelContextProfile, ModelDeferral,
+    ModelName, ModelResponse, ModelStreamItem, ModelToolCall, NoopObserver, Observer,
+    ObserverDescriptor, ObserverError, ObserverPayloadMode, OrderTier, PortFuture, SideEffectClass,
+    StageInput, StageMask, StageOutcome, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    ToolDeferral, ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset, child_relation_digest,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -122,6 +124,10 @@ fn deferred(job: &str) -> ScriptedModelPlan {
 }
 
 fn completed(text: &str) -> ScriptedModelPlan {
+    completed_with_id(text, "preview-completion")
+}
+
+fn completed_with_id(text: &str, completion_id: &str) -> ScriptedModelPlan {
     ScriptedModelPlan {
         actions: vec![
             ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
@@ -136,7 +142,7 @@ fn completed(text: &str) -> ScriptedModelPlan {
                 tool_calls: Arc::from([]),
                 usage: Usage::empty(),
                 provider_ids: ProviderIds::empty(),
-                completion_id: Arc::from("preview-completion"),
+                completion_id: Arc::from(completion_id),
                 continuation_state: None,
             }))),
         ],
@@ -1727,5 +1733,139 @@ async fn complete_external_routes_a_deferred_tool_effect() {
             ExternalRouteOutcome::Committed(_) | ExternalRouteOutcome::Rejected { .. }
         ),
         "external completion must route a deferred tool effect"
+    );
+}
+
+/// `before_finalize` middleware that supersedes the first finalize candidate
+/// with a `Verification` retry, then lets every subsequent candidate through.
+struct FinalizeVerificationRetry {
+    fired: AtomicBool,
+}
+
+impl FinalizeVerificationRetry {
+    fn new() -> Self {
+        Self {
+            fired: AtomicBool::new(false),
+        }
+    }
+}
+
+impl Middleware for FinalizeVerificationRetry {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        MiddlewareDescriptor {
+            invocation: ComponentInvocation {
+                component: ComponentId::parse("test.middleware.finalize-verification-retry")
+                    .expect("component id"),
+                version: VERSION,
+                configuration_digest: Digest::raw_json(b"{}"),
+                recovery: InvocationRecovery::RecomputeSafe,
+            },
+            stages: StageMask::from_stages([Stage::BeforeFinalize]),
+            order: MiddlewareOrder {
+                tier: OrderTier::Standard,
+                priority: 0,
+                before: Arc::from([]),
+                after: Arc::from([]),
+            },
+            role: MiddlewareRole::Standard,
+            metadata: Metadata::empty(),
+        }
+    }
+
+    fn invoke(
+        &self,
+        _ctx: MiddlewareContext,
+        _input: StageInput,
+    ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
+        let already_fired = self.fired.swap(true, Ordering::AcqRel);
+        Box::pin(async move {
+            if already_fired {
+                return Ok(StageOutcome::Continue);
+            }
+            let directive = RetryDirective::try_new(
+                RetryClassification::Verification,
+                finstack_ai_kernel::Duration::from_millis(1),
+                "test-finalize-verification-retry-v1",
+            )
+            .expect("retry directive");
+            Ok(StageOutcome::Retry(directive))
+        })
+    }
+}
+
+#[tokio::test]
+async fn drive_loop_continues_past_a_superseded_finalize() {
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![
+            completed_with_id("first answer", "finalize-retry-completion-1"),
+            completed_with_id("second answer", "finalize-retry-completion-2"),
+        ],
+    ));
+    let store = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 4,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 4_096,
+        })
+        .expect("store"),
+    );
+    let middleware: Arc<dyn Middleware> = Arc::new(FinalizeVerificationRetry::new());
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.finalize-retry").expect("agent"),
+        BundleId::parse("test.bundle.finalize-retry").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.finalize-retry").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.finalize-retry").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store) as Arc<dyn JournalStore>,
+        ),
+    )
+    .middleware(
+        ComponentRef::new(
+            ComponentId::parse("test.middleware.finalize-verification-retry").expect("component"),
+            Some(VERSION),
+        ),
+        middleware,
+    )
+    .build()
+    .await
+    .expect("agent");
+    let output = agent
+        .run(request("answer twice"))
+        .await
+        .expect("run survives a superseded finalize");
+    assert_eq!(output.text(), "second answer");
+
+    let loaded = store
+        .load(LoadRequest {
+            session_id: output.locator.session_id,
+        })
+        .await
+        .expect("load journal");
+    let verification_retries = loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .filter(|record| {
+            matches!(
+                record.body(),
+                RecordBody::RetryScheduled(retry)
+                    if retry.classification == RetryClassification::Verification
+            )
+        })
+        .count();
+    assert_eq!(
+        verification_retries, 1,
+        "journal must show exactly one Verification retry"
     );
 }

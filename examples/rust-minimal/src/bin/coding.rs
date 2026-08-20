@@ -26,10 +26,10 @@ use std::sync::Arc;
 use finstack_ai::runtime::{ContextProvider, JournalStore, Middleware, Model, ModelName, Toolset};
 use finstack_ai::{Agent, AgentRunRequest};
 use finstack_ai_context_repository::RepositoryContextProvider;
-use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Duration, RawJson, Version};
 use finstack_ai_memory::{InProcessMemoryStore, MemoryContextProvider, MemoryScope, RecallConfig};
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
-use finstack_ai_middleware_verify::VerifyMiddleware;
+use finstack_ai_middleware_verify::{EvidenceVerifier, Verdict, VerifyMiddleware, VerifyPolicy};
 use finstack_ai_native_examples::{
     BoxError, PREVIEW_VERSION, calculator_response, security, serve_ndjson, text_response,
 };
@@ -38,6 +38,20 @@ use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_tools_calculator::CalculatorToolset;
 use finstack_ai_tools_filesystem::FileSystemToolset;
 use finstack_ai_tools_shell::{ShellPolicy, ShellToolset};
+
+/// Trivial pass-through verifier: always lands the candidate.
+#[derive(Debug)]
+struct AlwaysAcceptVerifier;
+
+impl EvidenceVerifier for AlwaysAcceptVerifier {
+    fn verifier_id(&self) -> &'static str {
+        "example.always-accept"
+    }
+
+    fn verify(&self, _message: &RawJson) -> Verdict {
+        Verdict::Accept
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
@@ -82,7 +96,10 @@ async fn main() -> Result<(), BoxError> {
     let compaction: Arc<dyn Middleware> = Arc::new(CompactionMiddleware::try_new(
         CompactionConfig::sliding_window(8_192, 256),
     )?);
-    let verify: Arc<dyn Middleware> = Arc::new(VerifyMiddleware::try_accept()?);
+    let verify: Arc<dyn Middleware> = Arc::new(VerifyMiddleware::try_new(
+        Arc::new(AlwaysAcceptVerifier),
+        VerifyPolicy::try_new(Duration::from_millis(0), "example-v1")?,
+    )?);
 
     let (base_url, server) = serve_ndjson(vec![
         calculator_response(),
