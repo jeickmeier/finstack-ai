@@ -40,12 +40,12 @@ use finstack_ai_kernel::{
     ToolId, ToolResultBlock, Usage,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig, ExternalClock,
-    JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelResponse, ModelStreamItem,
-    ModelStreamLimits, ModelTaskConfig, ModelToolCall, ResolvedToolCatalog, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolCallDelta, ToolDeferral,
-    ToolDeferralSupport, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec,
-    ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
+    ExternalClock, JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelResponse,
+    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall, ResolvedToolCatalog,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolCallDelta,
+    ToolDeferral, ToolDeferralSupport, ToolExecutionPolicy, ToolPolicyDecision, ToolResult,
+    ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
     WorkflowSession, WorkflowWait,
 };
 use finstack_ai_store_memory::MemoryJournalStore;
@@ -99,6 +99,7 @@ async fn drive_past_missing_facade_decisions(
                 max_subscribers: 8,
             },
             shutdown_deadline: Duration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,
@@ -405,6 +406,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
                 max_subscribers: 8,
             },
             shutdown_deadline: Duration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,
@@ -657,6 +659,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
                 max_subscribers: 8,
             },
             shutdown_deadline: Duration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,
