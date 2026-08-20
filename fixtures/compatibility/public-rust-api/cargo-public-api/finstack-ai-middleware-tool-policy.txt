@@ -1,0 +1,93 @@
+pub mod finstack_ai_middleware_tool_policy
+pub enum finstack_ai_middleware_tool_policy::JailbreakAction
+pub finstack_ai_middleware_tool_policy::JailbreakAction::Fail
+pub finstack_ai_middleware_tool_policy::JailbreakAction::RestrictTo(alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>)
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::JailbreakAction
+pub fn finstack_ai_middleware_tool_policy::JailbreakAction::clone(&self) -> finstack_ai_middleware_tool_policy::JailbreakAction
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::JailbreakAction
+pub fn finstack_ai_middleware_tool_policy::JailbreakAction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_middleware_tool_policy::JailbreakAction
+pub fn finstack_ai_middleware_tool_policy::JailbreakAction::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum finstack_ai_middleware_tool_policy::ToolPolicyError
+pub finstack_ai_middleware_tool_policy::ToolPolicyError::Configuration
+pub finstack_ai_middleware_tool_policy::ToolPolicyError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::ToolPolicyError
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyError::clone(&self) -> finstack_ai_middleware_tool_policy::ToolPolicyError
+impl core::cmp::Eq for finstack_ai_middleware_tool_policy::ToolPolicyError
+impl core::cmp::PartialEq for finstack_ai_middleware_tool_policy::ToolPolicyError
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyError::eq(&self, &finstack_ai_middleware_tool_policy::ToolPolicyError) -> bool
+impl core::error::Error for finstack_ai_middleware_tool_policy::ToolPolicyError
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::ToolPolicyError
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_middleware_tool_policy::ToolPolicyError
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_tool_policy::ToolPolicyError
+pub struct finstack_ai_middleware_tool_policy::ChildDepthGate
+impl finstack_ai_middleware_tool_policy::ChildDepthGate
+pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::current_depth(&self) -> u16
+pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::max_depth(&self) -> u16
+pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::restricted(&self) -> &alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::ChildDepthGate
+pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::clone(&self) -> finstack_ai_middleware_tool_policy::ChildDepthGate
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::ChildDepthGate
+pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_middleware_tool_policy::ChildDepthGate
+pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_tool_policy::JailbreakTriggers
+impl finstack_ai_middleware_tool_policy::JailbreakTriggers
+pub fn finstack_ai_middleware_tool_policy::JailbreakTriggers::action(&self) -> &finstack_ai_middleware_tool_policy::JailbreakAction
+pub fn finstack_ai_middleware_tool_policy::JailbreakTriggers::patterns(&self) -> &[alloc::sync::Arc<str>]
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::JailbreakTriggers
+pub fn finstack_ai_middleware_tool_policy::JailbreakTriggers::clone(&self) -> finstack_ai_middleware_tool_policy::JailbreakTriggers
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::JailbreakTriggers
+pub fn finstack_ai_middleware_tool_policy::JailbreakTriggers::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_middleware_tool_policy::JailbreakTriggers
+pub fn finstack_ai_middleware_tool_policy::JailbreakTriggers::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_tool_policy::RoleAllowlist
+impl finstack_ai_middleware_tool_policy::RoleAllowlist
+pub fn finstack_ai_middleware_tool_policy::RoleAllowlist::default_allowed(&self) -> &alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>
+pub fn finstack_ai_middleware_tool_policy::RoleAllowlist::roles(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>>
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::RoleAllowlist
+pub fn finstack_ai_middleware_tool_policy::RoleAllowlist::clone(&self) -> finstack_ai_middleware_tool_policy::RoleAllowlist
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::RoleAllowlist
+pub fn finstack_ai_middleware_tool_policy::RoleAllowlist::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_middleware_tool_policy::RoleAllowlist
+pub fn finstack_ai_middleware_tool_policy::RoleAllowlist::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_tool_policy::ToolPolicyConfig
+impl finstack_ai_middleware_tool_policy::ToolPolicyConfig
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::child_depth(&self) -> core::option::Option<&finstack_ai_middleware_tool_policy::ChildDepthGate>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::is_empty(&self) -> bool
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::jailbreak(&self) -> core::option::Option<&finstack_ai_middleware_tool_policy::JailbreakTriggers>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::role_allowlist(&self) -> core::option::Option<&finstack_ai_middleware_tool_policy::RoleAllowlist>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::try_new() -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_child_depth_gate(self, u16, u16, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_jailbreak_triggers(self, alloc::vec::Vec<alloc::sync::Arc<str>>, finstack_ai_middleware_tool_policy::JailbreakAction) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_role_allowlist(self, alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>>, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_write_budget(self, u32) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::write_budget(&self) -> core::option::Option<&finstack_ai_middleware_tool_policy::WriteBudget>
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::ToolPolicyConfig
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::clone(&self) -> finstack_ai_middleware_tool_policy::ToolPolicyConfig
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::ToolPolicyConfig
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_middleware_tool_policy::ToolPolicyConfig
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_tool_policy::ToolPolicyMiddleware
+impl finstack_ai_middleware_tool_policy::ToolPolicyMiddleware
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyMiddleware::try_new(finstack_ai_middleware_tool_policy::ToolPolicyConfig) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::ToolPolicyMiddleware
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyMiddleware::clone(&self) -> finstack_ai_middleware_tool_policy::ToolPolicyMiddleware
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::ToolPolicyMiddleware
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyMiddleware::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_middleware_tool_policy::ToolPolicyMiddleware
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>
+pub struct finstack_ai_middleware_tool_policy::WriteBudget
+impl finstack_ai_middleware_tool_policy::WriteBudget
+pub fn finstack_ai_middleware_tool_policy::WriteBudget::max_write_calls(&self) -> u32
+impl core::clone::Clone for finstack_ai_middleware_tool_policy::WriteBudget
+pub fn finstack_ai_middleware_tool_policy::WriteBudget::clone(&self) -> finstack_ai_middleware_tool_policy::WriteBudget
+impl core::fmt::Debug for finstack_ai_middleware_tool_policy::WriteBudget
+pub fn finstack_ai_middleware_tool_policy::WriteBudget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_middleware_tool_policy::WriteBudget
+pub fn finstack_ai_middleware_tool_policy::WriteBudget::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub const finstack_ai_middleware_tool_policy::TOOL_POLICY_JAILBREAK_TRIGGERED: &str
