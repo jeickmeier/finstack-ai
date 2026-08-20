@@ -210,6 +210,13 @@ mod tests {
                 reason_code: "load_from_splits_batch"
             })
         ));
+        // Start inside batch B (the last batch) is also a split.
+        assert!(matches!(
+            select_tail_batches(&batches, 4, FROM_SEQUENCE_WINDOW),
+            Err(StoreError::Integrity {
+                reason_code: "load_from_splits_batch"
+            })
+        ));
         // Start past every batch yields an empty tail (head checks happen later).
         assert!(
             select_tail_batches(&batches, 5, FROM_SEQUENCE_WINDOW)
