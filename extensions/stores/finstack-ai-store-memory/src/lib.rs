@@ -31,15 +31,18 @@ use finstack_ai_kernel::{
     AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordDraft, RecordEnvelope,
     RecordId, SessionId,
 };
-use finstack_ai_protocol::{
-    ProtocolError, commit_records, decode_opaque_snapshot, encode_snapshot, verify_chain,
-    verify_chain_from,
-};
 use finstack_ai_runtime::{
-    AcceleratedRestore, JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession,
-    MetadataReceipt, OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS,
-    ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError,
-    StoreHealth, StoreLimits, WriteMetadataRequest,
+    JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
+    OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest,
+    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
+    WriteMetadataRequest,
+};
+use finstack_ai_store_common::{
+    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, SessionUsage, WindowCodes, accelerated_from,
+    admit_append_limits, admit_prune_snapshot, admit_snapshot_sequence, build_committed_batch,
+    check_append_sequence, check_snapshot_size, classify_record_reuse, encode_state_request,
+    outstanding_count, scan_next_sequence, scan_start, select_tail_batches, tombstone_count,
+    validate_scan_limit, verify_full_head, verify_tail_records,
 };
 
 /// Required resource ceilings for [`MemoryJournalStore`].
@@ -70,10 +73,6 @@ impl MemoryJournalStore {
         })
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the store contract requires one visible ordered idempotency, conflict, limit, and atomic-commit sequence"
-    )]
     fn append_sync(&self, request: AppendRequest) -> Result<CommittedBatch, StoreError> {
         let mut inner = self.lock()?;
 
@@ -93,26 +92,14 @@ impl MemoryJournalStore {
             });
         }
 
-        let reused = request
+        // record-id reuse classification
+        let hits = request
             .records()
             .iter()
             .filter_map(|record| inner.records_by_id.get(&record.record_id()))
+            .map(|entry| entry.batch_id)
             .collect::<Vec<_>>();
-        if !reused.is_empty() {
-            if reused.len() != request.records().len() {
-                return Err(StoreError::Corruption {
-                    reason_code: "mixed_record_id_reuse",
-                });
-            }
-            let original_batch_id = reused[0].batch_id;
-            if reused
-                .iter()
-                .any(|entry| entry.batch_id != original_batch_id)
-            {
-                return Err(StoreError::Corruption {
-                    reason_code: "mixed_record_batch_reuse",
-                });
-            }
+        if let Some(original_batch_id) = classify_record_reuse(&hits, request.records().len())? {
             let existing =
                 inner
                     .batches_by_id
@@ -131,46 +118,27 @@ impl MemoryJournalStore {
             });
         }
 
+        // sequence precondition
         let current_head = inner
             .sessions
             .get(&request.session_id())
             .map_or(0, |session| session.head_sequence);
-        let actual_next_sequence = current_head.checked_add(1).ok_or(StoreError::Integrity {
-            reason_code: "sequence_exhausted",
-        })?;
-        if request.expected_sequence() != actual_next_sequence {
-            return Err(StoreError::Conflict {
-                expected_sequence: request.expected_sequence(),
-                actual_next_sequence,
-            });
-        }
+        check_append_sequence(current_head, request.expected_sequence())?;
 
-        let session_is_new = !inner.sessions.contains_key(&request.session_id());
-        if session_is_new && inner.sessions.len() >= self.limits.sessions {
-            return Err(StoreError::LimitExceeded {
-                resource: "sessions",
-                limit: self.limits.sessions,
+        // limits
+        let usage = inner
+            .sessions
+            .get(&request.session_id())
+            .map(|session| SessionUsage {
+                batches: session.batches.len(),
+                records: session.records,
             });
-        }
-        if let Some(session) = inner.sessions.get(&request.session_id()) {
-            if session.batches.len() >= self.limits.batches_per_session {
-                return Err(StoreError::LimitExceeded {
-                    resource: "batches_per_session",
-                    limit: self.limits.batches_per_session,
-                });
-            }
-            if session.records + request.records().len() > self.limits.records_per_session {
-                return Err(StoreError::LimitExceeded {
-                    resource: "records_per_session",
-                    limit: self.limits.records_per_session,
-                });
-            }
-        } else if request.records().len() > self.limits.records_per_session {
-            return Err(StoreError::LimitExceeded {
-                resource: "records_per_session",
-                limit: self.limits.records_per_session,
-            });
-        }
+        admit_append_limits(
+            self.limits,
+            inner.sessions.len(),
+            usage,
+            request.records().len(),
+        )?;
 
         let previous_checksum = inner
             .sessions
@@ -261,15 +229,7 @@ impl MemoryJournalStore {
                 reason_code: "load_from_sequence_gap",
             });
         };
-        loaded_from_batches(
-            session_id,
-            session,
-            start,
-            prior_checksum,
-            "load_from_sequence_gap",
-            "load_from_splits_batch",
-            "load_from_prior_checksum_mismatch",
-        )
+        loaded_from_batches(session_id, session, start, prior_checksum, FROM_SEQUENCE_WINDOW)
     }
 
     fn load_snapshot_plus_tail(&self, session_id: SessionId) -> Result<LoadedSession, StoreError> {
@@ -292,23 +252,12 @@ impl MemoryJournalStore {
             session,
             start,
             accelerated.head_checksum,
-            "snapshot_missing_record",
-            "snapshot_splits_batch",
-            "snapshot_checksum_mismatch",
+            SNAPSHOT_WINDOW,
         )
     }
 
     fn scan_sync(&self, request: ScanRequest) -> Result<ScanPage, StoreError> {
-        if request.limit == 0 {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "scan_limit_zero",
-            });
-        }
-        if request.limit > SCAN_PAGE_MAX_RECORDS {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "scan_limit_exceeded",
-            });
-        }
+        validate_scan_limit(request.limit)?;
         let mut inner = self.lock()?;
         let Some(session) = inner.sessions.get_mut(&request.session_id) else {
             return Ok(ScanPage {
@@ -321,13 +270,10 @@ impl MemoryJournalStore {
             verify_session(session)?;
             session.mark_verified();
         }
-        let start = if request.from_sequence == 0 {
-            1
-        } else {
-            request.from_sequence
-        };
+        let start = scan_start(request.from_sequence);
         let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
-        let (records, next_sequence) = slice_records(session, start, limit);
+        let (records, saw_more) = slice_records(session, start, limit);
+        let next_sequence = scan_next_sequence(&records, saw_more);
         Ok(ScanPage {
             session_id: request.session_id,
             records: records.into(),
@@ -361,12 +307,7 @@ impl MemoryJournalStore {
     }
 
     fn write_snapshot_sync(&self, request: SnapshotRequest) -> Result<SnapshotReceipt, StoreError> {
-        if request.snapshot.bytes().len() > self.limits.snapshot_bytes {
-            return Err(StoreError::LimitExceeded {
-                resource: "snapshot_bytes",
-                limit: self.limits.snapshot_bytes,
-            });
-        }
+        check_snapshot_size(request.snapshot.bytes().len(), self.limits.snapshot_bytes)?;
         let mut inner = self.lock()?;
         let session =
             inner
@@ -375,20 +316,11 @@ impl MemoryJournalStore {
                 .ok_or(StoreError::InvalidRequest {
                     reason_code: "snapshot_session_not_found",
                 })?;
-        if request.snapshot.sequence() > session.head_sequence {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "snapshot_ahead_of_journal",
-            });
-        }
-        if session
-            .snapshot
-            .as_ref()
-            .is_some_and(|current| current.sequence() > request.snapshot.sequence())
-        {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "snapshot_sequence_regression",
-            });
-        }
+        admit_snapshot_sequence(
+            request.snapshot.sequence(),
+            session.head_sequence,
+            session.snapshot.as_ref().map(OpaqueSnapshot::sequence),
+        )?;
         let receipt = SnapshotReceipt {
             session_id: request.session_id,
             sequence: request.snapshot.sequence(),
@@ -425,11 +357,7 @@ impl MemoryJournalStore {
             .ok_or(StoreError::InvalidRequest {
                 reason_code: "prune_requires_snapshot",
             })?;
-        if snapshot.sequence() == 0 || snapshot.sequence() > session.head_sequence {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "prune_snapshot_not_aligned",
-            });
-        }
+        admit_prune_snapshot(snapshot.sequence(), session.head_sequence)?;
         let aligned = session
             .batches
             .iter()
@@ -582,106 +510,9 @@ struct RecordIndexEntry {
     draft: RecordDraft,
 }
 
-fn encode_state_request(
-    request: &StateSnapshotRequest,
-    max_bytes: usize,
-) -> Result<OpaqueSnapshot, StoreError> {
-    let (bytes, digest) = encode_snapshot(
-        &request.state,
-        request.state.last_applied_sequence,
-        request.head_checksum,
-        request.pending_timer_scheduled_at,
-        request.last_model_continuation.clone(),
-    )
-    .map_err(|_| StoreError::Integrity {
-        reason_code: "snapshot_encode_failed",
-    })?;
-    OpaqueSnapshot::try_new(
-        request.state.last_applied_sequence,
-        digest,
-        bytes,
-        max_bytes,
-    )
-}
-
-fn accelerated_from(snapshot: &OpaqueSnapshot) -> Option<AcceleratedRestore> {
-    let decoded =
-        decode_opaque_snapshot(snapshot.sequence(), snapshot.digest(), snapshot.bytes()).ok()?;
-    Some(AcceleratedRestore {
-        sequence: decoded.sequence,
-        head_checksum: decoded.head_checksum,
-        pending_timer_scheduled_at: decoded.pending_timer_scheduled_at,
-        last_model_continuation: decoded.last_model_continuation,
-        state: decoded.state,
-    })
-}
-
-fn build_committed_batch(
-    request: &AppendRequest,
-    previous_checksum: Option<Digest>,
-) -> Result<CommittedBatch, StoreError> {
-    let records = commit_records(
-        request.records(),
-        request.expected_sequence(),
-        previous_checksum,
-        None,
-    )
-    .map_err(|error| protocol_error(&error))?;
-    let last_sequence = request
-        .expected_sequence()
-        .checked_add(
-            u64::try_from(records.len() - 1).map_err(|_| StoreError::Integrity {
-                reason_code: "record_count_overflow",
-            })?,
-        )
-        .ok_or(StoreError::Integrity {
-            reason_code: "sequence_exhausted",
-        })?;
-    CommittedBatch::try_new(
-        request.batch_id(),
-        request.expected_sequence(),
-        last_sequence,
-        records,
-    )
-    .map_err(|_| StoreError::Integrity {
-        reason_code: "committed_batch_invalid",
-    })
-}
-
 fn verify_session(session: &SessionData) -> Result<(), StoreError> {
     let records = flatten_records(session);
-    let head = match records.first() {
-        Some(first) if first.sequence() > 1 => {
-            verify_chain_from(&records, first.previous_checksum(), Some(first.sequence()))
-                .map_err(|error| protocol_error(&error))?
-        }
-        _ => verify_chain(&records).map_err(|error| protocol_error(&error))?,
-    };
-    if head != session.head_checksum {
-        return Err(StoreError::Integrity {
-            reason_code: "head_checksum_mismatch",
-        });
-    }
-    Ok(())
-}
-
-fn outstanding_count(restored: &AcceleratedRestore) -> u64 {
-    let pending_model = u64::from(restored.state.pending_model_effect.is_some());
-    let pending_interaction = u64::from(restored.state.pending_interaction.is_some());
-    pending_model.saturating_add(pending_interaction)
-}
-
-fn tombstone_count(restored: &AcceleratedRestore) -> u64 {
-    u64::try_from(
-        restored
-            .state
-            .completion_identities
-            .len()
-            .saturating_add(restored.state.resolution_identities.len())
-            .saturating_add(restored.state.model_settlements.len())
-            .saturating_add(restored.state.tool_settlements.len()),
-    )
-    .unwrap_or(u64::MAX)
+    verify_full_head(&records, session.head_checksum).map(|_| ())
 }
 
 fn loaded_from_batches(
@@ -689,74 +520,28 @@ fn loaded_from_batches(
     session: &SessionData,
     start: u64,
     prior_checksum: Digest,
-    gap_code: &'static str,
-    split_code: &'static str,
-    checksum_code: &'static str,
+    codes: WindowCodes,
 ) -> Result<LoadedSession, StoreError> {
-    if start > session.head_sequence.saturating_add(1) {
-        return Err(StoreError::Integrity {
-            reason_code: gap_code,
-        });
-    }
-    if start == session.head_sequence.saturating_add(1) {
-        if session.head_checksum != Some(prior_checksum) {
-            return Err(StoreError::Integrity {
-                reason_code: checksum_code,
-            });
-        }
-        let snapshot = session.snapshot.clone();
-        return Ok(LoadedSession {
-            session_id,
-            head_sequence: session.head_sequence,
-            head_checksum: session.head_checksum,
-            metadata: session.metadata.clone(),
-            committed_batches: Arc::from([]),
-            snapshot: snapshot.clone(),
-            accelerated: snapshot.as_ref().and_then(accelerated_from),
-        });
-    }
-    let start_index = session
-        .batches
-        .iter()
-        .position(|batch| batch.first_sequence >= start)
-        .ok_or(StoreError::Integrity {
-            reason_code: gap_code,
-        })?;
-    if session.batches[start_index].first_sequence != start {
-        return Err(StoreError::Integrity {
-            reason_code: split_code,
-        });
-    }
-    let first = session.batches[start_index]
-        .records
-        .first()
-        .ok_or(StoreError::Integrity {
-            reason_code: gap_code,
-        })?;
-    if first.previous_checksum() != Some(prior_checksum) {
-        return Err(StoreError::Integrity {
-            reason_code: checksum_code,
-        });
-    }
-    let tail = session.batches[start_index..].to_vec();
+    let tail = select_tail_batches(&session.batches, start, codes)?;
     let records = tail
         .iter()
         .flat_map(|batch| batch.records.iter().cloned())
         .collect::<Vec<_>>();
-    let head = verify_chain_from(&records, Some(prior_checksum), Some(start))
-        .map_err(|error| protocol_error(&error))?;
-    if head != session.head_checksum {
-        return Err(StoreError::Integrity {
-            reason_code: "head_checksum_mismatch",
-        });
-    }
+    verify_tail_records(
+        &records,
+        start,
+        prior_checksum,
+        session.head_sequence,
+        session.head_checksum,
+        codes,
+    )?;
     let snapshot = session.snapshot.clone();
     Ok(LoadedSession {
         session_id,
         head_sequence: session.head_sequence,
         head_checksum: session.head_checksum,
         metadata: session.metadata.clone(),
-        committed_batches: tail.into(),
+        committed_batches: tail.to_vec().into(),
         snapshot: snapshot.clone(),
         accelerated: snapshot.as_ref().and_then(accelerated_from),
     })
@@ -770,11 +555,7 @@ fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {
         .collect()
 }
 
-fn slice_records(
-    session: &SessionData,
-    start: u64,
-    limit: usize,
-) -> (Vec<RecordEnvelope>, Option<u64>) {
+fn slice_records(session: &SessionData, start: u64, limit: usize) -> (Vec<RecordEnvelope>, bool) {
     let mut records = Vec::new();
     let mut saw_more = false;
     'batches: for batch in &session.batches {
@@ -789,29 +570,7 @@ fn slice_records(
             records.push(record.clone());
         }
     }
-    let next_sequence = if saw_more {
-        records
-            .last()
-            .and_then(|record| record.sequence().checked_add(1))
-    } else {
-        None
-    };
-    (records, next_sequence)
-}
-
-fn protocol_error(error: &ProtocolError) -> StoreError {
-    match error {
-        ProtocolError::LimitExceeded { resource, limit } => StoreError::LimitExceeded {
-            resource,
-            limit: *limit,
-        },
-        ProtocolError::Integrity { reason_code } | ProtocolError::InvalidCbor { reason_code } => {
-            StoreError::Integrity { reason_code }
-        }
-        ProtocolError::Codec { .. } => StoreError::Integrity {
-            reason_code: "canonical_codec",
-        },
-    }
+    (records, saw_more)
 }
 
 #[cfg(test)]
@@ -827,6 +586,7 @@ mod tests {
         RecordBody, RecordDraft, RecordTag, RunTag, SessionCreated, SessionTag, Timestamp,
     };
     use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
+    use finstack_ai_runtime::SCAN_PAGE_MAX_RECORDS;
 
     use super::*;
 
@@ -1209,6 +969,40 @@ mod tests {
         }))
         .expect("load");
         assert_eq!(loaded.snapshot, Some(snapshot));
+    }
+
+    #[test]
+    fn tail_window_reports_gap_for_holes_and_split_for_mid_batch_starts() {
+        let store = MemoryJournalStore::try_new(limits()).expect("store");
+        let first = block_on(store.append(request(1, 1, 1, vec![draft(1, 1), draft(2, 1)])))
+            .expect("append");
+        block_on(store.append(request(2, 1, 3, vec![draft(3, 1)]))).expect("append");
+        // Mid-batch start (sequence 2 is inside batch 1) is a split.
+        assert!(matches!(
+            block_on(store.load_from(LoadFromRequest {
+                session_id: id::<SessionTag>(1),
+                window: LoadWindow::FromSequence {
+                    from_sequence: 2,
+                    prior_checksum: first.records[0].checksum(),
+                },
+            })),
+            Err(StoreError::Integrity {
+                reason_code: "load_from_splits_batch"
+            })
+        ));
+        // Start past the head is a gap (unified from the old split code).
+        assert!(matches!(
+            block_on(store.load_from(LoadFromRequest {
+                session_id: id::<SessionTag>(1),
+                window: LoadWindow::FromSequence {
+                    from_sequence: 5,
+                    prior_checksum: first.records[1].checksum(),
+                },
+            })),
+            Err(StoreError::Integrity {
+                reason_code: "load_from_sequence_gap"
+            })
+        ));
     }
 
     #[test]

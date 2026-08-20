@@ -1444,6 +1444,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
 ]
 
 [[package]]
@@ -1454,6 +1455,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
  "finstack-ai-test",
  "rusqlite",
  "serde",
