@@ -202,7 +202,10 @@ async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
-    .drive_timeout(Duration::from_secs(30))
+    // Far more than the 5s outer timeout below, so spending any real part of
+    // the budget fails the test — but still under the 30s default lease TTL,
+    // which `build()` asserts.
+    .drive_timeout(Duration::from_secs(20))
     .register_ports("research", Arc::new(BindPorts { model }))
     .build();
 
@@ -275,9 +278,28 @@ async fn tick_keeps_the_inbox_entry_when_the_resume_cannot_park() {
         "an unparked resume keeps its response for redelivery"
     );
 
+    // Inside the backoff window the row must not be re-claimed. `wake_at` was
+    // pushed to t+1_000 by `record_failure`; at t+500 the row is still
+    // sleeping, so a tick here does no work at all. Without a `wake_at`-aware
+    // dueness predicate for non-timer rows, this poisoned row would be
+    // re-attached and re-driven on every single tick, forever.
+    clock.jump(500).expect("inside backoff");
+    let inside = Box::pin(worker.tick()).await.expect("backoff tick");
+    assert_eq!(
+        inside.failures, 0,
+        "the row is not retried before its backoff"
+    );
+    assert_eq!(inside.sessions_resumed, 0);
+    let sleeping = store.load_tenant("tenant-a").expect("rows");
+    assert_eq!(sleeping.len(), 1);
+    assert_eq!(
+        sleeping[0].attempts, 1,
+        "no attempt is burned inside the backoff window"
+    );
+
     // Past the backoff, the row is still claimable — the gate that skips a
     // non-timer row without an inbox entry must not have swallowed it.
-    clock.jump(2_000).expect("past backoff");
+    clock.jump(1_500).expect("past backoff");
     let second = Box::pin(worker.tick()).await.expect("second tick");
     assert_eq!(second.failures, 1, "the row is retried, not skipped");
     let rows = store.load_tenant("tenant-a").expect("rows");

@@ -52,6 +52,32 @@ bridge one cron schedule's claimed fires into a started run. `spawn` runs
 iteration; `shutdown` signals the loop and waits for its current tick to
 finish before returning.
 
+### What a registered `PortsFactory` does and does not buy
+
+Registering ports is necessary to resume a run, but it does not make every
+run reach its next wait under this worker alone. The worker fires timers,
+applies inbox responses to the journal, and re-parks or completes runs whose
+next wait is reachable without a facade decision. A run that is mid-flight in
+the model/tool stage loop needs an externally submitted
+`KernelInput::StageSettled { .. AfterModel | AfterToolBatch .., Continue }`,
+produced by the application-level facade in the `finstack-ai` agent layer — a
+crate this worker deliberately does not depend on. Those runs are not
+advanced here: the response stays in the inbox, the wake row survives, and
+the attempt is recorded as one counted failure with backoff, preserved for a
+host that can drive them. Hosts that embed a facade see such runs resume to
+completion; hosts that do not see them held safely, not lost.
+
+## Schema
+
+The worker's sqlite tables (`finstack_workflow_worker_wake`, `_fires`,
+`_inbox`) are **versionless by doctrine**, matching the
+`finstack_workflow_local_cron` precedent: they set no `PRAGMA user_version`
+and are not part of the kernel journal's schema version. They are hints, so a
+binary that does not understand a column can ignore it. Future changes must
+be additive and nullable — new tables, or new nullable columns that mean
+something sensible when absent — so old and new binaries can share one file
+without a migration step. Existing columns are never repurposed or dropped.
+
 ## Guarantees
 
 - **Lease CAS + journal append CAS.** A wake row is claimed with a

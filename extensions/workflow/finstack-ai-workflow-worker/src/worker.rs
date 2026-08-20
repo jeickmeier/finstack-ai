@@ -186,13 +186,41 @@ impl WorkerBuilder {
     }
 
     /// Finish the worker.
+    ///
+    /// # Panics
+    ///
+    /// Debug builds assert the per-session drive budget is shorter than the
+    /// lease TTL. A drive that can outlive its own lease lets a second worker
+    /// claim the same session while the first is still driving it, which the
+    /// journal's append CAS turns into wasted work and counted failures. The
+    /// defaults satisfy this; overriding either knob must preserve it.
     #[must_use]
     pub fn build(self) -> WorkflowWorker {
+        debug_assert!(
+            self.worker.drive_timeout.as_millis() < u128::from(self.worker.lease_ttl_ms),
+            "drive timeout must be shorter than the lease TTL",
+        );
         self.worker
     }
 }
 
 /// Leased worker over the local workflow driver.
+///
+/// # Scope of a resume
+///
+/// Registering a [`PortsFactory`] is necessary to resume a run, but it is not
+/// sufficient to carry every run to its next wait. This worker fires timers,
+/// applies inbox responses to the journal, and re-parks (or completes) runs
+/// whose next wait is reachable without a facade decision. A run whose next
+/// step needs an externally submitted
+/// `KernelInput::StageSettled { .. AfterModel | AfterToolBatch .., Continue }`
+/// — the decision made by the application-level facade in the `finstack-ai`
+/// agent layer, on which this crate does not depend — cannot be advanced
+/// here. Such a run is left mid-flight in the stage loop: its response stays
+/// in the inbox, its wake row survives, and the attempt is recorded as one
+/// counted failure with backoff, preserved for a host that can drive it.
+/// Hosts embedding a facade see those runs complete; hosts that do not see
+/// them held safely rather than resumed.
 pub struct WorkflowWorker {
     /// Authoritative kernel journal.
     journal: Arc<dyn JournalStore>,
@@ -511,6 +539,15 @@ impl WorkflowWorker {
         // strand the row: a non-timer row is claimed only while its inbox
         // entry exists, so a resume that failed after the delete could never
         // be retried.
+        //
+        // The spec words the park and this delete as "the same transaction".
+        // They are two calls against two stores, so what we actually provide
+        // is at-least-once: a crash between them replays the entry on the
+        // next tick. That is safe because settling the journal side is
+        // idempotent — the pending effect is already settled, so the replayed
+        // resume finds nothing to apply and simply re-parks on the same wait.
+        // Ordering matters more than atomicity here, and the order above is
+        // the one that cannot lose work.
         if let Some(entry) = inbox_entry {
             self.inbox.delete(
                 entry.tenant_scope.as_ref(),

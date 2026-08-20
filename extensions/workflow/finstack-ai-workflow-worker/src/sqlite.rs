@@ -16,6 +16,16 @@ use crate::fires::{FireRow, FireStatus, FireStore};
 use crate::inbox::{InboxKind, InboxRow, InboxStore};
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
 
+/// Schema for the worker's adapter tables.
+///
+/// These tables are deliberately **versionless**: like
+/// `finstack_workflow_local_cron`, they carry no `PRAGMA user_version` guard
+/// and are not part of the kernel journal's schema version. They hold hints
+/// only, so a binary that does not understand a column simply ignores it.
+/// Future changes must therefore be **additive and nullable** — new tables,
+/// or new nullable columns with a usable meaning when absent — so that old
+/// and new binaries can share one sqlite file without a migration step.
+/// Never repurpose or drop an existing column.
 const WORKER_DDL: &str = "
 CREATE TABLE IF NOT EXISTS finstack_workflow_worker_wake (
   tenant_scope TEXT NOT NULL,
@@ -304,7 +314,10 @@ impl WakeIndexStore for SqliteWorkerStore {
             let sql = format!(
                 "{WAKE_SELECT}
                  WHERE (leased_by IS NULL OR lease_expires_unix_ms <= ?1)
-                   AND (reason != 'timer' OR (wake_at_unix_ms IS NOT NULL AND wake_at_unix_ms <= ?1))
+                   AND (CASE WHEN reason = 'timer'
+                             THEN wake_at_unix_ms IS NOT NULL AND wake_at_unix_ms <= ?1
+                             ELSE wake_at_unix_ms IS NULL OR wake_at_unix_ms <= ?1
+                        END)
                  ORDER BY tenant_scope, session_id"
             );
             query_wake_rows(conn, &sql, params![now.as_unix_ms()])
@@ -740,6 +753,48 @@ mod tests {
         store.upsert(&row).expect("upsert");
         let loaded = store.load_tenant("tenant-a").expect("load");
         assert_eq!(loaded, vec![row]);
+    }
+
+    /// `load_due`'s SQL predicate must agree with [`crate::wake::wake_due`]
+    /// row for row: a freshly parked inbox-driven row (`wake_at: None`) is
+    /// immediately due, one backed off by `record_failure` sleeps until its
+    /// retry instant, and a timer row without a `wake_at` is never due.
+    #[test]
+    fn sqlite_dueness_matches_the_in_memory_predicate() {
+        let dir = tempfile::tempdir().expect("dir");
+        let store = SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
+
+        let mut fresh = timer_row("tenant-a", 1, 0);
+        fresh.reason = WakeReason::Deferred;
+        fresh.wake_at = None;
+        let mut backed_off = timer_row("tenant-a", 2, 0);
+        backed_off.reason = WakeReason::Interaction;
+        backed_off.wake_at = Some(ts(5_000));
+        let due_timer = timer_row("tenant-a", 3, 1_000);
+        let mut timerless = timer_row("tenant-a", 4, 0);
+        timerless.wake_at = None;
+
+        for row in [&fresh, &backed_off, &due_timer, &timerless] {
+            store.upsert(row).expect("upsert");
+        }
+
+        let now = ts(2_000);
+        let due = store.load_due(now).expect("load_due");
+        for row in [&fresh, &backed_off, &due_timer, &timerless] {
+            assert_eq!(
+                due.contains(row),
+                crate::wake::wake_due(row, now),
+                "sqlite and in-memory dueness disagree for {:?}",
+                row.session_id,
+            );
+        }
+        assert_eq!(due.len(), 2, "the fresh non-timer row and the due timer");
+
+        // Past the backoff, the inbox-driven row rejoins the due set.
+        let later = ts(6_000);
+        let due_later = store.load_due(later).expect("load_due");
+        assert!(due_later.contains(&backed_off));
+        assert!(crate::wake::wake_due(&backed_off, later));
     }
 
     #[test]

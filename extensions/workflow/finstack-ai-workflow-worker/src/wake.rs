@@ -63,7 +63,10 @@ pub struct WakeRow {
     pub workflow_kind: Arc<str>,
     /// Condition under which this session is due.
     pub reason: WakeReason,
-    /// Scheduled wake time, meaningful only for [`WakeReason::Timer`].
+    /// Earliest instant at which this row is due. Set at park time for
+    /// [`WakeReason::Timer`] rows; for the inbox-driven reasons it is `None`
+    /// until `record_failure` pushes it forward as a retry backoff. Either
+    /// way, a set value gates dueness — see [`wake_due`].
     pub wake_at: Option<Timestamp>,
     /// Identifier of the pending effect this row resumes.
     pub pending_id: Arc<str>,
@@ -169,11 +172,17 @@ pub fn lease_open(row: &WakeRow, now: Timestamp) -> bool {
 }
 
 /// Whether the row is due at `now` (lease aside).
+///
+/// Timer rows require a scheduled `wake_at` that has arrived. Non-timer rows
+/// are driven by the inbox rather than the clock, so they are due
+/// immediately — unless `record_failure` pushed `wake_at` forward as a
+/// retry backoff, in which case they wait for it like a timer does. Freshly
+/// parked non-timer rows carry `wake_at: None` and stay immediately due.
 #[must_use]
 pub fn wake_due(row: &WakeRow, now: Timestamp) -> bool {
     match row.reason {
         WakeReason::Timer => row.wake_at.is_some_and(|due| due <= now),
-        WakeReason::Interaction | WakeReason::Deferred => true,
+        WakeReason::Interaction | WakeReason::Deferred => row.wake_at.is_none_or(|due| due <= now),
     }
 }
 
