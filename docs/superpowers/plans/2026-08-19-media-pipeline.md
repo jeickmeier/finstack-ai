@@ -2684,7 +2684,19 @@ git commit -m "Prove pipeline resume and fail-closed re-run with golden tests"
 
 ## Phase E — `finstack-ai-store-media-s3`
 
-### Task 14: SigV4 signer
+> Superseded 2026-08-19: Tasks 14–15 below (the standalone SigV4 signer
+> and S3 client for `finstack-ai-store-media-s3`) are superseded by
+> `docs/superpowers/specs/2026-08-19-object-store-design.md` and
+> `docs/implementation/adrs/ADR-050-object-store-contract.md`. SigV4
+> signing and the S3 client now live once, in
+> `finstack-ai-store-object-s3`, and `S3MediaStore` becomes an adapter
+> over `Arc<dyn ObjectStore>` (`put_file` → `put(PutPayload::File)`,
+> `materialize` → `get_to_file`, `presign_get` → `presign_get`), per
+> `docs/superpowers/specs/2026-08-19-media-pipeline-design.md` §4.3. The
+> task text below is struck, not deleted, and is retained only for
+> historical record of the original design.
+
+### ~~Task 14: SigV4 signer~~
 
 **Files:**
 - Modify: `Cargo.toml` (workspace root — members entry, deps entry `finstack-ai-store-media-s3 = { path = "extensions/stores/finstack-ai-store-media-s3", version = "1.0.0" }`, and the one new dependency `hmac = { version = "0.12", default-features = false }`)
@@ -2839,7 +2851,10 @@ git commit -m "Add a dependency-light SigV4 signer for the S3 media backend"
 
 ---
 
-### Task 15: `S3MediaStore`
+### ~~Task 15: `S3MediaStore`~~
+
+> Superseded 2026-08-19: see the note at the top of Phase E. This task
+> is struck, not deleted.
 
 **Files:**
 - Modify: `extensions/stores/finstack-ai-store-media-s3/src/lib.rs`

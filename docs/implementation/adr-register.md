@@ -73,6 +73,7 @@ Index last reconciled: 2026-08-18 (ADR-048 accepted for shared authority and pro
 | ADR-046 | `mcp-nested-sampling-and-catalog` | Core/runtime lead | D5–D6 MCP sampling and re-resolve | Accepted | Standalone | In progress | Partial (local D5 `eafd8ea` / `bcc35b0`, D6 `b25fd95` / `66d108b`; no evidence id) |
 | ADR-047 | `retire-multi-protocol-gateway` | Ecosystem lead | Phase 14 / PR-094 | Accepted | Standalone | In progress | Missing (local uncommitted crate deletion; `Agent::gateway` remains a dispatcher; no evidence id) |
 | ADR-048 | `shared-authority-and-provider-secret` | Core/runtime lead | Phase 14 / PR-085 then leaf waves | Accepted | Standalone | In progress | Missing (local types only; no evidence id) |
+| ADR-050 | `object-store-contract` | Core/runtime lead | `docs/superpowers/plans/2026-08-19-object-store.md` | Accepted | Standalone | In progress | Missing (local types only; no evidence id) |
 
 ## Security review seed
 
@@ -107,6 +108,7 @@ Index last reconciled: 2026-08-18 (ADR-048 accepted for shared authority and pro
 | ADR-046 | SEC-INV-003, SEC-INV-004; TM-01, TM-10 |
 | ADR-047 | SEC-INV-005; TM-04 |
 | ADR-048 | SEC-INV-001, SEC-INV-004; TM-02, TM-04 |
+| ADR-050 | SEC-INV-004; TM-04, TM-16, TM-20 |
 
 ## Change control
 
@@ -455,6 +457,9 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-18 | ADR-048 | Decision | me@jeickmeier.com | — | Accepted | `verify_authority` on the Tool port; `SecretString`/`SecretRejected` and named credentials in `provider_util`; no shared stable secret code | — | me@jeickmeier.com |
 | 2026-08-18 | ADR-048 | Record | me@jeickmeier.com | — | Standalone | ADR-048-shared-authority-and-provider-secret.md | — | me@jeickmeier.com |
 | 2026-08-18 | ADR-048 | Implementation | me@jeickmeier.com | — | In progress | `verify_authority` and `provider_util` types land with PR-085; leaf crates now call them; no evidence id | — | me@jeickmeier.com |
+| 2026-08-20 | ADR-050 | Decision | me@jeickmeier.com | — | Accepted | `ObjectStore` host-supplied service; scoped fail-closed keys; frozen `object_*` codes; per-store `ArtifactStoreLimits`; hand-rolled SigV4 with `hmac` as the only new dependency; 64 MiB adapter default / 5 GiB object default | — | me@jeickmeier.com |
+| 2026-08-20 | ADR-050 | Record | me@jeickmeier.com | — | Standalone | ADR-050-object-store-contract.md | — | me@jeickmeier.com |
+| 2026-08-20 | ADR-050 | Implementation | me@jeickmeier.com | — | In progress | `ObjectStore` and its data model land in `finstack-ai-runtime`; `S3ObjectStore`/`LocalObjectStore`/`ObjectArtifactStore` land as sibling extension-crate tasks; no evidence id | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -508,6 +513,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-046 | [ADR-046-mcp-nested-sampling-and-catalog.md](adrs/ADR-046-mcp-nested-sampling-and-catalog.md) | me@jeickmeier.com | Partial: local D5 `eafd8ea` / `bcc35b0`, D6 `b25fd95` / `66d108b`; no evidence id | ADR-046 standalone record; D5–D6 local merges | 2026-08-18 |
 | ADR-047 | [ADR-047-retire-multi-protocol-gateway.md](adrs/ADR-047-retire-multi-protocol-gateway.md) | me@jeickmeier.com | Missing: local uncommitted crate deletion; `Agent::gateway` remains a dispatcher; no evidence id | ADR-047 standalone record; Phase 14 / PR-094 | 2026-08-18 |
 | ADR-048 | [ADR-048-shared-authority-and-provider-secret.md](adrs/ADR-048-shared-authority-and-provider-secret.md) | me@jeickmeier.com | Missing: local `verify_authority`, `provider_util` types, and leaf usage; no evidence id | ADR-048 standalone record; Phase 14 / PR-085 | 2026-08-18 |
+| ADR-050 | [ADR-050-object-store-contract.md](adrs/ADR-050-object-store-contract.md) | me@jeickmeier.com | Missing: local `ObjectStore` trait, S3/local backends, and `ObjectArtifactStore` adapter; no evidence id | ADR-050 standalone record; `docs/superpowers/plans/2026-08-19-object-store.md` | 2026-08-20 |
 
 ## Supersession log
 
