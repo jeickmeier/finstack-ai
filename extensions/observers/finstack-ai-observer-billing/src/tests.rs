@@ -357,7 +357,8 @@ async fn drop_progress_overflow_is_diagnosed() {
         ]))
         .await
         .expect("observe");
-    assert!(billing.dropped() >= 1);
+    // Capacity-1 queue, 2 events in one batch: exactly one drop, not two.
+    assert_eq!(billing.dropped(), 1);
     assert_eq!(billing.snapshot().dropped_events, billing.dropped());
 }
 

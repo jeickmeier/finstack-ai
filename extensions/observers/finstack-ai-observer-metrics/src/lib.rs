@@ -260,7 +260,22 @@ impl MetricsObserver {
         }
     }
 
+    /// Record a drop already counted by `self.queue.dropped()`. Only the
+    /// diagnostic is latched here; counting it again would double the total
+    /// returned by [`Self::dropped`].
     fn record_overflow(&self) {
+        if let Ok(mut slot) = self.diagnostic.lock() {
+            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
+        }
+    }
+
+    /// Record a drop the queue does not count itself: [`ObserverQueue::push`]
+    /// only increments its own counter on [`ObserverQueuePush::Dropped`] and
+    /// on [`ObserverError::CapacityExceeded`] (the `Disconnect` policy); an
+    /// [`ObserverError::Unavailable`] push (already disconnected, or a
+    /// poisoned lock) never touches the queue's counter, so the adapter must
+    /// count it to keep `dropped()` accurate.
+    fn record_uncounted_drop(&self) {
         self.dropped.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut slot) = self.diagnostic.lock() {
             *slot = Some(OBSERVER_QUEUE_OVERFLOW);
@@ -279,8 +294,12 @@ impl Observer for MetricsObserver {
             match self.queue.push(()) {
                 Ok(ObserverQueuePush::Accepted) => {}
                 Ok(ObserverQueuePush::Dropped) => self.record_overflow(),
-                Err(error) => {
+                Err(ObserverError::CapacityExceeded) => {
                     self.record_overflow();
+                    return Box::pin(async move { Err(ObserverError::CapacityExceeded) });
+                }
+                Err(error) => {
+                    self.record_uncounted_drop();
                     return Box::pin(async move { Err(error) });
                 }
             }
