@@ -2,6 +2,7 @@
 
 mod anthropic_messages;
 mod credentials;
+mod gemini_generate_content;
 mod media;
 mod ndjson;
 mod ollama_chat;
@@ -11,6 +12,11 @@ mod sse;
 
 pub use anthropic_messages::AnthropicMessagesAssembly;
 pub use credentials::{Authentication, CredentialReference, CredentialRejected, CredentialStore};
+pub use gemini_generate_content::{
+    GEMINI_CACHED_TOKENS_KEY, GEMINI_CODE_RESULT_MEDIA_TYPE, GEMINI_CONTINUATION_PROVIDER,
+    GEMINI_EXECUTABLE_CODE_MEDIA_TYPE, GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY,
+    GeminiGenerateContentAssembly,
+};
 pub use media::{
     MediaResolveError, MediaResolveKind, MediaResolver, ResolveDraftMediaError, ResolvedMedia,
     resolve_draft_media,

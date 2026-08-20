@@ -64,10 +64,13 @@ pub use profile::{
 };
 pub use provider_util::{
     AnthropicMessagesAssembly, Authentication, CredentialReference, CredentialRejected,
-    CredentialStore, MediaResolveError, MediaResolveKind, MediaResolver, NdjsonError, NdjsonParser,
-    OllamaChatAssembly, OllamaReplayEntry, OpenAiResponsesAssembly, ResolveDraftMediaError,
-    ResolvedMedia, SECRET_MAX_BYTES, SecretRejected, SecretString, SseEvent, SseEventParser,
-    SseParseError, StreamNormError, StreamNormKind, resolve_draft_media, secret_is_valid,
+    CredentialStore, GEMINI_CACHED_TOKENS_KEY, GEMINI_CODE_RESULT_MEDIA_TYPE,
+    GEMINI_CONTINUATION_PROVIDER, GEMINI_EXECUTABLE_CODE_MEDIA_TYPE, GEMINI_GROUNDING_MEDIA_TYPE,
+    GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly, MediaResolveError, MediaResolveKind,
+    MediaResolver, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
+    OpenAiResponsesAssembly, ResolveDraftMediaError, ResolvedMedia, SECRET_MAX_BYTES,
+    SecretRejected, SecretString, SseEvent, SseEventParser, SseParseError, StreamNormError,
+    StreamNormKind, resolve_draft_media, secret_is_valid,
 };
 pub use request::{
     ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft,
