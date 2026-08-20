@@ -381,9 +381,11 @@ impl Observer for NotifyObserver {
 
 mod http;
 mod project;
+mod slack;
 mod webhook;
 
 pub use project::project;
+pub use slack::{SlackSink, slack_text};
 pub use webhook::WebhookSink;
 
 #[cfg(test)]

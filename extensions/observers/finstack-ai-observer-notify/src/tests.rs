@@ -483,6 +483,98 @@ async fn webhook_sink_maps_server_errors_to_unavailable() {
     );
 }
 
+#[test]
+fn slack_text_renders_each_lifecycle_event() {
+    let requested = super::project(&event(requested_body())).expect("projected");
+    let text = super::slack_text(&requested);
+    assert!(text.contains("Interaction requested"));
+    assert!(text.contains("approval"));
+    assert!(text.contains("risk-desk"));
+    assert!(!text.contains(CANARY));
+
+    let resolution = InteractionResolution::try_new(
+        id::<InteractionTag>(7),
+        "resolution-1",
+        PrincipalRef::try_new("oidc", "reviewer-9", None::<&str>).expect("principal"),
+        AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth"),
+        RawJson::parse(format!("{{\"secret\":\"{CANARY}\"}}")).expect("json"),
+        Some("looks-fine"),
+    )
+    .expect("resolution");
+    let resolved =
+        super::project(&event(RunEventBody::InteractionResolved(resolution))).expect("projected");
+    let text = super::slack_text(&resolved);
+    assert!(text.contains("resolved by oidc/reviewer-9"));
+    assert!(!text.contains(CANARY));
+
+    let expired = InteractionExpired {
+        interaction_id: id::<InteractionTag>(7),
+        expired_at: Timestamp::from_unix_ms(9_500).expect("ts"),
+    };
+    let expired_notification =
+        super::project(&event(RunEventBody::InteractionExpired(expired))).expect("projected");
+    assert!(super::slack_text(&expired_notification).contains("Interaction expired"));
+
+    let cancelled =
+        InteractionCancelled::try_new(id::<InteractionTag>(7), None, None, Some("timeout"))
+            .expect("cancelled");
+    let cancelled_notification =
+        super::project(&event(RunEventBody::InteractionCancelled(cancelled))).expect("projected");
+    let text = super::slack_text(&cancelled_notification);
+    assert!(text.contains("Interaction cancelled"));
+    assert!(text.contains("(timeout)"));
+}
+
+#[test]
+fn verify_review_interaction_produces_a_review_notification() {
+    let request = requested_request(
+        InteractionKind::Review,
+        Some(AssigneeHint::Role(Arc::from("reviewer"))),
+    );
+    let notification = super::project(&event(RunEventBody::InteractionRequested(request)))
+        .expect("projected");
+    assert!(matches!(
+        notification.detail,
+        NotificationDetail::Requested { ref kind, .. } if kind.as_ref() == "review"
+    ));
+    let text = super::slack_text(&notification);
+    assert!(text.contains("review"));
+    assert!(!text.contains(CANARY));
+}
+
+#[tokio::test]
+async fn slack_sink_posts_text_payload() {
+    let (address, received) = tests_support::spawn_loopback_http(200).await;
+    let sink = super::SlackSink::try_new(
+        SecretString::try_new(format!("http://{address}/services/T0/B0/x")).expect("url"),
+        std::time::Duration::from_secs(5),
+    )
+    .expect("sink");
+    sink.deliver(super::project(&event(requested_body())).expect("projected"))
+        .await
+        .expect("delivered");
+    let body = received
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("request captured");
+    assert!(body.starts_with("{\"text\":"));
+    assert!(!body.contains(CANARY));
+}
+
+#[test]
+fn slack_sink_debug_never_leaks_the_url() {
+    let sink = super::SlackSink::try_new(
+        SecretString::try_new("https://hooks.slack.com/services/T0/B0/SECRETPART").expect("url"),
+        std::time::Duration::from_secs(5),
+    )
+    .expect("sink");
+    let rendered = format!("{sink:?}");
+    assert!(rendered.contains("[REDACTED]"));
+    assert!(!rendered.contains("SECRETPART"));
+    assert!(!rendered.contains("hooks.slack.com"));
+}
+
 #[tokio::test]
 async fn conformance_accepts_an_empty_batch() {
     let (sink, _seen) = tests_support::capturing_sink();
