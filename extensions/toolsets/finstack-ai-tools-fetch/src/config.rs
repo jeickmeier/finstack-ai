@@ -178,91 +178,76 @@ const _: [&str; 6] = [
     FETCH_TIMEOUT,
 ];
 
-/// Validated bounded HTTP fetch toolset: parsed allowlist patterns and
-/// validated per-host headers. Construction is fail-closed.
-pub struct HttpFetchToolset {
+/// Validate `config` in isolation (allowlist parses, limits within their
+/// ceilings, per-host header keys are exact hosts with valid HTTP
+/// name/value pairs) and return the normalized config (per-host-header keys
+/// lowercased) plus the parsed allowlist patterns.
+///
+/// Split out of `HttpFetchToolset::try_new` (in `toolset.rs`) so the pure
+/// config-shape checks stay next to the types they validate.
+///
+/// # Errors
+///
+/// Returns [`HttpFetchError::Configuration`] when the allowlist is empty,
+/// any allowlist or per-host-header-key entry fails [`HostPattern::parse`],
+/// a per-host-header key is a wildcard pattern rather than an exact host,
+/// any numeric limit is zero or exceeds its hard ceiling, or any per-host
+/// header name/value is not a valid HTTP header.
+pub(crate) fn validate(
     config: HttpFetchConfig,
-    patterns: Vec<HostPattern>,
-}
-
-impl HttpFetchToolset {
-    /// Validate `config` and construct a toolset.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HttpFetchError::Configuration`] when the allowlist is
-    /// empty, any allowlist or per-host-header-key entry fails
-    /// [`HostPattern::parse`], a per-host-header key is a wildcard pattern
-    /// rather than an exact host, any numeric limit is zero or exceeds its
-    /// hard ceiling, or any per-host header name/value is not a valid HTTP
-    /// header. Accepted per-host-header keys are normalized to ASCII
-    /// lowercase before storage.
-    pub fn try_new(config: HttpFetchConfig) -> Result<Self, HttpFetchError> {
-        if config.allowlist.is_empty() {
-            return Err(HttpFetchError::Configuration {
-                reason: "allowlist_empty",
-            });
-        }
-        let patterns = config
-            .allowlist
-            .iter()
-            .map(|entry| HostPattern::parse(entry))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        if config.max_response_bytes == 0 || config.max_response_bytes > MAX_RESPONSE_BYTES_CEILING
-        {
-            return Err(HttpFetchError::Configuration {
-                reason: "max_response_bytes_out_of_range",
-            });
-        }
-        if config.request_timeout.is_zero() || config.request_timeout > REQUEST_TIMEOUT_CEILING {
-            return Err(HttpFetchError::Configuration {
-                reason: "request_timeout_out_of_range",
-            });
-        }
-        if config.max_redirects > MAX_REDIRECTS_CEILING {
-            return Err(HttpFetchError::Configuration {
-                reason: "max_redirects_out_of_range",
-            });
-        }
-
-        let mut per_host_headers = BTreeMap::new();
-        for (host, headers) in &config.per_host_headers {
-            let pattern = HostPattern::parse(host)?;
-            if !pattern.is_exact() {
-                return Err(HttpFetchError::Configuration {
-                    reason: "per_host_header_key_not_exact_host",
-                });
-            }
-            for (name, value) in headers {
-                HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
-                    HttpFetchError::Configuration {
-                        reason: "invalid_per_host_header_name",
-                    }
-                })?;
-                HeaderValue::from_str(value).map_err(|_| HttpFetchError::Configuration {
-                    reason: "invalid_per_host_header_value",
-                })?;
-            }
-            per_host_headers.insert(host.to_ascii_lowercase(), headers.clone());
-        }
-
-        let config = HttpFetchConfig {
-            per_host_headers,
-            ..config
-        };
-
-        Ok(Self { config, patterns })
+) -> Result<(HttpFetchConfig, Vec<HostPattern>), HttpFetchError> {
+    if config.allowlist.is_empty() {
+        return Err(HttpFetchError::Configuration {
+            reason: "allowlist_empty",
+        });
     }
-}
+    let patterns = config
+        .allowlist
+        .iter()
+        .map(|entry| HostPattern::parse(entry))
+        .collect::<Result<Vec<_>, _>>()?;
 
-impl fmt::Debug for HttpFetchToolset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("HttpFetchToolset")
-            .field("config", &self.config)
-            .field("patterns", &self.patterns.len())
-            .finish()
+    if config.max_response_bytes == 0 || config.max_response_bytes > MAX_RESPONSE_BYTES_CEILING {
+        return Err(HttpFetchError::Configuration {
+            reason: "max_response_bytes_out_of_range",
+        });
     }
+    if config.request_timeout.is_zero() || config.request_timeout > REQUEST_TIMEOUT_CEILING {
+        return Err(HttpFetchError::Configuration {
+            reason: "request_timeout_out_of_range",
+        });
+    }
+    if config.max_redirects > MAX_REDIRECTS_CEILING {
+        return Err(HttpFetchError::Configuration {
+            reason: "max_redirects_out_of_range",
+        });
+    }
+
+    let mut per_host_headers = BTreeMap::new();
+    for (host, headers) in &config.per_host_headers {
+        let pattern = HostPattern::parse(host)?;
+        if !pattern.is_exact() {
+            return Err(HttpFetchError::Configuration {
+                reason: "per_host_header_key_not_exact_host",
+            });
+        }
+        for (name, value) in headers {
+            HeaderName::from_bytes(name.as_bytes()).map_err(|_| HttpFetchError::Configuration {
+                reason: "invalid_per_host_header_name",
+            })?;
+            HeaderValue::from_str(value).map_err(|_| HttpFetchError::Configuration {
+                reason: "invalid_per_host_header_value",
+            })?;
+        }
+        per_host_headers.insert(host.to_ascii_lowercase(), headers.clone());
+    }
+
+    let config = HttpFetchConfig {
+        per_host_headers,
+        ..config
+    };
+
+    Ok((config, patterns))
 }
 
 impl fmt::Debug for PatternKind {
