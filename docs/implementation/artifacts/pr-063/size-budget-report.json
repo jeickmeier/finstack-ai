@@ -10,9 +10,9 @@
       "within_budget": true
     },
     {
-      "bytes": 15661641,
+      "bytes": 15706637,
       "detail": "within ratified budget or unratified optional",
-      "gzip_bytes": 5426005,
+      "gzip_bytes": 5434532,
       "id": "wasm-bg",
       "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm_bg.wasm",
       "present": true,
