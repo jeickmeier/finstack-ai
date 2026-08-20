@@ -9,7 +9,10 @@ Finstack never reads `~/.codex`.
   `ChildPlacement::RemoteChildSession` with the frozen peer identity
   `finstack.peer.codex`. Equal `request_digest` attaches; a differing digest
   is a conflict. Run state (thread id, last message, usage, exit) is held
-  in memory; after a host restart, status is `unknown`.
+  in memory; status is `unknown` after a host restart, and for settled runs
+  evicted from a full run table (an equal replay still attaches via a
+  bounded tombstone instead of spawning a second child; the toolset forgets
+  an `unknown` run on the next status call).
 - `CodexToolset` exposes `codex_start` / `codex_status` / `codex_cancel`.
   The prompt is the only model-supplied input; binary path, workspace root,
   and sandbox mode are frozen at construction.

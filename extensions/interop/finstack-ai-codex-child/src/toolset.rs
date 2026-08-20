@@ -38,6 +38,7 @@ pub struct CodexToolset {
     tools: Arc<[ToolSpec]>,
     invoker: Arc<CodexChildInvoker>,
     agent: AgentRef,
+    remote: RemoteRouteRef,
     children: Arc<Mutex<BTreeMap<ChildKey, StartedChild>>>,
 }
 
@@ -62,6 +63,7 @@ impl CodexToolset {
     /// specification or the peer identity cannot be built.
     pub fn try_new(invoker: Arc<CodexChildInvoker>) -> Result<Self, CodexChildError> {
         let agent = codex_agent_ref()?;
+        let remote = codex_route_ref()?;
         let tools = Arc::from([
             tool_spec(
                 START_ID,
@@ -90,6 +92,7 @@ impl CodexToolset {
             tools,
             invoker,
             agent,
+            remote,
             children: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
@@ -124,6 +127,7 @@ impl Toolset for CodexToolset {
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let invoker = Arc::clone(&self.invoker);
         let agent = self.agent.clone();
+        let remote = self.remote.clone();
         let table = Arc::clone(&self.children);
         Box::pin(async move {
             verify_authority(&ctx)?;
@@ -135,18 +139,26 @@ impl Toolset for CodexToolset {
                     "codex call identity is invalid",
                 ));
             }
-            let snapshot = table.lock().map(|guard| guard.clone()).unwrap_or_default();
             let result = if name == START_NAME {
-                start_child(&invoker, &agent, &ctx, &call).await
-            } else if name == STATUS_NAME {
-                status_child(&invoker, &snapshot, &ctx, &call)
+                start_child(&invoker, &agent, remote, &ctx, &call).await
             } else {
-                cancel_child(&invoker, &snapshot, &ctx, &call).await
+                // Only status/cancel read the table; start never does.
+                let snapshot = table.lock().map(|guard| guard.clone()).unwrap_or_default();
+                if name == STATUS_NAME {
+                    status_child(&invoker, &snapshot, &ctx, &call)
+                } else {
+                    cancel_child(&invoker, &snapshot, &ctx, &call).await
+                }
             }?;
             if let Some(started) = result.started
                 && let Ok(mut children) = table.lock()
             {
                 children.insert(started.key, started.child);
+            }
+            if let Some(key) = result.forget
+                && let Ok(mut children) = table.lock()
+            {
+                children.remove(&key);
             }
             Ok(completed(result.output, result.is_error))
         })
@@ -157,6 +169,9 @@ struct CallOutcome {
     output: RawJson,
     is_error: bool,
     started: Option<StartedRecord>,
+    // A child the table should forget: its run was evicted from the
+    // invoker (status `unknown`), so later lookups would never improve.
+    forget: Option<ChildKey>,
 }
 
 struct StartedRecord {
@@ -167,6 +182,7 @@ struct StartedRecord {
 async fn start_child(
     invoker: &Arc<CodexChildInvoker>,
     agent: &AgentRef,
+    remote: RemoteRouteRef,
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
@@ -177,13 +193,6 @@ async fn start_child(
             "prompt must not be blank",
         ));
     }
-    let remote = codex_route_ref().map_err(|_| {
-        tool_error(
-            CODEX_INVALID_ARGUMENTS,
-            ErrorCategory::Internal,
-            "codex route reference is invalid",
-        )
-    })?;
     let locator = child_locator(&ctx.run.locator, remote).map_err(|_| {
         tool_error(
             CODEX_INVALID_ARGUMENTS,
@@ -240,6 +249,7 @@ async fn start_child(
                     key,
                     child: StartedChild { handle },
                 }),
+                forget: None,
             })
         }
         Err(error) => Ok(invoke_error_result(&error)),
@@ -271,20 +281,22 @@ fn status_child(
             "run_id": key.run_id.as_ref(),
             "status": "unknown",
         }))?;
+        // The invoker no longer knows this run (host restart or eviction
+        // of a settled run); later lookups can never improve, so the
+        // table forgets it instead of growing without bound.
         return Ok(CallOutcome {
             output,
             is_error: false,
             started: None,
+            forget: Some(key.clone()),
         });
     };
     let last_message = report
         .last_message
         .as_deref()
         .map(|text| truncate_message(text, MAX_MESSAGE_BYTES));
-    let stderr_tail = report
-        .stderr_tail
-        .as_deref()
-        .map(|text| truncate_message(text, MAX_MESSAGE_BYTES));
+    // Already bounded to STDERR_TAIL_BYTES at write time in `append_stderr`.
+    let stderr_tail = report.stderr_tail.as_deref();
     let output = result_json(&serde_json::json!({
         "run_id": key.run_id.as_ref(),
         "status": status_name(report.status),
@@ -298,6 +310,7 @@ fn status_child(
         output,
         is_error: false,
         started: None,
+        forget: None,
     })
 }
 
@@ -344,6 +357,7 @@ async fn cancel_child(
         output,
         is_error: false,
         started: None,
+        forget: None,
     })
 }
 
@@ -449,6 +463,7 @@ fn error_result(code: &'static str, message: &'static str) -> CallOutcome {
             .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
         is_error: true,
         started: None,
+        forget: None,
     }
 }
 

@@ -38,6 +38,12 @@ pub(crate) struct CodexRun {
 pub struct CodexChildInvoker {
     pub(crate) config: CodexExecConfig,
     pub(crate) runs: Arc<Mutex<BTreeMap<RunId, CodexRun>>>,
+    // Tombstones for runs evicted by `make_room`, keyed by run id with the
+    // accepted request digest. They keep `start_or_attach` idempotent: a
+    // replayed equal request attaches (without a second spawn) and a
+    // differing digest still conflicts, even after the run's state was
+    // evicted. Bounded to `max_accepted` entries, oldest dropped first.
+    pub(crate) evicted: Arc<Mutex<BTreeMap<RunId, finstack_ai_kernel::Digest>>>,
     pub(crate) max_accepted: usize,
 }
 
@@ -75,15 +81,16 @@ impl CodexChildInvoker {
         Ok(Self {
             config,
             runs: Arc::new(Mutex::new(BTreeMap::new())),
+            evicted: Arc::new(Mutex::new(BTreeMap::new())),
             max_accepted,
         })
     }
 
     /// Report point-in-time status for an accepted run.
     ///
-    /// Returns `None` for runs this process never accepted (including all
-    /// runs from before a host restart) — the toolset reports those as
-    /// `unknown`.
+    /// Returns `None` for runs this process never accepted — all runs from
+    /// before a host restart, and settled runs evicted from a full table by
+    /// [`make_room`] — the toolset reports those as `unknown`.
     #[must_use]
     pub fn run_status(&self, run_id: &RunId) -> Option<CodexRunReport> {
         let runs = self.runs.lock().ok()?;
@@ -117,15 +124,32 @@ fn unavailable(message: &'static str) -> AgentInvokeError {
 /// drop the only handle `cancel` can use to kill a possibly-running
 /// process. Keeping it costs one slot; evicting it could leak a process.
 ///
+/// Every evicted run leaves a tombstone (run id → request digest) so a
+/// replayed equal request still attaches instead of spawning a duplicate
+/// child; the tombstone map is itself bounded to `cap` entries.
+///
 /// Called with the run-table lock held; it never awaits.
-fn make_room(runs: &mut BTreeMap<RunId, CodexRun>, cap: usize) -> bool {
+fn make_room(
+    runs: &mut BTreeMap<RunId, CodexRun>,
+    evicted: &mut BTreeMap<RunId, finstack_ai_kernel::Digest>,
+    cap: usize,
+) -> bool {
     if runs.len() < cap {
         return true;
     }
-    runs.retain(|_, run| match run.state.lock() {
-        Ok(state) => state.report().status == CodexRunStatus::Running,
+    runs.retain(|run_id, run| match run.state.lock() {
+        Ok(state) => {
+            let keep = state.report().status == CodexRunStatus::Running;
+            if !keep {
+                evicted.insert(*run_id, run.request_digest);
+            }
+            keep
+        }
         Err(_) => true,
     });
+    while evicted.len() > cap {
+        evicted.pop_first();
+    }
     runs.len() < cap
 }
 
@@ -239,6 +263,7 @@ impl AgentInvoker for CodexChildInvoker {
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
         let config = self.config.clone();
         let runs = Arc::clone(&self.runs);
+        let evicted = Arc::clone(&self.evicted);
         let max_accepted = self.max_accepted;
         Box::pin(async move {
             request.validate()?;
@@ -280,9 +305,28 @@ impl AgentInvoker for CodexChildInvoker {
                     submitted: request.request_digest,
                 });
             }
-            if !make_room(&mut guard, max_accepted) {
+            // The evicted-tombstone map is locked strictly after the run
+            // table and released before any spawn; neither lock is held
+            // across an await.
+            let mut evicted_guard = evicted
+                .lock()
+                .map_err(|_| unavailable("codex eviction table is poisoned"))?;
+            if let Some(prior) = evicted_guard.get(&run_id) {
+                if *prior == request.request_digest {
+                    // The run settled and was evicted; the equal replay
+                    // attaches to that acceptance instead of spawning a
+                    // second child. State is gone, so status is `unknown`.
+                    return Ok(handle);
+                }
+                return Err(AgentInvokeError::Conflict {
+                    existing: *prior,
+                    submitted: request.request_digest,
+                });
+            }
+            if !make_room(&mut guard, &mut evicted_guard, max_accepted) {
                 return Err(unavailable("codex run table is full"));
             }
+            drop(evicted_guard);
             let (state, slot) = spawn_codex(&config, &prompt)?;
             guard.insert(
                 run_id,

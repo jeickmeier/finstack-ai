@@ -330,6 +330,43 @@ async fn full_table_of_settled_runs_evicts_and_accepts() {
     assert_eq!(guard.len(), 1, "both settled fillers were evicted");
 }
 
+/// Eviction leaves tombstones, so `start_or_attach` stays idempotent: an
+/// equal replay of an evicted run attaches without spawning a second
+/// child, and a differing digest still conflicts.
+#[tokio::test]
+async fn evicted_run_replay_attaches_and_conflicts_without_respawn() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = valid_config(dir.path());
+    config.binary = PathBuf::from("/bin/echo");
+    let invoker = CodexChildInvoker::try_new_with_cap(config, 2).expect("invoker");
+    fill_runs(&invoker, 2, true);
+
+    invoker
+        .start_or_attach(test_context(), test_request(9))
+        .await
+        .expect("settled runs make room");
+    assert_eq!(invoker.runs.lock().expect("run table").len(), 1);
+
+    let mut replay = test_request(200);
+    replay.request_digest =
+        Digest::domain_separated("child-run-request", 1, b"filler").expect("digest");
+    invoker
+        .start_or_attach(test_context(), replay)
+        .await
+        .expect("equal replay of the evicted run attaches");
+    assert_eq!(
+        invoker.runs.lock().expect("run table").len(),
+        1,
+        "the attach did not spawn or insert a second run"
+    );
+
+    let error = invoker
+        .start_or_attach(test_context(), test_request(201))
+        .await
+        .expect_err("differing digest for an evicted run conflicts");
+    assert!(matches!(error, AgentInvokeError::Conflict { .. }));
+}
+
 /// Running entries are never evicted, so a table genuinely full of live
 /// children still fails closed.
 #[tokio::test]
