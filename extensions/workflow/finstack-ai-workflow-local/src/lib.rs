@@ -1,11 +1,10 @@
 //! In-process reference workflow driver.
 //!
 //! This crate drives [`WorkflowSession`]. It does not depend on the kernel
-//! crate. Semantic types come from `finstack-ai-runtime`. It does not
-//! depend on the Temporal-shaped sibling.
+//! crate. Semantic types come from `finstack-ai-runtime`.
 //!
-//! Cron schedule rows are adapter state persisted beside the journal. They
-//! are not kernel records and do not add a `RecordBody` variant.
+//! This crate stays dependency-light: adapter cron state lives beside the
+//! journal file and never becomes a kernel record.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]

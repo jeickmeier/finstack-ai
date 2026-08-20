@@ -1657,6 +1657,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-workflow-worker"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-test",
+ "finstack-ai-workflow-local",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
