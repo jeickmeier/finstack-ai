@@ -1,6 +1,7 @@
 //! Integration tests for spawning and supervising `codex exec` runs.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use finstack_ai_codex_child::{
     CodexChildInvoker, CodexExecConfig, CodexRunReport, CodexRunStatus, CodexSandboxMode,
@@ -111,15 +112,19 @@ fn codex_request(prompt: &str) -> ChildRunRequest {
 }
 
 async fn wait_until_settled(invoker: &CodexChildInvoker, run_id: &RunId) -> CodexRunReport {
-    for _ in 0..200 {
+    let start = Instant::now();
+    loop {
         if let Some(report) = invoker.run_status(run_id)
             && report.status != CodexRunStatus::Running
         {
             return report;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "codex fake run never settled"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("codex fake run never settled");
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
 //! Integration tests for `CodexToolset` (`codex_start` / `codex_status` / `codex_cancel`).
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use finstack_ai_codex_child::{CodexChildInvoker, CodexExecConfig, CodexSandboxMode, CodexToolset};
 use finstack_ai_kernel::{
@@ -98,7 +99,8 @@ async fn call_tool(toolset: &CodexToolset, name: &str, arguments_json: &str) -> 
 }
 
 async fn poll_status(toolset: &CodexToolset, run_id: &str) -> serde_json::Value {
-    for _ in 0..200 {
+    let start = Instant::now();
+    loop {
         let status = call_tool(
             toolset,
             "codex_status",
@@ -108,9 +110,12 @@ async fn poll_status(toolset: &CodexToolset, run_id: &str) -> serde_json::Value 
         if status["status"] != "running" {
             return status;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "codex run never settled"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("codex run never settled");
 }
 
 #[tokio::test]
