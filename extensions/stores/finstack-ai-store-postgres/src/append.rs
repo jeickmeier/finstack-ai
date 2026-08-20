@@ -29,10 +29,15 @@
 //! session row serializes every writer of one session while leaving distinct
 //! sessions contention-free; creating a session additionally locks the
 //! single `store_totals` row so the `sessions` ceiling is enforced against a
-//! stable count. Locks are always taken session-row-then-`store_totals`, so
-//! the only deadlock window is the create race described on
-//! [`create_session`], which Postgres resolves as `40P01` →
-//! `Unavailable{postgres_serialization}` for the caller to retry.
+//! stable count.
+//!
+//! Only the create path takes both locks, and it takes `store_totals`
+//! *before* inserting the session row — so a lock cycle would need some
+//! other path to insert a session row while holding no `store_totals` lock,
+//! and none exists. The `40P01` → `Unavailable{postgres_serialization}`
+//! mapping is therefore defense in depth (a deadlock introduced by a future
+//! path, or by a lock Postgres takes on this transaction's behalf) rather
+//! than the handling of an expected outcome; the caller retries either way.
 //!
 //! ## Transaction handling
 //!
@@ -50,59 +55,30 @@
 //! ## Connection disposition
 //!
 //! Every error carries a poison flag (see [`Failure`]). Server-reported
-//! errors (those with a SQLSTATE) leave the connection healthy after the
-//! rollback and return it to the pool; errors with no SQLSTATE are IO,
-//! protocol, or codec failures on the wire, and poison the checkout so it is
-//! dropped instead of reused (spec D2). A `COMMIT` that fails without a
+//! errors (those with a SQLSTATE, on a still-open connection) leave the
+//! connection healthy after the rollback and return it to the pool; errors
+//! with no SQLSTATE are IO, protocol, or codec failures on the wire, and
+//! errors seen on an already-closed connection are the backend going away
+//! under this transaction — both poison the checkout so it is dropped
+//! instead of reused (spec D2). A `COMMIT` that fails without a
 //! SQLSTATE is the spec D5 ambiguous acknowledgement: the transaction may or
 //! may not be durable, so it maps to
 //! [`StoreError::AmbiguousAcknowledgement`] and always poisons.
 
 use finstack_ai_kernel::{
-    AppendBatchId, AppendRequest, CommittedBatch, Digest, EventId, Id, IdTag, Metadata, RecordBody,
-    RecordEnvelope, SessionId, Timestamp,
+    AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordEnvelope, SessionId,
 };
-use finstack_ai_protocol::{decode, encode};
+use finstack_ai_protocol::encode;
 use finstack_ai_runtime::{StoreError, StoreLimits};
 use finstack_ai_store_common::{
-    AppendIdentity, SessionUsage, admit_append_limits, build_committed_batch,
-    check_append_sequence, classify_record_reuse, protocol_error, request_cbor, request_identity,
+    SessionUsage, admit_append_limits, build_committed_batch, check_append_sequence,
+    classify_record_reuse, protocol_error, request_cbor, request_identity,
 };
 use tokio_postgres::{Client, Transaction};
 
-use crate::error::{i64_from_u64, map_postgres_error, u64_from_i64};
+use crate::error::{Failure, i64_from_u64, u64_from_i64};
+use crate::load::{digest_from_bytes, id_from_bytes, load_batch, usize_from_i64};
 use crate::pool::PooledClient;
-
-/// An append failure plus the disposition of the connection it happened on.
-struct Failure {
-    /// The error to report to the caller.
-    error: StoreError,
-    /// `true` when the connection must never be reused (spec D2/D5).
-    poison: bool,
-}
-
-impl From<StoreError> for Failure {
-    /// A purely logical failure (admission, encoding, integrity): the
-    /// connection itself is fine once the transaction has been rolled back.
-    fn from(error: StoreError) -> Self {
-        Self {
-            error,
-            poison: false,
-        }
-    }
-}
-
-impl Failure {
-    /// Classify a driver error: a server-reported failure (one carrying a
-    /// SQLSTATE) leaves a usable connection, anything else is a wire-level
-    /// failure that poisons it.
-    fn from_driver(error: &tokio_postgres::Error) -> Self {
-        Self {
-            error: map_postgres_error(error),
-            poison: error.code().is_none(),
-        }
-    }
-}
 
 /// Append `request` on `client`, per spec D4.
 ///
@@ -329,11 +305,12 @@ async fn lock_store_totals(transaction: &Transaction<'_>) -> Result<usize, Failu
 /// Insert the session row, returning `true` when *this* writer created it.
 ///
 /// `ON CONFLICT DO NOTHING` plus the caller's re-`SELECT … FOR UPDATE`
-/// closes the create race (spec D4 step 2). A concurrent creator that is
-/// mid-transaction holds its own uncommitted session row while waiting for
-/// the `store_totals` lock this writer holds; Postgres reports that cycle as
-/// a deadlock (`40P01` → `Unavailable{postgres_serialization}`) and the
-/// caller retries.
+/// closes the create race (spec D4 step 2). A concurrent creator is
+/// serialized before that: it must hold the single `store_totals` row lock
+/// to reach this statement at all, so two creators queue rather than
+/// deadlock, and the loser simply observes the committed row on its
+/// re-select. (`40P01` still maps to `Unavailable{postgres_serialization}`
+/// as defense in depth — see the module doc comment.)
 async fn create_session(
     transaction: &Transaction<'_>,
     session_id: SessionId,
@@ -369,62 +346,6 @@ async fn bump_session_count(transaction: &Transaction<'_>) -> Result<(), Failure
     Ok(())
 }
 
-/// A previously committed batch, rehydrated for an idempotent replay.
-struct LoadedBatch {
-    /// Stored [`AppendIdentity`] CBOR, compared byte-for-byte on replay.
-    request_cbor: Vec<u8>,
-    /// Decoded identity, used for the record-reuse replay comparison.
-    identity: AppendIdentity,
-    /// The batch as it was returned when first committed.
-    committed: CommittedBatch,
-}
-
-/// Load a committed batch by id, with its records in sequence order.
-async fn load_batch(
-    transaction: &Transaction<'_>,
-    batch_id: AppendBatchId,
-) -> Result<Option<LoadedBatch>, Failure> {
-    let row = transaction
-        .query_opt(
-            "SELECT request_cbor, first_sequence, last_sequence FROM batches WHERE batch_id = $1",
-            &[&batch_id.as_bytes().as_slice()],
-        )
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    let request_cbor: Vec<u8> = row.get(0);
-    let first_sequence = u64_from_i64(row.get(1), "first_sequence")?;
-    let last_sequence = u64_from_i64(row.get(2), "last_sequence")?;
-    let identity = decode::<AppendIdentity>(&request_cbor).map_err(protocol_error)?;
-
-    let record_rows = transaction
-        .query(
-            "SELECT session_id, sequence, record_id, lane_id, run_id, kind, format_version, \
-                    kind_version, payload_cbor, timestamp, payload_digest, previous_checksum, \
-                    envelope_checksum, derived_event_ids \
-             FROM records WHERE batch_id = $1 ORDER BY sequence",
-            &[&batch_id.as_bytes().as_slice()],
-        )
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-    let records = record_rows
-        .iter()
-        .map(reconstruct_envelope)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let committed = CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records)
-        .map_err(|_| StoreError::Integrity {
-            reason_code: "committed_batch_invalid",
-        })?;
-    Ok(Some(LoadedBatch {
-        request_cbor,
-        identity,
-        committed,
-    }))
-}
-
 /// Classify record-id reuse and, when the whole request was already
 /// committed under a different batch id, replay that batch.
 ///
@@ -458,7 +379,7 @@ async fn replay_by_record_reuse(
         .iter()
         .map(|row| {
             let batch_id: Vec<u8> = row.get(1);
-            id_from_bytes::<_>(&batch_id)
+            id_from_bytes(&batch_id)
         })
         .collect::<Result<Vec<AppendBatchId>, _>>()?;
 
@@ -655,148 +576,4 @@ async fn update_session_head(
         .into());
     }
     Ok(())
-}
-
-/// Rebuild a [`RecordEnvelope`] from a stored row.
-///
-/// Column order must match the `SELECT` in [`load_batch`].
-fn reconstruct_envelope(row: &tokio_postgres::Row) -> Result<RecordEnvelope, StoreError> {
-    let session_id: Vec<u8> = row.get(0);
-    let sequence: i64 = row.get(1);
-    let record_id: Vec<u8> = row.get(2);
-    let lane_id: Vec<u8> = row.get(3);
-    let run_id: Option<Vec<u8>> = row.get(4);
-    let kind: String = row.get(5);
-    let format_version: i32 = row.get(6);
-    let kind_version: i32 = row.get(7);
-    let payload_cbor: Vec<u8> = row.get(8);
-    let timestamp: i64 = row.get(9);
-    let payload_digest: Vec<u8> = row.get(10);
-    let previous_checksum: Option<Vec<u8>> = row.get(11);
-    let envelope_checksum: Vec<u8> = row.get(12);
-    let derived_event_ids: Vec<u8> = row.get(13);
-
-    let body = decode::<RecordBody>(&payload_cbor).map_err(protocol_error)?;
-    if body.kind_name() != kind {
-        return Err(StoreError::Integrity {
-            reason_code: "postgres_kind_mismatch",
-        });
-    }
-    let events = decode::<Vec<EventId>>(&derived_event_ids).map_err(protocol_error)?;
-    RecordEnvelope::try_new(
-        u16_from_i32(format_version, "format_version")?,
-        u16_from_i32(kind_version, "kind_version")?,
-        id_from_bytes(&record_id)?,
-        id_from_bytes(&session_id)?,
-        id_from_bytes(&lane_id)?,
-        run_id.as_deref().map(id_from_bytes).transpose()?,
-        u64_from_i64(sequence, "sequence")?,
-        Timestamp::from_unix_ms(timestamp).map_err(|_| StoreError::Integrity {
-            reason_code: "postgres_timestamp",
-        })?,
-        None,
-        digest_from_bytes(&payload_digest)?,
-        previous_checksum
-            .as_deref()
-            .map(digest_from_bytes)
-            .transpose()?,
-        digest_from_bytes(&envelope_checksum)?,
-        events,
-        body,
-    )
-    .map_err(|_| StoreError::Integrity {
-        reason_code: "postgres_envelope_invalid",
-    })
-}
-
-/// Convert a stored `BIGINT` count to `usize`.
-fn usize_from_i64(value: i64, reason_code: &'static str) -> Result<usize, StoreError> {
-    usize::try_from(value).map_err(|_| StoreError::Integrity { reason_code })
-}
-
-/// Convert a stored `INTEGER` version column back to `u16`.
-fn u16_from_i32(value: i32, reason_code: &'static str) -> Result<u16, StoreError> {
-    u16::try_from(value).map_err(|_| StoreError::Integrity { reason_code })
-}
-
-/// Rebuild a typed id from its stored 16-byte representation.
-fn id_from_bytes<T: IdTag>(bytes: &[u8]) -> Result<Id<T>, StoreError> {
-    let value: [u8; 16] = bytes.try_into().map_err(|_| StoreError::Integrity {
-        reason_code: "postgres_id_width",
-    })?;
-    Ok(Id::from_bytes(value))
-}
-
-/// Hex alphabet used to rebuild a [`Digest`] from its stored bytes.
-const DIGEST_HEX: &[u8; 16] = b"0123456789abcdef";
-
-/// Rebuild a [`Digest`] from its stored 32-byte representation.
-///
-/// [`Digest`] is constructed from hex (it has no from-bytes constructor), so
-/// the stored bytes are re-hexed here — the same round trip sqlite's
-/// `digest_from_blob` performs.
-fn digest_from_bytes(bytes: &[u8]) -> Result<Digest, StoreError> {
-    if bytes.len() != 32 {
-        return Err(StoreError::Integrity {
-            reason_code: "postgres_digest_width",
-        });
-    }
-    let mut hex = [0_u8; 64];
-    for (index, byte) in bytes.iter().enumerate() {
-        hex[index * 2] = DIGEST_HEX[usize::from(byte >> 4)];
-        hex[index * 2 + 1] = DIGEST_HEX[usize::from(byte & 0x0f)];
-    }
-    let Ok(hex) = core::str::from_utf8(&hex) else {
-        return Err(StoreError::Integrity {
-            reason_code: "postgres_digest_hex",
-        });
-    };
-    Digest::from_hex(hex).map_err(|_| StoreError::Integrity {
-        reason_code: "postgres_digest_hex",
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn digest_round_trips_through_its_stored_bytes() {
-        let digest = Digest::raw_json(b"{}");
-        let restored = digest_from_bytes(digest.as_bytes()).expect("round trip");
-        assert_eq!(restored, digest);
-    }
-
-    #[test]
-    fn digest_rejects_a_wrong_width_column() {
-        let error = digest_from_bytes(&[0_u8; 16]).unwrap_err();
-        assert!(matches!(
-            error,
-            StoreError::Integrity {
-                reason_code: "postgres_digest_width"
-            }
-        ));
-    }
-
-    #[test]
-    fn id_rejects_a_wrong_width_column() {
-        let error = id_from_bytes::<finstack_ai_kernel::SessionTag>(&[0_u8; 8]).unwrap_err();
-        assert!(matches!(
-            error,
-            StoreError::Integrity {
-                reason_code: "postgres_id_width"
-            }
-        ));
-    }
-
-    /// A logical (admission) failure must leave the connection reusable;
-    /// only wire-level failures poison it.
-    #[test]
-    fn logical_failures_do_not_poison_the_connection() {
-        let failure = Failure::from(StoreError::Conflict {
-            expected_sequence: 1,
-            actual_next_sequence: 2,
-        });
-        assert!(!failure.poison);
-    }
 }

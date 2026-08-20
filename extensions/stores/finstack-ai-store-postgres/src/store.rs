@@ -16,10 +16,15 @@
 //! rather than silently connecting in plaintext. Wiring
 //! `tokio-postgres-rustls` is follow-up work.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use finstack_ai_kernel::SessionId;
 use finstack_ai_runtime::StoreError;
 
 use crate::config::{PostgresDurability, PostgresStoreConfig};
 use crate::error::map_postgres_error;
+use crate::load::VerifiedHead;
 use crate::pool::Pool;
 use crate::schema::ensure_schema;
 
@@ -47,6 +52,53 @@ pub(crate) const RELAXED_DETAIL: &str = "postgres synchronous_commit=off";
 pub struct PostgresJournalStore {
     pub(crate) pool: Pool<tokio_postgres::Client>,
     pub(crate) config: PostgresStoreConfig,
+    /// Process-local chain-verification cache (spec D9), keyed by session.
+    ///
+    /// `Arc` because every port method returns a `'static` future that must
+    /// own what it touches; a `std::sync::Mutex` (never held across an
+    /// `.await` — see [`VerifiedCache`]) because the guarded map operations
+    /// are pure memory work that no async runtime needs to see.
+    pub(crate) verified: VerifiedCache,
+}
+
+/// Shared handle to the per-session [`VerifiedHead`] cache.
+pub(crate) type VerifiedCache = Arc<Mutex<HashMap<SessionId, VerifiedHead>>>;
+
+/// Read the cached verified head for `session_id`, if any.
+///
+/// A poisoned mutex is recovered from rather than propagated: the guarded
+/// section is a `HashMap` lookup that cannot leave the map inconsistent, and
+/// the crate forbids `unwrap`/`panic` in non-test code.
+pub(crate) fn cached_head(cache: &VerifiedCache, session_id: SessionId) -> Option<VerifiedHead> {
+    match cache.lock() {
+        Ok(map) => map.get(&session_id).copied(),
+        Err(poisoned) => poisoned.into_inner().get(&session_id).copied(),
+    }
+}
+
+/// Record `head` as verified for `session_id`, replacing any prior entry.
+pub(crate) fn remember_head(cache: &VerifiedCache, session_id: SessionId, head: VerifiedHead) {
+    match cache.lock() {
+        Ok(mut map) => {
+            map.insert(session_id, head);
+        }
+        Err(poisoned) => {
+            poisoned.into_inner().insert(session_id, head);
+        }
+    }
+}
+
+/// Drop any cached proof for `session_id` (spec D9: on an `Integrity`
+/// result, or when the observed head fell below the cached sequence).
+pub(crate) fn invalidate_head(cache: &VerifiedCache, session_id: SessionId) {
+    match cache.lock() {
+        Ok(mut map) => {
+            map.remove(&session_id);
+        }
+        Err(poisoned) => {
+            poisoned.into_inner().remove(&session_id);
+        }
+    }
 }
 
 impl PostgresJournalStore {
@@ -91,7 +143,11 @@ impl PostgresJournalStore {
         );
         pool.seed(client);
 
-        Ok(Self { pool, config })
+        Ok(Self {
+            pool,
+            config,
+            verified: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 }
 

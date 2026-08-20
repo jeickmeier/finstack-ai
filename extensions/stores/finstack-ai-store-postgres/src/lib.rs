@@ -8,8 +8,9 @@
 //! Python, or WASM default (no WASM support: native-tokio only).
 //!
 //! This crate currently provides configuration, error mapping, schema
-//! management, the connection pool, and an open path with `health()`.
-//! `append`/`load`/`write_snapshot` land in subsequent changes (see
+//! management, the connection pool, an open path with `health()`, the
+//! multi-writer `append` protocol, and chain-verified `load`/`load_from`.
+//! `write_snapshot` lands in a subsequent change (see
 //! `src/journal_store.rs`).
 
 #![warn(missing_docs)]
@@ -37,6 +38,7 @@ mod append;
 mod config;
 mod error;
 mod journal_store;
+mod load;
 mod pool;
 mod schema;
 mod store;

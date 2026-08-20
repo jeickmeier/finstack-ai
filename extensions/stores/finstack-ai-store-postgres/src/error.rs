@@ -25,6 +25,49 @@ const SERIALIZATION_FAILURE: &str = "40001";
 /// `AppendRequest`, which the idempotency contract makes safe.
 const DEADLOCK_DETECTED: &str = "40P01";
 
+/// A failure plus the disposition of the connection it happened on.
+///
+/// Shared by the append (spec D4/D5) and load (spec D9) paths: both run
+/// statements on a checked-out connection and must decide, for every error,
+/// whether that connection may go back to the pool (spec D2).
+pub(crate) struct Failure {
+    /// The error to report to the caller.
+    pub(crate) error: StoreError,
+    /// `true` when the connection must never be reused (spec D2/D5).
+    pub(crate) poison: bool,
+}
+
+impl From<StoreError> for Failure {
+    /// A purely logical failure (admission, encoding, integrity): the
+    /// connection itself is fine once any open transaction has been rolled
+    /// back.
+    fn from(error: StoreError) -> Self {
+        Self {
+            error,
+            poison: false,
+        }
+    }
+}
+
+impl Failure {
+    /// Classify a driver error: a server-reported failure (one carrying a
+    /// SQLSTATE, on a connection that is still open) leaves a usable
+    /// connection; anything else — a wire-level IO/protocol/codec failure,
+    /// or *any* error observed on a connection the driver has already
+    /// closed — poisons it.
+    ///
+    /// The `is_closed()` half matters on its own: a backend being shut down
+    /// reports `57P01 admin_shutdown` as a `DbError` *with* a SQLSTATE, so
+    /// the SQLSTATE test alone would hand that dying connection back to the
+    /// pool.
+    pub(crate) fn from_driver(error: &tokio_postgres::Error) -> Self {
+        Self {
+            error: map_postgres_error(error),
+            poison: error.code().is_none() || error.is_closed(),
+        }
+    }
+}
+
 /// Convert an unsigned 64-bit value to the signed 64-bit representation used
 /// for Postgres `BIGINT` columns.
 pub(crate) fn i64_from_u64(value: u64, reason_code: &'static str) -> Result<i64, StoreError> {
@@ -160,6 +203,17 @@ mod tests {
                 reason_code: "postgres_unavailable"
             }
         ));
+    }
+
+    /// A logical (admission) failure must leave the connection reusable;
+    /// only wire-level failures poison it.
+    #[test]
+    fn logical_failures_do_not_poison_the_connection() {
+        let failure = Failure::from(StoreError::Conflict {
+            expected_sequence: 1,
+            actual_next_sequence: 2,
+        });
+        assert!(!failure.poison);
     }
 
     #[test]
