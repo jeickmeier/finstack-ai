@@ -79,7 +79,7 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
 }
 
 /// Credentials, region, and timestamp needed to compute a `SigV4` signature.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SigningParams<'a> {
     /// AWS access key id (public identifier).
     pub access_key_id: &'a str,
@@ -91,6 +91,18 @@ pub struct SigningParams<'a> {
     pub service: &'a str,
     /// Request timestamp.
     pub timestamp: UtcStamp,
+}
+
+impl std::fmt::Debug for SigningParams<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SigningParams")
+            .field("access_key_id", &self.access_key_id)
+            .field("secret_key", &"[REDACTED]")
+            .field("region", &self.region)
+            .field("service", &self.service)
+            .field("timestamp", &self.timestamp)
+            .finish()
+    }
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
@@ -445,5 +457,18 @@ mod tests {
     fn uri_encode_preserves_slash_only_when_requested() {
         assert_eq!(super::uri_encode("/a b/c", false), "/a%20b/c");
         assert_eq!(super::uri_encode("/a b/c", true), "%2Fa%20b%2Fc");
+    }
+
+    #[test]
+    fn signing_params_debug_never_leaks_the_secret() {
+        let rendered = format!("{:?}", params());
+        assert!(
+            rendered.contains("[REDACTED]"),
+            "Debug output must redact secret_key: {rendered}"
+        );
+        assert!(
+            !rendered.contains(SECRET_KEY),
+            "Debug output must never contain the raw secret: {rendered}"
+        );
     }
 }

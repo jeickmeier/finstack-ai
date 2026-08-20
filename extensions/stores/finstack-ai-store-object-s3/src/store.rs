@@ -54,7 +54,8 @@ impl S3ObjectStore {
         // `Location`. Disabling redirects makes that a hard failure
         // (mapped to `Unavailable { message: "http_3xx" }`) instead.
         let client = reqwest::Client::builder()
-            .timeout(config.timeout())
+            .connect_timeout(config.timeout())
+            .read_timeout(config.timeout())
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_error| ObjectError::InvalidMetadata {

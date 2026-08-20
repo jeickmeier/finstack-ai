@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{Metadata, Sensitivity};
 use finstack_ai_runtime::{
-    Bytes, ObjectError, ObjectKey, ObjectMetadata, ObjectScope, ObjectStore, PageToken, PutPayload,
+    Bytes, OBJECT_TOO_LARGE, ObjectError, ObjectKey, ObjectMetadata, ObjectScope, ObjectStore,
+    ObjectStoreLimits, PageToken, PutPayload,
 };
 use finstack_ai_test::object_store::{FakeObjectStore, run_object_store_contract_suite};
 
@@ -113,5 +114,41 @@ async fn fake_object_store_pages_list_results_at_a_small_fixed_size() {
     assert_eq!(
         collected, expected_sorted,
         "the full walk must return exactly the 5 stored keys"
+    );
+}
+
+/// The shared contract suite skips its oversize case whenever a store's
+/// ceiling exceeds `OVERSIZE_CEILING_PROXY_MAX`, and every other invocation
+/// in this workspace uses the 5 GiB default ceiling — so the `TooLarge` path
+/// gets zero coverage unless something exercises a small ceiling directly.
+/// This is deliberately outside the shared suite (a small ceiling is a
+/// per-backend test concern, not a trait-contract assertion).
+#[tokio::test]
+async fn fake_object_store_rejects_a_put_over_a_small_ceiling() {
+    const MAX_OBJECT_BYTES: u64 = 1024;
+
+    let store = FakeObjectStore::with_limits(ObjectStoreLimits {
+        max_object_bytes: MAX_OBJECT_BYTES,
+    });
+    let scope = test_scope("tenant-a");
+    let key = ObjectKey::try_new("docs/oversize.bin").expect("key must be valid");
+    let oversized = vec![7_u8; usize::try_from(MAX_OBJECT_BYTES + 1).expect("fits usize")];
+
+    let error = store
+        .put(
+            scope,
+            key,
+            PutPayload::Bytes(Bytes::from(oversized)),
+            test_metadata(),
+        )
+        .await
+        .expect_err("put over the ceiling must be rejected");
+
+    assert_eq!(error.code(), OBJECT_TOO_LARGE);
+    assert!(
+        matches!(error, ObjectError::TooLarge { len, max }
+            if len == MAX_OBJECT_BYTES + 1 && max == MAX_OBJECT_BYTES),
+        "expected TooLarge{{len: {}, max: {MAX_OBJECT_BYTES}}}, got {error:?}",
+        MAX_OBJECT_BYTES + 1
     );
 }

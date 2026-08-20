@@ -123,7 +123,16 @@ impl S3ObjectStoreConfig {
         Ok(self)
     }
 
-    /// Set the per-request timeout.
+    /// Set the connection-establishment and inter-chunk idle-read timeout.
+    ///
+    /// This bounds two things: how long the client waits to establish the
+    /// TCP/TLS connection, and how long it waits between successive reads
+    /// while streaming a response body (the timer resets on every read).
+    /// It does **not** bound the total duration of a request — a large
+    /// `get_to_file`/put against a store with a large `max_object_bytes`
+    /// ceiling can legitimately run far longer than this value as long as
+    /// bytes keep arriving. Hosts that need a hard total deadline should
+    /// wrap calls into this store in their own timeout.
     #[must_use]
     pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -186,7 +195,8 @@ impl S3ObjectStoreConfig {
         self.secret_access_key.as_ref()
     }
 
-    /// Configured per-request timeout.
+    /// Configured connection-establishment and inter-chunk idle-read
+    /// timeout (not a total-request deadline; see [`Self::with_timeout`]).
     #[must_use]
     pub const fn timeout(&self) -> Duration {
         self.timeout
