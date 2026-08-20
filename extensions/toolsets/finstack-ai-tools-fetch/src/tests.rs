@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
     PrincipalRef, RawJson, RunId, SessionId, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, ValidatedToolCall,
 };
-use finstack_ai_net_guard::HostResolver;
+use finstack_ai_net_guard::{HostResolver, UrlPolicy, parse_and_vet_url};
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,
 };
@@ -506,6 +506,32 @@ async fn serve_sequence(
         stream.write_all(&response).await.expect("write");
         stream.shutdown().await.expect("shutdown");
     }
+}
+
+#[test]
+fn loopback_redirect_bypass_requires_loopback_origin() {
+    // Regression for a remote-steered-loopback finding: with
+    // `allow_loopback_http: true`, the loopback allowlist bypass must only
+    // apply when the *original* request was itself loopback — otherwise an
+    // allowlisted public host could 302 a caller into a local-only service
+    // via `Location: http://127.0.0.1:.../`. `host_allowed` takes
+    // `origin_is_loopback` as a caller-supplied fact (fixed for the whole
+    // redirect chain, computed once from hop 0) rather than re-deriving it
+    // from `vetted`, so this test exercises both true and false directly.
+    let config = loopback_config(&["docs.rs"]);
+    let policy = UrlPolicy {
+        allow_loopback_http: true,
+    };
+    let loopback = parse_and_vet_url("http://127.0.0.1:1/", &policy).expect("loopback url vets");
+    assert!(loopback.is_loopback, "sanity: fixture url is loopback");
+
+    // Loopback origin (hop 0 was itself loopback): the bypass applies.
+    assert!(crate::pipeline::host_allowed(&loopback, true, &config, &[]));
+
+    // Non-loopback origin (e.g. hop 0 was an allowlisted public host that
+    // redirected to loopback): the bypass must NOT apply, and an empty
+    // pattern list must deny.
+    assert!(!crate::pipeline::host_allowed(&loopback, false, &config, &[]));
 }
 
 #[tokio::test]

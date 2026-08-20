@@ -142,8 +142,26 @@ fn map_vet_error(error: &NetGuardError) -> ToolError {
     }
 }
 
-fn host_allowed(vetted: &VettedUrl, config: &HttpFetchConfig, patterns: &[HostPattern]) -> bool {
-    if vetted.is_loopback && config.allow_loopback_http {
+/// Is `vetted`'s host on the allowlist for this hop?
+///
+/// The loopback bypass (`allow_loopback_http`) exists so a caller can point
+/// the tool at their own test fixtures without adding `127.0.0.1` to the
+/// allowlist. It must NOT let a redirect escalate an allowlisted *public*
+/// host into loopback: an attacker-controlled or compromised allowlisted
+/// endpoint could otherwise respond `302 Location: http://127.0.0.1:.../` to
+/// reach a caller-local service that was never vetted for that purpose. So
+/// the bypass only applies when the *original* request (hop 0) was itself
+/// loopback — `origin_is_loopback` is fixed for the whole redirect chain,
+/// computed once from hop 0 and threaded through every subsequent hop.
+/// Once a chain starts at a public origin, every hop (including loopback
+/// ones) must clear the allowlist on its own merits.
+pub(crate) fn host_allowed(
+    vetted: &VettedUrl,
+    origin_is_loopback: bool,
+    config: &HttpFetchConfig,
+    patterns: &[HostPattern],
+) -> bool {
+    if origin_is_loopback && vetted.is_loopback && config.allow_loopback_http {
         return true;
     }
     patterns.iter().any(|pattern| pattern.matches(&vetted.host))
@@ -213,9 +231,10 @@ async fn send_hop(
     state: &FetchState,
     ctx: &ToolCallContext,
     current: &VettedUrl,
+    origin_is_loopback: bool,
     user_agent: &str,
 ) -> Result<reqwest::Response, ToolError> {
-    if !host_allowed(current, &state.config, &state.patterns) {
+    if !host_allowed(current, origin_is_loopback, &state.config, &state.patterns) {
         return Err(tool_error(
             FETCH_HOST_NOT_ALLOWLISTED,
             ErrorCategory::Validation,
@@ -300,14 +319,13 @@ pub(crate) async fn execute_fetch(
     ctx: &ToolCallContext,
     args: FetchArguments,
 ) -> Result<serde_json::Value, ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
-
     let policy = UrlPolicy {
         allow_loopback_http: state.config.allow_loopback_http,
     };
     let mut current = parse_and_vet_url(&args.url, &policy).map_err(|e| map_vet_error(&e))?;
+    // Fixed for the whole redirect chain: only a loopback *origin* (hop 0)
+    // may bypass the allowlist via loopback on later hops. See `host_allowed`.
+    let origin_is_loopback = current.is_loopback;
 
     let user_agent = state
         .config
@@ -327,9 +345,9 @@ pub(crate) async fn execute_fetch(
             return Err(timeout_error());
         }
 
-        let response = send_hop(state, ctx, &current, &user_agent).await?;
+        let response = send_hop(state, ctx, &current, origin_is_loopback, &user_agent).await?;
         let status = response.status();
-        if status.is_redirection() {
+        if matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
             if hop >= state.config.max_redirects {
                 return Err(tool_error(
                     FETCH_REDIRECT_DENIED,

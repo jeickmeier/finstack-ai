@@ -183,9 +183,9 @@ upgrade any tool to `RequireApproval`), `ToolExecutionMode::Parallel`,
 | Code | Category | Meaning |
 | --- | --- | --- |
 | `fetch_invalid_arguments` | Validation | Malformed arguments or URL |
-| `fetch_host_not_allowlisted` | Validation | Host matches no allowlist entry |
+| `fetch_host_not_allowlisted` | Validation | Host — initial or redirect hop — matches no allowlist entry |
 | `fetch_destination_blocked` | Validation | Resolved/literal address is private, loopback, link-local, or unique-local |
-| `fetch_redirect_denied` | Tool | Redirect limit exceeded, or a hop left the allowlist |
+| `fetch_redirect_denied` | Tool | Redirect limit exceeded |
 | `fetch_transport_failed` | Tool | Connect/TLS/read failure or non-2xx status (message names the status and a bounded reason, `endpoint_rejected` style) |
 | `fetch_limit_exceeded` | Limit | Body exceeds the effective byte cap |
 | `fetch_timeout` | Deadline | Cancellation, run deadline, or request timeout |
