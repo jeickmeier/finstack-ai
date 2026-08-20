@@ -33,6 +33,7 @@ use finstack_ai_runtime::{
 };
 
 mod config;
+mod eval;
 
 pub use config::*;
 

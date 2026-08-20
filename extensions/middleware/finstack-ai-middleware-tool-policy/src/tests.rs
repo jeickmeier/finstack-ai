@@ -137,3 +137,85 @@ mod middleware_tests {
         );
     }
 }
+
+mod eval_tests {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::Arc;
+
+    use finstack_ai_kernel::ToolId;
+
+    use crate::ToolPolicyConfig;
+    use crate::eval::narrow_universe;
+
+    fn tid(s: &str) -> ToolId {
+        ToolId::parse(s).expect("tool id")
+    }
+
+    fn universe() -> BTreeSet<ToolId> {
+        BTreeSet::from([tid("t.read"), tid("t.write"), tid("t.spawn")])
+    }
+
+    #[test]
+    fn role_allowlist_is_deny_by_default_union_of_granted_roles() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_role_allowlist(
+                BTreeMap::from([
+                    (Arc::<str>::from("reader"), BTreeSet::from([tid("t.read")])),
+                    (Arc::<str>::from("writer"), BTreeSet::from([tid("t.write")])),
+                ]),
+                BTreeSet::new(),
+            )
+            .expect("roles");
+        let granted = [Arc::<str>::from("reader")];
+        assert_eq!(
+            narrow_universe(&cfg, &universe(), &granted),
+            BTreeSet::from([tid("t.read")])
+        );
+        let both = [Arc::<str>::from("reader"), Arc::<str>::from("writer")];
+        assert_eq!(
+            narrow_universe(&cfg, &universe(), &both),
+            BTreeSet::from([tid("t.read"), tid("t.write")])
+        );
+        // no granted roles, empty default → everything filtered
+        assert!(narrow_universe(&cfg, &universe(), &[]).is_empty());
+    }
+
+    #[test]
+    fn child_depth_gate_hides_restricted_tools_at_threshold() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_child_depth_gate(2, 2, BTreeSet::from([tid("t.spawn")]))
+            .expect("gate");
+        assert_eq!(
+            narrow_universe(&cfg, &universe(), &[]),
+            BTreeSet::from([tid("t.read"), tid("t.write")])
+        );
+        let below = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_child_depth_gate(1, 2, BTreeSet::from([tid("t.spawn")]))
+            .expect("gate");
+        assert_eq!(narrow_universe(&below, &universe(), &[]), universe());
+    }
+
+    #[test]
+    fn rules_compose_by_intersection() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_role_allowlist(
+                BTreeMap::from([(
+                    Arc::<str>::from("agent"),
+                    BTreeSet::from([tid("t.read"), tid("t.spawn")]),
+                )]),
+                BTreeSet::new(),
+            )
+            .expect("roles")
+            .with_child_depth_gate(3, 2, BTreeSet::from([tid("t.spawn")]))
+            .expect("gate");
+        let granted = [Arc::<str>::from("agent")];
+        assert_eq!(
+            narrow_universe(&cfg, &universe(), &granted),
+            BTreeSet::from([tid("t.read")])
+        );
+    }
+}
