@@ -43,6 +43,15 @@ fn kind_token(kind: &InteractionKind) -> Arc<str> {
 /// re-parks an unresolved session on the same interaction, and that must not
 /// revive a row that was already delivered, expired, or closed.
 ///
+/// That carry-forward rests on an ordering invariant: the interaction's wake
+/// row must already be indexed when `capture` runs. [`park`] is the safe
+/// entry point, because it delegates to
+/// [`finstack_ai_workflow_worker::park`] first. A caller invoking `capture`
+/// directly must upsert the wake row before doing so — otherwise a
+/// [`crate::HitlRouter::sweep`] racing the park reconciles the wake-less row
+/// to `Closed`, and the status-preserving re-capture then keeps it `Closed`
+/// forever, so the interaction never returns to the pending view.
+///
 /// # Errors
 ///
 /// Returns [`HitlError::StoreIntegrity`] with code `"hitl_request_encode"`

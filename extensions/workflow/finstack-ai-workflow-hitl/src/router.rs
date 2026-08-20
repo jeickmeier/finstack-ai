@@ -162,9 +162,16 @@ impl HitlRouter {
     /// independently durable, so rows already transitioned stay that way and
     /// re-running the sweep is safe.
     ///
+    /// Rows come from a snapshot, so each one is re-loaded and re-checked
+    /// immediately before its expiry is delivered; that narrows but cannot
+    /// eliminate the window against a concurrent [`HitlRouter::resolve`], and
+    /// the journal's settlement — not this inbox — remains the once-only
+    /// authority.
+    ///
     /// # Errors
     ///
-    /// Returns store failures from [`HitlInboxStore::load_active`] or
+    /// Returns store failures from [`HitlInboxStore::load_active`],
+    /// [`HitlInboxStore::load`], or
     /// [`HitlInboxStore::set_status`], [`HitlError::Worker`] when the wake
     /// index or delivery fails, [`HitlError::StoreIntegrity`] with code
     /// `"hitl_request_decode"` or `"hitl_locator"` for an undecodable row,
@@ -213,7 +220,14 @@ impl HitlRouter {
     }
 
     /// Deliver the expiry policy's resolution for one past-deadline row and
-    /// mark it `Expired`. Returns `false` when the policy declines.
+    /// mark it `Expired`. Returns `false` when the policy declines or when
+    /// the row is no longer expirable.
+    ///
+    /// The row arrives from [`HitlInboxStore::load_active`]'s snapshot, so it
+    /// is re-loaded immediately before delivery: a `resolve` that landed since
+    /// the snapshot must not have its command overwritten in the worker inbox
+    /// by an expiry refusal. Anything that is no longer `Open` past its
+    /// deadline is left exactly as found.
     fn expire_row(&self, row: &InteractionRow, now: Timestamp) -> Result<bool, HitlError> {
         let request: InteractionRequest =
             serde_json::from_slice(row.request.as_ref()).map_err(|_| {
@@ -224,6 +238,16 @@ impl HitlRouter {
         let Some(resolution) = self.expiry.expire(row, &request)? else {
             return Ok(false);
         };
+        let still_expirable = self
+            .store
+            .load(row.tenant_scope.as_ref(), row.interaction_id.as_ref())?
+            .is_some_and(|fresh| {
+                fresh.status == InteractionStatus::Open
+                    && fresh.expires_at.is_some_and(|deadline| deadline <= now)
+            });
+        if !still_expirable {
+            return Ok(false);
+        }
         let subject = self.deliver(
             row,
             &request,
