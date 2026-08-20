@@ -83,6 +83,11 @@ impl PostgresJournalStore {
                 let pool_config = pool_config.clone();
                 Box::pin(async move { connect_and_prepare(&pool_config).await })
             }),
+            // A connection can die while idle in the pool (server restart,
+            // network drop) with nothing else noticing; the pool checks
+            // this on every idle connection it pops before handing it out
+            // (see the finding fixed in `src/pool.rs::Pool::get`).
+            Box::new(|client: &tokio_postgres::Client| !client.is_closed()),
         );
         pool.seed(client);
 

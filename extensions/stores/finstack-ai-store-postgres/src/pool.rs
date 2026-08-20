@@ -26,8 +26,13 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 type ConnectFuture<C> = Pin<Box<dyn Future<Output = Result<C, StoreError>> + Send>>;
 
 /// A connection factory: called whenever the pool needs a new physical
-/// connection (idle queue empty on checkout).
+/// connection (idle queue empty, or exhausted by dead connections, on
+/// checkout).
 type ConnectFn<C> = Box<dyn Fn() -> ConnectFuture<C> + Send + Sync>;
+
+/// A liveness check, called on every idle connection popped during
+/// checkout before it is handed out (see [`Pool::get`]).
+type IsAliveFn<C> = Box<dyn Fn(&C) -> bool + Send + Sync>;
 
 /// Shared pool state, held behind an `Arc` so [`PooledClient`] can return
 /// its connection on drop without borrowing from [`Pool`].
@@ -41,6 +46,11 @@ struct PoolInner<C> {
     idle: StdMutex<Vec<C>>,
     /// Lazily creates a new physical connection.
     connect: ConnectFn<C>,
+    /// Checks whether an idle connection is still usable. A connection can
+    /// die while sitting idle (server restart, network drop) with nothing
+    /// else noticing; [`Pool::get`] runs this on every idle connection it
+    /// pops and silently drops dead ones instead of handing them out.
+    is_alive: IsAliveFn<C>,
 }
 
 /// A small bounded pool of connections of type `C`.
@@ -61,13 +71,15 @@ impl<C> Clone for Pool<C> {
 
 impl<C: Send + 'static> Pool<C> {
     /// Construct a pool bounded to `size` concurrent connections, using
-    /// `connect` to lazily create new ones.
-    pub(crate) fn new(size: usize, connect: ConnectFn<C>) -> Self {
+    /// `connect` to lazily create new ones and `is_alive` to check an idle
+    /// connection's liveness before handing it out.
+    pub(crate) fn new(size: usize, connect: ConnectFn<C>, is_alive: IsAliveFn<C>) -> Self {
         Self {
             inner: Arc::new(PoolInner {
                 semaphore: Arc::new(Semaphore::new(size)),
                 idle: StdMutex::new(Vec::new()),
                 connect,
+                is_alive,
             }),
         }
     }
@@ -93,8 +105,14 @@ impl<C: Send + 'static> Pool<C> {
     /// Check out a connection, waiting if `size` connections are already
     /// checked out.
     ///
-    /// Reuses an idle connection when one is available; otherwise lazily
-    /// opens a new one via the pool's connect function.
+    /// Reuses an idle connection when one is available *and* still passes
+    /// the pool's liveness check; dead idle connections (the server bounced,
+    /// the network dropped) are silently discarded and the next idle
+    /// connection is tried, falling through to opening a fresh connection
+    /// once the idle queue is exhausted. This makes the pool self-healing
+    /// even when a caller propagates an error with `?` instead of calling
+    /// [`PooledClient::discard`] — a stale idle connection is never handed
+    /// out a second time.
     ///
     /// # Errors
     ///
@@ -112,18 +130,24 @@ impl<C: Send + 'static> Pool<C> {
                 reason_code: "postgres_pool_closed",
             })?;
 
-        let idle_client = {
-            let mut idle = self
-                .inner
-                .idle
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            idle.pop()
-        };
+        let client = loop {
+            let idle_client = {
+                let mut idle = self
+                    .inner
+                    .idle
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                idle.pop()
+            };
 
-        let client = match idle_client {
-            Some(client) => client,
-            None => (self.inner.connect)().await?,
+            match idle_client {
+                Some(client) if (self.inner.is_alive)(&client) => break client,
+                // Dead idle connection: drop `client` here (its Drop, if
+                // any, is the driver's normal close path) and loop back to
+                // try the next idle one instead of handing it out.
+                Some(_dead_client) => {}
+                None => break (self.inner.connect)().await?,
+            }
         };
 
         Ok(PooledClient {
@@ -211,6 +235,11 @@ mod tests {
 
     use super::*;
 
+    /// A dedicated dead-marker value the test connectors below never
+    /// produce themselves, so `always_alive`/`dead_marker_is_dead` can tell
+    /// it apart from any real connected value.
+    const DEAD_MARKER: u32 = u32::MAX;
+
     fn counting_connector() -> (ConnectFn<u32>, Arc<AtomicU32>) {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_for_closure = Arc::clone(&counter);
@@ -221,10 +250,18 @@ mod tests {
         (connect, counter)
     }
 
+    fn always_alive() -> IsAliveFn<u32> {
+        Box::new(|_client| true)
+    }
+
+    fn dead_marker_is_dead() -> IsAliveFn<u32> {
+        Box::new(|client| *client != DEAD_MARKER)
+    }
+
     #[tokio::test]
     async fn reuses_idle_connections_instead_of_reconnecting() {
         let (connect, counter) = counting_connector();
-        let pool = Pool::new(4, connect);
+        let pool = Pool::new(4, connect, always_alive());
 
         let first = pool.get().await.expect("first checkout");
         drop(first);
@@ -240,7 +277,7 @@ mod tests {
     #[tokio::test]
     async fn discarded_connections_are_not_reused() {
         let (connect, counter) = counting_connector();
-        let pool = Pool::new(4, connect);
+        let pool = Pool::new(4, connect, always_alive());
 
         let first = pool.get().await.expect("first checkout");
         first.discard();
@@ -256,7 +293,7 @@ mod tests {
     #[tokio::test]
     async fn seeded_connection_is_used_before_connecting() {
         let (connect, counter) = counting_connector();
-        let pool = Pool::new(4, connect);
+        let pool = Pool::new(4, connect, always_alive());
         pool.seed(9999);
 
         let checked_out = pool.get().await.expect("checkout");
@@ -275,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn pool_size_is_honored_third_get_waits_for_a_return() {
         let (connect, _counter) = counting_connector();
-        let pool = Pool::new(2, connect);
+        let pool = Pool::new(2, connect, always_alive());
 
         let first = pool.get().await.expect("first checkout");
         let second = pool.get().await.expect("second checkout");
@@ -299,5 +336,100 @@ mod tests {
 
         drop(second);
         drop(third);
+    }
+
+    /// Reviewer finding: a dead idle connection must be dropped and skipped
+    /// at checkout, not handed back out. Seeds two "dead" connections
+    /// (never popped by `is_alive`) directly into the idle queue and
+    /// asserts `get()` skips both and falls through to `connect()` exactly
+    /// once, rather than returning a dead connection or looping forever.
+    #[tokio::test]
+    async fn dead_idle_connections_are_skipped_at_checkout() {
+        let (connect, counter) = counting_connector();
+        let pool = Pool::new(4, connect, dead_marker_is_dead());
+        pool.seed(DEAD_MARKER);
+        pool.seed(DEAD_MARKER);
+
+        let checked_out = pool.get().await.expect("checkout should self-heal");
+
+        assert_ne!(
+            *checked_out, DEAD_MARKER,
+            "a dead idle connection must never be handed out"
+        );
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "checkout should skip both dead idle connections and connect exactly once"
+        );
+    }
+
+    /// Same finding, against a real server: an idle pooled
+    /// `tokio_postgres::Client` whose backend gets killed out from under it
+    /// (server restart / network drop, simulated here with
+    /// `pg_terminate_backend`) must be dropped at the next checkout rather
+    /// than handed back out, and the pool must transparently reconnect.
+    #[tokio::test]
+    async fn dead_idle_postgres_connection_is_dropped_and_pool_reconnects() {
+        let Some(url) = std::env::var("FINSTACK_PG_TEST_URL").ok() else {
+            eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+            return;
+        };
+
+        let connect_url = url.clone();
+        let connect: ConnectFn<tokio_postgres::Client> = Box::new(move || {
+            let url = connect_url.clone();
+            Box::pin(async move {
+                let (client, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+                    .await
+                    .map_err(|_error| StoreError::Unavailable {
+                        reason_code: "postgres_unavailable",
+                    })?;
+                tokio::spawn(async move {
+                    let _ = connection.await;
+                });
+                Ok(client)
+            })
+        });
+        let is_alive: IsAliveFn<tokio_postgres::Client> =
+            Box::new(|client: &tokio_postgres::Client| !client.is_closed());
+
+        let pool = Pool::new(4, connect, is_alive);
+
+        let first = pool.get().await.expect("first checkout");
+        let pid: i32 = first
+            .query_one("SELECT pg_backend_pid()", &[])
+            .await
+            .expect("read backend pid")
+            .get(0);
+        drop(first); // returns the connection to the idle queue
+
+        let (admin, admin_connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+            .await
+            .expect("admin connect");
+        tokio::spawn(async move {
+            let _ = admin_connection.await;
+        });
+        admin
+            .execute("SELECT pg_terminate_backend($1)", &[&pid])
+            .await
+            .expect("terminate the idle backend");
+
+        // Give the client's background connection task a moment to observe
+        // the closed socket and flip `is_closed()`.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let second = pool
+            .get()
+            .await
+            .expect("checkout must self-heal despite the dead idle connection");
+        let same_backend: bool = second
+            .query_one("SELECT pg_backend_pid() = $1", &[&pid])
+            .await
+            .expect("read backend pid")
+            .get(0);
+        assert!(
+            !same_backend,
+            "the pool must not hand back the terminated connection"
+        );
     }
 }
