@@ -275,6 +275,9 @@ description = "Run Python binding tests"
 run = """
 set -euo pipefail
 export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
+uv run --no-project --with maturin==1.14.1 \
+  maturin develop --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
+  --features extension-module
 uv run pytest -q
 """
 

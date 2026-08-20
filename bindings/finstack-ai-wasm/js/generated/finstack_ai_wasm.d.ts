@@ -228,6 +228,23 @@ export class JsJournalStore {
 }
 
 /**
+ * Trusted JS memory-store wrapper. Missing `memory_*` methods on the
+ * adapter are `Unavailable` per operation, not a construction failure.
+ */
+export class JsMemoryStore {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Clone the wrapper without moving the caller's handle.
+     */
+    cloneHandle(): JsMemoryStore;
+    /**
+     * Construct a memory-store wrapper around a trusted host adapter.
+     */
+    constructor(adapter: any);
+}
+
+/**
  * Trusted JS middleware wrapper.
  */
 export class JsMiddleware {
@@ -702,6 +719,7 @@ export interface InitOutput {
     readonly __wbg_jsclock_free: (a: number, b: number) => void;
     readonly __wbg_jscontextprovider_free: (a: number, b: number) => void;
     readonly __wbg_jsjournalstore_free: (a: number, b: number) => void;
+    readonly __wbg_jsmemorystore_free: (a: number, b: number) => void;
     readonly __wbg_jsmiddleware_free: (a: number, b: number) => void;
     readonly __wbg_jsmodel_free: (a: number, b: number) => void;
     readonly __wbg_jsobserver_free: (a: number, b: number) => void;
@@ -742,6 +760,8 @@ export interface InitOutput {
     readonly jscontextprovider_new: (a: number, b: number, c: number) => void;
     readonly jsjournalstore_cloneHandle: (a: number) => number;
     readonly jsjournalstore_new: (a: number, b: number, c: number) => void;
+    readonly jsmemorystore_cloneHandle: (a: number) => number;
+    readonly jsmemorystore_new: (a: number) => number;
     readonly jsmiddleware_new: (a: number, b: number, c: number) => void;
     readonly jsmodel_new: (a: number, b: number, c: number) => void;
     readonly jsobserver_new: (a: number, b: number, c: number) => void;
@@ -791,9 +811,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_5025: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_5039: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_433: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_5056: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5070: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_434: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

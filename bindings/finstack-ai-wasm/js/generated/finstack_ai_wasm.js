@@ -662,6 +662,48 @@ export class JsJournalStore {
 if (Symbol.dispose) JsJournalStore.prototype[Symbol.dispose] = JsJournalStore.prototype.free;
 
 /**
+ * Trusted JS memory-store wrapper. Missing `memory_*` methods on the
+ * adapter are `Unavailable` per operation, not a construction failure.
+ */
+export class JsMemoryStore {
+    static __wrap(ptr) {
+        const obj = Object.create(JsMemoryStore.prototype);
+        obj.__wbg_ptr = ptr;
+        JsMemoryStoreFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        JsMemoryStoreFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_jsmemorystore_free(ptr, 0);
+    }
+    /**
+     * Clone the wrapper without moving the caller's handle.
+     * @returns {JsMemoryStore}
+     */
+    cloneHandle() {
+        const ret = wasm.jsmemorystore_cloneHandle(this.__wbg_ptr);
+        return JsMemoryStore.__wrap(ret);
+    }
+    /**
+     * Construct a memory-store wrapper around a trusted host adapter.
+     * @param {any} adapter
+     */
+    constructor(adapter) {
+        const ret = wasm.jsmemorystore_new(addHeapObject(adapter));
+        this.__wbg_ptr = ret;
+        JsMemoryStoreFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+}
+if (Symbol.dispose) JsMemoryStore.prototype[Symbol.dispose] = JsMemoryStore.prototype.free;
+
+/**
  * Trusted JS middleware wrapper.
  */
 export class JsMiddleware {
@@ -2130,7 +2172,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_5039(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_5070(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -2216,13 +2258,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1131, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_5025);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1132, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_5056);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_433);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_434);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -2254,14 +2296,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_433(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_433(arg0, arg1);
+function __wasm_bindgen_func_elem_434(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_434(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_5025(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_5056(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_5025(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_5056(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -2272,8 +2314,8 @@ function __wasm_bindgen_func_elem_5025(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_5039(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_5039(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_5070(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_5070(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -2297,6 +2339,9 @@ const JsContextProviderFinalization = (typeof FinalizationRegistry === 'undefine
 const JsJournalStoreFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_jsjournalstore_free(ptr, 1));
+const JsMemoryStoreFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_jsmemorystore_free(ptr, 1));
 const JsMiddlewareFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_jsmiddleware_free(ptr, 1));
