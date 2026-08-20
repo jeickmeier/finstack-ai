@@ -80,6 +80,28 @@ settlement that can carry them.
 | [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | `before_model` | `CompactContext` / `RequestCompactionModel` | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
 | [`finstack-ai-middleware-tool-policy`](../../extensions/middleware/finstack-ai-middleware-tool-policy/README.md) | `before_model`, `before_tool_batch` | `FilterTools` / `Fail` | Policy-driven tool narrowing: role allowlists, write budgets, jailbreak triggers, and child-depth gates. |
 
+### The `before_tool_batch` payload
+
+Python and JS middleware authors receive one JSON object per stage
+invocation, tagged by `"stage"`. At `before_tool_batch` that object is:
+
+```json
+{
+  "stage": "before_tool_batch",
+  "calls": [ /* the batch's source ToolCallBlock entries, in source order */ ],
+  "tools": [ /* the resolved tool universe visible to this run's catalog,
+                including side-effect classes, in catalog order */ ]
+}
+```
+
+This previously carried a bare `calls` array with no universe attached, so a
+guest middleware could see what the model called but not what it was allowed
+to call. `tools` now mirrors the shape `before_model` already exposes via
+`request.tools`, letting a guest narrow the real catalog the same way a
+native leaf does — see
+[`finstack-ai-middleware-tool-policy`](../../extensions/middleware/finstack-ai-middleware-tool-policy/README.md)
+for the reference implementation of that narrowing.
+
 ### How summarize compaction completes
 
 **Deterministic strategies return `CompactContext`.** That outcome

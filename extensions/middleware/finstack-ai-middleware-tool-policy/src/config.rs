@@ -107,18 +107,11 @@ impl JailbreakTriggers {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ChildDepthGate {
-    current_depth: u16,
     max_depth: u16,
     restricted: BTreeSet<ToolId>,
 }
 
 impl ChildDepthGate {
-    /// Depth of the current run.
-    #[must_use]
-    pub fn current_depth(&self) -> u16 {
-        self.current_depth
-    }
-
     /// Depth at or beyond which `restricted` applies.
     #[must_use]
     pub fn max_depth(&self) -> u16 {
@@ -282,22 +275,17 @@ impl ToolPolicyConfig {
 
     /// Add a child-agent depth gate.
     ///
-    /// `current_depth` is frozen at construction time: the middleware cannot
-    /// observe live dispatch depth, and a resolved agent (with its
-    /// middleware) is cached and reused across child invocations, so an
-    /// agent instance reused at a different depth evaluates the gate against
-    /// this stale value. Hosts that dispatch at varying depths must
-    /// construct a separately-configured agent per depth; this composes with
-    /// the SDK's `ChildRunPolicy`, which does track live depth.
+    /// The gate compares the run's live relation depth
+    /// (`RunCallContext::relation_depth`) against `max_depth` at every stage
+    /// invocation; when `relation_depth >= max_depth`, the `restricted`
+    /// tools are hidden.
     ///
     /// # Errors
     ///
-    /// Rejects `current_depth` or `max_depth` above the kernel's run-relation
-    /// depth cap, an oversized restricted tool set, or a child-depth slot
-    /// already set.
+    /// Rejects `max_depth` above the kernel's run-relation depth cap, an
+    /// oversized restricted tool set, or a child-depth slot already set.
     pub fn with_child_depth_gate(
         mut self,
-        current_depth: u16,
         max_depth: u16,
         restricted: BTreeSet<ToolId>,
     ) -> Result<Self, ToolPolicyError> {
@@ -306,7 +294,7 @@ impl ToolPolicyConfig {
                 reason: "duplicate_rule",
             });
         }
-        if current_depth > MAX_KERNEL_DEPTH || max_depth > MAX_KERNEL_DEPTH {
+        if max_depth > MAX_KERNEL_DEPTH {
             return Err(ToolPolicyError::Configuration {
                 reason: "depth_exceeds_kernel_cap",
             });
@@ -317,7 +305,6 @@ impl ToolPolicyConfig {
             });
         }
         self.child_depth = Some(ChildDepthGate {
-            current_depth,
             max_depth,
             restricted,
         });

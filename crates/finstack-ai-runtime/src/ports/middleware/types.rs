@@ -233,7 +233,7 @@ pub struct BeforeModelInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BeforeToolBatchInput {
-    /// Canonicalized source calls of the batch, in source order.
+    /// Source calls of the batch, in source order.
     pub calls: Arc<[ToolCallBlock]>,
     /// The resolved tool universe visible to this run's catalog, in catalog
     /// order (`ResolvedToolCatalog::tools()`), including side-effect classes.

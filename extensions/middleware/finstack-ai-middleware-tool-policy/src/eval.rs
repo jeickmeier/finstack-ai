@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ContentBlock, MessageRole, ToolId};
-use finstack_ai_runtime::{BeforeModelInput, SideEffectClass};
+use finstack_ai_runtime::{BeforeModelInput, BeforeToolBatchInput, SideEffectClass};
 
 use crate::{JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, ToolPolicyConfig};
 
@@ -20,20 +20,22 @@ pub(crate) enum PolicyVerdict {
 }
 
 /// Compute the effective role-allowlist allow set, with the child-depth
-/// gate's restricted set subtracted if it fires. Shared by [`narrow_universe`]
-/// (role branch) and `evaluate_before_tool_batch`.
+/// gate's restricted set subtracted if it fires. Used by [`narrow_universe`]'s
+/// role branch, which both `evaluate_before_model` and
+/// `evaluate_before_tool_batch` go through.
 ///
 /// Role allowlist: effective allow = `default_allowed ∪ ⋃(roles[r] for r in
 /// granted_roles)`. Roles come from `ctx.run.authorization.roles`; unknown
 /// granted roles are ignored (they contribute nothing). Returns `None` when
 /// no role allowlist is configured.
 ///
-/// Child-depth gate: if `current_depth >= max_depth`, `restricted` is
+/// Child-depth gate: if `relation_depth >= max_depth`, `restricted` is
 /// subtracted from the allow set. Below the threshold (or unconfigured) →
 /// no subtraction.
 pub(crate) fn compute_effective_allow(
     config: &ToolPolicyConfig,
     granted_roles: &[Arc<str>],
+    relation_depth: u16,
 ) -> Option<BTreeSet<ToolId>> {
     let role_allowlist = config.role_allowlist()?;
     let mut effective_allow = role_allowlist.default_allowed().clone();
@@ -44,7 +46,7 @@ pub(crate) fn compute_effective_allow(
     }
 
     if let Some(gate) = config.child_depth()
-        && gate.current_depth() >= gate.max_depth()
+        && relation_depth >= gate.max_depth()
     {
         for tool in gate.restricted() {
             effective_allow.remove(tool);
@@ -73,13 +75,14 @@ pub(crate) fn narrow_universe(
     config: &ToolPolicyConfig,
     universe: &BTreeSet<ToolId>,
     granted_roles: &[Arc<str>],
+    relation_depth: u16,
 ) -> BTreeSet<ToolId> {
     let mut result = universe.clone();
 
-    if let Some(effective_allow) = compute_effective_allow(config, granted_roles) {
+    if let Some(effective_allow) = compute_effective_allow(config, granted_roles, relation_depth) {
         result.retain(|tool| effective_allow.contains(tool));
     } else if let Some(gate) = config.child_depth()
-        && gate.current_depth() >= gate.max_depth()
+        && relation_depth >= gate.max_depth()
     {
         for tool in gate.restricted() {
             result.remove(tool);
@@ -132,6 +135,7 @@ pub(crate) fn evaluate_before_model(
     config: &ToolPolicyConfig,
     input: &BeforeModelInput,
     granted_roles: &[Arc<str>],
+    relation_depth: u16,
 ) -> PolicyVerdict {
     let universe: BTreeSet<ToolId> = input
         .request
@@ -139,7 +143,7 @@ pub(crate) fn evaluate_before_model(
         .iter()
         .map(|tool| tool.id.clone())
         .collect();
-    let mut retain = narrow_universe(config, &universe, granted_roles);
+    let mut retain = narrow_universe(config, &universe, granted_roles, relation_depth);
 
     if let Some(budget) = config.write_budget() {
         // One pre-pass over `input.request.tools` to classify write-class
@@ -233,7 +237,7 @@ pub(crate) fn evaluate_before_model(
 
 /// Evaluate the `before_tool_batch` defense-in-depth policy.
 ///
-/// # Why this stage only enforces complete-set rules
+/// # Why this stage can now narrow like `before_model`
 ///
 /// `StageOutcome::FilterTools` is retain-semantics: a leaf hands back the
 /// exact set of tools that should survive, and the runtime turns whatever is
@@ -245,33 +249,42 @@ pub(crate) fn evaluate_before_model(
 /// tool the model could legitimately have called must be accounted for, or
 /// the leaf ends up denying calls to tools it simply never heard about.
 ///
-/// At `before_model`, [`evaluate_before_model`] sees `input.request.tools`
-/// and can narrow that concrete universe. At `before_tool_batch` the leaf
-/// sees no catalog at all — only the batch of calls the model already made.
-/// So the only rule that can express a complete set here is the role
-/// allowlist: its effective allow set, `default_allowed ∪ ⋃(roles[r] for r
-/// in granted_roles)`, is complete by construction regardless of what tools
-/// exist, because it is defined as an allow set rather than derived from a
-/// universe. If a child-depth gate is *also* configured and firing (`
-/// current_depth >= max_depth`), its `restricted` set is subtracted from
-/// that allow set — the gate only ever removes tools, so this stays
-/// complete too.
+/// The batch stage input now carries `input.tools` — the resolved tool
+/// universe visible to this run's catalog — so the leaf builds the same kind
+/// of concrete universe [`evaluate_before_model`] narrows from
+/// `input.request.tools`, and runs it through the identical
+/// [`narrow_universe`] rules (role allowlist + child-depth gate). The
+/// previous constraint (only a role allowlist can express a complete set,
+/// because it alone is defined as an allow set rather than derived from a
+/// universe) no longer applies: a depth-only config now narrows the real
+/// carried universe too.
 ///
-/// A depth-only or write-budget-only policy cannot enumerate a complete
-/// retain set here (a depth gate only says what to remove, not the full
-/// universe to remove it from), so with **no role allowlist configured**
-/// this returns `PolicyVerdict::Identity`. That is not a hole: `
-/// before_model` already hid ineligible tools from the model at the source,
-/// and this stage exists purely as a backstop against a provider emitting
-/// calls to tools the model was never shown — a role policy is exactly the
-/// kind of rule such a provider could route around, hence it alone gets
-/// re-checked here.
+/// # Why write budget and jailbreak stay `before_model`-only
+///
+/// Both rules need message history: the write budget counts prior
+/// assistant tool-call blocks in `input.request.messages`, and the
+/// jailbreak scan inspects user/tool text in the same array. `
+/// BeforeToolBatchInput` deliberately does not carry the message history —
+/// only `calls` (the batch itself) and `tools` (the universe) — and the
+/// narrowed request built by `before_model` is not retained in kernel state
+/// for the batch stage to re-read. There is nothing at this stage these two
+/// rules could evaluate against, so they are skipped here; `before_model`
+/// already applied them to shrink what the model was shown.
+///
+/// Returns `PolicyVerdict::Identity` when the narrowed retain set equals the
+/// carried universe (keeps the fold identity-clean); otherwise
+/// `PolicyVerdict::Retain`.
 pub(crate) fn evaluate_before_tool_batch(
     config: &ToolPolicyConfig,
+    input: &BeforeToolBatchInput,
     granted_roles: &[Arc<str>],
+    relation_depth: u16,
 ) -> PolicyVerdict {
-    match compute_effective_allow(config, granted_roles) {
-        Some(effective_allow) => PolicyVerdict::Retain(effective_allow),
-        None => PolicyVerdict::Identity,
+    let universe: BTreeSet<ToolId> = input.tools.iter().map(|tool| tool.id.clone()).collect();
+    let retain = narrow_universe(config, &universe, granted_roles, relation_depth);
+    if retain == universe {
+        PolicyVerdict::Identity
+    } else {
+        PolicyVerdict::Retain(retain)
     }
 }

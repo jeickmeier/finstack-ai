@@ -26,26 +26,30 @@ Four independent rules can be combined:
    never scanned. Pattern scan is bounded by the draft's own ceilings.
 
 4. **Child-depth gate**: Once the run's child-agent nesting depth reaches a
-   threshold, drop a configured set of tools. The middleware receives
-   `current_depth` at construction time (not run time) because the middleware
-   cannot inspect the dispatch depth at invocation; compose with the SDK's
-   `ChildRunPolicy` to enforce depth limits across multiple layers. Because
-   `current_depth` is frozen at construction and resolved agents/middleware
-   are cached and reused across child invocations, a single agent instance
-   reused at a different depth evaluates the gate against the stale value —
-   hosts must construct a separately-configured agent per depth.
+   threshold, drop a configured set of tools. The gate compares the run's
+   **live** relation depth (`RunCallContext::relation_depth`, sourced from the
+   accepted run's own `RunRelation.depth`) against `max_depth` at every stage
+   invocation — there is no construction-time depth to go stale, and no need
+   to build a separately-configured agent per depth. This composes with (does
+   not replace) the SDK's `ChildRunPolicy`, which enforces depth limits at
+   dispatch time.
 
 ## Deployment and stages
 
 | Stage | Behavior |
 | --- | --- |
 | `before_model` | All four rules apply. Narrows the tool universe from `input.request.tools`. Returns `Continue` when nothing narrows, `FilterTools(retain)` when a rule narrows, or `Fail` when a jailbreak trigger with `JailbreakAction::Fail` matches. |
-| `before_tool_batch` | Only role allowlist and child-depth gate apply (if configured); write budget and jailbreak scan do not run. Must return a complete allow set (derived from the role config alone, even if a depth gate subtracts from it). Returns `Continue` if no role allowlist is configured, otherwise `FilterTools(retain)`. Malformed payload is a hard `MiddlewareError`, not a stage outcome. Write-budget and jailbreak restrictions are **not** re-checked at this stage: a write-class tool call that a role allows passes this backstop even after the write budget was exhausted or a jailbreak pattern matched at `before_model`, since those two rules only ever narrowed the earlier `before_model` view and are not re-evaluated here. |
+| `before_tool_batch` | Role allowlist and child-depth gate apply, narrowed against the **real carried universe** (`input.tools`, the resolved catalog for this run) via the same `narrow_universe` rules `before_model` uses — a depth-only or role-only config now narrows here just as it would at `before_model`. Write budget and jailbreak scan do not run at this stage: both need message history (prior tool-call blocks, user/tool text) that `BeforeToolBatchInput` deliberately does not carry, and the narrowed `before_model` request is not retained in kernel state for this stage to re-read. Returns `Continue` when the narrowed retain set equals the carried universe, otherwise `FilterTools(retain)`. |
 
-The `before_tool_batch` simplification exists because a filtered call becomes a
-synthetic denial (not a silent drop): a leaf can only emit a retain set it knows
-to be complete, so the role policy alone is sufficient — depth gates only remove
-tools, preserving completeness.
+This stage exists as a backstop against a provider emitting calls to tools the
+model was never shown: `before_model` already hid ineligible tools from the
+model at the source, and `before_tool_batch` re-checks role and depth rules
+against the true universe a provider could otherwise route around by ignoring
+the narrowed request. `StageOutcome::FilterTools` is retain-semantics — the
+runtime turns whatever is *not* retained into a per-call `Deny` →
+`SyntheticClosure`, never a silent drop — so this only works because the stage
+now has a concrete universe (`input.tools`) to narrow, the same shape
+`before_model` narrows from `input.request.tools`.
 
 ## Configuration example
 
@@ -103,8 +107,7 @@ let config = ToolPolicyConfig::new()
     )
     .expect("jailbreak")
     .with_child_depth_gate(
-        0,  // current_depth at construction
-        2,  // max_depth: restrict when depth >= 2
+        2,  // max_depth: restrict when live relation_depth >= 2
         BTreeSet::from([tid("finstack.tools.spawn-agent")]),
     )
     .expect("gate");
@@ -141,11 +144,10 @@ When a jailbreak trigger with `JailbreakAction::Fail` matches during `before_mod
 the stage fails with `ErrorDescriptor.code = "tool_policy_jailbreak_triggered"`.
 The message displays `"tool policy jailbreak trigger matched"`.
 
-A malformed `before_tool_batch` payload (fails to deserialize as
-`Vec<ToolCallBlock>`) is a hard `MiddlewareError` with
-`code = "tool_policy_batch_payload_malformed"` and message `"tool batch
-payload malformed"` — distinct from the wrong-stage `MIDDLEWARE_OUTCOME_NOT_ALLOWED`
-code used when this leaf is invoked at a stage it does not run at.
+The runtime guarantees a typed `BeforeToolBatchInput` at `before_tool_batch`
+(there is no malformed-payload case to guard against); invoking this leaf at
+a stage other than `before_model`/`before_tool_batch` is the only remaining
+runtime failure, surfaced as `MIDDLEWARE_OUTCOME_NOT_ALLOWED`.
 
 After construction, all policy evaluation is pure and deterministic; no other runtime
 failures are possible.
