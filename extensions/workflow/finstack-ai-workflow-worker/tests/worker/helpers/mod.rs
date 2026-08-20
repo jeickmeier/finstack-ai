@@ -7,14 +7,15 @@ use std::time::Duration as StdDuration;
 
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AuthorizationEvidence, BudgetPropagation, CancellationPropagation,
-    ComponentId, ContentBlock, DeadlinePropagation, Digest, Duration as KernelDuration, EffectId,
-    EffectOutputContract, EffectOutputKind, ErrorCategory, ExternalEffectCompletion,
-    ExternalEffectCompletionCommand, ExternalEffectOutcome, ExternalHandleRef, Id, IdTag,
-    KernelInput, KernelState, Message, MessageRole, Metadata, OperationLocator, OutputSpec,
-    PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy, RecordBody,
-    ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted, RunLimits,
-    RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Stage, StageCursor, TextBlock,
-    Timestamp, TransitionEnv, Usage,
+    ComponentId, ComponentRef, ContentBlock, DeadlinePropagation, Digest,
+    Duration as KernelDuration, EffectId, EffectOutputContract, EffectOutputKind, EffectTag,
+    ErrorCategory, ExternalEffectCompletion, ExternalEffectCompletionCommand,
+    ExternalEffectOutcome, ExternalHandleRef, Id, IdTag, InteractionKind, InteractionRequest,
+    InteractionTag, KernelInput, KernelState, Message, MessageRole, Metadata, OperationLocator,
+    OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
+    RecordBody, ReducerStageOutcome, RequestInteraction, RetryClassification, RetryDirective,
+    RetrySafety, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
+    RunSecurityContext, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv, Usage, Version,
 };
 use finstack_ai_runtime::{
     Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError, JournalStore,
@@ -22,7 +23,7 @@ use finstack_ai_runtime::{
     ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
     ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
     RunTaskOwner, SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolSpec, WorkflowSession, WorkflowWait, resolve_model_context_profile,
+    ToolSpec, WorkflowSession, WorkflowWait, classify_wait, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
@@ -612,4 +613,233 @@ pub(crate) async fn park_on_retry_timer(
         "expected a timer wait, got {wait:?}"
     );
     session
+}
+
+/// Drive `session` past its currently classified wait, out of band from any
+/// worker.
+///
+/// Unlike [`WorkflowSession::drive_until_wait`] — which returns the very
+/// first wait it classifies, even one already recorded on the journal before
+/// this session ever attached, without ever spawning an owner to advance
+/// past it — this respawns the owner first (mirroring
+/// `finstack-ai-workflow-worker`'s own `resume_row`, which calls
+/// `respawn_owner` unconditionally before its poll loop) and only then polls
+/// until a *different* wait is classified. Respawning unconditionally is
+/// what actually lets an already-parked timer fire: the owner is what
+/// checks the clock and commits `TimerFired`; `ensure_owner` alone would
+/// never spawn one, since its own gate is "no owner and no classified
+/// wait" — and a parked session always has a classified wait.
+///
+/// # Errors
+///
+/// Returns `Err(())` when no new wait is classified within `timeout`.
+pub(crate) async fn drive_past_current_wait(
+    session: &mut WorkflowSession,
+    timeout: StdDuration,
+) -> Result<WorkflowWait, ()> {
+    let initial = classify_wait(session.last_state());
+    session.respawn_owner().await.expect("respawn owner");
+    tokio::time::timeout(timeout, async {
+        loop {
+            session.ensure_owner().await.expect("ensure owner");
+            if let Some(wait) = classify_wait(session.last_state())
+                && Some(&wait) != initial.as_ref()
+            {
+                return wait;
+            }
+            tokio::time::sleep(StdDuration::from_millis(1)).await;
+        }
+    })
+    .await
+    .map_err(|_| ())
+}
+
+/// Commit an interaction request directly onto a freshly accepted run,
+/// bypassing the model/tool-batch pipeline entirely.
+///
+/// `RequestInteraction` (`crates/finstack-ai-kernel/src/reducer/interaction.rs`)
+/// only requires a requestable stage — `RunPhase::BeforeRun`, the phase right
+/// after `AcceptRun`, qualifies — so no model or middleware chain is needed
+/// to reach `WorkflowWait::Interaction`. Uses a bare, dispatcher-less
+/// `CommitCoordinator`: both commits here (`AcceptRun`, `RequestInteraction`)
+/// produce no `PostCommitAction`, so no host dispatch is ever required.
+/// Returns the interaction id a caller then attaches a [`WorkflowSession`]
+/// to and drives to its `WorkflowWait::Interaction`.
+pub(crate) async fn request_interaction(
+    store: &Arc<MemoryJournalStore>,
+    now: Timestamp,
+) -> finstack_ai_kernel::InteractionId {
+    let dyn_store = Arc::clone(store) as Arc<dyn JournalStore>;
+    let mut coordinator = CommitCoordinator::new(dyn_store);
+    coordinator
+        .submit(
+            env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+            KernelInput::AcceptRun(AcceptRun {
+                session_id: id(1),
+                lane_id: id(2),
+                accepted: accepted(),
+            }),
+        )
+        .await
+        .expect("accept");
+
+    let interaction_id: Id<InteractionTag> = id(50);
+    let effect_id: Id<EffectTag> = id(51);
+    let request = InteractionRequest::try_new(
+        1,
+        interaction_id,
+        effect_id,
+        InteractionKind::Approval,
+        vec![ContentBlock::Text(
+            TextBlock::try_new("approve the next action").expect("prompt"),
+        )],
+        RawJson::parse(b"{}").expect("schema"),
+        ComponentRef::new(
+            ComponentId::parse("finstack.policy.approval").expect("component"),
+            None,
+        ),
+        Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        None,
+        None,
+        false,
+        Metadata::empty(),
+    )
+    .expect("interaction request");
+    coordinator
+        .submit(
+            TransitionEnv {
+                now,
+                ids: AllocatedIds::try_new(
+                    vec![id(2), id(3)],
+                    vec![id(2), id(3)],
+                    vec![effect_id],
+                    vec![interaction_id],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    vec![id(102)],
+                    Vec::new(),
+                )
+                .expect("ids"),
+            },
+            KernelInput::RequestInteraction(RequestInteraction { request }),
+        )
+        .await
+        .expect("request interaction");
+    interaction_id
+}
+
+/// Drives a run parked on `RunPhase::PreparingContext` (mid-flight after a
+/// `BeforeFinalize` retry timer has fired: the kernel restarts the model
+/// cycle from context preparation, which is a genuine facade decision, not
+/// something `RunTaskOwner` supplies on its own) forward through a full
+/// model round to `RunPhase::BeforeFinalize`, out of band from any worker.
+/// Mirrors the `PrepareContext -> BeforeModel` legs of
+/// `drive_past_missing_facade_decisions` in `tests/worker/inbox_resume.rs`.
+/// Leaves the run parked on `BeforeFinalize`; pair with
+/// [`finalize_out_of_band`] to reach Terminal.
+pub(crate) async fn continue_retry_cycle_out_of_band(
+    store: &Arc<MemoryJournalStore>,
+    model: &Arc<dyn Model>,
+    clock: &ExternalClock,
+    seed: u64,
+) {
+    let dyn_store = Arc::clone(store) as Arc<dyn JournalStore>;
+    let recovered = CommitCoordinator::recover(Arc::clone(&dyn_store), locator().session_id)
+        .await
+        .expect("recover to continue the retried cycle");
+    assert_eq!(
+        recovered.state().phase,
+        Some(RunPhase::PreparingContext),
+        "continue_retry_cycle_out_of_band expects the retried cycle parked on PreparingContext"
+    );
+    let cycle = recovered.state().cycle;
+    let messages: Arc<[Message]> = Arc::from(recovered.state().messages.as_slice());
+
+    let owner = spawn_model_owner(recovered, Arc::clone(model), clock.clone(), seed).await;
+    owner
+        .handle()
+        .submit(
+            env(4_200, &[950, 951], &[], &[], &[952], &[], &[], 953),
+            stage_at(
+                cycle,
+                Stage::PrepareContext,
+                ReducerStageOutcome::ContextPrepared {
+                    messages: Arc::clone(&messages),
+                },
+            ),
+        )
+        .await
+        .expect("context prepared");
+
+    let raw = RawJson::parse(
+        draft(messages, Arc::from([]))
+            .canonical_bytes()
+            .expect("canonical"),
+    )
+    .expect("raw");
+    owner
+        .handle()
+        .submit(
+            env(4_300, &[954, 955], &[956], &[957], &[], &[958], &[], 959),
+            stage_at(
+                cycle,
+                Stage::BeforeModel,
+                ReducerStageOutcome::ModelRequestPrepared {
+                    request: raw,
+                    component: None,
+                    output_contract: EffectOutputContract {
+                        kind: EffectOutputKind::ModelResponse,
+                        schema_version: 1,
+                        schema_digest: Digest::raw_json(b"model-response"),
+                    },
+                    retry_safety: RetrySafety::SafeToRetry,
+                    deadline: Some(timestamp(9_000)),
+                },
+            ),
+        )
+        .await
+        .expect("model request");
+    wait_state(store, |state| {
+        state.phase == Some(RunPhase::BeforeFinalize)
+    })
+    .await;
+    drop(owner);
+}
+
+/// Commit the finalize acceptance a facade would normally supply, out of
+/// band from any [`WorkflowSession`]/`RunTaskOwner`, using a bare,
+/// dispatcher-less `CommitCoordinator` (mirrors [`request_interaction`]:
+/// `FinalizeAccepted` at `Stage::BeforeFinalize` produces no
+/// `PostCommitAction` once a terminal candidate is already recorded, so no
+/// host dispatch is needed here either). The run must already be sitting on
+/// `RunPhase::BeforeFinalize` with a terminal candidate — the state a
+/// completed, tool-free model cycle reaches on its own once its retry timer
+/// has fired.
+pub(crate) async fn finalize_out_of_band(store: &Arc<MemoryJournalStore>) {
+    let dyn_store = Arc::clone(store) as Arc<dyn JournalStore>;
+    let mut coordinator = CommitCoordinator::recover(Arc::clone(&dyn_store), locator().session_id)
+        .await
+        .expect("recover for out-of-band finalize");
+    assert_eq!(
+        coordinator.state().phase,
+        Some(RunPhase::BeforeFinalize),
+        "finalize_out_of_band expects the run parked on BeforeFinalize"
+    );
+    let cycle = coordinator.state().cycle;
+    coordinator
+        .submit(
+            env(3_000, &[900, 901], &[902], &[], &[], &[], &[], 903),
+            stage_at(cycle, Stage::BeforeFinalize, ReducerStageOutcome::FinalizeAccepted),
+        )
+        .await
+        .expect("finalize out of band");
+    drop(coordinator);
+    wait_state(store, |state| state.terminal.is_some()).await;
 }

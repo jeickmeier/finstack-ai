@@ -479,8 +479,26 @@ impl WorkflowWorker {
         let mut session = factory
             .bind(session)?
             .with_drive_timeout(self.drive_timeout);
-        if let Some(entry) = inbox_entry {
-            Box::pin(self.submit_response(&session, entry, now)).await?;
+        if let Some(entry) = inbox_entry
+            && let Err(error) = Box::pin(self.submit_response(&session, entry, now)).await
+        {
+            // A payload whose command locator does not match this session
+            // (TM-19, `require_locator`) can never resolve on any future
+            // attempt either: it is permanently poisoned, not merely
+            // transient. Unlike the drive-timeout case below — where the
+            // entry survives for redelivery once the run can actually be
+            // parked — this entry is deleted so it cannot wedge every
+            // future tick claiming the same row. The wake row itself is
+            // untouched: the caller's `back_off` still records the failure
+            // and the run stays parked on its original wait.
+            if matches!(error, WorkerError::Driver(WorkflowDriverError::UnknownLocator)) {
+                self.inbox.delete(
+                    entry.tenant_scope.as_ref(),
+                    entry.session_id,
+                    entry.pending_id.as_ref(),
+                )?;
+            }
+            return Err(error);
         }
         session.respawn_owner().await?;
         let wait = self.drive_past_wait(&mut session, row, now).await?;
