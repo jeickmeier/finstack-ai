@@ -86,6 +86,7 @@ pub struct LockedCapability {
 /// Non-primary service requirements selected by composition.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RequiredServices {
     /// Child invocation service required.
     #[serde(default)]
@@ -96,6 +97,9 @@ pub struct RequiredServices {
     /// Scoped artifact store required.
     #[serde(default)]
     pub artifact_store: bool,
+    /// Scoped object store required.
+    #[serde(default)]
+    pub object_store: bool,
 }
 
 /// Canonical credential-free reconstruction lock.

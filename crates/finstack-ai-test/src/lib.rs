@@ -14,6 +14,7 @@
 //! - `scripted` — scripted model, toolset, and extension doubles
 //! - `fixtures` — golden traces, public-API subjects, and journal corpus
 //! - `conformance` — target-neutral runner, port checks, compaction, reducer
+//! - `object_store` — `FakeObjectStore` and the shared `ObjectStore` contract suite
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -40,6 +41,7 @@ mod conformance;
 mod crash_prefix;
 mod fakes;
 mod fixtures;
+pub mod object_store;
 mod paths;
 mod scripted;
 

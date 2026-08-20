@@ -14,12 +14,15 @@ impl core::fmt::Display for finstack_ai_context_memory::MemoryError
 pub fn finstack_ai_context_memory::MemoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_context_memory::MemoryError
 pub struct finstack_ai_context_memory::InProcessArtifactStore
+impl finstack_ai_context_memory::InProcessArtifactStore
+pub fn finstack_ai_context_memory::InProcessArtifactStore::with_max_artifact_bytes(self, usize) -> Self
 impl core::default::Default for finstack_ai_context_memory::InProcessArtifactStore
 pub fn finstack_ai_context_memory::InProcessArtifactStore::default() -> finstack_ai_context_memory::InProcessArtifactStore
 impl core::fmt::Debug for finstack_ai_context_memory::InProcessArtifactStore
 pub fn finstack_ai_context_memory::InProcessArtifactStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_runtime::services::artifact::ArtifactStore for finstack_ai_context_memory::InProcessArtifactStore
 pub fn finstack_ai_context_memory::InProcessArtifactStore::get(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_context_memory::InProcessArtifactStore::limits(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreLimits
 pub fn finstack_ai_context_memory::InProcessArtifactStore::stage_put(&self, finstack_ai_runtime::services::artifact::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactError>>
 pub struct finstack_ai_context_memory::MemoryContextProvider
 impl finstack_ai_context_memory::MemoryContextProvider

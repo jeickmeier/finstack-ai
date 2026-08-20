@@ -204,7 +204,11 @@ impl DocumentIngestMiddleware {
         store: Arc<dyn ArtifactStore>,
         index: Arc<AttachmentIndex>,
     ) -> Result<Self, DocumentIngestError> {
-        Self::try_with_limits(store, index, DocumentLimits::default())
+        let limits = DocumentLimits {
+            max_input_bytes: u64::try_from(store.limits().max_artifact_bytes).unwrap_or(u64::MAX),
+            ..DocumentLimits::default()
+        };
+        Self::try_with_limits(store, index, limits)
     }
 
     /// Construct with explicit parse limits.
@@ -244,6 +248,12 @@ impl DocumentIngestMiddleware {
             limits,
             parse_cache: Arc::new(ParseCache::default()),
         })
+    }
+
+    /// The parse limits this instance was constructed with.
+    #[cfg(test)]
+    pub(crate) fn limits(&self) -> &DocumentLimits {
+        &self.limits
     }
 }
 

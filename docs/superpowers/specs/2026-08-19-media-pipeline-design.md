@@ -133,13 +133,23 @@ pub trait MediaStore: PortObject {
   (`{root}/{scope-digest-prefix}/{content-digest}`), atomic
   write-then-rename ingest, optional total-bytes quota. No new
   dependencies.
-- **`finstack-ai-store-media-s3`**: bucket + key prefix + region +
+> Superseded 2026-08-19: the standalone `finstack-ai-store-media-s3`
+> client and its `sigv4.rs` described below are superseded by
+> `docs/superpowers/specs/2026-08-19-object-store-design.md` and
+> `docs/implementation/adrs/ADR-050-object-store-contract.md`. See the
+> replacement bullet immediately after this note.
+
+- ~~**`finstack-ai-store-media-s3`**: bucket + key prefix + region +
   credentials (explicit, ADR-048 style) + presign TTL. This crate alone
   takes the AWS SDK dependency — quarantined in one leaf so the runtime
   and other extensions stay dependency-clean. `materialize` streams to a
   temp file under an explicit scratch dir; `presign_get` returns presigned
   HTTPS GET URLs (which is how generated frames are fed to OpenRouter's
-  video API without inlining bytes).
+  video API without inlining bytes).~~
+- **`S3MediaStore`** adapts `Arc<dyn ObjectStore>` (see
+  `2026-08-19-object-store-design.md`): `put_file` → `put(PutPayload::File)`,
+  `materialize` → `get_to_file`, `presign_get` → `presign_get`. SigV4
+  lives in `finstack-ai-store-object-s3`.
 
 ### 4.4 Relationship to `ArtifactStore`
 

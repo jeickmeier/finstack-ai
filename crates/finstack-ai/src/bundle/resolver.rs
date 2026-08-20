@@ -503,6 +503,7 @@ fn host_feature_name(feature: &HostFeature) -> &str {
         HostFeature::AgentInvoker => "agent_invoker",
         HostFeature::BudgetLedger => "budget_ledger",
         HostFeature::ArtifactStore => "artifact_store",
+        HostFeature::ObjectStore => "object_store",
         HostFeature::Custom { id } => id.as_str(),
     }
 }

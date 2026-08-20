@@ -1,0 +1,10 @@
+pub mod finstack_ai_store_artifact_object
+pub struct finstack_ai_store_artifact_object::ObjectArtifactStore
+impl finstack_ai_store_artifact_object::ObjectArtifactStore
+pub fn finstack_ai_store_artifact_object::ObjectArtifactStore::new(alloc::sync::Arc<dyn finstack_ai_runtime::services::object::ObjectStore>) -> Self
+pub fn finstack_ai_store_artifact_object::ObjectArtifactStore::with_max_artifact_bytes(self, usize) -> Self
+impl finstack_ai_runtime::services::artifact::ArtifactStore for finstack_ai_store_artifact_object::ObjectArtifactStore
+pub fn finstack_ai_store_artifact_object::ObjectArtifactStore::get(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_store_artifact_object::ObjectArtifactStore::limits(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreLimits
+pub fn finstack_ai_store_artifact_object::ObjectArtifactStore::stage_put(&self, finstack_ai_runtime::services::artifact::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub const finstack_ai_store_artifact_object::DEFAULT_MAX_ARTIFACT_BYTES: usize
