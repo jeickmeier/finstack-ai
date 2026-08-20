@@ -420,20 +420,15 @@ mod tests {
 
     #[test]
     fn capability_round_trip_flips_input_images() {
-        let model = OllamaModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
-            .expect("model")
-            .with_input_images(true);
+        let model =
+            OllamaModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model")
+                .with_input_images(true);
         assert!(model.capabilities().input.images);
 
-        let mut refreshed = OllamaModelConfig::try_new(
-            "fixture-model",
-            1_000_000,
-            128_000,
-            4_096,
-            4_096,
-            256,
-        )
-        .expect("model");
+        let mut refreshed =
+            OllamaModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
         assert!(!refreshed.capabilities().input.images);
         refreshed.apply_capabilities(&model.capabilities());
         assert!(refreshed.capabilities().input.images);

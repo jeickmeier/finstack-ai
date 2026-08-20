@@ -434,8 +434,9 @@ async fn resolve_draft_media(
     let mut resolved_media = BTreeMap::new();
     for message in draft.messages.iter() {
         for block in message.content() {
-            let (ContentBlock::Image(media) | ContentBlock::Audio(media) | ContentBlock::File(media)) =
-                block
+            let (ContentBlock::Image(media)
+            | ContentBlock::Audio(media)
+            | ContentBlock::File(media)) = block
             else {
                 continue;
             };
@@ -523,10 +524,7 @@ mod tests {
     struct OversizedResolver;
 
     impl MediaResolver for OversizedResolver {
-        fn resolve(
-            &self,
-            _blob: &BlobRef,
-        ) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+        fn resolve(&self, _blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
             Box::pin(async {
                 Ok(ResolvedMedia::Bytes {
                     media_type: Arc::from("image/png"),
@@ -668,7 +666,10 @@ mod tests {
         let config = OpenRouterConfig::try_new(format!("http://{address}")).expect("config");
         let seed = OpenRouterModelConfig::try_new("seed", 1, 128, 16, 16, 8).expect("seed");
         let provider = OpenRouterProvider::try_new(config, vec![seed]).expect("provider");
-        let catalog = provider.fetch_model_catalog(1_000_000).await.expect("catalog");
+        let catalog = provider
+            .fetch_model_catalog(1_000_000)
+            .await
+            .expect("catalog");
         provider.replace_model_catalog(catalog).expect("replace");
         let request = server.await.expect("server");
         assert!(request.starts_with("GET /api/v1/models"));

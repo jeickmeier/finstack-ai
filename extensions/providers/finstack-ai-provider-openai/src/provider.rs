@@ -392,8 +392,9 @@ async fn resolve_draft_media(
     let mut resolved_media = BTreeMap::new();
     for message in draft.messages.iter() {
         for block in message.content() {
-            let (ContentBlock::Image(media) | ContentBlock::Audio(media) | ContentBlock::File(media)) =
-                block
+            let (ContentBlock::Image(media)
+            | ContentBlock::Audio(media)
+            | ContentBlock::File(media)) = block
             else {
                 continue;
             };
@@ -512,10 +513,7 @@ mod tests {
     struct OversizedResolver;
 
     impl MediaResolver for OversizedResolver {
-        fn resolve(
-            &self,
-            _blob: &BlobRef,
-        ) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+        fn resolve(&self, _blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
             Box::pin(async {
                 Ok(ResolvedMedia::Bytes {
                     media_type: Arc::from("image/png"),

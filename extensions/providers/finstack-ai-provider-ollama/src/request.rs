@@ -457,9 +457,14 @@ mod tests {
             OutputSpec::PlainText,
             vec![tool("lookup", br#"{"type":"object"}"#)],
         );
-        let request = ChatRequest::try_from_draft(&draft, &model().with_reasoning(true), None, &BTreeMap::new())
-            .expect("request")
-            .request;
+        let request = ChatRequest::try_from_draft(
+            &draft,
+            &model().with_reasoning(true),
+            None,
+            &BTreeMap::new(),
+        )
+        .expect("request")
+        .request;
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["messages"][0]["role"], "system");
         assert_eq!(value["messages"][0]["content"], "Stay concise.");
@@ -584,9 +589,10 @@ mod tests {
             .as_slice(),
         )
         .expect("continuation");
-        let request = ChatRequest::try_from_draft(&draft, &model(), Some(&matched), &BTreeMap::new())
-            .expect("request")
-            .request;
+        let request =
+            ChatRequest::try_from_draft(&draft, &model(), Some(&matched), &BTreeMap::new())
+                .expect("request")
+                .request;
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["messages"][1]["thinking"], "consider");
 
@@ -619,9 +625,10 @@ mod tests {
             .as_slice(),
         )
         .expect("compacted");
-        let rebuilt = ChatRequest::try_from_draft(&draft, &model(), Some(&compacted), &BTreeMap::new())
-            .expect("compaction rebuild")
-            .request;
+        let rebuilt =
+            ChatRequest::try_from_draft(&draft, &model(), Some(&compacted), &BTreeMap::new())
+                .expect("compaction rebuild")
+                .request;
         let value: Value = serde_json::from_slice(&serialize_request(&rebuilt).unwrap()).unwrap();
         assert!(value["messages"][1].get("thinking").is_none());
     }

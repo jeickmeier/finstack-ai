@@ -561,8 +561,7 @@ impl Toolset for OpenRouterMediaToolset {
                     call.call.arguments().as_bytes(),
                 )
                 .await?
-            } else if call.tool_id == video_status_tool_id && tool_name == VIDEO_STATUS_TOOL_NAME
-            {
+            } else if call.tool_id == video_status_tool_id && tool_name == VIDEO_STATUS_TOOL_NAME {
                 handle_video_status(
                     &client,
                     &api_key,
@@ -629,11 +628,16 @@ impl Toolset for OpenRouterMediaToolset {
 }
 
 fn invalid_arguments(message: &'static str) -> ToolError {
-    tool_error(OPENROUTER_MEDIA_INVALID_ARGUMENTS, ErrorCategory::Validation, message)
+    tool_error(
+        OPENROUTER_MEDIA_INVALID_ARGUMENTS,
+        ErrorCategory::Validation,
+        message,
+    )
 }
 
 fn parse_arguments<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, ToolError> {
-    serde_json::from_slice(bytes).map_err(|_| invalid_arguments("openrouter media arguments are invalid"))
+    serde_json::from_slice(bytes)
+        .map_err(|_| invalid_arguments("openrouter media arguments are invalid"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -649,7 +653,9 @@ async fn handle_image(
 ) -> Result<serde_json::Value, ToolError> {
     let arguments: ImageArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.prompt.is_empty() {
-        return Err(invalid_arguments("openrouter media model or prompt is empty"));
+        return Err(invalid_arguments(
+            "openrouter media model or prompt is empty",
+        ));
     }
     let mut body = serde_json::json!({
         "model": arguments.model,
@@ -660,10 +666,16 @@ async fn handle_image(
             map.insert("resolution".into(), serde_json::Value::String(resolution));
         }
         if let Some(aspect_ratio) = arguments.aspect_ratio {
-            map.insert("aspect_ratio".into(), serde_json::Value::String(aspect_ratio));
+            map.insert(
+                "aspect_ratio".into(),
+                serde_json::Value::String(aspect_ratio),
+            );
         }
         if let Some(output_format) = arguments.output_format {
-            map.insert("output_format".into(), serde_json::Value::String(output_format));
+            map.insert(
+                "output_format".into(),
+                serde_json::Value::String(output_format),
+            );
         }
     }
     let response: ImageResponse = send_json(
@@ -713,7 +725,9 @@ async fn handle_video_submit(
 ) -> Result<serde_json::Value, ToolError> {
     let arguments: VideoArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.prompt.is_empty() {
-        return Err(invalid_arguments("openrouter media model or prompt is empty"));
+        return Err(invalid_arguments(
+            "openrouter media model or prompt is empty",
+        ));
     }
     let mut body = serde_json::json!({
         "model": arguments.model,
@@ -727,7 +741,10 @@ async fn handle_video_submit(
             map.insert("resolution".into(), serde_json::Value::String(resolution));
         }
         if let Some(aspect_ratio) = arguments.aspect_ratio {
-            map.insert("aspect_ratio".into(), serde_json::Value::String(aspect_ratio));
+            map.insert(
+                "aspect_ratio".into(),
+                serde_json::Value::String(aspect_ratio),
+            );
         }
     }
     let response: VideoSubmitResponse = send_json(
@@ -760,7 +777,9 @@ async fn handle_video_status(
     }
     let wait_seconds = arguments.wait_seconds.unwrap_or(0);
     if wait_seconds > 300 {
-        return Err(invalid_arguments("openrouter media wait_seconds exceeds 300"));
+        return Err(invalid_arguments(
+            "openrouter media wait_seconds exceeds 300",
+        ));
     }
     let url = format!(
         "{endpoint}/api/v1/videos/{}",
@@ -819,7 +838,9 @@ async fn handle_speech(
 ) -> Result<serde_json::Value, ToolError> {
     let arguments: SpeechArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.input.is_empty() {
-        return Err(invalid_arguments("openrouter media model or input is empty"));
+        return Err(invalid_arguments(
+            "openrouter media model or input is empty",
+        ));
     }
     let mut body = serde_json::json!({
         "model": arguments.model,
@@ -867,10 +888,13 @@ async fn handle_transcribe(
 ) -> Result<serde_json::Value, ToolError> {
     let arguments: TranscribeArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.audio_url.is_empty() {
-        return Err(invalid_arguments("openrouter media model or audio_url is empty"));
+        return Err(invalid_arguments(
+            "openrouter media model or audio_url is empty",
+        ));
     }
     validate_download_url(&arguments.audio_url, endpoint_is_loopback)?;
-    let downloaded = download_bytes(client, &arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
+    let downloaded =
+        download_bytes(client, &arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
     let b64_audio = BASE64_STANDARD.encode(downloaded);
     let format = arguments.format.unwrap_or_else(|| {
         arguments
@@ -927,7 +951,9 @@ async fn send_json<T: for<'de> Deserialize<'de>>(
         request = request.header("X-Title", title);
     }
     if let Some(body) = body {
-        request = request.header("Content-Type", "application/json").json(body);
+        request = request
+            .header("Content-Type", "application/json")
+            .json(body);
     }
     let send = request.send();
     let response = tokio::select! {
@@ -977,7 +1003,9 @@ async fn send_bytes(
         request = request.header("X-Title", title);
     }
     if let Some(body) = body {
-        request = request.header("Content-Type", "application/json").json(body);
+        request = request
+            .header("Content-Type", "application/json")
+            .json(body);
     }
     let send = request.send();
     let response = tokio::select! {
@@ -1040,7 +1068,10 @@ async fn download_bytes(
     fetch_bytes_bounded(response, cap).await
 }
 
-async fn fetch_bytes_bounded(response: reqwest::Response, cap: usize) -> Result<Vec<u8>, ToolError> {
+async fn fetch_bytes_bounded(
+    response: reqwest::Response,
+    cap: usize,
+) -> Result<Vec<u8>, ToolError> {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -1154,9 +1185,8 @@ fn validate_download_url(value: &str, endpoint_is_loopback: bool) -> Result<(), 
             "openrouter media audio_url contains forbidden components",
         ));
     }
-    let host = endpoint_host(rest).ok_or_else(|| {
-        invalid_arguments("openrouter media audio_url host is missing")
-    })?;
+    let host = endpoint_host(rest)
+        .ok_or_else(|| invalid_arguments("openrouter media audio_url host is missing"))?;
     if scheme.eq_ignore_ascii_case("https") {
         return Ok(());
     }
@@ -1300,7 +1330,13 @@ mod tests {
             .expect("tool spec present")
     }
 
-    async fn respond(listener: &TcpListener, seen: &mpsc::UnboundedSender<String>, status: u16, body: &[u8], content_type: &str) {
+    async fn respond(
+        listener: &TcpListener,
+        seen: &mpsc::UnboundedSender<String>,
+        status: u16,
+        body: &[u8],
+        content_type: &str,
+    ) {
         let (mut stream, _) = listener.accept().await.expect("accept");
         let mut buf = vec![0_u8; 8_192];
         let n = stream.read(&mut buf).await.expect("read");
@@ -1329,7 +1365,11 @@ mod tests {
         })
         .expect_err("missing key");
         assert_eq!(error, OpenRouterMediaError::CredentialRequired);
-        assert!(error.to_string().contains(OPENROUTER_MEDIA_CREDENTIAL_REQUIRED));
+        assert!(
+            error
+                .to_string()
+                .contains(OPENROUTER_MEDIA_CREDENTIAL_REQUIRED)
+        );
     }
 
     #[test]
@@ -1379,20 +1419,21 @@ mod tests {
             )
             .await;
         });
-        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
-            .expect("tools");
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
-        let call = call_for(
-            &spec,
-            br#"{"model":"m","prompt":"a cat"}"#,
-        );
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let call = call_for(&spec, br#"{"model":"m","prompt":"a cat"}"#);
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
         assert!(!result.is_error);
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["b64_json"], "aGVsbG8=");
         assert_eq!(payload["media_type"], "image/png");
         let seen = seen_rx.recv().await.expect("request").to_ascii_lowercase();
@@ -1409,7 +1450,14 @@ mod tests {
         let big_b64 = "a".repeat(4_096);
         let body = format!(r#"{{"data":[{{"b64_json":"{big_b64}","media_type":"image/png"}}]}}"#);
         let server = tokio::spawn(async move {
-            respond(&listener, &seen_tx, 200, body.as_bytes(), "application/json").await;
+            respond(
+                &listener,
+                &seen_tx,
+                200,
+                body.as_bytes(),
+                "application/json",
+            )
+            .await;
         });
         let tools = OpenRouterMediaToolset::try_new(OpenRouterMediaConfig {
             max_result_bytes: 1_024,
@@ -1440,16 +1488,20 @@ mod tests {
             )
             .await;
         });
-        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
-            .expect("tools");
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), VIDEO_TOOL_NAME);
         let call = call_for(&spec, br#"{"model":"m","prompt":"a dog running"}"#);
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["id"], "vid-1");
         assert_eq!(payload["status"], "pending");
         let seen = seen_rx.recv().await.expect("request").to_ascii_lowercase();
@@ -1472,16 +1524,20 @@ mod tests {
             )
             .await;
         });
-        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
-            .expect("tools");
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), VIDEO_STATUS_TOOL_NAME);
         let call = call_for(&spec, br#"{"id":"vid-1"}"#);
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["status"], "completed");
         assert_eq!(
             payload["urls"][0],
@@ -1515,16 +1571,20 @@ mod tests {
             )
             .await;
         });
-        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
-            .expect("tools");
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), VIDEO_STATUS_TOOL_NAME);
         let call = call_for(&spec, br#"{"id":"vid-1","wait_seconds":30}"#);
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["status"], "completed");
         assert_eq!(payload["urls"][0], "https://openrouter.test/x");
         let first = seen_rx.recv().await.expect("first").to_ascii_lowercase();
@@ -1541,15 +1601,18 @@ mod tests {
         let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<String>();
         drop(seen_tx);
         drop(listener);
-        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
-            .expect("tools");
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), VIDEO_STATUS_TOOL_NAME);
         let call = call_for(&spec, br#"{"id":"vid-1","wait_seconds":301}"#);
         let Err(error) = tools.call(tool_context(), call).await else {
             panic!("expected invalid arguments");
         };
         assert_eq!(error.code(), crate::OPENROUTER_MEDIA_INVALID_ARGUMENTS);
-        assert!(seen_rx.try_recv().is_err(), "no HTTP must reach the fixture");
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
     }
 
     #[tokio::test]
@@ -1581,7 +1644,14 @@ mod tests {
         let audio_addr = audio_listener.local_addr().expect("addr");
         let (audio_tx, _audio_rx) = mpsc::unbounded_channel();
         let audio_server = tokio::spawn(async move {
-            respond(&audio_listener, &audio_tx, 200, b"hello-audio-bytes", "audio/mpeg").await;
+            respond(
+                &audio_listener,
+                &audio_tx,
+                200,
+                b"hello-audio-bytes",
+                "audio/mpeg",
+            )
+            .await;
         });
 
         let api_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -1601,18 +1671,23 @@ mod tests {
         let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{api_addr}")))
             .expect("tools");
         let spec = find_spec(&tools.tools(), TRANSCRIBE_TOOL_NAME);
-        let args = format!(
-            r#"{{"model":"m","audio_url":"http://{audio_addr}/audio.mp3"}}"#
-        );
+        let args = format!(r#"{{"model":"m","audio_url":"http://{audio_addr}/audio.mp3"}}"#);
         let call = call_for(&spec, args.as_bytes());
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["text"], "hello");
-        let expected_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"hello-audio-bytes");
+        let expected_b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            b"hello-audio-bytes",
+        );
         let seen = api_rx.recv().await.expect("request");
         assert!(seen.contains(&expected_b64));
         audio_server.await.expect("audio server");
@@ -1658,8 +1733,8 @@ mod tests {
                 let _ = seen_tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
             }
         });
-        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
-            .expect("tools");
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
         let ctx = tool_context();
         ctx.run.cancellation.cancel();
@@ -1668,7 +1743,10 @@ mod tests {
             panic!("cancelled");
         };
         assert_eq!(error.code(), crate::OPENROUTER_MEDIA_TIMEOUT);
-        assert!(seen_rx.try_recv().is_err(), "no HTTP must reach the fixture");
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
         server.abort();
     }
 

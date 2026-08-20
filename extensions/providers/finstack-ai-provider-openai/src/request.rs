@@ -495,7 +495,8 @@ mod tests {
         let mut draft =
             draft(br#"{"reasoning_effort":"low","reasoning_summary":"auto","temperature":0}"#);
         draft.tools = tools;
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new()).expect("request");
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["store"], false);
         assert_eq!(value["stream"], true);
@@ -518,7 +519,8 @@ mod tests {
     fn prompt_cache_key_is_rewritten_to_the_current_tool_catalog() {
         let mut draft = draft(br#"{"prompt_cache_key":"stale-previous-tools"}"#);
         draft.tools = Arc::from([tool("lookup", br#"{"type":"object"}"#)]);
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new()).expect("request");
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_ne!(value["prompt_cache_key"], "stale-previous-tools");
         assert_eq!(value["prompt_cache_key"], tool_catalog_key(&draft.tools));
@@ -539,8 +541,13 @@ mod tests {
             br#"{"reasoning_summary":"verbose"}"#.as_slice(),
             br#"{"reasoning_effort":1}"#.as_slice(),
         ] {
-            let error = ResponsesRequest::try_from_draft(&draft(settings), &model(), None, &BTreeMap::new())
-                .expect_err("unsupported reasoning must fail");
+            let error = ResponsesRequest::try_from_draft(
+                &draft(settings),
+                &model(),
+                None,
+                &BTreeMap::new(),
+            )
+            .expect_err("unsupported reasoning must fail");
             assert_eq!(error.code(), crate::error::REQUEST_INVALID);
         }
     }
@@ -596,8 +603,13 @@ mod tests {
             br#"{"provider":"openai.responses","replay_items":[{"call_id":"call_abc","type":"function_call"},{"encrypted_content":"secret-reasoning","type":"reasoning"}],"version":1}"#,
         )
         .expect("continuation");
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), Some(&continuation), &BTreeMap::new())
-            .expect("request");
+        let request = ResponsesRequest::try_from_draft(
+            &draft,
+            &model(),
+            Some(&continuation),
+            &BTreeMap::new(),
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["instructions"], "Be brief.");
         assert_eq!(value["input"].as_array().expect("input").len(), 3);

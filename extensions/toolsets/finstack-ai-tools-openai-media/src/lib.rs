@@ -172,11 +172,10 @@ impl OpenAiMediaToolset {
             ToolId::parse(SPEECH_TOOL_ID).map_err(|_| OpenAiMediaError::EndpointInvalid {
                 reason: "invalid_tool_id",
             })?;
-        let transcribe_tool_id = ToolId::parse(TRANSCRIBE_TOOL_ID).map_err(|_| {
-            OpenAiMediaError::EndpointInvalid {
+        let transcribe_tool_id =
+            ToolId::parse(TRANSCRIBE_TOOL_ID).map_err(|_| OpenAiMediaError::EndpointInvalid {
                 reason: "invalid_tool_id",
-            }
-        })?;
+            })?;
 
         let paid_approval = ApprovalMetadata {
             requirement: ApprovalRequirement::Policy,
@@ -440,11 +439,16 @@ impl Toolset for OpenAiMediaToolset {
 }
 
 fn invalid_arguments(message: &'static str) -> ToolError {
-    tool_error(OPENAI_MEDIA_INVALID_ARGUMENTS, ErrorCategory::Validation, message)
+    tool_error(
+        OPENAI_MEDIA_INVALID_ARGUMENTS,
+        ErrorCategory::Validation,
+        message,
+    )
 }
 
 fn parse_arguments<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, ToolError> {
-    serde_json::from_slice(bytes).map_err(|_| invalid_arguments("openai media arguments are invalid"))
+    serde_json::from_slice(bytes)
+        .map_err(|_| invalid_arguments("openai media arguments are invalid"))
 }
 
 async fn handle_image(
@@ -559,10 +563,13 @@ async fn handle_transcribe(
 ) -> Result<serde_json::Value, ToolError> {
     let arguments: TranscribeArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.audio_url.is_empty() {
-        return Err(invalid_arguments("openai media model or audio_url is empty"));
+        return Err(invalid_arguments(
+            "openai media model or audio_url is empty",
+        ));
     }
     validate_download_url(&arguments.audio_url)?;
-    let downloaded = download_bytes(client, &arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
+    let downloaded =
+        download_bytes(client, &arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
     let file_name = arguments
         .audio_url
         .rsplit('/')
@@ -604,7 +611,8 @@ async fn handle_transcribe(
             "openai media endpoint rejected the request",
         ));
     }
-    let response: TranscribeResponse = read_bounded_json(response, MAX_RESULT_BYTES_CEILING).await?;
+    let response: TranscribeResponse =
+        read_bounded_json(response, MAX_RESULT_BYTES_CEILING).await?;
     Ok(serde_json::json!({ "text": response.text }))
 }
 
@@ -624,7 +632,9 @@ async fn send_json<T: for<'de> Deserialize<'de>>(
         .request(method, url)
         .header("Authorization", format!("Bearer {api_key}"));
     if let Some(body) = body {
-        request = request.header("Content-Type", "application/json").json(body);
+        request = request
+            .header("Content-Type", "application/json")
+            .json(body);
     }
     let send = request.send();
     let response = tokio::select! {
@@ -665,7 +675,9 @@ async fn send_bytes(
         .request(method, url)
         .header("Authorization", format!("Bearer {api_key}"));
     if let Some(body) = body {
-        request = request.header("Content-Type", "application/json").json(body);
+        request = request
+            .header("Content-Type", "application/json")
+            .json(body);
     }
     let send = request.send();
     let response = tokio::select! {
@@ -728,7 +740,10 @@ async fn download_bytes(
     fetch_bytes_bounded(response, cap).await
 }
 
-async fn fetch_bytes_bounded(response: reqwest::Response, cap: usize) -> Result<Vec<u8>, ToolError> {
+async fn fetch_bytes_bounded(
+    response: reqwest::Response,
+    cap: usize,
+) -> Result<Vec<u8>, ToolError> {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -862,9 +877,7 @@ fn validate_download_url(value: &str) -> Result<(), ToolError> {
             return Ok(());
         }
     }
-    Err(invalid_arguments(
-        "openai media audio_url must be https",
-    ))
+    Err(invalid_arguments("openai media audio_url must be https"))
 }
 
 fn endpoint_host(rest: &str) -> Option<&str> {
@@ -1016,16 +1029,16 @@ mod tests {
 
     #[test]
     fn construction_rejects_plaintext_non_loopback() {
-        let error =
-            OpenAiMediaToolset::try_new(base_config("http://8.8.8.8".into())).expect_err("plaintext");
+        let error = OpenAiMediaToolset::try_new(base_config("http://8.8.8.8".into()))
+            .expect_err("plaintext");
         assert!(error.to_string().contains("plaintext HTTP"));
         assert!(!error.to_string().contains(CANARY));
     }
 
     #[test]
     fn debug_does_not_leak_the_api_key() {
-        let tools =
-            OpenAiMediaToolset::try_new(base_config("https://api.openai.com".into())).expect("tools");
+        let tools = OpenAiMediaToolset::try_new(base_config("https://api.openai.com".into()))
+            .expect("tools");
         assert!(!format!("{tools:?}").contains(CANARY));
         let config = base_config("https://api.openai.com".into());
         assert!(!format!("{config:?}").contains(CANARY));
@@ -1072,16 +1085,21 @@ mod tests {
             )
             .await;
         });
-        let tools = OpenAiMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let tools =
+            OpenAiMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
         let call = call_for(&spec, br#"{"model":"m","prompt":"a cat"}"#);
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
         assert!(!result.is_error);
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["url"], "https://cdn.openai.test/image.png");
         assert!(payload.get("b64_json").is_none());
         let seen = seen_rx.recv().await.expect("request").to_ascii_lowercase();
@@ -1105,15 +1123,20 @@ mod tests {
             )
             .await;
         });
-        let tools = OpenAiMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let tools =
+            OpenAiMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
         let call = call_for(&spec, br#"{"model":"m","prompt":"a cat"}"#);
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["b64_json"], "aGVsbG8=");
         assert!(payload.get("url").is_none());
         let seen = seen_rx.recv().await.expect("request");
@@ -1129,7 +1152,14 @@ mod tests {
         let big_b64 = "a".repeat(4_096);
         let body = format!(r#"{{"data":[{{"b64_json":"{big_b64}"}}]}}"#);
         let server = tokio::spawn(async move {
-            respond(&listener, &seen_tx, 200, body.as_bytes(), "application/json").await;
+            respond(
+                &listener,
+                &seen_tx,
+                200,
+                body.as_bytes(),
+                "application/json",
+            )
+            .await;
         });
         let tools = OpenAiMediaToolset::try_new(OpenAiMediaConfig {
             max_result_bytes: 1_024,
@@ -1174,7 +1204,14 @@ mod tests {
         let audio_addr = audio_listener.local_addr().expect("addr");
         let (audio_tx, _audio_rx) = mpsc::unbounded_channel();
         let audio_server = tokio::spawn(async move {
-            respond(&audio_listener, &audio_tx, 200, b"hello-audio-bytes", "audio/mpeg").await;
+            respond(
+                &audio_listener,
+                &audio_tx,
+                200,
+                b"hello-audio-bytes",
+                "audio/mpeg",
+            )
+            .await;
         });
 
         let api_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -1207,21 +1244,29 @@ mod tests {
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
-            stream.write_all(response.as_bytes()).await.expect("write head");
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write head");
             stream.write_all(body).await.expect("write body");
             stream.shutdown().await.expect("shutdown");
         });
 
-        let tools = OpenAiMediaToolset::try_new(base_config(format!("http://{api_addr}"))).expect("tools");
+        let tools =
+            OpenAiMediaToolset::try_new(base_config(format!("http://{api_addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), TRANSCRIBE_TOOL_NAME);
         let args = format!(r#"{{"model":"m","audio_url":"http://{audio_addr}/audio.mp3"}}"#);
         let call = call_for(&spec, args.as_bytes());
-        let mut stream = tools.call(tool_context(), call).await.expect("call started");
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
-        let payload: serde_json::Value = serde_json::from_slice(result.output.as_bytes()).expect("json");
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
         assert_eq!(payload["text"], "hello");
         let seen = api_rx.recv().await.expect("request");
         assert!(seen.contains("hello-audio-bytes"));
@@ -1238,10 +1283,13 @@ mod tests {
         // `validate_download_url` before any HTTP traffic is attempted; the
         // http://127.0.0.1 test-only exception is exercised positively by
         // `transcribe_tool_downloads_then_uploads_multipart`.
-        let tools =
-            OpenAiMediaToolset::try_new(base_config("https://api.openai.com".into())).expect("tools");
+        let tools = OpenAiMediaToolset::try_new(base_config("https://api.openai.com".into()))
+            .expect("tools");
         let spec = find_spec(&tools.tools(), TRANSCRIBE_TOOL_NAME);
-        let call = call_for(&spec, br#"{"model":"m","audio_url":"http://8.8.8.8/a.mp3"}"#);
+        let call = call_for(
+            &spec,
+            br#"{"model":"m","audio_url":"http://8.8.8.8/a.mp3"}"#,
+        );
         let Err(error) = tools.call(tool_context(), call).await else {
             panic!("expected invalid arguments");
         };
@@ -1271,7 +1319,8 @@ mod tests {
                 let _ = seen_tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
             }
         });
-        let tools = OpenAiMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let tools =
+            OpenAiMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
         let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
         let ctx = tool_context();
         ctx.run.cancellation.cancel();
@@ -1280,7 +1329,10 @@ mod tests {
             panic!("cancelled");
         };
         assert_eq!(error.code(), crate::OPENAI_MEDIA_TIMEOUT);
-        assert!(seen_rx.try_recv().is_err(), "no HTTP must reach the fixture");
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
         server.abort();
     }
 

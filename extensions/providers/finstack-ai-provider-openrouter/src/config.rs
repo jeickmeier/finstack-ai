@@ -44,7 +44,10 @@ impl SecretHeader {
             .map_err(|_| config_error("custom header name is invalid"))?;
         if matches!(
             parsed.as_str(),
-            "authorization" | "content-type" | "x-client-request-id" | REFERER_HEADER
+            "authorization"
+                | "content-type"
+                | "x-client-request-id"
+                | REFERER_HEADER
                 | TITLE_HEADER
         ) {
             return Err(config_error("custom header name is provider-owned"));
@@ -671,6 +674,9 @@ mod tests {
             config.endpoint_url().expect("endpoint").path(),
             "/api/v1/responses"
         );
-        assert_eq!(config.models_url().expect("models").path(), "/api/v1/models");
+        assert_eq!(
+            config.models_url().expect("models").path(),
+            "/api/v1/models"
+        );
     }
 }

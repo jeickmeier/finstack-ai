@@ -7,7 +7,9 @@ use finstack_ai_kernel::{
     OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, TextBlock,
     Timestamp,
 };
-use finstack_ai_provider_openrouter::{OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider};
+use finstack_ai_provider_openrouter::{
+    OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider,
+};
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
     ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem, ModelTerminal,

@@ -42,7 +42,9 @@ fn map_parse(error: SseParseError) -> ModelError {
     match error {
         SseParseError::Limit => stream_limit_error(),
         SseParseError::InvalidUtf8 => stream_error("OpenRouter SSE event is not UTF-8"),
-        SseParseError::DuplicateName => stream_error("OpenRouter SSE event declared multiple names"),
+        SseParseError::DuplicateName => {
+            stream_error("OpenRouter SSE event declared multiple names")
+        }
     }
 }
 

@@ -651,13 +651,15 @@ mod tests {
         let config = OllamaConfig::try_new("http://127.0.0.1:9")
             .expect("config")
             .with_media_resolver(Arc::new(OversizedResolver));
-        let model = OllamaModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
-            .expect("model");
+        let model =
+            OllamaModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
         let provider = OllamaProvider::try_new(config, vec![model]).expect("provider");
         let selected = ModelName::try_new("fixture-model").expect("name");
 
-        let blob = finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
-            .expect("blob");
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
+                .expect("blob");
         let message = finstack_ai_kernel::Message::try_new(
             MessageId::parse("01234567-89ab-7cde-89ab-0123456789a6").expect("message id"),
             finstack_ai_kernel::MessageRole::User,

@@ -493,7 +493,8 @@ mod tests {
         let mut draft =
             draft(br#"{"reasoning_effort":"low","reasoning_summary":"auto","temperature":0}"#);
         draft.tools = tools;
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new()).expect("request");
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert!(value.get("store").is_none());
         assert_eq!(value["stream"], true);
@@ -516,7 +517,8 @@ mod tests {
     fn prompt_cache_key_is_rewritten_to_the_current_tool_catalog() {
         let mut draft = draft(br#"{"prompt_cache_key":"stale-previous-tools"}"#);
         draft.tools = Arc::from([tool("lookup", br#"{"type":"object"}"#)]);
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new()).expect("request");
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_ne!(value["prompt_cache_key"], "stale-previous-tools");
         assert_eq!(value["prompt_cache_key"], tool_catalog_key(&draft.tools));
@@ -537,8 +539,13 @@ mod tests {
             br#"{"reasoning_summary":"verbose"}"#.as_slice(),
             br#"{"reasoning_effort":1}"#.as_slice(),
         ] {
-            let error = ResponsesRequest::try_from_draft(&draft(settings), &model(), None, &BTreeMap::new())
-                .expect_err("unsupported reasoning must fail");
+            let error = ResponsesRequest::try_from_draft(
+                &draft(settings),
+                &model(),
+                None,
+                &BTreeMap::new(),
+            )
+            .expect_err("unsupported reasoning must fail");
             assert_eq!(error.code(), crate::error::REQUEST_INVALID);
         }
     }
@@ -594,8 +601,13 @@ mod tests {
             br#"{"provider":"openai.responses","replay_items":[{"call_id":"call_abc","type":"function_call"},{"encrypted_content":"secret-reasoning","type":"reasoning"}],"version":1}"#,
         )
         .expect("continuation");
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), Some(&continuation), &BTreeMap::new())
-            .expect("request");
+        let request = ResponsesRequest::try_from_draft(
+            &draft,
+            &model(),
+            Some(&continuation),
+            &BTreeMap::new(),
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["instructions"], "Be brief.");
         assert_eq!(value["input"].as_array().expect("input").len(), 3);
@@ -612,7 +624,8 @@ mod tests {
         let draft = draft(
             br#"{"models":["openai/gpt-5","anthropic/claude-opus-5"],"provider":{"order":["openai"],"sort":"throughput"}}"#,
         );
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new()).expect("request");
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["provider"]["order"][0], "openai");
         assert_eq!(value["provider"]["sort"], "throughput");
@@ -625,16 +638,22 @@ mod tests {
             br#"{"store":true}"#.as_slice(),
             br#"{"previous_response_id":"resp-1"}"#.as_slice(),
         ] {
-            let error = ResponsesRequest::try_from_draft(&draft(settings), &model(), None, &BTreeMap::new())
-                .expect_err("stateless field must fail");
+            let error = ResponsesRequest::try_from_draft(
+                &draft(settings),
+                &model(),
+                None,
+                &BTreeMap::new(),
+            )
+            .expect_err("stateless field must fail");
             assert_eq!(error.code(), crate::error::REQUEST_INVALID);
         }
     }
 
     #[test]
     fn image_blocks_map_to_input_image_items() {
-        let blob = finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
-            .expect("blob");
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
+                .expect("blob");
         let media = finstack_ai_kernel::MediaRef::new(blob);
         let message = Message::try_new(
             MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
@@ -668,8 +687,9 @@ mod tests {
 
     #[test]
     fn media_without_resolver_fails_closed() {
-        let blob = finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
-            .expect("blob");
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
+                .expect("blob");
         let media = finstack_ai_kernel::MediaRef::new(blob);
         let message = Message::try_new(
             MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
@@ -690,8 +710,9 @@ mod tests {
 
     #[test]
     fn audio_url_resolution_is_rejected() {
-        let blob = finstack_ai_kernel::BlobRef::try_new("blob-1", "audio/mpeg", 4, None, None::<&str>)
-            .expect("blob");
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "audio/mpeg", 4, None, None::<&str>)
+                .expect("blob");
         let media = finstack_ai_kernel::MediaRef::new(blob);
         let message = Message::try_new(
             MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
@@ -717,8 +738,9 @@ mod tests {
 
     #[test]
     fn audio_bytes_map_to_input_audio_with_format_from_media_type() {
-        let blob = finstack_ai_kernel::BlobRef::try_new("blob-1", "audio/wav", 4, None, None::<&str>)
-            .expect("blob");
+        let blob =
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "audio/wav", 4, None, None::<&str>)
+                .expect("blob");
         let media = finstack_ai_kernel::MediaRef::new(blob);
         let message = Message::try_new(
             MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
@@ -744,7 +766,10 @@ mod tests {
             ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["input"][0]["content"][0]["type"], "input_audio");
-        assert_eq!(value["input"][0]["content"][0]["input_audio"]["format"], "wav");
+        assert_eq!(
+            value["input"][0]["content"][0]["input_audio"]["format"],
+            "wav"
+        );
         assert_eq!(
             value["input"][0]["content"][0]["input_audio"]["data"],
             base64::engine::general_purpose::STANDARD.encode(b"data")

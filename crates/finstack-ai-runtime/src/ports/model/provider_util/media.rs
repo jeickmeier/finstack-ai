@@ -57,10 +57,7 @@ mod tests {
     struct FixtureResolver;
 
     impl MediaResolver for FixtureResolver {
-        fn resolve(
-            &self,
-            blob: &BlobRef,
-        ) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+        fn resolve(&self, blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
             let id = blob.id().to_owned();
             Box::pin(async move {
                 if id == "missing" {
@@ -80,7 +77,8 @@ mod tests {
         let blob = BlobRef::try_new("blob-1", "image/png", 8, None, None::<&str>).expect("blob");
         let resolved = resolver.resolve(&blob).await.expect("resolved");
         assert!(matches!(resolved, ResolvedMedia::Url(_)));
-        let missing = BlobRef::try_new("missing", "image/png", 8, None, None::<&str>).expect("blob");
+        let missing =
+            BlobRef::try_new("missing", "image/png", 8, None, None::<&str>).expect("blob");
         let error = resolver.resolve(&missing).await.expect_err("missing");
         assert_eq!(error.kind, MediaResolveKind::NotFound);
     }
