@@ -283,6 +283,9 @@ def test_linked_factories_accept_python_toolset_and_observer_at_construct() -> N
             await finstack_ai.Agent.anthropic(
                 "http://127.0.0.1:9", "fixture-model", **ports
             ),
+            await finstack_ai.Agent.gemini(
+                "http://127.0.0.1:9", "fixture-model", **ports
+            ),
         ]
         assert all(agent.capability_catalog() == [] for agent in agents)
 

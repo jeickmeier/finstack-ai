@@ -54,8 +54,8 @@ pub use agent::{
     AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, ActivationHostError, Agent, AgentRun,
     AgentRunError, AgentRunOutput, AgentRunRequest, AnthropicAgentSpec, AttachmentInput,
     CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
-    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
-    MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS, NativeAgentBuilder,
+    E2bSandboxAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,
+    LinkedCommon, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS, NativeAgentBuilder,
     NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
     OpenRouterMediaToolsSpec, RemoteChildRouteSpec,
 };

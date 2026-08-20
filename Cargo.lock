@@ -1440,6 +1440,7 @@ dependencies = [
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
+ "finstack-ai-provider-gemini",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-provider-openrouter",

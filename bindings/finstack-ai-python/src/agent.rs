@@ -9,8 +9,9 @@ use crate::store::{PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
-    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
-    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
+    E2bSandboxAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,
+    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
+    Session,
 };
 use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
@@ -277,6 +278,77 @@ impl PyAgent {
             let (ports, output_adapter) = split_linked_ports(ports);
             let built = Agent::anthropic(AnthropicAgentSpec {
                 base_url,
+                model,
+                api_key,
+                openrouter_media,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                    approval_grant,
+                },
+            })
+            .await;
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
+        })
+    }
+
+    /// Construct a Rust-backed Gemini `generateContent` agent.
+    ///
+    /// `api_key` stays positional. Python port lists are keyword-only. HTTPS is
+    /// required when `api_key` is set; the binding does not read environment
+    /// variables. Does not hardcode the Google host: `endpoint` is passed
+    /// straight into the provider's `GeminiConfig::try_new`.
+    #[staticmethod]
+    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
+    )]
+    fn gemini(
+        py: Python<'_>,
+        endpoint: String,
+        model: String,
+        api_key: Option<String>,
+        instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
+        openrouter_media_api_key: Option<String>,
+        openrouter_media_referer: Option<String>,
+        openrouter_media_title: Option<String>,
+        toolsets: Option<Vec<PyToolsetArg>>,
+        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        observers: Option<Vec<Py<PyPythonObserver>>>,
+        output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
+        let openrouter_media = openrouter_media_spec(
+            openrouter_media_api_key,
+            openrouter_media_referer,
+            openrouter_media_title,
+        )?;
+        let (ports, artifact_store, attachment_index) = linked_ports(
+            py,
+            toolsets,
+            context_providers,
+            middleware,
+            observers,
+            output_type,
+        )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::gemini(GeminiAgentSpec {
+                endpoint,
                 model,
                 api_key,
                 openrouter_media,

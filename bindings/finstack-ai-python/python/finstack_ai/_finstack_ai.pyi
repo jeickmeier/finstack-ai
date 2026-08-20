@@ -1027,6 +1027,77 @@ class Agent:
                 ``openrouter_media_api_key``.
         """
     @staticmethod
+    async def gemini(
+        endpoint: str,
+        model: str,
+        api_key: str | None = None,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+        *,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
+    ) -> Agent:
+        """Build a Rust-backed Gemini ``generateContent`` agent.
+
+        Construction of the HTTP client happens only in this factory. Importing
+        ``finstack_ai`` does not open sockets or start Tokio. Keyword-only port
+        lists register the same T2 Python callbacks as
+        :meth:`Agent.from_python`. This factory does not read environment
+        variables and does not hardcode the Google host: ``endpoint`` is
+        passed straight into the provider's ``GeminiConfig::try_new``.
+
+        Args:
+            endpoint: Gemini ``generateContent`` base URL (Generative
+                Language API).
+            model: Provider model name.
+            api_key: Optional API key. HTTPS is required when set. Keyless
+                HTTP loopback is allowed. HTTP plus a key raises
+                :class:`ConfigurationError` and does not include the secret
+                in ``str`` or ``repr``.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The endpoint, credential, model, capability
+                set, or port registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
+        """
+    @staticmethod
     async def ollama(
         base_url: str,
         model: str,
@@ -1419,11 +1490,12 @@ def build_metadata() -> dict[str, str | bool | int]:
         Version, engine, and feature flags. No secrets.
     """
 
-def linked_providers() -> tuple[str, str, str, str]:
+def linked_providers() -> tuple[str, str, str, str, str]:
     """Return curated Rust-backed providers linked into this extension.
 
     Returns:
-        A tuple such as ``(\"openai\", \"anthropic\", \"ollama\", \"openrouter\")``.
+        A tuple such as
+        ``(\"openai\", \"anthropic\", \"gemini\", \"ollama\", \"openrouter\")``.
     """
 
 def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:

@@ -721,7 +721,8 @@ mod tests {
 
     use finstack_ai::{
         AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, E2bSandboxAgentSpec,
-        GatewayAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+        GatewayAgentSpec, GeminiAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
+        OpenRouterAgentSpec,
     };
 
     use super::{health, parse_document_markdown};
@@ -776,6 +777,15 @@ mod tests {
         }))
         .err()
         .expect("anthropic");
+        let gemini = ready(Agent::gemini(GeminiAgentSpec {
+            endpoint: "https://generativelanguage.googleapis.com".into(),
+            model: "fixture-model".into(),
+            api_key: None,
+            openrouter_media: None,
+            common: LinkedCommon::default(),
+        }))
+        .err()
+        .expect("gemini");
         let ollama = ready(Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
@@ -808,6 +818,7 @@ mod tests {
         assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(openrouter.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(anthropic.code(), AGENT_RUN_UNSUPPORTED_PLAN);
+        assert_eq!(gemini.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(gateway.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(e2b.code(), AGENT_RUN_UNSUPPORTED_PLAN);
