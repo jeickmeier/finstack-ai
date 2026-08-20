@@ -18,8 +18,8 @@ pub struct CodexUsage {
     pub output_tokens: u64,
 }
 
-// `CodexEvent` and `parse_event` are consumed by the run-state reducer
-// added in a later task; until then only the tests below exercise them.
+// Consumed by the run-state reducer (`crate::state`) and, in a later task,
+// by the process supervisor that streams `codex exec --json` stdout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum CodexEvent {

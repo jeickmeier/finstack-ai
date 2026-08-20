@@ -1,5 +1,7 @@
 use super::*;
 use crate::events::{parse_event, CodexEvent};
+use crate::state::RunState;
+use crate::CodexRunStatus;
 use std::path::PathBuf;
 
 fn valid_config(dir: &std::path::Path) -> CodexExecConfig {
@@ -94,6 +96,41 @@ fn unknown_and_malformed_lines_are_other() {
     assert_eq!(parse_event("not json"), CodexEvent::Other);
     assert_eq!(parse_event(""), CodexEvent::Other);
     assert_eq!(parse_event(r#"{"type":"item.completed","item":{"type":"command_execution"}}"#), CodexEvent::Other);
+}
+
+#[test]
+fn reduces_success_run() {
+    let mut state = RunState::default();
+    state.apply(parse_event(r#"{"type":"thread.started","thread_id":"t1"}"#));
+    state.apply(parse_event(r#"{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}"#));
+    state.apply(parse_event(r#"{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}"#));
+    assert_eq!(state.report().status, CodexRunStatus::Running);
+    state.record_exit(Some(0));
+    let report = state.report();
+    assert_eq!(report.status, CodexRunStatus::Completed);
+    assert_eq!(report.thread_id.as_deref(), Some("t1"));
+    assert_eq!(report.last_message.as_deref(), Some("hi"));
+    assert_eq!(report.exit_code, Some(0));
+}
+
+#[test]
+fn nonzero_exit_or_failure_event_is_failed() {
+    let mut state = RunState::default();
+    state.record_exit(Some(1));
+    assert_eq!(state.report().status, CodexRunStatus::Failed);
+
+    let mut state = RunState::default();
+    state.apply(parse_event(r#"{"type":"turn.failed","error":{"message":"boom"}}"#));
+    state.record_exit(Some(0));
+    assert_eq!(state.report().status, CodexRunStatus::Failed);
+}
+
+#[test]
+fn cancelled_wins_over_exit_status() {
+    let mut state = RunState::default();
+    state.mark_cancelled();
+    state.record_exit(Some(137));
+    assert_eq!(state.report().status, CodexRunStatus::Cancelled);
 }
 
 #[test]

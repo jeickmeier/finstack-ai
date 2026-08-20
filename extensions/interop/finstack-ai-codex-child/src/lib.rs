@@ -30,6 +30,7 @@ mod config;
 mod events;
 mod identity;
 mod invoker;
+mod state;
 
 #[cfg(test)]
 mod tests;
@@ -38,6 +39,7 @@ pub use config::{CodexExecConfig, CodexSandboxMode};
 pub use events::CodexUsage;
 pub use identity::{CODEX_PEER_AGENT_ID, codex_agent_ref, codex_route_ref};
 pub use invoker::CodexChildInvoker;
+pub use state::{CodexRunReport, CodexRunStatus};
 
 /// Stable constructor failure code (missing binary, bad workspace, bad spec).
 pub const CODEX_CONFIGURATION_INVALID: &str = "codex_configuration_invalid";
