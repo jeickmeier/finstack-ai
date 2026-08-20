@@ -11,6 +11,7 @@ description = "Human-in-the-loop router battery for the finstack-ai local workfl
 readme = "README.md"
 
 [dependencies]
+finstack-ai-kernel = { workspace = true }
 finstack-ai-workflow-worker = { workspace = true }
 thiserror = { workspace = true }
 

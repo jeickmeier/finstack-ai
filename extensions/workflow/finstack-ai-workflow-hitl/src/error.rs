@@ -70,9 +70,6 @@ mod tests {
             .code(),
             "tenant_mismatch"
         );
-        assert_eq!(
-            HitlError::from(WorkerError::NotParked).code(),
-            "not_parked"
-        );
+        assert_eq!(HitlError::from(WorkerError::NotParked).code(), "not_parked");
     }
 }
