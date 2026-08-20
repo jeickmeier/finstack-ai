@@ -1181,6 +1181,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-middleware-instructions"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-middleware-verify"
 version = "1.0.0"
 dependencies = [
