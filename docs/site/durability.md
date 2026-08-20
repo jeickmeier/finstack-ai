@@ -4,15 +4,25 @@ JournalStore is a port. Memory and SQLite are leaf implementations. The
 kernel remains authoritative for records, effect identity, and
 `InteractionId`.
 
-## Memory vs SQLite
+## Memory vs SQLite vs PostgreSQL
 
 | Store | Use |
 | --- | --- |
 | `finstack-ai-store-memory` | Tests and short-lived processes |
 | `finstack-ai-store-sqlite` | Local durable journals (WAL + FULL) |
+| `finstack-ai-store-postgres` | Multi-process durable journals (synchronous_commit=on) |
 
 Browser IndexedDB is experimental host storage. It does not meet
 NFR-REL-001.
+
+`finstack-ai-store-postgres` also accepts a Relaxed durability mode
+(`durable=false`, `health().detail` labeled `postgres synchronous_commit=off`)
+that must never be reported as meeting NFR-REL-001. Its v1 wiring is
+plaintext-only (`tokio_postgres::NoTls`): a connection URL whose `sslmode`
+demands TLS (`require`, `verify-ca`, `verify-full`) is rejected up front with
+a stable `postgres_tls_unsupported` error rather than silently connecting in
+plaintext. Use network-layer TLS (a stunnel/PgBouncer sidecar, a private
+network, or an SSH tunnel) until in-process TLS wiring lands.
 
 ## Inspect, do not continue
 

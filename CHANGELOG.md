@@ -24,6 +24,7 @@ unpublished.
   library and binary code. Unit tests remain allowed.
 - `verify_authority(&ToolCallContext)` on the runtime Tool port (ADR-048).
 - `mise run check-public-api` compares `cargo-public-api` dumps for kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Python/JS name lists stay in `scripts/compat/public_items.py`.
+- `finstack-ai-store-postgres`: a full `JournalStore` implementation backed by `PostgreSQL`. Multi-writer append via per-session row locks; chain-verified loads with a generation-guarded process-local cache; sqlite-parity reason codes and the same append-ambiguity contract; schema v1 with advisory-locked, fail-closed migrations (`SchemaPolicy::Manage` vs `Require`); an env-gated (`FINSTACK_PG_TEST_URL`) server test battery. CI now runs a pinned `postgres:16` service alongside `ci-rust`.
 - Tools may defer a first-pass call: `ToolStreamItem::Deferred` suspends under the original effect id. `ToolSpec` gains `deferral`; stream item enums are `#[non_exhaustive]`.
 - `AgentRun` child-run and `complete_external` facades plus `ChildRunBridge` for binding a deferred effect to a child run (PR-079 Rust half).
 - Derived poll scheduling from committed `EffectDeferred` (`due_polls` / `drive_due_polls`); expiry uses `tool_deferral_expired`.

@@ -1,0 +1,56 @@
+pub mod finstack_ai_store_postgres
+pub enum finstack_ai_store_postgres::PostgresDurability
+pub finstack_ai_store_postgres::PostgresDurability::Durable
+pub finstack_ai_store_postgres::PostgresDurability::Relaxed
+impl core::clone::Clone for finstack_ai_store_postgres::PostgresDurability
+pub fn finstack_ai_store_postgres::PostgresDurability::clone(&self) -> finstack_ai_store_postgres::PostgresDurability
+impl core::cmp::Eq for finstack_ai_store_postgres::PostgresDurability
+impl core::cmp::PartialEq for finstack_ai_store_postgres::PostgresDurability
+pub fn finstack_ai_store_postgres::PostgresDurability::eq(&self, &finstack_ai_store_postgres::PostgresDurability) -> bool
+impl core::fmt::Debug for finstack_ai_store_postgres::PostgresDurability
+pub fn finstack_ai_store_postgres::PostgresDurability::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_postgres::PostgresDurability
+impl core::marker::StructuralPartialEq for finstack_ai_store_postgres::PostgresDurability
+pub enum finstack_ai_store_postgres::SchemaPolicy
+pub finstack_ai_store_postgres::SchemaPolicy::Manage
+pub finstack_ai_store_postgres::SchemaPolicy::Require
+impl core::clone::Clone for finstack_ai_store_postgres::SchemaPolicy
+pub fn finstack_ai_store_postgres::SchemaPolicy::clone(&self) -> finstack_ai_store_postgres::SchemaPolicy
+impl core::cmp::Eq for finstack_ai_store_postgres::SchemaPolicy
+impl core::cmp::PartialEq for finstack_ai_store_postgres::SchemaPolicy
+pub fn finstack_ai_store_postgres::SchemaPolicy::eq(&self, &finstack_ai_store_postgres::SchemaPolicy) -> bool
+impl core::fmt::Debug for finstack_ai_store_postgres::SchemaPolicy
+pub fn finstack_ai_store_postgres::SchemaPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_postgres::SchemaPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_store_postgres::SchemaPolicy
+pub struct finstack_ai_store_postgres::PostgresJournalStore
+impl finstack_ai_store_postgres::PostgresJournalStore
+pub async fn finstack_ai_store_postgres::PostgresJournalStore::try_open(finstack_ai_store_postgres::PostgresStoreConfig) -> core::result::Result<Self, finstack_ai_runtime::ports::journal::StoreError>
+impl finstack_ai_runtime::ports::journal::JournalStore for finstack_ai_store_postgres::PostgresJournalStore
+pub fn finstack_ai_store_postgres::PostgresJournalStore::append(&self, finstack_ai_kernel::records::append::AppendRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::reducer::decision::CommittedBatch, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::health(&self) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::StoreHealth, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::load(&self, finstack_ai_runtime::ports::journal::LoadRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::LoadedSession, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::load_from(&self, finstack_ai_runtime::ports::journal::LoadFromRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::LoadedSession, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::prune(&self, finstack_ai_runtime::ports::journal::PruneRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::PruneReceipt, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::scan(&self, finstack_ai_runtime::ports::journal::ScanRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::ScanPage, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::write_metadata(&self, finstack_ai_runtime::ports::journal::WriteMetadataRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::MetadataReceipt, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::write_snapshot(&self, finstack_ai_runtime::ports::journal::SnapshotRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::SnapshotReceipt, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_store_postgres::PostgresJournalStore::write_state_snapshot(&self, finstack_ai_runtime::ports::journal::StateSnapshotRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::SnapshotReceipt, finstack_ai_runtime::ports::journal::StoreError>>
+pub struct finstack_ai_store_postgres::PostgresStoreConfig
+pub finstack_ai_store_postgres::PostgresStoreConfig::connect_timeout: core::time::Duration
+pub finstack_ai_store_postgres::PostgresStoreConfig::durability: finstack_ai_store_postgres::PostgresDurability
+pub finstack_ai_store_postgres::PostgresStoreConfig::limits: finstack_ai_runtime::ports::journal::StoreLimits
+pub finstack_ai_store_postgres::PostgresStoreConfig::pool_size: usize
+pub finstack_ai_store_postgres::PostgresStoreConfig::schema: alloc::sync::Arc<str>
+pub finstack_ai_store_postgres::PostgresStoreConfig::schema_policy: finstack_ai_store_postgres::SchemaPolicy
+pub finstack_ai_store_postgres::PostgresStoreConfig::url: alloc::sync::Arc<str>
+impl finstack_ai_store_postgres::PostgresStoreConfig
+pub fn finstack_ai_store_postgres::PostgresStoreConfig::new(impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_runtime::ports::journal::StoreLimits) -> Self
+pub fn finstack_ai_store_postgres::PostgresStoreConfig::validate(&self) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+impl core::clone::Clone for finstack_ai_store_postgres::PostgresStoreConfig
+pub fn finstack_ai_store_postgres::PostgresStoreConfig::clone(&self) -> finstack_ai_store_postgres::PostgresStoreConfig
+impl core::fmt::Debug for finstack_ai_store_postgres::PostgresStoreConfig
+pub fn finstack_ai_store_postgres::PostgresStoreConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const finstack_ai_store_postgres::DEFAULT_CONNECT_TIMEOUT: core::time::Duration
+pub const finstack_ai_store_postgres::DEFAULT_POOL_SIZE: usize
+pub const finstack_ai_store_postgres::DEFAULT_SCHEMA: &str
