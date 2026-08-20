@@ -16,5 +16,8 @@ finstack-ai-protocol = { workspace = true }
 finstack-ai-runtime = { workspace = true }
 finstack-ai-store-common = { workspace = true }
 
+[dev-dependencies]
+finstack-ai-test = { workspace = true }
+
 [lints]
 workspace = true

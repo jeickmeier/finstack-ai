@@ -1,4 +1,16 @@
-//! Test-only record/request fixtures shared by the semantics unit tests.
+//! Deterministic record/request builders shared by the journal-store test
+//! suites (`finstack-ai-store-common`, `finstack-ai-store-memory`,
+//! `finstack-ai-store-sqlite`).
+//!
+//! The sqlite golden test `append_identity_encoding_is_stable` pins the CBOR
+//! bytes of requests built from these fixtures. Changing the id-encoding
+//! scheme or any draft field below changes those bytes — do not alter them
+//! without revisiting that pin.
+
+#![expect(
+    clippy::expect_used,
+    reason = "fixture builders are test-only and fail loudly on invalid inputs"
+)]
 
 use finstack_ai_kernel::{
     AppendRequest, AuthorizationEvidence, Digest, ExternalCommandKind, ExternalCommandRejected,
@@ -6,7 +18,9 @@ use finstack_ai_kernel::{
     RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordTag, RunTag, SessionTag, Timestamp,
 };
 
-pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {
+/// Deterministic UUID-shaped id derived from `ordinal`.
+#[must_use]
+pub fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
     bytes[6] = 0x70;
     bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
@@ -14,7 +28,14 @@ pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     Id::from_bytes(bytes)
 }
 
-pub(crate) fn draft(record_ordinal: u64, session_ordinal: u64) -> RecordDraft {
+/// Committable `ExternalCommandRejected` draft for `record_ordinal` within
+/// `session_ordinal`'s session.
+///
+/// # Panics
+///
+/// Panics when the fixed fixture inputs are rejected by kernel validation.
+#[must_use]
+pub fn draft(record_ordinal: u64, session_ordinal: u64) -> RecordDraft {
     let principal =
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
     let authorization =
@@ -45,7 +66,13 @@ pub(crate) fn draft(record_ordinal: u64, session_ordinal: u64) -> RecordDraft {
     .expect("draft")
 }
 
-pub(crate) fn request(
+/// Frozen append request carrying `drafts` at `expected_sequence`.
+///
+/// # Panics
+///
+/// Panics when the fixture inputs are rejected by kernel validation.
+#[must_use]
+pub fn request(
     batch_ordinal: u64,
     session_ordinal: u64,
     expected_sequence: u64,

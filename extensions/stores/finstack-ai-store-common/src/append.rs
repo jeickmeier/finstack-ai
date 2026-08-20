@@ -213,7 +213,7 @@ mod tests {
     use finstack_ai_runtime::StoreLimits;
 
     use super::*;
-    use crate::test_support::{draft, id, request};
+    use finstack_ai_test::store_fixtures::{draft, id, request};
 
     fn limits() -> StoreLimits {
         StoreLimits {

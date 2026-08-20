@@ -28,8 +28,6 @@ mod append;
 mod error;
 mod scan;
 mod snapshot;
-#[cfg(test)]
-mod test_support;
 mod window;
 
 pub use append::{

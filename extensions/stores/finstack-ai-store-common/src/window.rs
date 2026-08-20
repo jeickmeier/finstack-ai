@@ -192,7 +192,7 @@ pub fn verify_full_head(
 mod tests {
     use super::*;
     use crate::append::build_committed_batch;
-    use crate::test_support::{draft, request};
+    use finstack_ai_test::store_fixtures::{draft, request};
 
     fn chained_batches() -> Vec<CommittedBatch> {
         // Batch A: sequences 1-2. Batch B: sequences 3-4.

@@ -18,6 +18,7 @@ use finstack_ai_runtime::{
     SCAN_PAGE_MAX_RECORDS, ScanRequest, SnapshotRequest, StateSnapshotRequest, StoreError,
     WriteMetadataRequest,
 };
+use finstack_ai_test::store_fixtures::{draft, id, request};
 use finstack_ai_test::{JournalStoreConformanceCase, check_journal_store_conformance};
 use rusqlite::{Connection, params};
 use tempfile::TempDir;
@@ -33,14 +34,6 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
             Poll::Pending => thread::yield_now(),
         }
     }
-}
-
-fn id<T: IdTag>(ordinal: u64) -> Id<T> {
-    let mut bytes = [0_u8; 16];
-    bytes[6] = 0x70;
-    bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Id::from_bytes(bytes)
 }
 
 fn limits() -> SqliteStoreLimits {
@@ -148,52 +141,6 @@ fn file_store(dir: &TempDir, durability: SqliteDurability) -> SqliteJournalStore
         busy_timeout: DEFAULT_BUSY_TIMEOUT,
     })
     .expect("file store")
-}
-
-fn draft(record_ordinal: u64, session_ordinal: u64) -> RecordDraft {
-    let principal =
-        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
-    let authorization =
-        AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("authorization");
-    let rejection = ExternalCommandRejected::try_new(
-        ExternalCommandKind::EffectCompletion,
-        format!("completion-{record_ordinal}"),
-        ExternalCommandTarget::Effect(id(record_ordinal + 1000)),
-        principal,
-        authorization,
-        "conflicting_completion",
-        Digest::raw_json(b"{}"),
-        None,
-    )
-    .expect("rejection");
-    RecordDraft::try_new(
-        RECORD_FORMAT_VERSION,
-        RECORD_KIND_VERSION,
-        id::<RecordTag>(record_ordinal),
-        id::<SessionTag>(session_ordinal),
-        id::<LaneTag>(session_ordinal + 100),
-        Some(id::<RunTag>(session_ordinal + 200)),
-        Timestamp::from_unix_ms(i64::try_from(record_ordinal).expect("timestamp"))
-            .expect("timestamp"),
-        Vec::new(),
-        RecordBody::ExternalCommandRejected(rejection),
-    )
-    .expect("draft")
-}
-
-fn request(
-    batch_ordinal: u64,
-    session_ordinal: u64,
-    expected_sequence: u64,
-    drafts: Vec<RecordDraft>,
-) -> AppendRequest {
-    AppendRequest::try_new(
-        id(batch_ordinal),
-        id::<SessionTag>(session_ordinal),
-        expected_sequence,
-        drafts,
-    )
-    .expect("append request")
 }
 
 #[test]

@@ -46,7 +46,7 @@ mod tests {
 
     use super::*;
     use crate::append::build_committed_batch;
-    use crate::test_support::{draft, request};
+    use finstack_ai_test::store_fixtures::{draft, request};
 
     #[test]
     fn scan_validation_and_paging_match_the_contract() {
