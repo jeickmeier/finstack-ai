@@ -23,6 +23,7 @@
 
 mod config;
 mod deliver;
+mod markdown;
 mod pipeline;
 mod toolset;
 

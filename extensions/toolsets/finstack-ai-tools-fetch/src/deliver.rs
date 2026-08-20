@@ -14,6 +14,7 @@ use finstack_ai_runtime::{
     stage_required_artifact,
 };
 
+use crate::markdown::html_to_markdown;
 use crate::toolset::FetchMode;
 use crate::{FETCH_LIMIT_EXCEEDED, FETCH_TRANSPORT_FAILED};
 
@@ -87,9 +88,13 @@ pub(crate) async fn deliver(
     }
 }
 
-/// `Auto`/`Markdown` routing: inline-text essences (including HTML, for
-/// now) decode as UTF-8 text; anything else, or a decode failure, falls
-/// through to artifact staging.
+/// `Auto`/`Markdown` routing: HTML essences (`text/html`,
+/// `application/xhtml+xml`, checked before the generic `+xml` suffix rule)
+/// are decoded as UTF-8 and converted to Markdown; a decode failure falls
+/// through to artifact staging, and a conversion failure (or a converted
+/// result over budget) falls back to inlining the original text. Other
+/// inline-text essences decode as UTF-8 text directly; anything else, or a
+/// decode failure, falls through to artifact staging.
 async fn deliver_auto_or_markdown(
     body: Vec<u8>,
     media_type: &str,
@@ -99,11 +104,16 @@ async fn deliver_auto_or_markdown(
 ) -> Result<DeliveredContent, ToolError> {
     let is_html = media_type == "text/html" || media_type == "application/xhtml+xml";
     if is_html {
-        // Task 10: convert HTML to Markdown here instead of falling through
-        // to plain inline text below (both `Auto` and `Markdown` route HTML
-        // through the converter; `Markdown` additionally forces conversion
-        // for `application/xhtml+xml`). Until Task 10 lands, HTML is
-        // treated as inline text, same as any other text essence.
+        return match String::from_utf8(body) {
+            Ok(text) => {
+                let inline_text = match html_to_markdown(&text, max_result_budget) {
+                    Some(markdown) => markdown,
+                    None => text,
+                };
+                inline_within_budget(inline_text, max_result_budget)
+            }
+            Err(err) => stage_or_error(err.into_bytes(), media_type, store, ctx).await,
+        };
     }
 
     if is_inline_text_essence(media_type) {

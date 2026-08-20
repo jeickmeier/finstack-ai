@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Script and style</title>
+<style>
+body { color: red; }
+.secret-css-marker { display: none; }
+</style>
+<script>
+var secret = "var secret marker should not appear";
+console.log(secret);
+</script>
+</head>
+<body>
+<!-- a comment that must not appear -->
+<h1>Visible Heading</h1>
+<p>Visible paragraph text.</p>
+<script>document.write("inline script marker");</script>
+</body>
+</html>

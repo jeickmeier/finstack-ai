@@ -199,6 +199,10 @@ futures-util = "0.3.31"
 base64 = { version = "0.22.1", default-features = false, features = ["std", "alloc"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["http2", "json", "native-tls", "stream"] }
 url = "2"
+# HTML→markdown conversion for the fetch toolset (spec §4.5). License-gated
+# via `cargo deny check licenses` before use; fallback is a hand-rolled
+# `scraper` DOM walk if this ever fails the gate.
+htmd = "0.5"
 rustix = { version = "1.1.4", default-features = false, features = ["alloc", "fs", "std"] }
 tempfile = "3.27.0"
 tokio = { version = "=1.51.1", default-features = false, features = ["macros", "rt", "sync", "time"] }

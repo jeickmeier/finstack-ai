@@ -912,6 +912,115 @@ async fn headers_do_not_cross_hosts_on_redirect() {
     assert!(!request_b.contains("x-api"), "{request_b}");
 }
 
+// --- Task 10: HTML -> markdown -------------------------------------------
+
+#[tokio::test]
+async fn html_body_converts_to_markdown_under_auto_mode() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let html = include_str!("../fixtures/nested_lists.html");
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/html\r\n".to_owned(),
+        html.as_bytes().to_vec(),
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    let content = output["content"].as_str().expect("content string");
+    assert!(content.contains("# Shopping"), "{content}");
+    assert!(!content.contains("<h1>"), "{content}");
+    assert!(!content.contains("<ul>"), "{content}");
+}
+
+#[tokio::test]
+async fn html_body_stays_raw_under_text_mode() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let html = include_str!("../fixtures/nested_lists.html");
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/html\r\n".to_owned(),
+        html.as_bytes().to_vec(),
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","mode":"text"}}"#).as_bytes(),
+    );
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    let content = output["content"].as_str().expect("content string");
+    assert!(content.contains("<h1>"), "{content}");
+    assert_eq!(content, html);
+}
+
+#[tokio::test]
+async fn xhtml_body_converts_to_markdown_under_auto_mode() {
+    // `application/xhtml+xml` must route through the HTML converter, not
+    // the generic `+xml` inline-text rule (which would leave raw markup in
+    // `content`).
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let html = include_str!("../fixtures/nested_lists.html");
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: application/xhtml+xml\r\n".to_owned(),
+        html.as_bytes().to_vec(),
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    let content = output["content"].as_str().expect("content string");
+    assert!(content.contains("# Shopping"), "{content}");
+    assert!(!content.contains("<h1>"), "{content}");
+}
+
+#[tokio::test]
+async fn html_body_converts_to_markdown_under_markdown_mode() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let html = include_str!("../fixtures/table.html");
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/html\r\n".to_owned(),
+        html.as_bytes().to_vec(),
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","mode":"markdown"}}"#).as_bytes(),
+    );
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    let content = output["content"].as_str().expect("content string");
+    assert!(content.contains("# Languages"), "{content}");
+    assert!(content.contains("| Rust"), "{content}");
+    assert!(!content.contains("<table>"), "{content}");
+}
+
 #[tokio::test]
 async fn pinned_address_overrides_dns_for_hostnames() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
