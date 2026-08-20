@@ -169,3 +169,63 @@ async fn uncosted_completions_are_counted_never_priced() {
     assert_eq!(row.effects, 2);
     assert_eq!(row.uncosted_effects, 2);
 }
+
+#[tokio::test]
+async fn model_and_provider_are_attributed_from_the_request() {
+    let billing =
+        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    billing
+        .observe(Arc::from([
+            model_event(1, 7, requested(7, r#"{"model":"demo-model-1","messages":[]}"#)),
+            model_event(2, 7, completed(7, Some(usage(10, 20, Some(cost("USD", 100, "prices-v1")))))),
+        ]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    let row = snapshot.spend.first().expect("spend row");
+    assert_eq!(row.model.as_deref(), Some("demo-model-1"));
+    let provider = row.provider.clone().expect("provider");
+    assert_eq!(provider.id().to_string(), "finstack.model.demo");
+    assert_eq!(snapshot.unattributed_effects, 0);
+}
+
+#[tokio::test]
+async fn untracked_completions_count_as_unattributed() {
+    let billing =
+        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    billing
+        .observe(Arc::from([model_event(
+            1,
+            7,
+            completed(7, Some(usage(1, 1, Some(cost("USD", 1, "prices-v1"))))),
+        )]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    assert_eq!(snapshot.unattributed_effects, 1);
+    let row = snapshot.spend.first().expect("spend row");
+    assert!(row.model.is_none());
+    assert_eq!(row.micros, 1);
+}
+
+#[tokio::test]
+async fn oversized_or_missing_model_names_fall_back_to_none() {
+    let billing =
+        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let long_model = "m".repeat(300);
+    let request = format!(r#"{{"model":"{long_model}"}}"#);
+    billing
+        .observe(Arc::from([
+            model_event(1, 7, requested(7, &request)),
+            model_event(2, 7, completed(7, Some(usage(1, 1, None)))),
+            model_event(3, 8, requested(8, r#"{"messages":[]}"#)),
+            model_event(4, 8, completed(8, Some(usage(1, 1, None)))),
+        ]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    assert_eq!(snapshot.usage.len(), 1);
+    assert!(snapshot.usage[0].model.is_none());
+    assert_eq!(snapshot.usage[0].effects, 2);
+    assert_eq!(snapshot.unattributed_effects, 0);
+}

@@ -27,8 +27,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentRef, EffectId, Metadata, RunEvent, RunEventBody, RunEventKind, RunId,
-    SessionId, Usage, Version,
+    ComponentId, ComponentRef, EffectId, EffectInput, EffectKind, Metadata, RunEvent, RunEventBody,
+    RunEventKind, RunId, SessionId, Usage, Version,
 };
 use finstack_ai_runtime::{
     OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
@@ -39,6 +39,10 @@ use thiserror::Error;
 
 /// Maximum distinct attribution keys accepted by the ledger.
 const MAX_ENTRIES_CEILING: usize = 1_000_000;
+/// Pending model effects tracked for attribution.
+const MAX_PENDING_EFFECTS: usize = 4096;
+/// Longest model-name string accepted from a request payload.
+const MAX_MODEL_NAME_BYTES: usize = 256;
 
 /// Billing-observer construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -263,6 +267,9 @@ impl BillingObserver {
             RunEventKind::EffectCompleted => {
                 if let RunEventBody::EffectCompleted(body) = event.body() {
                     let origin = state.pending.remove(&body.effect_id());
+                    if origin.is_none() {
+                        state.unattributed_effects = state.unattributed_effects.saturating_add(1);
+                    }
                     settle(
                         &mut state,
                         self.max_entries,
@@ -271,6 +278,46 @@ impl BillingObserver {
                         origin,
                         body.usage(),
                     );
+                }
+            }
+            RunEventKind::EffectRequested => {
+                if let RunEventBody::EffectRequested(body) = event.body()
+                    && body.kind() == EffectKind::Model
+                {
+                    if state.pending.len() >= MAX_PENDING_EFFECTS {
+                        return;
+                    }
+                    let provider = body.component().map(|invocation| {
+                        ComponentRef::new(invocation.component.clone(), Some(invocation.version))
+                    });
+                    let model = match body.input() {
+                        EffectInput::Model { request } => parse_model_name(request.as_str()),
+                        _ => None,
+                    };
+                    state
+                        .pending
+                        .insert(body.effect_id(), EffectOrigin { provider, model });
+                }
+            }
+            RunEventKind::EffectFailed => {
+                if let RunEventBody::EffectFailed(body) = event.body() {
+                    let origin = state.pending.remove(&body.effect_id());
+                    if origin.is_none() {
+                        state.unattributed_effects = state.unattributed_effects.saturating_add(1);
+                    }
+                    settle(
+                        &mut state,
+                        self.max_entries,
+                        event.session_id(),
+                        event.run_id(),
+                        origin,
+                        body.usage(),
+                    );
+                }
+            }
+            RunEventKind::EffectDeferred | RunEventKind::EffectCancelled => {
+                if let Some(effect_id) = event.effect_id() {
+                    state.pending.remove(&effect_id);
                 }
             }
             _ => {}
@@ -353,6 +400,16 @@ fn settle(
         }
     }
     true
+}
+
+/// Extract a bounded top-level `"model"` string from canonical request JSON.
+fn parse_model_name(request: &str) -> Option<Arc<str>> {
+    let value: serde_json::Value = serde_json::from_str(request).ok()?;
+    let name = value.get("model")?.as_str()?;
+    if name.is_empty() || name.len() > MAX_MODEL_NAME_BYTES {
+        return None;
+    }
+    Some(Arc::from(name))
 }
 
 #[cfg(test)]
