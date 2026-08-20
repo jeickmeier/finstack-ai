@@ -1365,6 +1365,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-provider-gemini"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-provider-ollama"
 version = "1.0.0"
 dependencies = [
