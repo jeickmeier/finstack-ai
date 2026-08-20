@@ -13,6 +13,9 @@ Public-API examples for finstack-ai bindings. Workspace version is
   inspect demo (T2 host / T5 content). Not crash-durable.
 - [`ts-alpha-install/`](ts-alpha-install/) — TypeScript consumer that
   typechecks against a staged `@finstack/ai` tarball.
-- [`durable-interaction/`](durable-interaction/) — typed interaction that
-  survives a simulated worker restart on a SQLite journal via the local
-  workflow driver. Not a default dependency of `finstack-ai-native-examples`.
+- [`durable-interaction/`](durable-interaction/) — full UC-05 story on a
+  SQLite journal: a run parks on a tool-approval interaction, the worker
+  process dies, a fresh host rebuilds the journal, worker, and HITL router
+  stores from disk paths alone, an operator lists and authorizes the
+  interaction through `HitlRouter`, and the same worker ticks the run to
+  completion. Not a default dependency of `finstack-ai-native-examples`.
