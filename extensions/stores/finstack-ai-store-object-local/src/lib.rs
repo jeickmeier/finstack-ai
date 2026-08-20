@@ -128,7 +128,10 @@ impl SidecarMeta {
     }
 
     fn from_json_bytes(bytes: &[u8]) -> Result<Self, ObjectError> {
-        let corrupt = || ObjectError::Integrity { message: Arc::from("sidecar_corrupt") };
+        // A corrupt/unparseable sidecar is malformed metadata, not a
+        // content-digest verification failure — `Integrity` is reserved for
+        // an actual content-hash mismatch against a well-formed sidecar.
+        let corrupt = || ObjectError::InvalidMetadata { message: Arc::from("sidecar_corrupt") };
         let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_error| corrupt())?;
         let scope_digest =
             value.get("scope_digest").and_then(serde_json::Value::as_str).ok_or_else(corrupt)?.to_owned();
@@ -142,12 +145,12 @@ impl SidecarMeta {
 
     fn content_digest(&self) -> Result<Digest, ObjectError> {
         Digest::from_hex(&self.content_digest)
-            .map_err(|_error| ObjectError::Integrity { message: Arc::from("sidecar_corrupt") })
+            .map_err(|_error| ObjectError::InvalidMetadata { message: Arc::from("sidecar_corrupt") })
     }
 
     fn scope_digest(&self) -> Result<Digest, ObjectError> {
         Digest::from_hex(&self.scope_digest)
-            .map_err(|_error| ObjectError::Integrity { message: Arc::from("sidecar_corrupt") })
+            .map_err(|_error| ObjectError::InvalidMetadata { message: Arc::from("sidecar_corrupt") })
     }
 }
 
@@ -595,7 +598,7 @@ mod tests {
     #[test]
     fn sidecar_from_json_rejects_missing_fields() {
         let error = SidecarMeta::from_json_bytes(br#"{"scope_digest":"a"}"#).expect_err("must reject");
-        assert_eq!(error.code(), finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE);
+        assert_eq!(error.code(), finstack_ai_runtime::OBJECT_INVALID_METADATA);
     }
 
     #[tokio::test]
