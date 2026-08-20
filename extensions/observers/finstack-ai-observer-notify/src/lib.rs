@@ -311,5 +311,9 @@ impl Observer for NotifyObserver {
     }
 }
 
+mod project;
+
+pub use project::project;
+
 #[cfg(test)]
 mod tests;
