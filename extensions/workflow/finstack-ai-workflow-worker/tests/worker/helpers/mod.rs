@@ -1,5 +1,4 @@
 //! Shared fixtures copied from finstack-ai-workflow-local's executable spec.
-#![allow(dead_code, reason = "fixtures land ahead of the tests that use them")]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,13 +12,13 @@ use finstack_ai_kernel::{
     ExternalEffectOutcome, ExternalHandleRef, Id, IdTag, InteractionKind, InteractionRequest,
     InteractionTag, KernelInput, KernelState, Message, MessageRole, Metadata, OperationLocator,
     OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
-    RecordBody, ReducerStageOutcome, RequestInteraction, RetryClassification, RetryDirective,
+    ReducerStageOutcome, RequestInteraction, RetryClassification, RetryDirective,
     RetrySafety, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
     RunSecurityContext, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv, Usage, Version,
 };
 use finstack_ai_runtime::{
     Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError, JournalStore,
-    LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelDeferral, ModelError,
+    LockedModelContextProfile, Model, ModelContextProfile, ModelDeferral, ModelError,
     ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
     ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
     RunTaskOwner, SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
@@ -27,7 +26,6 @@ use finstack_ai_runtime::{
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
-use finstack_ai_workflow_local::{LocalWorkflowDriver, MemoryCronStore};
 
 pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
@@ -416,64 +414,6 @@ pub(crate) async fn wait_state(
     wait_state_on(Arc::clone(store) as Arc<dyn JournalStore>, predicate).await
 }
 
-pub(crate) async fn journal_trace(
-    store: &Arc<MemoryJournalStore>,
-) -> Vec<(String, Option<EffectId>)> {
-    let loaded = store
-        .load(LoadRequest { session_id: id(1) })
-        .await
-        .expect("load");
-    let mut rows = Vec::new();
-    for batch in loaded.committed_batches.iter() {
-        for envelope in batch.records.iter() {
-            rows.push(match envelope.body() {
-                RecordBody::EffectRequested(requested) => {
-                    ("effect_requested".into(), Some(requested.effect_id()))
-                }
-                RecordBody::EffectCompleted(completed) => {
-                    ("effect_completed".into(), Some(completed.effect_id()))
-                }
-                RecordBody::EffectDeferred(deferred) => {
-                    ("effect_deferred".into(), Some(deferred.effect_id))
-                }
-                RecordBody::RetryScheduled(scheduled) => {
-                    ("retry_scheduled".into(), Some(scheduled.timer_effect_id))
-                }
-                RecordBody::InteractionRequested(request) => {
-                    ("interaction_requested".into(), Some(request.effect_id()))
-                }
-                RecordBody::RunAccepted(_) => ("run_accepted".into(), None),
-                RecordBody::StageOutcomeRecorded(_) => ("stage_outcome".into(), None),
-                RecordBody::ContextPrepared(_) => ("context_prepared".into(), None),
-                other => (
-                    format!("{other:?}")
-                        .split('(')
-                        .next()
-                        .unwrap_or("other")
-                        .into(),
-                    None,
-                ),
-            });
-        }
-    }
-    rows
-}
-
-pub(crate) async fn attach_driver(
-    store: Arc<MemoryJournalStore>,
-    model: Arc<dyn Model>,
-    clock: ExternalClock,
-    seed: u64,
-) -> LocalWorkflowDriver {
-    LocalWorkflowDriver::wrap(
-        WorkflowSession::trusted(store, locator(), clock, seed)
-            .await
-            .expect("attach")
-            .with_ports(model, locked_profile(), None),
-        Arc::new(MemoryCronStore::new()),
-    )
-}
-
 pub(crate) async fn attach_session(
     store: Arc<MemoryJournalStore>,
     model: Arc<dyn Model>,
@@ -629,6 +569,12 @@ pub(crate) async fn park_on_retry_timer(
 /// checks the clock and commits `TimerFired`; `ensure_owner` alone would
 /// never spawn one, since its own gate is "no owner and no classified
 /// wait" — and a parked session always has a classified wait.
+///
+/// `timeout` is a "give up and fall back to the manual facade path" budget,
+/// not a correctness bound — a case that never reaches a new classified
+/// wait (e.g. one stuck on a genuine facade decision) always consumes the
+/// whole timeout before returning `Err`. Do not shrink it for test speed;
+/// that only trades a slower test for a flakier one.
 ///
 /// # Errors
 ///

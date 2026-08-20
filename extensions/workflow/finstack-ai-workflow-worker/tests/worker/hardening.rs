@@ -222,6 +222,12 @@ async fn a_stale_wake_row_is_corrected_by_the_journal() {
         report.failures, 0,
         "the journal's Terminal state is not a failure, it is ground truth"
     );
+    assert_eq!(
+        report.sessions_resumed, 1,
+        "resume_row's Ok(terminal) path unconditionally counts the claim as \
+         a resumed session (worker.rs's tick_wake), even though this one \
+         only ever observed Terminal and deleted the stale row"
+    );
     assert!(
         store.load_tenant("tenant-a").expect("rows").is_empty(),
         "the stale row is deleted once the worker sees Terminal"
