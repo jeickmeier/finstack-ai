@@ -20,6 +20,11 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 //! Signed callback-token ingress for authenticated external effect completions.
 
+mod audit;
 mod config;
+mod ingress;
+mod token;
 
 pub use config::{CompletionIngressConfig, CompletionIngressConfigError};
+pub use ingress::IngressError;
+pub use token::CallbackToken;
