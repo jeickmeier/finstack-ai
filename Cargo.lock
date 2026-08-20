@@ -1817,10 +1817,15 @@ name = "finstack-ai-workflow-hitl"
 version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-test",
  "finstack-ai-workflow-worker",
  "rusqlite",
+ "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
