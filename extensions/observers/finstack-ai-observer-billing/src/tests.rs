@@ -229,3 +229,70 @@ async fn oversized_or_missing_model_names_fall_back_to_none() {
     assert_eq!(snapshot.usage[0].effects, 2);
     assert_eq!(snapshot.unattributed_effects, 0);
 }
+
+fn session_event(session: u64, sequence: u64, effect: u64, body: RunEventBody) -> RunEvent {
+    RunEvent::try_durable(
+        RUN_EVENT_SCHEMA_VERSION,
+        RUN_EVENT_KIND_VERSION,
+        id::<EventTag>(sequence),
+        id::<SessionTag>(session),
+        id::<LaneTag>(2),
+        id::<RunTag>(3),
+        Some(id::<TurnTag>(4)),
+        Some(id::<ModelRequestTag>(5)),
+        None,
+        Some(id::<EffectTag>(effect)),
+        None,
+        sequence,
+        sequence,
+        Timestamp::from_unix_ms(1_000).expect("timestamp"),
+        Sensitivity::Confidential,
+        body,
+    )
+    .expect("event")
+}
+
+#[tokio::test]
+async fn ledger_saturation_is_counted_and_diagnosed() {
+    let billing =
+        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 1).expect("billing");
+    billing
+        .observe(Arc::from([
+            session_event(1, 1, 7, completed(7, Some(usage(1, 1, Some(cost("USD", 1, "prices-v1")))))),
+            session_event(2, 2, 8, completed(8, Some(usage(1, 1, Some(cost("USD", 1, "prices-v1")))))),
+        ]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    assert_eq!(snapshot.spend.len(), 1);
+    assert_eq!(snapshot.overflowed_events, 1);
+    assert_eq!(
+        billing.last_diagnostic().expect("diagnostic").code,
+        "billing_ledger_saturated"
+    );
+    // The existing key keeps aggregating after saturation.
+    billing
+        .observe(Arc::from([session_event(
+            1, 3, 9,
+            completed(9, Some(usage(1, 1, Some(cost("USD", 4, "prices-v1"))))),
+        )]))
+        .await
+        .expect("observe");
+    let snapshot = billing.snapshot();
+    assert_eq!(snapshot.spend[0].micros, 5);
+}
+
+#[tokio::test]
+async fn drop_progress_overflow_is_diagnosed() {
+    let billing =
+        BillingObserver::try_new(1, ObserverBackpressure::DropProgress, 64).expect("billing");
+    billing
+        .observe(Arc::from([
+            model_event(1, 7, completed(7, None)),
+            model_event(2, 8, completed(8, None)),
+        ]))
+        .await
+        .expect("observe");
+    assert!(billing.dropped() >= 1);
+    assert_eq!(billing.snapshot().dropped_events, billing.dropped());
+}

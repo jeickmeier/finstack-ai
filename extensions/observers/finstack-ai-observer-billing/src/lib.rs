@@ -37,6 +37,12 @@ use finstack_ai_runtime::{
 };
 use thiserror::Error;
 
+/// Diagnostic stored when the ledger's entry bound rejects a new key.
+pub const BILLING_LEDGER_SATURATED: ObserverDiagnostic = ObserverDiagnostic {
+    code: "billing_ledger_saturated",
+    detail: "billing ledger entry bound reached; new attribution keys dropped",
+};
+
 /// Maximum distinct attribution keys accepted by the ledger.
 const MAX_ENTRIES_CEILING: usize = 1_000_000;
 /// Pending model effects tracked for attribution.
@@ -263,6 +269,7 @@ impl BillingObserver {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
+        let mut saturated = false;
         match event.kind() {
             RunEventKind::EffectCompleted => {
                 if let RunEventBody::EffectCompleted(body) = event.body() {
@@ -270,7 +277,7 @@ impl BillingObserver {
                     if origin.is_none() {
                         state.unattributed_effects = state.unattributed_effects.saturating_add(1);
                     }
-                    settle(
+                    saturated = !settle(
                         &mut state,
                         self.max_entries,
                         event.session_id(),
@@ -305,7 +312,7 @@ impl BillingObserver {
                     if origin.is_none() {
                         state.unattributed_effects = state.unattributed_effects.saturating_add(1);
                     }
-                    settle(
+                    saturated = !settle(
                         &mut state,
                         self.max_entries,
                         event.session_id(),
@@ -321,6 +328,10 @@ impl BillingObserver {
                 }
             }
             _ => {}
+        }
+        drop(state);
+        if saturated && let Ok(mut slot) = self.diagnostic.lock() {
+            *slot = Some(BILLING_LEDGER_SATURATED);
         }
     }
 
