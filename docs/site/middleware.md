@@ -111,9 +111,13 @@ a compliance footer, an as-of date, a locale tag, tenant rules — at
 `prepare_context` via `AddInstructions`. All text is frozen into
 `PolicyInstructionsConfig` at construction, so the leaf is pure and
 `RecomputeSafe`; the configuration digest changes whenever the policy text
-changes. Injected items land as protected System messages appended after the
-current user message, which the context compactor must preserve
-byte-identically. Register per tenant at agent build time:
+changes. Injected items land as protected System messages inserted **before**
+the trailing current-user message; the context compactor must preserve them
+byte-identically, and the current user message remains last and protected, so
+a registered compactor's `CompactContext` still lands. The component id is
+fixed (`finstack.middleware.instructions`), so register at most one instance
+per chain and use multiple entries for multiple policies. Register per tenant
+at agent build time:
 
 ```rust
 let policy = InstructionsMiddleware::try_new(PolicyInstructionsConfig {
@@ -128,7 +132,7 @@ let policy = InstructionsMiddleware::try_new(PolicyInstructionsConfig {
         },
     ],
 })?;
-builder.middleware(component_ref, Arc::new(policy));
+let builder = builder.middleware(component_ref, Arc::new(policy));
 ```
 
 Stable error code: `instructions_configuration_invalid`.

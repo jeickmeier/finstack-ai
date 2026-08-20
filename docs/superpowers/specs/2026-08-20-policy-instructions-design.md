@@ -39,13 +39,22 @@ construction. Component id: `finstack.middleware.instructions`.
   them byte-identically (`ports/middleware/validate.rs:198-205`). No ordering
   edges against the compactor are needed.
 
-### Known placement trade-off (accepted)
+### Placement (final semantics)
 
-At `prepare_context`, `AddInstructions` items are appended at the **tail** of
-the message array (after the current user message), not into the leading
-system prefix. This is acceptable for policy footers/rules — they are System
-role and protected. If prefix placement is ever required, that is a separate
-feature (`Replace` semantics) and out of scope here.
+At `prepare_context`, `apply_context_prepared` inserts `AddInstructions`
+items (as System messages) and `AddContext` items (as User messages)
+**immediately before the trailing current-user message**, mirroring the
+provider convention in `exec/context_driver/collect.rs::rebuild_messages`.
+The current user message therefore remains **last and structurally
+protected**, which is what keeps a `BeforeModel` `CompactContext` landable:
+`validate_compaction_result` requires the last source entry to be a
+protected user. The compactor must preserve the injected System messages
+byte-identically. When the array is empty or does not end with a user
+message (e.g. after a `Replace` reshaped it), additions fall back to
+appending at the tail — the fold does not invent structure. An earlier
+draft appended at the tail unconditionally; that broke composition with any
+registered compactor and was rejected in final review. Leading-prefix
+placement (ahead of pre-existing system messages) remains out of scope.
 
 ## Configuration
 

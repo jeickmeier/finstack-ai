@@ -51,3 +51,4 @@ impl core::marker::StructuralPartialEq for finstack_ai_middleware_instructions::
 impl serde_core::ser::Serialize for finstack_ai_middleware_instructions::PolicyInstructionsConfig
 pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub const finstack_ai_middleware_instructions::MAX_POLICY_ENTRIES: usize
+pub const finstack_ai_middleware_instructions::MAX_POLICY_LABEL_BYTES: usize

@@ -63,6 +63,34 @@ fn blank_label_or_text_is_rejected() {
     );
 }
 
+#[test]
+fn oversized_label_is_rejected() {
+    let ok = PolicyInstructionsConfig {
+        entries: vec![entry(&"a".repeat(MAX_POLICY_LABEL_BYTES), "text")],
+    };
+    ok.validate()
+        .expect("a 249-byte label still fits the 256-byte source id");
+
+    let too_long = PolicyInstructionsConfig {
+        entries: vec![entry(&"a".repeat(MAX_POLICY_LABEL_BYTES + 1), "text")],
+    };
+    assert_eq!(
+        too_long.validate().expect_err("too long").to_string(),
+        "instructions_configuration_invalid: entry_label_too_long"
+    );
+}
+
+#[test]
+fn label_with_nul_is_rejected() {
+    let config = PolicyInstructionsConfig {
+        entries: vec![entry("bad\0label", "text")],
+    };
+    assert_eq!(
+        config.validate().expect_err("nul").to_string(),
+        "instructions_configuration_invalid: entry_label_invalid"
+    );
+}
+
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
@@ -71,7 +99,7 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, ContextAuthority, ContextItemKind, Middleware,
-    MiddlewareContext, MiddlewareRole, RunCallContext, StageInput, StageOutcome,
+    MiddlewareContext, MiddlewareRole, OrderTier, RunCallContext, StageInput, StageOutcome,
     validate_stage_outcome,
 };
 use finstack_ai_test::{MiddlewareConformanceCase, check_middleware_conformance};
@@ -170,6 +198,37 @@ async fn descriptor_declares_prepare_context_standard_role() {
         finstack_ai_kernel::ComponentId::parse("finstack.middleware.instructions")
             .expect("component id")
     );
+}
+
+#[tokio::test]
+async fn descriptor_and_item_fields_are_pinned() {
+    let middleware = InstructionsMiddleware::try_new(sample_config()).expect("middleware");
+    let descriptor = middleware.descriptor();
+    assert_eq!(descriptor.order.tier, OrderTier::Standard);
+    assert_eq!(descriptor.order.priority, 0);
+    assert_eq!(
+        descriptor.invocation.version,
+        finstack_ai_kernel::Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        }
+    );
+    assert_eq!(
+        descriptor.invocation.recovery,
+        finstack_ai_kernel::InvocationRecovery::RecomputeSafe
+    );
+    let outcome = middleware
+        .invoke(ctx(), prepare_input())
+        .await
+        .expect("invoke");
+    let StageOutcome::AddInstructions(items) = &outcome else {
+        panic!("expected AddInstructions, got {outcome:?}");
+    };
+    for item in items.iter() {
+        assert_eq!(item.priority, 0);
+        assert_eq!(item.sensitivity, finstack_ai_kernel::Sensitivity::Internal);
+    }
 }
 
 #[tokio::test]

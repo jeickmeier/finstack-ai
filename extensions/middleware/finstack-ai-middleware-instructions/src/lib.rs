@@ -37,6 +37,12 @@ use thiserror::Error;
 /// Maximum number of policy entries one middleware may inject.
 pub const MAX_POLICY_ENTRIES: usize = 16;
 
+/// Longest permitted `PolicyEntry::label`, in bytes.
+///
+/// The label becomes the item's provenance source id as `policy:{label}`, and
+/// the runtime caps source ids at 256 bytes; `"policy:"` occupies 7 of them.
+pub const MAX_POLICY_LABEL_BYTES: usize = 249;
+
 const INSTRUCTIONS_VERSION: Version = Version {
     major: 1,
     minor: 0,
@@ -93,6 +99,19 @@ impl PolicyInstructionsConfig {
                     reason: "entry_label_empty",
                 });
             }
+            // The runtime caps provenance source ids at 256 bytes; the label
+            // lands there as `policy:{label}`, so reject early with a stable
+            // reason instead of failing item construction downstream.
+            if entry.label.len() > MAX_POLICY_LABEL_BYTES {
+                return Err(InstructionsError::Configuration {
+                    reason: "entry_label_too_long",
+                });
+            }
+            if entry.label.as_bytes().contains(&0) {
+                return Err(InstructionsError::Configuration {
+                    reason: "entry_label_invalid",
+                });
+            }
             if entry.text.trim().is_empty() {
                 return Err(InstructionsError::Configuration {
                     reason: "entry_text_empty",
@@ -129,6 +148,8 @@ impl InstructionsMiddleware {
                     reason: "entry_text_invalid",
                 }
             })?);
+            // bytes/4 over-counts tokens for non-ASCII text (multi-byte UTF-8),
+            // which is conservative for budgeting: never under-reports.
             let estimated_tokens = u64::try_from(entry.text.len() / 4).unwrap_or(u64::MAX);
             let item = ContextItem::try_new(
                 ContextItemKind::Instruction,
