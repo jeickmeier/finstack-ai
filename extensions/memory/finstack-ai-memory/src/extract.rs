@@ -10,9 +10,10 @@
 //! [`finstack_ai_kernel::RunEventBody::ModelTextDelta`], so
 //! [`RuleBasedExtractor`] scans that body kind rather than a "terminal" kind.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use finstack_ai_kernel::{RunEvent, RunEventBody, Sensitivity};
+use finstack_ai_kernel::{ModelRequestId, RunEvent, RunEventBody, RunId, Sensitivity};
 
 use crate::record::MemoryId;
 
@@ -53,6 +54,30 @@ pub trait MemoryExtractor: Send + Sync {
 /// marker (and any immediately following whitespace) stripped, whose
 /// keywords are the first five whitespace-separated tokens of that body
 /// lowercased, and whose confidence is a fixed `60`.
+///
+/// `ModelTextDelta` events are raw streaming chunks: a marker line can be
+/// split across two or more deltas (e.g. `"[[remember]] the user pre"` then
+/// `"fers dark mode\n"`), and scanning each event's text independently would
+/// silently miss it. To avoid that, `extract` first accumulates delta text
+/// **in arrival order, grouped by `(run_id, model_request_id)`**, and only
+/// then splits the concatenated per-group text into lines and scans those.
+/// Events with a different `model_request_id` (or none) never contribute to
+/// the same group, even if they share a `run_id` — a new model turn starts
+/// a new, unrelated text stream. Grouping lives here (inside the extractor)
+/// rather than in `MemoryObserver`, so the `MemoryExtractor::extract`
+/// signature stays a plain `&[RunEvent] -> Vec<CandidateMemory>` with no
+/// batching contract leaking into the trait.
+///
+/// Each resulting candidate's `source_ref` is the **first** contributing
+/// delta event's id for its group (not the id of whichever event happened
+/// to complete a marker line) — that keeps the `MemoryObserver`-assigned
+/// idempotency key (`capture:{run_id}:{event_id}:{candidate_index}`)
+/// deterministic across literal batch redelivery, since replays repeat the
+/// same event ids in the same order. Similarly, `sensitivity` for a group's
+/// candidates is the sensitivity of that first event; every event in a
+/// well-formed `ModelTextDelta` stream for one model request has the same
+/// sensitivity in practice (see the kernel's model-event validation), so
+/// this is not expected to lose information.
 #[derive(Debug, Clone)]
 pub struct RuleBasedExtractor {
     marker: Arc<str>,
@@ -72,16 +97,42 @@ impl Default for RuleBasedExtractor {
     }
 }
 
+/// Accumulated per-`(run_id, model_request_id)` text-delta stream.
+struct DeltaGroup {
+    source_run: Arc<str>,
+    source_ref: Arc<str>,
+    sensitivity: Sensitivity,
+    text: String,
+}
+
 impl MemoryExtractor for RuleBasedExtractor {
     fn extract(&self, events: &[RunEvent]) -> Vec<CandidateMemory> {
-        let mut candidates = Vec::new();
+        let mut order: Vec<(RunId, Option<ModelRequestId>)> = Vec::new();
+        let mut groups: HashMap<(RunId, Option<ModelRequestId>), DeltaGroup> = HashMap::new();
+
         for event in events {
             let RunEventBody::ModelTextDelta(delta) = event.body() else {
                 continue;
             };
-            let source_run: Arc<str> = Arc::from(event.run_id().to_string());
-            let source_ref: Arc<str> = Arc::from(event.event_id().to_string());
-            for line in delta.text().lines() {
+            let key = (event.run_id(), event.model_request_id());
+            let group = groups.entry(key).or_insert_with(|| {
+                order.push(key);
+                DeltaGroup {
+                    source_run: Arc::from(event.run_id().to_string()),
+                    source_ref: Arc::from(event.event_id().to_string()),
+                    sensitivity: event.sensitivity(),
+                    text: String::new(),
+                }
+            });
+            group.text.push_str(delta.text());
+        }
+
+        let mut candidates = Vec::new();
+        for key in order {
+            let Some(group) = groups.remove(&key) else {
+                continue;
+            };
+            for line in group.text.lines() {
                 let Some(rest) = line.strip_prefix(self.marker.as_ref()) else {
                     continue;
                 };
@@ -98,10 +149,10 @@ impl MemoryExtractor for RuleBasedExtractor {
                     id: None,
                     keywords,
                     body: Arc::from(body),
-                    sensitivity: event.sensitivity(),
+                    sensitivity: group.sensitivity,
                     confidence: 60,
-                    source_run: Some(Arc::clone(&source_run)),
-                    source_ref: Some(Arc::clone(&source_ref)),
+                    source_run: Some(Arc::clone(&group.source_run)),
+                    source_ref: Some(Arc::clone(&group.source_ref)),
                 });
             }
         }
