@@ -1699,6 +1699,7 @@ dependencies = [
  "base64",
  "finstack-ai",
  "finstack-ai-kernel",
+ "finstack-ai-net-guard",
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
  "finstack-ai-test",
