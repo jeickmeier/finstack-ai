@@ -48,6 +48,9 @@ const TOOL_POLICY_VERSION: Version = Version {
 /// Stable code for a `before_model` jailbreak trigger fail outcome.
 pub const TOOL_POLICY_JAILBREAK_TRIGGERED: &str = "tool_policy_jailbreak_triggered";
 
+/// Stable code for a malformed `before_tool_batch` payload.
+pub const TOOL_POLICY_BATCH_PAYLOAD_MALFORMED: &str = "tool_policy_batch_payload_malformed";
+
 /// Policy filter middleware that narrows the model-visible tool set at
 /// `before_model` and `before_tool_batch`.
 #[derive(Debug, Clone)]
@@ -127,7 +130,7 @@ impl Middleware for ToolPolicyMiddleware {
                     .is_err()
                     {
                         return Err(MiddlewareError::try_new(
-                            finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                            TOOL_POLICY_BATCH_PAYLOAD_MALFORMED,
                             ErrorCategory::Middleware,
                             "tool batch payload malformed",
                             Metadata::empty(),

@@ -9,16 +9,16 @@ use thiserror::Error;
 
 /// Maximum number of roles in a [`RoleAllowlist`].
 pub(crate) const MAX_ROLES: usize = 128;
-/// Maximum number of tools in any tool set (mirrors `ModelRequestDraft::MAX_TOOLS`).
-pub(crate) const MAX_TOOLS_PER_SET: usize = 1_024;
+/// Maximum number of tools in any tool set (aliases `ModelRequestDraft::MAX_TOOLS`).
+pub(crate) const MAX_TOOLS_PER_SET: usize = finstack_ai_runtime::ModelRequestDraft::MAX_TOOLS;
 /// Maximum number of jailbreak trigger patterns.
 pub(crate) const MAX_PATTERNS: usize = 64;
 /// Maximum byte length of a single jailbreak trigger pattern.
 pub(crate) const MAX_PATTERN_BYTES: usize = 256;
 /// Maximum byte length of a role name.
 pub(crate) const MAX_ROLE_NAME_BYTES: usize = 256;
-/// Maximum run-relation depth accepted by the kernel (`RunRelation.depth` cap).
-pub(crate) const MAX_KERNEL_DEPTH: u16 = 16;
+/// Maximum run-relation depth accepted by the kernel (aliases `finstack_ai_kernel::MAX_RUN_RELATION_DEPTH`).
+pub(crate) const MAX_KERNEL_DEPTH: u16 = finstack_ai_kernel::MAX_RUN_RELATION_DEPTH;
 
 /// Tool-policy leaf construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -142,20 +142,22 @@ pub struct ToolPolicyConfig {
     child_depth: Option<ChildDepthGate>,
 }
 
+impl Default for ToolPolicyConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolPolicyConfig {
     /// Start an empty configuration. Add at least one rule before use.
-    ///
-    /// # Errors
-    ///
-    /// This constructor is currently infallible but returns a `Result` to
-    /// match the `with_*` builder chain and preserve future flexibility.
-    pub fn try_new() -> Result<Self, ToolPolicyError> {
-        Ok(Self {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
             role_allowlist: None,
             write_budget: None,
             jailbreak: None,
             child_depth: None,
-        })
+        }
     }
 
     /// Add a role-based tool allowlist.
@@ -279,6 +281,14 @@ impl ToolPolicyConfig {
     }
 
     /// Add a child-agent depth gate.
+    ///
+    /// `current_depth` is frozen at construction time: the middleware cannot
+    /// observe live dispatch depth, and a resolved agent (with its
+    /// middleware) is cached and reused across child invocations, so an
+    /// agent instance reused at a different depth evaluates the gate against
+    /// this stale value. Hosts that dispatch at varying depths must
+    /// construct a separately-configured agent per depth; this composes with
+    /// the SDK's `ChildRunPolicy`, which does track live depth.
     ///
     /// # Errors
     ///

@@ -124,8 +124,7 @@ fn role_allowlist_rejects_oversized_role_set() {
     let roles: BTreeMap<Arc<str>, BTreeSet<ToolId>> = (0..129)
         .map(|i| (Arc::from(format!("role-{i}").as_str()), BTreeSet::new()))
         .collect();
-    let err = ToolPolicyConfig::try_new()
-        .expect("empty config")
+    let err = ToolPolicyConfig::new()
         .with_role_allowlist(roles, BTreeSet::new())
         .expect_err("129 roles must be rejected");
     assert!(matches!(
@@ -138,7 +137,7 @@ fn role_allowlist_rejects_oversized_role_set() {
 
 #[test]
 fn jailbreak_rejects_empty_and_oversized_patterns() {
-    let base = || ToolPolicyConfig::try_new().expect("empty config");
+    let base = || ToolPolicyConfig::new();
     assert!(
         base()
             .with_jailbreak_triggers(vec![Arc::from("")], JailbreakAction::Fail)
@@ -164,8 +163,7 @@ fn jailbreak_rejects_empty_and_oversized_patterns() {
 
 #[test]
 fn child_depth_gate_rejects_depth_over_kernel_cap() {
-    let err = ToolPolicyConfig::try_new()
-        .expect("empty config")
+    let err = ToolPolicyConfig::new()
         .with_child_depth_gate(0, 17, BTreeSet::from([tid("finstack.tools.subagent")]))
         .expect_err("max_depth 17 exceeds kernel cap 16");
     assert!(matches!(
@@ -179,8 +177,7 @@ fn child_depth_gate_rejects_depth_over_kernel_cap() {
 #[test]
 fn config_serialization_is_deterministic_for_digest() {
     let build = || {
-        ToolPolicyConfig::try_new()
-            .expect("empty config")
+        ToolPolicyConfig::new()
             .with_write_budget(3)
             .expect("budget")
     };
@@ -196,8 +193,7 @@ mod middleware_tests {
     use crate::ToolPolicyMiddleware;
 
     fn any_config() -> crate::ToolPolicyConfig {
-        crate::ToolPolicyConfig::try_new()
-            .expect("empty config")
+        crate::ToolPolicyConfig::new()
             .with_write_budget(3)
             .expect("budget")
     }
@@ -219,10 +215,8 @@ mod middleware_tests {
 
     #[test]
     fn empty_policy_is_rejected() {
-        let err = ToolPolicyMiddleware::try_new(
-            crate::ToolPolicyConfig::try_new().expect("empty config"),
-        )
-        .expect_err("a policy with zero rules is a no-op and must be rejected");
+        let err = ToolPolicyMiddleware::try_new(crate::ToolPolicyConfig::new())
+            .expect_err("a policy with zero rules is a no-op and must be rejected");
         assert!(matches!(
             err,
             crate::ToolPolicyError::Configuration {
@@ -250,8 +244,7 @@ mod middleware_tests {
             format!("00000000-0000-7000-8000-{value:012x}")
         }
 
-        let cfg = crate::ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = crate::ToolPolicyConfig::new()
             .with_role_allowlist(
                 BTreeMap::from([(
                     Arc::<str>::from("reader"),
@@ -323,8 +316,7 @@ mod middleware_tests {
             format!("00000000-0000-7000-8000-{value:012x}")
         }
 
-        let cfg = crate::ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = crate::ToolPolicyConfig::new()
             .with_role_allowlist(
                 BTreeMap::from([(
                     Arc::<str>::from("reader"),
@@ -389,18 +381,14 @@ mod middleware_tests {
             .invoke(ctx(), StageInput::BeforeToolBatch { value: malformed })
             .await
             .expect_err("malformed batch payload must error, not Continue");
-        assert_eq!(
-            err.code(),
-            finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED
-        );
+        assert_eq!(err.code(), crate::TOOL_POLICY_BATCH_PAYLOAD_MALFORMED);
     }
 
     #[test]
     fn distinct_configs_produce_distinct_digests() {
         let a = ToolPolicyMiddleware::try_new(any_config()).expect("leaf a");
         let b = ToolPolicyMiddleware::try_new(
-            crate::ToolPolicyConfig::try_new()
-                .expect("cfg")
+            crate::ToolPolicyConfig::new()
                 .with_write_budget(4)
                 .expect("budget"),
         )
@@ -437,8 +425,7 @@ mod eval_tests {
 
     #[test]
     fn role_allowlist_is_deny_by_default_union_of_granted_roles() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_role_allowlist(
                 BTreeMap::from([
                     (Arc::<str>::from("reader"), BTreeSet::from([tid("t.read")])),
@@ -463,16 +450,14 @@ mod eval_tests {
 
     #[test]
     fn child_depth_gate_hides_restricted_tools_at_threshold() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_child_depth_gate(2, 2, BTreeSet::from([tid("t.spawn")]))
             .expect("gate");
         assert_eq!(
             narrow_universe(&cfg, &universe(), &[]),
             BTreeSet::from([tid("t.read"), tid("t.write")])
         );
-        let below = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let below = ToolPolicyConfig::new()
             .with_child_depth_gate(1, 2, BTreeSet::from([tid("t.spawn")]))
             .expect("gate");
         assert_eq!(narrow_universe(&below, &universe(), &[]), universe());
@@ -480,8 +465,7 @@ mod eval_tests {
 
     #[test]
     fn rules_compose_by_intersection() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_role_allowlist(
                 BTreeMap::from([(
                     Arc::<str>::from("agent"),
@@ -501,8 +485,7 @@ mod eval_tests {
 
     #[test]
     fn write_budget_hides_write_tools_once_spent() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_write_budget(2)
             .expect("budget");
         let input = draft(
@@ -517,8 +500,7 @@ mod eval_tests {
 
     #[test]
     fn write_budget_under_limit_is_identity() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_write_budget(2)
             .expect("budget");
         let input = draft(
@@ -533,8 +515,7 @@ mod eval_tests {
 
     #[test]
     fn jailbreak_fail_action_fails_the_stage() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_jailbreak_triggers(
                 vec![Arc::from("ignore previous instructions")],
                 JailbreakAction::Fail,
@@ -554,8 +535,7 @@ mod eval_tests {
 
     #[test]
     fn jailbreak_restrict_action_narrows_to_safe_set() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_jailbreak_triggers(
                 vec![Arc::from("ignore previous instructions")],
                 JailbreakAction::RestrictTo(BTreeSet::from([tid("finstack.tools.read")])),
@@ -573,8 +553,7 @@ mod eval_tests {
 
     #[test]
     fn assistant_text_does_not_trigger_jailbreak() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_jailbreak_triggers(
                 vec![Arc::from("ignore previous instructions")],
                 JailbreakAction::Fail,
@@ -592,8 +571,7 @@ mod eval_tests {
 
     #[test]
     fn identity_when_nothing_narrows() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_write_budget(10)
             .expect("budget");
         let input = draft(vec![read_tool(), write_tool()], vec![]);
@@ -605,8 +583,7 @@ mod eval_tests {
 
     #[test]
     fn batch_stage_with_role_policy_emits_complete_allow_set() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_role_allowlist(
                 BTreeMap::from([(
                     Arc::<str>::from("agent"),
@@ -626,8 +603,7 @@ mod eval_tests {
 
     #[test]
     fn batch_stage_without_role_policy_is_identity() {
-        let cfg = ToolPolicyConfig::try_new()
-            .expect("cfg")
+        let cfg = ToolPolicyConfig::new()
             .with_write_budget(3)
             .expect("budget");
         assert_eq!(

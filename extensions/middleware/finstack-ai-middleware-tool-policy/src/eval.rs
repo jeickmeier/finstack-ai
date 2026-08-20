@@ -19,17 +19,53 @@ pub(crate) enum PolicyVerdict {
     Fail { reason: &'static str },
 }
 
+/// Compute the effective role-allowlist allow set, with the child-depth
+/// gate's restricted set subtracted if it fires. Shared by [`narrow_universe`]
+/// (role branch) and `evaluate_before_tool_batch`.
+///
+/// Role allowlist: effective allow = `default_allowed ∪ ⋃(roles[r] for r in
+/// granted_roles)`. Roles come from `ctx.run.authorization.roles`; unknown
+/// granted roles are ignored (they contribute nothing). Returns `None` when
+/// no role allowlist is configured.
+///
+/// Child-depth gate: if `current_depth >= max_depth`, `restricted` is
+/// subtracted from the allow set. Below the threshold (or unconfigured) →
+/// no subtraction.
+pub(crate) fn compute_effective_allow(
+    config: &ToolPolicyConfig,
+    granted_roles: &[Arc<str>],
+) -> Option<BTreeSet<ToolId>> {
+    let role_allowlist = config.role_allowlist()?;
+    let mut effective_allow = role_allowlist.default_allowed().clone();
+    for role in granted_roles {
+        if let Some(tools) = role_allowlist.roles().get(role) {
+            effective_allow.extend(tools.iter().cloned());
+        }
+    }
+
+    if let Some(gate) = config.child_depth()
+        && gate.current_depth() >= gate.max_depth()
+    {
+        for tool in gate.restricted() {
+            effective_allow.remove(tool);
+        }
+    }
+
+    Some(effective_allow)
+}
+
 /// ToolId-set rules only (role allowlist + child-depth gate), applied to a
 /// known universe of visible tools. Pure; used by both stages.
 ///
-/// Role allowlist: effective allow = `default_allowed ∪ ⋃(roles[r] for r in
-/// granted_roles)`. Deny-by-default: a tool not in the effective allow set is
-/// dropped. Roles come from `ctx.run.authorization.roles`; unknown granted
-/// roles are ignored (they contribute nothing). No role rule configured → no
-/// narrowing from this rule.
+/// Role allowlist: deny-by-default — a tool not in
+/// [`compute_effective_allow`]'s result is dropped. No role rule configured
+/// → no narrowing from this rule.
 ///
-/// Child-depth gate: if `current_depth >= max_depth`, drop every tool in
-/// `restricted` from the result. Below the threshold → no narrowing.
+/// Child-depth gate: when no role allowlist is configured, the gate's
+/// `restricted` set (if it fires) is still subtracted directly from the
+/// universe — [`compute_effective_allow`] returns `None` in that case, so
+/// its own gate handling never runs; this preserves depth-gate-only
+/// narrowing regardless of role-allowlist configuration.
 ///
 /// Returns `universe ∩ (rule constraints)`; leaves never "add" tools
 /// (narrowing is monotone — the fold intersects anyway).
@@ -40,17 +76,9 @@ pub(crate) fn narrow_universe(
 ) -> BTreeSet<ToolId> {
     let mut result = universe.clone();
 
-    if let Some(role_allowlist) = config.role_allowlist() {
-        let mut effective_allow = role_allowlist.default_allowed().clone();
-        for role in granted_roles {
-            if let Some(tools) = role_allowlist.roles().get(role) {
-                effective_allow.extend(tools.iter().cloned());
-            }
-        }
+    if let Some(effective_allow) = compute_effective_allow(config, granted_roles) {
         result.retain(|tool| effective_allow.contains(tool));
-    }
-
-    if let Some(gate) = config.child_depth()
+    } else if let Some(gate) = config.child_depth()
         && gate.current_depth() >= gate.max_depth()
     {
         for tool in gate.restricted() {
@@ -114,6 +142,18 @@ pub(crate) fn evaluate_before_model(
     let mut retain = narrow_universe(config, &universe, granted_roles);
 
     if let Some(budget) = config.write_budget() {
+        // One pre-pass over `input.request.tools` to classify write-class
+        // tools, instead of re-scanning `tools` once per call (O(calls×tools))
+        // and then again to rebuild the id set.
+        let mut write_model_names: BTreeSet<&str> = BTreeSet::new();
+        let mut write_tool_ids: BTreeSet<ToolId> = BTreeSet::new();
+        for tool in input.request.tools.iter() {
+            if tool.side_effect != SideEffectClass::ReadOnly {
+                write_model_names.insert(tool.model_name.as_ref());
+                write_tool_ids.insert(tool.id.clone());
+            }
+        }
+
         let write_call_count = input
             .request
             .messages
@@ -124,22 +164,10 @@ pub(crate) fn evaluate_before_model(
                 ContentBlock::ToolCall(call) => Some(call.tool_name()),
                 _ => None,
             })
-            .filter(|tool_name| {
-                input.request.tools.iter().any(|tool| {
-                    tool.model_name.as_ref() == *tool_name
-                        && tool.side_effect != SideEffectClass::ReadOnly
-                })
-            })
+            .filter(|tool_name| write_model_names.contains(tool_name))
             .count();
         let write_call_count = u64::try_from(write_call_count).unwrap_or(u64::MAX);
         if write_call_count >= u64::from(budget.max_write_calls()) {
-            let write_tool_ids: BTreeSet<ToolId> = input
-                .request
-                .tools
-                .iter()
-                .filter(|tool| tool.side_effect != SideEffectClass::ReadOnly)
-                .map(|tool| tool.id.clone())
-                .collect();
             retain.retain(|id| !write_tool_ids.contains(id));
         }
     }
@@ -242,24 +270,8 @@ pub(crate) fn evaluate_before_tool_batch(
     config: &ToolPolicyConfig,
     granted_roles: &[Arc<str>],
 ) -> PolicyVerdict {
-    let Some(role_allowlist) = config.role_allowlist() else {
-        return PolicyVerdict::Identity;
-    };
-
-    let mut effective_allow = role_allowlist.default_allowed().clone();
-    for role in granted_roles {
-        if let Some(tools) = role_allowlist.roles().get(role) {
-            effective_allow.extend(tools.iter().cloned());
-        }
+    match compute_effective_allow(config, granted_roles) {
+        Some(effective_allow) => PolicyVerdict::Retain(effective_allow),
+        None => PolicyVerdict::Identity,
     }
-
-    if let Some(gate) = config.child_depth()
-        && gate.current_depth() >= gate.max_depth()
-    {
-        for tool in gate.restricted() {
-            effective_allow.remove(tool);
-        }
-    }
-
-    PolicyVerdict::Retain(effective_allow)
 }

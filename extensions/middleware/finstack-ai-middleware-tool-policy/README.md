@@ -29,7 +29,11 @@ Four independent rules can be combined:
    threshold, drop a configured set of tools. The middleware receives
    `current_depth` at construction time (not run time) because the middleware
    cannot inspect the dispatch depth at invocation; compose with the SDK's
-   `ChildRunPolicy` to enforce depth limits across multiple layers.
+   `ChildRunPolicy` to enforce depth limits across multiple layers. Because
+   `current_depth` is frozen at construction and resolved agents/middleware
+   are cached and reused across child invocations, a single agent instance
+   reused at a different depth evaluates the gate against the stale value —
+   hosts must construct a separately-configured agent per depth.
 
 ## Deployment and stages
 
@@ -70,8 +74,7 @@ fn component_ref(id: &str, version: (u32, u32, u32)) -> ComponentRef {
 }
 
 // Build configuration with all four rules.
-let config = ToolPolicyConfig::try_new()
-    .expect("empty config")
+let config = ToolPolicyConfig::new()
     .with_role_allowlist(
         BTreeMap::from([
             (
@@ -120,7 +123,7 @@ builder.middleware(component, middleware);
 
 Build-time configuration errors are returned as `ToolPolicyError::Configuration`
 with a stable `reason: &'static str`. These errors occur in the builder chain
-(`ToolPolicyConfig::try_new` and `with_*` methods). Possible reasons:
+(the `with_*` methods; `ToolPolicyConfig::new` is infallible). Possible reasons:
 
 - `duplicate_rule` — a rule slot (role, write, jailbreak, depth) already set
 - `too_many_roles` — exceeds 128 roles
@@ -137,6 +140,12 @@ with a stable `reason: &'static str`. These errors occur in the builder chain
 When a jailbreak trigger with `JailbreakAction::Fail` matches during `before_model`,
 the stage fails with `ErrorDescriptor.code = "tool_policy_jailbreak_triggered"`.
 The message displays `"tool policy jailbreak trigger matched"`.
+
+A malformed `before_tool_batch` payload (fails to deserialize as
+`Vec<ToolCallBlock>`) is a hard `MiddlewareError` with
+`code = "tool_policy_batch_payload_malformed"` and message `"tool batch
+payload malformed"` — distinct from the wrong-stage `MIDDLEWARE_OUTCOME_NOT_ALLOWED`
+code used when this leaf is invoked at a stage it does not run at.
 
 After construction, all policy evaluation is pure and deterministic; no other runtime
 failures are possible.

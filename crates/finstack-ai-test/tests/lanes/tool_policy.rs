@@ -120,8 +120,7 @@ async fn tool_policy_agent() -> (Agent, Arc<ScriptedModel>, Arc<ScriptedToolset>
         vec![],
     ));
 
-    let policy_config = ToolPolicyConfig::try_new()
-        .expect("empty tool-policy config")
+    let policy_config = ToolPolicyConfig::new()
         .with_role_allowlist(
             std::collections::BTreeMap::new(),
             BTreeSet::from([read_tool_id()]),
