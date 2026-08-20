@@ -21,4 +21,7 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+mod config;
 mod error;
+
+pub use config::{GeminiConfig, GeminiEndpoint, GeminiModelConfig, SecretHeader};
