@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 
 use crate::NetGuardError;
-use crate::vet::VettedUrl;
+use crate::vet::{UrlPolicy, VettedUrl, is_loopback_host};
 
 /// Injectable DNS seam. Production uses [`SystemResolver`]; tests script
 /// answer sets to exercise rebinding shapes.
@@ -30,7 +30,9 @@ impl HostResolver for SystemResolver {
     ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + '_>> {
         let host = host.to_owned();
         Box::pin(async move {
-            Ok(tokio::net::lookup_host((host.as_str(), port)).await?.collect())
+            Ok(tokio::net::lookup_host((host.as_str(), port))
+                .await?
+                .collect())
         })
     }
 }
@@ -75,6 +77,45 @@ fn blocked(addr: IpAddr, allow_loopback: bool) -> bool {
     is_forbidden_destination(addr)
 }
 
+/// Reject a literal loopback/private/forbidden destination address (or the
+/// bare string `localhost`) synchronously, before any network I/O.
+///
+/// [`resolve_and_pin`] performs the equivalent check for literal and
+/// resolved hosts alike, using the same internal destination-blocking
+/// logic this function calls, but only after an async DNS-resolution
+/// step, and its loopback
+/// allowance is scoped to the `http` scheme via `VettedUrl::is_loopback`.
+/// An `https` URL with a literal loopback/private host would otherwise
+/// sail through [`crate::parse_and_vet_url`] unrejected until that async
+/// step. Callers that need an earlier, synchronous, scheme-independent
+/// rejection — e.g. a pre-flight `validate_*` check performed before any
+/// HTTP traffic is attempted — call this directly, computing the loopback
+/// allowance from `policy` and the URL's own host rather than from scheme.
+///
+/// # Errors
+///
+/// [`NetGuardError::DestinationBlocked`] when the literal address (or the
+/// bare string `localhost`) is not permitted under `policy`.
+pub fn reject_literal_destination(
+    vetted: &VettedUrl,
+    policy: &UrlPolicy,
+) -> Result<(), NetGuardError> {
+    let allow_loopback = policy.allow_loopback_http && is_loopback_host(&vetted.host);
+    let bare_host = vetted.host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(addr) = bare_host.parse::<IpAddr>() {
+        if blocked(addr, allow_loopback) {
+            return Err(NetGuardError::DestinationBlocked {
+                reason: "literal_address_forbidden",
+            });
+        }
+    } else if !allow_loopback && vetted.host.eq_ignore_ascii_case("localhost") {
+        return Err(NetGuardError::DestinationBlocked {
+            reason: "literal_address_forbidden",
+        });
+    }
+    Ok(())
+}
+
 /// Resolve and vet every address; return the address to pin.
 ///
 /// Every resolved address must pass — one bad address rejects the set,
@@ -92,7 +133,9 @@ pub async fn resolve_and_pin(
     let bare = vetted.host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = bare.parse::<IpAddr>() {
         if blocked(ip, allow_loopback) {
-            return Err(NetGuardError::DestinationBlocked { reason: "literal_address_forbidden" });
+            return Err(NetGuardError::DestinationBlocked {
+                reason: "literal_address_forbidden",
+            });
         }
         return Ok(SocketAddr::new(ip, vetted.port));
     }
@@ -103,7 +146,9 @@ pub async fn resolve_and_pin(
     let mut chosen = None;
     for addr in addrs {
         if blocked(addr.ip(), allow_loopback) {
-            return Err(NetGuardError::DestinationBlocked { reason: "resolved_address_forbidden" });
+            return Err(NetGuardError::DestinationBlocked {
+                reason: "resolved_address_forbidden",
+            });
         }
         if chosen.is_none() {
             chosen = Some(addr);

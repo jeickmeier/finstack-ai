@@ -60,10 +60,13 @@ pub enum NetGuardError {
 }
 
 mod vet;
-pub use vet::{UrlPolicy, VettedUrl, parse_and_vet_url, is_loopback_host};
+pub use vet::{UrlPolicy, VettedUrl, is_loopback_host, parse_and_vet_url};
 
 mod resolve;
-pub use resolve::{HostResolver, SystemResolver, is_forbidden_destination, resolve_and_pin};
+pub use resolve::{
+    HostResolver, SystemResolver, is_forbidden_destination, reject_literal_destination,
+    resolve_and_pin,
+};
 
 mod client;
 pub use client::{pinned_client, read_body_bounded};

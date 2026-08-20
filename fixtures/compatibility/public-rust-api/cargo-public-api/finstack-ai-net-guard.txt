@@ -31,6 +31,7 @@ impl finstack_ai_net_guard::HostResolver for finstack_ai_net_guard::SystemResolv
 pub fn finstack_ai_net_guard::SystemResolver::resolve(&self, &str, u16) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<core::net::socket_addr::SocketAddr>>> + core::marker::Send + '_)>>
 pub struct finstack_ai_net_guard::UrlPolicy
 pub finstack_ai_net_guard::UrlPolicy::allow_loopback_http: bool
+pub finstack_ai_net_guard::UrlPolicy::allow_nonstandard_https_port: bool
 impl core::clone::Clone for finstack_ai_net_guard::UrlPolicy
 pub fn finstack_ai_net_guard::UrlPolicy::clone(&self) -> finstack_ai_net_guard::UrlPolicy
 impl core::fmt::Debug for finstack_ai_net_guard::UrlPolicy
@@ -56,4 +57,5 @@ pub fn finstack_ai_net_guard::is_loopback_host(&str) -> bool
 pub fn finstack_ai_net_guard::parse_and_vet_url(&str, &finstack_ai_net_guard::UrlPolicy) -> core::result::Result<finstack_ai_net_guard::VettedUrl, finstack_ai_net_guard::NetGuardError>
 pub fn finstack_ai_net_guard::pinned_client(&finstack_ai_net_guard::VettedUrl, core::net::socket_addr::SocketAddr, core::time::Duration) -> core::result::Result<reqwest::async_impl::client::Client, finstack_ai_net_guard::NetGuardError>
 pub async fn finstack_ai_net_guard::read_body_bounded(reqwest::async_impl::response::Response, usize) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_net_guard::NetGuardError>
+pub fn finstack_ai_net_guard::reject_literal_destination(&finstack_ai_net_guard::VettedUrl, &finstack_ai_net_guard::UrlPolicy) -> core::result::Result<(), finstack_ai_net_guard::NetGuardError>
 pub async fn finstack_ai_net_guard::resolve_and_pin(&finstack_ai_net_guard::VettedUrl, &dyn finstack_ai_net_guard::HostResolver) -> core::result::Result<core::net::socket_addr::SocketAddr, finstack_ai_net_guard::NetGuardError>

@@ -11,6 +11,17 @@ use crate::NetGuardError;
 pub struct UrlPolicy {
     /// Plaintext HTTP permitted for loopback destinations (test fixtures).
     pub allow_loopback_http: bool,
+    /// Permit an `https` URL whose port is not 443.
+    ///
+    /// `false` (443-only) is the right default for a model-supplied URL: a
+    /// non-standard port on an otherwise-plausible host is exactly the kind
+    /// of thing an allowlist/SSRF check should treat with suspicion, and a
+    /// model has no legitimate reason to ask for one. A caller that
+    /// legitimately handles presigned URLs against a self-hosted
+    /// object-store or CDN on a custom port (`MinIO`, a self-hosted
+    /// S3-compatible endpoint, an internal media host behind a
+    /// non-standard listener) sets this `true` explicitly to opt in.
+    pub allow_nonstandard_https_port: bool,
 }
 
 /// Parsed, policy-vetted URL.
@@ -46,12 +57,14 @@ pub fn is_loopback_host(host: &str) -> bool {
             .parse::<IpAddr>()
             .is_ok_and(|addr| {
                 let canonical = addr.to_canonical();
-                canonical == IpAddr::V4(Ipv4Addr::LOCALHOST) || canonical == IpAddr::V6(Ipv6Addr::LOCALHOST)
+                canonical == IpAddr::V4(Ipv4Addr::LOCALHOST)
+                    || canonical == IpAddr::V6(Ipv6Addr::LOCALHOST)
             })
 }
 
 /// Parse and vet: https only (http iff loopback allowed and host is
-/// loopback), forbid userinfo and fragment, https port 443 only.
+/// loopback), forbid userinfo and fragment, https port 443 unless
+/// `policy.allow_nonstandard_https_port` opts in to a different port.
 ///
 /// # Errors
 ///
@@ -71,7 +84,10 @@ pub fn parse_and_vet_url(value: &str, policy: &UrlPolicy) -> Result<VettedUrl, N
     if url.fragment().is_some() {
         return Err(invalid("fragment_forbidden"));
     }
-    let host = url.host_str().ok_or_else(|| invalid("host_missing"))?.to_owned();
+    let host = url
+        .host_str()
+        .ok_or_else(|| invalid("host_missing"))?
+        .to_owned();
     let port = url
         .port_or_known_default()
         .ok_or_else(|| invalid("port_missing"))?;
@@ -79,7 +95,7 @@ pub fn parse_and_vet_url(value: &str, policy: &UrlPolicy) -> Result<VettedUrl, N
     if http && !(policy.allow_loopback_http && loopback) {
         return Err(invalid("plaintext_http_forbidden"));
     }
-    if https && port != 443 {
+    if https && port != 443 && !policy.allow_nonstandard_https_port {
         return Err(invalid("https_port_forbidden"));
     }
     Ok(VettedUrl {

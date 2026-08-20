@@ -340,6 +340,11 @@ pub(crate) async fn execute_fetch(
 ) -> Result<serde_json::Value, ToolError> {
     let policy = UrlPolicy {
         allow_loopback_http: state.config.allow_loopback_http,
+        // Model-supplied URLs stay 443-only: a non-standard https port on
+        // an otherwise-plausible host is exactly the kind of thing an
+        // allowlist/SSRF check should treat with suspicion, and a model
+        // has no legitimate reason to request one.
+        allow_nonstandard_https_port: false,
     };
     let mut current = parse_and_vet_url(&args.url, &policy).map_err(|e| map_vet_error(&e))?;
     // Fixed for the whole redirect chain: only a loopback *origin* (hop 0)

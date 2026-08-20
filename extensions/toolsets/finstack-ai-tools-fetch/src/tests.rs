@@ -934,6 +934,7 @@ fn loopback_redirect_bypass_requires_loopback_origin() {
     let config = loopback_config(&["docs.rs"]);
     let policy = UrlPolicy {
         allow_loopback_http: true,
+        allow_nonstandard_https_port: false,
     };
     let loopback = parse_and_vet_url("http://127.0.0.1:1/", &policy).expect("loopback url vets");
     assert!(loopback.is_loopback, "sanity: fixture url is loopback");

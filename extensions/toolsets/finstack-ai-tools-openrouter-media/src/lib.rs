@@ -357,10 +357,14 @@ impl OpenRouterMediaToolset {
                 reason: "invalid_tool_spec",
             })?;
 
-        // Downloads (e.g. transcription audio_url) must not follow redirects
-        // past the caller-supplied-URL validation performed before the
-        // request is sent — a redirect could otherwise smuggle the request
-        // to a host/scheme that validate_download_url never saw.
+        // This client serves the toolset's own OpenRouter API calls (image,
+        // speech, video, and the transcription POST after the audio is
+        // downloaded) — NOT the caller-supplied audio_url download, which
+        // builds its own address-pinned client per request via
+        // `finstack_ai_net_guard::pinned_client` (see `url::download_bytes`).
+        // Redirects stay disabled here too, defense in depth: the
+        // configured `endpoint` is not caller-supplied, but there is no
+        // reason for a same-provider API call to ever redirect either.
         let client = reqwest::Client::builder()
             .http1_only()
             .timeout(REQUEST_TIMEOUT)
@@ -1257,6 +1261,17 @@ mod tests {
             false,
         )
         .expect("https download url with a query string is accepted");
+    }
+
+    #[test]
+    fn validate_download_url_accepts_a_nonstandard_https_port() {
+        // A presigned URL against a self-hosted/MinIO-style object store on
+        // a non-standard port is a normal shape for a caller-supplied
+        // audio_url; net-guard's own default is 443-only, but this crate's
+        // download policy opts back in to the crate's prior any-port
+        // behavior.
+        validate_download_url("https://media.example.com:8443/a.mp3", false)
+            .expect("https download url on a non-standard port is accepted");
     }
 
     #[test]

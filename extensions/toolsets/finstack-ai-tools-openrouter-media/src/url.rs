@@ -1,7 +1,8 @@
 //! Caller-supplied download URL validation and address-pinned fetches.
 //!
 //! Backed by `finstack-ai-net-guard`'s vetted-egress primitives: URL
-//! parsing/vetting (`parse_and_vet_url`), DNS resolve-and-pin
+//! parsing/vetting (`parse_and_vet_url`), a synchronous literal-destination
+//! check (`reject_literal_destination`), DNS resolve-and-pin
 //! (`resolve_and_pin`), a redirect-disabled address-pinned client
 //! (`pinned_client`), and a bounded body read (`read_body_bounded`). This
 //! replaces the crate's former private copy of the same pipeline.
@@ -17,19 +18,29 @@
 //!   re-resolve it itself, bypassing the address pin below (security
 //!   finding F-1).
 //!
-//! One structural delta: net-guard's `parse_and_vet_url` restricts `https`
-//! to port 443 and enforces userinfo/fragment rejection structurally
-//! (rather than the crate's former substring scan for `@`/`#`). Both are
-//! stricter than the legacy checks; no existing test exercises a non-443
-//! `https` download URL or a query string containing `@`/`#`, so this does
-//! not change observable behavior for any covered caller-supplied URL.
-
-use std::net::IpAddr;
+//! Everything else is behavior-preserving, including a non-standard
+//! `https` port: [`download_url_policy`] sets
+//! `allow_nonstandard_https_port: true`, restoring the crate's prior
+//! any-port behavior (net-guard's own default is 443-only, the right
+//! choice for a model-supplied URL, but a presigned download URL against a
+//! self-hosted object store on a custom port is a normal shape this crate
+//! has always accepted).
+//!
+//! One deliberate, benign relaxation: the crate's former check rejected
+//! `@` anywhere in the URL after the scheme, which also rejected a
+//! legitimate query string like `?X-Amz-Credential=key@example` — a `@`
+//! after the authority cannot influence host parsing, so that was an
+//! over-broad substring scan, not a security boundary. `parse_and_vet_url`
+//! instead rejects userinfo and fragment structurally
+//! (`Url::username`/`password`/`fragment`), the correct authority-scoped
+//! equivalent: an actual `user:pw@host` userinfo component is still
+//! rejected, but a `@` legitimately embedded in a query string (as in
+//! presigned S3/GCS URLs) is now accepted.
 
 use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_net_guard::{
-    NetGuardError, SystemResolver, UrlPolicy, VettedUrl, is_forbidden_destination,
-    is_loopback_host, parse_and_vet_url, pinned_client, read_body_bounded, resolve_and_pin,
+    NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client, read_body_bounded,
+    reject_literal_destination, resolve_and_pin,
 };
 use finstack_ai_runtime::{ToolCallContext, ToolError};
 
@@ -51,6 +62,7 @@ pub(crate) const MAX_AUDIO_DOWNLOAD_BYTES: usize = 25 * 1_048_576;
 fn download_url_policy(endpoint_is_loopback: bool) -> UrlPolicy {
     UrlPolicy {
         allow_loopback_http: endpoint_is_loopback,
+        allow_nonstandard_https_port: true,
     }
 }
 
@@ -83,43 +95,13 @@ fn map_net_guard_error(error: NetGuardError) -> ToolError {
     }
 }
 
-/// True when a literal address (or the bare string `localhost`) violates
-/// destination policy. `resolve_and_pin` performs the equivalent check for
-/// resolved and literal hostnames alike, but only after an async DNS
-/// resolution step and only using `VettedUrl::is_loopback` (which net-guard
-/// scopes to the `http` scheme). The crate's former private checks applied
-/// this synchronously, and to *any* scheme, so `validate_download_url`
-/// keeps a synchronous literal check here for parity: the loopback
-/// allowance is computed from the endpoint policy and the URL's own host,
-/// not from the scheme.
-fn reject_literal_destination(
-    vetted: &VettedUrl,
-    endpoint_is_loopback: bool,
-) -> Result<(), ToolError> {
-    let allow_loopback = endpoint_is_loopback && is_loopback_host(&vetted.host);
-    let bare_host = vetted
-        .host
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-    if let Ok(addr) = bare_host.parse::<IpAddr>() {
-        let canonical = addr.to_canonical();
-        let blocked = !(allow_loopback && canonical.is_loopback()) && is_forbidden_destination(addr);
-        if blocked {
-            return Err(invalid_download_url());
-        }
-    } else if !allow_loopback && vetted.host.eq_ignore_ascii_case("localhost") {
-        return Err(invalid_download_url());
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_download_url(
     value: &str,
     endpoint_is_loopback: bool,
 ) -> Result<(), ToolError> {
-    let vetted = parse_and_vet_url(value, &download_url_policy(endpoint_is_loopback))
-        .map_err(|_| invalid_download_url())?;
-    reject_literal_destination(&vetted, endpoint_is_loopback)
+    let policy = download_url_policy(endpoint_is_loopback);
+    let vetted = parse_and_vet_url(value, &policy).map_err(|_| invalid_download_url())?;
+    reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())
 }
 
 pub(crate) async fn download_bytes(
@@ -133,7 +115,7 @@ pub(crate) async fn download_bytes(
     }
     let policy = download_url_policy(endpoint_is_loopback);
     let vetted = parse_and_vet_url(url, &policy).map_err(map_net_guard_error)?;
-    reject_literal_destination(&vetted, endpoint_is_loopback)?;
+    reject_literal_destination(&vetted, &policy).map_err(map_net_guard_error)?;
     let addr = resolve_and_pin(&vetted, &SystemResolver)
         .await
         .map_err(map_net_guard_error)?;
