@@ -319,11 +319,13 @@ fn disabled_detector_groups_do_not_fire() {
 }
 
 #[test]
-fn kinds_in_reports_detector_kinds() {
-    let kinds = detectors().kinds_in("mail jane@example.com key sk-proj-abcdefghij0123456789");
+fn findings_report_detector_kinds_and_count() {
+    let (kinds, count) =
+        detectors().findings("mail jane@example.com key sk-proj-abcdefghij0123456789");
     assert!(kinds.contains("email"));
     assert!(kinds.contains("api-key"));
     assert!(!kinds.contains("card"));
+    assert_eq!(count, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +429,72 @@ fn non_before_model_input_continues() {
             value: RawJson::parse(b"[]").expect("raw"),
         },
     );
+    assert_eq!(outcome, StageOutcome::Continue);
+}
+
+// ---------------------------------------------------------------------------
+// Task 4: AfterModel output policy
+// ---------------------------------------------------------------------------
+
+fn after_model_input(message: &Message) -> StageInput {
+    let bytes = serde_json_canonicalizer::to_vec(message).expect("canonical message");
+    StageInput::AfterModel {
+        value: RawJson::parse(bytes).expect("raw"),
+    }
+}
+
+fn fail_policy_middleware() -> RedactionMiddleware {
+    RedactionMiddleware::try_with_config(RedactionConfig {
+        output_policy: OutputPolicy::Fail,
+        ..RedactionConfig::default()
+    })
+    .expect("construct")
+}
+
+#[test]
+fn fail_policy_fails_on_output_secret_without_leaking_it() {
+    let secret = "sk-proj-abcdefghij0123456789";
+    let assistant = message(
+        1,
+        MessageRole::Assistant,
+        vec![text(&format!("here is your key {secret}"))],
+    );
+    let outcome = invoke(&fail_policy_middleware(), after_model_input(&assistant));
+    let StageOutcome::Fail(descriptor) = outcome else {
+        panic!("expected Fail, got {outcome:?}");
+    };
+    assert_eq!(descriptor.code.as_str(), "redaction_output_detected");
+    assert!(descriptor.message.contains("api-key"));
+    assert!(!descriptor.message.contains(secret));
+}
+
+#[test]
+fn fail_policy_continues_on_clean_output() {
+    let assistant = message(1, MessageRole::Assistant, vec![text("all clear")]);
+    let outcome = invoke(&fail_policy_middleware(), after_model_input(&assistant));
+    assert_eq!(outcome, StageOutcome::Continue);
+}
+
+#[test]
+fn fail_policy_is_fail_soft_on_undecodable_payload() {
+    let outcome = invoke(
+        &fail_policy_middleware(),
+        StageInput::AfterModel {
+            value: RawJson::parse(b"{\"not\":\"a message\"}").expect("raw"),
+        },
+    );
+    assert_eq!(outcome, StageOutcome::Continue);
+}
+
+#[test]
+fn off_policy_ignores_after_model() {
+    let secret_message = message(
+        1,
+        MessageRole::Assistant,
+        vec![text("key sk-proj-abcdefghij0123456789")],
+    );
+    let middleware = RedactionMiddleware::try_new().expect("construct");
+    let outcome = invoke(&middleware, after_model_input(&secret_message));
     assert_eq!(outcome, StageOutcome::Continue);
 }
 

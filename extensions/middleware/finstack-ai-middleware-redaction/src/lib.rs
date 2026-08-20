@@ -52,8 +52,8 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory, InvocationRecovery,
-    Message, Metadata, RawJson, Stage, TextBlock, ToolResultBlock, Version,
+    ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory, ErrorDescriptor,
+    InvocationRecovery, Message, Metadata, RawJson, Stage, TextBlock, ToolResultBlock, Version,
 };
 use finstack_ai_runtime::{
     BeforeModelInput, MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext,
@@ -237,6 +237,7 @@ impl Middleware for RedactionMiddleware {
                 StageInput::BeforeModel(before_model) => {
                     Ok(middleware.redact_before_model(&before_model))
                 }
+                StageInput::AfterModel { value } => Ok(middleware.check_after_model(&value)),
                 _ => Ok(StageOutcome::Continue),
             }
         })
@@ -309,6 +310,38 @@ impl RedactionMiddleware {
         }
     }
 
+    /// Apply the configured [`OutputPolicy`] to the assistant message the
+    /// model just produced. `AfterModel` middleware cannot `Replace`, so
+    /// `Fail` is the only enforcement available here; the descriptor names
+    /// detector kinds and the match count only — never the matched text.
+    /// Undecodable payloads are fail-soft `Continue`.
+    fn check_after_model(&self, value: &RawJson) -> StageOutcome {
+        if self.config.output_policy != OutputPolicy::Fail {
+            return StageOutcome::Continue;
+        }
+        let Ok(message) = serde_json::from_slice::<Message>(value.as_bytes()) else {
+            return StageOutcome::Continue;
+        };
+        let mut kinds = std::collections::BTreeSet::new();
+        let mut count = 0_usize;
+        for block in message.content() {
+            collect_findings(&self.detectors, block, &mut kinds, &mut count);
+        }
+        if count == 0 {
+            return StageOutcome::Continue;
+        }
+        let kinds = kinds.into_iter().collect::<Vec<_>>().join(", ");
+        ErrorDescriptor::new(
+            "redaction_output_detected",
+            format!("model output contains detectable secrets ({count} matches): {kinds}"),
+            ErrorCategory::Middleware,
+            false,
+        )
+        .map_or(StageOutcome::Continue, |descriptor| {
+            StageOutcome::Fail(Box::new(descriptor))
+        })
+    }
+
     /// Redact one content block. `Text` is rewritten directly; `ToolResult`
     /// recurses one level into its nested content (tool results cannot nest
     /// further tool blocks). Everything else — `Json`, `Opaque`, media, and
@@ -340,6 +373,29 @@ impl RedactionMiddleware {
             }
             other => (other.clone(), false),
         }
+    }
+}
+
+/// Accumulate detector findings over one block's text surface (the same
+/// surface [`RedactionMiddleware::redact_block`] rewrites).
+fn collect_findings(
+    detectors: &Detectors,
+    block: &ContentBlock,
+    kinds: &mut std::collections::BTreeSet<&'static str>,
+    count: &mut usize,
+) {
+    match block {
+        ContentBlock::Text(text) => {
+            let (found, matches) = detectors.findings(text.text());
+            kinds.extend(found);
+            *count += matches;
+        }
+        ContentBlock::ToolResult(result) => {
+            for inner in result.content() {
+                collect_findings(detectors, inner, kinds, count);
+            }
+        }
+        _ => {}
     }
 }
 

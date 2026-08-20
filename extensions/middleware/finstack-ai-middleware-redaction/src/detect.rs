@@ -139,11 +139,13 @@ impl Detectors {
         Some(output)
     }
 
-    /// The distinct detector kinds present in `text`, after overlap
-    /// resolution. Safe to name in error descriptors — kinds carry nothing
-    /// from the matched text.
-    pub(crate) fn kinds_in(&self, text: &str) -> BTreeSet<&'static str> {
-        self.scan(text).iter().map(|entry| entry.kind).collect()
+    /// The distinct detector kinds present in `text` (after overlap
+    /// resolution) and the resolved match count. Both are safe to name in
+    /// error descriptors — kinds carry nothing from the matched text.
+    pub(crate) fn findings(&self, text: &str) -> (BTreeSet<&'static str>, usize) {
+        let matches = self.scan(text);
+        let kinds = matches.iter().map(|entry| entry.kind).collect();
+        (kinds, matches.len())
     }
 
     /// Collect validated matches from every detector, resolve overlaps by
