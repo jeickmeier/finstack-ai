@@ -80,7 +80,8 @@ impl super::HostResolver for ScriptedResolver {
 fn forbidden_destination_covers_private_ranges() {
     for addr in [
         "127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.1.1",
-        "::1", "fd00::1", "fe80::1",
+        "0.0.0.0", "255.255.255.255", "224.0.0.1",
+        "::1", "fd00::1", "fe80::1", "::", "ff02::1",
         "::ffff:10.0.0.1", // IPv4-mapped must canonicalize before checking
     ] {
         assert!(is_forbidden_destination(addr.parse::<IpAddr>().unwrap()), "{addr}");
@@ -137,4 +138,62 @@ async fn empty_resolution_fails() {
     )
     .unwrap();
     resolve_and_pin(&vetted, &ScriptedResolver(Vec::new())).await.expect_err("empty");
+}
+
+async fn serve_once(listener: tokio::net::TcpListener, status: u16, headers: &str, body: &[u8]) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (mut stream, _) = listener.accept().await.expect("accept");
+    let mut buf = vec![0_u8; 8_192];
+    let _ = stream.read(&mut buf).await.expect("read");
+    let mut response = format!(
+        "HTTP/1.1 {status} X\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(body);
+    stream.write_all(&response).await.expect("write");
+    stream.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn pinned_client_fetches_within_the_cap() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_once(listener, 200, "", b"hello"));
+    let policy = super::UrlPolicy { allow_loopback_http: true };
+    let vetted = super::parse_and_vet_url(&format!("http://127.0.0.1:{}/x", addr.port()), &policy).unwrap();
+    let pinned = super::resolve_and_pin(&vetted, &super::SystemResolver).await.unwrap();
+    let client = super::pinned_client(&vetted, pinned, std::time::Duration::from_secs(5)).unwrap();
+    let response = client.get(vetted.url.as_str()).send().await.unwrap();
+    let body = super::read_body_bounded(response, 5).await.unwrap();
+    assert_eq!(body, b"hello");
+}
+
+#[tokio::test]
+async fn body_over_cap_is_an_error_not_a_truncation() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_once(listener, 200, "", b"hello!"));
+    let policy = super::UrlPolicy { allow_loopback_http: true };
+    let vetted = super::parse_and_vet_url(&format!("http://127.0.0.1:{}/x", addr.port()), &policy).unwrap();
+    let pinned = super::resolve_and_pin(&vetted, &super::SystemResolver).await.unwrap();
+    let client = super::pinned_client(&vetted, pinned, std::time::Duration::from_secs(5)).unwrap();
+    let response = client.get(vetted.url.as_str()).send().await.unwrap();
+    assert_eq!(
+        super::read_body_bounded(response, 5).await.unwrap_err(),
+        super::NetGuardError::LimitExceeded
+    );
+}
+
+#[tokio::test]
+async fn pinned_client_does_not_follow_redirects() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_once(listener, 302, "Location: https://docs.rs/\r\n", b""));
+    let policy = super::UrlPolicy { allow_loopback_http: true };
+    let vetted = super::parse_and_vet_url(&format!("http://127.0.0.1:{}/x", addr.port()), &policy).unwrap();
+    let pinned = super::resolve_and_pin(&vetted, &super::SystemResolver).await.unwrap();
+    let client = super::pinned_client(&vetted, pinned, std::time::Duration::from_secs(5)).unwrap();
+    let response = client.get(vetted.url.as_str()).send().await.unwrap();
+    assert_eq!(response.status(), 302); // surfaced, not followed
 }

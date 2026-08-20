@@ -36,12 +36,26 @@ impl HostResolver for SystemResolver {
 }
 
 /// True when the canonicalized address is loopback, private, link-local,
-/// or unique-local. IPv4-mapped IPv6 is canonicalized first.
+/// unspecified, broadcast, multicast, or unique-local.
+/// IPv4-mapped IPv6 is canonicalized first.
 #[must_use]
 pub fn is_forbidden_destination(addr: IpAddr) -> bool {
     match addr.to_canonical() {
-        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+        }
     }
 }
 
