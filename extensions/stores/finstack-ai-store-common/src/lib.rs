@@ -26,16 +26,23 @@
 
 mod append;
 mod error;
+mod scan;
 mod snapshot;
 #[cfg(test)]
 mod test_support;
+mod window;
 
 pub use append::{
     AppendIdentity, SessionUsage, admit_append_limits, build_committed_batch,
     check_append_sequence, classify_record_reuse, request_cbor, request_identity,
 };
 pub use error::protocol_error;
+pub use scan::{scan_next_sequence, scan_start, validate_scan_limit};
 pub use snapshot::{
     accelerated_from, admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size,
     encode_state_request, outstanding_count, tombstone_count,
+};
+pub use window::{
+    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, check_batch_alignment,
+    select_tail_batches, verify_full_head, verify_tail_records,
 };
