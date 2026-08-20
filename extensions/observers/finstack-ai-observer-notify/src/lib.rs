@@ -236,7 +236,6 @@ pub struct NotifyObserver {
     sink: Arc<dyn NotificationSink>,
     policy: DeliveryPolicy,
     queue: ObserverQueue<InteractionNotification>,
-    dropped: AtomicU64,
     delivered: Arc<AtomicU64>,
     failed: Arc<AtomicU64>,
     diagnostic: Arc<Mutex<Option<ObserverDiagnostic>>>,
@@ -287,7 +286,6 @@ impl NotifyObserver {
                     reason: "invalid_queue_capacity",
                 }
             })?,
-            dropped: AtomicU64::new(0),
             delivered: Arc::new(AtomicU64::new(0)),
             failed: Arc::new(AtomicU64::new(0)),
             diagnostic: Arc::new(Mutex::new(None)),
@@ -307,10 +305,11 @@ impl NotifyObserver {
         self.failed.load(Ordering::Relaxed)
     }
 
-    /// Notifications dropped by queue backpressure.
+    /// Notifications dropped by queue backpressure. The queue counts every
+    /// drop, including disconnected/poisoned pushes.
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.dropped.load(Ordering::Relaxed) + self.queue.dropped()
+        self.queue.dropped()
     }
 
     /// Last stored diagnostic.
@@ -319,12 +318,8 @@ impl NotifyObserver {
         self.diagnostic.lock().ok().and_then(|slot| *slot)
     }
 
-    /// Store the overflow diagnostic; `count_locally` covers queue errors the
-    /// queue's own `dropped()` counter does not record.
-    fn record_overflow(&self, count_locally: bool) {
-        if count_locally {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
-        }
+    /// Store the overflow diagnostic.
+    fn record_overflow(&self) {
         if let Ok(mut slot) = self.diagnostic.lock() {
             *slot = Some(OBSERVER_QUEUE_OVERFLOW);
         }
@@ -344,10 +339,9 @@ impl Observer for NotifyObserver {
             };
             match self.queue.push(notification) {
                 Ok(ObserverQueuePush::Accepted) => {}
-                Ok(ObserverQueuePush::Dropped) => self.record_overflow(false),
+                Ok(ObserverQueuePush::Dropped) => self.record_overflow(),
                 Err(error) => {
-                    // CapacityExceeded is already counted by the queue itself.
-                    self.record_overflow(!matches!(error, ObserverError::CapacityExceeded));
+                    self.record_overflow();
                     push_error = Some(error);
                     break;
                 }

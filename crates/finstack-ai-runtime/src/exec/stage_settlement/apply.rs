@@ -181,11 +181,33 @@ pub(super) fn apply_model_draft<C: Clock, R: RandomSource>(
 /// *between* kinds, so a positional "last writer across kinds wins" rule is not
 /// representable. This applier therefore defines precedence at the field level:
 /// `fold.replacement` substitutes the **base payload** the stage was going to
-/// land, and `fold.instructions`/`fold.context` are appended to whatever base
+/// land, and `fold.instructions`/`fold.context` apply on top of whatever base
 /// survives — the replacement when there is one, the facade's messages when
 /// there is not. Both orders are stable and documented: replacement first, then
 /// instructions (as `MessageRole::System`), then context (as
 /// `MessageRole::User`), each group in chain order.
+///
+/// # Placement: additions land before the trailing current user
+///
+/// When the surviving array ends with a `MessageRole::User` message — the
+/// current user message in every facade-prepared context — the fold's
+/// instruction and context messages are **inserted immediately before it**,
+/// preserving the same trailing-user-last invariant as
+/// `exec/context_driver/collect.rs::rebuild_messages` (whose insertion point
+/// differs: provider items land after the leading system/developer prefix,
+/// before conversation history). This keeps the current
+/// user message *last*, which is load-bearing downstream: `before_model_input`
+/// (`input.rs`) marks the trailing user structurally protected, and
+/// `validate_compaction_result` (`ports/middleware/validate.rs`) requires the
+/// last source entry to be a protected user before any `CompactContext` can
+/// land. Appending after the user message would make every compaction fail
+/// whenever a `prepare_context` addition ran. When the array is empty or its
+/// last message is not a user message (e.g. a `Replace` reshaped it), the
+/// additions append at the tail — the fold does not invent structure. A
+/// `Replace` author is therefore responsible for ending the payload with the
+/// current user message: a payload that buries the user turn mid-array leaves
+/// no protected trailing user, so `validate_compaction_result` rejects every
+/// subsequent `CompactContext` for that turn.
 ///
 /// The alternative — letting a `Replace` from one component discard an
 /// `AddContext` from another — was rejected: silently dropping a component's
@@ -214,11 +236,19 @@ pub(crate) fn apply_context_prepared<C: Clock, R: RandomSource>(
         Some(replacement) => parse_messages(replacement)?,
         None => base.to_vec(),
     };
-    for item in &fold.instructions {
-        messages.push(message_from_item(item, MessageRole::System, sources)?);
-    }
-    for item in &fold.context {
-        messages.push(message_from_item(item, MessageRole::User, sources)?);
+    if !fold.instructions.is_empty() || !fold.context.is_empty() {
+        let insert_at = match messages.last() {
+            Some(last) if last.role() == MessageRole::User => messages.len().saturating_sub(1),
+            _ => messages.len(),
+        };
+        let mut added = Vec::with_capacity(fold.instructions.len() + fold.context.len());
+        for item in &fold.instructions {
+            added.push(message_from_item(item, MessageRole::System, sources)?);
+        }
+        for item in &fold.context {
+            added.push(message_from_item(item, MessageRole::User, sources)?);
+        }
+        messages.splice(insert_at..insert_at, added);
     }
     if messages.len() > SEMANTIC_ARRAY_MAX_ITEMS {
         return Err(stage_error(MIDDLEWARE_STAGE_BOUNDS_EXCEEDED));

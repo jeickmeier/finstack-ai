@@ -15,6 +15,10 @@ Next-fire instants are computed against `WorkflowSession::clock()`
 next-fire is in the past fires once, then the expression advances to
 the next future tick. Missed ticks are not backfilled.
 
+`CronScheduleStore::load_due(now)` enumerates every due schedule across
+all tenants, for a leased worker to discover work without a per-tenant
+scan; third-party stores fail closed unless they override it.
+
 This crate is a T1 native mapping. It is not isolated. See
 [Technical Design §2](../../../docs/planning/03-finstack-ai-technical-design.md)
 for ownership boundaries.

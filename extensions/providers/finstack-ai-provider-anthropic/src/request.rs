@@ -7,7 +7,7 @@ use base64::Engine;
 use finstack_ai_kernel::{
     ContentBlock, MediaRef, Message, MessageRole, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL,
 };
-use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia};
+use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia, thinking_level_budget};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -169,12 +169,10 @@ fn take_thinking(
         return Ok(Some(value));
     }
     if let Some(level) = settings.remove("thinking_level") {
-        let budget = match level.as_str() {
-            Some("low") => 1_024,
-            Some("medium") => 4_096,
-            Some("high") => 8_192,
-            _ => return Err(request_error("thinking_level is not an allowlisted value")),
-        };
+        let budget = level
+            .as_str()
+            .and_then(thinking_level_budget)
+            .ok_or_else(|| request_error("thinking_level is not an allowlisted value"))?;
         if budget >= model.max_output_tokens {
             return Err(request_error("thinking budget exceeds max_tokens"));
         }

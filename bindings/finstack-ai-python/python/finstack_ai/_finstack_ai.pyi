@@ -176,6 +176,97 @@ class ElicitationToolset:
     @property
     def tool_count(self) -> int: ...
 
+class MemoryExtension:
+    """Native memory composition: one store, one scope, one policy.
+
+    The three accessors return handles accepted directly by the agent
+    factories' ``toolsets``, ``context_providers``, and ``observers``
+    parameters. All handles share the extension's store, so one extension
+    can back several agents.
+    """
+
+    @staticmethod
+    def in_process(
+        *,
+        tenant: str = "python-local",
+        user: str | None = None,
+        agent: str | None = None,
+        workspace: str | None = None,
+        read: bool = True,
+        write: bool = True,
+        manage: bool = False,
+    ) -> MemoryExtension:
+        """Build an extension over a process-local, non-durable store.
+
+        ``tenant`` must equal the tenant scope of the runs that recall from
+        it. It defaults to ``"python-local"``, the scope :meth:`Agent.run`
+        and :meth:`Agent.start` use; pass the session's tenant scope
+        instead when the recalling runs execute on a lane. Recall on a
+        mismatched tenant fails the run with
+        ``context_contribution_invalid``.
+        """
+
+    @staticmethod
+    def sqlite(
+        *,
+        path: str,
+        tenant: str = "python-local",
+        user: str | None = None,
+        agent: str | None = None,
+        workspace: str | None = None,
+        read: bool = True,
+        write: bool = True,
+        manage: bool = False,
+    ) -> MemoryExtension:
+        """Build an extension over a durable SQLite store at ``path``.
+
+        The file and its schema are created on first open.
+
+        ``tenant`` must equal the tenant scope of the runs that recall from
+        it. It defaults to ``"python-local"``, the scope :meth:`Agent.run`
+        and :meth:`Agent.start` use; pass the session's tenant scope
+        instead when the recalling runs execute on a lane. Recall on a
+        mismatched tenant fails the run with
+        ``context_contribution_invalid``.
+        """
+
+    @property
+    def tenant(self) -> str: ...
+    def context_provider(
+        self, *, max_hits: int | None = None, stable_prefix: int | None = None
+    ) -> MemoryContextProvider:
+        """Return the recall provider handle for ``context_providers``."""
+
+    def toolset(self) -> MemoryToolset:
+        """Return the memory toolset handle for ``toolsets``."""
+
+    def observer(self) -> MemoryObserver:
+        """Return the capture observer handle for ``observers``."""
+
+class MemoryContextProvider:
+    """Recall provider handle produced by :meth:`MemoryExtension.context_provider`."""
+
+    @property
+    def component(self) -> str: ...
+
+class MemoryToolset:
+    """Memory toolset handle produced by :meth:`MemoryExtension.toolset`.
+
+    The native toolset is materialized at agent-assembly time so it shares
+    the agent's artifact store.
+    """
+
+    @property
+    def component(self) -> str: ...
+    @property
+    def tool_count(self) -> int: ...
+
+class MemoryObserver:
+    """Capture observer handle produced by :meth:`MemoryExtension.observer`."""
+
+    @property
+    def component(self) -> str: ...
+
 class PythonToolset:
     """Trusted coarse Python implementation of the Rust Toolset port.
 
@@ -819,10 +910,12 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -897,10 +990,12 @@ class Agent:
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
         media_tools: bool = False,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -968,10 +1063,12 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1027,9 +1124,10 @@ class Agent:
                 ``openrouter_media_api_key``.
         """
     @staticmethod
-    async def ollama(
-        base_url: str,
+    async def gemini(
+        endpoint: str,
         model: str,
+        api_key: str | None = None,
         instruction: str | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
@@ -1041,6 +1139,78 @@ class Agent:
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
+    ) -> Agent:
+        """Build a Rust-backed Gemini ``generateContent`` agent.
+
+        Construction of the HTTP client happens only in this factory. Importing
+        ``finstack_ai`` does not open sockets or start Tokio. Keyword-only port
+        lists register the same T2 Python callbacks as
+        :meth:`Agent.from_python`. This factory does not read environment
+        variables and does not hardcode the Google host: ``endpoint`` is
+        passed straight into the provider's ``GeminiConfig::try_new``.
+
+        Args:
+            endpoint: Gemini ``generateContent`` base URL (Generative
+                Language API).
+            model: Provider model name.
+            api_key: Optional API key. HTTPS is required when set. Keyless
+                HTTP loopback is allowed. HTTP plus a key raises
+                :class:`ConfigurationError` and does not include the secret
+                in ``str`` or ``repr``.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The endpoint, credential, model, capability
+                set, or port registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
+        """
+    @staticmethod
+    async def ollama(
+        base_url: str,
+        model: str,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+        *,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1101,10 +1271,12 @@ class Agent:
         hard_input_bytes: int | None = None,
         auth: str | None = None,
         api_key: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1124,7 +1296,7 @@ class Agent:
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
             wire_protocol: ``openai_responses``, ``anthropic_messages``,
-                or ``ollama_chat``.
+                ``ollama_chat``, or ``gemini_generate_content``.
             credential_name: Named credential reference, never a secret.
             hard_input_bytes: Required maximum canonical request bytes.
             auth: ``none``, ``bearer``, or ``api_key``. Defaults from
@@ -1159,10 +1331,12 @@ class Agent:
         api_key: str,
         endpoint: str | None = None,
         template: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1203,14 +1377,16 @@ class Agent:
     @staticmethod
     async def from_python(
         model: PythonModel,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
         instruction: str | None = None,
         output_type: Any | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1419,11 +1595,12 @@ def build_metadata() -> dict[str, str | bool | int]:
         Version, engine, and feature flags. No secrets.
     """
 
-def linked_providers() -> tuple[str, str, str, str]:
+def linked_providers() -> tuple[str, str, str, str, str]:
     """Return curated Rust-backed providers linked into this extension.
 
     Returns:
-        A tuple such as ``(\"openai\", \"anthropic\", \"ollama\", \"openrouter\")``.
+        A tuple such as
+        ``(\"openai\", \"anthropic\", \"gemini\", \"ollama\", \"openrouter\")``.
     """
 
 def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:

@@ -7,6 +7,7 @@ use finstack_ai::{Agent, CapabilityActivation, CapabilitySpec, InstructionSpec};
 use finstack_ai_kernel::CapabilityId;
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 use finstack_ai_provider_anthropic::{AnthropicConfig, AnthropicModelConfig, AnthropicProvider};
+use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
 use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 use finstack_ai_provider_openai::{OpenAiConfig, OpenAiModelConfig, OpenAiProvider};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
@@ -25,6 +26,7 @@ async fn capability_catalog_is_identical_across_scripted_compatible_anthropic_an
         catalog_for(openai_model()).await,
         catalog_for(anthropic_model()).await,
         catalog_for(ollama_model()).await,
+        catalog_for(gemini_model()).await,
     ];
     for catalog in &catalogs[1..] {
         assert_eq!(&catalogs[0], catalog);
@@ -206,6 +208,18 @@ fn anthropic_model() -> Arc<dyn Model> {
             vec![
                 AnthropicModelConfig::try_new("preview-1", 1_000_000, 128_000, 4_096, 4_096, 256)
                     .expect("model"),
+            ],
+        )
+        .expect("provider"),
+    )
+}
+
+fn gemini_model() -> Arc<dyn Model> {
+    Arc::new(
+        GeminiProvider::try_new(
+            GeminiConfig::try_new("http://127.0.0.1:9").expect("config"),
+            vec![
+                GeminiModelConfig::try_new("preview-1", 1_000_000, 128_000, 4_096).expect("model"),
             ],
         )
         .expect("provider"),

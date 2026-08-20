@@ -48,6 +48,7 @@ mod host;
 mod host_artifact;
 mod host_clock;
 mod host_context;
+mod host_memory;
 mod host_middleware;
 mod host_model;
 mod host_observer;
@@ -65,6 +66,10 @@ mod scripted;
 use std::sync::Arc;
 
 use wasm_bindgen::prelude::*;
+
+/// In-process, non-persistent [`MemoryStore`](finstack_ai_memory::MemoryStore)
+/// for wasm consumers that skip host-backed persistence entirely.
+pub use finstack_ai_memory::InProcessMemoryStore;
 
 /// Install the host driver when the generated module loads.
 #[cfg(target_arch = "wasm32")]
@@ -472,6 +477,46 @@ impl JsJournalStore {
     }
 }
 
+/// Trusted JS memory-store wrapper. Missing `memory_*` methods on the
+/// adapter are `Unavailable` per operation, not a construction failure.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = JsMemoryStore)]
+pub struct JsMemoryStore {
+    inner: std::sync::Arc<host_memory::HostMemoryStore>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_class = JsMemoryStore)]
+impl JsMemoryStore {
+    /// Construct a memory-store wrapper around a trusted host adapter.
+    #[wasm_bindgen(constructor)]
+    #[must_use]
+    pub fn new(adapter: JsValue) -> JsMemoryStore {
+        Self {
+            inner: std::sync::Arc::new(host_memory::HostMemoryStore::from_js(adapter)),
+        }
+    }
+
+    /// Clone the wrapper without moving the caller's handle.
+    #[wasm_bindgen(js_name = cloneHandle)]
+    pub fn clone_handle(&self) -> JsMemoryStore {
+        Self {
+            inner: std::sync::Arc::clone(&self.inner),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsMemoryStore {
+    // Not yet wired into `JsAgent`: the memory extension is not part of the
+    // Agent port bundle. Kept for the coming memory-extension task and for
+    // direct Rust composition.
+    #[allow(dead_code)]
+    pub(crate) fn port(&self) -> std::sync::Arc<dyn finstack_ai_memory::MemoryStore> {
+        std::sync::Arc::clone(&self.inner) as std::sync::Arc<dyn finstack_ai_memory::MemoryStore>
+    }
+}
+
 /// Host clock wrapper. `now()` returns Unix milliseconds.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsClock)]
@@ -608,8 +653,10 @@ pub fn compile_native_host_adapters() {
     use crate::host::{HostFailure, NativeHostResult};
     use crate::host_artifact::HostArtifactStore;
     use crate::host_clock::{HostClock, HostRandomSource};
+    use crate::host_memory::HostMemoryStore;
     use crate::host_store::{HostJournalStore, HostJournalStoreOptions};
     use finstack_ai::runtime::{ArtifactStore, Clock, JournalStore, RandomSource};
+    use finstack_ai_memory::MemoryStore;
 
     compile_native_port_adapters();
     let store = HostJournalStore::from_callback(
@@ -627,6 +674,19 @@ pub fn compile_native_host_adapters() {
     let artifacts = HostArtifactStore::memory();
     let _: std::sync::Arc<dyn ArtifactStore> = std::sync::Arc::new(artifacts);
     let _ = HostFailure::Failed;
+    let memory_store = HostMemoryStore::from_callback_fns(
+        |_| Ok(NativeHostResult::Object(r#"{"ok":"inserted"}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":null}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":[]}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":null}"#.into())),
+        |_| Ok(NativeHostResult::Object(r#"{"ok":null}"#.into())),
+        |_| {
+            Ok(NativeHostResult::Object(
+                r#"{"ok":{"records":[],"total":0}}"#.into(),
+            ))
+        },
+    );
+    let _: std::sync::Arc<dyn MemoryStore> = std::sync::Arc::new(memory_store);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -721,7 +781,8 @@ mod tests {
 
     use finstack_ai::{
         AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, E2bSandboxAgentSpec,
-        GatewayAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+        GatewayAgentSpec, GeminiAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
+        OpenRouterAgentSpec,
     };
 
     use super::{health, parse_document_markdown};
@@ -744,6 +805,45 @@ mod tests {
 
     #[test]
     fn linked_constructors_are_fail_closed_on_wasm_host() {
+        // `finstack-ai-wasm` depends on the `finstack-ai` facade with
+        // `default-features = false, features = ["wasm-host"]` (see this
+        // crate's `Cargo.toml`), and on that build the facade's linked
+        // constructors dispatch to a fail-closed `wasm-host`-only stub
+        // (`AGENT_RUN_UNSUPPORTED_PLAN`) rather than the real native
+        // providers (`crates/finstack-ai/src/agent/linked.rs`,
+        // `#[cfg(all(feature = "wasm-host", not(feature =
+        // "native-tokio")))]`).
+        //
+        // Cargo unifies features per package-per-target across an entire
+        // build, not per dependency edge. `cargo test --workspace` also
+        // builds several other members (`finstack-ai-provider-anthropic`,
+        // `finstack-ai-tools-mcp`, `finstack-ai-test`, `finstack-ai-wit`,
+        // `finstack-ai-plugin-host`, `examples/rust-minimal`, ...) that
+        // depend on `finstack-ai/native-tokio`, for the same host target
+        // this crate's tests build for. That unions `native-tokio` onto
+        // the single `finstack-ai` unit used everywhere in that build,
+        // including here, so the linked constructors resolve to the real
+        // native providers instead of the stub — expected Cargo behavior,
+        // not a wiring mistake in any one member's Cargo.toml. It cannot
+        // be detected here with a plain `#[cfg(feature = "native-tokio")]`
+        // — this crate never declares that feature itself, so such a cfg
+        // would be permanently dead code, not a reflection of what got
+        // unified into its `finstack-ai` dependency. It also never
+        // happens for an actual `wasm32-unknown-unknown` build (`mise run
+        // build-wasm`), where `finstack-ai-wasm` is compiled alone and
+        // nothing pulls in `native-tokio`.
+        //
+        // `finstack_ai::native_tokio_enabled()` reports the facade's own,
+        // post-unification `native-tokio` feature state (it's `cfg!` runs
+        // inside that crate, where the real value is visible), so this
+        // test uses it to skip the fail-closed assertions only when they
+        // do not apply — keeping the assertions themselves exercised by
+        // `cargo test -p finstack-ai-wasm --lib` and real wasm-target
+        // builds, which are the configurations where the fail-closed
+        // behavior is actually load-bearing.
+        if finstack_ai::native_tokio_enabled() {
+            return;
+        }
         let openai = ready(Agent::openai(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-unused".into(),
@@ -776,6 +876,15 @@ mod tests {
         }))
         .err()
         .expect("anthropic");
+        let gemini = ready(Agent::gemini(GeminiAgentSpec {
+            endpoint: "https://generativelanguage.googleapis.com".into(),
+            model: "fixture-model".into(),
+            api_key: None,
+            openrouter_media: None,
+            common: LinkedCommon::default(),
+        }))
+        .err()
+        .expect("gemini");
         let ollama = ready(Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
@@ -808,6 +917,7 @@ mod tests {
         assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(openrouter.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(anthropic.code(), AGENT_RUN_UNSUPPORTED_PLAN);
+        assert_eq!(gemini.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(gateway.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(e2b.code(), AGENT_RUN_UNSUPPORTED_PLAN);

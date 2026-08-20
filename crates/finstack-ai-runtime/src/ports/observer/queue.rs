@@ -68,6 +68,7 @@ impl<T> ObserverQueue<T> {
     /// fires.
     pub fn push(&self, item: T) -> Result<ObserverQueuePush, ObserverError> {
         if self.disconnected.load(Ordering::Acquire) {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
             return Err(ObserverError::Unavailable);
         }
         let deadline = match self.policy {
@@ -77,7 +78,10 @@ impl<T> ObserverQueue<T> {
         let mut pending = Some(item);
         loop {
             {
-                let mut inner = self.inner.lock().map_err(|_| ObserverError::Unavailable)?;
+                let mut inner = self.inner.lock().map_err(|_| {
+                    self.dropped.fetch_add(1, Ordering::Relaxed);
+                    ObserverError::Unavailable
+                })?;
                 if inner.len() < self.capacity {
                     inner.push_back(pending.take().ok_or(ObserverError::Unavailable)?);
                     return Ok(ObserverQueuePush::Accepted);

@@ -1,0 +1,54 @@
+pub mod finstack_ai_middleware_instructions
+pub enum finstack_ai_middleware_instructions::InstructionsError
+pub finstack_ai_middleware_instructions::InstructionsError::Configuration
+pub finstack_ai_middleware_instructions::InstructionsError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_middleware_instructions::InstructionsError
+pub fn finstack_ai_middleware_instructions::InstructionsError::clone(&self) -> finstack_ai_middleware_instructions::InstructionsError
+impl core::cmp::Eq for finstack_ai_middleware_instructions::InstructionsError
+impl core::cmp::PartialEq for finstack_ai_middleware_instructions::InstructionsError
+pub fn finstack_ai_middleware_instructions::InstructionsError::eq(&self, &finstack_ai_middleware_instructions::InstructionsError) -> bool
+impl core::error::Error for finstack_ai_middleware_instructions::InstructionsError
+impl core::fmt::Debug for finstack_ai_middleware_instructions::InstructionsError
+pub fn finstack_ai_middleware_instructions::InstructionsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_middleware_instructions::InstructionsError
+pub fn finstack_ai_middleware_instructions::InstructionsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_instructions::InstructionsError
+pub struct finstack_ai_middleware_instructions::InstructionsMiddleware
+impl finstack_ai_middleware_instructions::InstructionsMiddleware
+pub fn finstack_ai_middleware_instructions::InstructionsMiddleware::try_new(finstack_ai_middleware_instructions::PolicyInstructionsConfig) -> core::result::Result<Self, finstack_ai_middleware_instructions::InstructionsError>
+impl core::clone::Clone for finstack_ai_middleware_instructions::InstructionsMiddleware
+pub fn finstack_ai_middleware_instructions::InstructionsMiddleware::clone(&self) -> finstack_ai_middleware_instructions::InstructionsMiddleware
+impl core::fmt::Debug for finstack_ai_middleware_instructions::InstructionsMiddleware
+pub fn finstack_ai_middleware_instructions::InstructionsMiddleware::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_middleware_instructions::InstructionsMiddleware
+pub fn finstack_ai_middleware_instructions::InstructionsMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
+pub fn finstack_ai_middleware_instructions::InstructionsMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>
+pub struct finstack_ai_middleware_instructions::PolicyEntry
+pub finstack_ai_middleware_instructions::PolicyEntry::label: alloc::string::String
+pub finstack_ai_middleware_instructions::PolicyEntry::text: alloc::string::String
+impl core::clone::Clone for finstack_ai_middleware_instructions::PolicyEntry
+pub fn finstack_ai_middleware_instructions::PolicyEntry::clone(&self) -> finstack_ai_middleware_instructions::PolicyEntry
+impl core::cmp::Eq for finstack_ai_middleware_instructions::PolicyEntry
+impl core::cmp::PartialEq for finstack_ai_middleware_instructions::PolicyEntry
+pub fn finstack_ai_middleware_instructions::PolicyEntry::eq(&self, &finstack_ai_middleware_instructions::PolicyEntry) -> bool
+impl core::fmt::Debug for finstack_ai_middleware_instructions::PolicyEntry
+pub fn finstack_ai_middleware_instructions::PolicyEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_instructions::PolicyEntry
+impl serde_core::ser::Serialize for finstack_ai_middleware_instructions::PolicyEntry
+pub fn finstack_ai_middleware_instructions::PolicyEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_instructions::PolicyInstructionsConfig
+pub finstack_ai_middleware_instructions::PolicyInstructionsConfig::entries: alloc::vec::Vec<finstack_ai_middleware_instructions::PolicyEntry>
+impl finstack_ai_middleware_instructions::PolicyInstructionsConfig
+pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::validate(&self) -> core::result::Result<(), finstack_ai_middleware_instructions::InstructionsError>
+impl core::clone::Clone for finstack_ai_middleware_instructions::PolicyInstructionsConfig
+pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::clone(&self) -> finstack_ai_middleware_instructions::PolicyInstructionsConfig
+impl core::cmp::Eq for finstack_ai_middleware_instructions::PolicyInstructionsConfig
+impl core::cmp::PartialEq for finstack_ai_middleware_instructions::PolicyInstructionsConfig
+pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::eq(&self, &finstack_ai_middleware_instructions::PolicyInstructionsConfig) -> bool
+impl core::fmt::Debug for finstack_ai_middleware_instructions::PolicyInstructionsConfig
+pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_instructions::PolicyInstructionsConfig
+impl serde_core::ser::Serialize for finstack_ai_middleware_instructions::PolicyInstructionsConfig
+pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub const finstack_ai_middleware_instructions::MAX_POLICY_ENTRIES: usize
+pub const finstack_ai_middleware_instructions::MAX_POLICY_LABEL_BYTES: usize

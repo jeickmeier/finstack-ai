@@ -16,6 +16,9 @@ unpublished.
 
 ### Added
 
+- `finstack-ai-completion-ingress`: new `extensions/interop` leaf that mints signed
+  opaque callback tokens for deferred effects and delivers authenticated external
+  completions through `ExternalCompletionRouter` (TM-10; the workflow webhook path).
 - Kernel constructors for crate-owned literals: `ErrorCode::from_static`,
   `Key::from_static` (including `ComponentId` / `ToolId` / `LimitKey`),
   `Digest::from_fixed_domain`, and the `UNIX_EPOCH` timestamp constant.

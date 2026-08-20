@@ -1,5 +1,5 @@
 [package]
-name = "finstack-ai-context-memory"
+name = "finstack-ai-observer-billing"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,15 +7,17 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Reference memory ContextProvider for finstack-ai"
+description = "Read-only billing ledger observer aggregating kernel CostAmount for finstack-ai"
 readme = "README.md"
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
-finstack-ai-runtime = { workspace = true, default-features = false }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+finstack-ai-test = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]

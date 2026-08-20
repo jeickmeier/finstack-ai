@@ -9,14 +9,15 @@ use crate::store::{PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
-    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
-    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
+    E2bSandboxAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,
+    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
+    Session,
 };
-use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
     SessionId, Version,
 };
+use finstack_ai_memory::InProcessArtifactStore;
 use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
 use finstack_ai_tools_document::DocumentToolset;
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -30,6 +31,7 @@ use crate::callbacks::{
 use crate::capability::PyCapability;
 use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
+use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
     result_to_python_with_locator, run_request, stage_attachments,
@@ -43,13 +45,67 @@ pub(crate) enum PyToolsetArg {
     Python(Py<PyPythonToolset>),
     /// Rust elicitation toolset.
     Elicitation(Py<PyElicitationToolset>),
+    /// Rust memory toolset handle from `MemoryExtension.toolset()`.
+    Memory(Py<PyMemoryToolset>),
 }
 
 impl PyToolsetArg {
-    fn registration(&self, py: Python<'_>) -> (ComponentRef, Arc<dyn Toolset>) {
+    /// `artifact_store` is the agent's own store; only the memory toolset
+    /// consumes it (for oversized memory bodies staged as blobs).
+    fn registration(
+        &self,
+        py: Python<'_>,
+        artifact_store: &Arc<dyn ArtifactStore>,
+    ) -> PyResult<(ComponentRef, Arc<dyn Toolset>)> {
         match self {
-            Self::Python(toolset) => toolset.bind(py).borrow().registration(),
-            Self::Elicitation(toolset) => toolset.bind(py).borrow().registration(),
+            Self::Python(toolset) => Ok(toolset.bind(py).borrow().registration()),
+            Self::Elicitation(toolset) => Ok(toolset.bind(py).borrow().registration()),
+            Self::Memory(toolset) => toolset
+                .bind(py)
+                .borrow()
+                .registration(py, Arc::clone(artifact_store)),
+        }
+    }
+}
+
+/// Context-provider argument accepted by every agent factory.
+#[derive(FromPyObject)]
+pub(crate) enum PyContextProviderArg {
+    /// Trusted Python callback context provider.
+    Python(Py<PyPythonContextProvider>),
+    /// Rust memory recall provider from `MemoryExtension.context_provider()`.
+    Memory(Py<PyMemoryContextProvider>),
+}
+
+impl PyContextProviderArg {
+    fn registration(
+        &self,
+        py: Python<'_>,
+    ) -> (ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>) {
+        match self {
+            Self::Python(provider) => provider.bind(py).borrow().registration(),
+            Self::Memory(provider) => provider.bind(py).borrow().registration(),
+        }
+    }
+}
+
+/// Observer argument accepted by every agent factory.
+#[derive(FromPyObject)]
+pub(crate) enum PyObserverArg {
+    /// Trusted Python callback observer.
+    Python(Py<PyPythonObserver>),
+    /// Rust memory capture observer from `MemoryExtension.observer()`.
+    Memory(Py<PyMemoryObserver>),
+}
+
+impl PyObserverArg {
+    fn registration(
+        &self,
+        py: Python<'_>,
+    ) -> (ComponentRef, Arc<dyn finstack_ai::runtime::Observer>) {
+        match self {
+            Self::Python(observer) => observer.bind(py).borrow().registration(),
+            Self::Memory(observer) => observer.bind(py).borrow().registration(),
         }
     }
 }
@@ -105,9 +161,9 @@ impl PyAgent {
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
-        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<Py<PyPythonObserver>>>,
+        observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
@@ -181,9 +237,9 @@ impl PyAgent {
         reasoning_summary: Option<String>,
         media_tools: bool,
         toolsets: Option<Vec<PyToolsetArg>>,
-        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<Py<PyPythonObserver>>>,
+        observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
@@ -249,9 +305,9 @@ impl PyAgent {
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
-        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<Py<PyPythonObserver>>>,
+        observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
@@ -296,6 +352,77 @@ impl PyAgent {
         })
     }
 
+    /// Construct a Rust-backed Gemini `generateContent` agent.
+    ///
+    /// `api_key` stays positional. Python port lists are keyword-only. HTTPS is
+    /// required when `api_key` is set; the binding does not read environment
+    /// variables. Does not hardcode the Google host: `endpoint` is passed
+    /// straight into the provider's `GeminiConfig::try_new`.
+    #[staticmethod]
+    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
+    )]
+    fn gemini(
+        py: Python<'_>,
+        endpoint: String,
+        model: String,
+        api_key: Option<String>,
+        instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
+        openrouter_media_api_key: Option<String>,
+        openrouter_media_referer: Option<String>,
+        openrouter_media_title: Option<String>,
+        toolsets: Option<Vec<PyToolsetArg>>,
+        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        observers: Option<Vec<Py<PyPythonObserver>>>,
+        output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
+        approval_grant: Option<Py<PyApprovalGrantMode>>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
+        let openrouter_media = openrouter_media_spec(
+            openrouter_media_api_key,
+            openrouter_media_referer,
+            openrouter_media_title,
+        )?;
+        let (ports, artifact_store, attachment_index) = linked_ports(
+            py,
+            toolsets,
+            context_providers,
+            middleware,
+            observers,
+            output_type,
+        )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
+        let approval_grant = approval_grant_or_per_call(py, approval_grant);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::gemini(GeminiAgentSpec {
+                endpoint,
+                model,
+                api_key,
+                openrouter_media,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                    approval_grant,
+                },
+            })
+            .await;
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
+        })
+    }
+
     /// Construct a keyless Rust-backed Ollama/local agent.
     ///
     /// Python port lists are keyword-only. This factory does not accept an
@@ -317,9 +444,9 @@ impl PyAgent {
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
-        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<Py<PyPythonObserver>>>,
+        observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
@@ -387,9 +514,9 @@ impl PyAgent {
         auth: Option<String>,
         api_key: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
-        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<Py<PyPythonObserver>>>,
+        observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
@@ -452,9 +579,9 @@ impl PyAgent {
         endpoint: Option<String>,
         template: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
-        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<Py<PyPythonObserver>>>,
+        observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
@@ -509,9 +636,9 @@ impl PyAgent {
         output_type: Option<Py<PyAny>>,
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
-        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<Py<PyPythonObserver>>>,
+        observers: Option<Vec<PyObserverArg>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         sqlite_path: Option<String>,
@@ -975,9 +1102,9 @@ fn document_ingest_ports() -> Result<DocumentIngestPorts, AgentRunError> {
 fn linked_ports(
     py: Python<'_>,
     toolsets: Option<Vec<PyToolsetArg>>,
-    context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+    context_providers: Option<Vec<PyContextProviderArg>>,
     middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-    observers: Option<Vec<Py<PyPythonObserver>>>,
+    observers: Option<Vec<PyObserverArg>>,
     output_type: Option<Py<PyAny>>,
 ) -> PyResult<(
     LinkedPorts,
@@ -986,11 +1113,13 @@ fn linked_ports(
 )> {
     let (artifact_store, attachment_index, document_toolset, document_middleware) =
         document_ingest_ports().map_err(|error| agent_error(py, &error, None))?;
+    let dyn_artifact_store: Arc<dyn ArtifactStore> =
+        Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>;
     let mut toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = toolsets
         .unwrap_or_default()
         .into_iter()
-        .map(|toolset| toolset.registration(py))
-        .collect();
+        .map(|toolset| toolset.registration(py, &dyn_artifact_store))
+        .collect::<PyResult<Vec<_>>>()?;
     toolsets.push(document_toolset);
     let mut middleware: Vec<(ComponentRef, Arc<dyn Middleware>)> = middleware
         .unwrap_or_default()
@@ -1001,17 +1130,17 @@ fn linked_ports(
     Ok((
         LinkedPorts {
             toolsets,
-            artifact_store: Some(Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>),
+            artifact_store: Some(Arc::clone(&dyn_artifact_store)),
             context_providers: context_providers
                 .unwrap_or_default()
                 .into_iter()
-                .map(|provider| provider.bind(py).borrow().registration())
+                .map(|provider| provider.registration(py))
                 .collect(),
             middleware,
             observers: observers
                 .unwrap_or_default()
                 .into_iter()
-                .map(|observer| observer.bind(py).borrow().registration())
+                .map(|observer| observer.registration(py))
                 .collect(),
             output: output_type
                 .map(|target| prepare_pydantic_output(py, target))

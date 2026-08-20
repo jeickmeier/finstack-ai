@@ -1020,6 +1020,7 @@ impl finstack_ai::Agent
 pub async fn finstack_ai::Agent::anthropic(finstack_ai::AnthropicAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::e2b_sandbox(finstack_ai::E2bSandboxAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::gateway(finstack_ai::GatewayAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
+pub async fn finstack_ai::Agent::gemini(finstack_ai::GeminiAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::ollama(finstack_ai::OllamaAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::openai(finstack_ai::OpenAiAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::openrouter(finstack_ai::OpenRouterAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
@@ -1385,6 +1386,12 @@ pub finstack_ai::GatewayAgentSpec::endpoint: alloc::string::String
 pub finstack_ai::GatewayAgentSpec::hard_input_bytes: core::option::Option<u64>
 pub finstack_ai::GatewayAgentSpec::model: alloc::string::String
 pub finstack_ai::GatewayAgentSpec::wire_protocol: alloc::string::String
+pub struct finstack_ai::GeminiAgentSpec
+pub finstack_ai::GeminiAgentSpec::api_key: core::option::Option<alloc::string::String>
+pub finstack_ai::GeminiAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::GeminiAgentSpec::endpoint: alloc::string::String
+pub finstack_ai::GeminiAgentSpec::model: alloc::string::String
+pub finstack_ai::GeminiAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::InstructionSpec
 impl finstack_ai::InstructionSpec
 pub fn finstack_ai::InstructionSpec::text(&self) -> &str
@@ -1839,4 +1846,5 @@ pub fn finstack_ai::Extension::register(&self, &mut finstack_ai::Registrar) -> c
 impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
 pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub const fn finstack_ai::native_tokio_enabled() -> bool
 pub fn finstack_ai::outstanding_deferrals(&finstack_ai_kernel::state::KernelState) -> alloc::vec::Vec<finstack_ai::OutstandingDeferral>

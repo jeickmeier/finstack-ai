@@ -8,7 +8,7 @@
 // conversation still carries the original `File` block.
 
 use finstack_ai::{AgentRunRequest, AttachmentInput};
-use finstack_ai_context_memory::InProcessArtifactStore;
+use finstack_ai_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{EntryBody, Sensitivity};
 use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
 use finstack_ai_runtime::{ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes};

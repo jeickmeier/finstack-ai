@@ -1126,6 +1126,7 @@ version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-provider-anthropic",
+ "finstack-ai-provider-gemini",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-provider-openrouter",
@@ -1161,11 +1162,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "finstack-ai-context-memory"
+name = "finstack-ai-completion-ingress"
 version = "1.0.0"
 dependencies = [
+ "base64",
+ "finstack-ai",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-test",
+ "hmac",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha2",
  "thiserror",
  "tokio",
 ]
@@ -1229,6 +1239,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-memory"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-middleware-compaction"
 version = "1.0.0"
 dependencies = [
@@ -1247,13 +1272,26 @@ name = "finstack-ai-middleware-document-ingest"
 version = "1.0.0"
 dependencies = [
  "criterion",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-runtime",
  "finstack-ai-tools-document",
  "serde_json",
  "serde_json_canonicalizer",
  "thiserror",
+]
+
+[[package]]
+name = "finstack-ai-middleware-instructions"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1296,9 +1334,9 @@ name = "finstack-ai-native-examples"
 version = "1.0.0"
 dependencies = [
  "finstack-ai",
- "finstack-ai-context-memory",
  "finstack-ai-context-repository",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-compaction",
  "finstack-ai-middleware-verify",
  "finstack-ai-provider-ollama",
@@ -1307,6 +1345,18 @@ dependencies = [
  "finstack-ai-tools-calculator",
  "finstack-ai-tools-filesystem",
  "finstack-ai-tools-shell",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-observer-billing"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde_json",
+ "thiserror",
  "tokio",
 ]
 
@@ -1409,8 +1459,27 @@ dependencies = [
  "criterion",
  "finstack-ai",
  "finstack-ai-kernel",
+ "finstack-ai-provider-gemini",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-test",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-provider-gemini"
+version = "1.0.0"
+dependencies = [
+ "base64",
+ "criterion",
+ "finstack-ai",
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
  "finstack-ai-test",
@@ -1472,11 +1541,12 @@ name = "finstack-ai-python"
 version = "1.0.0"
 dependencies = [
  "finstack-ai",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
+ "finstack-ai-provider-gemini",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-provider-openrouter",
@@ -1652,8 +1722,8 @@ version = "1.0.0"
 dependencies = [
  "criterion",
  "finstack-ai",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
@@ -1759,8 +1829,8 @@ name = "finstack-ai-tools-openai-media"
 version = "1.0.0"
 dependencies = [
  "base64",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-runtime",
  "futures-util",
  "reqwest",
@@ -1775,8 +1845,8 @@ name = "finstack-ai-tools-openrouter-media"
 version = "1.0.0"
 dependencies = [
  "base64",
- "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-runtime",
  "futures-util",
  "reqwest",
@@ -1857,6 +1927,7 @@ version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-store-memory",
@@ -1895,6 +1966,24 @@ dependencies = [
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "rusqlite",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-workflow-worker"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-test",
+ "finstack-ai-workflow-local",
+ "rusqlite",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",

@@ -10,6 +10,7 @@ use crate::json_bridge::{json_to_py, py_to_json};
 
 pub(crate) const OPENAI_PROVIDER: &str = "openai";
 pub(crate) const ANTHROPIC_PROVIDER: &str = "anthropic";
+pub(crate) const GEMINI_PROVIDER: &str = "gemini";
 pub(crate) const OLLAMA_PROVIDER: &str = "ollama";
 pub(crate) const OPENROUTER_PROVIDER: &str = "openrouter";
 
@@ -21,11 +22,18 @@ pub(crate) fn health() -> &'static str {
 
 #[pyfunction]
 #[pyo3(text_signature = "()")]
-pub(crate) fn linked_providers() -> (&'static str, &'static str, &'static str, &'static str) {
+pub(crate) fn linked_providers() -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
     let _ = finstack_ai_provider_anthropic::ANTHROPIC_MESSAGES_VERSION;
     (
         OPENAI_PROVIDER,
         ANTHROPIC_PROVIDER,
+        GEMINI_PROVIDER,
         OLLAMA_PROVIDER,
         OPENROUTER_PROVIDER,
     )

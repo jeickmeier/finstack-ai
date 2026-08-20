@@ -14,7 +14,11 @@ EventBatchIterator
 FinstackError
 Lane
 Locator
+MemoryContextProvider
+MemoryExtension
 MemoryExternalIdentityMap
+MemoryObserver
+MemoryToolset
 PythonContextProvider
 PythonMiddleware
 PythonModel

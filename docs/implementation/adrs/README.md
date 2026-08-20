@@ -68,3 +68,4 @@ chain and receive the next approved ADR number.
 | ADR-047 | [ADR-047-retire-multi-protocol-gateway.md](ADR-047-retire-multi-protocol-gateway.md) |
 | ADR-048 | [ADR-048-shared-authority-and-provider-secret.md](ADR-048-shared-authority-and-provider-secret.md) |
 | ADR-049 | [ADR-049-media-resolver.md](ADR-049-media-resolver.md) |
+| ADR-051 | [ADR-051-gemini-native-provider.md](ADR-051-gemini-native-provider.md) |

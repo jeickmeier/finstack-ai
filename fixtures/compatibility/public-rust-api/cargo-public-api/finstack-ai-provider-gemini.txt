@@ -1,0 +1,81 @@
+pub mod finstack_ai_provider_gemini
+pub use finstack_ai_provider_gemini::Authentication
+pub use finstack_ai_provider_gemini::CredentialReference
+pub use finstack_ai_provider_gemini::CredentialRejected
+pub use finstack_ai_provider_gemini::CredentialStore
+pub use finstack_ai_provider_gemini::SecretRejected
+pub use finstack_ai_provider_gemini::SecretString
+pub enum finstack_ai_provider_gemini::GeminiEndpoint
+pub finstack_ai_provider_gemini::GeminiEndpoint::GenerativeLanguage
+pub finstack_ai_provider_gemini::GeminiEndpoint::Vertex
+pub finstack_ai_provider_gemini::GeminiEndpoint::Vertex::location: alloc::sync::Arc<str>
+pub finstack_ai_provider_gemini::GeminiEndpoint::Vertex::project: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_provider_gemini::GeminiEndpoint
+pub fn finstack_ai_provider_gemini::GeminiEndpoint::clone(&self) -> finstack_ai_provider_gemini::GeminiEndpoint
+impl core::cmp::Eq for finstack_ai_provider_gemini::GeminiEndpoint
+impl core::cmp::PartialEq for finstack_ai_provider_gemini::GeminiEndpoint
+pub fn finstack_ai_provider_gemini::GeminiEndpoint::eq(&self, &finstack_ai_provider_gemini::GeminiEndpoint) -> bool
+impl core::fmt::Debug for finstack_ai_provider_gemini::GeminiEndpoint
+pub fn finstack_ai_provider_gemini::GeminiEndpoint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_gemini::GeminiEndpoint
+pub struct finstack_ai_provider_gemini::GeminiConfig
+impl finstack_ai_provider_gemini::GeminiConfig
+pub fn finstack_ai_provider_gemini::GeminiConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiConfig::try_new_vertex(impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_authentication(self, finstack_ai_runtime::ports::model::provider_util::credentials::Authentication) -> Self
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_credentials(self, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialStore, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialReference) -> Self
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::provider_util::media::MediaResolver>) -> Self
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_request_timeout(self, core::time::Duration) -> Self
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_secret_header(self, finstack_ai_provider_gemini::SecretHeader) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_stream_limits(self, usize, usize) -> Self
+impl core::clone::Clone for finstack_ai_provider_gemini::GeminiConfig
+pub fn finstack_ai_provider_gemini::GeminiConfig::clone(&self) -> finstack_ai_provider_gemini::GeminiConfig
+impl core::fmt::Debug for finstack_ai_provider_gemini::GeminiConfig
+pub fn finstack_ai_provider_gemini::GeminiConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_provider_gemini::GeminiModelConfig
+impl finstack_ai_provider_gemini::GeminiModelConfig
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::apply_capabilities(&mut self, &finstack_ai_runtime::ports::model::profile::ModelCapabilities) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::capabilities(&self, &str) -> finstack_ai_runtime::ports::model::profile::ModelCapabilities
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::try_new(impl core::convert::AsRef<str>, u64, u64, u64) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_cached_content(self, bool) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_code_execution(self, bool) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_google_search(self, bool) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_input_audio(self, bool) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_input_files(self, bool) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_input_images(self, bool) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_parallel_tool_calls(self, bool) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_provider_overhead_tokens(self, u64) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_reserved_output_tokens(self, u64) -> Self
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::with_thinking(self, bool, u64) -> Self
+impl core::clone::Clone for finstack_ai_provider_gemini::GeminiModelConfig
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::clone(&self) -> finstack_ai_provider_gemini::GeminiModelConfig
+impl core::cmp::Eq for finstack_ai_provider_gemini::GeminiModelConfig
+impl core::cmp::PartialEq for finstack_ai_provider_gemini::GeminiModelConfig
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::eq(&self, &finstack_ai_provider_gemini::GeminiModelConfig) -> bool
+impl core::fmt::Debug for finstack_ai_provider_gemini::GeminiModelConfig
+pub fn finstack_ai_provider_gemini::GeminiModelConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_gemini::GeminiModelConfig
+pub struct finstack_ai_provider_gemini::GeminiProvider
+impl finstack_ai_provider_gemini::GeminiProvider
+pub fn finstack_ai_provider_gemini::GeminiProvider::refresh_model_metadata(&self, &finstack_ai_runtime::ports::model::identity::ModelName, &finstack_ai_runtime::ports::model::profile::ModelCapabilities) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiProvider::replace_model_catalog(&self, alloc::vec::Vec<finstack_ai_provider_gemini::GeminiModelConfig>) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiProvider::try_new(finstack_ai_provider_gemini::GeminiConfig, alloc::vec::Vec<finstack_ai_provider_gemini::GeminiModelConfig>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::fmt::Debug for finstack_ai_provider_gemini::GeminiProvider
+pub fn finstack_ai_provider_gemini::GeminiProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::model::port::Model for finstack_ai_provider_gemini::GeminiProvider
+pub fn finstack_ai_provider_gemini::GeminiProvider::capabilities(&self, &finstack_ai_runtime::ports::model::identity::ModelName) -> finstack_ai_runtime::ports::model::profile::ModelCapabilities
+pub fn finstack_ai_provider_gemini::GeminiProvider::descriptor(&self) -> finstack_ai_runtime::ports::model::identity::ModelDescriptor
+pub fn finstack_ai_provider_gemini::GeminiProvider::estimate_input_tokens(&self, &finstack_ai_runtime::ports::model::identity::ModelName, &[u8]) -> core::result::Result<finstack_ai_runtime::ports::model::request::ModelTokenEstimate, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_gemini::GeminiProvider::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::context::ModelReconcileResult, finstack_ai_runtime::ports::model::error::ModelError>>
+pub fn finstack_ai_provider_gemini::GeminiProvider::request(&self, finstack_ai_runtime::ports::model::context::ModelRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::stream::ModelEventStream, finstack_ai_runtime::ports::model::error::ModelError>>
+pub struct finstack_ai_provider_gemini::SecretHeader
+impl finstack_ai_provider_gemini::SecretHeader
+pub fn finstack_ai_provider_gemini::SecretHeader::try_new(impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::clone::Clone for finstack_ai_provider_gemini::SecretHeader
+pub fn finstack_ai_provider_gemini::SecretHeader::clone(&self) -> finstack_ai_provider_gemini::SecretHeader
+impl core::cmp::Eq for finstack_ai_provider_gemini::SecretHeader
+impl core::cmp::PartialEq for finstack_ai_provider_gemini::SecretHeader
+pub fn finstack_ai_provider_gemini::SecretHeader::eq(&self, &finstack_ai_provider_gemini::SecretHeader) -> bool
+impl core::fmt::Debug for finstack_ai_provider_gemini::SecretHeader
+pub fn finstack_ai_provider_gemini::SecretHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_gemini::SecretHeader

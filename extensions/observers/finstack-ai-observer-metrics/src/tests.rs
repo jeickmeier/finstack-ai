@@ -124,7 +124,8 @@ async fn drop_progress_overflow_is_diagnosed() {
         ]))
         .await
         .expect("observe");
-    assert!(metrics.dropped() >= 1);
+    // Capacity-1 queue, 2 events in one batch: exactly one drop, not two.
+    assert_eq!(metrics.dropped(), 1);
     assert_eq!(
         metrics.last_diagnostic().expect("diagnostic").code,
         "observer_queue_overflow"
@@ -158,5 +159,6 @@ async fn block_bounded_timeout_does_not_hang() {
         ]))
         .await
         .expect("observe");
-    assert!(metrics.dropped() >= 1);
+    // Capacity-1 queue, 2 events in one batch: exactly one drop, not two.
+    assert_eq!(metrics.dropped(), 1);
 }

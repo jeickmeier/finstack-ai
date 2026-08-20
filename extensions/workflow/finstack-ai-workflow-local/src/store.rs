@@ -52,6 +52,20 @@ pub trait CronScheduleStore: Send + Sync {
             code: "try_claim_unsupported",
         })
     }
+
+    /// Every schedule (any tenant) due at or before `now`.
+    ///
+    /// Third-party stores fail closed unless they override this method.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CronError::StoreUnavailable`] by default.
+    fn load_due(&self, now: Timestamp) -> Result<Vec<CronSchedule>, CronError> {
+        let _ = now;
+        Err(CronError::StoreUnavailable {
+            code: "load_due_unsupported",
+        })
+    }
 }
 
 type MemoryCronRows = BTreeMap<(Arc<str>, Arc<str>), CronSchedule>;
@@ -115,6 +129,17 @@ impl CronScheduleStore for MemoryCronStore {
         }
         *row = claimed.clone();
         Ok(true)
+    }
+
+    fn load_due(&self, now: Timestamp) -> Result<Vec<CronSchedule>, CronError> {
+        let inner = self.inner.lock().map_err(|_| CronError::StoreUnavailable {
+            code: "memory_cron_lock_poisoned",
+        })?;
+        Ok(inner
+            .values()
+            .filter(|schedule| schedule.next_fire_at <= now)
+            .cloned()
+            .collect())
     }
 }
 
@@ -323,6 +348,74 @@ impl CronScheduleStore for SqliteCronStore {
             Ok(won)
         })
     }
+
+    fn load_due(&self, now: Timestamp) -> Result<Vec<CronSchedule>, CronError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT tenant_scope, schedule_id, expression, origin_unix_ms,
+                            next_fire_unix_ms, last_fired_unix_ms, fire_count
+                     FROM finstack_workflow_local_cron
+                     WHERE next_fire_unix_ms <= ?1
+                     ORDER BY tenant_scope, schedule_id",
+                )
+                .map_err(|_| CronError::StoreUnavailable {
+                    code: "sqlite_cron_prepare",
+                })?;
+            let rows = stmt
+                .query_map(params![now.as_unix_ms()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                })
+                .map_err(|_| CronError::StoreUnavailable {
+                    code: "sqlite_cron_query",
+                })?;
+            let mut schedules = Vec::new();
+            for row in rows {
+                let (
+                    tenant_scope,
+                    schedule_id,
+                    expression,
+                    origin,
+                    next_fire,
+                    last_fired,
+                    fire_count,
+                ) = row.map_err(|_| CronError::StoreIntegrity {
+                    code: "sqlite_cron_row",
+                })?;
+                schedules.push(CronSchedule {
+                    tenant_scope: Arc::from(tenant_scope),
+                    schedule_id: Arc::from(schedule_id),
+                    expression: IntervalSchedule::parse(&expression)?,
+                    origin: Timestamp::from_unix_ms(origin).map_err(|_| {
+                        CronError::StoreIntegrity {
+                            code: "sqlite_cron_origin",
+                        }
+                    })?,
+                    next_fire_at: Timestamp::from_unix_ms(next_fire).map_err(|_| {
+                        CronError::StoreIntegrity {
+                            code: "sqlite_cron_next_fire",
+                        }
+                    })?,
+                    last_fired_at: last_fired
+                        .map(Timestamp::from_unix_ms)
+                        .transpose()
+                        .map_err(|_| CronError::StoreIntegrity {
+                            code: "sqlite_cron_last_fired",
+                        })?,
+                    fire_count: u64_from_i64(fire_count)?,
+                });
+            }
+            Ok(schedules)
+        })
+    }
 }
 
 fn is_memory_path(path: &Path) -> bool {
@@ -392,6 +485,56 @@ mod tests {
                 .expect("miss")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn load_due_crosses_tenants_and_respects_now() {
+        let store = MemoryCronStore::new();
+        let origin = Timestamp::from_unix_ms(2_000).expect("origin");
+        for (tenant, next) in [("tenant-a", 2_010), ("tenant-b", 2_020)] {
+            store
+                .upsert(&CronSchedule {
+                    tenant_scope: Arc::from(tenant),
+                    schedule_id: Arc::from("tick"),
+                    expression: IntervalSchedule::parse("every 10ms").expect("expr"),
+                    origin,
+                    next_fire_at: Timestamp::from_unix_ms(next).expect("next"),
+                    last_fired_at: None,
+                    fire_count: 0,
+                })
+                .expect("upsert");
+        }
+        let due = store
+            .load_due(Timestamp::from_unix_ms(2_015).expect("now"))
+            .expect("due");
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].tenant_scope.as_ref(), "tenant-a");
+    }
+
+    #[test]
+    fn sqlite_load_due_crosses_tenants_and_respects_now() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("cron.sqlite");
+        let store = SqliteCronStore::open(&path).expect("store");
+        let origin = Timestamp::from_unix_ms(2_000).expect("origin");
+        for (tenant, next) in [("tenant-a", 2_010), ("tenant-b", 2_020)] {
+            store
+                .upsert(&CronSchedule {
+                    tenant_scope: Arc::from(tenant),
+                    schedule_id: Arc::from("tick"),
+                    expression: IntervalSchedule::parse("every 10ms").expect("expr"),
+                    origin,
+                    next_fire_at: Timestamp::from_unix_ms(next).expect("next"),
+                    last_fired_at: None,
+                    fire_count: 0,
+                })
+                .expect("upsert");
+        }
+        let due = store
+            .load_due(Timestamp::from_unix_ms(2_015).expect("now"))
+            .expect("due");
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].tenant_scope.as_ref(), "tenant-a");
     }
 
     #[test]

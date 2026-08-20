@@ -2144,6 +2144,12 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::ExternalIdentityKey
 pub fn finstack_ai_runtime::ExternalIdentityKey::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ExternalIdentityKey
 pub fn finstack_ai_runtime::ExternalIdentityKey::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::GeminiGenerateContentAssembly
+impl finstack_ai_runtime::GeminiGenerateContentAssembly
+pub const fn finstack_ai_runtime::GeminiGenerateContentAssembly::completed(&self) -> bool
+pub fn finstack_ai_runtime::GeminiGenerateContentAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ModelStreamItem>, finstack_ai_runtime::StreamNormError>
+pub fn finstack_ai_runtime::GeminiGenerateContentAssembly::finish(&mut self) -> core::result::Result<(), finstack_ai_runtime::StreamNormError>
+pub fn finstack_ai_runtime::GeminiGenerateContentAssembly::new(alloc::string::String, bool) -> Self
 pub struct finstack_ai_runtime::IdempotencyHorizon
 pub finstack_ai_runtime::IdempotencyHorizon::expire_at: finstack_ai_kernel::primitives::time::Timestamp
 impl core::clone::Clone for finstack_ai_runtime::IdempotencyHorizon
@@ -3784,6 +3790,7 @@ pub fn finstack_ai_runtime::WorkflowSession::abort_owner(&mut self)
 pub async fn finstack_ai_runtime::WorkflowSession::attach(alloc::sync::Arc<dyn finstack_ai_runtime::JournalStore>, finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai_runtime::ExternalClock, u64, alloc::sync::Arc<finstack_ai_runtime::SecurityAuditGate>) -> core::result::Result<Self, finstack_ai_runtime::WorkflowDriverError>
 pub fn finstack_ai_runtime::WorkflowSession::clock(&self) -> &finstack_ai_runtime::ExternalClock
 pub async fn finstack_ai_runtime::WorkflowSession::complete_external(&self, finstack_ai_kernel::records::run::external::ExternalEffectCompletionCommand, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_runtime::ExternalRouteOutcome, finstack_ai_runtime::WorkflowDriverError>
+pub const fn finstack_ai_runtime::WorkflowSession::drive_timeout(&self) -> core::time::Duration
 pub async fn finstack_ai_runtime::WorkflowSession::drive_until_wait(&mut self) -> core::result::Result<finstack_ai_runtime::WorkflowWait, finstack_ai_runtime::WorkflowDriverError>
 pub async fn finstack_ai_runtime::WorkflowSession::ensure_owner(&mut self) -> core::result::Result<(), finstack_ai_runtime::WorkflowDriverError>
 pub const fn finstack_ai_runtime::WorkflowSession::last_state(&self) -> &finstack_ai_kernel::state::KernelState
@@ -3799,6 +3806,7 @@ pub async fn finstack_ai_runtime::WorkflowSession::trusted(alloc::sync::Arc<dyn 
 pub fn finstack_ai_runtime::WorkflowSession::with_approval_grant(self, finstack_ai_runtime::ApprovalGrantMode) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_capability_owners(self, alloc::sync::Arc<alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::ids::CapabilityId>>) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_context_providers(self, alloc::sync::Arc<[alloc::sync::Arc<dyn finstack_ai_runtime::ContextProvider>]>) -> Self
+pub const fn finstack_ai_runtime::WorkflowSession::with_drive_timeout(self, core::time::Duration) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_middleware_chain(self, alloc::sync::Arc<finstack_ai_runtime::ResolvedMiddlewareChain>) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_ports(self, alloc::sync::Arc<dyn finstack_ai_runtime::Model>, finstack_ai_runtime::LockedModelContextProfile, core::option::Option<alloc::sync::Arc<finstack_ai_runtime::ResolvedToolCatalog>>) -> Self
 pub struct finstack_ai_runtime::WriteMetadataRequest
@@ -3821,6 +3829,12 @@ pub const finstack_ai_runtime::COMPACTION_RESULT_INVALID: &str
 pub const finstack_ai_runtime::CONFINEMENT_UNAVAILABLE: &str
 pub const finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED: &str
 pub const finstack_ai_runtime::CONTEXT_CONTRIBUTION_INVALID: &str
+pub const finstack_ai_runtime::GEMINI_CACHED_TOKENS_KEY: &str
+pub const finstack_ai_runtime::GEMINI_CODE_RESULT_MEDIA_TYPE: &str
+pub const finstack_ai_runtime::GEMINI_CONTINUATION_PROVIDER: &str
+pub const finstack_ai_runtime::GEMINI_EXECUTABLE_CODE_MEDIA_TYPE: &str
+pub const finstack_ai_runtime::GEMINI_GROUNDING_MEDIA_TYPE: &str
+pub const finstack_ai_runtime::GEMINI_THOUGHTS_TOKENS_KEY: &str
 pub const finstack_ai_runtime::MAX_ARTIFACT_BYTES: usize
 pub const finstack_ai_runtime::MAX_OBJECT_KEY_BYTES: usize
 pub const finstack_ai_runtime::MCP_SAMPLING_REQUIRED: &str
@@ -3968,6 +3982,7 @@ pub fn finstack_ai_runtime::retry_decision(&finstack_ai_kernel::state::KernelSta
 pub fn finstack_ai_runtime::secret_is_valid(&str) -> bool
 pub async fn finstack_ai_runtime::stage_required_artifact(&dyn finstack_ai_runtime::ArtifactStore, finstack_ai_runtime::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::ArtifactMetadata) -> core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::ArtifactError>
 pub fn finstack_ai_runtime::support_bundle_versions(&str, &[&str]) -> serde_json::value::Value
+pub fn finstack_ai_runtime::thinking_level_budget(&str) -> core::option::Option<u64>
 pub fn finstack_ai_runtime::tool_resume_action(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId) -> finstack_ai_runtime::ToolResumeAction
 pub fn finstack_ai_runtime::validate_compaction_result(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::BeforeModelInput, &finstack_ai_runtime::CompactionResult) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>
 pub fn finstack_ai_runtime::validate_object_metadata(&finstack_ai_runtime::ObjectMetadata) -> core::result::Result<(), finstack_ai_runtime::ObjectError>
