@@ -47,8 +47,15 @@ impl S3ObjectStore {
     /// Returns [`ObjectError::InvalidMetadata`] when the underlying HTTP
     /// client cannot be constructed (e.g. an unsupported TLS configuration).
     pub fn try_new(config: S3ObjectStoreConfig) -> Result<Self, ObjectError> {
+        // A 3xx would otherwise cause reqwest to transparently re-send the
+        // request (including any PUT body and the SigV4-signed headers,
+        // which are only valid for the original host/path) to whatever
+        // target a compromised or misconfigured endpoint names in
+        // `Location`. Disabling redirects makes that a hard failure
+        // (mapped to `Unavailable { message: "http_3xx" }`) instead.
         let client = reqwest::Client::builder()
             .timeout(config.timeout())
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_error| ObjectError::InvalidMetadata {
                 message: Arc::from("http_client_build_failed"),
@@ -174,6 +181,24 @@ fn parse_scope_digest(header: &str, expected: Digest) -> Result<Digest, ObjectEr
         return Err(ObjectError::ScopeMismatch { expected, actual });
     }
     Ok(actual)
+}
+
+/// Read `content-length`, if present and well-formed, and reject early when
+/// it already exceeds `max_bytes` — before any body bytes are read.
+///
+/// A missing or malformed header is not itself an error here: the
+/// incremental byte counter on the streaming read path is the real
+/// enforcement; this is a fast path that avoids opening a body stream at
+/// all for a response that already announces itself as too large.
+fn reject_if_content_length_exceeds(response: &Response, max_bytes: u64) -> Result<(), ObjectError> {
+    let Some(header) = response.headers().get("content-length") else { return Ok(()) };
+    let Some(len) = header.to_str().ok().and_then(|value| value.parse::<u64>().ok()) else {
+        return Ok(());
+    };
+    if len > max_bytes {
+        return Err(ObjectError::TooLarge { len, max: max_bytes });
+    }
+    Ok(())
 }
 
 /// Reads a local file in two full passes: once to compute the real SHA-256
@@ -331,7 +356,25 @@ async fn get_impl(
     let digest_header = header_value(&response, HEADER_DIGEST)?;
     parse_scope_digest(&scope_header, scope_digest)?;
 
-    let bytes = response.bytes().await.map_err(|_error| map_transport_error())?;
+    let max_bytes = config.max_object_bytes();
+    reject_if_content_length_exceeds(&response, max_bytes)?;
+
+    // Stream rather than `response.bytes()` so a hostile or misconfigured
+    // endpoint that lies about (or omits) `content-length` cannot force an
+    // unbounded buffer allocation before the size ceiling is checked.
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut total: u64 = 0;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_error| map_transport_error())?;
+        total = total.saturating_add(chunk.len() as u64);
+        if total > max_bytes {
+            return Err(ObjectError::TooLarge { len: total, max: max_bytes });
+        }
+        buffer.extend_from_slice(&chunk);
+    }
+
+    let bytes = Bytes::from(buffer);
     let computed = Digest::blob_content(&bytes);
     if computed.to_hex() != digest_header {
         return Err(ObjectError::Integrity { message: Arc::from("digest_mismatch") });
@@ -369,6 +412,9 @@ async fn get_to_file_impl(
     });
     parse_scope_digest(&scope_header, scope_digest)?;
 
+    let max_bytes = config.max_object_bytes();
+    reject_if_content_length_exceeds(&response, max_bytes)?;
+
     let parent = dest
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -379,6 +425,13 @@ async fn get_to_file_impl(
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_error| map_transport_error())?;
+        // Enforce the ceiling against the incremental counter, not just the
+        // (possibly absent or falsified) `content-length` header, so a
+        // hostile endpoint cannot exhaust disk before verification.
+        let projected = hasher.bytes_written().saturating_add(chunk.len() as u64);
+        if projected > max_bytes {
+            return Err(ObjectError::TooLarge { len: projected, max: max_bytes });
+        }
         hasher.update(&chunk);
         std::io::Write::write_all(&mut tmp, &chunk).map_err(|error| io_error(&error))?;
     }
@@ -505,7 +558,13 @@ async fn list_impl(
 
     let mut entries = Vec::with_capacity(keys.len());
     for (raw_key, raw_size) in keys.iter().zip(sizes.iter()) {
-        let logical = raw_key.strip_prefix(&base_prefix).unwrap_or(raw_key);
+        // Fail closed: a key outside the caller's scope prefix means the
+        // endpoint ignored `prefix=` (compromised or buggy). Surfacing it
+        // anyway would leak another tenant's physical key (including their
+        // scope digest) as a valid in-scope entry.
+        let Some(logical) = raw_key.strip_prefix(&base_prefix) else {
+            return Err(ObjectError::Integrity { message: Arc::from("list_key_outside_scope") });
+        };
         let object_key = ObjectKey::try_new(logical)?;
         let length: u64 = raw_size
             .parse()

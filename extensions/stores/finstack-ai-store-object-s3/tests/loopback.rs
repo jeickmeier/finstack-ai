@@ -362,6 +362,71 @@ async fn oversize_file_put_is_rejected_before_any_request() {
 }
 
 // ---------------------------------------------------------------------------
+// Review fixes: fail-closed list scope, no redirects, bounded reads
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_rejects_a_key_outside_the_caller_scope() {
+    // A compromised or buggy endpoint could ignore `prefix=` and return a
+    // key stamped with a different scope digest. The client must fail
+    // closed rather than surface it as a valid in-scope entry.
+    let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult>\
+               <IsTruncated>false</IsTruncated>\
+               <Contents><Key>finstack/0000000000000000/docs/other-tenant.pdf</Key><Size>7</Size></Contents>\
+               </ListBucketResult>";
+    let (base_url, server) = serve(vec![CannedResponse::ok(Vec::new(), xml.as_bytes().to_vec())]).await;
+    let store = store(&base_url, Addressing::Path, None);
+
+    let error = store
+        .list(scope(), None, PageToken::first())
+        .await
+        .expect_err("out-of-scope key must be rejected");
+    assert_eq!(error.code(), finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE);
+    server.await.expect("server task");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn redirects_are_never_followed() {
+    let (base_url, server) = serve(vec![CannedResponse {
+        status_line: "301 Moved Permanently",
+        headers: vec![("Location", "http://127.0.0.1:1/elsewhere".to_owned())],
+        body: Vec::new(),
+    }])
+    .await;
+    let store = store(&base_url, Addressing::Path, None);
+    let key = ObjectKey::try_new("docs/a.pdf").expect("key");
+
+    let error = store.get(scope(), key).await.expect_err("redirect must not be followed");
+    assert_eq!(error.code(), finstack_ai_runtime::OBJECT_UNAVAILABLE);
+    assert!(format!("{error}").contains("http_301"), "error: {error}");
+
+    let captured = server.await.expect("server task");
+    assert_eq!(captured.len(), 1, "the listener must see exactly one request, never a follow-up to Location");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn get_rejects_a_body_over_the_configured_ceiling() {
+    let scope_digest = scope().digest().expect("scope digest").to_hex();
+    let oversized_body = vec![7_u8; 2 * 1024];
+    let content_digest = Digest::blob_content(&oversized_body).to_hex();
+    let (base_url, server) = serve(vec![CannedResponse::ok(
+        vec![
+            ("content-type", "application/octet-stream".to_owned()),
+            ("x-amz-meta-fsai-digest", content_digest),
+            ("x-amz-meta-fsai-scope", scope_digest),
+        ],
+        oversized_body,
+    )])
+    .await;
+    let store = store(&base_url, Addressing::Path, Some(1024));
+    let key = ObjectKey::try_new("docs/a.pdf").expect("key");
+
+    let error = store.get(scope(), key).await.expect_err("oversized body must be rejected");
+    assert_eq!(error.code(), OBJECT_TOO_LARGE);
+    server.await.expect("server task");
+}
+
+// ---------------------------------------------------------------------------
 // Step 3: minimal in-process S3 stub satisfying the shared contract suite
 // ---------------------------------------------------------------------------
 
