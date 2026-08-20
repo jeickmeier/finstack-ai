@@ -21,7 +21,7 @@ pub const ARTIFACT_INTEGRITY_FAILURE: &str = "artifact_integrity_failure";
 pub const ARTIFACT_TOO_LARGE: &str = "artifact_too_large";
 /// Stable code for malformed artifact metadata.
 pub const ARTIFACT_INVALID_METADATA: &str = "artifact_invalid_metadata";
-/// V1 individual byte-string ceiling.
+/// Default individual byte-string ceiling; stores may override via `limits()`.
 pub const MAX_ARTIFACT_BYTES: usize = 4 * 1024 * 1024;
 
 /// Exact authorization and integrity scope for an artifact operation.
@@ -80,6 +80,21 @@ pub struct ArtifactMetadata {
     pub attributes: Metadata,
 }
 
+/// Per-store artifact size ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactStoreLimits {
+    /// Reject staged content above this size; never truncate.
+    pub max_artifact_bytes: usize,
+}
+
+impl Default for ArtifactStoreLimits {
+    fn default() -> Self {
+        Self {
+            max_artifact_bytes: MAX_ARTIFACT_BYTES,
+        }
+    }
+}
+
 /// Scoped application/runtime artifact service.
 pub trait ArtifactStore: PortObject {
     /// Durably stage exact bytes before the referencing journal append.
@@ -96,6 +111,11 @@ pub trait ArtifactStore: PortObject {
         scope: ArtifactScope,
         artifact: ArtifactRef,
     ) -> PortFuture<Result<Bytes, ArtifactError>>;
+
+    /// This store's size ceilings. Defaults to the v1 4 MiB constant.
+    fn limits(&self) -> ArtifactStoreLimits {
+        ArtifactStoreLimits::default()
+    }
 }
 
 /// Stage a required artifact and verify the exact returned reference.
@@ -114,11 +134,12 @@ pub async fn stage_required_artifact(
     content: Bytes,
     metadata: ArtifactMetadata,
 ) -> Result<ArtifactRef, ArtifactError> {
-    validate_artifact_input(&scope, &content, &metadata)?;
+    let limits = store.limits();
+    validate_artifact_input(&scope, &content, &metadata, &limits)?;
     let artifact = store
         .stage_put(scope.clone(), content.clone(), metadata.clone())
         .await?;
-    validate_staged_artifact(&scope, &content, &metadata, &artifact)?;
+    validate_staged_artifact(&scope, &content, &metadata, &artifact, &limits)?;
     Ok(artifact)
 }
 
@@ -133,8 +154,9 @@ pub fn validate_staged_artifact(
     content: &[u8],
     metadata: &ArtifactMetadata,
     artifact: &ArtifactRef,
+    limits: &ArtifactStoreLimits,
 ) -> Result<(), ArtifactError> {
-    validate_artifact_input(scope, content, metadata)?;
+    validate_artifact_input(scope, content, metadata, limits)?;
     let expected_scope = scope.digest()?;
     if artifact.scope_digest() != expected_scope {
         return Err(ArtifactError::ScopeMismatch {
@@ -164,16 +186,21 @@ pub fn validate_staged_artifact(
     Ok(())
 }
 
+// `limits` is taken by reference (rather than by value, despite being
+// `Copy`-sized) to match the public `validate_staged_artifact` signature
+// mandated by the artifact-limits design, which callers use uniformly.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn validate_artifact_input(
     scope: &ArtifactScope,
     content: &[u8],
     metadata: &ArtifactMetadata,
+    limits: &ArtifactStoreLimits,
 ) -> Result<(), ArtifactError> {
     scope.digest()?;
-    if content.len() > MAX_ARTIFACT_BYTES {
+    if content.len() > limits.max_artifact_bytes {
         return Err(ArtifactError::TooLarge {
             len: content.len(),
-            max: MAX_ARTIFACT_BYTES,
+            max: limits.max_artifact_bytes,
         });
     }
     if metadata.kind.is_empty()
@@ -441,10 +468,12 @@ mod tests {
         let metadata = metadata();
         let content = b"artifact bytes";
         let artifact = artifact(content, &scope, &metadata);
-        validate_staged_artifact(&scope, content, &metadata, &artifact).expect("valid artifact");
+        let limits = ArtifactStoreLimits::default();
+        validate_staged_artifact(&scope, content, &metadata, &artifact, &limits)
+            .expect("valid artifact");
 
         assert!(
-            validate_staged_artifact(&scope, b"corrupt", &metadata, &artifact).is_err(),
+            validate_staged_artifact(&scope, b"corrupt", &metadata, &artifact, &limits).is_err(),
             "corrupt bytes must fail"
         );
         let other_scope = ArtifactScope {
@@ -452,7 +481,8 @@ mod tests {
             ..scope.clone()
         };
         assert!(
-            validate_staged_artifact(&other_scope, content, &metadata, &artifact).is_err(),
+            validate_staged_artifact(&other_scope, content, &metadata, &artifact, &limits)
+                .is_err(),
             "cross-scope read must fail"
         );
     }
@@ -464,7 +494,13 @@ mod tests {
         let content = vec![0_u8; MAX_ARTIFACT_BYTES + 1];
         let artifact = artifact(&content, &scope, &metadata);
         assert!(matches!(
-            validate_staged_artifact(&scope, &content, &metadata, &artifact),
+            validate_staged_artifact(
+                &scope,
+                &content,
+                &metadata,
+                &artifact,
+                &ArtifactStoreLimits::default()
+            ),
             Err(ArtifactError::TooLarge { .. })
         ));
     }
@@ -541,5 +577,45 @@ mod tests {
             block_on(store.get(other_scope, new_reference)),
             Err(ArtifactError::Integrity { .. })
         ));
+    }
+
+    #[test]
+    fn default_limits_match_the_v1_ceiling() {
+        struct DefaultStore;
+        impl ArtifactStore for DefaultStore {
+            fn stage_put(
+                &self,
+                _: ArtifactScope,
+                _: Bytes,
+                _: ArtifactMetadata,
+            ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
+                Box::pin(async { Err(ArtifactError::NotFound) })
+            }
+            fn get(
+                &self,
+                _: ArtifactScope,
+                _: ArtifactRef,
+            ) -> PortFuture<Result<Bytes, ArtifactError>> {
+                Box::pin(async { Err(ArtifactError::NotFound) })
+            }
+        }
+        assert_eq!(DefaultStore.limits().max_artifact_bytes, MAX_ARTIFACT_BYTES);
+    }
+
+    #[test]
+    fn staging_respects_store_limits_not_the_constant() {
+        // A store that raises its ceiling accepts content above MAX_ARTIFACT_BYTES.
+        let content = Bytes::from(vec![0_u8; MAX_ARTIFACT_BYTES + 1]);
+        let raised = ArtifactStoreLimits {
+            max_artifact_bytes: 8 * 1024 * 1024,
+        };
+        assert!(validate_artifact_input(&scope(), &content, &metadata(), &raised).is_ok());
+        let default = ArtifactStoreLimits::default();
+        assert_eq!(
+            validate_artifact_input(&scope(), &content, &metadata(), &default)
+                .expect_err("must reject")
+                .code(),
+            ARTIFACT_TOO_LARGE
+        );
     }
 }

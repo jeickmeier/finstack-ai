@@ -29,10 +29,10 @@ use finstack_ai_kernel::{
     Metadata, Sensitivity, TextBlock, Version,
 };
 use finstack_ai_runtime::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ContextAuthority, ContextCallContext,
-    ContextContribution, ContextError, ContextItem, ContextItemKind, ContextOverflowPolicy,
-    ContextProvenance, ContextProvider, ContextProviderDescriptor, ContextRequest, PortFuture,
-    stage_required_artifact,
+    ArtifactMetadata, ArtifactScope, ArtifactStore, ArtifactStoreLimits, Bytes, ContextAuthority,
+    ContextCallContext, ContextContribution, ContextError, ContextItem, ContextItemKind,
+    ContextOverflowPolicy, ContextProvenance, ContextProvider, ContextProviderDescriptor,
+    ContextRequest, PortFuture, stage_required_artifact,
 };
 use thiserror::Error;
 
@@ -66,6 +66,16 @@ pub struct MemoryIndex {
 #[derive(Debug, Default)]
 pub struct InProcessArtifactStore {
     bodies: Mutex<BTreeMap<ArtifactId, Bytes>>,
+    limits: ArtifactStoreLimits,
+}
+
+impl InProcessArtifactStore {
+    /// Override the artifact byte ceiling for this in-process store.
+    #[must_use]
+    pub fn with_max_artifact_bytes(mut self, max_artifact_bytes: usize) -> Self {
+        self.limits = ArtifactStoreLimits { max_artifact_bytes };
+        self
+    }
 }
 
 impl ArtifactStore for InProcessArtifactStore {
@@ -135,6 +145,10 @@ impl ArtifactStore for InProcessArtifactStore {
             })?;
             stored.ok_or(finstack_ai_runtime::ArtifactError::NotFound)
         })
+    }
+
+    fn limits(&self) -> ArtifactStoreLimits {
+        self.limits
     }
 }
 

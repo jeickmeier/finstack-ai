@@ -1153,6 +1153,19 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::ArtifactScope
 pub fn finstack_ai_runtime::ArtifactScope::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ArtifactScope
 pub fn finstack_ai_runtime::ArtifactScope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::ArtifactStoreLimits
+pub finstack_ai_runtime::ArtifactStoreLimits::max_artifact_bytes: usize
+impl core::clone::Clone for finstack_ai_runtime::ArtifactStoreLimits
+pub fn finstack_ai_runtime::ArtifactStoreLimits::clone(&self) -> finstack_ai_runtime::ArtifactStoreLimits
+impl core::cmp::Eq for finstack_ai_runtime::ArtifactStoreLimits
+impl core::cmp::PartialEq for finstack_ai_runtime::ArtifactStoreLimits
+pub fn finstack_ai_runtime::ArtifactStoreLimits::eq(&self, &finstack_ai_runtime::ArtifactStoreLimits) -> bool
+impl core::default::Default for finstack_ai_runtime::ArtifactStoreLimits
+pub fn finstack_ai_runtime::ArtifactStoreLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_runtime::ArtifactStoreLimits
+pub fn finstack_ai_runtime::ArtifactStoreLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::ArtifactStoreLimits
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ArtifactStoreLimits
 pub struct finstack_ai_runtime::AssembledContext
 pub finstack_ai_runtime::AssembledContext::bytes: u64
 pub finstack_ai_runtime::AssembledContext::diagnostics: alloc::sync::Arc<[finstack_ai_runtime::ContextTruncationDiagnostic]>
@@ -3360,6 +3373,7 @@ pub fn finstack_ai_runtime::AgentInvoker::cancel(&self, &finstack_ai_kernel::rec
 pub fn finstack_ai_runtime::AgentInvoker::start_or_attach(&self, finstack_ai_runtime::ChildRunContext, finstack_ai_runtime::ChildRunRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ChildRunHandle, finstack_ai_runtime::AgentInvokeError>>
 pub trait finstack_ai_runtime::ArtifactStore: finstack_ai_runtime::PortObject
 pub fn finstack_ai_runtime::ArtifactStore::get(&self, finstack_ai_runtime::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef) -> finstack_ai_runtime::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::ArtifactError>>
+pub fn finstack_ai_runtime::ArtifactStore::limits(&self) -> finstack_ai_runtime::ArtifactStoreLimits
 pub fn finstack_ai_runtime::ArtifactStore::stage_put(&self, finstack_ai_runtime::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::ArtifactMetadata) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::ArtifactError>>
 pub trait finstack_ai_runtime::BudgetLedger: finstack_ai_runtime::PortObject
 pub fn finstack_ai_runtime::BudgetLedger::charge(&self, finstack_ai_kernel::records::policy::budget::BudgetChargeRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_kernel::records::policy::budget::BudgetChargeReceipt, finstack_ai_runtime::BudgetError>>
@@ -3463,7 +3477,7 @@ pub fn finstack_ai_runtime::tool_resume_action(&finstack_ai_kernel::state::Kerne
 pub fn finstack_ai_runtime::validate_compaction_result(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::BeforeModelInput, &finstack_ai_runtime::CompactionResult) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>
 pub fn finstack_ai_runtime::validate_object_metadata(&finstack_ai_runtime::ObjectMetadata) -> core::result::Result<(), finstack_ai_runtime::ObjectError>
 pub fn finstack_ai_runtime::validate_stage_outcome(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::StageInput, &finstack_ai_runtime::StageOutcome) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>
-pub fn finstack_ai_runtime::validate_staged_artifact(&finstack_ai_runtime::ArtifactScope, &[u8], &finstack_ai_runtime::ArtifactMetadata, &finstack_ai_kernel::primitives::handles::ArtifactRef) -> core::result::Result<(), finstack_ai_runtime::ArtifactError>
+pub fn finstack_ai_runtime::validate_staged_artifact(&finstack_ai_runtime::ArtifactScope, &[u8], &finstack_ai_runtime::ArtifactMetadata, &finstack_ai_kernel::primitives::handles::ArtifactRef, &finstack_ai_runtime::ArtifactStoreLimits) -> core::result::Result<(), finstack_ai_runtime::ArtifactError>
 pub fn finstack_ai_runtime::verify_authority(&finstack_ai_runtime::ToolCallContext) -> core::result::Result<(), finstack_ai_runtime::ToolError>
 pub type finstack_ai_runtime::ModelEventStream = finstack_ai_runtime::PortStream<core::result::Result<finstack_ai_runtime::ModelStreamItem, finstack_ai_runtime::ModelError>>
 pub type finstack_ai_runtime::PortFuture<T> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = T> + core::marker::Send + 'static)>>

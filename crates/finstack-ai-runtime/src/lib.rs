@@ -115,7 +115,7 @@ pub use services::agent_invoker::{
 };
 pub use services::artifact::{
     ARTIFACT_INTEGRITY_FAILURE, ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
-    MAX_ARTIFACT_BYTES, stage_required_artifact, validate_staged_artifact,
+    ArtifactStoreLimits, MAX_ARTIFACT_BYTES, stage_required_artifact, validate_staged_artifact,
 };
 pub use services::object::{
     MAX_OBJECT_KEY_BYTES, OBJECT_INTEGRITY_FAILURE, OBJECT_INVALID_KEY, OBJECT_INVALID_METADATA,
