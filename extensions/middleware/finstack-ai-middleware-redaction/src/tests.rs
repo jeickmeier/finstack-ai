@@ -4,13 +4,12 @@ use std::task::{Context, Poll, Waker};
 
 use finstack_ai_kernel::{
     ContentBlock, Digest, Id, IdTag, LaneId, Message, MessageRole, Metadata, OperationLocator,
-    OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, Stage, TextBlock,
-    ToolResultBlock, Timestamp,
+    OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, Stage, TextBlock, Timestamp,
+    ToolResultBlock,
 };
 use finstack_ai_runtime::{
-    AuthorizationContext, BeforeModelInput, CancellationSignal, ModelName,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, OrderTier, RunCallContext, StageInput,
-    StageOutcome,
+    AuthorizationContext, BeforeModelInput, CancellationSignal, ModelName, ModelRequestDraft,
+    ModelRequestLimits, ModelSettings, OrderTier, RunCallContext, StageInput, StageOutcome,
 };
 
 use crate::detect::Detectors;
@@ -581,8 +580,8 @@ fn wrapper_redacts_inner_replace_payload() {
         MessageRole::User,
         vec![text("ingested doc says key sk-proj-abcdefghij0123456789")],
     )]));
-    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
-        .expect("wrap");
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
     let outcome = invoke(
         &wrapper,
         before_model_input(vec![message(2, MessageRole::User, vec![text("clean")])]),
@@ -597,8 +596,8 @@ fn wrapper_redacts_inner_replace_payload() {
 #[test]
 fn wrapper_redacts_base_draft_when_inner_continues() {
     let inner = StubInner::before_model(StageOutcome::Continue);
-    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
-        .expect("wrap");
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
     let outcome = invoke(
         &wrapper,
         before_model_input(vec![message(
@@ -624,8 +623,8 @@ fn wrapper_passes_through_inner_terminal_outcomes() {
     )
     .expect("descriptor");
     let inner = StubInner::before_model(StageOutcome::Fail(Box::new(descriptor)));
-    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
-        .expect("wrap");
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
     let outcome = invoke(
         &wrapper,
         before_model_input(vec![message(
@@ -645,8 +644,8 @@ fn wrapper_passes_through_unparsable_inner_replace() {
     let inner = StubInner::before_model(StageOutcome::Replace(
         RawJson::parse(b"{\"not\":\"a draft\"}").expect("raw"),
     ));
-    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
-        .expect("wrap");
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
     let outcome = invoke(
         &wrapper,
         before_model_input(vec![message(1, MessageRole::User, vec![text("clean")])]),
@@ -692,8 +691,8 @@ fn wrapper_rejects_non_standard_inner_role() {
 #[test]
 fn wrapper_descriptor_adopts_inner_order() {
     let inner = StubInner::before_model(StageOutcome::Continue);
-    let wrapper = RedactionMiddleware::try_wrapping(inner, RedactionConfig::default())
-        .expect("wrap");
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
     let descriptor = wrapper.descriptor();
     assert_eq!(
         descriptor.invocation.component.to_string(),

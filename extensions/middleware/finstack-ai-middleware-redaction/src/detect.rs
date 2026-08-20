@@ -103,7 +103,11 @@ impl Detectors {
         if config.detect_api_keys {
             // Longer, more specific structures first so equal-start overlaps
             // resolve to the most specific kind.
-            detectors.push(detector(PRIVATE_KEY_PATTERN, KIND_PRIVATE_KEY, validate_any)?);
+            detectors.push(detector(
+                PRIVATE_KEY_PATTERN,
+                KIND_PRIVATE_KEY,
+                validate_any,
+            )?);
             detectors.push(detector(JWT_PATTERN, KIND_JWT, validate_any)?);
             detectors.push(detector(API_KEY_PATTERN, KIND_API_KEY, validate_any)?);
         }
@@ -155,7 +159,9 @@ impl Detectors {
         let mut candidates: Vec<(usize, usize, usize, &'static str)> = Vec::new();
         for (order, detector) in self.detectors.iter().enumerate() {
             for found in detector.regex.find_iter(text) {
-                let prev = text.get(..found.start()).and_then(|s| s.chars().next_back());
+                let prev = text
+                    .get(..found.start())
+                    .and_then(|s| s.chars().next_back());
                 let next = text.get(found.end()..).and_then(|s| s.chars().next());
                 if (detector.validate)(found.as_str(), prev, next) {
                     candidates.push((found.start(), found.end(), order, detector.kind));

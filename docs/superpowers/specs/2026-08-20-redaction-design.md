@@ -131,7 +131,10 @@ Keep PII and secrets out of provider-bound model requests. One new crate:
 
     - Construction validates the inner descriptor: `BeforeModel`-only stage
       mask and `MiddlewareRole::Standard`, else
-      `RedactionError::Configuration`.
+      `RedactionError::Configuration`. *(Amended during implementation,
+      2026-08-20: the wrapper's own stage mask still follows decision 12 —
+      `OutputPolicy::Fail` adds `AfterModel`, which the wrapper handles
+      itself; the inner middleware never sees it.)*
     - The wrapper's descriptor keeps the redaction component id/version but
       adopts the **inner's** `MiddlewareOrder` (tier/priority/constraints), so
       it sits exactly where the inner middleware sat; its

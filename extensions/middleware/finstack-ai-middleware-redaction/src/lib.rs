@@ -401,8 +401,7 @@ impl RedactionMiddleware {
                 let Ok(bytes) = serde_json_canonicalizer::to_vec(&draft) else {
                     return StageOutcome::Replace(raw);
                 };
-                RawJson::parse(bytes)
-                    .map_or(StageOutcome::Replace(raw), StageOutcome::Replace)
+                RawJson::parse(bytes).map_or(StageOutcome::Replace(raw), StageOutcome::Replace)
             }
             StageOutcome::Continue => self.redact_before_model(before_model),
             other => other,
