@@ -1,15 +1,21 @@
+use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
     Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata, OperationLocator,
-    PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
+    PrincipalRef, RawJson, RunId, SessionId, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, ValidatedToolCall,
 };
+use finstack_ai_net_guard::HostResolver;
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,
 };
 use futures_util::StreamExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 
 use super::{HostPattern, HttpFetchConfig, HttpFetchToolset};
 
@@ -50,6 +56,19 @@ fn tool_context() -> crate::ToolCallContext {
     }
 }
 
+/// `tool_context()` with a caller-supplied deadline and cancellation signal,
+/// for exercising the pipeline's cancellation/deadline gate.
+fn tool_context_with(deadline: Option<Timestamp>, cancellation: CancellationSignal) -> crate::ToolCallContext {
+    crate::ToolCallContext {
+        run: RunCallContext {
+            deadline,
+            cancellation,
+            ..tool_context().run
+        },
+        ..tool_context()
+    }
+}
+
 /// Verbatim copy of the helper from
 /// `finstack-ai-tools-openrouter-media/src/lib.rs:583-636`, adjusted to this
 /// crate's `crate::` re-exports.
@@ -78,7 +97,16 @@ fn call_for(spec: &crate::ToolSpec, args: &[u8]) -> ValidatedToolCall {
 /// Drive one `call()` to its terminal error, whether it surfaces directly
 /// from the future or from the first stream item.
 async fn drive_to_error(toolset: &HttpFetchToolset, call: ValidatedToolCall) -> ToolError {
-    match toolset.call(tool_context(), call).await {
+    drive_to_error_with_ctx(toolset, tool_context(), call).await
+}
+
+/// Like [`drive_to_error`], but with a caller-supplied `ToolCallContext`.
+async fn drive_to_error_with_ctx(
+    toolset: &HttpFetchToolset,
+    ctx: crate::ToolCallContext,
+    call: ValidatedToolCall,
+) -> ToolError {
+    match toolset.call(ctx, call).await {
         Err(error) => error,
         Ok(mut stream) => stream
             .next()
@@ -86,6 +114,25 @@ async fn drive_to_error(toolset: &HttpFetchToolset, call: ValidatedToolCall) -> 
             .expect("stream item")
             .expect_err("expected an error"),
     }
+}
+
+/// Drive one `call()` to its terminal success value.
+async fn drive_to_success(
+    toolset: &HttpFetchToolset,
+    ctx: crate::ToolCallContext,
+    call: ValidatedToolCall,
+) -> serde_json::Value {
+    let mut stream = toolset.call(ctx, call).await.expect("call succeeded");
+    let item = stream
+        .next()
+        .await
+        .expect("stream item")
+        .expect("expected success");
+    let finstack_ai_runtime::ToolStreamItem::Completed(result) = item else {
+        panic!("expected a completed result");
+    };
+    assert!(!result.is_error);
+    serde_json::from_slice(result.output.as_bytes()).expect("json output")
 }
 
 fn config_with(hosts: &[&str]) -> HttpFetchConfig {
@@ -204,4 +251,222 @@ async fn unknown_argument_fields_are_rejected() {
     let call = call_for(&spec, br#"{"url":"https://docs.rs/","surprise":1}"#);
     let error = drive_to_error(&toolset, call).await;
     assert_eq!(error.code(), super::FETCH_INVALID_ARGUMENTS);
+}
+
+// --- Task 7: request pipeline -------------------------------------------
+
+/// A fixture config with `allow_loopback_http: true`, letting loopback
+/// fixtures skip the allowlist per `HttpFetchConfig::allow_loopback_http`'s
+/// documented bypass.
+fn loopback_config(hosts: &[&str]) -> HttpFetchConfig {
+    HttpFetchConfig {
+        allow_loopback_http: true,
+        ..config_with(hosts)
+    }
+}
+
+/// Verbatim-shape copy of `serve_once` from
+/// `finstack-ai-net-guard/src/tests.rs:143-156`, extended to capture the raw
+/// request bytes it received onto `seen` (mirroring the
+/// `finstack-ai-tools-openrouter-media` `respond()` mpsc pattern).
+async fn serve_once(
+    listener: TcpListener,
+    seen: Option<mpsc::UnboundedSender<String>>,
+    status: u16,
+    headers: String,
+    body: Vec<u8>,
+) {
+    let (mut stream, _) = listener.accept().await.expect("accept");
+    let mut buf = vec![0_u8; 16_384];
+    let n = stream.read(&mut buf).await.expect("read");
+    if let Some(seen) = seen {
+        seen.send(String::from_utf8_lossy(&buf[..n]).into_owned())
+            .expect("seen");
+    }
+    let mut response = format!(
+        "HTTP/1.1 {status} X\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(&body);
+    stream.write_all(&response).await.expect("write");
+    stream.shutdown().await.expect("shutdown");
+}
+
+struct ScriptedResolver(Vec<SocketAddr>);
+
+impl HostResolver for ScriptedResolver {
+    fn resolve(
+        &self,
+        _host: &str,
+        _port: u16,
+    ) -> Pin<Box<dyn std::future::Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + '_>> {
+        let addrs = self.0.clone();
+        Box::pin(async move { Ok(addrs) })
+    }
+}
+
+#[tokio::test]
+async fn fetch_returns_inline_text() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_once(listener, None, 200, "Content-Type: text/plain\r\n".to_owned(), b"hello".to_vec()));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    assert_eq!(output["url"], url);
+    assert_eq!(output["final_url"], url);
+    assert_eq!(output["status"], 200);
+    assert_eq!(output["media_type"], "text/plain");
+    assert_eq!(output["byte_length"], 5);
+    assert_eq!(output["content"], "hello");
+}
+
+#[tokio::test]
+async fn non_allowlisted_host_is_denied_before_any_connection() {
+    // No fixture server at all: a denied host must fail without I/O.
+    let toolset = HttpFetchToolset::try_new(config_with(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let call = call_for(&spec, br#"{"url":"https://example.com/"}"#);
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_HOST_NOT_ALLOWLISTED);
+}
+
+#[tokio::test]
+async fn private_destination_is_blocked() {
+    let toolset = HttpFetchToolset::try_new(config_with(&["internal.example"]))
+        .unwrap()
+        .with_resolver(Arc::new(ScriptedResolver(vec![SocketAddr::new(
+            "10.0.0.1".parse().unwrap(),
+            443,
+        )])));
+    let spec = toolset.tools()[0].clone();
+    let call = call_for(&spec, br#"{"url":"https://internal.example/"}"#);
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_DESTINATION_BLOCKED);
+}
+
+#[tokio::test]
+async fn oversize_body_is_a_limit_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![b'x'; 64];
+    tokio::spawn(serve_once(listener, None, 200, String::new(), body));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","max_bytes":8}}"#).as_bytes(),
+    );
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
+}
+
+#[tokio::test]
+async fn non_success_status_reports_bounded_detail() {
+    const TAIL_MARKER: &str = "TAIL-MARKER-CANARY";
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut body = vec![b'e'; 10 * 1024];
+    body.extend_from_slice(TAIL_MARKER.as_bytes());
+    tokio::spawn(serve_once(listener, None, 503, String::new(), body));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_TRANSPORT_FAILED);
+    let message = error.to_string();
+    assert!(message.contains("503"), "{message}");
+    assert!(message.len() < 500, "{message}");
+    assert!(!message.contains(TAIL_MARKER), "{message}");
+}
+
+#[tokio::test]
+async fn cancelled_or_deadline_expired_calls_return_fetch_timeout() {
+    let toolset = HttpFetchToolset::try_new(config_with(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+
+    // Pre-cancelled: must fail without any connection attempt.
+    let cancellation = CancellationSignal::new();
+    cancellation.cancel();
+    let ctx = tool_context_with(None, cancellation);
+    let call = call_for(&spec, br#"{"url":"https://docs.rs/"}"#);
+    let error = drive_to_error_with_ctx(&toolset, ctx, call).await;
+    assert_eq!(error.code(), super::FETCH_TIMEOUT);
+
+    // Deadline already in the past.
+    let ctx = tool_context_with(
+        Some(Timestamp::from_unix_ms(1).unwrap()),
+        CancellationSignal::new(),
+    );
+    let call = call_for(&spec, br#"{"url":"https://docs.rs/"}"#);
+    let error = drive_to_error_with_ctx(&toolset, ctx, call).await;
+    assert_eq!(error.code(), super::FETCH_TIMEOUT);
+}
+
+#[tokio::test]
+async fn per_host_headers_are_sent_to_the_matching_host() {
+    let listener_with = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_with = listener_with.local_addr().unwrap();
+    let (tx_with, mut rx_with) = mpsc::unbounded_channel();
+    tokio::spawn(serve_once(listener_with, Some(tx_with), 200, String::new(), b"ok".to_vec()));
+
+    let listener_without = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_without = listener_without.local_addr().unwrap();
+    let (tx_without, mut rx_without) = mpsc::unbounded_channel();
+    tokio::spawn(serve_once(listener_without, Some(tx_without), 200, String::new(), b"ok".to_vec()));
+
+    let mut config = loopback_config(&["docs.rs"]);
+    config.per_host_headers.insert(
+        "127.0.0.1".to_owned(),
+        vec![("X-Api".to_owned(), "canary".to_owned())],
+    );
+    // Per-host headers are scoped to the exact-host key ("127.0.0.1", no
+    // port). The "with" fixture is addressed by that literal, so it
+    // receives the header; the "without" fixture is addressed as
+    // "localhost" (also loopback, but a different host string), so it must
+    // not. The literal-IP "with" request skips DNS entirely, so scripting
+    // the resolver to answer the "without" fixture's address only affects
+    // the "localhost" lookup, keeping this deterministic regardless of
+    // whether the system resolver prefers ::1 or 127.0.0.1 for "localhost".
+    let toolset = HttpFetchToolset::try_new(config)
+        .unwrap()
+        .with_resolver(Arc::new(ScriptedResolver(vec![addr_without])));
+    let spec = toolset.tools()[0].clone();
+
+    let url_with = format!("http://127.0.0.1:{}/x", addr_with.port());
+    let call_with = call_for(&spec, format!(r#"{{"url":"{url_with}"}}"#).as_bytes());
+    let _ = drive_to_success(&toolset, tool_context(), call_with).await;
+    let request_with = rx_with.recv().await.expect("request seen");
+    assert!(request_with.contains("x-api: canary"), "{request_with}");
+
+    let url_without = format!("http://localhost:{}/x", addr_without.port());
+    let call_without = call_for(&spec, format!(r#"{{"url":"{url_without}"}}"#).as_bytes());
+    let _ = drive_to_success(&toolset, tool_context(), call_without).await;
+    let request_without = rx_without.recv().await.expect("request seen");
+    assert!(!request_without.contains("x-api"), "{request_without}");
+}
+
+#[tokio::test]
+async fn pinned_address_overrides_dns_for_hostnames() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_once(listener, None, 200, String::new(), b"pinned".to_vec()));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"]))
+        .unwrap()
+        .with_resolver(Arc::new(ScriptedResolver(vec![addr])));
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://localhost:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+    assert_eq!(output["content"], "pinned");
 }

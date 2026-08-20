@@ -110,6 +110,14 @@ pub struct HttpFetchConfig {
     /// the key. Redacted from `Debug`. This is the sole cookie/auth door.
     pub per_host_headers: BTreeMap<String, Vec<(String, String)>>,
     /// Allow plaintext-HTTP loopback fixtures for tests. Default false.
+    ///
+    /// This also bypasses the `allowlist` match for loopback destinations:
+    /// when a vetted URL resolves to a loopback host *and* this flag is
+    /// set, the request flow skips the allowlist check entirely (net-guard
+    /// still vets scheme/component policy and destination safety). This is
+    /// what lets fixture servers on `127.0.0.1`/`localhost` run without
+    /// adding every ephemeral test port to the allowlist; it has no effect
+    /// on non-loopback hosts, which are always allowlist-gated.
     pub allow_loopback_http: bool,
     /// Optional `User-Agent` override.
     pub user_agent: Option<String>,

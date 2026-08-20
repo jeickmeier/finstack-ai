@@ -22,6 +22,7 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 mod config;
+mod pipeline;
 mod toolset;
 
 pub use config::{HostPattern, HttpFetchConfig, HttpFetchError};

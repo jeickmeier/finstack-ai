@@ -1,7 +1,8 @@
 //! `Toolset` port implementation: the cached `http_fetch` `ToolSpec`,
 //! argument parsing, and call dispatch.
 //!
-//! `execute_fetch` is a stub until Task 7 wires the bounded request flow
+//! `call()` parses arguments and hands them to
+//! [`crate::pipeline::execute_fetch`] for the bounded request flow
 //! (allowlist/redirect/destination checks, the actual HTTP GET, and the
 //! text/markdown/artifact response shaping).
 
@@ -13,14 +14,18 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactStore, PortFuture, SideEffectClass,
-    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec,
-    ToolStreamItem, Toolset, ToolsetDescriptor,
+    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolSpec, ToolStreamItem,
+    Toolset, ToolsetDescriptor,
 };
 use futures_util::stream;
 use serde::Deserialize;
 
-use crate::config::{self, HostPattern};
-use crate::{FETCH_INVALID_ARGUMENTS, FETCH_TRANSPORT_FAILED, HttpFetchConfig, HttpFetchError};
+use crate::config;
+use crate::pipeline::{FetchState, execute_fetch};
+use crate::{FETCH_INVALID_ARGUMENTS, HttpFetchConfig, HttpFetchError};
+
+#[cfg(test)]
+use finstack_ai_net_guard::HostResolver;
 
 // `finstack.tools.http_fetch`: verified against
 // `finstack_ai_kernel::primitives::ids::validate_key`, which accepts
@@ -48,13 +53,8 @@ pub(crate) enum FetchMode {
 }
 
 /// Parsed `http_fetch` tool call arguments.
-///
-/// Fields are unread until Task 7 wires `execute_fetch`'s request flow; the
-/// struct exists now so argument *parsing* (including `deny_unknown_fields`
-/// rejection) is exercised end to end by this task's tests.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
 pub(crate) struct FetchArguments {
     /// URL to fetch; the host must match the toolset's allowlist.
     pub(crate) url: String,
@@ -70,8 +70,7 @@ pub(crate) struct FetchArguments {
 /// validated per-host headers, and one cached `ToolSpec`. Construction is
 /// fail-closed.
 pub struct HttpFetchToolset {
-    config: HttpFetchConfig,
-    patterns: Vec<HostPattern>,
+    state: Arc<FetchState>,
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
     tool_id: ToolId,
@@ -132,8 +131,7 @@ impl HttpFetchToolset {
         })?;
 
         Ok(Self {
-            config,
-            patterns,
+            state: Arc::new(FetchState::new(config, patterns)),
             descriptor: ToolsetDescriptor {
                 name: Arc::from("finstack-fetch"),
                 metadata: Metadata::empty(),
@@ -150,13 +148,23 @@ impl HttpFetchToolset {
         self.artifact_store = Some(store);
         self
     }
+
+    /// Override the DNS resolver seam with a scripted resolver (tests only).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_resolver(mut self, resolver: Arc<dyn HostResolver>) -> Self {
+        let rebuilt = FetchState::new(self.state.config.clone(), self.state.patterns.clone())
+            .with_resolver(resolver);
+        self.state = Arc::new(rebuilt);
+        self
+    }
 }
 
 impl fmt::Debug for HttpFetchToolset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpFetchToolset")
-            .field("config", &self.config)
-            .field("patterns", &self.patterns.len())
+            .field("config", &self.state.config)
+            .field("patterns", &self.state.patterns.len())
             .field("artifact_store", &self.artifact_store.is_some())
             .finish_non_exhaustive()
     }
@@ -177,6 +185,7 @@ impl Toolset for HttpFetchToolset {
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let expected_id = self.tool_id.clone();
+        let state = Arc::clone(&self.state);
         Box::pin(async move {
             validate_call_context(&ctx, &call, &expected_id)?;
             let arguments: FetchArguments =
@@ -187,7 +196,24 @@ impl Toolset for HttpFetchToolset {
                         "http fetch arguments are invalid",
                     )
                 })?;
-            let result = execute_fetch(arguments)?;
+            let value = execute_fetch(&state, &ctx, arguments).await?;
+            let output = serde_json::to_vec(&value).map_err(|_| {
+                tool_error(
+                    FETCH_INVALID_ARGUMENTS,
+                    ErrorCategory::Internal,
+                    "http fetch result serialization failed",
+                )
+            })?;
+            let result = finstack_ai_runtime::ToolResult {
+                output: RawJson::parse(output).map_err(|_| {
+                    tool_error(
+                        FETCH_INVALID_ARGUMENTS,
+                        ErrorCategory::Internal,
+                        "http fetch result normalization failed",
+                    )
+                })?,
+                is_error: false,
+            };
             Ok(Box::pin(stream::once(async move {
                 Ok(ToolStreamItem::Completed(result))
             })) as ToolEventStream)
@@ -222,16 +248,6 @@ fn validate_call_context(
         ));
     }
     Ok(())
-}
-
-/// Stub request flow: real allowlist/redirect/transport handling lands in
-/// Task 7.
-fn execute_fetch(_arguments: FetchArguments) -> Result<ToolResult, ToolError> {
-    Err(tool_error(
-        FETCH_TRANSPORT_FAILED,
-        ErrorCategory::Tool,
-        "http fetch is not wired yet",
-    ))
 }
 
 fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
