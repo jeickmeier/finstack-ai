@@ -82,8 +82,8 @@ struct WireUsage {
     prompt_token_count: Option<u64>,
     #[serde(default, rename = "candidatesTokenCount")]
     candidates_token_count: Option<u64>,
-    #[serde(default, rename = "totalTokenCount")]
-    total_token_count: Option<u64>,
+    // `totalTokenCount` is intentionally not deserialized: the total is derived
+    // from `input + output` so it always satisfies the runtime's usage invariant.
     #[serde(default, rename = "thoughtsTokenCount")]
     thoughts_token_count: Option<u64>,
     #[serde(default, rename = "cachedContentTokenCount")]
@@ -303,14 +303,27 @@ impl GeminiGenerateContentAssembly {
             counters.entry(key.clone()).or_insert(*value);
         }
         let input_tokens = usage.prompt_token_count.or(self.usage.input_tokens());
-        let output_tokens = usage.candidates_token_count.or(self.usage.output_tokens());
-        let total_tokens =
-            usage
-                .total_token_count
-                .or_else(|| match (input_tokens, output_tokens) {
-                    (Some(input), Some(output)) => input.checked_add(output),
-                    _ => None,
-                });
+        // `candidatesTokenCount` excludes `thoughtsTokenCount`, and thought tokens
+        // are billed as output, so the two are summed. The wire `totalTokenCount`
+        // is deliberately ignored: the runtime's `validate_usage` requires
+        // `input + output == total`, and only a derived total can guarantee that.
+        let output_tokens = match (usage.candidates_token_count, usage.thoughts_token_count) {
+            (None, None) => self.usage.output_tokens(),
+            (candidates, thoughts) => Some(
+                candidates
+                    .unwrap_or(0)
+                    .checked_add(thoughts.unwrap_or(0))
+                    .ok_or_else(|| StreamNormError::response("usage is invalid"))?,
+            ),
+        };
+        let total_tokens = match (input_tokens, output_tokens) {
+            (Some(input), Some(output)) => Some(
+                input
+                    .checked_add(output)
+                    .ok_or_else(|| StreamNormError::response("usage is invalid"))?,
+            ),
+            _ => None,
+        };
         self.usage = Usage::try_new(input_tokens, output_tokens, total_tokens, None, counters)
             .map_err(|_| StreamNormError::response("usage is invalid"))?;
         Ok(vec![ModelStreamItem::Usage(UsageDelta {
@@ -577,18 +590,29 @@ mod tests {
         );
     }
 
+    /// Realistic thinking response: `candidatesTokenCount` EXCLUDES
+    /// `thoughtsTokenCount`, and the wire total is prompt + candidates + thoughts.
+    const CHUNK_STOP_THINKING: &str = r#"{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":22,"thoughtsTokenCount":7,"cachedContentTokenCount":0},"responseId":"resp-1"}"#;
+
     #[test]
     fn usage_extension_counters_map_and_suppress_zeros() {
         let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), false);
         assembly.consume(CHUNK_TEXT_ONE).unwrap();
-        let last = assembly
-            .consume(
-                r#"{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15,"thoughtsTokenCount":7,"cachedContentTokenCount":0},"responseId":"resp-1"}"#,
-            )
-            .unwrap();
+        let last = assembly.consume(CHUNK_STOP_THINKING).unwrap();
+
+        let ModelStreamItem::Usage(delta) = &last[0] else {
+            panic!("expected usage delta");
+        };
+        assert_eq!(delta.usage.output_tokens(), Some(12));
+
         let ModelStreamItem::Completed(response) = &last[1] else {
             panic!("expected completed item");
         };
+        // Thought tokens are billed output, so they join candidatesTokenCount.
+        assert_eq!(response.usage.input_tokens(), Some(10));
+        assert_eq!(response.usage.output_tokens(), Some(12));
+        assert_eq!(response.usage.total_tokens(), Some(22));
+
         let counters = response.usage.extension_counters();
         assert_eq!(counters.len(), 1);
         assert_eq!(
@@ -600,6 +624,43 @@ mod tests {
                 .get(&LimitKey::from_static(GEMINI_CACHED_TOKENS_KEY))
                 .is_none()
         );
+    }
+
+    /// Every emitted `Usage` must satisfy the runtime's `validate_usage`
+    /// invariant (`input + output == total`), including on thinking streams —
+    /// otherwise the whole turn fails with `model_usage_invalid`.
+    #[test]
+    fn usage_totals_are_derived_and_never_trust_the_wire_total() {
+        let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), false);
+        assembly.consume(CHUNK_TEXT_ONE).unwrap();
+        for item in assembly.consume(CHUNK_STOP_THINKING).unwrap() {
+            let usage = match &item {
+                ModelStreamItem::Usage(delta) => delta.usage.clone(),
+                ModelStreamItem::Completed(response) => response.usage.clone(),
+                _ => continue,
+            };
+            let (Some(input), Some(output), Some(total)) = (
+                usage.input_tokens(),
+                usage.output_tokens(),
+                usage.total_tokens(),
+            ) else {
+                panic!("expected a fully populated usage");
+            };
+            assert_eq!(input + output, total, "usage total must be consistent");
+        }
+
+        // A wire totalTokenCount that disagrees with prompt + candidates + thoughts
+        // is ignored outright rather than propagated.
+        let mut assembly = GeminiGenerateContentAssembly::new("request-2".to_owned(), false);
+        let last = assembly
+            .consume(
+                r#"{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":999,"thoughtsTokenCount":7},"responseId":"resp-2"}"#,
+            )
+            .unwrap();
+        let ModelStreamItem::Completed(response) = &last[1] else {
+            panic!("expected completed item");
+        };
+        assert_eq!(response.usage.total_tokens(), Some(22));
     }
 
     #[test]
