@@ -59,5 +59,8 @@ pub enum NetGuardError {
     LimitExceeded,
 }
 
+mod vet;
+pub use vet::{UrlPolicy, VettedUrl, parse_and_vet_url, is_loopback_host};
+
 #[cfg(test)]
 mod tests;
