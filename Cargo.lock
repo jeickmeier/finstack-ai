@@ -1813,6 +1813,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-workflow-hitl"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-workflow-worker",
+ "thiserror",
+]
+
+[[package]]
 name = "finstack-ai-workflow-local"
 version = "1.0.0"
 dependencies = [
