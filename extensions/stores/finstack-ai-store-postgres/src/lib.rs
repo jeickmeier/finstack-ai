@@ -33,6 +33,7 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+mod append;
 mod config;
 mod error;
 mod journal_store;

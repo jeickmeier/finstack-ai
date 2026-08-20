@@ -172,6 +172,20 @@ pub(crate) struct PooledClient<C> {
 }
 
 impl<C> PooledClient<C> {
+    /// Mark this connection as poisoned *in place*, without consuming the
+    /// handle: it is dropped rather than returned to the idle queue when the
+    /// handle itself is eventually dropped.
+    ///
+    /// [`PooledClient::discard`] is the preferred spelling when the caller
+    /// owns the handle. `poison` exists for callers that only hold
+    /// `&mut PooledClient` — notably [`crate::append::append`], whose
+    /// signature (spec D4) borrows the checkout rather than consuming it, yet
+    /// must still guarantee that a connection which hit an IO/protocol error
+    /// (or an ambiguous `COMMIT`, spec D5) is never handed out again.
+    pub(crate) fn poison(&mut self) {
+        self.discarded = true;
+    }
+
     /// Mark this connection as poisoned: it is dropped rather than returned
     /// to the pool, and the checkout slot it held is released so a fresh
     /// connection can be opened by a later [`Pool::get`].
@@ -287,6 +301,26 @@ mod tests {
             counter.load(Ordering::SeqCst),
             2,
             "a discarded connection must never be handed out again"
+        );
+    }
+
+    /// `poison` is `discard`'s in-place form (used by `append`, which only
+    /// holds `&mut PooledClient`): a poisoned connection must not return to
+    /// the idle queue when the handle is later dropped.
+    #[tokio::test]
+    async fn poisoned_connections_are_not_reused() {
+        let (connect, counter) = counting_connector();
+        let pool = Pool::new(4, connect, always_alive());
+
+        let mut first = pool.get().await.expect("first checkout");
+        first.poison();
+        drop(first);
+        let _second = pool.get().await.expect("second checkout");
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            2,
+            "a poisoned connection must never be handed out again"
         );
     }
 

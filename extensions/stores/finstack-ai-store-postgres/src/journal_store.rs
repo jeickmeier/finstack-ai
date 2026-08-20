@@ -1,10 +1,11 @@
 //! [`JournalStore`] implementation for [`PostgresJournalStore`].
 //!
-//! Only [`JournalStore::health`] is implemented in this task. `append`,
-//! `load`, and `write_snapshot` are non-default methods on the trait (the
-//! port has no default body for them), so they need *some* implementation
-//! to compile; Tasks 4–6 replace these stubs with the real multi-writer
-//! transaction logic (spec D4/D9) and store-common snapshot wiring. Every
+//! [`JournalStore::append`] (spec D4/D5, see [`crate::append`]) and
+//! [`JournalStore::health`] are implemented. `load` and `write_snapshot`
+//! are non-default methods on the trait (the port has no default body for
+//! them), so they need *some* implementation to compile; Tasks 5–6 replace
+//! these stubs with chain verification (spec D9) and store-common snapshot
+//! wiring. Every
 //! other trait method (`scan`, `write_metadata`, `write_state_snapshot`,
 //! `prune`, `load_from`) keeps the port's own default implementation for
 //! now.
@@ -17,16 +18,25 @@ use finstack_ai_runtime::{
     StoreError, StoreHealth,
 };
 
+use crate::append::append;
 use crate::config::PostgresDurability;
 use crate::store::{DURABLE_DETAIL, PostgresJournalStore, RELAXED_DETAIL};
 
 impl JournalStore for PostgresJournalStore {
-    /// Stub pending Task 4 (multi-writer append transaction, spec D4).
-    fn append(&self, _request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
-        Box::pin(async {
-            Err(StoreError::Unavailable {
-                reason_code: "postgres_not_implemented",
-            })
+    /// Multi-writer append over one pooled connection (spec D4/D5).
+    ///
+    /// Never retries internally: a serialization failure or deadlock
+    /// surfaces as `Unavailable{postgres_serialization}` and an
+    /// interrupted `COMMIT` as
+    /// [`StoreError::AmbiguousAcknowledgement`], both of which the caller
+    /// resolves by retrying the same request — which the idempotency
+    /// contract makes safe.
+    fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
+        let pool = self.pool.clone();
+        let limits = self.config.limits;
+        Box::pin(async move {
+            let mut client = pool.get().await?;
+            append(&mut client, &request, &limits).await
         })
     }
 

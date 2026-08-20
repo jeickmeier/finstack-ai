@@ -16,6 +16,15 @@ const DISK_FULL: &str = "53100";
 /// SQLSTATE for serialization failures under concurrent transactions.
 const SERIALIZATION_FAILURE: &str = "40001";
 
+/// SQLSTATE for a server-detected deadlock. Like [`SERIALIZATION_FAILURE`]
+/// this is a *retryable* concurrency outcome, not a durable failure: the
+/// append transaction protocol (spec D4) can deadlock when two writers race
+/// to create the same session (one holds the new session row, the other
+/// holds `store_totals`). The store never retries internally — it reports
+/// `Unavailable{postgres_serialization}` and the caller retries the same
+/// `AppendRequest`, which the idempotency contract makes safe.
+const DEADLOCK_DETECTED: &str = "40P01";
+
 /// Convert an unsigned 64-bit value to the signed 64-bit representation used
 /// for Postgres `BIGINT` columns.
 pub(crate) fn i64_from_u64(value: u64, reason_code: &'static str) -> Result<i64, StoreError> {
@@ -44,7 +53,7 @@ pub(crate) fn classify_sqlstate(code: Option<&str>, is_closed: bool) -> StoreErr
         Some(DISK_FULL) => StoreError::Unavailable {
             reason_code: "postgres_disk_full",
         },
-        Some(SERIALIZATION_FAILURE) => StoreError::Unavailable {
+        Some(SERIALIZATION_FAILURE | DEADLOCK_DETECTED) => StoreError::Unavailable {
             reason_code: "postgres_serialization",
         },
         Some(sqlstate) if sqlstate.starts_with(CONSTRAINT_VIOLATION_CLASS) => {
@@ -96,6 +105,17 @@ mod tests {
     #[test]
     fn serialization_failure_sqlstate_is_unavailable() {
         let error = classify_sqlstate(Some("40001"), false);
+        assert!(matches!(
+            error,
+            StoreError::Unavailable {
+                reason_code: "postgres_serialization"
+            }
+        ));
+    }
+
+    #[test]
+    fn deadlock_sqlstate_is_a_retryable_serialization_failure() {
+        let error = classify_sqlstate(Some("40P01"), false);
         assert!(matches!(
             error,
             StoreError::Unavailable {
