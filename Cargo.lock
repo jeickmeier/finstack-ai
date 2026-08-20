@@ -1820,6 +1820,7 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
  "finstack-ai-test",
+ "finstack-ai-workflow-local",
  "finstack-ai-workflow-worker",
  "rusqlite",
  "serde_json",

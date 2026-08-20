@@ -26,7 +26,7 @@ use finstack_ai_workflow_worker::{MemoryWorkerStore, WakeIndexStore, WakeReason}
 // (tests/worker/helpers/mod.rs), which itself copies
 // finstack-ai-workflow-local's tests/local_workflow/restart.rs.
 
-fn id<T: IdTag>(ordinal: u64) -> Id<T> {
+pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
     bytes[6] = 0x70;
     bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
@@ -34,7 +34,7 @@ fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     Id::from_bytes(bytes)
 }
 
-fn timestamp(ms: i64) -> Timestamp {
+pub(crate) fn timestamp(ms: i64) -> Timestamp {
     Timestamp::from_unix_ms(ms).expect("timestamp")
 }
 
@@ -63,7 +63,7 @@ fn locked_profile() -> LockedModelContextProfile {
     resolve_model_context_profile(profile(), None, None, false).expect("locked profile")
 }
 
-fn memory_store() -> Arc<MemoryJournalStore> {
+pub(crate) fn memory_store() -> Arc<MemoryJournalStore> {
     Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
             sessions: 1,
@@ -107,7 +107,7 @@ fn accepted() -> RunAccepted {
 /// Approval-profile request built exactly as `request_approval_interaction`
 /// (`crates/finstack-ai-runtime/src/exec/settlement/interaction.rs`) builds
 /// the envelope the runtime commits for a paid-tool approval park.
-fn approval_request(
+pub(crate) fn approval_request(
     interaction_id: Id<InteractionTag>,
     effect_id: Id<EffectTag>,
     expires_at: Option<Timestamp>,
@@ -145,7 +145,7 @@ fn approval_request(
     .expect("interaction request")
 }
 
-fn checkpoint() -> WorkflowCheckpoint {
+pub(crate) fn checkpoint() -> WorkflowCheckpoint {
     WorkflowCheckpoint {
         tenant_scope: Arc::from("tenant-a"),
         session_id: id(1),
