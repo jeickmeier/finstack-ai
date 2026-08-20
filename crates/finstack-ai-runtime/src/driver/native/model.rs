@@ -172,7 +172,7 @@ impl PostCommitDispatcher for ModelDispatcher {
                             deadline: seed.pending.requested.deadline(),
                             budget_scope_id: seed.budget_scope_id,
                             cancellation,
-                            relation_depth: 0, // no accepted run in scope
+                            relation_depth: seed.relation_depth,
                         },
                         request_id: seed.pending.model_request_id,
                     },

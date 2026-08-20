@@ -141,7 +141,7 @@ async fn complete_parent_tool(
             deadline: driver_result.seed.requested.deadline(),
             budget_scope_id: driver_result.seed.budget_scope_id,
             cancellation: ports.cancellation.child(),
-            relation_depth: 0, // no accepted run in scope
+            relation_depth: driver_result.seed.relation_depth,
         },
         tool_batch_id: driver_result.seed.tool_batch_id,
         tool_call_id: driver_result.seed.tool_call_id,

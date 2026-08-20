@@ -32,6 +32,7 @@ impl CommitCoordinator {
             attempt: state.retry.attempts.checked_add(1)?,
             requested_at: state.accepted_at?,
             continuation_state: self.last_model_continuation.clone(),
+            relation_depth: relation_depth_from_state(state),
         })
     }
 
@@ -48,6 +49,7 @@ impl CommitCoordinator {
         let Some(requested_at) = state.accepted_at else {
             return Vec::new();
         };
+        let relation_depth = relation_depth_from_state(state);
         batch
             .calls
             .iter()
@@ -73,6 +75,7 @@ impl CommitCoordinator {
                     budget_scope_id,
                     attempt: 1,
                     requested_at,
+                    relation_depth,
                 })
             })
             .collect()
@@ -106,12 +109,20 @@ impl CommitCoordinator {
     /// (`crate::RunCallContext`) outside the stage-boundary seed path.
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn accepted_relation_depth(&self) -> u16 {
-        self.kernel
-            .state()
-            .accepted
-            .as_ref()
-            .map_or(0, |accepted| accepted.relation().depth())
+        relation_depth_from_state(self.kernel.state())
     }
+}
+
+/// The accepted run's relation depth, or `0` before a run is accepted.
+///
+/// Shared by [`CommitCoordinator::accepted_relation_depth`] and the
+/// dispatch-seed builders in this module so every seed sources depth the
+/// same way.
+fn relation_depth_from_state(state: &KernelState) -> u16 {
+    state
+        .accepted
+        .as_ref()
+        .map_or(0, |accepted| accepted.relation().depth())
 }
 
 pub(super) fn action_is_authorized(
@@ -210,6 +221,7 @@ pub(crate) struct ModelDispatchSeed {
     pub(crate) attempt: u32,
     pub(crate) requested_at: Timestamp,
     pub(crate) continuation_state: Option<finstack_ai_kernel::RawJson>,
+    pub(crate) relation_depth: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -224,6 +236,7 @@ pub(crate) struct ToolDispatchSeed {
     pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
     pub(crate) attempt: u32,
     pub(crate) requested_at: Timestamp,
+    pub(crate) relation_depth: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -268,6 +281,7 @@ pub(crate) struct ContextDispatchSeed {
     pub(crate) authorization: crate::AuthorizationContext,
     pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
     pub(crate) attempt: u32,
+    pub(crate) relation_depth: u16,
 }
 
 pub(crate) trait PostCommitDispatcher: PortObject {
@@ -300,6 +314,7 @@ pub(super) fn model_dispatch_seed(
         attempt: state.retry.attempts.checked_add(1)?,
         requested_at: effect_requested_at(committed, effect_id)?,
         continuation_state,
+        relation_depth: relation_depth_from_state(state),
     })
 }
 
@@ -336,6 +351,7 @@ pub(super) fn tool_dispatch_seed(
         budget_scope_id,
         attempt: 1,
         requested_at: effect_requested_at(committed, effect_id)?,
+        relation_depth: relation_depth_from_state(state),
     })
 }
 
@@ -381,6 +397,7 @@ pub(super) fn context_dispatch_seed(
         authorization,
         budget_scope_id,
         attempt: state.retry.attempts.checked_add(1)?,
+        relation_depth: relation_depth_from_state(state),
     })
 }
 

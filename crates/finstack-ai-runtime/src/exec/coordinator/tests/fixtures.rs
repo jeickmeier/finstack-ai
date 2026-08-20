@@ -88,6 +88,66 @@ fn accept_input() -> KernelInput {
     })
 }
 
+/// A `ChildAgent` acceptance one level below `acceptance`'s root, for
+/// asserting that dispatch-seed `relation_depth` is the accepted run's real
+/// relation depth rather than a stubbed `0`.
+#[cfg_attr(
+    not(any(feature = "native-tokio", feature = "wasm-host")),
+    allow(dead_code)
+)]
+fn child_acceptance() -> RunAccepted {
+    let root = acceptance();
+    let child_run_id = id(9);
+    let relation = RunRelation::try_new(
+        root.relation().root_run_id(),
+        Some(root.run_id()),
+        Some(id::<finstack_ai_kernel::EffectTag>(10)),
+        finstack_ai_kernel::RunRelationKind::ChildAgent,
+        1,
+        None,
+        None::<&str>,
+    )
+    .expect("child relation");
+    RunAccepted::try_new(
+        child_run_id,
+        relation,
+        root.security().clone(),
+        None,
+        RunLimits::empty(),
+        root.propagation(),
+        root.resolved_agent_lock_digest(),
+        Some(&root),
+    )
+    .expect("child accepted")
+}
+
+#[cfg_attr(
+    not(any(feature = "native-tokio", feature = "wasm-host")),
+    allow(dead_code)
+)]
+fn child_accept_input() -> KernelInput {
+    KernelInput::AcceptRun(AcceptRun {
+        session_id: id::<SessionTag>(1),
+        lane_id: id::<LaneTag>(2),
+        accepted: child_acceptance(),
+    })
+}
+
+#[cfg_attr(
+    not(any(feature = "native-tokio", feature = "wasm-host")),
+    allow(dead_code)
+)]
+async fn drive_child_to_model_request(coordinator: &mut CommitCoordinator) -> CommitOutcome {
+    coordinator
+        .submit(
+            env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+            child_accept_input(),
+        )
+        .await
+        .expect("accept child");
+    drive_accepted_to_model_request(coordinator).await
+}
+
 fn create_compatible_lane(commit: &mut CommitCoordinator, lane: u64, batch: u64, record: u64) {
     block_on(commit.commit_session_records(
         id(batch),

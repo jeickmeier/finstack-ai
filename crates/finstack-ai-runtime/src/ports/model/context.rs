@@ -164,6 +164,13 @@ pub struct RunCallContext {
     /// Relation depth of the owning run (0 for a root run), from the
     /// accepted run record. Capped by
     /// `finstack_ai_kernel::MAX_RUN_RELATION_DEPTH`.
+    ///
+    /// Carries the accepted run's real depth at every middleware stage
+    /// boundary, every model and tool dispatch (including nested MCP
+    /// sampling and deferred-tool resume), and every settlement path
+    /// (model, tool, poll, compaction, context). It is `0` only for
+    /// contexts built without an accepted run in scope at all — synthetic
+    /// fixtures in unit tests and doc examples, never a live dispatch path.
     pub relation_depth: u16,
 }
 

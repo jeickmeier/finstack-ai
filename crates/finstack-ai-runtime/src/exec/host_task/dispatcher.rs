@@ -113,7 +113,7 @@ impl HostDispatcher {
                     deadline: seed.pending.requested.deadline(),
                     budget_scope_id: seed.budget_scope_id,
                     cancellation,
-                    relation_depth: 0, // no accepted run in scope
+                    relation_depth: seed.relation_depth,
                 },
                 request_id: seed.pending.model_request_id,
             },
@@ -164,7 +164,7 @@ impl HostDispatcher {
                 deadline: seed.requested.deadline(),
                 budget_scope_id: seed.budget_scope_id,
                 cancellation,
-                relation_depth: 0, // no accepted run in scope
+                relation_depth: seed.relation_depth,
             },
             tool_batch_id: seed.tool_batch_id,
             tool_call_id: seed.tool_call_id,
@@ -228,7 +228,7 @@ impl HostDispatcher {
                     deadline: seed.requested.deadline(),
                     budget_scope_id: seed.budget_scope_id,
                     cancellation: parent.child(),
-                    relation_depth: 0, // no accepted run in scope
+                    relation_depth: seed.relation_depth,
                 },
                 provider_index: pipeline.index(),
                 chain_digest: pipeline.chain_digest(),

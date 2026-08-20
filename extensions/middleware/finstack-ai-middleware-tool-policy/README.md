@@ -32,7 +32,8 @@ Four independent rules can be combined:
    invocation — there is no construction-time depth to go stale, and no need
    to build a separately-configured agent per depth. This composes with (does
    not replace) the SDK's `ChildRunPolicy`, which enforces depth limits at
-   dispatch time.
+   dispatch time. `max_depth = 0` is degenerate: `relation_depth >= 0` always
+   holds, so the gate fires for every run, including the root run.
 
 ## Deployment and stages
 

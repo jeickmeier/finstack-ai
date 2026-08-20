@@ -635,6 +635,7 @@ pub(super) fn deferred_tool_seed(
         budget_scope_id,
         attempt: 1,
         requested_at: state.accepted_at?,
+        relation_depth: coordinator.accepted_relation_depth(),
     })
 }
 

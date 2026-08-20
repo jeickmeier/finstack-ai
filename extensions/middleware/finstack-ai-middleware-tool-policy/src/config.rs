@@ -280,6 +280,10 @@ impl ToolPolicyConfig {
     /// invocation; when `relation_depth >= max_depth`, the `restricted`
     /// tools are hidden.
     ///
+    /// `max_depth = 0` is degenerate: since `relation_depth >= 0` always
+    /// holds, the gate fires on every run, including the root run at depth
+    /// 0, hiding the `restricted` tools everywhere.
+    ///
     /// # Errors
     ///
     /// Rejects `max_depth` above the kernel's run-relation depth cap, an

@@ -247,7 +247,7 @@ impl PostCommitDispatcher for ToolDispatcher {
                         deadline: seed.requested.deadline(),
                         budget_scope_id: seed.budget_scope_id,
                         cancellation,
-                        relation_depth: 0, // no accepted run in scope
+                        relation_depth: seed.relation_depth,
                     },
                     tool_batch_id: seed.tool_batch_id,
                     tool_call_id: seed.tool_call_id,

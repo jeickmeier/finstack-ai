@@ -649,4 +649,11 @@ fn before_tool_batch_input_serializes_with_stage_tag_calls_and_tools() {
     assert!(json["calls"].is_array());
     assert!(json["tools"].is_array());
     assert_eq!(input.stage(), Stage::BeforeToolBatch);
+
+    let round_tripped: StageInput =
+        serde_json::from_value(json).expect("deserialize before_tool_batch");
+    assert_eq!(
+        round_tripped, input,
+        "the internally-tagged BeforeToolBatch variant must round-trip through serde_json"
+    );
 }
