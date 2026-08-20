@@ -8,10 +8,11 @@
 //!   [`finstack_ai_kernel::RetryClassification::Verification`] retry, and
 //!   `Reject` fails the run with the stable `verify_rejected` code.
 //! - `before_model` re-derives the same verdict from the trailing draft
-//!   message (present on the bounce cycle) and, when it is not `Accept`,
-//!   renders the findings as one user-visible feedback context item. This
-//!   channel is deliberately stateless: nothing is journaled, so crash
-//!   recovery just re-runs the pure verifier.
+//!   message (present on the bounce cycle), fed to the verifier as the same
+//!   JCS-canonical `Message` JSON `before_finalize` uses, and, when it is
+//!   not `Accept`, renders the findings as one user-visible feedback context
+//!   item. This channel is deliberately stateless: nothing is journaled, so
+//!   crash recovery just re-runs the pure verifier.
 //!
 //! The middleware never writes a store.
 
@@ -295,31 +296,23 @@ impl Middleware for VerifyMiddleware {
     }
 }
 
-/// Extract the trailing assistant draft message's text content and encode
-/// it as a small canonical JSON projection suitable for [`EvidenceVerifier`].
+/// JCS-canonical `Message` JSON for the trailing assistant draft message.
 ///
-/// The kernel's full JCS-canonical `Message` encoding is only available
-/// inside the runtime crate (it depends on `serde_json_canonicalizer`, which
-/// this crate does not depend on). This projection keeps the same text a
-/// verifier cares about while staying within this crate's dependency
-/// surface; canonicalization is still enforced by [`RawJson::parse`].
+/// Byte-identical to the runtime's own `before_finalize` `result_message`
+/// encoding (`finstack-ai-runtime`'s `stage_settlement::codec::canonical_message`),
+/// so the same pure [`EvidenceVerifier`] re-derives the same findings from
+/// either call site.
 fn assistant_message_raw_json(message: &Message) -> Result<RawJson, MiddlewareError> {
-    let text: String = message
-        .content()
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text(text_block) => Some(text_block.text()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    let mut json = String::from(r#"{"role":"assistant","text":""#);
-    escape_json_into(&text, &mut json);
-    json.push_str(r#""}"#);
-    RawJson::parse(json.as_bytes()).map_err(|_| {
+    let bytes = serde_json_canonicalizer::to_vec(message).map_err(|_| {
         stable_error(
-            "verify_message_projection_invalid",
-            "verify could not encode the assistant draft message",
+            "verify_message_encoding_invalid",
+            "verify could not canonicalize the assistant draft message",
+        )
+    })?;
+    RawJson::parse(&bytes).map_err(|_| {
+        stable_error(
+            "verify_message_encoding_invalid",
+            "verify could not canonicalize the assistant draft message",
         )
     })
 }

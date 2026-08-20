@@ -153,6 +153,24 @@ fn middleware(verifier: Arc<dyn EvidenceVerifier>) -> VerifyMiddleware {
     VerifyMiddleware::try_new(verifier, policy()).expect("middleware")
 }
 
+/// Verifier that records the exact bytes it was asked to judge, and always
+/// accepts.
+#[derive(Debug, Default)]
+struct RecordingVerifier {
+    observed: Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+}
+
+impl EvidenceVerifier for RecordingVerifier {
+    fn verifier_id(&self) -> &'static str {
+        "recording-verifier"
+    }
+
+    fn verify(&self, message: &RawJson) -> Verdict {
+        *self.observed.lock().expect("lock") = Some(message.as_bytes().to_vec());
+        Verdict::Accept
+    }
+}
+
 #[tokio::test]
 async fn before_finalize_accept_continues() {
     let verifier = Arc::new(ScriptedVerifier::default());
@@ -278,6 +296,26 @@ async fn before_model_accept_continues() {
     let input = before_model_input(vec![assistant]);
     let outcome = mw.invoke(ctx(), input).await.expect("invoke");
     assert_eq!(outcome, StageOutcome::Continue);
+}
+
+#[tokio::test]
+async fn before_model_verifier_receives_canonical_message_json_identical_to_before_finalize() {
+    let observed: Arc<std::sync::Mutex<Option<Vec<u8>>>> = Arc::new(std::sync::Mutex::new(None));
+    let verifier = Arc::new(RecordingVerifier {
+        observed: Arc::clone(&observed),
+    });
+    let mw = middleware(verifier);
+    let assistant = text_message(7, MessageRole::Assistant, "capturing this message");
+    let input = before_model_input(vec![assistant.clone()]);
+    mw.invoke(ctx(), input).await.expect("invoke");
+
+    let expected =
+        serde_json_canonicalizer::to_vec(&assistant).expect("canonical message bytes");
+    let observed_bytes = observed.lock().expect("lock").clone().expect("verifier called");
+    assert_eq!(
+        observed_bytes, expected,
+        "before_model must hand the verifier byte-identical JCS-canonical Message JSON"
+    );
 }
 
 #[tokio::test]
