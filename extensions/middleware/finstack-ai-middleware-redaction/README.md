@@ -46,6 +46,12 @@ rewrite is silently discarded. Therefore:
   ordering), invokes it first, and redacts whatever draft it produces — so
   Markdown extracted from attached documents is redacted too. Register the
   wrapper *instead of* the inner middleware, never both.
+- **Context compactors**: do not register this middleware together with a
+  `ContextCompactor`-role middleware (e.g. finstack-ai-middleware-compaction).
+  The settlement applier lands the compaction projection — validated against
+  the *unredacted* base draft — on top of any `Replace` in the same fold, so
+  the compactor silently discards this middleware's rewrite for every entry
+  its projection covers.
 
 ## Output redaction
 

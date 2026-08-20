@@ -303,6 +303,57 @@ fn redaction_is_idempotent() {
 }
 
 #[test]
+fn redaction_is_idempotent_for_marker_adjacent_candidates() {
+    // Pass 1 redacts the card and rejects the IBAN (digit-adjacent). The
+    // marker must keep blocking the IBAN on later passes, or the Replace
+    // payload would differ between BeforeModel cycles.
+    let once = redacted("4111111111111111GB82WEST12345698765432");
+    assert_eq!(once, "[REDACTED:card]GB82WEST12345698765432");
+    assert_eq!(detectors().redact(&once), None);
+}
+
+#[test]
+fn card_embedded_in_rejected_candidate_is_still_redacted() {
+    assert_eq!(
+        redacted("2026-08-20 4111-1111-1111-1111"),
+        "2026-08-20 [REDACTED:card]"
+    );
+    assert_eq!(
+        redacted("Order 12345 4111111111111111"),
+        "Order 12345 [REDACTED:card]"
+    );
+}
+
+#[test]
+fn truncated_pem_block_consumes_key_body() {
+    assert_eq!(
+        redacted("cfg:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAvq\nQEFAAOCAQ8A=="),
+        "cfg:\n[REDACTED:private-key]"
+    );
+}
+
+#[test]
+fn spaced_iban_grouping_is_redacted() {
+    assert_eq!(
+        redacted("pay GB82 WEST 1234 5698 7654 32 now"),
+        "pay [REDACTED:iban] now"
+    );
+}
+
+#[test]
+fn email_does_not_swallow_following_sentence() {
+    assert_eq!(
+        redacted("Email a@b.com.See the runbook"),
+        "Email [REDACTED:email].See the runbook"
+    );
+    // Uppercase emails whose TLD is the only remaining label stay intact.
+    assert_eq!(
+        redacted("mail USER@EXAMPLE.COM now"),
+        "mail [REDACTED:email] now"
+    );
+}
+
+#[test]
 fn disabled_detector_groups_do_not_fire() {
     let config = RedactionConfig {
         detect_emails: false,
@@ -475,14 +526,17 @@ fn fail_policy_continues_on_clean_output() {
 }
 
 #[test]
-fn fail_policy_is_fail_soft_on_undecodable_payload() {
+fn fail_policy_fails_closed_on_undecodable_payload() {
     let outcome = invoke(
         &fail_policy_middleware(),
         StageInput::AfterModel {
             value: RawJson::parse(b"{\"not\":\"a message\"}").expect("raw"),
         },
     );
-    assert_eq!(outcome, StageOutcome::Continue);
+    let StageOutcome::Fail(descriptor) = outcome else {
+        panic!("expected Fail, got {outcome:?}");
+    };
+    assert_eq!(descriptor.code.as_str(), "redaction_output_undecodable");
 }
 
 #[test]

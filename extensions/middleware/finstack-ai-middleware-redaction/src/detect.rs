@@ -1,11 +1,18 @@
 //! Pure, deterministic secret/PII detection and marker substitution.
 //!
-//! Every detector is a compiled regex plus an optional post-validation step
-//! (Luhn for card numbers, ISO 7064 mod-97 for IBANs, digit-boundary checks
-//! for both). Detection is anchored to curated patterns — no entropy
+//! Every detector is a compiled regex plus a post-validation step that can
+//! reject a candidate (Luhn for card numbers, ISO 7064 mod-97 for IBANs,
+//! boundary checks for both) or trim it (emails). A rejected candidate does
+//! not skip the span it covered: scanning resumes one character past the
+//! candidate's start, so a valid secret embedded in a rejected greedy match
+//! is still found. Detection is anchored to curated patterns — no entropy
 //! heuristics — so results are deterministic and false positives stay rare.
+//!
 //! Markers use an alphabet (`[REDACTED:<kind>]`) that no detector can
-//! re-match, making [`Detectors::redact`] idempotent.
+//! re-match, and a position immediately adjacent to an existing marker is
+//! treated as a blocked word boundary (the marker stands in for whatever
+//! character enforced the boundary before it was redacted), making
+//! [`Detectors::redact`] idempotent.
 
 use std::collections::BTreeSet;
 
@@ -26,10 +33,24 @@ const KIND_CARD: &str = "card";
 /// Marker kind for mod-97-valid IBANs.
 const KIND_IBAN: &str = "iban";
 
-/// Post-validation applied to a raw regex candidate before it becomes a
-/// match. Receives the candidate text and its byte range's surrounding
-/// characters (`prev`/`next`, `None` at the text edges).
-type Validate = fn(candidate: &str, prev: Option<char>, next: Option<char>) -> bool;
+/// Every marker this crate can emit, for the marker-adjacency boundary rule.
+const MARKERS: [&str; 6] = [
+    "[REDACTED:email]",
+    "[REDACTED:api-key]",
+    "[REDACTED:jwt]",
+    "[REDACTED:private-key]",
+    "[REDACTED:card]",
+    "[REDACTED:iban]",
+];
+
+/// Post-validation applied to a raw regex candidate. Receives the candidate
+/// text and the characters surrounding its byte range (`prev`/`next`,
+/// `None` at the text edges; a character adjacent to an existing redaction
+/// marker is reported as a synthetic alphanumeric so boundary rules keep
+/// holding after a neighbouring secret was redacted). Returns the number of
+/// candidate bytes to keep — usually the full length, shorter to trim a
+/// over-greedy match — or `None` to reject the candidate entirely.
+type Validate = fn(candidate: &str, prev: Option<char>, next: Option<char>) -> Option<usize>;
 
 struct Detector {
     regex: Regex,
@@ -74,17 +95,24 @@ const API_KEY_PATTERN: &str = "sk-[A-Za-z0-9_-]{16,}\
 const JWT_PATTERN: &str = "eyJ[A-Za-z0-9_-]{4,}\\.eyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}";
 
 /// A whole PEM block when the end marker is present (leftmost-first
-/// alternation prefers it), else the header alone.
+/// alternation prefers it). The header-only fallback also consumes any
+/// directly following base64 lines, so a block whose `END` line was
+/// truncated does not leave its key material behind in cleartext — only
+/// whole newline-led base64 lines are consumed, never same-line prose.
 const PRIVATE_KEY_PATTERN: &str = "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\
     (?s:.*?)-----END [A-Z0-9 ]*PRIVATE KEY-----\
-    |-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----";
+    |-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:\\r?\\n[A-Za-z0-9+/=]+)*";
 
 /// 13–24 characters of digits with optional space/dash separators, starting
 /// and ending on a digit. Length and separator uniformity are enforced by
 /// [`validate_card`], Luhn decides the rest.
 const CARD_PATTERN: &str = "[0-9][0-9 -]{11,22}[0-9]";
 
-const IBAN_PATTERN: &str = "[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}";
+/// Country code + check digits, then 11–30 more alphanumerics with optional
+/// single space/dash separators — covering both the compact form and the
+/// printed blocks-of-four grouping. [`validate_iban`] strips the separators
+/// before the mod-97 check.
+const IBAN_PATTERN: &str = "[A-Z]{2}[0-9]{2}(?:[ -]?[A-Z0-9]){11,30}";
 
 impl Detectors {
     /// Compile the detectors enabled by `config`.
@@ -116,7 +144,7 @@ impl Detectors {
             detectors.push(detector(CARD_PATTERN, KIND_CARD, validate_card)?);
         }
         if config.detect_emails {
-            detectors.push(detector(EMAIL_PATTERN, KIND_EMAIL, validate_any)?);
+            detectors.push(detector(EMAIL_PATTERN, KIND_EMAIL, validate_email)?);
         }
         Ok(Self { detectors })
     }
@@ -155,16 +183,31 @@ impl Detectors {
     /// Collect validated matches from every detector, resolve overlaps by
     /// (earliest start, then longest, then detector registration order),
     /// and return them in text order.
+    ///
+    /// A candidate the validator rejects only advances the search by one
+    /// character past the candidate's start — never past its end — so a
+    /// secret embedded inside a rejected greedy candidate (e.g. a valid
+    /// card preceded by a run of reference digits) is still found.
     fn scan(&self, text: &str) -> Vec<Match> {
         let mut candidates: Vec<(usize, usize, usize, &'static str)> = Vec::new();
         for (order, detector) in self.detectors.iter().enumerate() {
-            for found in detector.regex.find_iter(text) {
-                let prev = text
-                    .get(..found.start())
-                    .and_then(|s| s.chars().next_back());
-                let next = text.get(found.end()..).and_then(|s| s.chars().next());
-                if (detector.validate)(found.as_str(), prev, next) {
-                    candidates.push((found.start(), found.end(), order, detector.kind));
+            let mut position = 0_usize;
+            while position <= text.len() {
+                let Some(found) = detector.regex.find_at(text, position) else {
+                    break;
+                };
+                let prev = effective_prev(text, found.start());
+                let next = effective_next(text, found.end());
+                match (detector.validate)(found.as_str(), prev, next) {
+                    Some(keep) if keep > 0 => {
+                        let end = found.start() + keep;
+                        candidates.push((found.start(), end, order, detector.kind));
+                        position = end;
+                    }
+                    _ => {
+                        position =
+                            found.start() + found.as_str().chars().next().map_or(1, char::len_utf8);
+                    }
                 }
             }
         }
@@ -185,6 +228,29 @@ impl Detectors {
     }
 }
 
+/// The character before byte `start`, with an existing redaction marker
+/// reported as a synthetic alphanumeric: the marker stands in for whatever
+/// character enforced a word boundary before it was redacted, so
+/// boundary-sensitive validators keep rejecting on the second pass exactly
+/// as they did on the first — the idempotence invariant.
+fn effective_prev(text: &str, start: usize) -> Option<char> {
+    let prefix = text.get(..start)?;
+    if MARKERS.iter().any(|marker| prefix.ends_with(marker)) {
+        return Some('A');
+    }
+    prefix.chars().next_back()
+}
+
+/// The character at byte `end`, with a following redaction marker reported
+/// as a synthetic alphanumeric (see [`effective_prev`]).
+fn effective_next(text: &str, end: usize) -> Option<char> {
+    let suffix = text.get(end..)?;
+    if suffix.starts_with("[REDACTED:") {
+        return Some('A');
+    }
+    suffix.chars().next()
+}
+
 fn detector(
     pattern: &str,
     kind: &'static str,
@@ -199,15 +265,44 @@ fn detector(
     })
 }
 
-fn validate_any(_candidate: &str, _prev: Option<char>, _next: Option<char>) -> bool {
-    true
+// The wrap is the `Validate` fn-pointer contract, not a choice.
+#[allow(clippy::unnecessary_wraps)]
+fn validate_any(candidate: &str, _prev: Option<char>, _next: Option<char>) -> Option<usize> {
+    Some(candidate.len())
+}
+
+/// Trim over-greedy email matches: a sentence-ending period with no
+/// following space ("a@b.com.See the runbook") makes the domain class
+/// swallow the next word as a bogus final label. Drop trailing labels that
+/// start with an uppercase letter — real TLDs in prose are lowercase —
+/// while the remaining domain still contains a dot.
+fn validate_email(candidate: &str, _prev: Option<char>, _next: Option<char>) -> Option<usize> {
+    let mut keep = candidate.len();
+    loop {
+        let kept = candidate.get(..keep)?;
+        let at = kept.find('@')?;
+        let domain = kept.get(at + 1..)?;
+        let Some(dot) = domain.rfind('.') else {
+            return Some(keep);
+        };
+        let last_label_upper = domain
+            .get(dot + 1..)
+            .and_then(|label| label.chars().next())
+            .is_some_and(|c| c.is_ascii_uppercase());
+        let rest_has_dot = domain.get(..dot).is_some_and(|rest| rest.contains('.'));
+        if last_label_upper && rest_has_dot {
+            keep = at + 1 + dot;
+        } else {
+            return Some(keep);
+        }
+    }
 }
 
 /// A card candidate must not extend a longer digit run, must use one uniform
 /// separator (or none), must carry 13–19 digits, and must pass Luhn.
-fn validate_card(candidate: &str, prev: Option<char>, next: Option<char>) -> bool {
+fn validate_card(candidate: &str, prev: Option<char>, next: Option<char>) -> Option<usize> {
     if prev.is_some_and(|c| c.is_ascii_digit()) || next.is_some_and(|c| c.is_ascii_digit()) {
-        return false;
+        return None;
     }
     let mut separator: Option<char> = None;
     let mut digits: Vec<u8> = Vec::with_capacity(candidate.len());
@@ -218,11 +313,11 @@ fn validate_card(candidate: &str, prev: Option<char>, next: Option<char>) -> boo
             match separator {
                 None => separator = Some(character),
                 Some(existing) if existing == character => {}
-                Some(_) => return false,
+                Some(_) => return None,
             }
         }
     }
-    (13..=19).contains(&digits.len()) && luhn(&digits)
+    ((13..=19).contains(&digits.len()) && luhn(&digits)).then_some(candidate.len())
 }
 
 fn luhn(digits: &[u8]) -> bool {
@@ -241,30 +336,32 @@ fn luhn(digits: &[u8]) -> bool {
 }
 
 /// An IBAN candidate must be word-isolated and pass the ISO 7064 mod-97
-/// check over its rearranged, letter-expanded form.
-fn validate_iban(candidate: &str, prev: Option<char>, next: Option<char>) -> bool {
+/// check over its rearranged, letter-expanded form, ignoring the space or
+/// dash separators of the printed blocks-of-four grouping.
+fn validate_iban(candidate: &str, prev: Option<char>, next: Option<char>) -> Option<usize> {
     if prev.is_some_and(|c| c.is_ascii_alphanumeric())
         || next.is_some_and(|c| c.is_ascii_alphanumeric())
     {
-        return false;
+        return None;
     }
-    let Some((head, tail)) = candidate
-        .char_indices()
-        .nth(4)
-        .map(|(index, _)| candidate.split_at(index))
-    else {
-        return false;
-    };
+    let compact: Vec<char> = candidate
+        .chars()
+        .filter(|c| *c != ' ' && *c != '-')
+        .collect();
+    if compact.len() < 4 {
+        return None;
+    }
+    let (head, tail) = compact.split_at(4);
     let mut remainder = 0_u32;
-    for character in tail.chars().chain(head.chars()) {
+    for character in tail.iter().chain(head.iter()) {
         if let Some(digit) = character.to_digit(10) {
             remainder = (remainder * 10 + digit) % 97;
         } else if character.is_ascii_uppercase() {
-            let value = u32::from(character) - u32::from('A') + 10;
+            let value = u32::from(*character) - u32::from('A') + 10;
             remainder = (remainder * 100 + value) % 97;
         } else {
-            return false;
+            return None;
         }
     }
-    remainder == 1
+    (remainder == 1).then_some(candidate.len())
 }

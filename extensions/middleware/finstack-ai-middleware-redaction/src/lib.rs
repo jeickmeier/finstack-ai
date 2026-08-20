@@ -22,6 +22,16 @@
 //! [`RedactionMiddleware::try_wrapping`] instead, which also redacts the
 //! text the inner middleware injects.
 //!
+//! The same hazard applies to a registered **context compactor**: the
+//! settlement applier lands a `CompactContext` projection on top of any
+//! `Replace` in the same fold (`apply_model_draft` overwrites
+//! `draft.messages` with the compactor's `replacement_messages`, which were
+//! validated against the *unredacted* base draft), so a compactor in the
+//! chain discards this middleware's rewrite for every entry the projection
+//! covers — silently. Do not register this middleware together with a
+//! `ContextCompactor`-role middleware until the runtime redacts or threads
+//! compaction projections through `Replace` payloads.
+//!
 //! # Output redaction
 //!
 //! `AfterModel` middleware cannot `Replace`, so model **output** cannot be
@@ -56,9 +66,9 @@ use finstack_ai_kernel::{
     InvocationRecovery, Message, Metadata, RawJson, Stage, TextBlock, ToolResultBlock, Version,
 };
 use finstack_ai_runtime::{
-    BeforeModelInput, MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext,
-    MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole, ModelRequestDraft,
-    OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+    BeforeModelInput, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
+    MiddlewareOrder, MiddlewareRole, ModelRequestDraft, OrderTier, PortFuture, StageInput,
+    StageMask, StageOutcome,
 };
 use thiserror::Error;
 
@@ -314,54 +324,34 @@ impl RedactionMiddleware {
     /// markers. Unchanged drafts continue; every internal failure degrades
     /// to passing the affected content through unmodified (fail-soft).
     fn redact_before_model(&self, before_model: &BeforeModelInput) -> StageOutcome {
-        let (draft, changed) = self.redact_draft(&before_model.request);
-        if !changed {
+        let Some(draft) = self.redact_draft(&before_model.request) else {
             return StageOutcome::Continue;
-        }
+        };
         let Ok(bytes) = serde_json_canonicalizer::to_vec(&draft) else {
             return StageOutcome::Continue;
         };
         RawJson::parse(bytes).map_or(StageOutcome::Continue, StageOutcome::Replace)
     }
 
-    /// Redact every message of `draft`, reporting whether anything changed.
-    fn redact_draft(&self, draft: &ModelRequestDraft) -> (ModelRequestDraft, bool) {
-        let mut changed = false;
-        let mut messages: Vec<Message> = Vec::with_capacity(draft.messages.len());
-        for message in draft.messages.iter() {
-            let (rewritten, message_changed) = self.redact_message(message);
-            changed |= message_changed;
-            messages.push(rewritten);
-        }
-        if !changed {
-            return (draft.clone(), false);
-        }
-        (
-            ModelRequestDraft {
-                messages: messages.into(),
-                ..draft.clone()
-            },
-            true,
-        )
+    /// Redact every message of `draft`. Returns `None` when nothing changed,
+    /// so the dominant clean-draft path clones nothing.
+    fn redact_draft(&self, draft: &ModelRequestDraft) -> Option<ModelRequestDraft> {
+        let messages = redact_slice(&draft.messages, |message| self.redact_message(message))?;
+        Some(ModelRequestDraft {
+            messages: messages.into(),
+            ..draft.clone()
+        })
     }
 
     /// Redact one message's text-bearing blocks, preserving its identity
-    /// (id, role, timestamps, model, provider ids, metadata) exactly. A
-    /// rebuild failure falls back to the original message: unlike
-    /// document-ingest there is no must-strip invariant here — fail-soft
-    /// means unredacted pass-through, never an aborted run.
-    fn redact_message(&self, message: &Message) -> (Message, bool) {
-        let mut changed = false;
-        let mut blocks: Vec<ContentBlock> = Vec::with_capacity(message.content().len());
-        for block in message.content() {
-            let (rewritten, block_changed) = self.redact_block(block);
-            changed |= block_changed;
-            blocks.push(rewritten);
-        }
-        if !changed {
-            return (message.clone(), false);
-        }
-        match Message::try_new(
+    /// (id, role, timestamps, model, provider ids, metadata) exactly.
+    /// Returns `None` when unchanged, and also on a rebuild failure so the
+    /// caller keeps the original message: unlike document-ingest there is no
+    /// must-strip invariant here — fail-soft means unredacted pass-through,
+    /// never an aborted run.
+    fn redact_message(&self, message: &Message) -> Option<Message> {
+        let blocks = redact_slice(message.content(), |block| self.redact_block(block))?;
+        Message::try_new(
             *message.id(),
             message.role(),
             blocks,
@@ -369,10 +359,8 @@ impl RedactionMiddleware {
             message.model().cloned(),
             message.provider_ids().clone(),
             message.metadata().clone(),
-        ) {
-            Ok(rebuilt) => (rebuilt, true),
-            Err(_) => (message.clone(), false),
-        }
+        )
+        .ok()
     }
 
     /// Redact whatever draft the wrapped middleware produced.
@@ -394,10 +382,9 @@ impl RedactionMiddleware {
                 else {
                     return StageOutcome::Replace(raw);
                 };
-                let (draft, changed) = self.redact_draft(&inner_draft);
-                if !changed {
+                let Some(draft) = self.redact_draft(&inner_draft) else {
                     return StageOutcome::Replace(raw);
-                }
+                };
                 let Ok(bytes) = serde_json_canonicalizer::to_vec(&draft) else {
                     return StageOutcome::Replace(raw);
                 };
@@ -412,13 +399,20 @@ impl RedactionMiddleware {
     /// model just produced. `AfterModel` middleware cannot `Replace`, so
     /// `Fail` is the only enforcement available here; the descriptor names
     /// detector kinds and the match count only — never the matched text.
-    /// Undecodable payloads are fail-soft `Continue`.
+    ///
+    /// Unlike every other path in this crate, `Fail` mode fails **closed**:
+    /// an undecodable payload means the output cannot be checked, and a
+    /// strict mode that silently stops checking (e.g. after a drift in
+    /// [`Message`]'s wire shape) would be a security control turned no-op.
     fn check_after_model(&self, value: &RawJson) -> StageOutcome {
         if self.config.output_policy != OutputPolicy::Fail {
             return StageOutcome::Continue;
         }
         let Ok(message) = serde_json::from_slice::<Message>(value.as_bytes()) else {
-            return StageOutcome::Continue;
+            return fail_outcome(
+                "redaction_output_undecodable",
+                "model output could not be decoded for redaction checking".to_owned(),
+            );
         };
         let mut kinds = std::collections::BTreeSet::new();
         let mut count = 0_usize;
@@ -429,49 +423,79 @@ impl RedactionMiddleware {
             return StageOutcome::Continue;
         }
         let kinds = kinds.into_iter().collect::<Vec<_>>().join(", ");
-        ErrorDescriptor::new(
+        fail_outcome(
             "redaction_output_detected",
             format!("model output contains detectable secrets ({count} matches): {kinds}"),
-            ErrorCategory::Middleware,
-            false,
         )
-        .map_or(StageOutcome::Continue, |descriptor| {
-            StageOutcome::Fail(Box::new(descriptor))
-        })
     }
 
     /// Redact one content block. `Text` is rewritten directly; `ToolResult`
     /// recurses one level into its nested content (tool results cannot nest
     /// further tool blocks). Everything else — `Json`, `Opaque`, media, and
     /// `ToolCall` arguments — passes through untouched (v1 scan surface).
-    fn redact_block(&self, block: &ContentBlock) -> (ContentBlock, bool) {
+    ///
+    /// Returns `None` when unchanged, and also on a rebuild failure so the
+    /// caller keeps the original block (fail-soft).
+    fn redact_block(&self, block: &ContentBlock) -> Option<ContentBlock> {
         match block {
-            ContentBlock::Text(text) => match self.detectors.redact(text.text()) {
-                Some(redacted) => match TextBlock::try_new(redacted) {
-                    Ok(rewritten) => (ContentBlock::Text(rewritten), true),
-                    Err(_) => (block.clone(), false),
-                },
-                None => (block.clone(), false),
-            },
-            ContentBlock::ToolResult(result) => {
-                let mut changed = false;
-                let mut nested: Vec<ContentBlock> = Vec::with_capacity(result.content().len());
-                for inner in result.content() {
-                    let (rewritten, block_changed) = self.redact_block(inner);
-                    changed |= block_changed;
-                    nested.push(rewritten);
-                }
-                if !changed {
-                    return (block.clone(), false);
-                }
-                match ToolResultBlock::try_new(*result.tool_call_id(), nested, result.is_error()) {
-                    Ok(rebuilt) => (ContentBlock::ToolResult(rebuilt), true),
-                    Err(_) => (block.clone(), false),
-                }
+            ContentBlock::Text(text) => {
+                let redacted = self.detectors.redact(text.text())?;
+                TextBlock::try_new(redacted).ok().map(ContentBlock::Text)
             }
-            other => (other.clone(), false),
+            ContentBlock::ToolResult(result) => {
+                let nested = redact_slice(result.content(), |inner| self.redact_block(inner))?;
+                ToolResultBlock::try_new(*result.tool_call_id(), nested, result.is_error())
+                    .ok()
+                    .map(ContentBlock::ToolResult)
+            }
+            _ => None,
         }
     }
+}
+
+/// Lazily rewrite a slice: apply `redact` to each item and return `None`
+/// when no item changed. The originals are cloned only once a change has
+/// actually occurred, so the dominant no-secrets path allocates and copies
+/// nothing.
+fn redact_slice<T: Clone>(items: &[T], mut redact: impl FnMut(&T) -> Option<T>) -> Option<Vec<T>> {
+    let mut rewritten: Option<Vec<T>> = None;
+    for (index, item) in items.iter().enumerate() {
+        match redact(item) {
+            Some(new_item) => {
+                let vec = rewritten.get_or_insert_with(|| {
+                    let mut vec = Vec::with_capacity(items.len());
+                    vec.extend(items[..index].iter().cloned());
+                    vec
+                });
+                vec.push(new_item);
+            }
+            None => {
+                if let Some(vec) = rewritten.as_mut() {
+                    vec.push(item.clone());
+                }
+            }
+        }
+    }
+    rewritten
+}
+
+/// A `Fail` outcome with a stable code and a safe message (never matched
+/// text). The static fallback descriptor cannot fail to construct, so this
+/// path never degrades to `Continue`.
+fn fail_outcome(code: &'static str, message: String) -> StageOutcome {
+    let descriptor = ErrorDescriptor::new(code, message, ErrorCategory::Middleware, false)
+        .or_else(|_| {
+            ErrorDescriptor::new(
+                code,
+                "model output failed redaction checking",
+                ErrorCategory::Middleware,
+                false,
+            )
+        })
+        .ok();
+    descriptor.map_or(StageOutcome::Continue, |descriptor| {
+        StageOutcome::Fail(Box::new(descriptor))
+    })
 }
 
 /// Accumulate detector findings over one block's text surface (the same
@@ -495,17 +519,6 @@ fn collect_findings(
         }
         _ => {}
     }
-}
-
-#[allow(dead_code)]
-fn stable_error(message: &'static str) -> MiddlewareError {
-    MiddlewareError::try_new(
-        MIDDLEWARE_OUTCOME_NOT_ALLOWED,
-        ErrorCategory::Middleware,
-        message,
-        Metadata::empty(),
-    )
-    .unwrap_or_else(Into::into)
 }
 
 #[cfg(test)]
