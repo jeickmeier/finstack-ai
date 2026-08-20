@@ -32,6 +32,25 @@ a thin dispatcher onto the three dedicated crates. Supported
 multi-protocol gateway crate. `Agent.e2b_sandbox()` is the T4 sandbox
 constructor on both bindings; see [toolsets](toolset.md).
 
+Two native media toolsets are registrable from any linked constructor.
+`finstack-ai-tools-openrouter-media` publishes five tools —
+`openrouter_generate_image`, `openrouter_generate_speech`,
+`openrouter_transcribe_audio`, `openrouter_generate_video`, and
+`openrouter_get_video` (which accepts a `wait_seconds` argument, 0-300,
+to poll a video job inline until it completes or the time budget is
+spent) — and always authenticates against OpenRouter, so it carries its
+own API key even when the chat model is served by another provider.
+`Agent::openrouter` reuses its own key and attribution (`media_tools:
+bool`); `Agent::openai`, `Agent::anthropic`, and `Agent::ollama` accept
+an independent `openrouter_media: Option<OpenRouterMediaToolsSpec>`.
+`finstack-ai-tools-openai-media` publishes three tools —
+`openai_generate_image`, `openai_generate_speech`, and
+`openai_transcribe_audio` — reusing the OpenAI Responses credential; only
+`Agent::openai` exposes it, via `media_tools: bool`. Both toolsets may be
+registered on the same `Agent::openai` construction simultaneously. All
+OpenRouter media tool calls are billed to the configured OpenRouter API
+key, independent of which provider serves the chat model.
+
 `GatewayAgentSpec.wire_protocol` selects the dedicated leaf. Required
 construction fields include `hard_input_bytes` and `max_output_tokens`.
 Dedicated crate rustdoc on each `*Provider::try_new` is the same

@@ -72,6 +72,20 @@ unpublished.
   attribution headers, provider-routing passthrough, and a model-catalog
   fetch helper; new `Agent::openrouter` constructor with Python and WASM
   binding parity.
+- Added `finstack-ai-tools-openrouter-media` (five tools: image, speech,
+  transcription, video generation, and video-status polling with an inline
+  `wait_seconds` budget) and `finstack-ai-tools-openai-media` (three tools:
+  image, speech, transcription) as native, opt-in T1 toolsets. Registrable
+  from every linked constructor: `Agent::openrouter` gains `media_tools:
+  bool` (reusing its own key and attribution); `Agent::openai`,
+  `Agent::anthropic`, and `Agent::ollama` gain `openrouter_media:
+  Option<OpenRouterMediaToolsSpec>`; `Agent::openai` additionally gains its
+  own `media_tools: bool` for the native OpenAI toolset, and both may be
+  active together. OpenRouter media tool calls are always billed to the
+  configured OpenRouter API key. Python factories gain the matching
+  `media_tools` / `openrouter_media_api_key` / `openrouter_media_referer`
+  / `openrouter_media_title` keyword arguments; both crates stay off the
+  wasm-host dependency graph.
 
 ### Changed
 

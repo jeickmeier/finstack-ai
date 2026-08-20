@@ -48,6 +48,8 @@ FORBIDDEN_WASM = frozenset(
         "prometheus",
         "finstack-ai-remote-child",
         "finstack-ai-sandbox-e2b",
+        "finstack-ai-tools-openrouter-media",
+        "finstack-ai-tools-openai-media",
         "finstack-ai-server",
         "finstack-ai-workflow-local",
         "rustls",
