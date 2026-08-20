@@ -175,8 +175,16 @@ No silent truncation anywhere: a body exceeding the effective cap is a
 `RetrySafety::SafeToRetry`, `ApprovalRequirement::NotRequired` (the
 deployer's allowlist is the gate; host `ToolExecutionPolicy` can still
 upgrade any tool to `RequireApproval`), `ToolExecutionMode::Parallel`,
-`ToolDeferralSupport::Never`, `max_result_bytes` = configured
-`max_response_bytes` plus a 4 KiB envelope margin.
+`ToolDeferralSupport::Never`. The `ToolSpec` declares
+`max_result_bytes` = configured `max_response_bytes` plus a 4 KiB envelope
+margin, and the toolset itself enforces that same ceiling: after
+serializing a successful result to JSON, `call()` rejects any output whose
+serialized size exceeds it with `fetch_limit_exceeded`, rather than letting
+the runtime's generic oversize-result rejection fire. This check exists
+because JSON string escaping (`\n` → `\\n`, etc.) can inflate the
+serialized `content` field well past the raw byte count already bounded on
+read — the raw-byte budget alone does not guarantee the wire-serialized
+result stays under the declared ceiling.
 
 ### 4.2 Stable error codes
 

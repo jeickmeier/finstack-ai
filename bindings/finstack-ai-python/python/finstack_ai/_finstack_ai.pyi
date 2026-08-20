@@ -184,6 +184,10 @@ class HttpFetchToolset:
     ``max_redirects``, ``per_host_headers``, ``user_agent``.
     ``allow_loopback_http`` is also accepted for test-fixture parity with the
     Rust config, but is documented as fixtures-only.
+
+    This constructor never attaches an artifact store, so ``mode: "artifact"``
+    and any binary (or invalid-UTF-8) response body always fail with
+    ``fetch_limit_exceeded`` in v1 — there is no store to stage them to.
     """
 
     def __init__(self, config_json: str) -> None: ...

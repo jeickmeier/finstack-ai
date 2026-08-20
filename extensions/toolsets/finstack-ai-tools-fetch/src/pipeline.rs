@@ -191,11 +191,14 @@ async fn rejection_detail(response: reqwest::Response) -> Option<String> {
     Some(truncate_chars(&detail, ERROR_DETAIL_CHARS))
 }
 
+/// Truncate `text` to at most `max` chars total, including the `"..."`
+/// suffix when truncation occurs (so the result never exceeds `max`).
 fn truncate_chars(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_owned();
     }
-    let kept: String = text.chars().take(max).collect();
+    let keep = max.saturating_sub(3);
+    let kept: String = text.chars().take(keep).collect();
     format!("{kept}...")
 }
 
@@ -293,13 +296,17 @@ fn next_hop(response: &reqwest::Response, current: &VettedUrl, policy: UrlPolicy
         .get(reqwest::header::LOCATION)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| tool_error(FETCH_TRANSPORT_FAILED, ErrorCategory::Tool, "redirect location invalid"))?;
-    let next_url = current.url.join(location).map_err(|_| {
+    let mut next_url = current.url.join(location).map_err(|_| {
         tool_error(
             FETCH_TRANSPORT_FAILED,
             ErrorCategory::Tool,
             "redirect location invalid",
         )
     })?;
+    // Legal redirect targets can carry a fragment (`#anchor`); net-guard's
+    // vet step rejects any fragment as suspicious, so strip it here before
+    // re-vetting rather than loosening that check for every other caller.
+    next_url.set_fragment(None);
     parse_and_vet_url(next_url.as_str(), &policy).map_err(|e| map_vet_error(&e))
 }
 

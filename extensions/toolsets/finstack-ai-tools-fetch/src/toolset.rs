@@ -22,7 +22,7 @@ use serde::Deserialize;
 
 use crate::config;
 use crate::pipeline::{FetchState, execute_fetch};
-use crate::{FETCH_INVALID_ARGUMENTS, HttpFetchConfig, HttpFetchError};
+use crate::{FETCH_INVALID_ARGUMENTS, FETCH_LIMIT_EXCEEDED, HttpFetchConfig, HttpFetchError};
 
 #[cfg(test)]
 use finstack_ai_net_guard::HostResolver;
@@ -36,6 +36,16 @@ const TOOL_NAME: &str = "http_fetch";
 /// for the `max_result_bytes` ceiling reported on the `ToolSpec` (envelope
 /// for the JSON wrapper around the fetched body).
 const RESULT_ENVELOPE_BYTES: u64 = 4_096;
+
+/// Compute the serialized-result ceiling from `max_response_bytes`: the same
+/// value reported as `ToolSpec::max_result_bytes` and enforced in `call()`
+/// against the actual serialized (JSON-escaped) output, so the two can never
+/// drift apart.
+fn result_ceiling(max_response_bytes: usize) -> u64 {
+    u64::try_from(max_response_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(RESULT_ENVELOPE_BYTES)
+}
 
 /// Requested output shape for one `http_fetch` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -101,9 +111,7 @@ impl HttpFetchToolset {
             reason: "invalid_input_schema",
         })?;
 
-        let max_result_bytes = u64::try_from(config.max_response_bytes)
-            .unwrap_or(u64::MAX)
-            .saturating_add(RESULT_ENVELOPE_BYTES);
+        let max_result_bytes = result_ceiling(config.max_response_bytes);
 
         let spec = ToolSpec {
             id: tool_id.clone(),
@@ -205,6 +213,20 @@ impl Toolset for HttpFetchToolset {
                     "http fetch result serialization failed",
                 )
             })?;
+            // JSON escaping (`\n` -> `\\n`, etc.) can inflate the serialized
+            // output past the raw byte budget already enforced on `content`
+            // in `deliver.rs`. Re-check the *serialized* size against the
+            // same ceiling declared on the ToolSpec so the runtime never
+            // hard-rejects with its generic `tool_result_limit_exceeded`
+            // instead of our stable `fetch_limit_exceeded`.
+            let ceiling = result_ceiling(state.config.max_response_bytes);
+            if u64::try_from(output.len()).unwrap_or(u64::MAX) > ceiling {
+                return Err(tool_error(
+                    FETCH_LIMIT_EXCEEDED,
+                    ErrorCategory::Limit,
+                    "fetch content exceeds the configured byte limit",
+                ));
+            }
             let result = finstack_ai_runtime::ToolResult {
                 output: RawJson::parse(output).map_err(|_| {
                     tool_error(

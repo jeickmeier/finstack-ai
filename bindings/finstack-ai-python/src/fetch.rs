@@ -17,6 +17,13 @@ const FETCH_COMPONENT: &str = "finstack.tools.fetch";
 /// `max_redirects`, `per_host_headers`, `user_agent`. `allow_loopback_http`
 /// is also accepted for test-fixture parity with the Rust config, but is
 /// documented as fixtures-only — production callers should never set it.
+///
+/// This constructor never attaches an artifact store: the Python-built
+/// toolset always calls `HttpFetchToolset::try_new` alone, with no
+/// `with_artifact_store` call available from Python in v1. As a result,
+/// `mode: "artifact"` and any binary (or invalid-UTF-8) response body always
+/// fail with `fetch_limit_exceeded` for this binding — there is no store to
+/// stage them to.
 #[pyclass(
     module = "finstack_ai._finstack_ai",
     name = "HttpFetchToolset",

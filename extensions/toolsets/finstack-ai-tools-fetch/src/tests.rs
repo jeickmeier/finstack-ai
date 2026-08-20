@@ -893,6 +893,40 @@ async fn same_host_redirect_is_followed() {
 }
 
 #[tokio::test]
+async fn redirect_location_fragment_is_stripped_before_revet() {
+    // Legal redirect targets can carry a fragment (e.g. `Location: /b#frag`);
+    // net-guard's vet step rejects any URL fragment (`vet.rs:62-63`,
+    // `fragment_forbidden`), so `next_hop` must strip it before re-vetting
+    // rather than failing the whole fetch as `fetch_invalid_arguments`.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_sequence(
+        listener,
+        None,
+        vec![
+            (302, "Location: /b#frag\r\n".to_owned(), Vec::new()),
+            (
+                200,
+                "Content-Type: text/plain\r\n".to_owned(),
+                b"moved-ok".to_vec(),
+            ),
+        ],
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/a", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    assert!(
+        output["final_url"].as_str().unwrap().ends_with("/b"),
+        "{output}"
+    );
+    assert_eq!(output["content"], "moved-ok");
+}
+
+#[tokio::test]
 async fn cross_host_redirect_to_unlisted_host_is_denied() {
     // No server exists for evil.example: if the pipeline tried to connect,
     // resolution/connection would fail with a transport error instead, so
@@ -1158,4 +1192,47 @@ async fn pinned_address_overrides_dns_for_hostnames() {
     let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
     let output = drive_to_success(&toolset, tool_context(), call).await;
     assert_eq!(output["content"], "pinned");
+}
+
+#[tokio::test]
+async fn serialized_result_over_ceiling_returns_fetch_limit_exceeded() {
+    // The raw body is 8000 newline bytes: within `max_response_bytes`
+    // (8192), so both the raw-byte read cap (`read_body_bounded`) and the
+    // raw-byte inline-budget check in `deliver.rs::inline_within_budget`
+    // pass -- the body inlines as `content` uninterrupted.
+    //
+    // But JSON string escaping doubles every `\n` to the two-byte sequence
+    // `\n` (backslash, n), so the *serialized* `content` field alone is
+    // ~16000 bytes -- well past the ToolSpec ceiling reported as
+    // `max_result_bytes` (`max_response_bytes + RESULT_ENVELOPE_BYTES` =
+    // 8192 + 4096 = 12288 bytes). This proves `call()` re-checks the
+    // serialized output size against that same ceiling, not just the raw
+    // byte count already bounded upstream, and returns the crate's stable
+    // `fetch_limit_exceeded` rather than a generic runtime rejection.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = "\n".repeat(8000);
+    assert!(body.len() <= 8192, "raw body must clear the raw-byte cap");
+    assert!(
+        body.len() * 2 > 8192 + 4096,
+        "escaped body must exceed the serialized ceiling"
+    );
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        body.into_bytes(),
+    ));
+
+    let config = HttpFetchConfig {
+        max_response_bytes: 8192,
+        ..loopback_config(&["docs.rs"])
+    };
+    let toolset = HttpFetchToolset::try_new(config).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
 }
