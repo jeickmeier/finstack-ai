@@ -369,6 +369,30 @@ async fn oversize_body_is_a_limit_error() {
 }
 
 #[tokio::test]
+async fn lossy_utf8_expansion_past_max_response_bytes_is_a_limit_error() {
+    // Invalid UTF-8 bytes each expand to a 3-byte U+FFFD replacement under
+    // `String::from_utf8_lossy`, so a raw body that fits the byte cap can
+    // still produce an oversized `content` string. 60 raw bytes of 0xFF
+    // pass a 64-byte `effective_cap`, but expand to 180 bytes of lossy
+    // text, which must be rejected against `max_response_bytes` (64).
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![0xFF_u8; 60];
+    tokio::spawn(serve_once(listener, None, 200, String::new(), body));
+
+    let config = HttpFetchConfig {
+        max_response_bytes: 64,
+        ..loopback_config(&["docs.rs"])
+    };
+    let toolset = HttpFetchToolset::try_new(config).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
+}
+
+#[tokio::test]
 async fn non_success_status_reports_bounded_detail() {
     const TAIL_MARKER: &str = "TAIL-MARKER-CANARY";
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

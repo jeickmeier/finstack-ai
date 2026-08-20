@@ -286,7 +286,7 @@ pub(crate) async fn execute_fetch(
     if status.is_redirection() {
         return Err(tool_error(
             FETCH_REDIRECT_DENIED,
-            ErrorCategory::Validation,
+            ErrorCategory::Tool,
             format!("http fetch endpoint returned a redirect (HTTP {status}), which this tool does not follow"),
         ));
     }
@@ -305,6 +305,22 @@ pub(crate) async fn execute_fetch(
         .map_err(|e| map_vet_error(&e))?;
     let byte_length = body.len();
     let content = String::from_utf8_lossy(&body).into_owned();
+
+    // Lossy UTF-8 repair replaces each invalid byte with U+FFFD (3 bytes in
+    // UTF-8), so an adversarial/binary body can expand up to ~3x past the
+    // `effective_cap` we just enforced on the raw bytes — silently blowing
+    // through the `max_response_bytes + envelope` ceiling the ToolSpec
+    // advertises. Re-check the *encoded* length here and refuse rather than
+    // ship an oversized result. Task 9 replaces this whole inline-text path
+    // with content-type routing (binary bodies go to an artifact or a
+    // refusal instead of being force-decoded as text).
+    if content.len() > state.config.max_response_bytes {
+        return Err(tool_error(
+            FETCH_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "fetch content exceeds the configured byte limit",
+        ));
+    }
 
     // `args.mode` will select text/markdown/artifact shaping once Task 9/10
     // land; every mode inlines text for now.
