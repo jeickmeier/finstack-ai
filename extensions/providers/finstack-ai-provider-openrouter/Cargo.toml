@@ -13,6 +13,7 @@ readme = "README.md"
 [features]
 default = []
 vendored-tls = ["reqwest/native-tls-vendored"]
+bench = []
 
 [dependencies]
 base64 = { workspace = true }
@@ -25,8 +26,14 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 finstack-ai-test = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
+
+[[bench]]
+name = "request_overhead"
+harness = false
+required-features = ["bench"]
 
 [lints]
 workspace = true
