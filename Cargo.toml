@@ -31,6 +31,7 @@ members = [
     "extensions/observers/finstack-ai-observer-log",
     "extensions/observers/finstack-ai-observer-otel",
     "extensions/observers/finstack-ai-observer-metrics",
+    "extensions/interop/finstack-ai-codex-child",
     "extensions/interop/finstack-ai-remote-child",
     "extensions/workflow/finstack-ai-workflow-local",
     "examples/rust-minimal",

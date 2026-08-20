@@ -1086,6 +1086,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-codex-child"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-context-memory"
 version = "1.0.0"
 dependencies = [
