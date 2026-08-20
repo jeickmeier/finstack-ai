@@ -303,6 +303,98 @@ mod middleware_tests {
         );
     }
 
+    #[tokio::test]
+    async fn before_tool_batch_role_policy_filters_and_malformed_payload_errors() {
+        use std::collections::{BTreeMap, BTreeSet};
+        use std::sync::Arc;
+
+        use finstack_ai_kernel::{
+            Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId,
+            SessionId, ToolCallBlock, ToolCallId,
+        };
+        use finstack_ai_runtime::{
+            AuthorizationContext, CancellationSignal, MiddlewareContext, RunCallContext,
+            StageInput, StageOutcome,
+        };
+
+        use super::tid;
+
+        fn uuid_str(value: u64) -> String {
+            format!("00000000-0000-7000-8000-{value:012x}")
+        }
+
+        let cfg = crate::ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_role_allowlist(
+                BTreeMap::from([(
+                    Arc::<str>::from("reader"),
+                    BTreeSet::from([tid("finstack.tools.read")]),
+                )]),
+                BTreeSet::new(),
+            )
+            .expect("roles");
+        let mw = ToolPolicyMiddleware::try_new(cfg).expect("leaf");
+
+        let principal =
+            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
+        let ctx = || MiddlewareContext {
+            run: RunCallContext {
+                locator: OperationLocator::try_new(
+                    "tenant-a",
+                    SessionId::parse(&uuid_str(1)).expect("session"),
+                    LaneId::parse(&uuid_str(2)).expect("lane"),
+                    RunId::parse(&uuid_str(3)).expect("run"),
+                )
+                .expect("locator"),
+                authorization: AuthorizationContext {
+                    principal: principal.clone(),
+                    authentication_method: Arc::from("test"),
+                    assurance_level: Arc::from("test"),
+                    roles: Arc::from([Arc::<str>::from("reader")]),
+                    permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+                    safe_claims: Metadata::empty(),
+                    policy_version: Arc::from("policy-v1"),
+                    decision_id: Arc::from("decision-v1"),
+                },
+                effect_id: EffectId::parse(&uuid_str(4)).expect("effect"),
+                attempt: 1,
+                deadline: None,
+                budget_scope_id: None,
+                cancellation: CancellationSignal::new(),
+            },
+            chain_digest: Digest::raw_json(b"chain"),
+            chain_index: 0,
+            compaction_resume: None,
+        };
+
+        let call = ToolCallBlock::try_new(
+            ToolCallId::parse(&uuid_str(5)).expect("call id"),
+            "read",
+            RawJson::parse(b"{}").expect("args"),
+        )
+        .expect("call");
+        let payload = RawJson::parse(serde_json::to_vec(&vec![call]).expect("serialize calls"))
+            .expect("payload json");
+        let outcome = mw
+            .invoke(ctx(), StageInput::BeforeToolBatch { value: payload })
+            .await
+            .expect("invoke");
+        assert_eq!(
+            outcome,
+            StageOutcome::FilterTools(Arc::from([tid("finstack.tools.read")]))
+        );
+
+        let malformed = RawJson::parse(b"{}").expect("malformed but valid json");
+        let err = mw
+            .invoke(ctx(), StageInput::BeforeToolBatch { value: malformed })
+            .await
+            .expect_err("malformed batch payload must error, not Continue");
+        assert_eq!(
+            err.code(),
+            finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED
+        );
+    }
+
     #[test]
     fn distinct_configs_produce_distinct_digests() {
         let a = ToolPolicyMiddleware::try_new(any_config()).expect("leaf a");
@@ -326,7 +418,9 @@ mod eval_tests {
 
     use finstack_ai_kernel::ToolId;
 
-    use crate::eval::{PolicyVerdict, evaluate_before_model, narrow_universe};
+    use crate::eval::{
+        PolicyVerdict, evaluate_before_model, evaluate_before_tool_batch, narrow_universe,
+    };
     use crate::{JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, ToolPolicyConfig};
 
     use super::{
@@ -505,6 +599,39 @@ mod eval_tests {
         let input = draft(vec![read_tool(), write_tool()], vec![]);
         assert_eq!(
             evaluate_before_model(&cfg, &input, &[]),
+            PolicyVerdict::Identity
+        );
+    }
+
+    #[test]
+    fn batch_stage_with_role_policy_emits_complete_allow_set() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_role_allowlist(
+                BTreeMap::from([(
+                    Arc::<str>::from("agent"),
+                    BTreeSet::from([tid("t.read"), tid("t.spawn")]),
+                )]),
+                BTreeSet::new(),
+            )
+            .expect("roles")
+            .with_child_depth_gate(3, 2, BTreeSet::from([tid("t.spawn")]))
+            .expect("gate");
+        let granted = [Arc::<str>::from("agent")];
+        assert_eq!(
+            evaluate_before_tool_batch(&cfg, &granted),
+            PolicyVerdict::Retain(BTreeSet::from([tid("t.read")]))
+        );
+    }
+
+    #[test]
+    fn batch_stage_without_role_policy_is_identity() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_write_budget(3)
+            .expect("budget");
+        assert_eq!(
+            evaluate_before_tool_batch(&cfg, &[]),
             PolicyVerdict::Identity
         );
     }

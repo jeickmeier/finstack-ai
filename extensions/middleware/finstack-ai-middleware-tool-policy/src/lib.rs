@@ -37,7 +37,7 @@ mod eval;
 
 pub use config::*;
 
-use eval::{PolicyVerdict, evaluate_before_model};
+use eval::{PolicyVerdict, evaluate_before_model, evaluate_before_tool_batch};
 
 const TOOL_POLICY_VERSION: Version = Version {
     major: 1,
@@ -115,36 +115,30 @@ impl Middleware for ToolPolicyMiddleware {
         let config = self.config.clone();
         Box::pin(async move {
             match input {
-                StageInput::BeforeModel(before_model) => {
-                    match evaluate_before_model(
-                        &config,
-                        &before_model,
-                        &ctx.run.authorization.roles,
-                    ) {
-                        PolicyVerdict::Identity => Ok(StageOutcome::Continue),
-                        PolicyVerdict::Retain(tools) => Ok(StageOutcome::FilterTools(
-                            tools.into_iter().collect::<Vec<_>>().into(),
-                        )),
-                        PolicyVerdict::Fail { reason } => Ok(StageOutcome::Fail(Box::new(
-                            ErrorDescriptor::new(
-                                reason,
-                                "tool policy jailbreak trigger matched",
-                                ErrorCategory::Validation,
-                                false,
-                            )
-                            .map_err(|_| {
-                                MiddlewareError::try_new(
-                                    reason,
-                                    ErrorCategory::Validation,
-                                    "tool policy jailbreak trigger matched",
-                                    Metadata::empty(),
-                                )
-                                .unwrap_or_else(Into::into)
-                            })?,
-                        ))),
+                StageInput::BeforeModel(before_model) => verdict_to_outcome(evaluate_before_model(
+                    &config,
+                    &before_model,
+                    &ctx.run.authorization.roles,
+                )),
+                StageInput::BeforeToolBatch { value } => {
+                    if serde_json::from_slice::<Vec<finstack_ai_kernel::ToolCallBlock>>(
+                        value.as_bytes(),
+                    )
+                    .is_err()
+                    {
+                        return Err(MiddlewareError::try_new(
+                            finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                            ErrorCategory::Middleware,
+                            "tool batch payload malformed",
+                            Metadata::empty(),
+                        )
+                        .unwrap_or_else(Into::into));
                     }
+                    verdict_to_outcome(evaluate_before_tool_batch(
+                        &config,
+                        &ctx.run.authorization.roles,
+                    ))
                 }
-                StageInput::BeforeToolBatch { .. } => Ok(StageOutcome::Continue),
                 _ => Err(MiddlewareError::try_new(
                     finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
                     ErrorCategory::Middleware,
@@ -154,6 +148,34 @@ impl Middleware for ToolPolicyMiddleware {
                 .unwrap_or_else(Into::into)),
             }
         })
+    }
+}
+
+/// Map a [`PolicyVerdict`] to the `Continue` / `FilterTools` / `Fail`
+/// stage outcome shared by both filter stages.
+fn verdict_to_outcome(verdict: PolicyVerdict) -> Result<StageOutcome, MiddlewareError> {
+    match verdict {
+        PolicyVerdict::Identity => Ok(StageOutcome::Continue),
+        PolicyVerdict::Retain(tools) => Ok(StageOutcome::FilterTools(
+            tools.into_iter().collect::<Vec<_>>().into(),
+        )),
+        PolicyVerdict::Fail { reason } => Ok(StageOutcome::Fail(Box::new(
+            ErrorDescriptor::new(
+                reason,
+                "tool policy jailbreak trigger matched",
+                ErrorCategory::Validation,
+                false,
+            )
+            .map_err(|_| {
+                MiddlewareError::try_new(
+                    reason,
+                    ErrorCategory::Validation,
+                    "tool policy jailbreak trigger matched",
+                    Metadata::empty(),
+                )
+                .unwrap_or_else(Into::into)
+            })?,
+        ))),
     }
 }
 
