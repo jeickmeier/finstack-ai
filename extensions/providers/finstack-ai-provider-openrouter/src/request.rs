@@ -11,6 +11,7 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec};
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 use crate::OpenRouterModelConfig;
@@ -59,7 +60,7 @@ struct WireTool {
     kind: &'static str,
     name: String,
     description: String,
-    parameters: Value,
+    parameters: Box<RawValue>,
     strict: bool,
 }
 
@@ -131,7 +132,7 @@ impl ResponsesRequest {
                 kind: "function",
                 name: tool.model_name.to_string(),
                 description: tool.description.to_string(),
-                parameters: raw_value(&tool.input_schema)?,
+                parameters: raw_value_passthrough(&tool.input_schema)?,
                 strict: true,
             });
         }
@@ -183,6 +184,18 @@ fn take_string_setting(
 
 fn raw_value(value: &RawJson) -> Result<Value, ModelError> {
     serde_json::from_slice(value.as_bytes())
+        .map_err(|_| request_error("canonical provider JSON could not be decoded"))
+}
+
+/// Wrap already-canonical (RFC 8785) provider JSON for verbatim pass-through
+/// serialization, skipping the parse-into-`Value`-then-reserialize round trip.
+///
+/// `RawJson` guarantees its bytes are already canonical JSON, so re-emitting
+/// them unchanged produces the same bytes `raw_value` + re-serialization
+/// would have produced (both land on the same compact, sorted-key form for
+/// ASCII member names), without materializing an intermediate `Value` tree.
+fn raw_value_passthrough(value: &RawJson) -> Result<Box<RawValue>, ModelError> {
+    RawValue::from_string(value.as_str().to_owned())
         .map_err(|_| request_error("canonical provider JSON could not be decoded"))
 }
 
