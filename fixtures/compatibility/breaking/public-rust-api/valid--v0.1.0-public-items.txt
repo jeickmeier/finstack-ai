@@ -372,6 +372,7 @@ finstack-ai-runtime::BUDGET_INVALID_RECEIPT
 finstack-ai-runtime::BUDGET_UNAVAILABLE
 finstack-ai-runtime::BUDGET_UNKNOWN
 finstack-ai-runtime::BeforeModelInput
+finstack-ai-runtime::BeforeToolBatchInput
 finstack-ai-runtime::BlobRef
 finstack-ai-runtime::BudgetChargeReceipt
 finstack-ai-runtime::BudgetChargeRecorded

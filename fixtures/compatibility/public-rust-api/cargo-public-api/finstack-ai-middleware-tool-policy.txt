@@ -24,7 +24,6 @@ pub fn finstack_ai_middleware_tool_policy::ToolPolicyError::fmt(&self, &mut core
 impl core::marker::StructuralPartialEq for finstack_ai_middleware_tool_policy::ToolPolicyError
 pub struct finstack_ai_middleware_tool_policy::ChildDepthGate
 impl finstack_ai_middleware_tool_policy::ChildDepthGate
-pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::current_depth(&self) -> u16
 pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::max_depth(&self) -> u16
 pub fn finstack_ai_middleware_tool_policy::ChildDepthGate::restricted(&self) -> &alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>
 impl core::clone::Clone for finstack_ai_middleware_tool_policy::ChildDepthGate
@@ -60,7 +59,7 @@ pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::is_empty(&self) -> 
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::jailbreak(&self) -> core::option::Option<&finstack_ai_middleware_tool_policy::JailbreakTriggers>
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::new() -> Self
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::role_allowlist(&self) -> core::option::Option<&finstack_ai_middleware_tool_policy::RoleAllowlist>
-pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_child_depth_gate(self, u16, u16, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
+pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_child_depth_gate(self, u16, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_jailbreak_triggers(self, alloc::vec::Vec<alloc::sync::Arc<str>>, finstack_ai_middleware_tool_policy::JailbreakAction) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_role_allowlist(self, alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>>, alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ToolId>) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyConfig::with_write_budget(self, u32) -> core::result::Result<Self, finstack_ai_middleware_tool_policy::ToolPolicyError>
@@ -92,5 +91,4 @@ impl core::fmt::Debug for finstack_ai_middleware_tool_policy::WriteBudget
 pub fn finstack_ai_middleware_tool_policy::WriteBudget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl serde_core::ser::Serialize for finstack_ai_middleware_tool_policy::WriteBudget
 pub fn finstack_ai_middleware_tool_policy::WriteBudget::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-pub const finstack_ai_middleware_tool_policy::TOOL_POLICY_BATCH_PAYLOAD_MALFORMED: &str
 pub const finstack_ai_middleware_tool_policy::TOOL_POLICY_JAILBREAK_TRIGGERED: &str

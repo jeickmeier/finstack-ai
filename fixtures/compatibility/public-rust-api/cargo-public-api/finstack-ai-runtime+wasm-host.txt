@@ -896,8 +896,7 @@ pub finstack_ai_runtime::StageInput::BeforeFinalize::candidate: finstack_ai_kern
 pub finstack_ai_runtime::StageInput::BeforeModel(alloc::boxed::Box<finstack_ai_runtime::BeforeModelInput>)
 pub finstack_ai_runtime::StageInput::BeforeRun
 pub finstack_ai_runtime::StageInput::BeforeRun::value: finstack_ai_kernel::primitives::raw_json::RawJson
-pub finstack_ai_runtime::StageInput::BeforeToolBatch
-pub finstack_ai_runtime::StageInput::BeforeToolBatch::value: finstack_ai_kernel::primitives::raw_json::RawJson
+pub finstack_ai_runtime::StageInput::BeforeToolBatch(alloc::boxed::Box<finstack_ai_runtime::BeforeToolBatchInput>)
 pub finstack_ai_runtime::StageInput::PrepareContext
 pub finstack_ai_runtime::StageInput::PrepareContext::value: finstack_ai_kernel::primitives::raw_json::RawJson
 impl finstack_ai_runtime::StageInput
@@ -1292,6 +1291,21 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::BeforeModelInput
 pub fn finstack_ai_runtime::BeforeModelInput::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::BeforeModelInput
 pub fn finstack_ai_runtime::BeforeModelInput::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::BeforeToolBatchInput
+pub finstack_ai_runtime::BeforeToolBatchInput::calls: alloc::sync::Arc<[finstack_ai_kernel::content::tool::ToolCallBlock]>
+pub finstack_ai_runtime::BeforeToolBatchInput::tools: alloc::sync::Arc<[finstack_ai_runtime::ToolSpec]>
+impl core::clone::Clone for finstack_ai_runtime::BeforeToolBatchInput
+pub fn finstack_ai_runtime::BeforeToolBatchInput::clone(&self) -> finstack_ai_runtime::BeforeToolBatchInput
+impl core::cmp::Eq for finstack_ai_runtime::BeforeToolBatchInput
+impl core::cmp::PartialEq for finstack_ai_runtime::BeforeToolBatchInput
+pub fn finstack_ai_runtime::BeforeToolBatchInput::eq(&self, &finstack_ai_runtime::BeforeToolBatchInput) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::BeforeToolBatchInput
+pub fn finstack_ai_runtime::BeforeToolBatchInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::BeforeToolBatchInput
+impl serde_core::ser::Serialize for finstack_ai_runtime::BeforeToolBatchInput
+pub fn finstack_ai_runtime::BeforeToolBatchInput::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::BeforeToolBatchInput
+pub fn finstack_ai_runtime::BeforeToolBatchInput::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_runtime::BudgetCoordinator
 impl finstack_ai_runtime::BudgetCoordinator
 pub async fn finstack_ai_runtime::BudgetCoordinator::charge_committed(&self, &mut finstack_ai_runtime::CommitCoordinator, &finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai_kernel::records::policy::budget::BudgetChargeRequest, finstack_ai_runtime::BudgetOperationIds, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_kernel::records::policy::budget::BudgetChargeReceipt, finstack_ai_runtime::CompositionError>
@@ -2738,6 +2752,7 @@ pub finstack_ai_runtime::RunCallContext::cancellation: finstack_ai_runtime::Canc
 pub finstack_ai_runtime::RunCallContext::deadline: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
 pub finstack_ai_runtime::RunCallContext::effect_id: finstack_ai_kernel::primitives::ids::EffectId
 pub finstack_ai_runtime::RunCallContext::locator: finstack_ai_kernel::records::run::external::OperationLocator
+pub finstack_ai_runtime::RunCallContext::relation_depth: u16
 impl core::clone::Clone for finstack_ai_runtime::RunCallContext
 pub fn finstack_ai_runtime::RunCallContext::clone(&self) -> finstack_ai_runtime::RunCallContext
 impl core::fmt::Debug for finstack_ai_runtime::RunCallContext
