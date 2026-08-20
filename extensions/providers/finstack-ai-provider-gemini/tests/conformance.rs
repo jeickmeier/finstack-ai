@@ -6,8 +6,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ContentBlock, EffectId, JsonSchemaDraft, LaneId, Message, MessageId, MessageRole, Metadata,
     ModelRequestId, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RetrySafety,
-    RunId, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, SessionId, TextBlock, Timestamp,
-    ToolExecutionMode, ToolId,
+    RunId, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, SessionId, TextBlock, Timestamp, ToolExecutionMode,
+    ToolId,
 };
 use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
 use finstack_ai_runtime::{

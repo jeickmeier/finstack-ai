@@ -22,8 +22,13 @@ pub(crate) fn health() -> &'static str {
 
 #[pyfunction]
 #[pyo3(text_signature = "()")]
-pub(crate) fn linked_providers()
--> (&'static str, &'static str, &'static str, &'static str, &'static str) {
+pub(crate) fn linked_providers() -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
     let _ = finstack_ai_provider_anthropic::ANTHROPIC_MESSAGES_VERSION;
     (
         OPENAI_PROVIDER,

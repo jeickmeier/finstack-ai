@@ -1195,7 +1195,7 @@ class Agent:
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
             wire_protocol: ``openai_responses``, ``anthropic_messages``,
-                or ``ollama_chat``.
+                ``ollama_chat``, or ``gemini_generate_content``.
             credential_name: Named credential reference, never a secret.
             hard_input_bytes: Required maximum canonical request bytes.
             auth: ``none``, ``bearer``, or ``api_key``. Defaults from

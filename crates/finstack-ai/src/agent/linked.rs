@@ -571,8 +571,8 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
             format!("{}: {}", error.code(), error.message()),
         )
     })?;
-    let mut config = GeminiConfig::try_new(spec.endpoint)
-        .map_err(|error| model_configuration_error(&error))?;
+    let mut config =
+        GeminiConfig::try_new(spec.endpoint).map_err(|error| model_configuration_error(&error))?;
     if let Some(api_key) = spec.api_key {
         config = config.with_authentication(Authentication::ApiKey(
             SecretString::try_new(api_key).map_err(|_| secret_configuration_error())?,

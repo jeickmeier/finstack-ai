@@ -218,9 +218,14 @@ Capabilities: `structured_output: Native`, `reasoning` from the
   `Json(raw)`; `executableCode` / `codeExecutionResult` parts → Opaque
   blocks `…gemini.executable-code` / `…gemini.code-execution-result`.
 - `usageMetadata` (cumulative) → `UsageDelta`; final usage maps
-  `promptTokenCount`/`candidatesTokenCount`/`totalTokenCount` to
-  `Usage` and `thoughtsTokenCount`/`cachedContentTokenCount` to
-  extension counters (zeros suppressed).
+  `promptTokenCount` to input tokens and derives output tokens as
+  `candidatesTokenCount + thoughtsTokenCount`, with total tokens
+  computed as input + output — the wire `totalTokenCount` is
+  deliberately not trusted, since Gemini's `candidatesTokenCount`
+  excludes thoughts and using the wire total would violate the
+  kernel's input + output == total invariant. `thoughtsTokenCount`/
+  `cachedContentTokenCount` are also recorded to extension counters
+  (zeros suppressed).
 - Chunk with `finishReason: STOP|MAX_TOKENS` → assemble
   `Completed(ModelResponse)` with `continuation_state` envelope built
   from the accumulated model-turn contents; `SAFETY`/`RECITATION`/other

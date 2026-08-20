@@ -321,8 +321,11 @@ async fn cancellation_aborts_stream() {
 fn provider(base_url: &str) -> GeminiProvider {
     let model =
         GeminiModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096).expect("model");
-    GeminiProvider::try_new(GeminiConfig::try_new(base_url).expect("config"), vec![model])
-        .expect("provider")
+    GeminiProvider::try_new(
+        GeminiConfig::try_new(base_url).expect("config"),
+        vec![model],
+    )
+    .expect("provider")
 }
 
 fn draft(output: OutputSpec, tools: Arc<[ToolSpec]>) -> ModelRequestDraft {

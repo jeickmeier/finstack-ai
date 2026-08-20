@@ -38,8 +38,9 @@ flattened onto the wire body:
 `generation_config`, `cachedContent`/`cached_content`, `responseSchema`,
 `responseJsonSchema`, and `responseMimeType` are reserved settings keys —
 setting them directly is a `gemini_request_invalid` error.
-`safetySettings` is the one passthrough exception (flattened to the
-top-level request unchanged).
+Any settings key not on the reserved list is passed through to the
+request body top-level unchanged; `safetySettings` is the canonical
+example.
 
 ## Extension usage counters
 
