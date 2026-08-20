@@ -192,6 +192,43 @@ async fn wrong_placement_is_rejected() {
     assert!(matches!(error, AgentInvokeError::InvalidRequest { .. }));
 }
 
+/// Two equal requests racing on the same run id must produce exactly one
+/// accepted run: the attach check and the spawn share one critical section,
+/// so the loser never spawns a duplicate Codex process.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_equal_requests_accept_one_run() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = Arc::new(fake_invoker("hang", dir.path()));
+    let request = codex_request("race me");
+    let run_id = request.locator.operation.run_id;
+    let mut tasks = Vec::new();
+    for _ in 0..4 {
+        let invoker = Arc::clone(&invoker);
+        let request = request.clone();
+        tasks.push(tokio::spawn(async move {
+            invoker
+                .start_or_attach(child_context(), request)
+                .await
+                .expect("accepted")
+        }));
+    }
+    let mut handles = Vec::new();
+    for task in tasks {
+        handles.push(task.await.expect("join"));
+    }
+    for handle in &handles {
+        assert_eq!(handle, handles.first().expect("first"));
+    }
+    // A single accepted run means a single supervised process; cancelling
+    // it settles that one run.
+    invoker
+        .cancel(&handles.first().expect("first").locator)
+        .await
+        .expect("cancelled");
+    let report = wait_until_settled(&invoker, &run_id).await;
+    assert_eq!(report.status, CodexRunStatus::Cancelled);
+}
+
 #[tokio::test]
 async fn cancel_kills_a_hanging_run() {
     let dir = tempfile::tempdir().expect("tempdir");

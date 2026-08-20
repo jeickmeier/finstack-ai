@@ -27,8 +27,9 @@ pub(crate) struct CodexRun {
     request_digest: finstack_ai_kernel::Digest,
     handle: ChildRunHandle,
     state: Arc<Mutex<RunState>>,
-    // Killed by `cancel`; also reaped with the run table entry via
-    // `kill_on_drop`.
+    // Killed by `cancel`. The supervisor task shares this slot and takes
+    // the child out of it once stdout reaches EOF, so `kill_on_drop` only
+    // fires when both references are gone (host shutdown).
     child: ChildSlot,
 }
 
@@ -185,23 +186,6 @@ impl AgentInvoker for CodexChildInvoker {
                 return Err(invalid("codex child locator is missing a route"));
             }
             let run_id = request.locator.operation.run_id;
-            {
-                let guard = runs
-                    .lock()
-                    .map_err(|_| unavailable("codex run table is poisoned"))?;
-                if let Some(existing) = guard.get(&run_id) {
-                    if existing.request_digest == request.request_digest {
-                        return Ok(existing.handle.clone());
-                    }
-                    return Err(AgentInvokeError::Conflict {
-                        existing: existing.request_digest,
-                        submitted: request.request_digest,
-                    });
-                }
-                if guard.len() >= MAX_ACCEPTED {
-                    return Err(unavailable("codex run table is full"));
-                }
-            }
             let prompt = prompt_text(&request.input)?;
             let relation_digest = child_relation_digest(&ctx, &request).map_err(|error| {
                 AgentInvokeError::InvalidRequest {
@@ -212,18 +196,16 @@ impl AgentInvoker for CodexChildInvoker {
                 locator: request.locator.clone(),
                 relation_digest,
             };
-            let (state, slot) = spawn_codex(&config, &prompt)?;
-            let run = CodexRun {
-                request_digest: request.request_digest,
-                handle: handle.clone(),
-                state,
-                child: slot,
-            };
+            // Attach check, spawn, and insert share one critical section.
+            // `spawn_codex` never awaits, so holding the run-table lock
+            // across it keeps the future `Send` and makes a racing equal
+            // request wait rather than spawn a duplicate child that would
+            // then have to be killed (the supervisor task holds a second
+            // strong reference to the child, so dropping the losing
+            // `CodexRun` would not run `kill_on_drop`).
             let mut guard = runs
                 .lock()
                 .map_err(|_| unavailable("codex run table is poisoned"))?;
-            // Re-check under the write lock: a racing equal request keeps
-            // the first insertion (kill_on_drop reaps the duplicate child).
             if let Some(existing) = guard.get(&run_id) {
                 if existing.request_digest == request.request_digest {
                     return Ok(existing.handle.clone());
@@ -233,7 +215,20 @@ impl AgentInvoker for CodexChildInvoker {
                     submitted: request.request_digest,
                 });
             }
-            guard.insert(run_id, run);
+            if guard.len() >= MAX_ACCEPTED {
+                return Err(unavailable("codex run table is full"));
+            }
+            let (state, slot) = spawn_codex(&config, &prompt)?;
+            guard.insert(
+                run_id,
+                CodexRun {
+                    request_digest: request.request_digest,
+                    handle: handle.clone(),
+                    state,
+                    child: slot,
+                },
+            );
+            drop(guard);
             Ok(handle)
         })
     }
