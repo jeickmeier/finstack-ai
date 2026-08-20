@@ -203,6 +203,13 @@ url = "2"
 # via `cargo deny check licenses` before use; fallback is a hand-rolled
 # `scraper` DOM walk if this ever fails the gate.
 htmd = "0.5"
+# Dev-only: the real parser/DOM behind `htmd`, used directly by
+# finstack-ai-tools-fetch's differential depth-guard test (F-4) to build the
+# real DOM and compare its max depth against the heuristic pre-parse guard.
+# Already in the dependency tree (and license-cleared) via `htmd` above; this
+# just exposes the same locked versions for test-only use.
+html5ever = "0.38"
+markup5ever_rcdom = "0.38"
 rustix = { version = "1.1.4", default-features = false, features = ["alloc", "fs", "std"] }
 tempfile = "3.27.0"
 tokio = { version = "=1.51.1", default-features = false, features = ["macros", "rt", "sync", "time"] }

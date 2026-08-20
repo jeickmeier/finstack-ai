@@ -29,6 +29,8 @@ url = { workspace = true }
 
 [dev-dependencies]
 finstack-ai-context-memory = { workspace = true }
+html5ever = { workspace = true }
+markup5ever_rcdom = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 
 [lints]

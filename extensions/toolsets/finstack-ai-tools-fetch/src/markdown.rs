@@ -18,13 +18,20 @@ const MAX_SCAN_DEPTH: usize = 512;
 /// that must not push onto the depth-tracking stack in
 /// [`exceeds_safe_nesting_depth`].
 const VOID_ELEMENTS: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
-    "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
 ];
 
 /// Parse an ASCII tag name (letters, digits, `-`, `:`) from the start of
 /// `bytes`, lowercased. Returns `(name, bytes_consumed)`; `name` is `None`
 /// when `bytes` does not start with a valid name character.
+///
+/// This is a strict subset of html5ever's real tag-name tokenizer state,
+/// which appends essentially any byte (`_`, `.`, `@`, non-ASCII, ...) to the
+/// name rather than stopping. That means this function can stop mid-name on
+/// input html5ever would keep consuming — see [`is_tag_name_terminator`] and
+/// the doc comment on [`exceeds_safe_nesting_depth`] for why a name is only
+/// trusted when the byte immediately after it is a genuine terminator.
 fn parse_tag_name(bytes: &[u8]) -> (Option<String>, usize) {
     let len = bytes
         .iter()
@@ -44,6 +51,28 @@ fn parse_tag_name(bytes: &[u8]) -> (Option<String>, usize) {
 fn find_gt(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&b| b == b'>')
 }
+
+/// Whether `byte` is a genuine HTML tag-name terminator: ASCII whitespace,
+/// `/`, `>`, or NUL. [`parse_tag_name`]'s output is only trustworthy as a
+/// *complete* tag name when the byte right after it is one of these —
+/// otherwise `parse_tag_name` stopped early because it hit a character it
+/// doesn't understand (e.g. `_`, `.`, `@`, non-ASCII), while html5ever's
+/// tokenizer would have kept appending that character to the name. See
+/// [`exceeds_safe_nesting_depth`]'s doc comment for the bypass this closes.
+fn is_tag_name_terminator(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0C | b'/' | b'>' | 0)
+}
+
+/// Placeholder pushed onto the depth-tracking stack in place of a real tag
+/// name when [`parse_tag_name`]'s output could not be trusted (see
+/// [`is_tag_name_terminator`]). Deliberately a byte sequence
+/// [`parse_tag_name`] can never itself produce (it only emits ASCII
+/// alphanumerics, `-`, and `:`), so this marker can never accidentally
+/// string-equal a later trusted, properly-terminated tag name and get
+/// popped by it — an untrusted push must stay on the stack for the rest of
+/// the scan, exactly mirroring "the real element's true identity is unknown,
+/// so nothing we parse later can be assumed to close it."
+const UNTRUSTED_TAG_MARKER: &str = "\u{0}untrusted";
 
 /// Cheap pre-parse guard against pathologically deep HTML (F-4): `htmd`'s
 /// underlying `html5ever` parse produces a DOM that is walked, and dropped,
@@ -78,14 +107,37 @@ fn find_gt(bytes: &[u8]) -> Option<usize> {
 /// up to the SIGABRT. Only [`VOID_ELEMENTS`] are now exempt from the push;
 /// a trailing `/` on anything else no longer matters.
 ///
-/// Because closes only pop on an exact match, and a trailing `/` no longer
-/// suppresses a push except for true void elements, this now genuinely can
-/// only reject more documents than strictly necessary, never fewer: any
-/// push this scan misses would have to come from a tag html5ever also
-/// wouldn't count as an open element, and any close this scan fails to
-/// apply (a mismatched close) only leaves the tracked depth higher than
-/// reality, not lower. Known false-positive sources from that same
-/// conservative bias:
+/// A third, independent bypass was found and fixed the same way:
+/// [`parse_tag_name`] stops at the first byte outside `[A-Za-z0-9\-:]`, but
+/// html5ever's real tag-name tokenizer state appends essentially *any*
+/// other byte (`_`, `.`, `@`, non-ASCII, ...) to the name instead of
+/// stopping there. So a void element name padded with such a byte (e.g.
+/// `<img_x>`) used to truncate to a void match ("img") and get skipped,
+/// while html5ever parsed a *different*, non-void element ("`img_x`") that
+/// stayed open and nested — `"<img_x>".repeat(100_000)` reproduced the same
+/// SIGABRT. The same truncation is a bypass on the closing side too: a
+/// padded close like `</div_x>` used to truncate to "div" and could
+/// wrongly pop a genuinely open `<div>`, when html5ever would treat
+/// `</div_x>` as an unmatched end tag for an unrelated element and ignore
+/// it. The fix ([`is_tag_name_terminator`]) inspects the byte immediately
+/// after a parsed name: the name is trusted only when that byte is a real
+/// HTML tag-name terminator (ASCII whitespace, `/`, `>`, or NUL); anything
+/// else means the name is a truncation of something this scan cannot
+/// identify, and both directions now fail closed on that — an untrusted
+/// opening tag is pushed unconditionally (bypassing the void check, see
+/// [`UNTRUSTED_TAG_MARKER`]) rather than skipped, and an untrusted closing
+/// tag never pops. Only an exact-and-terminated name may match
+/// [`VOID_ELEMENTS`] or pop the stack.
+///
+/// Because closes only pop on an exact-and-terminated match, a trailing `/`
+/// no longer suppresses a push except for true void elements, and an
+/// untrusted name is always pushed rather than trusted either way, this now
+/// genuinely can only reject more documents than strictly necessary, never
+/// fewer: any push this scan misses would have to come from a tag html5ever
+/// also wouldn't count as an open element, and any close this scan fails to
+/// apply (a mismatched, untrusted, or otherwise non-matching close) only
+/// leaves the tracked depth higher than reality, not lower. Known
+/// false-positive sources from that same conservative bias:
 ///   - Implied closes handled by html5ever's tree-construction
 ///     adoption-agency / implied-end-tag rules (e.g. a huge run of sibling
 ///     `<li>`s that HTML treats as auto-closing one another, or misnesting
@@ -95,11 +147,23 @@ fn find_gt(bytes: &[u8]) -> Option<usize> {
 ///     this scan has no namespace awareness and pushes them like any other
 ///     non-void element, so an SVG-heavy document with more than
 ///     [`MAX_SCAN_DEPTH`] such elements will over-count and trip the guard.
+///   - Any tag name this scan cannot fully parse (an untrusted name, per
+///     above) is always pushed, whether or not the real element html5ever
+///     builds is void or otherwise short-lived, so a large run of oddly
+///     punctuated tag-like fragments (attacker-chosen or otherwise) can
+///     trip the guard even if html5ever's real tree stays shallow.
 ///
-/// In both cases a legitimate document at extreme scale could trip this
+/// In every case a legitimate document at extreme scale could trip this
 /// guard and fall back to plain-text delivery even though html5ever would
 /// have handled it without unbounded real nesting. That fallback is inline
 /// text, not an error, so this is an accepted, documented tradeoff.
+///
+/// A differential test (`differential_guard_never_under_trips_against_the_real_parser`,
+/// below) parses an adversarial corpus with the real `html5ever` +
+/// `markup5ever_rcdom` parser and asserts the invariant this whole function
+/// exists to uphold: whenever the real DOM's depth exceeds
+/// [`MAX_SCAN_DEPTH`], this guard trips. It may trip early (over-count); it
+/// must never fail to trip when the real parser would recurse past the cap.
 ///
 /// `MAX_SCAN_DEPTH` (512) is well above any HTML a legitimate document is
 /// likely to nest by hand or by templating, and well below the depth that
@@ -114,13 +178,24 @@ fn exceeds_safe_nesting_depth(html: &str) -> bool {
             continue;
         }
         if bytes.get(i + 1) == Some(&b'/') {
-            // Closing tag: pop only on an exact match with the top of the
-            // stack (see the doc comment above for why an unconditional
-            // decrement is unsound here).
+            // Closing tag: pop only when the parsed name is BOTH an exact
+            // match with the top of the stack AND properly terminated (see
+            // the doc comment above for why an unconditional decrement is
+            // unsound, and for the untrusted-name direction of the third
+            // bypass this terminator check closes). A truncated name (e.g.
+            // `</div_x>` parsing as "div") must never be allowed to pop a
+            // genuinely open "div" -- html5ever would treat `</div_x>` as
+            // an unmatched end tag for an unrelated element and ignore it
+            // entirely, so this scan must too.
             let (name, consumed) = parse_tag_name(&bytes[i + 2..]);
             let after_name = i + 2 + consumed;
-            let tag_end = find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
-            if let Some(name) = name
+            let terminated = bytes
+                .get(after_name)
+                .is_none_or(|&b| is_tag_name_terminator(b));
+            let tag_end =
+                find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
+            if terminated
+                && let Some(name) = name
                 && stack.last() == Some(&name)
             {
                 stack.pop();
@@ -136,16 +211,34 @@ fn exceeds_safe_nesting_depth(html: &str) -> bool {
         // to skip the push: per the HTML5 tree-construction algorithm, a
         // self-closing slash on a non-void, non-foreign (HTML-namespace)
         // element is ignored, and the element stays open exactly like
-        // `<div>` would. Only [`VOID_ELEMENTS`] are exempt from the stack;
-        // see the doc comment above for the second bypass this closed and
-        // the foreign-content (SVG/MathML) residual it accepts.
+        // `<div>` would. Only [`VOID_ELEMENTS`] are exempt from the stack —
+        // and only when the parsed name is properly terminated (see
+        // [`is_tag_name_terminator`]): a truncated name (e.g. `<img_x>`
+        // parsing as "img") must NOT be treated as the void element "img",
+        // because html5ever's real tag name is "img_x", a non-void element
+        // that stays open. An untrusted name is pushed unconditionally
+        // (skipping the void check entirely) using
+        // [`UNTRUSTED_TAG_MARKER`] rather than the truncated string, so it
+        // can never later be matched and popped by an unrelated, correctly
+        // terminated closing tag. See the doc comment above for the second
+        // and third bypasses this closed and the residuals both accept.
         let (name, consumed) = parse_tag_name(&bytes[i + 1..]);
         let after_name = i + 1 + consumed;
-        let tag_end = find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
+        let terminated = bytes
+            .get(after_name)
+            .is_none_or(|&b| is_tag_name_terminator(b));
+        let tag_end =
+            find_gt(&bytes[after_name..]).map_or(bytes.len(), |offset| after_name + offset + 1);
         if let Some(name) = name {
-            let is_void = VOID_ELEMENTS.contains(&name.as_str());
-            if !is_void {
-                stack.push(name);
+            let pushed = if !terminated {
+                Some(UNTRUSTED_TAG_MARKER.to_owned())
+            } else if VOID_ELEMENTS.contains(&name.as_str()) {
+                None
+            } else {
+                Some(name)
+            };
+            if let Some(pushed) = pushed {
+                stack.push(pushed);
                 if stack.len() > MAX_SCAN_DEPTH {
                     return true;
                 }
@@ -344,5 +437,133 @@ mod tests {
             result.is_none(),
             "expected the depth guard to trip on self-closing non-void padding"
         );
+    }
+
+    #[test]
+    fn truncated_void_name_padding_does_not_bypass_the_depth_guard() {
+        // Critical regression: an earlier version of `parse_tag_name` had no
+        // notion of a "terminator", so a void element name padded with a
+        // byte outside `[A-Za-z0-9\-:]` (e.g. `<img_x>`) truncated to a void
+        // match ("img") and was skipped, while html5ever parsed the real,
+        // *different*, non-void element "img_x" that stayed open and
+        // nested. `"<img_x>".repeat(100_000)` reported "not exceeded" from
+        // the old guard while `htmd::HtmlToMarkdown::convert` on the same
+        // input aborted the process (SIGABRT). Easier to trigger than
+        // either prior bypass: one repeated fragment, no padding trick.
+        let html = "<img_x>".repeat(100_000);
+        let result = html_to_markdown(&html, BIG_CAP);
+        assert!(
+            result.is_none(),
+            "expected the depth guard to trip on truncated-void-name padding"
+        );
+    }
+
+    #[test]
+    fn truncated_close_padding_does_not_bypass_the_depth_guard() {
+        // The closing-tag direction of the same bypass: a genuinely open
+        // run of `<div>`s followed by padded closes (`</div_x>`) that
+        // truncate to "div" must NOT be allowed to pop them. html5ever
+        // treats `</div_x>` as an unmatched end tag for an unrelated
+        // element and ignores it, so all the `<div>`s stay open and nested.
+        let opens = "<div>".repeat(1_000);
+        let padded_closes = "</div_x>".repeat(1_000);
+        let html = format!("{opens}{padded_closes}");
+        let result = html_to_markdown(&html, BIG_CAP);
+        assert!(
+            result.is_none(),
+            "expected the depth guard to trip: padded closes must not pop real opens"
+        );
+    }
+
+    // --- Differential test against the real parser -------------------------
+    //
+    // Three bypasses have now slipped through this heuristic guard, each
+    // only found by a reviewer hand-compiling a harness against the real
+    // parser. This brings that harness into the suite permanently: for an
+    // adversarial corpus, assert that whenever the REAL DOM's max depth
+    // exceeds the cap, the guard also trips. The guard may over-trip
+    // (reject a document the real parser would have handled); it must never
+    // under-trip.
+
+    use html5ever::tendril::TendrilSink;
+    use html5ever::{ParseOpts, parse_document};
+    use markup5ever_rcdom::{Handle, NodeData, RcDom};
+
+    /// The real maximum element-nesting depth of `html`, as built by the
+    /// same parser (`html5ever`/`markup5ever_rcdom`) that `htmd` uses
+    /// internally. Walked iteratively (an explicit `Vec` stack, never Rust
+    /// call-stack recursion) so that measuring an adversarial, very-deep
+    /// corpus item in a test never itself risks the exact failure mode this
+    /// guard exists to prevent.
+    fn real_dom_max_depth(html: &str) -> usize {
+        let dom = parse_document(RcDom::default(), ParseOpts::default())
+            .from_utf8()
+            .read_from(&mut html.as_bytes())
+            .expect("html5ever's TendrilSink does not fail on arbitrary UTF-8 input");
+        let mut max_depth = 0usize;
+        let mut stack: Vec<(Handle, usize)> = vec![(dom.document.clone(), 0)];
+        while let Some((node, depth)) = stack.pop() {
+            if matches!(node.data, NodeData::Element { .. }) {
+                max_depth = max_depth.max(depth);
+            }
+            for child in node.children.borrow().iter() {
+                stack.push((child.clone(), depth + 1));
+            }
+        }
+        max_depth
+    }
+
+    #[test]
+    fn differential_guard_never_under_trips_against_the_real_parser() {
+        // N=1000 keeps this fast (the dedicated 100_000-repetition cases
+        // above remain as the slower crash regressions); it's already well
+        // past MAX_SCAN_DEPTH (512) for every case here that should trip.
+        const N: usize = 1_000;
+        let corpus: Vec<(&str, String)> = vec![
+            ("well_formed_div_opens", "<div>".repeat(N)),
+            ("mismatched_close_padding", "<div></span>".repeat(N)),
+            ("self_closing_non_void", "<div/>".repeat(N)),
+            ("truncated_void_underscore", "<img_x>".repeat(N)),
+            ("truncated_void_dot", "<br.x>".repeat(N)),
+            ("truncated_void_at", "<hr@x>".repeat(N)),
+            ("truncated_void_dot_input", "<input.x>".repeat(N)),
+            ("truncated_void_non_ascii", "<img\u{00ef}>".repeat(N)),
+            (
+                "truncated_close_direction",
+                format!("{}{}", "<div>".repeat(N), "</div_x>".repeat(N)),
+            ),
+            ("quoted_gt_in_attribute", "<div title=\"a>b\">".repeat(N)),
+            (
+                "comment_wrapped_fake_tags",
+                "<!-- <div><div><div> -->".repeat(N),
+            ),
+        ];
+
+        for (label, html) in corpus {
+            let real_depth = real_dom_max_depth(&html);
+            if real_depth > super::MAX_SCAN_DEPTH {
+                assert!(
+                    super::exceeds_safe_nesting_depth(&html),
+                    "corpus item {label:?}: real DOM depth {real_depth} exceeds \
+                     MAX_SCAN_DEPTH ({}) but the guard did not trip -- this is a bypass",
+                    super::MAX_SCAN_DEPTH
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn differential_guard_does_not_falsely_trip_on_a_shallow_legitimate_document() {
+        // The flip side of the invariant above, checked directly for one
+        // concrete legitimate case rather than corpus-wide: a real,
+        // ~100-deep document must convert normally, not fall back to
+        // plain text.
+        let html = nested_divs(100);
+        assert!(
+            real_dom_max_depth(&html) < super::MAX_SCAN_DEPTH,
+            "sanity: this corpus item's real depth must stay under the cap"
+        );
+        assert!(!super::exceeds_safe_nesting_depth(&html));
+        assert!(html_to_markdown(&html, BIG_CAP).is_some());
     }
 }

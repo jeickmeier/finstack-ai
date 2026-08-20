@@ -1669,6 +1669,8 @@ dependencies = [
  "finstack-ai-runtime",
  "futures-util",
  "htmd",
+ "html5ever",
+ "markup5ever_rcdom",
  "reqwest",
  "serde",
  "serde_json",

@@ -429,6 +429,65 @@ FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
   `cargo test -p finstack-ai-tools-fetch` (57 tests at this point,
   other agents' work included) and
   `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
+
+  UPDATE 3 (2026-08-20, third review pass): a THIRD independent bypass
+  was found in the same family, compiled and reproduced with a real
+  SIGABRT. `parse_tag_name` stopped consuming at the first byte outside
+  `[A-Za-z0-9\-:]`, but html5ever's real tag-name tokenizer state
+  appends essentially ANY other byte (`_`, `.`, `@`, non-ASCII, ...) to
+  the name rather than stopping. So a void element name padded with
+  such a byte truncated to a void match and was skipped, while
+  html5ever parsed a DIFFERENT, non-void element that stayed open and
+  nested. Reviewer verified `"<img_x>".repeat(1000)` -> guard `false`,
+  real DOM depth 1002; same shape confirmed for `<br.x>`, `<hr@x>`,
+  `<input.x>`, and a non-ASCII-suffixed void name; and
+  `htmd::HtmlToMarkdown::convert(&"<img_x>".repeat(100_000))` aborted
+  with SIGABRT (exit 134). The closing-tag side has the mirror bypass:
+  a padded close like `</div_x>` truncated to "div" and could wrongly
+  pop a genuinely open `<div>`, when html5ever treats `</div_x>` as an
+  unmatched end tag for an unrelated element and ignores it.
+  Fix (this pass, terminator rule, applied in both directions): after
+  parsing a name, inspect the byte immediately following it
+  (`is_tag_name_terminator`). A name is trusted only when that byte is
+  a real HTML tag-name terminator: ASCII whitespace, `/`, `>`, or NUL.
+  Otherwise the parsed name is a truncation of something else, and both
+  directions now fail closed on that: an opening tag with an untrusted
+  name does NOT get the void skip and is pushed unconditionally (using
+  a marker string, `UNTRUSTED_TAG_MARKER`, that `parse_tag_name` can
+  never itself produce, so it can never later be matched and popped by
+  an unrelated correctly-terminated close); a closing tag with an
+  untrusted name never pops. Only an exact-and-terminated name may
+  match `VOID_ELEMENTS` or pop the stack. Doc comment's residual list
+  updated: untrusted-name over-counting (a large run of oddly
+  punctuated tag-like fragments can trip the guard even if html5ever's
+  real tree stays shallow) now joins the implied-close/`<li>` and
+  SVG-self-closing residuals already on record.
+  Durable fix, not just another instance patch: three bypasses in this
+  guard have now each needed a reviewer to hand-compile a differential
+  harness against the real parser to catch. That harness is now in the
+  suite permanently as
+  `differential_guard_never_under_trips_against_the_real_parser`
+  (markdown.rs): `html5ever` and `markup5ever_rcdom` were added as
+  dev-dependencies of finstack-ai-tools-fetch (already in the
+  dependency tree, and license-cleared, via `htmd`; `cargo deny check
+  licenses` passes with them exposed directly) and a helper
+  (`real_dom_max_depth`) builds the real DOM with them and measures its
+  maximum depth via an iterative (non-recursive) walk. The test asserts
+  over an adversarial corpus (well-formed deep `<div>`s, mismatched-close
+  padding, self-closing non-void tags, truncated void names via `_`/`./`@`
+  suffixes and a non-ASCII suffix, the closing-tag-direction truncation,
+  a quoted `>` inside an attribute value, and comment-wrapped fake tags)
+  that whenever the real DOM's depth exceeds `MAX_SCAN_DEPTH`, the guard
+  trips; a companion test
+  (`differential_guard_does_not_falsely_trip_on_a_shallow_legitimate_document`)
+  checks the flip side for one concrete legitimate ~100-deep document.
+  Plus two direct regression tests for this bypass:
+  `truncated_void_name_padding_does_not_bypass_the_depth_guard`
+  (`"<img_x>".repeat(100_000)`) and
+  `truncated_close_padding_does_not_bypass_the_depth_guard` (the
+  closing-tag direction). All prior depth-guard tests still pass.
+  `cargo test -p finstack-ai-tools-fetch` (61 tests at this point) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
   Original finding text retained below for the record.
 
   --- original finding ---
