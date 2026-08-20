@@ -613,18 +613,6 @@ impl GeminiModelConfig {
         self.input_files
     }
 
-    pub(crate) const fn google_search(&self) -> bool {
-        self.google_search
-    }
-
-    pub(crate) const fn code_execution(&self) -> bool {
-        self.code_execution
-    }
-
-    pub(crate) const fn cached_content(&self) -> bool {
-        self.cached_content
-    }
-
     pub(crate) fn estimator_ref() -> TokenEstimatorRef {
         TokenEstimatorRef {
             id: Arc::from("gemini.utf8-byte-upper-bound"),

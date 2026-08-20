@@ -70,7 +70,7 @@ pub use provider_util::{
     MediaResolver, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
     OpenAiResponsesAssembly, ResolveDraftMediaError, ResolvedMedia, SECRET_MAX_BYTES,
     SecretRejected, SecretString, SseEvent, SseEventParser, SseParseError, StreamNormError,
-    StreamNormKind, resolve_draft_media, secret_is_valid,
+    StreamNormKind, resolve_draft_media, secret_is_valid, thinking_level_budget,
 };
 pub use request::{
     ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft,

@@ -202,7 +202,7 @@ pub use model::{
     SseEvent, SseEventParser, SseParseError, StreamNormError, StreamNormKind,
     StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
     ToolDeferralSupport, ToolSpec, UsageDelta, model_resume_action, resolve_draft_media,
-    resolve_model_context_profile, secret_is_valid,
+    resolve_model_context_profile, secret_is_valid, thinking_level_budget,
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use model::{MODEL_PROFILE_INVALID, map_model_reconcile_result, model_retry_allowed};

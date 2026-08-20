@@ -3530,6 +3530,7 @@ pub fn finstack_ai_runtime::resolve_model_context_profile(finstack_ai_runtime::M
 pub fn finstack_ai_runtime::secret_is_valid(&str) -> bool
 pub async fn finstack_ai_runtime::stage_required_artifact(&dyn finstack_ai_runtime::ArtifactStore, finstack_ai_runtime::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::ArtifactMetadata) -> core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::ArtifactError>
 pub fn finstack_ai_runtime::support_bundle_versions(&str, &[&str]) -> serde_json::value::Value
+pub fn finstack_ai_runtime::thinking_level_budget(&str) -> core::option::Option<u64>
 pub fn finstack_ai_runtime::tool_resume_action(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId) -> finstack_ai_runtime::ToolResumeAction
 pub fn finstack_ai_runtime::validate_compaction_result(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::BeforeModelInput, &finstack_ai_runtime::CompactionResult) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>
 pub fn finstack_ai_runtime::validate_object_metadata(&finstack_ai_runtime::ObjectMetadata) -> core::result::Result<(), finstack_ai_runtime::ObjectError>

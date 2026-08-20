@@ -183,9 +183,12 @@ Capabilities: `structured_output: Native`, `reasoning` from the
 - Tools: each `ToolSpec` → one entry in a single
   `{"functionDeclarations":[…]}` tool; native tools append
   `{"googleSearch":{}}` / `{"codeExecution":{}}` objects to the same
-  `tools` array. No client-side compatibility matrix: if a model
-  rejects the combination, the HTTP error propagates as
-  `gemini_http_error`.
+  `tools` array. Explicit `gemini.*` settings are honored without
+  model-flag gating (the linked-surface convention shared with the
+  Anthropic leaf) — the per-model flags drive capability advertising
+  and the thinking default, never a veto. No client-side compatibility
+  matrix: if a model rejects the combination, the HTTP error propagates
+  as `gemini_http_error`.
 - `generationConfig.maxOutputTokens =
   draft.limits.max_output_tokens.min(model.max_output_tokens)`.
 - Structured output: `OutputSpec::JsonSchema` →
@@ -193,10 +196,12 @@ Capabilities: `structured_output: Native`, `reasoning` from the
   `responseJsonSchema: <schema>`; capability `Native`; the
   `finstack.internal.submit_final_output` tool must NOT be present
   (mirror of the OpenAI leaf's rule).
-- Continuation replay (mirror `openai/src/request.rs::map_input`):
-  parse the envelope, reject provider/version mismatch, replay
-  `replay_contents` verbatim (signatures intact), then append only
-  messages after the last assistant message. Outbound
+- Continuation replay: parse the envelope, reject provider/version
+  mismatch, and splice `replay_contents` verbatim (signatures intact)
+  over ONLY the assistant turn it replays — the last one. All earlier
+  and later conversation turns still map from the kernel transcript:
+  `generateContent` is stateless, so dropping pre-assistant user turns
+  would erase the request the model is answering. Outbound
   `ContentBlock::Opaque` is dropped (all leaves do this — replay comes
   from continuation state, not from content blocks).
 - Media: image/audio/file blocks gated per-model flags;

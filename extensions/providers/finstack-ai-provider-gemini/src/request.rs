@@ -10,6 +10,7 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     GEMINI_CONTINUATION_PROVIDER, ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec,
+    thinking_level_budget,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -140,8 +141,8 @@ impl GenerateContentRequest {
             }
         }
         let thinking_config = take_thinking(&mut settings, model, max_output_tokens)?;
-        let cached_content = take_cached_content(&mut settings, model)?;
-        let native_tools = take_native_tools(&mut settings, model)?;
+        let cached_content = take_cached_content(&mut settings)?;
+        let native_tools = take_native_tools(&mut settings)?;
 
         let (declarations, response_json_schema) = map_tools(&draft.tools, &draft.output)?;
         let mut tools = Vec::with_capacity(native_tools.len().saturating_add(1));
@@ -192,21 +193,16 @@ fn take_thinking(
 ) -> Result<Option<ThinkingConfig>, ModelError> {
     let explicit = settings.remove("gemini.thinking");
     let level = settings.remove("thinking_level");
+    // Explicit settings are honored regardless of the model-config flag (the
+    // linked-surface convention shared with the Anthropic leaf); the flag only
+    // drives the default-on path and capability advertising.
     let budget = if let Some(value) = explicit {
-        if !model.thinking() {
-            return Err(request_error("model is not configured for thinking"));
-        }
         thinking_budget(&value)?
     } else if let Some(level) = level {
-        if !model.thinking() {
-            return Err(request_error("model is not configured for thinking"));
-        }
-        match level.as_str() {
-            Some("low") => 1_024,
-            Some("medium") => 4_096,
-            Some("high") => 8_192,
-            _ => return Err(request_error("thinking_level is not an allowlisted value")),
-        }
+        level
+            .as_str()
+            .and_then(thinking_level_budget)
+            .ok_or_else(|| request_error("thinking_level is not an allowlisted value"))?
     } else if model.thinking() {
         model.thinking_budget_tokens()
     } else {
@@ -231,7 +227,6 @@ fn thinking_budget(value: &Value) -> Result<u64, ModelError> {
 
 fn take_cached_content(
     settings: &mut BTreeMap<String, Value>,
-    model: &GeminiModelConfig,
 ) -> Result<Option<String>, ModelError> {
     let Some(value) = settings.remove("gemini.cached_content") else {
         return Ok(None);
@@ -239,27 +234,17 @@ fn take_cached_content(
     let Value::String(name) = value else {
         return Err(request_error("gemini.cached_content must be a string"));
     };
-    if !model.cached_content() {
-        return Err(request_error("model is not configured for cached content"));
-    }
     Ok(Some(name))
 }
 
-fn take_native_tools(
-    settings: &mut BTreeMap<String, Value>,
-    model: &GeminiModelConfig,
-) -> Result<Vec<Value>, ModelError> {
+// Explicit native-tool settings are honored without model-flag gating; the
+// flags exist to advertise capabilities, not to veto host settings.
+fn take_native_tools(settings: &mut BTreeMap<String, Value>) -> Result<Vec<Value>, ModelError> {
     let mut tools = Vec::new();
     if let Some(config) = take_native_tool(settings, "gemini.google_search")? {
-        if !model.google_search() {
-            return Err(request_error("model is not configured for Google Search"));
-        }
         tools.push(json!({ "googleSearch": config }));
     }
     if let Some(config) = take_native_tool(settings, "gemini.code_execution")? {
-        if !model.code_execution() {
-            return Err(request_error("model is not configured for code execution"));
-        }
         tools.push(json!({ "codeExecution": config }));
     }
     Ok(tools)
@@ -352,24 +337,39 @@ fn map_messages(
     };
 
     let identities = call_identities(messages);
-    let (mut contents, tail_start) = match continuation {
-        Some(state) => {
-            let envelope = parse_continuation(state)?;
-            let tail_start = messages
-                .iter()
-                .rposition(|message| message.role() == MessageRole::Assistant)
-                .map_or(prefix_len, |index| index.saturating_add(1));
-            (envelope.replay_contents, tail_start)
-        }
-        None => (Vec::new(), prefix_len),
+    let mut contents = Vec::new();
+    // On continuation, the envelope splices over ONLY the assistant turn it
+    // replays (the last one). Everything before and after it still maps from
+    // the kernel transcript: `generateContent` is stateless, so dropping the
+    // earlier user turns would erase the request the model is answering.
+    let replaced = match continuation {
+        Some(_) => messages
+            .iter()
+            .rposition(|message| message.role() == MessageRole::Assistant),
+        None => None,
     };
-    for message in &messages[tail_start..] {
+    for (index, message) in messages.iter().enumerate().skip(prefix_len) {
+        if replaced == Some(index) {
+            if let Some(state) = continuation {
+                contents.extend(parse_continuation(state)?.replay_contents);
+            }
+            continue;
+        }
         contents.extend(map_conversation_message(
             message,
             &identities,
             resolved,
             model,
         )?);
+    }
+    if let Some(state) = continuation
+        && replaced.is_none()
+    {
+        // No assistant turn to replace (deferred/recovery edge): replay first,
+        // then the mapped conversation.
+        let mut spliced = parse_continuation(state)?.replay_contents;
+        spliced.append(&mut contents);
+        contents = spliced;
     }
     Ok((system_instruction, contents))
 }
@@ -744,11 +744,14 @@ mod tests {
     }
 
     #[test]
-    fn google_search_rejected_when_model_flag_off() {
+    fn google_search_setting_is_honored_without_the_model_flag() {
+        // Explicit settings win over the capability-advertising flag, matching
+        // the Anthropic leaf's settings convention.
         let draft = draft(br#"{"gemini.google_search":true}"#);
-        let error = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
-            .expect_err("google search must require the model flag");
-        assert_eq!(error.code(), GEMINI_REQUEST_INVALID);
+        let request = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
+            .expect("explicit setting must be honored");
+        let value = body(&request);
+        assert_eq!(value["tools"][0]["googleSearch"], serde_json::json!({}));
     }
 
     #[test]
@@ -764,9 +767,11 @@ mod tests {
         let value = body(&request);
         assert_eq!(value["tools"][0]["codeExecution"], serde_json::json!({}));
 
-        let error = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
-            .expect_err("code execution must require the model flag");
-        assert_eq!(error.code(), GEMINI_REQUEST_INVALID);
+        // The flag is capability advertising, not a veto on explicit settings.
+        let request = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
+            .expect("explicit setting must be honored without the flag");
+        let value = body(&request);
+        assert_eq!(value["tools"][0]["codeExecution"], serde_json::json!({}));
     }
 
     #[test]
@@ -826,10 +831,14 @@ mod tests {
             1_024
         );
 
-        // Thinking off on the model plus an explicit setting is an error.
-        let error = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
-            .expect_err("thinking must require the model flag");
-        assert_eq!(error.code(), GEMINI_REQUEST_INVALID);
+        // Thinking off on the model still honors an explicit setting.
+        let request = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
+            .expect("explicit thinking_level must be honored without the flag");
+        let value = body(&request);
+        assert_eq!(
+            value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            4_096
+        );
 
         // A budget at or above maxOutputTokens is an error.
         let mut oversized = draft.clone();
@@ -911,9 +920,11 @@ mod tests {
         assert_eq!(value["cachedContent"], "cachedContents/abc");
         assert!(value.get("gemini.cached_content").is_none());
 
-        let error = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
-            .expect_err("cached content must require the model flag");
-        assert_eq!(error.code(), GEMINI_REQUEST_INVALID);
+        // The flag is capability advertising, not a veto on explicit settings.
+        let request = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
+            .expect("explicit setting must be honored without the flag");
+        let value = body(&request);
+        assert_eq!(value["cachedContent"], "cachedContents/abc");
     }
 
     #[test]
@@ -945,13 +956,18 @@ mod tests {
         let contents = value["contents"].as_array().expect("contents");
         assert_eq!(
             contents.len(),
-            2,
-            "only messages after the last assistant message are appended"
+            3,
+            "the replay splices over only the assistant turn it replaces"
         );
-        assert_eq!(contents[0]["role"], "model");
-        assert_eq!(contents[0]["parts"][0]["thoughtSignature"], SIGNATURE);
+        assert_eq!(contents[0]["role"], "user");
         assert_eq!(
-            contents[1]["parts"][0]["functionResponse"]["name"],
+            contents[0]["parts"][0]["text"], "hello",
+            "earlier user turns must still reach the stateless wire"
+        );
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(contents[1]["parts"][0]["thoughtSignature"], SIGNATURE);
+        assert_eq!(
+            contents[2]["parts"][0]["functionResponse"]["name"],
             "lookup"
         );
         assert_eq!(value["systemInstruction"]["parts"][0]["text"], "Be brief.");

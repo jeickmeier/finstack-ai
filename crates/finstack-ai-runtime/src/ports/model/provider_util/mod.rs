@@ -27,6 +27,21 @@ pub use openai_responses::OpenAiResponsesAssembly;
 pub use secret::{SECRET_MAX_BYTES, SecretRejected, SecretString, secret_is_valid};
 pub use sse::{SseEvent, SseEventParser, SseParseError};
 
+/// Budget tiers for the portable `thinking_level` setting.
+///
+/// Every leaf that honors `thinking_level` maps `low`/`medium`/`high` through
+/// this one table so the setting means the same token budget on every
+/// provider; returns `None` for values outside the allowlist.
+#[must_use]
+pub fn thinking_level_budget(level: &str) -> Option<u64> {
+    match level {
+        "low" => Some(1_024),
+        "medium" => Some(4_096),
+        "high" => Some(8_192),
+        _ => None,
+    }
+}
+
 /// Kind of a shared stream-normalization failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamNormKind {

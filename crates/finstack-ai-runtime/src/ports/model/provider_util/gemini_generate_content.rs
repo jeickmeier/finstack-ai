@@ -93,7 +93,9 @@ struct WireUsage {
 struct ToolAssembly {
     call_id: Option<String>,
     name: String,
-    arguments: String,
+    // `Arc<str>` because Gemini delivers complete arguments in one part; the
+    // delta and the terminal share one buffer instead of cloning the JSON.
+    arguments: Arc<str>,
 }
 
 /// Incremental Gemini `generateContent` assembler.
@@ -171,7 +173,7 @@ impl GeminiGenerateContentAssembly {
         };
         let mut items = Vec::new();
         if let Some(content) = candidate.content {
-            for part in &content.parts {
+            for part in content.parts {
                 items.extend(self.consume_part(part)?);
             }
         }
@@ -218,40 +220,44 @@ impl GeminiGenerateContentAssembly {
         }
     }
 
-    fn consume_part(&mut self, part: &Value) -> Result<Vec<ModelStreamItem>, StreamNormError> {
-        self.replay_parts.push(part.clone());
-        if let Some(call) = part.get("functionCall") {
-            return self.consume_function_call(call).map(|item| vec![item]);
-        }
-        if let Some(code) = part.get("executableCode") {
+    fn consume_part(&mut self, part: Value) -> Result<Vec<ModelStreamItem>, StreamNormError> {
+        let items = if let Some(call) = part.get("functionCall") {
+            vec![self.consume_function_call(call)?]
+        } else if let Some(code) = part.get("executableCode") {
             self.opaque
                 .push((GEMINI_EXECUTABLE_CODE_MEDIA_TYPE, code.clone()));
-            return Ok(Vec::new());
-        }
-        if let Some(result) = part.get("codeExecutionResult") {
+            Vec::new()
+        } else if let Some(result) = part.get("codeExecutionResult") {
             self.opaque
                 .push((GEMINI_CODE_RESULT_MEDIA_TYPE, result.clone()));
-            return Ok(Vec::new());
-        }
-        let Some(text) = part.get("text").and_then(Value::as_str) else {
-            return Ok(Vec::new());
-        };
-        if text.is_empty() {
-            return Ok(Vec::new());
-        }
-        if part.get("thought").and_then(Value::as_bool) == Some(true) {
-            return Ok(vec![ModelStreamItem::ReasoningDelta(ReasoningDelta {
-                text: Arc::from(text),
-            })]);
-        }
-        self.text.push_str(text);
-        if self.structured {
-            Ok(Vec::new())
+            Vec::new()
+        } else if let Some(text) = part
+            .get("text")
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+        {
+            if part.get("thought").and_then(Value::as_bool) == Some(true) {
+                vec![ModelStreamItem::ReasoningDelta(ReasoningDelta {
+                    text: Arc::from(text),
+                })]
+            } else {
+                self.text.push_str(text);
+                if self.structured {
+                    Vec::new()
+                } else {
+                    vec![ModelStreamItem::TextDelta(TextDelta {
+                        text: Arc::from(text),
+                    })]
+                }
+            }
         } else {
-            Ok(vec![ModelStreamItem::TextDelta(TextDelta {
-                text: Arc::from(text),
-            })])
-        }
+            Vec::new()
+        };
+        // The raw part is moved (not cloned) into the replay accumulator once
+        // field extraction is done; an error above fails the whole stream, so
+        // the skipped push can never reach a continuation envelope.
+        self.replay_parts.push(part);
+        Ok(items)
     }
 
     fn consume_function_call(&mut self, call: &Value) -> Result<ModelStreamItem, StreamNormError> {
@@ -265,22 +271,24 @@ impl GeminiGenerateContentAssembly {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .map(str::to_owned);
-        let arguments = match call.get("args") {
-            None | Some(Value::Null) => "{}".to_owned(),
-            Some(value) => serde_json::to_string(value)
-                .map_err(|_| StreamNormError::response("tool-call arguments are invalid JSON"))?,
-        };
+        let arguments: Arc<str> =
+            match call.get("args") {
+                None | Some(Value::Null) => Arc::from("{}"),
+                Some(value) => Arc::from(serde_json::to_string(value).map_err(|_| {
+                    StreamNormError::response("tool-call arguments are invalid JSON")
+                })?),
+            };
         let index = u32::try_from(self.tools.len())
             .map_err(|_| StreamNormError::response("tool-call index overflowed"))?;
         self.tools.push(ToolAssembly {
             call_id: call_id.clone(),
             name: name.to_owned(),
-            arguments: arguments.clone(),
+            arguments: Arc::clone(&arguments),
         });
         Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
             index,
             name: Some(Arc::from(name)),
-            arguments_delta: Arc::from(arguments.as_str()),
+            arguments_delta: arguments,
             provider_call_id: call_id.as_deref().map(Arc::from),
         }))
     }
