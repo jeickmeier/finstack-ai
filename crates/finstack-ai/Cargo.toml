@@ -21,6 +21,7 @@ native-tokio = [
     "dep:finstack-ai-provider-openai",
     "dep:finstack-ai-provider-openrouter",
     "dep:finstack-ai-provider-anthropic",
+    "dep:finstack-ai-provider-gemini",
     "dep:finstack-ai-provider-ollama",
     "dep:finstack-ai-remote-child",
     "dep:finstack-ai-sandbox-e2b",
@@ -36,6 +37,7 @@ finstack-ai-runtime = { workspace = true, default-features = false }
 finstack-ai-provider-openai = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-provider-openrouter = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-provider-anthropic = { workspace = true, optional = true, features = ["vendored-tls"] }
+finstack-ai-provider-gemini = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-provider-ollama = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-remote-child = { workspace = true, optional = true }
 finstack-ai-sandbox-e2b = { workspace = true, optional = true, features = ["vendored-tls"] }
