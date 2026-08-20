@@ -3,19 +3,20 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use finstack_ai_kernel::RunPhase;
+use finstack_ai_kernel::{EffectId, RunPhase};
 use finstack_ai_runtime::{CommitCoordinator, ExternalClock, JournalStore, Model};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_local::{
     CronFire, CronSchedule, CronScheduleStore, IntervalSchedule, MemoryCronStore,
 };
 use finstack_ai_workflow_worker::{
-    FireStore, InboxStore, MemoryWorkerStore, PortsFactory, RunStarter, StartedRun, WakeIndexStore,
-    WorkerBuilder, WorkerError, park,
+    FireStore, InboxKind, InboxRow, InboxStore, MemoryWorkerStore, PortsFactory, RunStarter,
+    StartedRun, WakeIndexStore, WakeReason, WorkerBuilder, WorkerError, park,
 };
 
 use crate::helpers::{
-    completed_plan, id, memory_store, park_on_retry_timer, profile, retryable_failure, timestamp,
+    completed_plan, completion_command, deferring_model, id, memory_store, park_on_deferred_effect,
+    park_on_retry_timer, profile, retryable_failure, timestamp,
 };
 
 struct BindPorts {
@@ -221,4 +222,65 @@ async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
     );
     assert_eq!(rows[0].attempts, 0);
     assert_eq!(rows[0].leased_by, None);
+}
+
+/// A non-timer row is claimable only while its inbox entry exists, so the
+/// entry must outlive a resume that submitted the response but could not
+/// park the run — otherwise the row is skipped forever by the claim gate.
+#[tokio::test]
+async fn tick_keeps_the_inbox_entry_when_the_resume_cannot_park() {
+    let journal = memory_store();
+    let model = deferring_model();
+    let clock = ExternalClock::new(timestamp(2_000));
+    let mut session = Box::pin(park_on_deferred_effect(&journal, &model, &clock, 740)).await;
+    let store = Arc::new(MemoryWorkerStore::new());
+    park(&mut session, store.as_ref(), "research").expect("park");
+    drop(session);
+
+    let row = store.load_tenant("tenant-a").expect("rows").remove(0);
+    assert_eq!(row.reason, WakeReason::Deferred);
+    let effect_id = EffectId::parse(row.pending_id.as_ref()).expect("effect id");
+    let payload = serde_json::to_vec(&completion_command(effect_id)).expect("payload");
+    store
+        .insert(&InboxRow {
+            tenant_scope: Arc::clone(&row.tenant_scope),
+            session_id: row.session_id,
+            pending_id: Arc::clone(&row.pending_id),
+            kind: InboxKind::External,
+            payload: Arc::from(payload.as_slice()),
+            received_at: timestamp(2_000),
+        })
+        .expect("inbox");
+
+    let worker = WorkerBuilder::new(
+        journal,
+        Arc::new(MemoryCronStore::new()),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn FireStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .clock(clock.clone())
+    .drive_timeout(Duration::from_millis(500))
+    .register_ports("research", Arc::new(BindPorts { model }))
+    .build();
+
+    // The completion lands, clearing the deferred wait, but the woken run is
+    // then mid-flight in the stage loop with no wait this worker can park.
+    let first = Box::pin(worker.tick()).await.expect("first tick");
+    assert_eq!(first.failures, 1);
+    assert_eq!(first.sessions_resumed, 0);
+    assert_eq!(
+        store.load_all().expect("inbox").len(),
+        1,
+        "an unparked resume keeps its response for redelivery"
+    );
+
+    // Past the backoff, the row is still claimable — the gate that skips a
+    // non-timer row without an inbox entry must not have swallowed it.
+    clock.jump(2_000).expect("past backoff");
+    let second = Box::pin(worker.tick()).await.expect("second tick");
+    assert_eq!(second.failures, 1, "the row is retried, not skipped");
+    let rows = store.load_tenant("tenant-a").expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].attempts, 2, "a second attempt was recorded");
 }

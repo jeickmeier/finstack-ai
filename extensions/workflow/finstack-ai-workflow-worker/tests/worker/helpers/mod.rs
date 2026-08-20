@@ -6,24 +6,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration as StdDuration;
 
 use finstack_ai_kernel::{
-    AcceptRun, AllocatedIds, BudgetPropagation, CancellationPropagation, ContentBlock,
-    DeadlinePropagation, Digest, Duration as KernelDuration, EffectId, EffectOutputContract,
-    EffectOutputKind, ErrorCategory, Id, IdTag, KernelInput, KernelState, Message, MessageRole,
-    Metadata, OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds,
-    RawJson, RecordBody, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety,
-    RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Stage,
-    StageCursor, TextBlock, Timestamp, TransitionEnv, Usage,
+    AcceptRun, AllocatedIds, AuthorizationEvidence, BudgetPropagation, CancellationPropagation,
+    ComponentId, ContentBlock, DeadlinePropagation, Digest, Duration as KernelDuration, EffectId,
+    EffectOutputContract, EffectOutputKind, ErrorCategory, ExternalEffectCompletion,
+    ExternalEffectCompletionCommand, ExternalEffectOutcome, ExternalHandleRef, Id, IdTag,
+    KernelInput, KernelState, Message, MessageRole, Metadata, OperationLocator, OutputSpec,
+    PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy, RecordBody,
+    ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted, RunLimits,
+    RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Stage, StageCursor, TextBlock,
+    Timestamp, TransitionEnv, Usage,
 };
 use finstack_ai_runtime::{
     Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError, JournalStore,
-    LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelError, ModelName,
-    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem,
-    ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolSpec,
-    WorkflowSession, resolve_model_context_profile,
+    LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelDeferral, ModelError,
+    ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
+    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
+    RunTaskOwner, SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
+    ToolSpec, WorkflowSession, WorkflowWait, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
-use finstack_ai_test::{ScriptedModelAction, ScriptedModelPlan};
+use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_local::{LocalWorkflowDriver, MemoryCronStore};
 
 pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {
@@ -474,6 +476,82 @@ pub(crate) async fn attach_session(
         .await
         .expect("attach")
         .with_ports(model, locked_profile(), None)
+}
+
+/// Scripted model whose single request defers to an external handle.
+pub(crate) fn deferring_model() -> Arc<dyn Model> {
+    Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![ScriptedModelPlan {
+            actions: vec![ScriptedModelAction::Emit(Ok(ModelStreamItem::Deferred(
+                ModelDeferral {
+                    handle: ExternalHandleRef::try_new(
+                        ComponentId::parse("finstack.model.scripted").expect("component"),
+                        "job-1",
+                        RawJson::parse(b"{}").expect("metadata"),
+                    )
+                    .expect("handle"),
+                    reconciliation: ReconciliationPolicy::CallbackOnly,
+                    next_poll_at: None,
+                    expires_at: None,
+                },
+            )))],
+        }],
+    ))
+}
+
+/// Drive a fresh run onto a deferred external effect and hand back the
+/// attached session, parked but not yet indexed.
+///
+/// Mirrors `deferred_survives_worker_restart` in `finstack-ai-workflow-local`.
+pub(crate) async fn park_on_deferred_effect(
+    store: &Arc<MemoryJournalStore>,
+    model: &Arc<dyn Model>,
+    clock: &ExternalClock,
+    seed: u64,
+) -> WorkflowSession {
+    let owner = spawn_model_owner(
+        CommitCoordinator::new(store.clone()),
+        Arc::clone(model),
+        clock.clone(),
+        seed,
+    )
+    .await;
+    drive_to_active_model_request(&owner.handle()).await;
+    wait_state(store, |state| {
+        state.phase == Some(RunPhase::AwaitingExternal)
+    })
+    .await;
+    drop(owner);
+
+    let mut session =
+        attach_session(Arc::clone(store), Arc::clone(model), clock.clone(), seed).await;
+    let wait = session.drive_until_wait().await.expect("deferred");
+    assert!(
+        matches!(wait, WorkflowWait::DeferredEffect { .. }),
+        "expected a deferred wait, got {wait:?}"
+    );
+    session
+}
+
+/// Completion command settling `effect_id` on the fixture locator.
+pub(crate) fn completion_command(effect_id: EffectId) -> ExternalEffectCompletionCommand {
+    ExternalEffectCompletionCommand::try_new(
+        locator(),
+        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+        AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth"),
+        ExternalEffectCompletion::try_new(
+            effect_id,
+            "ext-1",
+            ExternalEffectOutcome::Completed {
+                output: RawJson::parse(r#"{"ok":true}"#).expect("output"),
+                usage: None,
+                artifacts: Arc::from([]),
+            },
+        )
+        .expect("completion"),
+    )
+    .expect("command")
 }
 
 /// Drive a fresh run onto a retry timer and hand back the attached session.

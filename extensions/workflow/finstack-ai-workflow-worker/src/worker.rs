@@ -415,6 +415,17 @@ impl WorkflowWorker {
         let wait = self.drive_past_wait(&mut session, row, now).await?;
         let terminal = matches!(wait, WorkflowWait::Terminal { .. });
         park(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
+        // Only now is the response fully consumed. Dropping it earlier would
+        // strand the row: a non-timer row is claimed only while its inbox
+        // entry exists, so a resume that failed after the delete could never
+        // be retried.
+        if let Some(entry) = inbox_entry {
+            self.inbox.delete(
+                entry.tenant_scope.as_ref(),
+                entry.session_id,
+                entry.pending_id.as_ref(),
+            )?;
+        }
         Ok(terminal)
     }
 
@@ -453,8 +464,14 @@ impl WorkflowWorker {
         .map_err(|_| WorkerError::Driver(WorkflowDriverError::DriveTimeout))?
     }
 
-    /// Submit one buffered response through the session ingress and drop the
-    /// inbox row once it is accepted.
+    /// Submit one buffered response through the session ingress.
+    ///
+    /// The inbox row survives this call; [`Self::resume_row`] deletes it only
+    /// once the resume it unblocked has parked. Re-submitting an already
+    /// settled response is safe: the ingress answers a duplicate with
+    /// `ExternalRouteOutcome::Idempotent`, and a conflicting one with a
+    /// durable `Rejected` — neither is an error, so redelivery cannot push
+    /// the row into permanent backoff.
     async fn submit_response(
         &self,
         session: &WorkflowSession,
@@ -481,11 +498,7 @@ impl WorkflowWorker {
                 Box::pin(session.complete_external(command, now)).await?;
             }
         }
-        self.inbox.delete(
-            entry.tenant_scope.as_ref(),
-            entry.session_id,
-            entry.pending_id.as_ref(),
-        )
+        Ok(())
     }
 
     /// Record a failed resume with exponential backoff.
