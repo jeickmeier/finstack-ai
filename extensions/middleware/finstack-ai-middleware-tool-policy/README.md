@@ -36,7 +36,7 @@ Four independent rules can be combined:
 | Stage | Behavior |
 | --- | --- |
 | `before_model` | All four rules apply. Narrows the tool universe from `input.request.tools`. Returns `Continue` when nothing narrows, `FilterTools(retain)` when a rule narrows, or `Fail` when a jailbreak trigger with `JailbreakAction::Fail` matches. |
-| `before_tool_batch` | Only role allowlist and child-depth gate apply (if configured); write budget and jailbreak scan do not run. Must return a complete allow set (derived from the role config alone, even if a depth gate subtracts from it). Returns `Continue` if no role allowlist is configured, otherwise `FilterTools(retain)`. Malformed payload is a hard `MiddlewareError`, not a stage outcome. |
+| `before_tool_batch` | Only role allowlist and child-depth gate apply (if configured); write budget and jailbreak scan do not run. Must return a complete allow set (derived from the role config alone, even if a depth gate subtracts from it). Returns `Continue` if no role allowlist is configured, otherwise `FilterTools(retain)`. Malformed payload is a hard `MiddlewareError`, not a stage outcome. Write-budget and jailbreak restrictions are **not** re-checked at this stage: a write-class tool call that a role allows passes this backstop even after the write budget was exhausted or a jailbreak pattern matched at `before_model`, since those two rules only ever narrowed the earlier `before_model` view and are not re-evaluated here. |
 
 The `before_tool_batch` simplification exists because a filtered call becomes a
 synthetic denial (not a silent drop): a leaf can only emit a retain set it knows

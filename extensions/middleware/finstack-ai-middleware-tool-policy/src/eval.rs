@@ -145,6 +145,11 @@ pub(crate) fn evaluate_before_model(
     }
 
     if let Some(jailbreak) = config.jailbreak() {
+        let lowered_patterns: Vec<String> = jailbreak
+            .patterns()
+            .iter()
+            .map(|pattern| pattern.to_lowercase())
+            .collect();
         'scan: for message in input.request.messages.iter() {
             let texts: Vec<&str> = match message.role() {
                 MessageRole::User => message
@@ -172,8 +177,8 @@ pub(crate) fn evaluate_before_model(
             };
             for text in &texts {
                 let lowered = text.to_lowercase();
-                for pattern in jailbreak.patterns() {
-                    if lowered.contains(&pattern.to_lowercase()) {
+                for pattern in &lowered_patterns {
+                    if lowered.contains(pattern.as_str()) {
                         match jailbreak.action() {
                             JailbreakAction::Fail => {
                                 return PolicyVerdict::Fail {
@@ -204,8 +209,9 @@ pub(crate) fn evaluate_before_model(
 ///
 /// `StageOutcome::FilterTools` is retain-semantics: a leaf hands back the
 /// exact set of tools that should survive, and the runtime turns whatever is
-/// *not* in that set into per-call `Deny` → `SyntheticClosure`
-/// (`finstack-ai-runtime/src/exec/settlement/stage.rs:293-306`) — a filtered
+/// *not* in that set into per-call `Deny` → `SyntheticClosure` (see
+/// `middleware_tool_policy` in
+/// `finstack-ai-runtime/src/exec/settlement/stage.rs`) — a filtered
 /// call is answered with a synthetic denial, never silently dropped. That
 /// means a leaf may only emit a retain set it knows to be *complete*: every
 /// tool the model could legitimately have called must be accounted for, or

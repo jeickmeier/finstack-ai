@@ -64,6 +64,9 @@ impl RoleAllowlist {
 }
 
 /// Per-run cap on the number of write-classified tool calls.
+///
+/// `max_write_calls = 0` is a legitimate read-only mode: write-class tools
+/// are never made visible.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct WriteBudget {
@@ -160,7 +163,7 @@ impl ToolPolicyConfig {
     /// # Errors
     ///
     /// Rejects an oversized role set, an oversized per-role or default tool
-    /// set, an oversized or empty role name, or a role/write-budget slot
+    /// set, an oversized or empty role name, or a role-allowlist slot
     /// already set.
     pub fn with_role_allowlist(
         mut self,
