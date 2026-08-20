@@ -8,7 +8,8 @@ use thiserror::Error;
 /// Byte, output, and page ceilings for one parse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentLimits {
-    /// Reject inputs above this size; aligned with `MAX_ARTIFACT_BYTES`.
+    /// Reject inputs above this size; defaults to the artifact store ceiling
+    /// at wiring time.
     pub max_input_bytes: u64,
     /// Truncate Markdown above this size and set `truncated`.
     pub max_output_bytes: u64,

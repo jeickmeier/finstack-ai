@@ -9,9 +9,9 @@ use finstack_ai_kernel::{
     ToolCallBlock, ToolCallId, ToolExecutionMode, ToolFailurePolicy,
 };
 use finstack_ai_runtime::{
-    ArtifactError, ArtifactScope, ArtifactStore, AuthorizationContext, CancellationSignal,
-    PendingToolEffect, PortFuture, ReconcileContext, RunCallContext, SideEffectClass,
-    ToolReconcileResult, ToolStreamItem, Toolset,
+    ArtifactError, ArtifactScope, ArtifactStore, ArtifactStoreLimits, AuthorizationContext,
+    CancellationSignal, PendingToolEffect, PortFuture, ReconcileContext, RunCallContext,
+    SideEffectClass, ToolReconcileResult, ToolStreamItem, Toolset,
 };
 use futures_util::StreamExt;
 use tempfile::TempDir;
@@ -428,12 +428,35 @@ fn rename_after_open_reads_the_authorized_object_not_replacement() {
     assert!(!result.output.as_str().contains("canary-secret"));
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct CaptureArtifactStore {
     staged: Arc<Mutex<Vec<(ArtifactScope, Bytes, ArtifactMetadata)>>>,
+    max_artifact_bytes: usize,
+}
+
+impl Default for CaptureArtifactStore {
+    fn default() -> Self {
+        Self {
+            staged: Arc::new(Mutex::new(Vec::new())),
+            max_artifact_bytes: finstack_ai_runtime::MAX_ARTIFACT_BYTES,
+        }
+    }
+}
+
+impl CaptureArtifactStore {
+    fn with_max_artifact_bytes(mut self, max_artifact_bytes: usize) -> Self {
+        self.max_artifact_bytes = max_artifact_bytes;
+        self
+    }
 }
 
 impl ArtifactStore for CaptureArtifactStore {
+    fn limits(&self) -> ArtifactStoreLimits {
+        ArtifactStoreLimits {
+            max_artifact_bytes: self.max_artifact_bytes,
+        }
+    }
+
     fn stage_put(
         &self,
         scope: ArtifactScope,
@@ -499,7 +522,8 @@ async fn oversized_output_requires_and_uses_exact_scoped_artifact_service() {
         .expect("filesystem")
         .try_with_limits(limits)
         .expect("limits")
-        .with_artifact_store(Arc::new(store.clone()), Sensitivity::Confidential);
+        .with_artifact_store(Arc::new(store.clone()), Sensitivity::Confidential)
+        .expect("artifact store limits");
     let result = invoke(&toolset, 0, serde_json::json!({"path":"large.txt"}))
         .await
         .expect("artifact reference");
@@ -511,4 +535,43 @@ async fn oversized_output_requires_and_uses_exact_scoped_artifact_service() {
     assert_eq!(staged[0].0.sensitivity, Sensitivity::Confidential);
     assert!(staged[0].1.len() > limits.inline_result_bytes);
     assert!(staged[0].2.attributes.as_str().contains("effect_id"));
+}
+
+#[test]
+fn try_with_limits_rejects_file_bytes_above_the_default_artifact_ceiling() {
+    let root = TempDir::new().expect("root");
+    let limits = FileSystemLimits {
+        file_bytes: finstack_ai_runtime::MAX_ARTIFACT_BYTES + 1,
+        ..FileSystemLimits::default()
+    };
+    let error = FileSystemToolset::try_new(root.path())
+        .expect("filesystem")
+        .try_with_limits(limits)
+        .expect_err("file_bytes above the default artifact ceiling must be rejected");
+    assert!(matches!(error, FileSystemError::Configuration { .. }));
+}
+
+#[tokio::test]
+async fn result_ceiling_follows_the_attached_store_not_the_fixed_constant() {
+    // A store with a byte ceiling far below `MAX_ARTIFACT_BYTES` must cause
+    // even a small serialized result to be rejected, proving the check in
+    // `operation.rs` reads the store's live limit rather than the fixed
+    // `MAX_ARTIFACT_BYTES` constant.
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join("small.txt"), "hello").expect("small");
+    let limits = FileSystemLimits {
+        file_bytes: 8,
+        ..FileSystemLimits::default()
+    };
+    let store = CaptureArtifactStore::default().with_max_artifact_bytes(8);
+    let toolset = FileSystemToolset::try_new(root.path())
+        .expect("filesystem")
+        .try_with_limits(limits)
+        .expect("limits")
+        .with_artifact_store(Arc::new(store), Sensitivity::Internal)
+        .expect("artifact store limits");
+    let error = invoke(&toolset, 0, serde_json::json!({"path":"small.txt"}))
+        .await
+        .expect_err("serialized result exceeds the store-derived ceiling");
+    assert_eq!(error.code(), FILESYSTEM_LIMIT_EXCEEDED);
 }

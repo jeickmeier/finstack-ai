@@ -10,6 +10,16 @@ use crate::policy::ProtectedPaths;
 use crate::policy::ValidatedPath;
 use crate::{FILESYSTEM_LIMIT_EXCEEDED, fs_tool_error};
 
+/// Resource ceilings threaded from the toolset into one operation: the
+/// explicit [`FileSystemLimits`] plus the artifact-store-derived byte
+/// ceiling applied to the serialized result.
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+pub(crate) struct FileSystemCeilings {
+    pub(crate) limits: FileSystemLimits,
+    pub(crate) max_artifact_bytes: usize,
+}
+
 pub(crate) enum FileOperation {
     Read(ValidatedPath),
     Write {
@@ -42,6 +52,7 @@ impl OperationOutput {
     pub(crate) fn try_new<T: serde::Serialize>(
         value: &T,
         artifact_name: &'static str,
+        max_artifact_bytes: usize,
     ) -> Result<Self, ToolError> {
         let json = serde_json::to_vec(value).map_err(|_| {
             fs_tool_error(
@@ -50,7 +61,7 @@ impl OperationOutput {
                 "filesystem result serialization failed",
             )
         })?;
-        if json.len() > finstack_ai_runtime::MAX_ARTIFACT_BYTES {
+        if json.len() > max_artifact_bytes {
             return Err(fs_tool_error(
                 FILESYSTEM_LIMIT_EXCEEDED,
                 ErrorCategory::Limit,
@@ -69,10 +80,10 @@ impl FileOperation {
     pub(crate) fn execute(
         self,
         root: &crate::unix::Root,
-        limits: FileSystemLimits,
+        ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
-        root.execute(self, limits, protected, cancellation)
+        root.execute(self, ceilings, protected, cancellation)
     }
 }

@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+finstack-ai-context-memory = { workspace = true }
 
 [[bench]]
 name = "ingest"

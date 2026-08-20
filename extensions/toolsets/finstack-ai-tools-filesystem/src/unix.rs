@@ -10,7 +10,7 @@ use rustix::fd::OwnedFd;
 use rustix::fs::{Dir, FileType, Mode, OFlags, fstat, open, openat};
 use serde::Serialize;
 
-use crate::operation::{FileOperation, OperationOutput};
+use crate::operation::{FileOperation, FileSystemCeilings, OperationOutput};
 use crate::policy::{ProtectedPaths, ValidatedPath, glob_matches};
 use crate::{
     FILESYSTEM_NOT_FOUND, FILESYSTEM_POLICY_DENIED, FileSystemError, FileSystemLimits,
@@ -54,27 +54,31 @@ impl Root {
     pub(crate) fn execute(
         &self,
         operation: FileOperation,
-        limits: FileSystemLimits,
+        ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
         check_cancelled(cancellation)?;
         match operation {
-            FileOperation::Read(path) => self.read(&path, limits, cancellation),
-            FileOperation::Write { path, content } => self.write(&path, &content, cancellation),
+            FileOperation::Read(path) => self.read(&path, ceilings, cancellation),
+            FileOperation::Write { path, content } => {
+                self.write(&path, &content, ceilings, cancellation)
+            }
             FileOperation::Edit {
                 path,
                 old,
                 new,
                 replace_all,
-            } => self.edit(&path, &old, &new, replace_all, limits, cancellation),
-            FileOperation::List(path) => self.list(&path, limits, protected, cancellation),
-            FileOperation::Glob { pattern } => self.glob(&pattern, limits, protected, cancellation),
+            } => self.edit(&path, &old, &new, replace_all, ceilings, cancellation),
+            FileOperation::List(path) => self.list(&path, ceilings, protected, cancellation),
+            FileOperation::Glob { pattern } => {
+                self.glob(&pattern, ceilings, protected, cancellation)
+            }
             FileOperation::Search { path, query, glob } => self.search(
                 &path,
                 &query,
                 glob.as_deref(),
-                limits,
+                ceilings,
                 protected,
                 cancellation,
             ),
@@ -84,13 +88,13 @@ impl Root {
     fn read(
         &self,
         path: &ValidatedPath,
-        limits: FileSystemLimits,
+        ceilings: FileSystemCeilings,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
         let fd = self.open_leaf(path, READ_FLAGS, Mode::empty())?;
         self.after_final_open();
         ensure_regular(&fd)?;
-        let bytes = read_bounded(fd, limits.file_bytes, cancellation)?;
+        let bytes = read_bounded(fd, ceilings.limits.file_bytes, cancellation)?;
         let content =
             String::from_utf8(bytes).map_err(|_| io_error("filesystem file is not valid UTF-8"))?;
         OperationOutput::try_new(
@@ -100,6 +104,7 @@ impl Root {
                 content: &content,
             },
             "filesystem-read.json",
+            ceilings.max_artifact_bytes,
         )
     }
 
@@ -107,6 +112,7 @@ impl Root {
         &self,
         path: &ValidatedPath,
         content: &[u8],
+        ceilings: FileSystemCeilings,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
         check_cancelled(cancellation)?;
@@ -129,6 +135,7 @@ impl Root {
                 bytes_written: content.len(),
             },
             "filesystem-write.json",
+            ceilings.max_artifact_bytes,
         )
     }
 
@@ -138,14 +145,14 @@ impl Root {
         old: &str,
         new: &str,
         replace_all: bool,
-        limits: FileSystemLimits,
+        ceilings: FileSystemCeilings,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
         let flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
         let fd = self.open_leaf(path, flags, Mode::empty())?;
         self.after_final_open();
         ensure_regular(&fd)?;
-        let bytes = read_bounded_fd(&fd, limits.file_bytes, cancellation)?;
+        let bytes = read_bounded_fd(&fd, ceilings.limits.file_bytes, cancellation)?;
         let content =
             String::from_utf8(bytes).map_err(|_| io_error("filesystem file is not valid UTF-8"))?;
         let replacements = content.matches(old).count();
@@ -157,7 +164,7 @@ impl Root {
         } else {
             content.replacen(old, new, 1)
         };
-        if updated.len() > limits.file_bytes {
+        if updated.len() > ceilings.limits.file_bytes {
             return Err(limit_error(
                 "filesystem edit exceeds the configured byte limit",
             ));
@@ -175,13 +182,14 @@ impl Root {
                 bytes_written: updated.len(),
             },
             "filesystem-edit.json",
+            ceilings.max_artifact_bytes,
         )
     }
 
     fn list(
         &self,
         path: &ValidatedPath,
-        limits: FileSystemLimits,
+        ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
@@ -200,7 +208,7 @@ impl Root {
             if protected.denies(&relative) {
                 continue;
             }
-            if entries.len() >= limits.visited_entries {
+            if entries.len() >= ceilings.limits.visited_entries {
                 return Err(limit_error(
                     "filesystem list exceeds the configured entry limit",
                 ));
@@ -223,24 +231,29 @@ impl Root {
                 entries,
             },
             "filesystem-list.json",
+            ceilings.max_artifact_bytes,
         )
     }
 
     fn glob(
         &self,
         pattern: &str,
-        limits: FileSystemLimits,
+        ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
         let base = ValidatedPath::try_directory("", protected)?;
-        let entries = self.walk(&base, limits, protected, cancellation)?;
+        let entries = self.walk(&base, ceilings.limits, protected, cancellation)?;
         let paths = entries
             .into_iter()
             .filter(|entry| glob_matches(pattern, &entry.path))
             .map(|entry| entry.path)
             .collect::<Vec<_>>();
-        OperationOutput::try_new(&GlobOutput { pattern, paths }, "filesystem-glob.json")
+        OperationOutput::try_new(
+            &GlobOutput { pattern, paths },
+            "filesystem-glob.json",
+            ceilings.max_artifact_bytes,
+        )
     }
 
     fn search(
@@ -248,11 +261,11 @@ impl Root {
         base: &ValidatedPath,
         query: &str,
         glob: Option<&str>,
-        limits: FileSystemLimits,
+        ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
     ) -> Result<OperationOutput, ToolError> {
-        let entries = self.walk(base, limits, protected, cancellation)?;
+        let entries = self.walk(base, ceilings.limits, protected, cancellation)?;
         let mut matches = Vec::new();
         for entry in entries {
             check_cancelled(cancellation)?;
@@ -268,7 +281,7 @@ impl Root {
             if ensure_regular(&fd).is_err() {
                 continue;
             }
-            let bytes = read_bounded(fd, limits.file_bytes, cancellation)?;
+            let bytes = read_bounded(fd, ceilings.limits.file_bytes, cancellation)?;
             let Ok(content) = String::from_utf8(bytes) else {
                 continue;
             };
@@ -276,7 +289,7 @@ impl Root {
                 if !line.contains(query) {
                     continue;
                 }
-                if matches.len() >= limits.search_matches {
+                if matches.len() >= ceilings.limits.search_matches {
                     return Err(limit_error(
                         "filesystem search exceeds the configured match limit",
                     ));
@@ -288,7 +301,11 @@ impl Root {
                 });
             }
         }
-        OperationOutput::try_new(&SearchOutput { query, matches }, "filesystem-search.json")
+        OperationOutput::try_new(
+            &SearchOutput { query, matches },
+            "filesystem-search.json",
+            ceilings.max_artifact_bytes,
+        )
     }
 
     fn walk(
