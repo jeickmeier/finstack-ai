@@ -28,6 +28,7 @@ EXPECTED = (
     "08_document_ingestion.ipynb",
     "09_openrouter.ipynb",
     "10_elicitation.ipynb",
+    "11_memory.ipynb",
 )
 SECRET_MARKERS = (
     "sk-",

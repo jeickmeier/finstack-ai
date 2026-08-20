@@ -176,6 +176,97 @@ class ElicitationToolset:
     @property
     def tool_count(self) -> int: ...
 
+class MemoryExtension:
+    """Native memory composition: one store, one scope, one policy.
+
+    The three accessors return handles accepted directly by the agent
+    factories' ``toolsets``, ``context_providers``, and ``observers``
+    parameters. All handles share the extension's store, so one extension
+    can back several agents.
+    """
+
+    @staticmethod
+    def in_process(
+        *,
+        tenant: str = "python-local",
+        user: str | None = None,
+        agent: str | None = None,
+        workspace: str | None = None,
+        read: bool = True,
+        write: bool = True,
+        manage: bool = False,
+    ) -> MemoryExtension:
+        """Build an extension over a process-local, non-durable store.
+
+        ``tenant`` must equal the tenant scope of the runs that recall from
+        it. It defaults to ``"python-local"``, the scope :meth:`Agent.run`
+        and :meth:`Agent.start` use; pass the session's tenant scope
+        instead when the recalling runs execute on a lane. Recall on a
+        mismatched tenant fails the run with
+        ``context_contribution_invalid``.
+        """
+
+    @staticmethod
+    def sqlite(
+        *,
+        path: str,
+        tenant: str = "python-local",
+        user: str | None = None,
+        agent: str | None = None,
+        workspace: str | None = None,
+        read: bool = True,
+        write: bool = True,
+        manage: bool = False,
+    ) -> MemoryExtension:
+        """Build an extension over a durable SQLite store at ``path``.
+
+        The file and its schema are created on first open.
+
+        ``tenant`` must equal the tenant scope of the runs that recall from
+        it. It defaults to ``"python-local"``, the scope :meth:`Agent.run`
+        and :meth:`Agent.start` use; pass the session's tenant scope
+        instead when the recalling runs execute on a lane. Recall on a
+        mismatched tenant fails the run with
+        ``context_contribution_invalid``.
+        """
+
+    @property
+    def tenant(self) -> str: ...
+    def context_provider(
+        self, *, max_hits: int | None = None, stable_prefix: int | None = None
+    ) -> MemoryContextProvider:
+        """Return the recall provider handle for ``context_providers``."""
+
+    def toolset(self) -> MemoryToolset:
+        """Return the memory toolset handle for ``toolsets``."""
+
+    def observer(self) -> MemoryObserver:
+        """Return the capture observer handle for ``observers``."""
+
+class MemoryContextProvider:
+    """Recall provider handle produced by :meth:`MemoryExtension.context_provider`."""
+
+    @property
+    def component(self) -> str: ...
+
+class MemoryToolset:
+    """Memory toolset handle produced by :meth:`MemoryExtension.toolset`.
+
+    The native toolset is materialized at agent-assembly time so it shares
+    the agent's artifact store.
+    """
+
+    @property
+    def component(self) -> str: ...
+    @property
+    def tool_count(self) -> int: ...
+
+class MemoryObserver:
+    """Capture observer handle produced by :meth:`MemoryExtension.observer`."""
+
+    @property
+    def component(self) -> str: ...
+
 class PythonToolset:
     """Trusted coarse Python implementation of the Rust Toolset port.
 
@@ -819,10 +910,12 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -897,10 +990,12 @@ class Agent:
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
         media_tools: bool = False,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -968,10 +1063,12 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1037,10 +1134,12 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1101,10 +1200,12 @@ class Agent:
         hard_input_bytes: int | None = None,
         auth: str | None = None,
         api_key: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1159,10 +1260,12 @@ class Agent:
         api_key: str,
         endpoint: str | None = None,
         template: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1203,14 +1306,16 @@ class Agent:
     @staticmethod
     async def from_python(
         model: PythonModel,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        | None = None,
         instruction: str | None = None,
         output_type: Any | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        | None = None,
         middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver] | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,

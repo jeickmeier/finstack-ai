@@ -36,6 +36,7 @@ mod errors;
 mod events;
 mod json_bridge;
 mod locator;
+mod memory;
 mod protocol;
 mod run;
 mod session;
@@ -56,6 +57,7 @@ use child_policy::PyChildRunPolicy;
 use document::{parse_document, parse_document_markdown};
 use events::{PyEvent, PyEventBatch, PyEventIterator};
 use locator::PyLocator;
+use memory::{PyMemoryContextProvider, PyMemoryExtension, PyMemoryObserver, PyMemoryToolset};
 use protocol::{
     _normalize_pydantic_schema, build_metadata, health, journal_known_answer, linked_providers,
     normalize_prebeta_shape,
@@ -128,6 +130,10 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyPythonModel>()?;
     module.add_class::<PyPythonToolset>()?;
     module.add_class::<elicitation::PyElicitationToolset>()?;
+    module.add_class::<PyMemoryExtension>()?;
+    module.add_class::<PyMemoryContextProvider>()?;
+    module.add_class::<PyMemoryToolset>()?;
+    module.add_class::<PyMemoryObserver>()?;
     module.add_class::<PyPythonContextProvider>()?;
     module.add_class::<PyPythonMiddleware>()?;
     module.add_class::<PyPythonObserver>()?;
