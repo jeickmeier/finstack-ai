@@ -205,32 +205,17 @@ fn media_type_of(response: &reqwest::Response) -> String {
         .unwrap_or_default()
 }
 
-/// Run the bounded fetch request flow for one validated `http_fetch` call.
-///
-/// # Errors
-///
-/// Returns a [`ToolError`] carrying one of the crate's stable `FETCH_*`
-/// codes: `FETCH_TIMEOUT` on cancellation/deadline, `FETCH_HOST_NOT_ALLOWLISTED`
-/// when the parsed host is not permitted, `FETCH_INVALID_ARGUMENTS` /
-/// `FETCH_DESTINATION_BLOCKED` from URL vetting, `FETCH_REDIRECT_DENIED` on a
-/// 3xx response (redirect following lands in a later task), `FETCH_TRANSPORT_FAILED`
-/// on resolution/client/transport failures or a non-2xx/3xx status, and
-/// `FETCH_LIMIT_EXCEEDED` when the body exceeds the effective byte cap.
-pub(crate) async fn execute_fetch(
+/// Send one hop's request: allowlist check, resolve+pin, build the pinned
+/// client, attach headers, and race the send against cancellation/deadline.
+/// Returns the raw response so the caller can branch on redirect vs.
+/// terminal status.
+async fn send_hop(
     state: &FetchState,
     ctx: &ToolCallContext,
-    args: FetchArguments,
-) -> Result<serde_json::Value, ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
-
-    let policy = UrlPolicy {
-        allow_loopback_http: state.config.allow_loopback_http,
-    };
-    let vetted = parse_and_vet_url(&args.url, &policy).map_err(|e| map_vet_error(&e))?;
-
-    if !host_allowed(&vetted, &state.config, &state.patterns) {
+    current: &VettedUrl,
+    user_agent: &str,
+) -> Result<reqwest::Response, ToolError> {
+    if !host_allowed(current, &state.config, &state.patterns) {
         return Err(tool_error(
             FETCH_HOST_NOT_ALLOWLISTED,
             ErrorCategory::Validation,
@@ -238,20 +223,15 @@ pub(crate) async fn execute_fetch(
         ));
     }
 
-    let addr = resolve_and_pin(&vetted, state.resolver.as_ref())
+    let addr = resolve_and_pin(current, state.resolver.as_ref())
         .await
         .map_err(|e| map_vet_error(&e))?;
-    let client = pinned_client(&vetted, addr, state.config.request_timeout).map_err(|e| map_vet_error(&e))?;
+    let client = pinned_client(current, addr, state.config.request_timeout).map_err(|e| map_vet_error(&e))?;
 
-    let user_agent = state
-        .config
-        .user_agent
-        .clone()
-        .unwrap_or_else(default_user_agent);
     let mut request = client
-        .get(vetted.url.as_str())
+        .get(current.url.as_str())
         .header(reqwest::header::USER_AGENT, user_agent);
-    if let Some(headers) = state.config.per_host_headers.get(&vetted.host) {
+    if let Some(headers) = state.config.per_host_headers.get(&current.host) {
         for (name, value) in headers {
             let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
                 tool_error(
@@ -272,24 +252,102 @@ pub(crate) async fn execute_fetch(
     }
 
     let send = request.send();
-    let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+    tokio::select! {
+        () = ctx.run.cancellation.cancelled() => Err(timeout_error()),
+        () = wait_deadline(ctx.run.deadline) => Err(timeout_error()),
         result = send => result.map_err(|_| tool_error(
             FETCH_TRANSPORT_FAILED,
             ErrorCategory::Tool,
             "http fetch transport failed",
-        ))?,
+        )),
+    }
+}
+
+/// Resolve a redirect's `Location` header against the current URL
+/// (`url::Url::join`, so relative Locations work) and re-vet it as a
+/// brand-new destination — spec §4.4 step 7's "re-enter the entire pipeline
+/// from the allowlist/vet step".
+fn next_hop(response: &reqwest::Response, current: &VettedUrl, policy: UrlPolicy) -> Result<VettedUrl, ToolError> {
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| tool_error(FETCH_TRANSPORT_FAILED, ErrorCategory::Tool, "redirect location invalid"))?;
+    let next_url = current.url.join(location).map_err(|_| {
+        tool_error(
+            FETCH_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "redirect location invalid",
+        )
+    })?;
+    parse_and_vet_url(next_url.as_str(), &policy).map_err(|e| map_vet_error(&e))
+}
+
+/// Run the bounded fetch request flow for one validated `http_fetch` call.
+///
+/// # Errors
+///
+/// Returns a [`ToolError`] carrying one of the crate's stable `FETCH_*`
+/// codes: `FETCH_TIMEOUT` on cancellation/deadline, `FETCH_HOST_NOT_ALLOWLISTED`
+/// when the parsed host is not permitted, `FETCH_INVALID_ARGUMENTS` /
+/// `FETCH_DESTINATION_BLOCKED` from URL vetting, `FETCH_REDIRECT_DENIED` when
+/// following a 3xx response would exceed `config.max_redirects`,
+/// `FETCH_TRANSPORT_FAILED` on resolution/client/transport failures, an
+/// invalid/missing redirect `Location`, or a non-2xx/3xx status, and
+/// `FETCH_LIMIT_EXCEEDED` when the body exceeds the effective byte cap.
+pub(crate) async fn execute_fetch(
+    state: &FetchState,
+    ctx: &ToolCallContext,
+    args: FetchArguments,
+) -> Result<serde_json::Value, ToolError> {
+    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
+        return Err(timeout_error());
+    }
+
+    let policy = UrlPolicy {
+        allow_loopback_http: state.config.allow_loopback_http,
+    };
+    let mut current = parse_and_vet_url(&args.url, &policy).map_err(|e| map_vet_error(&e))?;
+
+    let user_agent = state
+        .config
+        .user_agent
+        .clone()
+        .unwrap_or_else(default_user_agent);
+
+    // Manual redirect loop (spec §4.4 step 7): each hop re-enters the entire
+    // pipeline from the allowlist/vet step — new vet, new resolve, new
+    // pinned client — so a redirect can never smuggle a caller past the
+    // allowlist or DNS-rebind past the pin. `hop` counts *follows already
+    // taken*; with `max_redirects` follows permitted, `max_redirects + 1`
+    // requests are allowed in total (the initial request plus each follow).
+    let mut hop = 0usize;
+    let (status, response, vetted) = loop {
+        if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
+            return Err(timeout_error());
+        }
+
+        let response = send_hop(state, ctx, &current, &user_agent).await?;
+        let status = response.status();
+        if status.is_redirection() {
+            if hop >= state.config.max_redirects {
+                return Err(tool_error(
+                    FETCH_REDIRECT_DENIED,
+                    ErrorCategory::Tool,
+                    format!(
+                        "http fetch exceeded the configured redirect limit ({}) following HTTP {status}",
+                        state.config.max_redirects
+                    ),
+                ));
+            }
+            current = next_hop(&response, &current, policy)?;
+            hop += 1;
+            continue;
+        }
+
+        break (status, response, current);
     };
 
-    let status = response.status();
-    if status.is_redirection() {
-        return Err(tool_error(
-            FETCH_REDIRECT_DENIED,
-            ErrorCategory::Tool,
-            format!("http fetch endpoint returned a redirect (HTTP {status}), which this tool does not follow"),
-        ));
-    }
     if !status.is_success() {
         return Err(endpoint_rejected(status, response).await);
     }

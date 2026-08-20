@@ -479,6 +479,165 @@ async fn per_host_headers_are_sent_to_the_matching_host() {
     assert!(!request_without.contains("x-api"), "{request_without}");
 }
 
+// --- Task 8: manual redirects with per-hop re-vetting -------------------
+
+/// Serve `responses.len()` requests in sequence on one listener, each as
+/// `(status, headers, body)`. Optionally reports each raw request onto
+/// `seen`, one message per accepted connection, in order.
+async fn serve_sequence(
+    listener: TcpListener,
+    seen: Option<mpsc::UnboundedSender<String>>,
+    responses: Vec<(u16, String, Vec<u8>)>,
+) {
+    for (status, headers, body) in responses {
+        let (mut stream, _) = listener.accept().await.expect("accept");
+        let mut buf = vec![0_u8; 16_384];
+        let n = stream.read(&mut buf).await.expect("read");
+        if let Some(seen) = &seen {
+            seen.send(String::from_utf8_lossy(&buf[..n]).into_owned())
+                .expect("seen");
+        }
+        let mut response = format!(
+            "HTTP/1.1 {status} X\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&body);
+        stream.write_all(&response).await.expect("write");
+        stream.shutdown().await.expect("shutdown");
+    }
+}
+
+#[tokio::test]
+async fn same_host_redirect_is_followed() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_sequence(
+        listener,
+        None,
+        vec![
+            (302, "Location: /b\r\n".to_owned(), Vec::new()),
+            (200, String::new(), b"moved-ok".to_vec()),
+        ],
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/a", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+
+    assert_eq!(output["url"], url);
+    assert!(
+        output["final_url"].as_str().unwrap().ends_with("/b"),
+        "{output}"
+    );
+    assert_eq!(output["content"], "moved-ok");
+}
+
+#[tokio::test]
+async fn cross_host_redirect_to_unlisted_host_is_denied() {
+    // No server exists for evil.example: if the pipeline tried to connect,
+    // resolution/connection would fail with a transport error instead, so
+    // asserting the exact allowlist code proves the gate fired first.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve_sequence(
+        listener,
+        None,
+        vec![(
+            302,
+            "Location: https://evil.example/\r\n".to_owned(),
+            Vec::new(),
+        )],
+    ));
+
+    let toolset = HttpFetchToolset::try_new(loopback_config(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/a", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_HOST_NOT_ALLOWLISTED);
+}
+
+#[tokio::test]
+async fn redirect_limit_is_enforced() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    // max_redirects: 3 permits 3 follows (4 requests total); the pipeline
+    // must error after the 4th response without attempting a 5th request,
+    // so the server only has 4 responses queued.
+    let responses = std::iter::repeat_with(|| (302, "Location: /a\r\n".to_owned(), Vec::new()))
+        .take(4)
+        .collect();
+    tokio::spawn(serve_sequence(listener, Some(tx), responses));
+
+    let config = HttpFetchConfig {
+        max_redirects: 3,
+        ..loopback_config(&["docs.rs"])
+    };
+    let toolset = HttpFetchToolset::try_new(config).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/a", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_REDIRECT_DENIED);
+
+    let mut count = 0;
+    while rx.recv().await.is_some() {
+        count += 1;
+    }
+    assert_eq!(count, 4, "expected exactly 4 requests total");
+}
+
+#[tokio::test]
+async fn headers_do_not_cross_hosts_on_redirect() {
+    // Fixture A is addressed literally as "127.0.0.1" (matches the
+    // per-host-headers key, so it gets the header); it 302s to fixture B,
+    // addressed as "localhost" (a distinct host string with no entry in
+    // per_host_headers, resolved via the scripted resolver as in
+    // `pinned_address_overrides_dns_for_hostnames`), which must not see it.
+    let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_a = listener_a.local_addr().unwrap();
+    let (tx_a, mut rx_a) = mpsc::unbounded_channel();
+
+    let listener_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_b = listener_b.local_addr().unwrap();
+    let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+
+    let location = format!("http://localhost:{}/y", addr_b.port());
+    tokio::spawn(serve_sequence(
+        listener_a,
+        Some(tx_a),
+        vec![(302, format!("Location: {location}\r\n"), Vec::new())],
+    ));
+    tokio::spawn(serve_sequence(
+        listener_b,
+        Some(tx_b),
+        vec![(200, String::new(), b"ok".to_vec())],
+    ));
+
+    let mut config = loopback_config(&["docs.rs"]);
+    config.per_host_headers.insert(
+        "127.0.0.1".to_owned(),
+        vec![("X-Api".to_owned(), "canary".to_owned())],
+    );
+    let toolset = HttpFetchToolset::try_new(config)
+        .unwrap()
+        .with_resolver(Arc::new(ScriptedResolver(vec![addr_b])));
+    let spec = toolset.tools()[0].clone();
+
+    let url_a = format!("http://127.0.0.1:{}/x", addr_a.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url_a}"}}"#).as_bytes());
+    let _ = drive_to_success(&toolset, tool_context(), call).await;
+
+    let request_a = rx_a.recv().await.expect("request seen");
+    assert!(request_a.contains("x-api: canary"), "{request_a}");
+    let request_b = rx_b.recv().await.expect("request seen");
+    assert!(!request_b.contains("x-api"), "{request_b}");
+}
+
 #[tokio::test]
 async fn pinned_address_overrides_dns_for_hostnames() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
