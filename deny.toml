@@ -55,7 +55,20 @@ wildcards = "deny"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
-deny = []
+deny = [
+    # The nesting-depth guard in finstack-ai-tools-fetch (F-4) measures
+    # documents by driving html5ever's *real* tree builder directly; its
+    # exactness depends on resolving the SAME html5ever/markup5ever build
+    # that htmd's parser uses internally. If a version bump ever caused
+    # Cargo to resolve two copies, the guard would silently measure with a
+    # different tree builder than the one that actually processes the
+    # document, and nothing else in this workspace would catch that (the
+    # differential test exercises the workspace's own markup5ever_rcdom,
+    # not htmd's copy). Hard-ban a version split so `cargo deny check`
+    # fails instead of merely `warn`ing via `multiple-versions`.
+    { name = "html5ever", deny-multiple-versions = true },
+    { name = "markup5ever", deny-multiple-versions = true },
+]
 skip = []
 skip-tree = []
 
