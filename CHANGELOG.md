@@ -68,6 +68,13 @@ unpublished.
 - The checked-in `fixtures/documents/` corpus omits a table-heavy PDF (the spec's fixture list calls for one); anydoc's own upstream test corpus already covers table-heavy PDF extraction.
 - Debug parse-to-markdown helpers over `finstack-ai-tools-document`'s parser, without an `Agent` or `Run`: Python `parse_document_markdown` / `parse_document`, WASM `parseDocumentMarkdown` / `parseDocument`.
 - `examples/python-notebooks/08_document_ingestion.ipynb`: an offline, scripted-model walkthrough of PDF and `.docx` document ingestion — debug parsing, scanned-PDF classification, and an `Agent.run` attachment showing the model-visible Markdown the ingest middleware injects.
+- Add `finstack-ai-store-common`: shared journal-store semantics (append
+  admission, snapshot/prune admission, chain and window verification, scan
+  validation) now used by both the memory and sqlite stores.
+- Fix the sqlite store to reject tail-window loads that start mid-batch
+  (`load_from_splits_batch` / `snapshot_splits_batch`) instead of returning a
+  reconstructed batch that splits a committed one; unify the memory store's
+  hole-at-start code to the `gap` reason codes.
 
 ### Changed
 
