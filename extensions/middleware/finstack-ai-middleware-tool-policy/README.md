@@ -49,7 +49,7 @@ tools, preserving completeness.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use finstack_ai_kernel::{ComponentId, ToolId};
+use finstack_ai_kernel::{ComponentId, ComponentRef, ToolId, Version};
 use finstack_ai_middleware_tool_policy::{
     ToolPolicyConfig, ToolPolicyMiddleware, JailbreakAction,
 };
@@ -58,10 +58,10 @@ fn tid(s: &str) -> ToolId {
     ToolId::parse(s).expect("tool id")
 }
 
-fn component_ref(id: &str, version: (u32, u32, u32)) -> finstack_ai::ComponentRef {
-    finstack_ai::ComponentRef::new(
+fn component_ref(id: &str, version: (u32, u32, u32)) -> ComponentRef {
+    ComponentRef::new(
         ComponentId::parse(id).expect("component id"),
-        Some(finstack_ai_kernel::Version {
+        Some(Version {
             major: version.0,
             minor: version.1,
             patch: version.2,
