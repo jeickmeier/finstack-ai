@@ -22,10 +22,10 @@ use std::time::Duration;
 
 use finstack_ai_kernel::{Digest, Metadata, Sensitivity};
 use finstack_ai_runtime::{
-    Bytes, OBJECT_INVALID_KEY, OBJECT_NOT_FOUND, OBJECT_TOO_LARGE, OBJECT_UNSUPPORTED,
-    ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef, ObjectScope,
-    ObjectStore, ObjectStoreLimits, PageToken, PortFuture, PresignedUrl, PutPayload,
-    physical_object_key, validate_object_metadata,
+    Bytes, OBJECT_INVALID_KEY, OBJECT_NOT_FOUND, OBJECT_TOO_LARGE, OBJECT_UNSUPPORTED, ObjectEntry,
+    ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef, ObjectScope, ObjectStore,
+    ObjectStoreLimits, PageToken, PortFuture, PresignedUrl, PutPayload, physical_object_key,
+    validate_object_metadata,
 };
 
 /// Number of entries returned per [`FakeObjectStore::list`] page.
@@ -66,7 +66,11 @@ impl FakeObjectStore {
     /// Construct a fake with explicit size ceilings.
     #[must_use]
     pub fn with_limits(limits: ObjectStoreLimits) -> Self {
-        Self { limits, objects: Mutex::new(BTreeMap::new()), poison_next_get: AtomicBool::new(false) }
+        Self {
+            limits,
+            objects: Mutex::new(BTreeMap::new()),
+            poison_next_get: AtomicBool::new(false),
+        }
     }
 
     /// Poison the next `get`/`get_to_file` call so it returns
@@ -79,10 +83,14 @@ impl FakeObjectStore {
         self.poison_next_get.store(true, Ordering::SeqCst);
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, StoredObject>>, ObjectError> {
+    fn lock(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, StoredObject>>, ObjectError> {
         self.objects
             .lock()
-            .map_err(|_error| ObjectError::Unavailable { message: Arc::from("poisoned_lock") })
+            .map_err(|_error| ObjectError::Unavailable {
+                message: Arc::from("poisoned_lock"),
+            })
     }
 }
 
@@ -100,15 +108,20 @@ impl ObjectStore for FakeObjectStore {
             let bytes = match content {
                 PutPayload::Bytes(bytes) => bytes,
                 PutPayload::File(path) => {
-                    let data = std::fs::read(&path)
-                        .map_err(|error| ObjectError::Io { message: Arc::from(error.to_string()) })?;
+                    let data = std::fs::read(&path).map_err(|error| ObjectError::Io {
+                        message: Arc::from(error.to_string()),
+                    })?;
                     Bytes::from(data)
                 }
             };
-            let length = u64::try_from(bytes.len())
-                .map_err(|_error| ObjectError::Io { message: Arc::from("length_overflow") })?;
+            let length = u64::try_from(bytes.len()).map_err(|_error| ObjectError::Io {
+                message: Arc::from("length_overflow"),
+            })?;
             if length > self.limits.max_object_bytes {
-                return Err(ObjectError::TooLarge { len: length, max: self.limits.max_object_bytes });
+                return Err(ObjectError::TooLarge {
+                    len: length,
+                    max: self.limits.max_object_bytes,
+                });
             }
             let content_digest = Digest::blob_content(&bytes);
             let physical = physical_object_key(None, &scope_digest, &key);
@@ -140,13 +153,20 @@ impl ObjectStore for FakeObjectStore {
             let objects = self.lock()?;
             let stored = objects.get(&physical).ok_or(ObjectError::NotFound)?;
             if stored.scope_digest != scope_digest {
-                return Err(ObjectError::ScopeMismatch { expected: scope_digest, actual: stored.scope_digest });
+                return Err(ObjectError::ScopeMismatch {
+                    expected: scope_digest,
+                    actual: stored.scope_digest,
+                });
             }
             if poisoned {
-                return Err(ObjectError::Integrity { message: Arc::from("injected_failure") });
+                return Err(ObjectError::Integrity {
+                    message: Arc::from("injected_failure"),
+                });
             }
             if Digest::blob_content(&stored.content) != stored.content_digest {
-                return Err(ObjectError::Integrity { message: Arc::from("digest_mismatch") });
+                return Err(ObjectError::Integrity {
+                    message: Arc::from("digest_mismatch"),
+                });
             }
             Ok(stored.content.clone())
         })();
@@ -166,18 +186,27 @@ impl ObjectStore for FakeObjectStore {
             let objects = self.lock()?;
             let stored = objects.get(&physical).ok_or(ObjectError::NotFound)?;
             if stored.scope_digest != scope_digest {
-                return Err(ObjectError::ScopeMismatch { expected: scope_digest, actual: stored.scope_digest });
+                return Err(ObjectError::ScopeMismatch {
+                    expected: scope_digest,
+                    actual: stored.scope_digest,
+                });
             }
-            std::fs::write(&dest, &stored.content)
-                .map_err(|error| ObjectError::Io { message: Arc::from(error.to_string()) })?;
+            std::fs::write(&dest, &stored.content).map_err(|error| ObjectError::Io {
+                message: Arc::from(error.to_string()),
+            })?;
             if poisoned {
-                return Err(ObjectError::Integrity { message: Arc::from("injected_failure") });
+                return Err(ObjectError::Integrity {
+                    message: Arc::from("injected_failure"),
+                });
             }
             if Digest::blob_content(&stored.content) != stored.content_digest {
-                return Err(ObjectError::Integrity { message: Arc::from("digest_mismatch") });
+                return Err(ObjectError::Integrity {
+                    message: Arc::from("digest_mismatch"),
+                });
             }
-            let length = u64::try_from(stored.content.len())
-                .map_err(|_error| ObjectError::Io { message: Arc::from("length_overflow") })?;
+            let length = u64::try_from(stored.content.len()).map_err(|_error| ObjectError::Io {
+                message: Arc::from("length_overflow"),
+            })?;
             Ok(ObjectRef {
                 key,
                 scope_digest,
@@ -189,17 +218,25 @@ impl ObjectStore for FakeObjectStore {
         Box::pin(async move { result })
     }
 
-    fn head(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<ObjectRef, ObjectError>> {
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let result = (|| {
             let scope_digest = scope.digest()?;
             let physical = physical_object_key(None, &scope_digest, &key);
             let objects = self.lock()?;
             let stored = objects.get(&physical).ok_or(ObjectError::NotFound)?;
             if stored.scope_digest != scope_digest {
-                return Err(ObjectError::ScopeMismatch { expected: scope_digest, actual: stored.scope_digest });
+                return Err(ObjectError::ScopeMismatch {
+                    expected: scope_digest,
+                    actual: stored.scope_digest,
+                });
             }
-            let length = u64::try_from(stored.content.len())
-                .map_err(|_error| ObjectError::Io { message: Arc::from("length_overflow") })?;
+            let length = u64::try_from(stored.content.len()).map_err(|_error| ObjectError::Io {
+                message: Arc::from("length_overflow"),
+            })?;
             Ok(ObjectRef {
                 key,
                 scope_digest,
@@ -242,7 +279,9 @@ impl ObjectStore for FakeObjectStore {
                     .filter(|(physical, _)| physical.starts_with(&scope_prefix))
                     .filter(|(physical, _)| {
                         let logical = &physical[scope_prefix.len()..];
-                        prefix_str.as_deref().is_none_or(|prefix| logical.starts_with(prefix))
+                        prefix_str
+                            .as_deref()
+                            .is_none_or(|prefix| logical.starts_with(prefix))
                     })
                     .map(|(physical, stored)| (physical.clone(), stored.content.len() as u64))
                     .collect()
@@ -261,14 +300,22 @@ impl ObjectStore for FakeObjectStore {
             let mut last_physical: Option<String> = None;
             for (physical, length) in remaining.iter().take(LIST_PAGE_SIZE) {
                 let logical = &physical[scope_prefix.len()..];
-                let key = ObjectKey::try_new(logical)
-                    .map_err(|_error| ObjectError::Io { message: Arc::from("corrupt_physical_key") })?;
-                entries.push(ObjectEntry { key, length: *length });
+                let key = ObjectKey::try_new(logical).map_err(|_error| ObjectError::Io {
+                    message: Arc::from("corrupt_physical_key"),
+                })?;
+                entries.push(ObjectEntry {
+                    key,
+                    length: *length,
+                });
                 last_physical = Some(physical.clone());
             }
 
             let consumed = start_index + entries.len();
-            let next = if consumed < matching.len() { last_physical.map(PageToken::opaque) } else { None };
+            let next = if consumed < matching.len() {
+                last_physical.map(PageToken::opaque)
+            } else {
+                None
+            };
 
             Ok(ObjectPage { entries, next })
         })();
@@ -282,7 +329,10 @@ impl ObjectStore for FakeObjectStore {
         expiry: Duration,
     ) -> PortFuture<Result<PresignedUrl, ObjectError>> {
         let url = format!("fake://{key}", key = key.as_str());
-        let result = Ok(PresignedUrl { url: Arc::from(url), expires_in_secs: expiry.as_secs() });
+        let result = Ok(PresignedUrl {
+            url: Arc::from(url),
+            expires_in_secs: expiry.as_secs(),
+        });
         Box::pin(async move { result })
     }
 
@@ -305,7 +355,11 @@ fn test_scope(tenant: &str) -> ObjectScope {
 }
 
 fn test_metadata() -> ObjectMetadata {
-    ObjectMetadata { media_type: Arc::from("application/octet-stream"), name: None, attributes: Metadata::empty() }
+    ObjectMetadata {
+        media_type: Arc::from("application/octet-stream"),
+        name: None,
+        attributes: Metadata::empty(),
+    }
 }
 
 fn deterministic_content() -> Vec<u8> {
@@ -342,13 +396,28 @@ async fn put_get_round_trip(store: &dyn ObjectStore) {
     let metadata = test_metadata();
 
     let object_ref = store
-        .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(content.clone())), metadata.clone())
+        .put(
+            scope.clone(),
+            key.clone(),
+            PutPayload::Bytes(Bytes::from(content.clone())),
+            metadata.clone(),
+        )
         .await
         .expect("put_get_round_trip: put must succeed");
 
-    assert_eq!(object_ref.key, key, "put_get_round_trip: ref key must echo the logical key");
-    assert_eq!(object_ref.length, content.len() as u64, "put_get_round_trip: ref length must match payload");
-    assert_eq!(object_ref.media_type, metadata.media_type, "put_get_round_trip: ref media type must match metadata");
+    assert_eq!(
+        object_ref.key, key,
+        "put_get_round_trip: ref key must echo the logical key"
+    );
+    assert_eq!(
+        object_ref.length,
+        content.len() as u64,
+        "put_get_round_trip: ref length must match payload"
+    );
+    assert_eq!(
+        object_ref.media_type, metadata.media_type,
+        "put_get_round_trip: ref media type must match metadata"
+    );
     assert_eq!(
         object_ref.scope_digest,
         scope.digest().expect("put_get_round_trip: scope digest"),
@@ -360,27 +429,41 @@ async fn put_get_round_trip(store: &dyn ObjectStore) {
         "put_get_round_trip: ref content digest must be the SHA-256 of the exact bytes"
     );
 
-    let fetched = store.get(scope, key).await.expect("put_get_round_trip: get must succeed");
-    assert_eq!(fetched.as_ref(), content.as_slice(), "put_get_round_trip: get must return the exact bytes");
+    let fetched = store
+        .get(scope, key)
+        .await
+        .expect("put_get_round_trip: get must succeed");
+    assert_eq!(
+        fetched.as_ref(),
+        content.as_slice(),
+        "put_get_round_trip: get must return the exact bytes"
+    );
 }
 
 async fn put_file_and_get_to_file_round_trip(store: &dyn ObjectStore) {
     let scope = test_scope("tenant-a");
-    let key = ObjectKey::try_new("docs/b.bin").expect("put_file_and_get_to_file_round_trip: key must be valid");
+    let key = ObjectKey::try_new("docs/b.bin")
+        .expect("put_file_and_get_to_file_round_trip: key must be valid");
     let content = deterministic_content();
     let metadata = test_metadata();
 
-    let source =
-        tempfile::NamedTempFile::new().expect("put_file_and_get_to_file_round_trip: create source tempfile");
+    let source = tempfile::NamedTempFile::new()
+        .expect("put_file_and_get_to_file_round_trip: create source tempfile");
     std::fs::write(source.path(), &content)
         .expect("put_file_and_get_to_file_round_trip: write source tempfile");
 
     let put_ref = store
-        .put(scope.clone(), key.clone(), PutPayload::File(source.path().to_path_buf()), metadata)
+        .put(
+            scope.clone(),
+            key.clone(),
+            PutPayload::File(source.path().to_path_buf()),
+            metadata,
+        )
         .await
         .expect("put_file_and_get_to_file_round_trip: put from file must succeed");
 
-    let dest = tempfile::NamedTempFile::new().expect("put_file_and_get_to_file_round_trip: create dest tempfile");
+    let dest = tempfile::NamedTempFile::new()
+        .expect("put_file_and_get_to_file_round_trip: create dest tempfile");
     let get_ref = store
         .get_to_file(scope, key, dest.path().to_path_buf())
         .await
@@ -390,9 +473,12 @@ async fn put_file_and_get_to_file_round_trip(store: &dyn ObjectStore) {
         put_ref.content_digest, get_ref.content_digest,
         "put_file_and_get_to_file_round_trip: content digests must be equal"
     );
-    let written =
-        std::fs::read(dest.path()).expect("put_file_and_get_to_file_round_trip: read dest tempfile");
-    assert_eq!(written, content, "put_file_and_get_to_file_round_trip: dest file bytes must match source");
+    let written = std::fs::read(dest.path())
+        .expect("put_file_and_get_to_file_round_trip: read dest tempfile");
+    assert_eq!(
+        written, content,
+        "put_file_and_get_to_file_round_trip: dest file bytes must match source"
+    );
 }
 
 async fn head_matches_put_ref(store: &dyn ObjectStore) {
@@ -401,22 +487,39 @@ async fn head_matches_put_ref(store: &dyn ObjectStore) {
     let metadata = test_metadata();
 
     let put_ref = store
-        .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(deterministic_content())), metadata)
+        .put(
+            scope.clone(),
+            key.clone(),
+            PutPayload::Bytes(Bytes::from(deterministic_content())),
+            metadata,
+        )
         .await
         .expect("head_matches_put_ref: put must succeed");
-    let head_ref = store.head(scope, key).await.expect("head_matches_put_ref: head must succeed");
+    let head_ref = store
+        .head(scope, key)
+        .await
+        .expect("head_matches_put_ref: head must succeed");
 
-    assert_eq!(put_ref, head_ref, "head_matches_put_ref: head must return the exact ref returned by put");
+    assert_eq!(
+        put_ref, head_ref,
+        "head_matches_put_ref: head must return the exact ref returned by put"
+    );
 }
 
 async fn cross_scope_read_fails_closed(store: &dyn ObjectStore) {
     let scope_a = test_scope("tenant-a");
     let scope_b = test_scope("tenant-b");
-    let key = ObjectKey::try_new("docs/d.bin").expect("cross_scope_read_fails_closed: key must be valid");
+    let key =
+        ObjectKey::try_new("docs/d.bin").expect("cross_scope_read_fails_closed: key must be valid");
     let metadata = test_metadata();
 
     store
-        .put(scope_a, key.clone(), PutPayload::Bytes(Bytes::from(deterministic_content())), metadata)
+        .put(
+            scope_a,
+            key.clone(),
+            PutPayload::Bytes(Bytes::from(deterministic_content())),
+            metadata,
+        )
         .await
         .expect("cross_scope_read_fails_closed: put must succeed");
 
@@ -425,17 +528,28 @@ async fn cross_scope_read_fails_closed(store: &dyn ObjectStore) {
         .await
         .expect_err("cross_scope_read_fails_closed: cross-scope get must fail");
     assert!(
-        matches!(error, ObjectError::ScopeMismatch { .. } | ObjectError::NotFound),
+        matches!(
+            error,
+            ObjectError::ScopeMismatch { .. } | ObjectError::NotFound
+        ),
         "cross_scope_read_fails_closed: must fail closed with ScopeMismatch or NotFound, got {error:?}"
     );
 }
 
 async fn missing_object_is_not_found(store: &dyn ObjectStore) {
     let scope = test_scope("tenant-a");
-    let key = ObjectKey::try_new("docs/missing.bin").expect("missing_object_is_not_found: key must be valid");
+    let key = ObjectKey::try_new("docs/missing.bin")
+        .expect("missing_object_is_not_found: key must be valid");
 
-    let error = store.get(scope, key).await.expect_err("missing_object_is_not_found: get must fail");
-    assert_eq!(error.code(), OBJECT_NOT_FOUND, "missing_object_is_not_found: must report object_not_found");
+    let error = store
+        .get(scope, key)
+        .await
+        .expect_err("missing_object_is_not_found: get must fail");
+    assert_eq!(
+        error.code(),
+        OBJECT_NOT_FOUND,
+        "missing_object_is_not_found: must report object_not_found"
+    );
 }
 
 async fn delete_is_idempotent(store: &dyn ObjectStore) {
@@ -444,17 +558,32 @@ async fn delete_is_idempotent(store: &dyn ObjectStore) {
     let metadata = test_metadata();
 
     store
-        .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(deterministic_content())), metadata)
+        .put(
+            scope.clone(),
+            key.clone(),
+            PutPayload::Bytes(Bytes::from(deterministic_content())),
+            metadata,
+        )
         .await
         .expect("delete_is_idempotent: put must succeed");
-    store.delete(scope.clone(), key.clone()).await.expect("delete_is_idempotent: first delete must succeed");
-    store.delete(scope.clone(), key.clone()).await.expect("delete_is_idempotent: second delete must succeed");
+    store
+        .delete(scope.clone(), key.clone())
+        .await
+        .expect("delete_is_idempotent: first delete must succeed");
+    store
+        .delete(scope.clone(), key.clone())
+        .await
+        .expect("delete_is_idempotent: second delete must succeed");
 
     let error = store
         .get(scope, key)
         .await
         .expect_err("delete_is_idempotent: get after delete must fail");
-    assert_eq!(error.code(), OBJECT_NOT_FOUND, "delete_is_idempotent: deleted object must be not_found");
+    assert_eq!(
+        error.code(),
+        OBJECT_NOT_FOUND,
+        "delete_is_idempotent: deleted object must be not_found"
+    );
 }
 
 async fn list_pages_within_scope_only(store: &dyn ObjectStore) {
@@ -478,14 +607,21 @@ async fn list_pages_within_scope_only(store: &dyn ObjectStore) {
         expected_keys.push(key);
     }
 
-    let other_key =
-        ObjectKey::try_new("list/other.bin").expect("list_pages_within_scope_only: key must be valid");
+    let other_key = ObjectKey::try_new("list/other.bin")
+        .expect("list_pages_within_scope_only: key must be valid");
     store
-        .put(scope_b, other_key, PutPayload::Bytes(Bytes::from(deterministic_content())), metadata)
+        .put(
+            scope_b,
+            other_key,
+            PutPayload::Bytes(Bytes::from(deterministic_content())),
+            metadata,
+        )
         .await
         .expect("list_pages_within_scope_only: put in scope B must succeed");
 
-    let prefix = Some(ObjectKey::try_new("list").expect("list_pages_within_scope_only: prefix must be valid"));
+    let prefix = Some(
+        ObjectKey::try_new("list").expect("list_pages_within_scope_only: prefix must be valid"),
+    );
     let mut collected = Vec::new();
     let mut page = PageToken::first();
     loop {
@@ -536,21 +672,32 @@ async fn oversize_put_is_rejected(store: &dyn ObjectStore) {
     }
 
     let scope = test_scope("tenant-a");
-    let key = ObjectKey::try_new("docs/oversize.bin").expect("oversize_put_is_rejected: key must be valid");
+    let key = ObjectKey::try_new("docs/oversize.bin")
+        .expect("oversize_put_is_rejected: key must be valid");
     let oversized_len = usize::try_from(limits.max_object_bytes + 1)
         .expect("oversize_put_is_rejected: oversized length must fit in usize");
     let metadata = test_metadata();
 
     let error = store
-        .put(scope, key, PutPayload::Bytes(Bytes::from(vec![7_u8; oversized_len])), metadata)
+        .put(
+            scope,
+            key,
+            PutPayload::Bytes(Bytes::from(vec![7_u8; oversized_len])),
+            metadata,
+        )
         .await
         .expect_err("oversize_put_is_rejected: put over the ceiling must fail");
-    assert_eq!(error.code(), OBJECT_TOO_LARGE, "oversize_put_is_rejected: must report object_too_large");
+    assert_eq!(
+        error.code(),
+        OBJECT_TOO_LARGE,
+        "oversize_put_is_rejected: must report object_too_large"
+    );
 }
 
 fn invalid_key_never_reaches_backend() {
     for bad in ["", "/abs", "a//b", "a/../b", "..", "a b"] {
-        let error = ObjectKey::try_new(bad).expect_err("invalid_key_never_reaches_backend: key must be rejected");
+        let error = ObjectKey::try_new(bad)
+            .expect_err("invalid_key_never_reaches_backend: key must be rejected");
         assert_eq!(
             error.code(),
             OBJECT_INVALID_KEY,
@@ -565,7 +712,12 @@ async fn presign_returns_url(store: &dyn ObjectStore) {
     let metadata = test_metadata();
 
     store
-        .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(deterministic_content())), metadata)
+        .put(
+            scope.clone(),
+            key.clone(),
+            PutPayload::Bytes(Bytes::from(deterministic_content())),
+            metadata,
+        )
         .await
         .expect("presign_returns_url: put must succeed");
 
@@ -573,8 +725,14 @@ async fn presign_returns_url(store: &dyn ObjectStore) {
         .presign_get(scope, key, Duration::from_mins(1))
         .await
         .expect("presign_returns_url: presign must succeed when supported");
-    assert!(!presigned.url.is_empty(), "presign_returns_url: url must be non-empty");
-    assert_eq!(presigned.expires_in_secs, 60, "presign_returns_url: expiry must echo the request");
+    assert!(
+        !presigned.url.is_empty(),
+        "presign_returns_url: url must be non-empty"
+    );
+    assert_eq!(
+        presigned.expires_in_secs, 60,
+        "presign_returns_url: expiry must echo the request"
+    );
 }
 
 async fn presign_is_unsupported(store: &dyn ObjectStore) {

@@ -117,13 +117,6 @@ pub use services::artifact::{
     ARTIFACT_INTEGRITY_FAILURE, ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
     ArtifactStoreLimits, MAX_ARTIFACT_BYTES, stage_required_artifact, validate_staged_artifact,
 };
-pub use services::object::{
-    MAX_OBJECT_KEY_BYTES, OBJECT_INTEGRITY_FAILURE, OBJECT_INVALID_KEY, OBJECT_INVALID_METADATA,
-    OBJECT_IO_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH, OBJECT_TOO_LARGE,
-    OBJECT_UNAVAILABLE, OBJECT_UNSUPPORTED, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata,
-    ObjectPage, ObjectRef, ObjectScope, ObjectStore, ObjectStoreLimits, PageToken, PresignedUrl,
-    PutPayload, physical_object_key, validate_object_metadata,
-};
 pub use services::audit::{
     SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
     SecurityAuditReceipt, SecurityAuditSink,
@@ -135,6 +128,13 @@ pub use services::composition::{
 };
 pub use services::identity_map::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
+};
+pub use services::object::{
+    MAX_OBJECT_KEY_BYTES, OBJECT_INTEGRITY_FAILURE, OBJECT_INVALID_KEY, OBJECT_INVALID_METADATA,
+    OBJECT_IO_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH, OBJECT_TOO_LARGE,
+    OBJECT_UNAVAILABLE, OBJECT_UNSUPPORTED, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata,
+    ObjectPage, ObjectRef, ObjectScope, ObjectStore, ObjectStoreLimits, PageToken, PresignedUrl,
+    PutPayload, physical_object_key, validate_object_metadata,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::process_confinement::{

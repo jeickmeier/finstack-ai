@@ -1,0 +1,161 @@
+pub mod finstack_ai_store_object_s3
+pub mod finstack_ai_store_object_s3::config
+pub enum finstack_ai_store_object_s3::config::Addressing
+pub finstack_ai_store_object_s3::config::Addressing::Path
+pub finstack_ai_store_object_s3::config::Addressing::VirtualHost
+impl core::clone::Clone for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::clone(&self) -> finstack_ai_store_object_s3::config::Addressing
+impl core::cmp::Eq for finstack_ai_store_object_s3::config::Addressing
+impl core::cmp::PartialEq for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::eq(&self, &finstack_ai_store_object_s3::config::Addressing) -> bool
+impl core::default::Default for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::default() -> finstack_ai_store_object_s3::config::Addressing
+impl core::fmt::Debug for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_object_s3::config::Addressing
+impl core::marker::StructuralPartialEq for finstack_ai_store_object_s3::config::Addressing
+pub struct finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+impl finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::access_key_id(&self) -> core::option::Option<&str>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::addressing(&self) -> finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::bucket(&self) -> &str
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::endpoint(&self) -> &str
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::key_prefix(&self) -> core::option::Option<&str>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::max_object_bytes(&self) -> u64
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::presign_expiry_max(&self) -> core::time::Duration
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::region(&self) -> &str
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::secret_access_key(&self) -> core::option::Option<&finstack_ai_runtime::ports::model::provider_util::secret::SecretString>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::timeout(&self) -> core::time::Duration
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::try_new(impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_addressing(self, finstack_ai_store_object_s3::config::Addressing) -> Self
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_credentials(self, impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_key_prefix(self, impl core::convert::AsRef<str>) -> Self
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_max_object_bytes(self, u64) -> Self
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_presign_expiry_max(self, core::time::Duration) -> Self
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_timeout(self, core::time::Duration) -> Self
+impl core::clone::Clone for finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::clone(&self) -> finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+impl core::fmt::Debug for finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod finstack_ai_store_object_s3::request
+pub struct finstack_ai_store_object_s3::request::BlobDigestHasher
+impl finstack_ai_store_object_s3::request::BlobDigestHasher
+pub const fn finstack_ai_store_object_s3::request::BlobDigestHasher::bytes_written(&self) -> u64
+pub fn finstack_ai_store_object_s3::request::BlobDigestHasher::finish(self) -> core::result::Result<(finstack_ai_kernel::primitives::digest::Digest, u64), finstack_ai_runtime::services::object::ObjectError>
+pub fn finstack_ai_store_object_s3::request::BlobDigestHasher::new() -> Self
+pub fn finstack_ai_store_object_s3::request::BlobDigestHasher::update(&mut self, &[u8])
+impl core::default::Default for finstack_ai_store_object_s3::request::BlobDigestHasher
+pub fn finstack_ai_store_object_s3::request::BlobDigestHasher::default() -> Self
+pub struct finstack_ai_store_object_s3::request::ListTarget
+pub finstack_ai_store_object_s3::request::ListTarget::canonical_query: alloc::string::String
+pub finstack_ai_store_object_s3::request::ListTarget::host: alloc::string::String
+pub finstack_ai_store_object_s3::request::ListTarget::path: alloc::string::String
+pub finstack_ai_store_object_s3::request::ListTarget::url: url::Url
+pub struct finstack_ai_store_object_s3::request::RequestTarget
+pub finstack_ai_store_object_s3::request::RequestTarget::host: alloc::string::String
+pub finstack_ai_store_object_s3::request::RequestTarget::path: alloc::string::String
+pub finstack_ai_store_object_s3::request::RequestTarget::scheme: alloc::string::String
+pub finstack_ai_store_object_s3::request::RequestTarget::url: url::Url
+pub struct finstack_ai_store_object_s3::request::StreamingSha256(_)
+impl finstack_ai_store_object_s3::request::StreamingSha256
+pub fn finstack_ai_store_object_s3::request::StreamingSha256::finish(self) -> alloc::string::String
+pub fn finstack_ai_store_object_s3::request::StreamingSha256::new() -> Self
+pub fn finstack_ai_store_object_s3::request::StreamingSha256::update(&mut self, &[u8])
+impl core::default::Default for finstack_ai_store_object_s3::request::StreamingSha256
+pub fn finstack_ai_store_object_s3::request::StreamingSha256::default() -> Self
+pub fn finstack_ai_store_object_s3::request::extract_tag_values(&str, &str) -> alloc::vec::Vec<alloc::string::String>
+pub fn finstack_ai_store_object_s3::request::list_url(&finstack_ai_store_object_s3::config::S3ObjectStoreConfig, &str, core::option::Option<&str>) -> core::result::Result<finstack_ai_store_object_s3::request::ListTarget, finstack_ai_runtime::services::object::ObjectError>
+pub fn finstack_ai_store_object_s3::request::map_status_error(http::status::StatusCode) -> finstack_ai_runtime::services::object::ObjectError
+pub fn finstack_ai_store_object_s3::request::map_transport_error() -> finstack_ai_runtime::services::object::ObjectError
+pub fn finstack_ai_store_object_s3::request::object_url(&finstack_ai_store_object_s3::config::S3ObjectStoreConfig, &str) -> core::result::Result<finstack_ai_store_object_s3::request::RequestTarget, finstack_ai_runtime::services::object::ObjectError>
+pub fn finstack_ai_store_object_s3::request::payload_sha256_hex(&[u8]) -> alloc::string::String
+pub mod finstack_ai_store_object_s3::sigv4
+pub struct finstack_ai_store_object_s3::sigv4::SigningParams<'a>
+pub finstack_ai_store_object_s3::sigv4::SigningParams::access_key_id: &'a str
+pub finstack_ai_store_object_s3::sigv4::SigningParams::region: &'a str
+pub finstack_ai_store_object_s3::sigv4::SigningParams::secret_key: &'a str
+pub finstack_ai_store_object_s3::sigv4::SigningParams::service: &'a str
+pub finstack_ai_store_object_s3::sigv4::SigningParams::timestamp: finstack_ai_store_object_s3::sigv4::UtcStamp
+impl<'a> core::clone::Clone for finstack_ai_store_object_s3::sigv4::SigningParams<'a>
+pub fn finstack_ai_store_object_s3::sigv4::SigningParams<'a>::clone(&self) -> finstack_ai_store_object_s3::sigv4::SigningParams<'a>
+impl<'a> core::fmt::Debug for finstack_ai_store_object_s3::sigv4::SigningParams<'a>
+pub fn finstack_ai_store_object_s3::sigv4::SigningParams<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_store_object_s3::sigv4::UtcStamp
+pub finstack_ai_store_object_s3::sigv4::UtcStamp::date: alloc::string::String
+pub finstack_ai_store_object_s3::sigv4::UtcStamp::datetime: alloc::string::String
+impl finstack_ai_store_object_s3::sigv4::UtcStamp
+pub fn finstack_ai_store_object_s3::sigv4::UtcStamp::from_unix_secs(u64) -> Self
+pub fn finstack_ai_store_object_s3::sigv4::UtcStamp::now() -> Self
+impl core::clone::Clone for finstack_ai_store_object_s3::sigv4::UtcStamp
+pub fn finstack_ai_store_object_s3::sigv4::UtcStamp::clone(&self) -> finstack_ai_store_object_s3::sigv4::UtcStamp
+impl core::cmp::Eq for finstack_ai_store_object_s3::sigv4::UtcStamp
+impl core::cmp::PartialEq for finstack_ai_store_object_s3::sigv4::UtcStamp
+pub fn finstack_ai_store_object_s3::sigv4::UtcStamp::eq(&self, &finstack_ai_store_object_s3::sigv4::UtcStamp) -> bool
+impl core::fmt::Debug for finstack_ai_store_object_s3::sigv4::UtcStamp
+pub fn finstack_ai_store_object_s3::sigv4::UtcStamp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_store_object_s3::sigv4::UtcStamp
+pub fn finstack_ai_store_object_s3::sigv4::presign_url(&finstack_ai_store_object_s3::sigv4::SigningParams<'_>, &str, &str, &str, &str, u64) -> alloc::string::String
+pub fn finstack_ai_store_object_s3::sigv4::sign_headers(&finstack_ai_store_object_s3::sigv4::SigningParams<'_>, &str, &str, &str, &str, &str, &[(alloc::string::String, alloc::string::String)]) -> alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub fn finstack_ai_store_object_s3::sigv4::uri_encode(&str, bool) -> alloc::string::String
+pub mod finstack_ai_store_object_s3::store
+pub struct finstack_ai_store_object_s3::store::S3ObjectStore
+impl finstack_ai_store_object_s3::store::S3ObjectStore
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::try_new(finstack_ai_store_object_s3::config::S3ObjectStoreConfig) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+impl finstack_ai_runtime::services::object::ObjectStore for finstack_ai_store_object_s3::store::S3ObjectStore
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::delete(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::get(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::get_to_file(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey, std::path::PathBuf) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectRef, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::head(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectRef, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::limits(&self) -> finstack_ai_runtime::services::object::ObjectStoreLimits
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::list(&self, finstack_ai_runtime::services::object::ObjectScope, core::option::Option<finstack_ai_runtime::services::object::ObjectKey>, finstack_ai_runtime::services::object::PageToken) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectPage, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::presign_get(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey, core::time::Duration) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::PresignedUrl, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::put(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey, finstack_ai_runtime::services::object::PutPayload, finstack_ai_runtime::services::object::ObjectMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectRef, finstack_ai_runtime::services::object::ObjectError>>
+pub enum finstack_ai_store_object_s3::Addressing
+pub finstack_ai_store_object_s3::Addressing::Path
+pub finstack_ai_store_object_s3::Addressing::VirtualHost
+impl core::clone::Clone for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::clone(&self) -> finstack_ai_store_object_s3::config::Addressing
+impl core::cmp::Eq for finstack_ai_store_object_s3::config::Addressing
+impl core::cmp::PartialEq for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::eq(&self, &finstack_ai_store_object_s3::config::Addressing) -> bool
+impl core::default::Default for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::default() -> finstack_ai_store_object_s3::config::Addressing
+impl core::fmt::Debug for finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::Addressing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_object_s3::config::Addressing
+impl core::marker::StructuralPartialEq for finstack_ai_store_object_s3::config::Addressing
+pub struct finstack_ai_store_object_s3::S3ObjectStore
+impl finstack_ai_store_object_s3::store::S3ObjectStore
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::try_new(finstack_ai_store_object_s3::config::S3ObjectStoreConfig) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+impl finstack_ai_runtime::services::object::ObjectStore for finstack_ai_store_object_s3::store::S3ObjectStore
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::delete(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::get(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::get_to_file(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey, std::path::PathBuf) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectRef, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::head(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectRef, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::limits(&self) -> finstack_ai_runtime::services::object::ObjectStoreLimits
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::list(&self, finstack_ai_runtime::services::object::ObjectScope, core::option::Option<finstack_ai_runtime::services::object::ObjectKey>, finstack_ai_runtime::services::object::PageToken) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectPage, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::presign_get(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey, core::time::Duration) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::PresignedUrl, finstack_ai_runtime::services::object::ObjectError>>
+pub fn finstack_ai_store_object_s3::store::S3ObjectStore::put(&self, finstack_ai_runtime::services::object::ObjectScope, finstack_ai_runtime::services::object::ObjectKey, finstack_ai_runtime::services::object::PutPayload, finstack_ai_runtime::services::object::ObjectMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::object::ObjectRef, finstack_ai_runtime::services::object::ObjectError>>
+pub struct finstack_ai_store_object_s3::S3ObjectStoreConfig
+impl finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::access_key_id(&self) -> core::option::Option<&str>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::addressing(&self) -> finstack_ai_store_object_s3::config::Addressing
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::bucket(&self) -> &str
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::endpoint(&self) -> &str
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::key_prefix(&self) -> core::option::Option<&str>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::max_object_bytes(&self) -> u64
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::presign_expiry_max(&self) -> core::time::Duration
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::region(&self) -> &str
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::secret_access_key(&self) -> core::option::Option<&finstack_ai_runtime::ports::model::provider_util::secret::SecretString>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::timeout(&self) -> core::time::Duration
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::try_new(impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_addressing(self, finstack_ai_store_object_s3::config::Addressing) -> Self
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_credentials(self, impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_key_prefix(self, impl core::convert::AsRef<str>) -> Self
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_max_object_bytes(self, u64) -> Self
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_presign_expiry_max(self, core::time::Duration) -> Self
+pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_timeout(self, core::time::Duration) -> Self
+impl core::clone::Clone for finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::clone(&self) -> finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+impl core::fmt::Debug for finstack_ai_store_object_s3::config::S3ObjectStoreConfig
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result

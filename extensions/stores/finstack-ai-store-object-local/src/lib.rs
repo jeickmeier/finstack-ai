@@ -37,7 +37,7 @@ use std::time::Duration;
 
 use finstack_ai_kernel::Digest;
 use finstack_ai_runtime::{
-    Bytes, ObjectError, ObjectEntry, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef, ObjectScope,
+    Bytes, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef, ObjectScope,
     ObjectStore, ObjectStoreLimits, PageToken, PortFuture, PresignedUrl, PutPayload,
     physical_object_key, validate_object_metadata,
 };
@@ -73,7 +73,10 @@ impl LocalObjectStore {
     /// Returns [`ObjectError::Io`] if `root_dir` cannot be created.
     pub fn try_new(root_dir: PathBuf) -> Result<Self, ObjectError> {
         std::fs::create_dir_all(&root_dir).map_err(|error| io_error(&error, "root_dir"))?;
-        Ok(Self { root: root_dir, limits: ObjectStoreLimits::default() })
+        Ok(Self {
+            root: root_dir,
+            limits: ObjectStoreLimits::default(),
+        })
     }
 
     /// Set this store's size ceilings.
@@ -82,7 +85,6 @@ impl LocalObjectStore {
         self.limits = limits;
         self
     }
-
 }
 
 fn scope_hex16(scope_digest: &Digest) -> String {
@@ -99,7 +101,9 @@ fn sidecar_path(content_path: &Path) -> PathBuf {
 /// Bounded, non-secret I/O diagnostic: error kind plus a caller-controlled
 /// relative context (never an absolute filesystem path).
 fn io_error(error: &std::io::Error, context: &str) -> ObjectError {
-    ObjectError::Io { message: Arc::from(format!("{kind:?}: {context}", kind = error.kind())) }
+    ObjectError::Io {
+        message: Arc::from(format!("{kind:?}: {context}", kind = error.kind())),
+    }
 }
 
 fn is_not_found(error: &std::io::Error) -> bool {
@@ -123,34 +127,56 @@ impl SidecarMeta {
             "length": self.length,
             "media_type": self.media_type,
         });
-        serde_json::to_vec(&value)
-            .map_err(|_error| ObjectError::Io { message: Arc::from("sidecar_encode_failed") })
+        serde_json::to_vec(&value).map_err(|_error| ObjectError::Io {
+            message: Arc::from("sidecar_encode_failed"),
+        })
     }
 
     fn from_json_bytes(bytes: &[u8]) -> Result<Self, ObjectError> {
         // A corrupt/unparseable sidecar is malformed metadata, not a
         // content-digest verification failure — `Integrity` is reserved for
         // an actual content-hash mismatch against a well-formed sidecar.
-        let corrupt = || ObjectError::InvalidMetadata { message: Arc::from("sidecar_corrupt") };
+        let corrupt = || ObjectError::InvalidMetadata {
+            message: Arc::from("sidecar_corrupt"),
+        };
         let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_error| corrupt())?;
-        let scope_digest =
-            value.get("scope_digest").and_then(serde_json::Value::as_str).ok_or_else(corrupt)?.to_owned();
-        let content_digest =
-            value.get("content_digest").and_then(serde_json::Value::as_str).ok_or_else(corrupt)?.to_owned();
-        let length = value.get("length").and_then(serde_json::Value::as_u64).ok_or_else(corrupt)?;
-        let media_type =
-            value.get("media_type").and_then(serde_json::Value::as_str).ok_or_else(corrupt)?.to_owned();
-        Ok(Self { scope_digest, content_digest, length, media_type })
+        let scope_digest = value
+            .get("scope_digest")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(corrupt)?
+            .to_owned();
+        let content_digest = value
+            .get("content_digest")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(corrupt)?
+            .to_owned();
+        let length = value
+            .get("length")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(corrupt)?;
+        let media_type = value
+            .get("media_type")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(corrupt)?
+            .to_owned();
+        Ok(Self {
+            scope_digest,
+            content_digest,
+            length,
+            media_type,
+        })
     }
 
     fn content_digest(&self) -> Result<Digest, ObjectError> {
-        Digest::from_hex(&self.content_digest)
-            .map_err(|_error| ObjectError::InvalidMetadata { message: Arc::from("sidecar_corrupt") })
+        Digest::from_hex(&self.content_digest).map_err(|_error| ObjectError::InvalidMetadata {
+            message: Arc::from("sidecar_corrupt"),
+        })
     }
 
     fn scope_digest(&self) -> Result<Digest, ObjectError> {
-        Digest::from_hex(&self.scope_digest)
-            .map_err(|_error| ObjectError::InvalidMetadata { message: Arc::from("sidecar_corrupt") })
+        Digest::from_hex(&self.scope_digest).map_err(|_error| ObjectError::InvalidMetadata {
+            message: Arc::from("sidecar_corrupt"),
+        })
     }
 }
 
@@ -185,8 +211,9 @@ impl StreamingBlobDigest {
             // `write!` into a `String` never fails.
             let _ignored = write!(hex, "{byte:02x}");
         }
-        let digest = Digest::from_hex(&hex)
-            .map_err(|_error| ObjectError::Io { message: Arc::from("digest_encode_failed") })?;
+        let digest = Digest::from_hex(&hex).map_err(|_error| ObjectError::Io {
+            message: Arc::from("digest_encode_failed"),
+        })?;
         Ok((digest, self.len))
     }
 }
@@ -204,7 +231,10 @@ struct CleanupGuard {
 
 impl CleanupGuard {
     fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into(), armed: true }
+        Self {
+            path: path.into(),
+            armed: true,
+        }
     }
 
     const fn disarm(&mut self) {
@@ -248,7 +278,11 @@ impl ObjectStore for LocalObjectStore {
         Box::pin(async move { get_to_file_impl(&root, scope, key, dest).await })
     }
 
-    fn head(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<ObjectRef, ObjectError>> {
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let root = self.root.clone();
         Box::pin(async move { head_impl(&root, scope, key).await })
     }
@@ -275,7 +309,9 @@ impl ObjectStore for LocalObjectStore {
         _expiry: Duration,
     ) -> PortFuture<Result<PresignedUrl, ObjectError>> {
         Box::pin(async move {
-            Err(ObjectError::Unsupported { operation: Arc::from("presign_get") })
+            Err(ObjectError::Unsupported {
+                operation: Arc::from("presign_get"),
+            })
         })
     }
 
@@ -297,9 +333,13 @@ async fn put_impl(
     let content_path = root.join(physical_object_key(None, &scope_digest, &key));
     let sidecar = sidecar_path(&content_path);
     let Some(parent) = content_path.parent() else {
-        return Err(ObjectError::Io { message: Arc::from("content_path_has_no_parent") });
+        return Err(ObjectError::Io {
+            message: Arc::from("content_path_has_no_parent"),
+        });
     };
-    tokio::fs::create_dir_all(parent).await.map_err(|error| io_error(&error, key.as_str()))?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|error| io_error(&error, key.as_str()))?;
 
     let content_temp =
         tempfile::NamedTempFile::new_in(parent).map_err(|error| io_error(&error, key.as_str()))?;
@@ -307,10 +347,14 @@ async fn put_impl(
 
     let (content_digest, length) = match content {
         PutPayload::Bytes(bytes) => {
-            let length = u64::try_from(bytes.len())
-                .map_err(|_error| ObjectError::Io { message: Arc::from("length_overflow") })?;
+            let length = u64::try_from(bytes.len()).map_err(|_error| ObjectError::Io {
+                message: Arc::from("length_overflow"),
+            })?;
             if length > limits.max_object_bytes {
-                return Err(ObjectError::TooLarge { len: length, max: limits.max_object_bytes });
+                return Err(ObjectError::TooLarge {
+                    len: length,
+                    max: limits.max_object_bytes,
+                });
             }
             std::io::Write::write_all(&mut content_temp.as_file(), &bytes)
                 .map_err(|error| io_error(&error, key.as_str()))?;
@@ -320,23 +364,36 @@ async fn put_impl(
             let mut source = tokio::fs::File::open(&source_path)
                 .await
                 .map_err(|error| io_error(&error, key.as_str()))?;
-            let clone = content_temp.as_file().try_clone().map_err(|error| io_error(&error, key.as_str()))?;
+            let clone = content_temp
+                .as_file()
+                .try_clone()
+                .map_err(|error| io_error(&error, key.as_str()))?;
             let mut dest = tokio::fs::File::from_std(clone);
             let mut hasher = StreamingBlobDigest::new();
             let mut buffer = [0_u8; STREAM_CHUNK_BYTES];
             loop {
-                let read = source.read(&mut buffer).await.map_err(|error| io_error(&error, key.as_str()))?;
+                let read = source
+                    .read(&mut buffer)
+                    .await
+                    .map_err(|error| io_error(&error, key.as_str()))?;
                 if read == 0 {
                     break;
                 }
                 let chunk = buffer.get(..read).unwrap_or(&[]);
                 hasher.update(chunk);
                 if hasher.len > limits.max_object_bytes {
-                    return Err(ObjectError::TooLarge { len: hasher.len, max: limits.max_object_bytes });
+                    return Err(ObjectError::TooLarge {
+                        len: hasher.len,
+                        max: limits.max_object_bytes,
+                    });
                 }
-                dest.write_all(chunk).await.map_err(|error| io_error(&error, key.as_str()))?;
+                dest.write_all(chunk)
+                    .await
+                    .map_err(|error| io_error(&error, key.as_str()))?;
             }
-            dest.flush().await.map_err(|error| io_error(&error, key.as_str()))?;
+            dest.flush()
+                .await
+                .map_err(|error| io_error(&error, key.as_str()))?;
             hasher.finish()?
         }
     };
@@ -357,12 +414,22 @@ async fn put_impl(
 
     // Publish order: sidecar first, then content. A crash between the two
     // renames leaves only an orphan sidecar, which reads treat as NotFound.
-    sidecar_temp.persist(&sidecar).map_err(|error| io_error(&error.error, key.as_str()))?;
+    sidecar_temp
+        .persist(&sidecar)
+        .map_err(|error| io_error(&error.error, key.as_str()))?;
     sidecar_guard.disarm();
-    content_temp.persist(&content_path).map_err(|error| io_error(&error.error, key.as_str()))?;
+    content_temp
+        .persist(&content_path)
+        .map_err(|error| io_error(&error.error, key.as_str()))?;
     content_guard.disarm();
 
-    Ok(ObjectRef { key, scope_digest, content_digest, length, media_type: metadata.media_type })
+    Ok(ObjectRef {
+        key,
+        scope_digest,
+        content_digest,
+        length,
+        media_type: metadata.media_type,
+    })
 }
 
 /// Read and validate the sidecar for `scope`/`key`, checking scope binding.
@@ -385,7 +452,10 @@ async fn read_sidecar(
     let meta = SidecarMeta::from_json_bytes(&sidecar_bytes)?;
     let stored_scope_digest = meta.scope_digest()?;
     if stored_scope_digest != scope_digest {
-        return Err(ObjectError::ScopeMismatch { expected: scope_digest, actual: stored_scope_digest });
+        return Err(ObjectError::ScopeMismatch {
+            expected: scope_digest,
+            actual: stored_scope_digest,
+        });
     }
     Ok((scope_digest, content_path, meta))
 }
@@ -403,7 +473,9 @@ async fn get_impl(root: &Path, scope: ObjectScope, key: ObjectKey) -> Result<Byt
 
     let expected = meta.content_digest()?;
     if Digest::blob_content(&content) != expected {
-        return Err(ObjectError::Integrity { message: Arc::from("content_digest_mismatch") });
+        return Err(ObjectError::Integrity {
+            message: Arc::from("content_digest_mismatch"),
+        });
     }
     Ok(Bytes::from(content))
 }
@@ -422,11 +494,16 @@ async fn get_to_file_impl(
         Err(error) => return Err(io_error(&error, key.as_str())),
     }
 
-    let mut file = tokio::fs::File::open(&dest).await.map_err(|error| io_error(&error, key.as_str()))?;
+    let mut file = tokio::fs::File::open(&dest)
+        .await
+        .map_err(|error| io_error(&error, key.as_str()))?;
     let mut hasher = StreamingBlobDigest::new();
     let mut buffer = [0_u8; STREAM_CHUNK_BYTES];
     loop {
-        let read = file.read(&mut buffer).await.map_err(|error| io_error(&error, key.as_str()))?;
+        let read = file
+            .read(&mut buffer)
+            .await
+            .map_err(|error| io_error(&error, key.as_str()))?;
         if read == 0 {
             break;
         }
@@ -435,7 +512,9 @@ async fn get_to_file_impl(
     let (actual_digest, length) = hasher.finish()?;
     let expected = meta.content_digest()?;
     if actual_digest != expected {
-        return Err(ObjectError::Integrity { message: Arc::from("content_digest_mismatch") });
+        return Err(ObjectError::Integrity {
+            message: Arc::from("content_digest_mismatch"),
+        });
     }
 
     Ok(ObjectRef {
@@ -447,7 +526,11 @@ async fn get_to_file_impl(
     })
 }
 
-async fn head_impl(root: &Path, scope: ObjectScope, key: ObjectKey) -> Result<ObjectRef, ObjectError> {
+async fn head_impl(
+    root: &Path,
+    scope: ObjectScope,
+    key: ObjectKey,
+) -> Result<ObjectRef, ObjectError> {
     let (scope_digest, content_path, meta) = read_sidecar(root, &scope, &key).await?;
     match tokio::fs::metadata(&content_path).await {
         Ok(_metadata) => {}
@@ -505,19 +588,29 @@ async fn list_impl(
             .map_or(0, |index| index + 1),
         None => 0,
     };
-    let remaining = matching.get(start_index.min(matching.len())..).unwrap_or(&[]);
+    let remaining = matching
+        .get(start_index.min(matching.len())..)
+        .unwrap_or(&[]);
 
     let mut entries = Vec::new();
     let mut last_logical: Option<String> = None;
     for (logical, length) in remaining.iter().take(LIST_PAGE_SIZE) {
-        let key = ObjectKey::try_new(logical)
-            .map_err(|_error| ObjectError::Io { message: Arc::from("corrupt_physical_key") })?;
-        entries.push(ObjectEntry { key, length: *length });
+        let key = ObjectKey::try_new(logical).map_err(|_error| ObjectError::Io {
+            message: Arc::from("corrupt_physical_key"),
+        })?;
+        entries.push(ObjectEntry {
+            key,
+            length: *length,
+        });
         last_logical = Some(logical.clone());
     }
 
     let consumed = start_index + entries.len();
-    let next = if consumed < matching.len() { last_logical.map(PageToken::opaque) } else { None };
+    let next = if consumed < matching.len() {
+        last_logical.map(PageToken::opaque)
+    } else {
+        None
+    };
 
     Ok(ObjectPage { entries, next })
 }
@@ -537,8 +630,15 @@ async fn walk_scope_dir(scope_dir: &Path) -> Result<Vec<(String, u64)>, ObjectEr
             Err(error) => return Err(io_error(&error, "list")),
         };
 
-        while let Some(entry) = entries.next_entry().await.map_err(|error| io_error(&error, "list"))? {
-            let file_type = entry.file_type().await.map_err(|error| io_error(&error, "list"))?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|error| io_error(&error, "list"))?
+        {
+            let file_type = entry
+                .file_type()
+                .await
+                .map_err(|error| io_error(&error, "list"))?;
             let path = entry.path();
             if file_type.is_dir() {
                 stack.push(path);
@@ -560,7 +660,10 @@ async fn walk_scope_dir(scope_dir: &Path) -> Result<Vec<(String, u64)>, ObjectEr
                 .map(|component| component.as_os_str().to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join("/");
-            let file_metadata = entry.metadata().await.map_err(|error| io_error(&error, "list"))?;
+            let file_metadata = entry
+                .metadata()
+                .await
+                .map_err(|error| io_error(&error, "list"))?;
             out.push((logical, file_metadata.len()));
         }
     }
@@ -575,11 +678,20 @@ mod tests {
     use super::*;
 
     fn scope(tenant: &str) -> ObjectScope {
-        ObjectScope { tenant_scope: Arc::from(tenant), session_id: None, run_id: None, sensitivity: Sensitivity::Internal }
+        ObjectScope {
+            tenant_scope: Arc::from(tenant),
+            session_id: None,
+            run_id: None,
+            sensitivity: Sensitivity::Internal,
+        }
     }
 
     fn test_metadata() -> ObjectMetadata {
-        ObjectMetadata { media_type: Arc::from("application/octet-stream"), name: None, attributes: Metadata::empty() }
+        ObjectMetadata {
+            media_type: Arc::from("application/octet-stream"),
+            name: None,
+            attributes: Metadata::empty(),
+        }
     }
 
     #[test]
@@ -597,7 +709,8 @@ mod tests {
 
     #[test]
     fn sidecar_from_json_rejects_missing_fields() {
-        let error = SidecarMeta::from_json_bytes(br#"{"scope_digest":"a"}"#).expect_err("must reject");
+        let error =
+            SidecarMeta::from_json_bytes(br#"{"scope_digest":"a"}"#).expect_err("must reject");
         assert_eq!(error.code(), finstack_ai_runtime::OBJECT_INVALID_METADATA);
     }
 
@@ -609,15 +722,25 @@ mod tests {
         let key = ObjectKey::try_new("docs/a.bin").expect("key");
 
         let object_ref = store
-            .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(vec![7_u8; 32])), test_metadata())
+            .put(
+                scope.clone(),
+                key.clone(),
+                PutPayload::Bytes(Bytes::from(vec![7_u8; 32])),
+                test_metadata(),
+            )
             .await
             .expect("put must succeed");
 
         let scope_digest = scope.digest().expect("digest");
-        let content_path = dir.path().join(physical_object_key(None, &scope_digest, &key));
+        let content_path = dir
+            .path()
+            .join(physical_object_key(None, &scope_digest, &key));
         std::fs::write(&content_path, vec![9_u8; 32]).expect("tamper content");
 
-        let error = store.get(scope, key).await.expect_err("get must fail after tampering");
+        let error = store
+            .get(scope, key)
+            .await
+            .expect_err("get must fail after tampering");
         assert_eq!(error.code(), finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE);
         assert_eq!(object_ref.length, 32);
     }
@@ -630,15 +753,25 @@ mod tests {
         let key = ObjectKey::try_new("docs/orphan.bin").expect("key");
 
         store
-            .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(vec![1_u8; 16])), test_metadata())
+            .put(
+                scope.clone(),
+                key.clone(),
+                PutPayload::Bytes(Bytes::from(vec![1_u8; 16])),
+                test_metadata(),
+            )
             .await
             .expect("put must succeed");
 
         let scope_digest = scope.digest().expect("digest");
-        let content_path = dir.path().join(physical_object_key(None, &scope_digest, &key));
+        let content_path = dir
+            .path()
+            .join(physical_object_key(None, &scope_digest, &key));
         std::fs::remove_file(&content_path).expect("remove content, leaving orphan sidecar");
 
-        let error = store.get(scope, key).await.expect_err("get must fail for orphan sidecar");
+        let error = store
+            .get(scope, key)
+            .await
+            .expect_err("get must fail for orphan sidecar");
         assert_eq!(error.code(), finstack_ai_runtime::OBJECT_NOT_FOUND);
     }
 

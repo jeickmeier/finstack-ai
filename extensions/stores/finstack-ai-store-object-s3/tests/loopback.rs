@@ -39,7 +39,13 @@ fn metadata(media_type: &str) -> ObjectMetadata {
 }
 
 fn hex16() -> String {
-    scope().digest().expect("scope digest").to_hex().chars().take(16).collect()
+    scope()
+        .digest()
+        .expect("scope digest")
+        .to_hex()
+        .chars()
+        .take(16)
+        .collect()
 }
 
 fn store(base_url: &str, addressing: Addressing, max_object_bytes: Option<u64>) -> S3ObjectStore {
@@ -47,7 +53,10 @@ fn store(base_url: &str, addressing: Addressing, max_object_bytes: Option<u64>) 
         .expect("config")
         .with_addressing(addressing)
         .with_key_prefix("finstack")
-        .with_credentials("AKIAEXAMPLE", SecretString::try_new("supersecretvalue").expect("secret"))
+        .with_credentials(
+            "AKIAEXAMPLE",
+            SecretString::try_new("supersecretvalue").expect("secret"),
+        )
         .expect("credentials");
     if let Some(max) = max_object_bytes {
         config = config.with_max_object_bytes(max);
@@ -65,11 +74,19 @@ struct CannedResponse {
 
 impl CannedResponse {
     fn ok(headers: Vec<(&'static str, String)>, body: Vec<u8>) -> Self {
-        Self { status_line: "200 OK", headers, body }
+        Self {
+            status_line: "200 OK",
+            headers,
+            body,
+        }
     }
 
     fn status(status_line: &'static str) -> Self {
-        Self { status_line, headers: Vec::new(), body: Vec::new() }
+        Self {
+            status_line,
+            headers: Vec::new(),
+            body: Vec::new(),
+        }
     }
 }
 
@@ -127,8 +144,15 @@ async fn write_response(socket: &mut TcpStream, canned: &CannedResponse) {
     for (name, value) in &canned.headers {
         let _ = write!(response, "{name}: {value}\r\n");
     }
-    let _ = write!(response, "Content-Length: {}\r\nConnection: close\r\n\r\n", canned.body.len());
-    socket.write_all(response.as_bytes()).await.expect("write headers");
+    let _ = write!(
+        response,
+        "Content-Length: {}\r\nConnection: close\r\n\r\n",
+        canned.body.len()
+    );
+    socket
+        .write_all(response.as_bytes())
+        .await
+        .expect("write headers");
     socket.write_all(&canned.body).await.expect("write body");
 }
 
@@ -144,7 +168,12 @@ async fn put_signs_path_style_and_sends_metadata_headers() {
     let content = Bytes::from_static(b"hello world");
 
     let object_ref = store
-        .put(scope(), key, PutPayload::Bytes(content.clone()), metadata("application/pdf"))
+        .put(
+            scope(),
+            key,
+            PutPayload::Bytes(content.clone()),
+            metadata("application/pdf"),
+        )
         .await
         .expect("put must succeed");
     assert_eq!(object_ref.length, content.len() as u64);
@@ -152,11 +181,17 @@ async fn put_signs_path_style_and_sends_metadata_headers() {
     let captured = server.await.expect("server task");
     let request = &captured[0];
     assert!(
-        request.starts_with(&format!("PUT /bucket/finstack/{}/docs/a.pdf HTTP/1.1", hex16())),
+        request.starts_with(&format!(
+            "PUT /bucket/finstack/{}/docs/a.pdf HTTP/1.1",
+            hex16()
+        )),
         "captured request: {request}"
     );
     assert!(request.contains("authorization: AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE/"));
-    assert!(request.contains(&format!("x-amz-content-sha256: {}", payload_sha256_hex(b"hello world"))));
+    assert!(request.contains(&format!(
+        "x-amz-content-sha256: {}",
+        payload_sha256_hex(b"hello world")
+    )));
     assert!(request.contains("x-amz-meta-fsai-digest:"));
     assert!(request.contains("x-amz-meta-fsai-scope:"));
 }
@@ -174,18 +209,29 @@ async fn put_virtual_host_addressing_targets_bucket_host() {
     let content = Bytes::from_static(b"hello world");
 
     store
-        .put(scope(), key, PutPayload::Bytes(content), metadata("application/pdf"))
+        .put(
+            scope(),
+            key,
+            PutPayload::Bytes(content),
+            metadata("application/pdf"),
+        )
         .await
         .expect("put must succeed");
 
     let captured = server.await.expect("server task");
     let request = captured[0].to_ascii_lowercase();
-    assert!(request.contains("host: bucket.localhost:"), "captured request: {request}");
+    assert!(
+        request.contains("host: bucket.localhost:"),
+        "captured request: {request}"
+    );
     assert!(
         request.starts_with(&format!("put /finstack/{}/docs/a.pdf http/1.1", hex16())),
         "captured request: {request}"
     );
-    assert!(!request.contains("/bucket/"), "captured request must not carry a /bucket path segment");
+    assert!(
+        !request.contains("/bucket/"),
+        "captured request must not carry a /bucket path segment"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -250,7 +296,10 @@ async fn get_with_tampered_body_fails_integrity() {
     let store = store(&base_url, Addressing::Path, None);
     let key = ObjectKey::try_new("docs/a.pdf").expect("key");
 
-    let error = store.get(scope(), key).await.expect_err("must detect tampering");
+    let error = store
+        .get(scope(), key)
+        .await
+        .expect_err("must detect tampering");
     assert_eq!(error.code(), finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE);
     server.await.expect("server task");
 }
@@ -261,7 +310,10 @@ async fn missing_object_maps_404_to_not_found() {
     let store = store(&base_url, Addressing::Path, None);
     let key = ObjectKey::try_new("docs/missing.pdf").expect("key");
 
-    let error = store.get(scope(), key).await.expect_err("missing object must fail");
+    let error = store
+        .get(scope(), key)
+        .await
+        .expect_err("missing object must fail");
     assert_eq!(error.code(), OBJECT_NOT_FOUND);
     server.await.expect("server task");
 }
@@ -272,7 +324,10 @@ async fn delete_treats_404_as_success() {
     let store = store(&base_url, Addressing::Path, None);
     let key = ObjectKey::try_new("docs/missing.pdf").expect("key");
 
-    store.delete(scope(), key).await.expect("delete of a missing object must be Ok");
+    store
+        .delete(scope(), key)
+        .await
+        .expect("delete of a missing object must be Ok");
     server.await.expect("server task");
 }
 
@@ -299,7 +354,10 @@ async fn list_walks_continuation_tokens() {
     .await;
     let store = store(&base_url, Addressing::Path, None);
 
-    let page1 = store.list(scope(), None, PageToken::first()).await.expect("first page");
+    let page1 = store
+        .list(scope(), None, PageToken::first())
+        .await
+        .expect("first page");
     assert_eq!(page1.entries.len(), 1);
     assert_eq!(page1.entries[0].key.as_str(), "docs/a.pdf");
     assert_eq!(page1.entries[0].length, 5);
@@ -328,10 +386,20 @@ async fn presign_get_produces_a_signed_query_url() {
         .await
         .expect("presign must succeed with no server involved");
 
-    assert!(presigned.url.contains("X-Amz-Signature="), "url: {}", presigned.url);
-    assert!(presigned.url.contains("X-Amz-Expires=900"), "url: {}", presigned.url);
     assert!(
-        presigned.url.contains(&format!("/bucket/finstack/{}/docs/a.pdf", hex16())),
+        presigned.url.contains("X-Amz-Signature="),
+        "url: {}",
+        presigned.url
+    );
+    assert!(
+        presigned.url.contains("X-Amz-Expires=900"),
+        "url: {}",
+        presigned.url
+    );
+    assert!(
+        presigned
+            .url
+            .contains(&format!("/bucket/finstack/{}/docs/a.pdf", hex16())),
         "url: {}",
         presigned.url
     );
@@ -352,13 +420,21 @@ async fn oversize_file_put_is_rejected_before_any_request() {
     let key = ObjectKey::try_new("docs/oversize.bin").expect("key");
 
     let error = store
-        .put(scope(), key, PutPayload::File(file.path().to_path_buf()), metadata("application/octet-stream"))
+        .put(
+            scope(),
+            key,
+            PutPayload::File(file.path().to_path_buf()),
+            metadata("application/octet-stream"),
+        )
         .await
         .expect_err("oversize file put must be rejected");
     assert_eq!(error.code(), OBJECT_TOO_LARGE);
 
     let accepted = accept_task.await.expect("accept task");
-    assert!(accepted.is_err(), "the listener must never have seen a connection");
+    assert!(
+        accepted.is_err(),
+        "the listener must never have seen a connection"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +450,11 @@ async fn list_rejects_a_key_outside_the_caller_scope() {
                <IsTruncated>false</IsTruncated>\
                <Contents><Key>finstack/0000000000000000/docs/other-tenant.pdf</Key><Size>7</Size></Contents>\
                </ListBucketResult>";
-    let (base_url, server) = serve(vec![CannedResponse::ok(Vec::new(), xml.as_bytes().to_vec())]).await;
+    let (base_url, server) = serve(vec![CannedResponse::ok(
+        Vec::new(),
+        xml.as_bytes().to_vec(),
+    )])
+    .await;
     let store = store(&base_url, Addressing::Path, None);
 
     let error = store
@@ -396,12 +476,19 @@ async fn redirects_are_never_followed() {
     let store = store(&base_url, Addressing::Path, None);
     let key = ObjectKey::try_new("docs/a.pdf").expect("key");
 
-    let error = store.get(scope(), key).await.expect_err("redirect must not be followed");
+    let error = store
+        .get(scope(), key)
+        .await
+        .expect_err("redirect must not be followed");
     assert_eq!(error.code(), finstack_ai_runtime::OBJECT_UNAVAILABLE);
     assert!(format!("{error}").contains("http_301"), "error: {error}");
 
     let captured = server.await.expect("server task");
-    assert_eq!(captured.len(), 1, "the listener must see exactly one request, never a follow-up to Location");
+    assert_eq!(
+        captured.len(),
+        1,
+        "the listener must see exactly one request, never a follow-up to Location"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -421,7 +508,10 @@ async fn get_rejects_a_body_over_the_configured_ceiling() {
     let store = store(&base_url, Addressing::Path, Some(1024));
     let key = ObjectKey::try_new("docs/a.pdf").expect("key");
 
-    let error = store.get(scope(), key).await.expect_err("oversized body must be rejected");
+    let error = store
+        .get(scope(), key)
+        .await
+        .expect_err("oversized body must be rejected");
     assert_eq!(error.code(), OBJECT_TOO_LARGE);
     server.await.expect("server task");
 }
@@ -458,7 +548,9 @@ mod s3_stub {
         let state: State = Arc::new(Mutex::new(BTreeMap::new()));
         let task = tokio::spawn(async move {
             loop {
-                let Ok((socket, _)) = listener.accept().await else { break };
+                let Ok((socket, _)) = listener.accept().await else {
+                    break;
+                };
                 let state = Arc::clone(&state);
                 tokio::spawn(handle(socket, state));
             }
@@ -467,44 +559,61 @@ mod s3_stub {
     }
 
     async fn handle(mut socket: TcpStream, state: State) {
-        let Some((method, path, headers, body)) = read_request(&mut socket).await else { return };
+        let Some((method, path, headers, body)) = read_request(&mut socket).await else {
+            return;
+        };
         let (raw_path, query) = path.split_once('?').unwrap_or((path.as_str(), ""));
         let key = raw_path.strip_prefix("/bucket/").map(str::to_owned);
 
         match method.as_str() {
             "PUT" => {
-                let Some(key) = key else { return respond(&mut socket, 400, "", Vec::new()).await };
+                let Some(key) = key else {
+                    return respond(&mut socket, 400, "", Vec::new()).await;
+                };
                 let meta_headers: Vec<(String, String)> = headers
                     .iter()
                     .filter(|(name, _)| name.starts_with("x-amz-meta-") || name == "content-type")
                     .cloned()
                     .collect();
-                state
-                    .lock()
-                    .expect("lock")
-                    .insert(key, StoredObject { body, headers: meta_headers });
+                state.lock().expect("lock").insert(
+                    key,
+                    StoredObject {
+                        body,
+                        headers: meta_headers,
+                    },
+                );
                 respond(&mut socket, 200, "OK", Vec::new()).await;
             }
             "GET" if raw_path == "/bucket" => handle_list(&mut socket, &state, query).await,
             "GET" => {
-                let Some(key) = key else { return respond(&mut socket, 400, "", Vec::new()).await };
-                let found = state.lock().expect("lock").get(&key).map(|object| {
-                    (object.body.clone(), object.headers.clone())
-                });
+                let Some(key) = key else {
+                    return respond(&mut socket, 400, "", Vec::new()).await;
+                };
+                let found = state
+                    .lock()
+                    .expect("lock")
+                    .get(&key)
+                    .map(|object| (object.body.clone(), object.headers.clone()));
                 match found {
-                    Some((body, meta)) => respond_with_headers(&mut socket, 200, "OK", meta, body).await,
+                    Some((body, meta)) => {
+                        respond_with_headers(&mut socket, 200, "OK", meta, body).await;
+                    }
                     None => respond(&mut socket, 404, "Not Found", Vec::new()).await,
                 }
             }
             "HEAD" => {
-                let Some(key) = key else { return respond(&mut socket, 400, "", Vec::new()).await };
+                let Some(key) = key else {
+                    return respond(&mut socket, 400, "", Vec::new()).await;
+                };
                 let found = state.lock().expect("lock").get(&key).map(|object| {
                     let mut meta = object.headers.clone();
                     meta.push(("content-length".to_owned(), object.body.len().to_string()));
                     meta
                 });
                 match found {
-                    Some(meta) => respond_with_headers(&mut socket, 200, "OK", meta, Vec::new()).await,
+                    Some(meta) => {
+                        respond_with_headers(&mut socket, 200, "OK", meta, Vec::new()).await;
+                    }
                     None => respond(&mut socket, 404, "Not Found", Vec::new()).await,
                 }
             }
@@ -535,7 +644,10 @@ mod s3_stub {
         };
 
         let start = match continuation {
-            Some(cursor) => matching.iter().position(|(key, _)| *key == cursor).map_or(0, |index| index + 1),
+            Some(cursor) => matching
+                .iter()
+                .position(|(key, _)| *key == cursor)
+                .map_or(0, |index| index + 1),
             None => 0,
         };
         let remaining = matching.get(start..).unwrap_or_default();
@@ -543,14 +655,22 @@ mod s3_stub {
         let truncated = remaining.len() > page.len();
 
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult>");
-        xml.push_str(if truncated { "<IsTruncated>true</IsTruncated>" } else { "<IsTruncated>false</IsTruncated>" });
+        xml.push_str(if truncated {
+            "<IsTruncated>true</IsTruncated>"
+        } else {
+            "<IsTruncated>false</IsTruncated>"
+        });
         for (key, size) in &page {
-            let _ = write!(xml, "<Contents><Key>{key}</Key><Size>{size}</Size></Contents>");
+            let _ = write!(
+                xml,
+                "<Contents><Key>{key}</Key><Size>{size}</Size></Contents>"
+            );
         }
-        if truncated
-            && let Some((last_key, _)) = page.last()
-        {
-            let _ = write!(xml, "<NextContinuationToken>{last_key}</NextContinuationToken>");
+        if truncated && let Some((last_key, _)) = page.last() {
+            let _ = write!(
+                xml,
+                "<NextContinuationToken>{last_key}</NextContinuationToken>"
+            );
         }
         xml.push_str("</ListBucketResult>");
         respond(socket, 200, "OK", xml.into_bytes()).await;
@@ -584,7 +704,9 @@ mod s3_stub {
         String::from_utf8(out).unwrap_or_default()
     }
 
-    async fn read_request(socket: &mut TcpStream) -> Option<(String, String, Vec<(String, String)>, Vec<u8>)> {
+    async fn read_request(
+        socket: &mut TcpStream,
+    ) -> Option<(String, String, Vec<(String, String)>, Vec<u8>)> {
         let mut request = Vec::new();
         let mut buffer = [0_u8; 8_192];
         let header_end = loop {
@@ -623,7 +745,10 @@ mod s3_stub {
             }
             request.extend_from_slice(&buffer[..count]);
         }
-        let body = request.get(header_end..header_end + content_length).unwrap_or_default().to_vec();
+        let body = request
+            .get(header_end..header_end + content_length)
+            .unwrap_or_default()
+            .to_vec();
         Some((method, path, headers, body))
     }
 
@@ -644,7 +769,11 @@ mod s3_stub {
         for (name, value) in &headers {
             let _ = write!(response, "{name}: {value}\r\n");
         }
-        let _ = write!(response, "Content-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+        let _ = write!(
+            response,
+            "Content-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
         let _ = socket.write_all(response.as_bytes()).await;
         let _ = socket.write_all(&body).await;
     }
@@ -673,18 +802,29 @@ async fn transport_errors_never_leak_signing_material() {
     let secret = "supersecretvalue";
     let config = S3ObjectStoreConfig::try_new(format!("http://{address}"), "bucket", "us-east-1")
         .expect("config")
-        .with_credentials("AKIAEXAMPLE", SecretString::try_new(secret).expect("secret"))
+        .with_credentials(
+            "AKIAEXAMPLE",
+            SecretString::try_new(secret).expect("secret"),
+        )
         .expect("credentials");
     let store = S3ObjectStore::try_new(config).expect("store");
     let key = ObjectKey::try_new("docs/a.pdf").expect("key");
 
     let error = store
-        .put(scope(), key, PutPayload::Bytes(Bytes::from_static(b"hello")), metadata("application/pdf"))
+        .put(
+            scope(),
+            key,
+            PutPayload::Bytes(Bytes::from_static(b"hello")),
+            metadata("application/pdf"),
+        )
         .await
         .expect_err("closed port must fail");
 
     let rendered = format!("{error:?} {error}");
     assert!(!rendered.contains(secret), "rendered error: {rendered}");
-    assert!(!rendered.contains("X-Amz-Signature"), "rendered error: {rendered}");
+    assert!(
+        !rendered.contains("X-Amz-Signature"),
+        "rendered error: {rendered}"
+    );
     assert_eq!(error.code(), finstack_ai_runtime::OBJECT_UNAVAILABLE);
 }

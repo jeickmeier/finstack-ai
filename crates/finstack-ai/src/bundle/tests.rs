@@ -160,7 +160,9 @@ fn missing_required_object_store_fails_resolution() {
 #[test]
 fn present_object_store_satisfies_the_requirement() {
     let services = RuntimeServices {
-        object_store: Some(Arc::new(finstack_ai_test::object_store::FakeObjectStore::default())),
+        object_store: Some(Arc::new(
+            finstack_ai_test::object_store::FakeObjectStore::default(),
+        )),
         ..RuntimeServices::default()
     };
     services

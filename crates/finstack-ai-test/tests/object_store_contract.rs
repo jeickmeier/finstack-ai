@@ -18,7 +18,11 @@ fn test_scope(tenant: &str) -> ObjectScope {
 }
 
 fn test_metadata() -> ObjectMetadata {
-    ObjectMetadata { media_type: Arc::from("application/octet-stream"), name: None, attributes: Metadata::empty() }
+    ObjectMetadata {
+        media_type: Arc::from("application/octet-stream"),
+        name: None,
+        attributes: Metadata::empty(),
+    }
 }
 
 #[tokio::test]
@@ -33,12 +37,20 @@ async fn fake_object_store_reports_injected_integrity_failure() {
     let key = ObjectKey::try_new("docs/injected.bin").expect("key must be valid");
 
     store
-        .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(vec![7_u8; 1024])), test_metadata())
+        .put(
+            scope.clone(),
+            key.clone(),
+            PutPayload::Bytes(Bytes::from(vec![7_u8; 1024])),
+            test_metadata(),
+        )
         .await
         .expect("put must succeed before the injected failure");
 
     store.fail_next_get_with_integrity();
-    let error = store.get(scope, key).await.expect_err("get must fail once poisoned");
+    let error = store
+        .get(scope, key)
+        .await
+        .expect_err("get must fail once poisoned");
     assert!(
         matches!(error, ObjectError::Integrity { .. }),
         "expected ObjectError::Integrity, got {error:?}"
@@ -59,7 +71,12 @@ async fn fake_object_store_pages_list_results_at_a_small_fixed_size() {
     for index in 0_u8..5 {
         let key = ObjectKey::try_new(format!("paged/{index}.bin")).expect("key must be valid");
         store
-            .put(scope.clone(), key.clone(), PutPayload::Bytes(Bytes::from(vec![7_u8; 1024])), test_metadata())
+            .put(
+                scope.clone(),
+                key.clone(),
+                PutPayload::Bytes(Bytes::from(vec![7_u8; 1024])),
+                test_metadata(),
+            )
             .await
             .expect("put must succeed");
         expected_keys.push(key);
@@ -70,7 +87,10 @@ async fn fake_object_store_pages_list_results_at_a_small_fixed_size() {
     let mut page = PageToken::first();
     let mut page_count = 0_u32;
     loop {
-        let result = store.list(scope.clone(), prefix.clone(), page).await.expect("list must succeed");
+        let result = store
+            .list(scope.clone(), prefix.clone(), page)
+            .await
+            .expect("list must succeed");
         page_count += 1;
         assert!(
             result.entries.len() <= FAKE_LIST_PAGE_SIZE,
@@ -90,5 +110,8 @@ async fn fake_object_store_pages_list_results_at_a_small_fixed_size() {
     collected.sort();
     let mut expected_sorted = expected_keys;
     expected_sorted.sort();
-    assert_eq!(collected, expected_sorted, "the full walk must return exactly the 5 stored keys");
+    assert_eq!(
+        collected, expected_sorted,
+        "the full walk must return exactly the 5 stored keys"
+    );
 }

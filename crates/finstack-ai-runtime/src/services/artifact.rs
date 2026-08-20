@@ -481,8 +481,7 @@ mod tests {
             ..scope.clone()
         };
         assert!(
-            validate_staged_artifact(&other_scope, content, &metadata, &artifact, &limits)
-                .is_err(),
+            validate_staged_artifact(&other_scope, content, &metadata, &artifact, &limits).is_err(),
             "cross-scope read must fail"
         );
     }

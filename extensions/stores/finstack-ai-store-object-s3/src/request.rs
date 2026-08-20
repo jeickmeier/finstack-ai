@@ -50,7 +50,9 @@ fn split_endpoint(config: &S3ObjectStoreConfig) -> Result<(String, String, Strin
     let endpoint = Url::parse(config.endpoint()).map_err(|_error| invalid_endpoint())?;
     let scheme = endpoint.scheme().to_owned();
     let base_host = endpoint.host_str().ok_or_else(invalid_endpoint)?.to_owned();
-    let port_suffix = endpoint.port().map_or_else(String::new, |port| format!(":{port}"));
+    let port_suffix = endpoint
+        .port()
+        .map_or_else(String::new, |port| format!(":{port}"));
     Ok((scheme, base_host, port_suffix))
 }
 
@@ -75,8 +77,14 @@ pub fn object_url(
             format!("/{physical_key}"),
         ),
     };
-    let url = Url::parse(&format!("{scheme}://{host}{path}")).map_err(|_error| invalid_endpoint())?;
-    Ok(RequestTarget { url, path, host, scheme })
+    let url =
+        Url::parse(&format!("{scheme}://{host}{path}")).map_err(|_error| invalid_endpoint())?;
+    Ok(RequestTarget {
+        url,
+        path,
+        host,
+        scheme,
+    })
 }
 
 /// A resolved `ListObjectsV2` request target, including the canonical query
@@ -109,7 +117,10 @@ pub fn list_url(
             format!("{base_host}{port_suffix}"),
             format!("/{}", config.bucket()),
         ),
-        Addressing::VirtualHost => (format!("{}.{base_host}{port_suffix}", config.bucket()), "/".to_owned()),
+        Addressing::VirtualHost => (
+            format!("{}.{base_host}{port_suffix}", config.bucket()),
+            "/".to_owned(),
+        ),
     };
 
     let mut query_params: Vec<(&str, String)> =
@@ -132,7 +143,12 @@ pub fn list_url(
 
     let url = Url::parse(&format!("{scheme}://{host}{path}?{canonical_query}"))
         .map_err(|_error| invalid_endpoint())?;
-    Ok(ListTarget { url, path, host, canonical_query })
+    Ok(ListTarget {
+        url,
+        path,
+        host,
+        canonical_query,
+    })
 }
 
 /// SHA-256 hex of `data`, used as the `x-amz-content-sha256` payload hash.
@@ -246,7 +262,9 @@ impl Default for BlobDigestHasher {
 /// full request URL, including a presigned query string's signature.
 #[must_use]
 pub fn map_transport_error() -> ObjectError {
-    ObjectError::Unavailable { message: Arc::from("transport_failure") }
+    ObjectError::Unavailable {
+        message: Arc::from("transport_failure"),
+    }
 }
 
 /// Map a non-2xx HTTP status to the exact [`ObjectError`] the contract requires.
@@ -254,8 +272,12 @@ pub fn map_transport_error() -> ObjectError {
 pub fn map_status_error(status: StatusCode) -> ObjectError {
     match status {
         StatusCode::NOT_FOUND => ObjectError::NotFound,
-        StatusCode::FORBIDDEN => ObjectError::Unavailable { message: Arc::from("access_denied") },
-        other => ObjectError::Unavailable { message: Arc::from(format!("http_{}", other.as_u16())) },
+        StatusCode::FORBIDDEN => ObjectError::Unavailable {
+            message: Arc::from("access_denied"),
+        },
+        other => ObjectError::Unavailable {
+            message: Arc::from(format!("http_{}", other.as_u16())),
+        },
     }
 }
 
@@ -321,13 +343,18 @@ mod tests {
     use finstack_ai_kernel::Digest;
     use sha2::{Digest as Sha2Digest, Sha256};
 
-    use super::{BlobDigestHasher, decode_entities, extract_tag_values, payload_sha256_hex, to_hex};
+    use super::{
+        BlobDigestHasher, decode_entities, extract_tag_values, payload_sha256_hex, to_hex,
+    };
 
     #[test]
     fn extract_tag_values_reads_repeated_tags_and_decodes_entities() {
         let body = "<a><Key>docs/&amp;a.pdf</Key><Size>10</Size></a>\
                      <a><Key>docs/b.pdf</Key><Size>20</Size></a>";
-        assert_eq!(extract_tag_values(body, "Key"), vec!["docs/&a.pdf", "docs/b.pdf"]);
+        assert_eq!(
+            extract_tag_values(body, "Key"),
+            vec!["docs/&a.pdf", "docs/b.pdf"]
+        );
         assert_eq!(extract_tag_values(body, "Size"), vec!["10", "20"]);
         assert!(extract_tag_values(body, "Missing").is_empty());
     }

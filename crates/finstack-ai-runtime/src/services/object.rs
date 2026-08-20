@@ -64,10 +64,14 @@ impl ObjectScope {
             });
         }
         let canonical = serde_json_canonicalizer::to_vec(self).map_err(|error| {
-            ObjectError::InvalidMetadata { message: Arc::from(error.to_string()) }
+            ObjectError::InvalidMetadata {
+                message: Arc::from(error.to_string()),
+            }
         })?;
         Digest::domain_separated("object-scope", 1, &canonical).map_err(|error| {
-            ObjectError::InvalidMetadata { message: Arc::from(error.to_string()) }
+            ObjectError::InvalidMetadata {
+                message: Arc::from(error.to_string()),
+            }
         })
     }
 }
@@ -87,7 +91,9 @@ impl ObjectKey {
     /// `[A-Za-z0-9._-]`.
     pub fn try_new(value: impl AsRef<str>) -> Result<Self, ObjectError> {
         let value = value.as_ref();
-        let invalid = |message: &str| ObjectError::InvalidKey { message: Arc::from(message) };
+        let invalid = |message: &str| ObjectError::InvalidKey {
+            message: Arc::from(message),
+        };
         if value.is_empty() || value.len() > MAX_OBJECT_KEY_BYTES {
             return Err(invalid("key_length_out_of_range"));
         }
@@ -227,7 +233,9 @@ pub struct ObjectStoreLimits {
 impl Default for ObjectStoreLimits {
     fn default() -> Self {
         // S3 single-PUT protocol ceiling; the cap until multipart lands.
-        Self { max_object_bytes: 5 * 1024 * 1024 * 1024 }
+        Self {
+            max_object_bytes: 5 * 1024 * 1024 * 1024,
+        }
     }
 }
 
@@ -254,7 +262,11 @@ pub trait ObjectStore: PortObject {
     ) -> PortFuture<Result<ObjectRef, ObjectError>>;
 
     /// Fetch the reference without content.
-    fn head(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<ObjectRef, ObjectError>>;
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>>;
 
     /// Delete one object; deleting a missing object is not an error.
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>>;
@@ -283,7 +295,11 @@ pub trait ObjectStore: PortObject {
 
 /// Compose the physical backend key: `{prefix}/{scope-digest-16-hex}/{key}`.
 #[must_use]
-pub fn physical_object_key(key_prefix: Option<&str>, scope_digest: &Digest, key: &ObjectKey) -> String {
+pub fn physical_object_key(
+    key_prefix: Option<&str>,
+    scope_digest: &Digest,
+    key: &ObjectKey,
+) -> String {
     let hex = scope_digest.to_hex();
     let hex16 = hex.get(..16).unwrap_or(&hex);
     match key_prefix {
@@ -325,7 +341,10 @@ pub enum ObjectError {
     #[error("{}: object is missing", OBJECT_NOT_FOUND)]
     NotFound,
     /// Requested scope differs from the object's frozen binding.
-    #[error("{}: expected scope {expected}, actual scope {actual}", OBJECT_SCOPE_MISMATCH)]
+    #[error(
+        "{}: expected scope {expected}, actual scope {actual}",
+        OBJECT_SCOPE_MISMATCH
+    )]
     ScopeMismatch {
         /// Requested scope digest.
         expected: Digest,
@@ -417,10 +436,16 @@ mod tests {
     fn empty_or_nul_tenant_scope_is_rejected() {
         let mut bad = scope();
         bad.tenant_scope = Arc::from("");
-        assert_eq!(bad.digest().expect_err("must fail").code(), OBJECT_INVALID_METADATA);
+        assert_eq!(
+            bad.digest().expect_err("must fail").code(),
+            OBJECT_INVALID_METADATA
+        );
         let mut nul = scope();
         nul.tenant_scope = Arc::from("a\0b");
-        assert_eq!(nul.digest().expect_err("must fail").code(), OBJECT_INVALID_METADATA);
+        assert_eq!(
+            nul.digest().expect_err("must fail").code(),
+            OBJECT_INVALID_METADATA
+        );
     }
 
     #[test]
@@ -431,7 +456,16 @@ mod tests {
 
     #[test]
     fn object_key_rejects_traversal_absolute_empty_and_bad_chars() {
-        for bad in ["", "/abs", "a//b", "a/../b", "..", "a b", "ключ", &"x".repeat(513)] {
+        for bad in [
+            "",
+            "/abs",
+            "a//b",
+            "a/../b",
+            "..",
+            "a b",
+            "ключ",
+            &"x".repeat(513),
+        ] {
             let error = ObjectKey::try_new(bad).expect_err("must reject");
             assert_eq!(error.code(), OBJECT_INVALID_KEY);
         }
@@ -452,14 +486,20 @@ mod tests {
 
     #[test]
     fn limits_default_is_five_gib() {
-        assert_eq!(ObjectStoreLimits::default().max_object_bytes, 5 * 1024 * 1024 * 1024);
+        assert_eq!(
+            ObjectStoreLimits::default().max_object_bytes,
+            5 * 1024 * 1024 * 1024
+        );
     }
 
     #[test]
     fn error_codes_are_frozen() {
         assert_eq!(ObjectError::NotFound.code(), "object_not_found");
         assert_eq!(
-            ObjectError::Unsupported { operation: Arc::from("presign_get") }.code(),
+            ObjectError::Unsupported {
+                operation: Arc::from("presign_get")
+            }
+            .code(),
             "object_unsupported"
         );
     }
@@ -472,7 +512,9 @@ mod tests {
             attributes: Metadata::parse(b"{}").expect("metadata"),
         };
         assert_eq!(
-            validate_object_metadata(&bad).expect_err("must fail").code(),
+            validate_object_metadata(&bad)
+                .expect_err("must fail")
+                .code(),
             OBJECT_INVALID_METADATA
         );
     }

@@ -62,7 +62,10 @@ impl ObjectArtifactStore {
     pub fn new(store: Arc<dyn ObjectStore>) -> Self {
         let max_artifact_bytes =
             clamp_to_object_limit(DEFAULT_MAX_ARTIFACT_BYTES, store.limits().max_object_bytes);
-        Self { store, max_artifact_bytes }
+        Self {
+            store,
+            max_artifact_bytes,
+        }
     }
 
     /// Override the artifact byte ceiling, still clamped to the backing
@@ -103,8 +106,10 @@ fn artifact_key(digest: &Digest) -> Result<ObjectKey, ArtifactError> {
 }
 
 fn encode_stored_meta(metadata: &ArtifactMetadata) -> Result<Metadata, ArtifactError> {
-    let stored =
-        StoredArtifactMeta { kind: Arc::clone(&metadata.kind), attributes: metadata.attributes.clone() };
+    let stored = StoredArtifactMeta {
+        kind: Arc::clone(&metadata.kind),
+        attributes: metadata.attributes.clone(),
+    };
     let bytes = serde_json::to_vec(&stored).map_err(|error| ArtifactError::InvalidMetadata {
         message: Arc::from(error.to_string()),
     })?;
@@ -157,7 +162,9 @@ impl ArtifactStore for ObjectArtifactStore {
     }
 
     fn limits(&self) -> ArtifactStoreLimits {
-        ArtifactStoreLimits { max_artifact_bytes: self.max_artifact_bytes }
+        ArtifactStoreLimits {
+            max_artifact_bytes: self.max_artifact_bytes,
+        }
     }
 }
 
@@ -182,7 +189,12 @@ async fn stage_put_impl(
 
     let object_scope = to_object_scope(&scope);
     store
-        .put(object_scope, key, PutPayload::Bytes(content.clone()), object_metadata)
+        .put(
+            object_scope,
+            key,
+            PutPayload::Bytes(content.clone()),
+            object_metadata,
+        )
         .await
         .map_err(map_object_error)?;
 
@@ -193,10 +205,21 @@ async fn stage_put_impl(
         Some(digest),
         metadata.name.as_deref(),
     )
-    .map_err(|error| ArtifactError::InvalidMetadata { message: Arc::from(error.to_string()) })?;
+    .map_err(|error| ArtifactError::InvalidMetadata {
+        message: Arc::from(error.to_string()),
+    })?;
 
-    ArtifactRef::try_new(artifact_id, metadata.kind.as_ref(), blob, digest, scope.digest()?, metadata.attributes)
-        .map_err(|error| ArtifactError::InvalidMetadata { message: Arc::from(error.to_string()) })
+    ArtifactRef::try_new(
+        artifact_id,
+        metadata.kind.as_ref(),
+        blob,
+        digest,
+        scope.digest()?,
+        metadata.attributes,
+    )
+    .map_err(|error| ArtifactError::InvalidMetadata {
+        message: Arc::from(error.to_string()),
+    })
 }
 
 async fn get_impl(
@@ -207,7 +230,10 @@ async fn get_impl(
     let digest = artifact.content_digest();
     let key = artifact_key(&digest)?;
     let object_scope = to_object_scope(&scope);
-    let bytes = store.get(object_scope, key).await.map_err(map_object_error)?;
+    let bytes = store
+        .get(object_scope, key)
+        .await
+        .map_err(map_object_error)?;
 
     if Digest::blob_content(&bytes) != digest {
         return Err(ArtifactError::Integrity {

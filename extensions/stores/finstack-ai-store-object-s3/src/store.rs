@@ -94,7 +94,11 @@ impl ObjectStore for S3ObjectStore {
         Box::pin(async move { get_to_file_impl(&client, &config, scope, key, dest).await })
     }
 
-    fn head(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<ObjectRef, ObjectError>> {
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let client = self.client.clone();
         let config = self.config.clone();
         Box::pin(async move { head_impl(&client, &config, scope, key).await })
@@ -128,15 +132,22 @@ impl ObjectStore for S3ObjectStore {
     }
 
     fn limits(&self) -> ObjectStoreLimits {
-        ObjectStoreLimits { max_object_bytes: self.config.max_object_bytes() }
+        ObjectStoreLimits {
+            max_object_bytes: self.config.max_object_bytes(),
+        }
     }
 }
 
 fn missing_credentials() -> ObjectError {
-    ObjectError::InvalidMetadata { message: Arc::from("missing_credentials") }
+    ObjectError::InvalidMetadata {
+        message: Arc::from("missing_credentials"),
+    }
 }
 
-fn signing_params(config: &S3ObjectStoreConfig, timestamp: UtcStamp) -> Result<SigningParams<'_>, ObjectError> {
+fn signing_params(
+    config: &S3ObjectStoreConfig,
+    timestamp: UtcStamp,
+) -> Result<SigningParams<'_>, ObjectError> {
     let access_key_id = config.access_key_id().ok_or_else(missing_credentials)?;
     let secret_access_key = config.secret_access_key().ok_or_else(missing_credentials)?;
     Ok(SigningParams {
@@ -149,7 +160,9 @@ fn signing_params(config: &S3ObjectStoreConfig, timestamp: UtcStamp) -> Result<S
 }
 
 fn io_error(error: &std::io::Error) -> ObjectError {
-    ObjectError::Io { message: Arc::from(error.to_string()) }
+    ObjectError::Io {
+        message: Arc::from(error.to_string()),
+    }
 }
 
 fn send_signed(
@@ -171,12 +184,15 @@ fn header_value(response: &Response, name: &str) -> Result<String, ObjectError> 
         .get(name)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned)
-        .ok_or_else(|| ObjectError::Integrity { message: Arc::from("missing_metadata_header") })
+        .ok_or_else(|| ObjectError::Integrity {
+            message: Arc::from("missing_metadata_header"),
+        })
 }
 
 fn parse_scope_digest(header: &str, expected: Digest) -> Result<Digest, ObjectError> {
-    let actual = Digest::from_hex(header)
-        .map_err(|_error| ObjectError::Integrity { message: Arc::from("malformed_scope_header") })?;
+    let actual = Digest::from_hex(header).map_err(|_error| ObjectError::Integrity {
+        message: Arc::from("malformed_scope_header"),
+    })?;
     if actual != expected {
         return Err(ObjectError::ScopeMismatch { expected, actual });
     }
@@ -190,13 +206,25 @@ fn parse_scope_digest(header: &str, expected: Digest) -> Result<Digest, ObjectEr
 /// incremental byte counter on the streaming read path is the real
 /// enforcement; this is a fast path that avoids opening a body stream at
 /// all for a response that already announces itself as too large.
-fn reject_if_content_length_exceeds(response: &Response, max_bytes: u64) -> Result<(), ObjectError> {
-    let Some(header) = response.headers().get("content-length") else { return Ok(()) };
-    let Some(len) = header.to_str().ok().and_then(|value| value.parse::<u64>().ok()) else {
+fn reject_if_content_length_exceeds(
+    response: &Response,
+    max_bytes: u64,
+) -> Result<(), ObjectError> {
+    let Some(header) = response.headers().get("content-length") else {
+        return Ok(());
+    };
+    let Some(len) = header
+        .to_str()
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    else {
         return Ok(());
     };
     if len > max_bytes {
-        return Err(ObjectError::TooLarge { len, max: max_bytes });
+        return Err(ObjectError::TooLarge {
+            len,
+            max: max_bytes,
+        });
     }
     Ok(())
 }
@@ -207,13 +235,18 @@ fn reject_if_content_length_exceeds(response: &Response, max_bytes: u64) -> Resu
 /// sent on the wire), and once — separately, in `stream_file_body` — to
 /// stream the body. The file is never materialized in memory.
 async fn hash_file(path: &Path, max_bytes: u64) -> Result<(String, Digest, u64), ObjectError> {
-    let mut file = tokio::fs::File::open(path).await.map_err(|error| io_error(&error))?;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| io_error(&error))?;
     let mut raw_hasher = StreamingSha256::new();
     let mut blob_hasher = BlobDigestHasher::new();
     let mut total: u64 = 0;
     let mut buffer = vec![0_u8; FILE_CHUNK_BYTES];
     loop {
-        let read = file.read(&mut buffer).await.map_err(|error| io_error(&error))?;
+        let read = file
+            .read(&mut buffer)
+            .await
+            .map_err(|error| io_error(&error))?;
         if read == 0 {
             break;
         }
@@ -224,7 +257,10 @@ async fn hash_file(path: &Path, max_bytes: u64) -> Result<(String, Digest, u64),
         blob_hasher.update(chunk);
         total = total.saturating_add(read as u64);
         if total > max_bytes {
-            return Err(ObjectError::TooLarge { len: total, max: max_bytes });
+            return Err(ObjectError::TooLarge {
+                len: total,
+                max: max_bytes,
+            });
         }
     }
     let payload_hash = raw_hasher.finish();
@@ -257,19 +293,35 @@ struct PutSource {
 async fn put_source(content: PutPayload, max_bytes: u64) -> Result<PutSource, ObjectError> {
     match content {
         PutPayload::Bytes(bytes) => {
-            let length = u64::try_from(bytes.len())
-                .map_err(|_error| ObjectError::Io { message: Arc::from("length_overflow") })?;
+            let length = u64::try_from(bytes.len()).map_err(|_error| ObjectError::Io {
+                message: Arc::from("length_overflow"),
+            })?;
             if length > max_bytes {
-                return Err(ObjectError::TooLarge { len: length, max: max_bytes });
+                return Err(ObjectError::TooLarge {
+                    len: length,
+                    max: max_bytes,
+                });
             }
             let payload_hash = payload_sha256_hex(&bytes);
             let content_digest = Digest::blob_content(&bytes);
-            Ok(PutSource { payload_hash, content_digest, length, body: reqwest::Body::from(bytes) })
+            Ok(PutSource {
+                payload_hash,
+                content_digest,
+                length,
+                body: reqwest::Body::from(bytes),
+            })
         }
         PutPayload::File(path) => {
             let (payload_hash, content_digest, length) = hash_file(&path, max_bytes).await?;
-            let file = tokio::fs::File::open(&path).await.map_err(|error| io_error(&error))?;
-            Ok(PutSource { payload_hash, content_digest, length, body: file_body_stream(file) })
+            let file = tokio::fs::File::open(&path)
+                .await
+                .map_err(|error| io_error(&error))?;
+            Ok(PutSource {
+                payload_hash,
+                content_digest,
+                length,
+                body: file_body_stream(file),
+            })
         }
     }
 }
@@ -341,7 +393,15 @@ async fn get_impl(
     let target = object_url(config, &physical)?;
     let params = signing_params(config, UtcStamp::now())?;
     let empty_hash = payload_sha256_hex(b"");
-    let signed = sign_headers(&params, "GET", &target.path, "", &target.host, &empty_hash, &[]);
+    let signed = sign_headers(
+        &params,
+        "GET",
+        &target.path,
+        "",
+        &target.host,
+        &empty_hash,
+        &[],
+    );
 
     let response = send_signed(client, Method::GET, target.url, &signed)
         .send()
@@ -369,7 +429,10 @@ async fn get_impl(
         let chunk = chunk.map_err(|_error| map_transport_error())?;
         total = total.saturating_add(chunk.len() as u64);
         if total > max_bytes {
-            return Err(ObjectError::TooLarge { len: total, max: max_bytes });
+            return Err(ObjectError::TooLarge {
+                len: total,
+                max: max_bytes,
+            });
         }
         buffer.extend_from_slice(&chunk);
     }
@@ -377,7 +440,9 @@ async fn get_impl(
     let bytes = Bytes::from(buffer);
     let computed = Digest::blob_content(&bytes);
     if computed.to_hex() != digest_header {
-        return Err(ObjectError::Integrity { message: Arc::from("digest_mismatch") });
+        return Err(ObjectError::Integrity {
+            message: Arc::from("digest_mismatch"),
+        });
     }
     Ok(bytes)
 }
@@ -394,7 +459,15 @@ async fn get_to_file_impl(
     let target = object_url(config, &physical)?;
     let params = signing_params(config, UtcStamp::now())?;
     let empty_hash = payload_sha256_hex(b"");
-    let signed = sign_headers(&params, "GET", &target.path, "", &target.host, &empty_hash, &[]);
+    let signed = sign_headers(
+        &params,
+        "GET",
+        &target.path,
+        "",
+        &target.host,
+        &empty_hash,
+        &[],
+    );
 
     let response = send_signed(client, Method::GET, target.url, &signed)
         .send()
@@ -407,9 +480,8 @@ async fn get_to_file_impl(
 
     let scope_header = header_value(&response, HEADER_SCOPE)?;
     let digest_header = header_value(&response, HEADER_DIGEST)?;
-    let media_type = header_value(&response, "content-type").unwrap_or_else(|_error| {
-        "application/octet-stream".to_owned()
-    });
+    let media_type = header_value(&response, "content-type")
+        .unwrap_or_else(|_error| "application/octet-stream".to_owned());
     parse_scope_digest(&scope_header, scope_digest)?;
 
     let max_bytes = config.max_object_bytes();
@@ -430,7 +502,10 @@ async fn get_to_file_impl(
         // hostile endpoint cannot exhaust disk before verification.
         let projected = hasher.bytes_written().saturating_add(chunk.len() as u64);
         if projected > max_bytes {
-            return Err(ObjectError::TooLarge { len: projected, max: max_bytes });
+            return Err(ObjectError::TooLarge {
+                len: projected,
+                max: max_bytes,
+            });
         }
         hasher.update(&chunk);
         std::io::Write::write_all(&mut tmp, &chunk).map_err(|error| io_error(&error))?;
@@ -438,13 +513,22 @@ async fn get_to_file_impl(
 
     let (content_digest, length) = hasher.finish()?;
     if content_digest.to_hex() != digest_header {
-        return Err(ObjectError::Integrity { message: Arc::from("digest_mismatch") });
+        return Err(ObjectError::Integrity {
+            message: Arc::from("digest_mismatch"),
+        });
     }
 
-    tmp.persist(&dest)
-        .map_err(|error| ObjectError::Io { message: Arc::from(error.to_string()) })?;
+    tmp.persist(&dest).map_err(|error| ObjectError::Io {
+        message: Arc::from(error.to_string()),
+    })?;
 
-    Ok(ObjectRef { key, scope_digest, content_digest, length, media_type: Arc::from(media_type) })
+    Ok(ObjectRef {
+        key,
+        scope_digest,
+        content_digest,
+        length,
+        media_type: Arc::from(media_type),
+    })
 }
 
 async fn head_impl(
@@ -458,7 +542,15 @@ async fn head_impl(
     let target = object_url(config, &physical)?;
     let params = signing_params(config, UtcStamp::now())?;
     let empty_hash = payload_sha256_hex(b"");
-    let signed = sign_headers(&params, "HEAD", &target.path, "", &target.host, &empty_hash, &[]);
+    let signed = sign_headers(
+        &params,
+        "HEAD",
+        &target.path,
+        "",
+        &target.host,
+        &empty_hash,
+        &[],
+    );
 
     let response = send_signed(client, Method::HEAD, target.url, &signed)
         .send()
@@ -472,18 +564,27 @@ async fn head_impl(
     let scope_header = header_value(&response, HEADER_SCOPE)?;
     let digest_header = header_value(&response, HEADER_DIGEST)?;
     let content_length = header_value(&response, "content-length")?;
-    let media_type = header_value(&response, "content-type").unwrap_or_else(|_error| {
-        "application/octet-stream".to_owned()
-    });
+    let media_type = header_value(&response, "content-type")
+        .unwrap_or_else(|_error| "application/octet-stream".to_owned());
 
     parse_scope_digest(&scope_header, scope_digest)?;
-    let content_digest = Digest::from_hex(&digest_header)
-        .map_err(|_error| ObjectError::Integrity { message: Arc::from("malformed_digest_header") })?;
+    let content_digest =
+        Digest::from_hex(&digest_header).map_err(|_error| ObjectError::Integrity {
+            message: Arc::from("malformed_digest_header"),
+        })?;
     let length: u64 = content_length
         .parse()
-        .map_err(|_error| ObjectError::Integrity { message: Arc::from("malformed_content_length") })?;
+        .map_err(|_error| ObjectError::Integrity {
+            message: Arc::from("malformed_content_length"),
+        })?;
 
-    Ok(ObjectRef { key, scope_digest, content_digest, length, media_type: Arc::from(media_type) })
+    Ok(ObjectRef {
+        key,
+        scope_digest,
+        content_digest,
+        length,
+        media_type: Arc::from(media_type),
+    })
 }
 
 async fn delete_impl(
@@ -497,7 +598,15 @@ async fn delete_impl(
     let target = object_url(config, &physical)?;
     let params = signing_params(config, UtcStamp::now())?;
     let empty_hash = payload_sha256_hex(b"");
-    let signed = sign_headers(&params, "DELETE", &target.path, "", &target.host, &empty_hash, &[]);
+    let signed = sign_headers(
+        &params,
+        "DELETE",
+        &target.path,
+        "",
+        &target.host,
+        &empty_hash,
+        &[],
+    );
 
     let response = send_signed(client, Method::DELETE, target.url, &signed)
         .send()
@@ -533,11 +642,23 @@ async fn list_impl(
         full_prefix.push_str(user_prefix.as_str());
     }
 
-    let ListTarget { url, path, host, canonical_query } =
-        list_url(config, &full_prefix, page.value())?;
+    let ListTarget {
+        url,
+        path,
+        host,
+        canonical_query,
+    } = list_url(config, &full_prefix, page.value())?;
     let params = signing_params(config, UtcStamp::now())?;
     let empty_hash = payload_sha256_hex(b"");
-    let signed = sign_headers(&params, "GET", &path, &canonical_query, &host, &empty_hash, &[]);
+    let signed = sign_headers(
+        &params,
+        "GET",
+        &path,
+        &canonical_query,
+        &host,
+        &empty_hash,
+        &[],
+    );
 
     let response = send_signed(client, Method::GET, url, &signed)
         .send()
@@ -547,14 +668,19 @@ async fn list_impl(
     if !status.is_success() {
         return Err(map_status_error(status));
     }
-    let body = response.text().await.map_err(|_error| map_transport_error())?;
+    let body = response
+        .text()
+        .await
+        .map_err(|_error| map_transport_error())?;
 
     let keys = extract_tag_values(&body, "Key");
     let sizes = extract_tag_values(&body, "Size");
     let truncated = extract_tag_values(&body, "IsTruncated")
         .first()
         .is_some_and(|value| value == "true");
-    let next_token = extract_tag_values(&body, "NextContinuationToken").into_iter().next();
+    let next_token = extract_tag_values(&body, "NextContinuationToken")
+        .into_iter()
+        .next();
 
     let mut entries = Vec::with_capacity(keys.len());
     for (raw_key, raw_size) in keys.iter().zip(sizes.iter()) {
@@ -563,16 +689,25 @@ async fn list_impl(
         // anyway would leak another tenant's physical key (including their
         // scope digest) as a valid in-scope entry.
         let Some(logical) = raw_key.strip_prefix(&base_prefix) else {
-            return Err(ObjectError::Integrity { message: Arc::from("list_key_outside_scope") });
+            return Err(ObjectError::Integrity {
+                message: Arc::from("list_key_outside_scope"),
+            });
         };
         let object_key = ObjectKey::try_new(logical)?;
-        let length: u64 = raw_size
-            .parse()
-            .map_err(|_error| ObjectError::Io { message: Arc::from("invalid_list_size") })?;
-        entries.push(ObjectEntry { key: object_key, length });
+        let length: u64 = raw_size.parse().map_err(|_error| ObjectError::Io {
+            message: Arc::from("invalid_list_size"),
+        })?;
+        entries.push(ObjectEntry {
+            key: object_key,
+            length,
+        });
     }
 
-    let next = if truncated { next_token.map(PageToken::opaque) } else { None };
+    let next = if truncated {
+        next_token.map(PageToken::opaque)
+    } else {
+        None
+    };
     Ok(ObjectPage { entries, next })
 }
 
@@ -587,6 +722,16 @@ fn presign_get_impl(
     let target: RequestTarget = object_url(config, &physical)?;
     let clamped = expiry.min(config.presign_expiry_max());
     let params = signing_params(config, UtcStamp::now())?;
-    let url = presign_url(&params, "GET", &target.path, &target.host, &target.scheme, clamped.as_secs());
-    Ok(PresignedUrl { url: Arc::from(url), expires_in_secs: clamped.as_secs() })
+    let url = presign_url(
+        &params,
+        "GET",
+        &target.path,
+        &target.host,
+        &target.scheme,
+        clamped.as_secs(),
+    );
+    Ok(PresignedUrl {
+        url: Arc::from(url),
+        expires_in_secs: clamped.as_secs(),
+    })
 }

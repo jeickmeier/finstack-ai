@@ -37,7 +37,7 @@ impl finstack_ai_tools_filesystem::FileSystemToolset
 pub fn finstack_ai_tools_filesystem::FileSystemToolset::try_new(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_tools_filesystem::FileSystemError>
 pub fn finstack_ai_tools_filesystem::FileSystemToolset::try_with_limits(self, finstack_ai_tools_filesystem::FileSystemLimits) -> core::result::Result<Self, finstack_ai_tools_filesystem::FileSystemError>
 pub fn finstack_ai_tools_filesystem::FileSystemToolset::try_with_protected_paths<I, S>(self, I) -> core::result::Result<Self, finstack_ai_tools_filesystem::FileSystemError> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
-pub fn finstack_ai_tools_filesystem::FileSystemToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_kernel::primitives::diagnostic::Sensitivity) -> Self
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_kernel::primitives::diagnostic::Sensitivity) -> core::result::Result<Self, finstack_ai_tools_filesystem::FileSystemError>
 impl core::fmt::Debug for finstack_ai_tools_filesystem::FileSystemToolset
 pub fn finstack_ai_tools_filesystem::FileSystemToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_filesystem::FileSystemToolset

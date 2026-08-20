@@ -1531,6 +1531,7 @@ dependencies = [
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-artifact-object",
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
  "finstack-ai-tools-document",

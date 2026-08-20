@@ -205,8 +205,7 @@ impl DocumentIngestMiddleware {
         index: Arc<AttachmentIndex>,
     ) -> Result<Self, DocumentIngestError> {
         let limits = DocumentLimits {
-            max_input_bytes: u64::try_from(store.limits().max_artifact_bytes)
-                .unwrap_or(u64::MAX),
+            max_input_bytes: u64::try_from(store.limits().max_artifact_bytes).unwrap_or(u64::MAX),
             ..DocumentLimits::default()
         };
         Self::try_with_limits(store, index, limits)
