@@ -485,12 +485,34 @@ impl MemoryJournalStore {
         };
         let records = flatten_records(session);
         let stored_head = session.head_checksum;
+        // `inner` is one mutex over *every* session, so nothing expensive may
+        // run under it. `records` is already an owned clone and `stored_head`
+        // a `Copy` digest, so the chain walk needs no lock at all: release it
+        // first, and every unrelated append/load/scan keeps running while this
+        // prune re-verifies.
+        drop(inner);
         verify_full_head(&records, stored_head)?;
-        // Inside the `inner` critical section, for the same reason as
-        // `append_sync`: a concurrent writer's newer head must not be
-        // overwritten by this one.
-        let read = self.verified.read(request.session_id);
-        self.verified.remember(request.session_id, read, head);
+        // The cache write does go back under `inner`, briefly, for
+        // `append_sync`'s reason: a concurrent writer's newer head must not be
+        // overwritten by this older-but-valid one. The generation guard alone
+        // cannot prevent that — an intervening append bumps nothing, so its
+        // proof would be silently replaced by the pre-append head verified
+        // above. Re-checking the head under the lock is what rules it out: if
+        // the session moved on, that writer has already recorded its own
+        // (newer, equally valid) proof and this one is simply dropped.
+        {
+            let inner = self.lock()?;
+            let head_unchanged = inner
+                .sessions
+                .get(&request.session_id)
+                .is_some_and(|session| {
+                    session.head_sequence == head.sequence && session.head_checksum == head.checksum
+                });
+            if head_unchanged {
+                let read = self.verified.read(request.session_id);
+                self.verified.remember(request.session_id, read, head);
+            }
+        }
         let _ = request.horizon;
         Ok(PruneReceipt {
             pruned_through_sequence,
