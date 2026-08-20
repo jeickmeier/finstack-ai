@@ -4,6 +4,7 @@ mod record;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 mod sqlite;
 mod store;
+mod toolset;
 
 use crate::record::*;
 use finstack_ai_kernel::{Sensitivity, UNIX_EPOCH};
