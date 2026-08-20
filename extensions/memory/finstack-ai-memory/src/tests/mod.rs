@@ -1,3 +1,4 @@
+mod observer;
 mod provider;
 mod record;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]

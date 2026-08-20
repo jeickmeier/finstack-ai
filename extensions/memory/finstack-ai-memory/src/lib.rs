@@ -25,10 +25,14 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+pub mod extract;
+pub mod observer;
 pub mod provider;
 pub mod record;
 pub mod store;
 
+pub use extract::{CandidateMemory, DEFAULT_MARKER, MemoryExtractor, RuleBasedExtractor};
+pub use observer::MemoryObserver;
 pub use provider::{MemoryContextProvider, RecallConfig};
 pub use record::{
     ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
