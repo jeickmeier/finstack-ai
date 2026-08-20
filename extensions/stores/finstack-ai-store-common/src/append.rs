@@ -168,11 +168,18 @@ pub fn admit_append_limits(
 ///
 /// # Errors
 ///
-/// Returns [`StoreError::Integrity`] when commitment or chaining fails.
+/// Returns [`StoreError::InvalidRequest`] (`empty_append_batch`) when
+/// `request` has no records, and [`StoreError::Integrity`] when commitment
+/// or chaining fails.
 pub fn build_committed_batch(
     request: &AppendRequest,
     previous_checksum: Option<Digest>,
 ) -> Result<CommittedBatch, StoreError> {
+    if request.records().is_empty() {
+        return Err(StoreError::InvalidRequest {
+            reason_code: "empty_append_batch",
+        });
+    }
     let records = commit_records(
         request.records(),
         request.expected_sequence(),
@@ -329,6 +336,16 @@ mod tests {
         .expect("second batch");
         assert_eq!((second.first_sequence, second.last_sequence), (2, 3));
         assert_eq!(second.records[0].previous_checksum(), Some(prior));
+    }
+
+    #[test]
+    fn committed_batch_rejects_an_empty_append_request() {
+        assert!(matches!(
+            build_committed_batch(&request(1, 1, 1, Vec::new()), None),
+            Err(StoreError::InvalidRequest {
+                reason_code: "empty_append_batch"
+            })
+        ));
     }
 
     #[test]
