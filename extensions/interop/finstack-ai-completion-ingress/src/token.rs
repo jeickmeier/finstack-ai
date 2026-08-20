@@ -16,7 +16,10 @@ use crate::config::ResolvedKeys;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Maximum accepted token length in bytes.
-pub(crate) const MAX_TOKEN_BYTES: usize = 4_096;
+///
+/// Bounds what [`crate::CompletionIngress::deliver`] accepts as a token; hosts
+/// should cap transport payloads to align with this limit.
+pub const MAX_TOKEN_BYTES: usize = 4_096;
 const TOKEN_PREFIX: &str = "fcit1.";
 /// Current claims schema version.
 pub(crate) const CLAIMS_VERSION: u32 = 1;
@@ -135,7 +138,7 @@ pub(crate) fn verify_token(
         .strip_prefix(TOKEN_PREFIX)
         .ok_or(VerifyFailure::Malformed)?;
     let (claims_b64, tag_b64) = rest.split_once('.').ok_or(VerifyFailure::Malformed)?;
-    if claims_b64.is_empty() || tag_b64.is_empty() || claims_b64.contains('.') {
+    if claims_b64.is_empty() || tag_b64.is_empty() {
         return Err(VerifyFailure::Malformed);
     }
     let claims_bytes = URL_SAFE_NO_PAD
@@ -225,6 +228,24 @@ mod tests {
         let verified = verify_token(&keys, minted.as_str(), ts(9_999)).expect("verify");
         assert_eq!(verified.kid, "k-active");
         assert_eq!(verified.effect_id, claims("k-active", ts(10_000)).effect_id);
+    }
+
+    #[test]
+    fn mint_signs_with_active_key_not_rotation_key() {
+        // `keys()` resolves an active key ("k-active") plus a rotation
+        // verification key ("k-old"). Minting must sign with the active key:
+        // the token verifies against a key set containing only the active
+        // key, which would fail if the rotation key had signed instead.
+        let keys = keys();
+        let minted = mint_token(&keys, &claims("k-active", ts(10_000))).expect("mint");
+        let active_only = validated_keys(&CompletionIngressConfig {
+            key_id: "k-active".to_owned(),
+            key: SecretString::try_new("a".repeat(32)).expect("secret"),
+            additional_verification_keys: vec![],
+        })
+        .expect("active only");
+        let verified = verify_token(&active_only, minted.as_str(), ts(9_999)).expect("verify");
+        assert_eq!(verified.kid, "k-active");
     }
 
     #[test]

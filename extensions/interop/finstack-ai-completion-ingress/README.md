@@ -25,6 +25,10 @@ let token = ingress.mint(&grant)?;          // hand token.as_str() to the extern
 let outcome = ingress.deliver(received_token, received_body, now).await?;
 ```
 
+The signing key should be at least 32 bytes of cryptographically random
+material (e.g. base64 or hex of 32 random bytes), not a human-chosen
+passphrase — `MIN_KEY_BYTES` checks length, not entropy.
+
 Minted tokens are signed but not encrypted (locator ids are non-secret).
 Duplicate deliveries with an equal body are idempotent; conflicting
 duplicates fail closed with durable rejection evidence. Interaction

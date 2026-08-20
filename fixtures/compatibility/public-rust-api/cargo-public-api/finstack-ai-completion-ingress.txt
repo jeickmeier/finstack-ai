@@ -77,4 +77,6 @@ impl core::clone::Clone for finstack_ai_completion_ingress::CompletionIngressCon
 pub fn finstack_ai_completion_ingress::CompletionIngressConfig::clone(&self) -> finstack_ai_completion_ingress::CompletionIngressConfig
 impl core::fmt::Debug for finstack_ai_completion_ingress::CompletionIngressConfig
 pub fn finstack_ai_completion_ingress::CompletionIngressConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const finstack_ai_completion_ingress::MAX_BODY_BYTES: usize
+pub const finstack_ai_completion_ingress::MAX_TOKEN_BYTES: usize
 pub const finstack_ai_completion_ingress::MIN_KEY_BYTES: usize

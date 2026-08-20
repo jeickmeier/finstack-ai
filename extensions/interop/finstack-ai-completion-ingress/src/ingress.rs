@@ -226,7 +226,10 @@ impl CompletionIngress {
 }
 
 /// Maximum accepted delivery body in bytes.
-pub(crate) const MAX_BODY_BYTES: usize = 1_048_576;
+///
+/// Bounds what [`CompletionIngress::deliver`] accepts as a request body;
+/// hosts should cap transport payloads to align with this limit.
+pub const MAX_BODY_BYTES: usize = 1_048_576;
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
