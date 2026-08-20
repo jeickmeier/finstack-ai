@@ -5,6 +5,10 @@ use finstack_ai_runtime::StoreError;
 
 /// Map a protocol failure onto the stable store error surface.
 #[must_use]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "protocol map_err adapter takes the owned error"
+)]
 pub fn protocol_error(error: ProtocolError) -> StoreError {
     match error {
         ProtocolError::LimitExceeded { resource, limit } => {
