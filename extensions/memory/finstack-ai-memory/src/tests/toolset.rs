@@ -342,8 +342,12 @@ async fn forget_and_correct_require_ids_and_are_idempotent() {
     assert!(record.expect("record").tombstoned);
 }
 
-fn expected_derived_id(body: &str) -> String {
-    let digest = Digest::blob_content(body.as_bytes());
+fn expected_derived_id(tenant: &str, body: &str) -> String {
+    let digest = Digest::from_fixed_domain(
+        "memory-tool-derived-id",
+        1,
+        format!("{tenant}\0{body}").as_bytes(),
+    );
     let hex = digest.to_hex();
     format!("mem-{}", &hex[..16.min(hex.len())])
 }
@@ -378,7 +382,7 @@ async fn correct_memory_supersedes_and_is_idempotent() {
         "body": new_body,
     });
     let correct_args_bytes = serde_json::to_vec(&correct_args).expect("json");
-    let expected_new_id = expected_derived_id(new_body);
+    let expected_new_id = expected_derived_id("tenant-a", new_body);
 
     let first = call_and_extract(
         &toolset,
@@ -493,7 +497,7 @@ async fn correct_memory_stages_large_replacement_bodies_as_blobs() {
         "keywords": ["beta"],
         "body": new_body,
     });
-    let expected_new_id = expected_derived_id(&new_body);
+    let expected_new_id = expected_derived_id("tenant-a", &new_body);
 
     let result = call_and_extract(
         &toolset,
@@ -651,7 +655,7 @@ async fn correct_memory_rejects_an_unchanged_body() {
         profile: false,
     });
     let body = "unchanged body text";
-    let old_id = expected_derived_id(body);
+    let old_id = expected_derived_id("tenant-a", body);
     let remember_args = serde_json::json!({
         "id": old_id.clone(),
         "keywords": ["alpha"],
@@ -713,4 +717,50 @@ async fn scope_comes_from_configuration_not_arguments() {
         panic!("extra unknown field must be rejected");
     };
     assert_eq!(error.code(), crate::MEMORY_TOOL_INVALID_ARGUMENTS);
+}
+
+#[tokio::test]
+async fn remember_accepts_a_long_multibyte_body() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    // Well over PREVIEW_MAX_BYTES once encoded, but only 300 characters:
+    // a character-truncated preview would fail record validation.
+    let body = "日本語".repeat(100);
+    let args = serde_json::json!({ "keywords": ["alpha"], "body": body });
+    let result = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([44; 16])),
+        "remember",
+        serde_json::to_vec(&args).expect("json").as_slice(),
+    )
+    .await;
+    assert!(!result.is_error, "multibyte remember rejected: {result:?}");
+
+    let listing = store
+        .list(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            crate::MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    assert_eq!(listing.total, 1);
+    assert!(listing.records[0].preview.len() <= crate::record::PREVIEW_MAX_BYTES);
+}
+
+#[tokio::test]
+async fn search_memory_rejects_an_empty_text_query() {
+    let (toolset, _store) = toolset_with_policy(MemoryPolicy::default());
+    let args = serde_json::json!({ "text": "   " });
+    let arguments = serde_json::to_vec(&args).expect("json");
+    let error = toolset
+        .call(
+            context(EffectId::from_bytes([45; 16])),
+            validated_call(&toolset, "search_memory", &arguments),
+        )
+        .await
+        .err()
+        .expect("empty text must be rejected");
+    assert_eq!(error.code(), "memory_query_invalid");
 }

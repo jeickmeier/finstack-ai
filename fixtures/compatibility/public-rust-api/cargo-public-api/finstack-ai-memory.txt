@@ -19,8 +19,6 @@ impl core::marker::StructuralPartialEq for finstack_ai_memory::extract::Candidat
 pub struct finstack_ai_memory::extract::RuleBasedExtractor
 impl finstack_ai_memory::extract::RuleBasedExtractor
 pub fn finstack_ai_memory::extract::RuleBasedExtractor::new(alloc::sync::Arc<str>) -> Self
-impl core::clone::Clone for finstack_ai_memory::extract::RuleBasedExtractor
-pub fn finstack_ai_memory::extract::RuleBasedExtractor::clone(&self) -> finstack_ai_memory::extract::RuleBasedExtractor
 impl core::default::Default for finstack_ai_memory::extract::RuleBasedExtractor
 pub fn finstack_ai_memory::extract::RuleBasedExtractor::default() -> Self
 impl core::fmt::Debug for finstack_ai_memory::extract::RuleBasedExtractor
@@ -226,6 +224,7 @@ pub const finstack_ai_memory::record::KEYWORDS_MAX_COUNT: usize
 pub const finstack_ai_memory::record::KEYWORD_MAX_BYTES: usize
 pub const finstack_ai_memory::record::MEMORY_ID_MAX_BYTES: usize
 pub const finstack_ai_memory::record::PREVIEW_MAX_BYTES: usize
+pub fn finstack_ai_memory::record::preview_of(&str) -> alloc::sync::Arc<str>
 pub fn finstack_ai_memory::record::system_clock() -> finstack_ai_memory::record::MemoryClock
 pub type finstack_ai_memory::record::MemoryClock = alloc::sync::Arc<(dyn core::ops::function::Fn() -> finstack_ai_kernel::primitives::time::Timestamp + core::marker::Send + core::marker::Sync)>
 pub mod finstack_ai_memory::store
@@ -742,8 +741,6 @@ impl core::marker::StructuralPartialEq for finstack_ai_memory::provider::RecallC
 pub struct finstack_ai_memory::RuleBasedExtractor
 impl finstack_ai_memory::extract::RuleBasedExtractor
 pub fn finstack_ai_memory::extract::RuleBasedExtractor::new(alloc::sync::Arc<str>) -> Self
-impl core::clone::Clone for finstack_ai_memory::extract::RuleBasedExtractor
-pub fn finstack_ai_memory::extract::RuleBasedExtractor::clone(&self) -> finstack_ai_memory::extract::RuleBasedExtractor
 impl core::default::Default for finstack_ai_memory::extract::RuleBasedExtractor
 pub fn finstack_ai_memory::extract::RuleBasedExtractor::default() -> Self
 impl core::fmt::Debug for finstack_ai_memory::extract::RuleBasedExtractor

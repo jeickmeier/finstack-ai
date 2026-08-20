@@ -300,3 +300,122 @@ async fn full_text_matches_preview_substring() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].matched, MatchEvidence::FullText);
 }
+
+#[tokio::test]
+async fn forgotten_id_can_be_remembered_again_by_the_same_scope() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .forget(
+            Arc::from("k2"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The tombstone must not strand the id: the same scope re-remembering
+    // the same content is the recovery path, and refusing it would leave the
+    // fact unstorable (supersession rejects a self-derived replacement id).
+    let outcome = store
+        .put(Arc::from("k3"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(outcome, PutOutcome::Inserted);
+    let revived = store
+        .get(scope, MemoryId::parse("m1").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!revived.tombstoned);
+}
+
+#[tokio::test]
+async fn put_rejects_reviving_another_scopes_tombstone() {
+    let store = InProcessMemoryStore::new();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .forget(
+            Arc::from("k2"),
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    let outcome = store
+        .put(Arc::from("k3"), crate::tests::sample_record("m1", "t2"))
+        .await;
+    assert_eq!(outcome, Err(MemoryStoreError::IdConflict));
+}
+
+#[tokio::test]
+async fn correct_rejects_a_replacement_id_owned_by_another_scope() {
+    let store = InProcessMemoryStore::new();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("victim", "t2"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("mine", "t1"))
+        .await
+        .unwrap();
+
+    let mut replacement = crate::tests::sample_record("victim", "t1");
+    replacement.body = MemoryBody::Inline(Arc::from("clobbered"));
+    let result = store
+        .correct(
+            Arc::from("k3"),
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("mine").unwrap(),
+            replacement,
+        )
+        .await;
+    assert_eq!(result, Err(MemoryStoreError::IdConflict));
+
+    // The other tenant's record is untouched.
+    let victim = store
+        .get(
+            MemoryScope::try_new("t2").unwrap(),
+            MemoryId::parse("victim").unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(victim.scope.tenant.as_ref(), "t2");
+}
+
+#[tokio::test]
+async fn full_text_matches_any_query_token_and_never_matches_on_empty() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+
+    // A whole user turn only overlaps the record on one token.
+    let hits = store
+        .search(
+            scope.clone(),
+            MemoryQuery::FullText(Arc::from("what did I say about body earlier?")),
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+
+    for empty in ["", "   "] {
+        let hits = store
+            .search(scope.clone(), MemoryQuery::FullText(Arc::from(empty)), 10)
+            .await
+            .unwrap();
+        assert!(hits.is_empty(), "empty query must not enumerate records");
+    }
+}

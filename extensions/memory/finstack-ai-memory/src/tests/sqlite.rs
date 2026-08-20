@@ -366,3 +366,112 @@ async fn tombstone_removes_from_fts() {
         .unwrap();
     assert!(hits.is_empty());
 }
+
+#[tokio::test]
+async fn sqlite_forgotten_id_can_be_remembered_again_by_the_same_scope() {
+    let store = SqliteMemoryStore::open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .forget(
+            Arc::from("k2"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    let outcome = store
+        .put(Arc::from("k3"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(outcome, PutOutcome::Inserted);
+
+    // The revived record is live again, and searchable.
+    let hits = store
+        .search(
+            scope,
+            MemoryQuery::Keywords(Arc::from([Arc::<str>::from("alpha")])),
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+}
+
+#[tokio::test]
+async fn sqlite_put_rejects_reviving_another_scopes_tombstone() {
+    let store = SqliteMemoryStore::open_in_memory().unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .forget(
+            Arc::from("k2"),
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    let outcome = store
+        .put(Arc::from("k3"), crate::tests::sample_record("m1", "t2"))
+        .await;
+    assert_eq!(outcome, Err(MemoryStoreError::IdConflict));
+}
+
+#[tokio::test]
+async fn sqlite_correct_rejects_a_replacement_id_owned_by_another_scope() {
+    let store = SqliteMemoryStore::open_in_memory().unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("victim", "t2"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("mine", "t1"))
+        .await
+        .unwrap();
+    let result = store
+        .correct(
+            Arc::from("k3"),
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("mine").unwrap(),
+            crate::tests::sample_record("victim", "t1"),
+        )
+        .await;
+    assert_eq!(result, Err(MemoryStoreError::IdConflict));
+
+    let victim = store
+        .get(
+            MemoryScope::try_new("t2").unwrap(),
+            MemoryId::parse("victim").unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(victim.scope.tenant.as_ref(), "t2");
+}
+
+#[tokio::test]
+async fn sqlite_full_text_matches_a_partial_query() {
+    let store = SqliteMemoryStore::open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let mut record = crate::tests::sample_record("m1", "t1");
+    record.body = MemoryBody::Inline(Arc::from("the user prefers dark mode"));
+    record.preview = Arc::from("the user prefers dark mode");
+    store.put(Arc::from("k1"), record).await.unwrap();
+
+    // A whole user turn shares only some tokens with the stored memory:
+    // under FTS5's implicit AND this would not match at all.
+    let hits = store
+        .search(
+            scope,
+            MemoryQuery::FullText(Arc::from("what did I say about dark mode?")),
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+}

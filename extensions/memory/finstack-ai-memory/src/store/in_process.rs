@@ -104,6 +104,18 @@ impl ArtifactStore for InProcessArtifactStore {
     }
 }
 
+/// Whether writing `incoming` at its id conflicts with `existing`.
+///
+/// A live record always conflicts: ids are a global key, and a collision
+/// with another scope's record must not silently replace it. A *tombstoned*
+/// record in the identical scope does not conflict — it is the same owner
+/// re-remembering something they forgot, and refusing that would strand the
+/// id forever, since the supersession route rejects a replacement whose id
+/// equals the one it supersedes.
+fn conflicts_with(existing: Option<&MemoryRecord>, incoming: &MemoryRecord) -> bool {
+    existing.is_some_and(|existing| !(existing.tombstoned && existing.scope == incoming.scope))
+}
+
 fn lock_error() -> MemoryStoreError {
     MemoryStoreError::Unavailable {
         message: Arc::from("memory store lock failed"),
@@ -168,10 +180,8 @@ impl MemoryStore for InProcessMemoryStore {
             if self.key_applied(&idempotency_key)? {
                 return Ok(PutOutcome::AlreadyApplied);
             }
-            // Scope-blind on purpose: `id` is a global key here, so a
-            // collision with another tenant's record is still a conflict.
-            // Nothing about the existing record is revealed.
-            if records.contains_key(&record.id) {
+            // Nothing about any existing record is revealed by the conflict.
+            if conflicts_with(records.get(&record.id), &record) {
                 return Err(MemoryStoreError::IdConflict);
             }
             // Peeked above under the `records` lock, which every key-claiming
@@ -275,10 +285,19 @@ impl MemoryStore for InProcessMemoryStore {
                     return Err(MemoryStoreError::NotFound);
                 }
             }
-            let newly_applied = self.claim_key(&idempotency_key)?;
-            if !newly_applied {
+            // Replay of the correction that already ran: report success
+            // before the conflict check, which would otherwise trip on the
+            // replacement this very effect wrote the first time.
+            if self.key_applied(&idempotency_key)? {
                 return Ok(());
             }
+            // The replacement is a new record, so it is subject to the same
+            // conflict rule as `put`: never overwrite a record that is not
+            // this scope's own tombstone.
+            if conflicts_with(records.get(&replacement.id), &replacement) {
+                return Err(MemoryStoreError::IdConflict);
+            }
+            let _newly_applied = self.claim_key(&idempotency_key)?;
             replacement.supersedes = Some(old.clone());
             let replacement_id = replacement.id.clone();
             records.insert(replacement_id.clone(), replacement);
@@ -349,15 +368,23 @@ fn match_record(record: &MemoryRecord, query: &MemoryQuery) -> Option<MemoryHit>
             })
         }
         MemoryQuery::FullText(text) => {
-            let needle = text.to_ascii_lowercase();
-            let preview_hit = record.preview.to_ascii_lowercase().contains(&needle);
-            let body_hit = match &record.body {
-                crate::record::MemoryBody::Inline(body) => {
-                    body.to_ascii_lowercase().contains(&needle)
+            // Match any query token as a substring rather than requiring the
+            // whole query verbatim: recall passes a full user turn here, and
+            // a whole-message substring test never fires. An empty or
+            // whitespace-only query yields no tokens and so matches nothing,
+            // rather than matching every record via `contains("")`.
+            let haystack = {
+                let mut haystack = record.preview.to_ascii_lowercase();
+                if let crate::record::MemoryBody::Inline(body) = &record.body {
+                    haystack.push(' ');
+                    haystack.push_str(&body.to_ascii_lowercase());
                 }
-                crate::record::MemoryBody::Blob(_) => false,
+                haystack
             };
-            if preview_hit || body_hit {
+            let matched_any = text
+                .split_whitespace()
+                .any(|token| haystack.contains(&token.to_ascii_lowercase()));
+            if matched_any {
                 Some(MemoryHit {
                     record: record.clone(),
                     score: 10,

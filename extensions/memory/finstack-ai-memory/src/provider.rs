@@ -209,9 +209,19 @@ async fn search_candidates(
         if hit.record.tombstoned || hit.record.superseded_by.is_some() {
             continue;
         }
-        match merged.get(&hit.record.id) {
-            Some(existing) if existing.score >= hit.score => {}
-            _ => {
+        match merged.get_mut(&hit.record.id) {
+            Some(existing) => {
+                existing.score = existing.score.max(hit.score);
+                // Keep the strongest evidence any leg produced for this
+                // record, not whichever hit happened to score higher.
+                // `score` is on a store-defined scale (a match count here, a
+                // rank position there), so choosing evidence by score would
+                // make recall order depend on which store is configured.
+                if tier_of(&hit.matched) < tier_of(&existing.matched) {
+                    existing.matched = hit.matched;
+                }
+            }
+            None => {
                 merged.insert(hit.record.id.clone(), hit);
             }
         }

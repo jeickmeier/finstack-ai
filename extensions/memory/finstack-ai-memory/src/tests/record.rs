@@ -110,3 +110,17 @@ fn memory_error_reason_codes_are_stable() {
 fn timestamp_type_is_reachable() {
     let _: Timestamp = UNIX_EPOCH;
 }
+
+#[test]
+fn preview_of_respects_the_byte_budget_validate_enforces() {
+    // A multi-byte body: truncating by characters would produce a preview
+    // that `validate` rejects for exceeding PREVIEW_MAX_BYTES.
+    let body = "日本語".repeat(200);
+    let preview = preview_of(&body);
+    assert!(preview.len() <= PREVIEW_MAX_BYTES);
+
+    let mut record = sample_record("m1", "t1");
+    record.preview = preview;
+    record.body = MemoryBody::Inline(Arc::from(body.as_str()));
+    assert!(record.validate().is_ok());
+}

@@ -21,7 +21,7 @@ use finstack_ai_runtime::{
 use crate::extract::MemoryExtractor;
 use crate::record::{
     ExtractionMethod, INLINE_BODY_MAX_BYTES, MemoryBody, MemoryClock, MemoryError,
-    MemoryProvenance, MemoryRecord, MemoryScope, PREVIEW_MAX_BYTES, RetentionPolicy,
+    MemoryProvenance, MemoryRecord, MemoryScope, RetentionPolicy, preview_of,
 };
 use crate::store::MemoryStore;
 
@@ -77,19 +77,6 @@ impl MemoryObserver {
             clock,
         })
     }
-}
-
-/// Truncate `body` to at most [`PREVIEW_MAX_BYTES`] bytes on a `char`
-/// boundary.
-fn preview_of(body: &str) -> Arc<str> {
-    if body.len() <= PREVIEW_MAX_BYTES {
-        return Arc::from(body);
-    }
-    let mut end = PREVIEW_MAX_BYTES;
-    while end > 0 && !body.is_char_boundary(end) {
-        end -= 1;
-    }
-    Arc::from(&body[..end])
 }
 
 impl Observer for MemoryObserver {

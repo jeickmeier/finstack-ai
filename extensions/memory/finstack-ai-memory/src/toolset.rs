@@ -23,7 +23,7 @@ use serde::Deserialize;
 
 use crate::record::{
     ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
-    MemoryRecord, MemoryScope, RetentionPolicy,
+    MemoryRecord, MemoryScope, RetentionPolicy, preview_of,
 };
 use crate::store::{MatchEvidence, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome};
 
@@ -32,9 +32,6 @@ use crate::store::{MatchEvidence, MemoryQuery, MemoryStore, MemoryStoreError, Pu
 /// Re-exported from [`crate::record`], which owns the single definition
 /// shared with the observer's capture path.
 pub use crate::record::INLINE_BODY_MAX_BYTES;
-
-/// Bounded number of characters kept in a staged blob's preview.
-const PREVIEW_CHAR_LIMIT: usize = 256;
 
 const REMEMBER_TOOL_ID: &str = "finstack.tools.memory.remember";
 const SEARCH_TOOL_ID: &str = "finstack.tools.memory.search";
@@ -66,7 +63,7 @@ pub const MEMORY_TOOL_SELF_SUPERSESSION: &str = "memory_self_supersession";
 const REMEMBER_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"body":{"type":"string"},"sensitivity":{"type":"string"}},"required":["keywords","body"]}"#;
 const REMEMBER_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"outcome":{"type":"string","enum":["inserted","already_applied"]}},"required":["id","outcome"]}"#;
 
-const SEARCH_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"text":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":25}},"required":[]}"#;
+const SEARCH_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"text":{"type":"string","minLength":1},"limit":{"type":"integer","minimum":1,"maximum":25}},"required":[]}"#;
 const SEARCH_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"hits":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"preview":{"type":"string"},"score":{"type":"integer"},"matched":{"type":"string"}},"required":["id","preview","score","matched"]}}},"required":["hits"]}"#;
 
 const INSPECT_INPUT_SCHEMA: &[u8] =
@@ -360,7 +357,9 @@ impl MemoryToolset {
     ) -> Result<ToolResult, ToolError> {
         let args: RememberArguments = parse_arguments(arguments)?;
         let sensitivity = parse_sensitivity(args.sensitivity.as_deref())?;
-        let id = args.id.unwrap_or_else(|| derive_id(&args.body));
+        let id = args
+            .id
+            .unwrap_or_else(|| derive_id(self.scope.tenant(), &args.body));
         let memory_id =
             MemoryId::parse(&id).map_err(|_| invalid_arguments("memory id is invalid"))?;
         let (body, preview) = self
@@ -416,8 +415,7 @@ impl MemoryToolset {
         body: &str,
         sensitivity: Sensitivity,
     ) -> Result<(MemoryBody, Arc<str>), ToolError> {
-        let preview: Arc<str> =
-            Arc::from(body.chars().take(PREVIEW_CHAR_LIMIT).collect::<String>());
+        let preview: Arc<str> = preview_of(body);
         if body.len() <= INLINE_BODY_MAX_BYTES {
             return Ok((MemoryBody::Inline(Arc::from(body)), preview));
         }
@@ -482,6 +480,15 @@ impl MemoryToolset {
             );
             MemoryQuery::Keywords(keywords)
         } else if let Some(text) = args.text {
+            // An empty or whitespace-only needle matches every record in a
+            // substring-matching store, turning `search_memory` into an
+            // enumeration of memories the caller never named.
+            if text.trim().is_empty() {
+                return Err(invalid_arguments_code(
+                    "memory_query_invalid",
+                    "text must contain at least one non-whitespace character",
+                ));
+            }
             MemoryQuery::FullText(Arc::from(text.as_str()))
         } else {
             return Err(invalid_arguments_code(
@@ -581,7 +588,7 @@ impl MemoryToolset {
         let old_id = MemoryId::parse(&args.old_id)
             .map_err(|_| invalid_arguments("memory old_id is invalid"))?;
         let sensitivity = parse_sensitivity(args.sensitivity.as_deref())?;
-        let new_id_str = derive_id(&args.body);
+        let new_id_str = derive_id(self.scope.tenant(), &args.body);
         let new_id =
             MemoryId::parse(&new_id_str).map_err(|_| invalid_arguments("memory id is invalid"))?;
         // The replacement id is derived from the replacement body, so an
@@ -650,8 +657,18 @@ fn matched_str(matched: &MatchEvidence) -> String {
     }
 }
 
-fn derive_id(body: &str) -> String {
-    let digest = Digest::blob_content(body.as_bytes());
+/// Derive a content-addressed id for `body` within `tenant`.
+///
+/// The tenant is part of the digest domain so two tenants storing identical
+/// text land on distinct ids: a shared store must not turn one tenant's
+/// first write into a conflict with another tenant's record, nor let the
+/// conflict reveal that some other scope holds that exact body.
+fn derive_id(tenant: &str, body: &str) -> String {
+    let digest = Digest::from_fixed_domain(
+        "memory-tool-derived-id",
+        1,
+        format!("{tenant}\0{body}").as_bytes(),
+    );
     let hex = digest.to_hex();
     format!("mem-{}", &hex[..16.min(hex.len())])
 }

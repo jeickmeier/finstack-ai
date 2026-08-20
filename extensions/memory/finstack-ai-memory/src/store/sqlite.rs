@@ -174,10 +174,14 @@ fn sensitivity_to_text(sensitivity: Sensitivity) -> Result<String, MemoryStoreEr
 /// `*`, column filters, …) in the caller's input is never interpreted as
 /// query syntax; quoted tokens are matched as plain phrases, `ANDed` together.
 fn sanitize_fts_query(text: &str) -> String {
+    // Joined with OR, not FTS5's implicit AND: recall passes a whole user
+    // turn here, and requiring every token to be present means a stored
+    // memory essentially never matches. OR lets `bm25` rank by how much of
+    // the query a row actually covers, which is why FTS5 was chosen.
     text.split_whitespace()
         .map(|token| format!("\"{}\"", token.replace('"', "\"\"")))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" OR ")
 }
 
 /// One `memory_records` row, decoded back into a [`MemoryRecord`].
@@ -350,21 +354,48 @@ fn fetch_record(
         .map_err(|_| sqlite_unavailable())
 }
 
-/// Report whether any row already occupies `id`.
+/// Report whether writing `incoming` at its id would collide with a row
+/// that must not be replaced.
 ///
-/// Deliberately scope-blind: `id` is the table's primary key, so a
+/// A live row always collides: `id` is the table's primary key, so a
 /// collision with another tenant's row is still a conflict, and the caller
-/// learns only that the identifier is taken.
-fn record_exists(transaction: &Transaction<'_>, id: &MemoryId) -> Result<bool, MemoryStoreError> {
-    let found: Option<i64> = transaction
+/// learns only that the identifier is taken. A *tombstoned* row in the
+/// identical scope does not collide — that is the same owner re-remembering
+/// something they forgot, and refusing it would strand the id forever, since
+/// the supersession route rejects a replacement whose id equals the one it
+/// supersedes.
+fn record_conflicts(
+    transaction: &Transaction<'_>,
+    incoming: &MemoryRecord,
+) -> Result<bool, MemoryStoreError> {
+    let existing: Option<(bool, MemoryScope)> = transaction
         .query_row(
-            "SELECT 1 FROM memory_records WHERE id = ?1",
-            params![id.as_str()],
-            |row| row.get(0),
+            "SELECT tombstoned, tenant, user, agent, workspace FROM memory_records
+             WHERE id = ?1",
+            params![incoming.id.as_str()],
+            |row| {
+                let tombstoned: i64 = row.get(0)?;
+                let tenant: String = row.get(1)?;
+                let user: Option<String> = row.get(2)?;
+                let agent: Option<String> = row.get(3)?;
+                let workspace: Option<String> = row.get(4)?;
+                Ok((
+                    tombstoned != 0,
+                    MemoryScope {
+                        tenant: Arc::from(tenant),
+                        user: user.map(Arc::from),
+                        agent: agent.map(Arc::from),
+                        workspace: workspace.map(Arc::from),
+                    },
+                ))
+            },
         )
         .optional()
         .map_err(|_| sqlite_unavailable())?;
-    Ok(found.is_some())
+    let Some((tombstoned, existing_scope)) = existing else {
+        return Ok(false);
+    };
+    Ok(!(tombstoned && existing_scope == incoming.scope))
 }
 
 /// Claim `idempotency_key` inside `transaction`. Returns `true` when newly
@@ -540,7 +571,7 @@ impl MemoryStore for SqliteMemoryStore {
                 transaction.commit().map_err(|_| sqlite_unavailable())?;
                 return Ok(PutOutcome::AlreadyApplied);
             }
-            if record_exists(&transaction, &record.id)? {
+            if record_conflicts(&transaction, &record)? {
                 // Returning without committing rolls the transaction back,
                 // releasing the key claim above so a later legitimate write
                 // under the same effect id is not treated as already applied.
@@ -661,10 +692,20 @@ impl MemoryStore for SqliteMemoryStore {
                 // the key stays free for a retry once `old` exists.
                 return Err(MemoryStoreError::NotFound);
             }
+            // Replay of the correction that already ran short-circuits
+            // before the conflict check, which would otherwise trip on the
+            // replacement this very effect wrote the first time.
             let newly_applied = claim_key(&transaction, &idempotency_key)?;
             if !newly_applied {
                 transaction.commit().map_err(|_| sqlite_unavailable())?;
                 return Ok(());
+            }
+            // The replacement is a new record, so it is subject to the same
+            // conflict rule as `put`: never overwrite a record that is not
+            // this scope's own tombstone. Returning here rolls back, which
+            // also releases the key claimed just above.
+            if record_conflicts(&transaction, &replacement)? {
+                return Err(MemoryStoreError::IdConflict);
             }
             replacement.supersedes = Some(old.clone());
             write_record(&transaction, &replacement)?;

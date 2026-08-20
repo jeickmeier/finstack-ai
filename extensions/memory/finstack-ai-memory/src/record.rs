@@ -308,6 +308,24 @@ impl MemoryRecord {
     }
 }
 
+/// Build a record preview from `body`, truncated to [`PREVIEW_MAX_BYTES`] at
+/// a character boundary.
+///
+/// The bound is the same byte budget [`MemoryRecord::validate`] enforces, so
+/// every writer that builds a preview this way passes validation regardless
+/// of how many bytes each character occupies.
+#[must_use]
+pub fn preview_of(body: &str) -> Arc<str> {
+    if body.len() <= PREVIEW_MAX_BYTES {
+        return Arc::from(body);
+    }
+    let mut end = PREVIEW_MAX_BYTES;
+    while end > 0 && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    Arc::from(&body[..end])
+}
+
 /// A source of timestamps for memory operations.
 ///
 /// Injected rather than read from ambient time directly so tests and

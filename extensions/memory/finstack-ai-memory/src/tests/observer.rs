@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    EffectTag, EventTag, Id, IdTag, LaneTag, ModelRequestTag, ModelTextDelta,
+    Digest, EffectTag, EventTag, Id, IdTag, LaneTag, ModelRequestTag, ModelTextDelta,
     RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RunEvent, RunEventBody, RunTag, Sensitivity,
     SessionTag, Timestamp, TurnTag,
 };
@@ -95,8 +95,45 @@ fn rule_based_extractor_does_not_concatenate_across_different_model_requests() {
     let first = text_event_with(10, 1, "[[remember]] the user pre");
     let second = text_event_with(11, 2, "fers dark mode\n");
     let candidates = extractor.extract(&[first, second]);
-    assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].body.as_ref(), "the user pre");
+    // The halves belong to different model requests, so they never join. The
+    // first is an incomplete line and is carried as residual rather than
+    // captured truncated; the second has no marker.
+    assert!(candidates.is_empty());
+
+    // Each request completing its own marker line yields its own candidate.
+    let extractor = RuleBasedExtractor::default();
+    let candidates = extractor.extract(&[
+        text_event_with(12, 1, "[[remember]] first fact\n"),
+        text_event_with(13, 2, "[[remember]] second fact\n"),
+    ]);
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0].body.as_ref(), "first fact");
+    assert_eq!(candidates[1].body.as_ref(), "second fact");
+}
+
+/// Terminal event for the same run the text fixtures belong to.
+fn run_completed_event() -> RunEvent {
+    RunEvent::try_durable(
+        RUN_EVENT_SCHEMA_VERSION,
+        RUN_EVENT_KIND_VERSION,
+        id::<EventTag>(99),
+        id::<SessionTag>(1),
+        id::<LaneTag>(2),
+        id::<RunTag>(3),
+        Some(id::<TurnTag>(1)),
+        Some(id::<ModelRequestTag>(8)),
+        None,
+        Some(id::<EffectTag>(4)),
+        None,
+        1,
+        0,
+        Timestamp::from_unix_ms(2_000).expect("timestamp"),
+        Sensitivity::Internal,
+        RunEventBody::RunCompleted {
+            result_digest: Digest::raw_json(b"{}"),
+        },
+    )
+    .expect("event")
 }
 
 #[tokio::test]
@@ -112,7 +149,8 @@ async fn observer_capture_is_idempotent_on_redelivery() {
     )
     .expect("observer");
 
-    let batch: Arc<[RunEvent]> = Arc::from([text_event("[[remember]] the user prefers dark mode")]);
+    let batch: Arc<[RunEvent]> =
+        Arc::from([text_event("[[remember]] the user prefers dark mode\n")]);
 
     observer.observe(batch.clone()).await.expect("observe 1");
     observer.observe(batch).await.expect("observe 2");
@@ -297,4 +335,33 @@ async fn observer_handles_candidates_without_event_correlation() {
         .await
         .expect("list");
     assert_eq!(listing.total, 1);
+}
+
+#[test]
+fn extractor_carries_a_partial_line_across_batches() {
+    let extractor = RuleBasedExtractor::default();
+    // Same model request, split across two deliveries.
+    let first = extractor.extract(&[text_event_with(20, 7, "[[remember]] the user pre")]);
+    assert!(first.is_empty(), "an incomplete line must not be captured");
+
+    let second = extractor.extract(&[text_event_with(21, 7, "fers dark mode\n")]);
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].body.as_ref(), "the user prefers dark mode");
+    // Attribution stays with the event where the line began, keeping the
+    // observer's idempotency key stable.
+    assert_eq!(
+        second[0].source_ref.as_deref(),
+        Some(text_event_with(20, 7, "x").event_id().to_string().as_str())
+    );
+}
+
+#[test]
+fn extractor_flushes_an_unterminated_line_when_the_run_ends() {
+    let extractor = RuleBasedExtractor::default();
+    let held = extractor.extract(&[text_event_with(30, 8, "[[remember]] a final fact")]);
+    assert!(held.is_empty());
+
+    let flushed = extractor.extract(&[run_completed_event()]);
+    assert_eq!(flushed.len(), 1);
+    assert_eq!(flushed[0].body.as_ref(), "a final fact");
 }
