@@ -1,0 +1,352 @@
+Bounded HTTP fetch TM-22 / TM-01 / TM-16 / TM-20 security review
+Date: 2026-08-20
+Candidate: 2870dc46e523bcbf67408a46409767d7000c255f
+Reviewer: me@jeickmeier.com
+Decision: Pass with one Important finding to route. The SSRF/rebinding
+control set is sound as written; one inherited reqwest default
+(environment/system proxy) can void the resolve-and-pin control in a
+proxied deployment. No threat-model rewrite beyond the new TM-22 row.
+No ADR trigger. Section 15 network-egress gate is satisfied
+fail-closed (empty allowlist refuses construction).
+
+Scope reviewed (full source, not a diff):
+  extensions/net/finstack-ai-net-guard/src/{lib,vet,resolve,client,tests}.rs
+  extensions/toolsets/finstack-ai-tools-fetch/src/{lib,config,pipeline,
+    deliver,markdown,toolset,tests}.rs
+  extensions/toolsets/finstack-ai-tools-fetch/fixtures/*
+  Cargo manifests for both crates and the workspace reqwest/htmd/url pins
+  docs/superpowers/specs/2026-08-20-bounded-http-fetch-design.md sections
+    4.1, 4.4, 4.5, 5
+
+Note on concurrent work: at review start the working tree carried
+uncommitted changes under bindings/ and a new
+HttpFetchConfigSnapshot in tools-fetch/src/config.rs from another
+agent. Those are NOT covered here. The committed config.rs at the
+candidate sha (274 lines, no snapshot type) is what was reviewed. The
+JSON snapshot constructor needs its own fail-closed check when it
+lands: it must route through config::validate and must not become a
+second, laxer door to allow_loopback_http.
+
+Triggered controls: Threat Model section 18 (privileged host
+capability: model-directed network egress; new parser surface:
+html5ever via htmd; secret-bearing adapter: per-host credential
+headers). Primary TM-22 (proposed, see tm-22-proposed-row.md). Also
+TM-01 (retrieved content as data), TM-16 (parser/size DoS), TM-20
+(artifact spill), SEC-INV-006/007/008.
+
+================================================================
+FINDINGS REQUIRING ROUTING
+================================================================
+
+IMPORTANT  F-1  Environment/system HTTP proxy is inherited, and it
+                bypasses the address pin.
+  net-guard/src/client.rs:22-28 builds the client with
+  reqwest::Client::builder() and never calls .no_proxy(). In
+  reqwest 0.13.2 the builder default is auto_sys_proxy: true
+  (async_impl/client.rs:305, 410-414), so HTTP_PROXY / HTTPS_PROXY /
+  ALL_PROXY and platform proxy configuration are honored.
+
+  Consequence: when a proxy is configured in the host environment,
+  the connection target is the proxy, not the address returned by
+  resolve_and_pin. The .resolve() override only steers direct
+  connections, so:
+    - the destination-name resolution is performed a second time, by
+      the proxy, after net-guard vetted its own answer set. That is
+      exactly the DNS-rebinding TOCTOU the pin exists to close
+      (resolve.rs:79-105 docstring claims it is closed);
+    - the proxy endpoint itself is never vetted, so egress can leave
+      through a loopback or link-local address that
+      is_forbidden_destination would have denied.
+  TLS certificate validation still binds the far end to the
+  allowlisted hostname on https, so this is a destination-vetting and
+  egress-path bypass rather than a content-integrity break. Severity
+  is Important, not Critical, because it requires proxy configuration
+  in the host process environment (common in server deployments) and
+  does not by itself let an attacker choose the proxy.
+
+  Additionally, spec section 3 lists "proxy support" as an explicit
+  v1 non-goal; the current code silently ships it as inherited
+  default behaviour, so the shipped posture contradicts the spec.
+
+  Suggested disposition (controller routes; not fixed here): call
+  .no_proxy() in pinned_client, and add a test asserting the built
+  client ignores a set HTTPS_PROXY. If proxied egress is later
+  wanted, it must be an explicit config field whose proxy URL goes
+  through the same vetting.
+
+No Critical findings.
+
+================================================================
+AREA VERDICTS
+================================================================
+
+PASS  URL parse and component policy (TM-22, SEC-INV-007)
+      vet.rs:51-82. Parse via the url crate; scheme restricted to
+      https, or http only when policy.allow_loopback_http AND the
+      host is loopback (vet.rs:70); userinfo (username or password)
+      rejected (vet.rs:59); fragment rejected (vet.rs:63); missing
+      host and missing port rejected; https confined to port 443
+      (vet.rs:73). Non-http(s) schemes (file:, data:, gopher:, ftp:,
+      jar:) fall out at vet.rs:56. IPv6 forms are handled by
+      stripping the parser's brackets before IpAddr::parse
+      (vet.rs:38-41, resolve.rs:84), and to_canonical() collapses
+      IPv4-mapped ::ffff:127.0.0.1 shapes before the deny test
+      (resolve.rs:43, 63). IDNA: hosts arrive punycoded and
+      lowercased from the parser and allowlist entries are compared
+      in that form (tests.rs:57 unicode_hosts_normalize_to_punycode);
+      a Unicode allowlist entry therefore cannot match a punycode
+      host, which fails closed (see F-5).
+      Residual: none material. Note that the https-port-443-only rule
+      makes allowlisted hosts on non-standard TLS ports unusable;
+      that is a deliberate conservative choice, not a gap.
+
+PASS  Destination deny set (TM-22)
+      resolve.rs:42-60. Denied after canonicalization: IPv4 loopback,
+      private (RFC1918), link-local (169.254/16, which covers the
+      cloud metadata endpoint), unspecified (0.0.0.0), broadcast, and
+      multicast; IPv6 loopback, unique-local (fc00::/7),
+      unicast-link-local (fe80::/10), unspecified, and multicast.
+      This is a superset of the spec's draft list — unspecified,
+      broadcast, and multicast were added beyond spec section 5 text,
+      which is why the proposed TM-22 row names them.
+      Residual: IPv4 shared address space 100.64.0.0/10 (CGNAT) and
+      benchmarking 198.18.0.0/15 are not denied, and IPv6
+      documentation/ORCHID ranges are not denied. Reaching them still
+      requires an allowlisted hostname that resolves there, so the
+      allowlist remains the binding control. Accepted.
+
+PASS  DNS rebinding TOCTOU (TM-22, resolve-and-pin)
+      resolve.rs:79-105 vets EVERY address in the answer set and
+      returns DestinationBlocked if any one is forbidden
+      (resolve.rs:97-99), then pins the first address; client.rs:26
+      installs it as a DNS override so the socket connect cannot
+      re-resolve. Literal-IP hosts skip resolution but not the deny
+      check (resolve.rs:85-90). A fresh client is built per hop
+      (pipeline.rs:249), which is required for correctness and must
+      not be "optimized" into a shared client. Evidence:
+      net-guard tests one_private_address_rejects_the_whole_set
+      (tests.rs:94), first_public_address_is_pinned (tests.rs:109),
+      literal_hosts_skip_resolution_but_not_the_deny_check
+      (tests.rs:122), empty_resolution_fails (tests.rs:134); fetch
+      tests pinned_address_overrides_dns_for_hostnames
+      (tests.rs:1119).
+      Residual: voided by F-1 in a proxied environment. Also, the
+      pin is per-hostname and port-agnostic by design (reqwest
+      ignores the port in a resolve override and uses the URL's
+      port); since the URL port is itself vetted, this is safe.
+
+PASS  Redirect attack surface (TM-22)
+      pipeline.rs:344-369. Client-level redirect following is
+      disabled (client.rs:25) and the loop is manual. Only
+      301/302/303/307/308 are treated as redirects
+      (pipeline.rs:352); every other non-2xx becomes a terminal
+      transport error, so exotic 3xx (300, 304, 305 "use proxy",
+      306) cannot be followed. next_hop (pipeline.rs:290-304)
+      resolves Location with url::Url::join against the current URL,
+      so relative and protocol-relative ("//evil.example") Locations
+      are resolved rather than mis-parsed, and the result is then
+      re-vetted through the full parse_and_vet_url + allowlist +
+      resolve_and_pin path, i.e. spec section 4.4 step 7 is honoured.
+      Downgrade: an https origin redirected to http fails
+      plaintext_http_forbidden at vet.rs:70-72 because the hop is not
+      loopback. Loopback steering: origin_is_loopback is computed
+      once from hop 0 (pipeline.rs:330) and threaded into
+      host_allowed (pipeline.rs:159-169), so a compromised
+      allowlisted public host cannot 302 the chain into
+      http://127.0.0.1:<port>/. Hop cap enforced at
+      pipeline.rs:353 with max_redirects <= 5 by config ceiling
+      (config.rs:26, 228). Evidence: tests.rs:824, 850, 877, 902.
+
+PASS  Header and credential isolation (TM-04, TM-22)
+      Per-host headers are looked up by the current hop's exact host
+      (pipeline.rs:254) against keys that config::validate has
+      normalized to lowercase and required to be exact (non-wildcard)
+      hosts (config.rs:236-251). A credential configured for host A
+      is therefore never emitted on a hop to host B; a same-host
+      redirect keeps it, which is intended. Values are re-validated
+      as HTTP header values at construction and again per send.
+      HttpFetchConfig's Debug renders every header value as
+      "<redacted>" (config.rs:31, 140-163) and HttpFetchToolset's
+      Debug prints only the pattern count and store presence
+      (toolset.rs:163-171). No header value appears in any error
+      string. Evidence: tests.rs:204 debug_redacts_per_host_headers,
+      tests.rs:740, tests.rs:933 headers_do_not_cross_hosts_on_redirect.
+
+PASS  Response handling and bounds (SEC-INV-007, TM-16)
+      client.rs:38-52 streams the body and returns LimitExceeded the
+      moment the accumulated length would exceed the cap — an error,
+      never a silent truncation, and the overflow check uses
+      saturating_add. The effective cap is
+      min(config.max_response_bytes, args.max_bytes)
+      (pipeline.rs:377-380) and the same number bounds the inline
+      result after decoding/markdown conversion
+      (deliver.rs:193-202, markdown.rs:32), so a lossy-UTF-8
+      expansion cannot smuggle a larger string into the transcript
+      (tests.rs:662). Config ceilings are construction errors, not
+      clamps: 8 MiB bytes, 120 s timeout, 5 redirects
+      (config.rs:17-28, 218-232; tests.rs:152). reqwest is built with
+      default-features = false and no gzip/brotli/deflate feature, so
+      no automatic decompression happens and the cap is a wire-byte
+      cap — decompression bombs are not reachable through this path.
+
+PASS  Error surface (TM-04)
+      All net-guard error variants carry &'static str reasons only
+      (lib.rs:33-60), and the pipeline maps them to fixed strings
+      (pipeline.rs:111-144). No URL, header, body, or address value
+      is interpolated into an error message except the bounded
+      endpoint-rejection detail covered by F-2 below. Error codes are
+      the frozen FETCH_* vocabulary (lib.rs:41-53).
+
+PASS  Artifact staging and tenant scoping (TM-20, SEC-INV-008)
+      deliver.rs:153-190 stages through stage_required_artifact with
+      an ArtifactScope built from ctx.run.locator (tenant_scope,
+      session_id, run_id) and Sensitivity::Internal — the same call
+      shape as finstack-ai-tools-openrouter-media. No caller-supplied
+      field participates in the scope, so a model cannot address
+      another tenant's store. toolset.rs:237-250 additionally rejects
+      a call whose authenticated principal's tenant scope differs
+      from the committed effect's locator scope. With no store
+      attached, binary/oversize bodies fail closed with
+      fetch_limit_exceeded rather than being inlined
+      (deliver.rs:37-43, 143-145; tests.rs:535).
+
+PASS  Fail-closed configuration and default-graph posture
+      (SEC-INV-012, section 15 gate)
+      config::validate rejects an empty allowlist first
+      (config.rs:207-211); HostPattern::parse rejects entries
+      containing '*', '/', ':', '?', '#', '@', or whitespace after an
+      optional "*." prefix and rejects empty labels
+      (config.rs:56-75), so a bare "*" is rejected and scheme, port,
+      path, or userinfo cannot be smuggled into an allowlist entry.
+      Bare-TLD wildcards such as "*.com" are still accepted (see F-6). Wildcard matching
+      requires a non-empty proper subdomain label, so
+      "*.wikipedia.org" does not match "wikipedia.org" or
+      "notwikipedia.org" (config.rs:88-93; tests.rs:180). Both crates
+      are separate opt-in packages with default = [] features; no
+      default SDK feature pulls them in. Evidence: tests.rs:147
+      empty_allowlist_refuses_to_construct.
+
+PASS  Spec section 4.4 ordering
+      The implementation orders parse/vet (pipeline.rs:327) before
+      the allowlist match (pipeline.rs:238), where the spec lists
+      allowlist as step 2 and vetting as step 3. This inversion is
+      necessary — the allowlist matches on the parsed host — and is
+      security-neutral: both run before any socket connect, the
+      cancellation/deadline gate still precedes both
+      (pipeline.rs:346), and each redirect hop re-enters at the
+      allowlist check. Recommend the spec text be corrected rather
+      than the code.
+
+================================================================
+LOWER-SEVERITY FINDINGS AND RESIDUAL RISK
+================================================================
+
+MINOR  F-2  Untrusted response bytes reach the model context with no
+            provenance marking.
+  Two channels. (a) On a non-2xx terminal status, up to 4096 bytes of
+  the endpoint's body are read and up to 300 characters are
+  whitespace-collapsed into the ToolError message
+  (pipeline.rs:29-32, 172-208). (b) On success, the fetched body (or
+  its Markdown rendering) is placed in the result JSON's "content"
+  field (pipeline.rs:406-412) as ordinary tool output.
+  Both are bounded, which is what SEC-INV-007 requires, and TM-01's
+  "treat content as data" is a framework-level property of tool
+  results rather than something this toolset can assert. But note the
+  contrast with finstack-ai-context-repository, which marks retrieved
+  file content QuotedSource + Untrusted + external:true. Fetched web
+  pages are strictly more hostile than repository files and currently
+  carry no equivalent marking, and channel (a) puts attacker-chosen
+  prose into an *error* message, where a reader is least likely to
+  expect adversarial content. Recommendation (follow-up, not a
+  blocker): if ToolResult gains a provenance/sensitivity channel,
+  this toolset should be an early adopter; meanwhile consider
+  prefixing the rejection detail with an explicit "remote endpoint
+  said:" delimiter.
+
+MINOR  F-3  Time is bounded per hop, not per call.
+  request_timeout is a reqwest total timeout and does cover the body
+  stream (reqwest 0.13.2 async_impl/response.rs:39-45), so no hop can
+  hang. But the cap is applied per hop, so a chain of
+  max_redirects + 1 hops can consume up to 6 x 120 s of wall clock
+  when the run carries no deadline. Separately, the
+  cancellation/deadline select! wraps only request.send()
+  (pipeline.rs:274-283); the body read (client.rs:38) and the
+  rejection-detail read (pipeline.rs:172) are not raced against
+  ctx.run.cancellation, so a cancelled run keeps a trickling body
+  alive until the per-hop timeout fires. Both are bounded, so this is
+  a responsiveness/resource-fairness issue rather than an unbounded
+  one. Deployments that need a hard ceiling should set a run deadline
+  — which IS honoured between hops (pipeline.rs:346).
+
+MINOR  F-4  Adversarial HTML nesting depth is untested against the
+            htmd/html5ever conversion path.
+  markdown.rs:24-36 hands up to max_response_bytes (default 2 MiB,
+  ceiling 8 MiB) of attacker-controlled markup to htmd 0.5 /
+  html5ever. Memory safety is not the concern — the crates are safe
+  Rust and both this crate and net-guard are #![forbid(unsafe_code)]
+  — but a document of ~hundreds of thousands of nested elements can
+  drive a recursive tree walk (and recursive Drop of the resulting
+  tree) into stack exhaustion, which aborts the process rather than
+  returning an error. fixtures/pathological.html (127 bytes) covers
+  malformed/unclosed markup only, not depth; the README is explicit
+  that no fixture makes conversion fail. Not demonstrated here, and
+  the blast radius is availability of the host process for an
+  allowlisted-host fetch. Recommended follow-up: a generated
+  deep-nesting fixture (for example 100k nested <div>) exercised in
+  a test, and, if it does blow the stack, a pre-conversion depth or
+  tag-count guard.
+  Dependency surface note for the register: htmd 0.5 (MIT, cleared by
+  cargo deny check licenses per the crate README) pulls html5ever /
+  markup5ever / tendril, which do contain unsafe internally. This is
+  the feature's largest new untrusted-input parser and belongs on the
+  TM-18 / TM-16 radar for advisory watch.
+
+INFO   F-5  Non-ASCII allowlist entries are silently inert.
+  HostPattern::parse (config.rs:57) applies to_ascii_lowercase, which
+  is a no-op on non-ASCII, and does not reject non-ASCII bytes. A
+  configured entry such as "münchen.de" parses successfully and then
+  never matches, because the url crate delivers hosts punycoded
+  ("xn--mnchen-3ya.de"). The failure direction is closed (deny), and
+  the spec documents that allowlist entries must be punycode, but the
+  silence is a config footgun. Suggested: reject non-ASCII in
+  HostPattern::parse with a distinct reason, or punycode the entry
+  there.
+
+INFO   F-6  Allowlist patterns are not checked against a public
+  suffix list. "*.com" or "*.co.uk" are accepted and would allow
+  essentially the whole web. This matches the deliberate
+  no-PSL-dependency posture and is a deployment-configuration
+  concern, but the config documentation should say plainly that
+  wildcard entries must name a registrable domain.
+
+INFO   F-7  Documentation of the fixtures-only loopback posture is
+  incomplete. The brief requires that the config doc state a config
+  with fixtures enabled must never reach production. config.rs:114-121
+  and pipeline.rs:146-158 explain the bypass and its origin-gating
+  well, but neither says "never enable in production", and
+  extensions/toolsets/finstack-ai-tools-fetch/README.md is stale — it
+  still describes the crate as "this task-5 slice ... configuration
+  layer only" and never mentions allow_loopback_http at all. Worth
+  correcting before release: with allow_loopback_http = true a
+  model-supplied URL can reach ANY loopback port with no allowlist
+  check whatsoever (host_allowed, pipeline.rs:165), which is the
+  single largest privilege in the feature and is exactly the shape a
+  prompt injection would aim for. The code posture is right; the
+  documentation does not warn loudly enough.
+
+Residual risk disposition
+- F-1 voids resolve-and-pin under a configured proxy; until fixed,
+  deployments must not set HTTP(S)_PROXY for the host process, and
+  that constraint is currently undocumented.
+- Egress is only as tight as the deployer's allowlist; the framework
+  cannot judge whether an allowlisted host is itself hostile. A
+  compromised allowlisted host can serve prompt injection (F-2) and
+  can attempt redirect steering (blocked, see above).
+- No rate limiting or per-run call budget exists in this toolset; a
+  looping model can issue unbounded sequential fetches to
+  allowlisted hosts. Bounded elsewhere by run deadlines/budgets, but
+  not by this crate.
+- No cargo-deny advisories run, no gitleaks run, and no hosted
+  matrix is claimed by this review.
+
+No G7-D-*, hosted pull request, publication, or tag is recorded.
