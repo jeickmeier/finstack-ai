@@ -14,8 +14,12 @@ use finstack_ai_runtime::PortFuture;
 use crate::record::{MemoryId, MemoryRecord, MemoryScope};
 
 mod in_process;
+#[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
+mod sqlite;
 
 pub use in_process::{InProcessArtifactStore, InProcessMemoryStore};
+#[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
+pub use sqlite::SqliteMemoryStore;
 
 /// A search query against a [`MemoryStore`].
 #[non_exhaustive]
