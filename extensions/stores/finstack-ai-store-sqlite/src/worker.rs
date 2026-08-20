@@ -1,6 +1,5 @@
 //! Dedicated bounded sqlite worker: one thread, one connection, ordered jobs.
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
@@ -9,13 +8,12 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::thread::{self, JoinHandle};
 
-use finstack_ai_kernel::SessionId;
 use finstack_ai_runtime::{PortFuture, StoreError};
 use rusqlite::Connection;
 
 use crate::config::{SqliteStoreConfig, SqliteStoreLimits, is_memory_path};
 use crate::error::map_sqlite_error;
-use crate::load::VerifiedHead;
+use crate::load::VerifiedHeadCache;
 use crate::schema::{apply_durability, apply_schema, quick_check};
 
 /// In-flight jobs waiting for the single writer. Sized for the 64-session
@@ -31,7 +29,13 @@ enum Work {
 pub(crate) struct WorkerCtx {
     pub(crate) connection: Connection,
     pub(crate) limits: SqliteStoreLimits,
-    pub(crate) verified: HashMap<SessionId, VerifiedHead>,
+    /// Process-local chain-verification cache (spec D9), keyed by session.
+    ///
+    /// Owned outright rather than shared: the worker thread is the only
+    /// accessor, so the container's generation guard is never contended. It
+    /// is still the shared container so the cache semantics cannot drift
+    /// from the other backends'.
+    pub(crate) verified: VerifiedHeadCache,
 }
 
 /// Handle to the ordered worker. `Drop` sends shutdown and joins the thread.
@@ -166,7 +170,7 @@ fn open_context(config: &SqliteStoreConfig) -> Result<WorkerCtx, StoreError> {
     Ok(WorkerCtx {
         connection,
         limits: config.limits,
-        verified: HashMap::new(),
+        verified: VerifiedHeadCache::new(),
     })
 }
 

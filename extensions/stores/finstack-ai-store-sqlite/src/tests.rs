@@ -670,6 +670,70 @@ fn load_from_omits_the_verified_prefix() {
 }
 
 #[test]
+fn windowed_load_must_not_cache_an_unverified_prefix() {
+    // A windowed load's tail verification chains from a caller-supplied
+    // prior checksum and proves nothing about the omitted prefix. If it were
+    // allowed to populate the process-local verified-head cache, a later
+    // `Full` load could anchor on that head in
+    // `finstack_ai_store_common::verify_head_against_cache` and verify only
+    // the suffix after it, skipping a prefix corruption this process never
+    // actually checked (fail-open).
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.sqlite");
+    let setup = file_store(&dir, SqliteDurability::Durable);
+    let first = block_on(setup.append(request(1, 1, 1, vec![draft(1, 1)]))).expect("append");
+    let second = block_on(setup.append(request(2, 1, 2, vec![draft(2, 1)]))).expect("append");
+    let prior = first.records[0].checksum();
+    // Appending legitimately populates this process's verified-head cache
+    // from the in-memory chain it just built, which would mask the bug
+    // under test. Drop the store (and its worker/cache) before corrupting
+    // the file and reopening, so the load path below starts with an empty
+    // cache — exactly the fresh-process scenario the defect targets.
+    drop(setup);
+
+    let connection = Connection::open(&path).expect("second connection");
+    connection
+        .execute(
+            "UPDATE records SET envelope_checksum = ?1 WHERE sequence = 1",
+            params![vec![0_u8; 32]],
+        )
+        .expect("corrupt prefix");
+    drop(connection);
+
+    let store = SqliteJournalStore::try_open(SqliteStoreConfig {
+        path,
+        durability: SqliteDurability::Durable,
+        limits: limits(),
+        busy_timeout: DEFAULT_BUSY_TIMEOUT,
+    })
+    .expect("reopen store");
+
+    // The windowed load starts after the corrupted prefix and chains from
+    // the caller-supplied `prior` checksum, so it never reads the corrupted
+    // record and succeeds.
+    let tail = block_on(store.load_from(LoadFromRequest {
+        session_id: id::<SessionTag>(1),
+        window: LoadWindow::FromSequence {
+            from_sequence: second.first_sequence,
+            prior_checksum: prior,
+        },
+    }))
+    .expect("windowed load succeeds despite corrupted prefix");
+    assert_eq!(tail.head_sequence, second.last_sequence);
+
+    // A subsequent full load must independently verify the whole chain and
+    // catch the corrupted prefix record — it must not be short-circuited by
+    // a verified-head cache entry the windowed load had no business writing.
+    let result = block_on(store.load(LoadRequest {
+        session_id: id::<SessionTag>(1),
+    }));
+    assert!(
+        matches!(result, Err(StoreError::Integrity { .. })),
+        "full load must fail-closed on the corrupted prefix, got {result:?}"
+    );
+}
+
+#[test]
 fn v1_schema_applies_from_user_version_zero() {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("fresh.sqlite");

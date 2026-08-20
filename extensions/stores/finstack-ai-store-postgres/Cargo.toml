@@ -1,0 +1,27 @@
+[package]
+name = "finstack-ai-store-postgres"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Durable multi-writer PostgreSQL journal store for finstack-ai"
+publish = false
+
+[dependencies]
+finstack-ai-kernel = { workspace = true }
+finstack-ai-protocol = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai-store-common = { workspace = true }
+tokio = { workspace = true }
+tokio-postgres = { workspace = true }
+
+[dev-dependencies]
+finstack-ai-test = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }
+
+[lints]
+workspace = true

@@ -406,3 +406,11 @@ mise install cargo:cargo-public-api rust@nightly-2025-08-02
 export PATH="$(mise where cargo:cargo-public-api)/bin:${PATH}"
 uv run --no-project python scripts/compat/public_items.py --check
 """
+
+[tasks.pg-test-db]
+description = "Run a disposable Postgres container for finstack-ai-store-postgres's server-gated tests"
+run = """
+set -euo pipefail
+docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres --name finstack-pg postgres:16
+echo "export FINSTACK_PG_TEST_URL=postgres://postgres:postgres@localhost:5432/postgres"
+"""

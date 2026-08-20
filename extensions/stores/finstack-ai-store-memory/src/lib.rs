@@ -38,11 +38,12 @@ use finstack_ai_runtime::{
     WriteMetadataRequest,
 };
 use finstack_ai_store_common::{
-    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, SessionUsage, WindowCodes, accelerated_from,
-    admit_append_limits, admit_prune_snapshot, admit_snapshot_sequence, build_committed_batch,
-    check_append_sequence, check_snapshot_size, classify_record_reuse, encode_state_request,
-    outstanding_count, scan_next_sequence, scan_start, select_tail_batches, tombstone_count,
-    validate_scan_limit, verify_full_head, verify_tail_records,
+    FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, SessionUsage, VerifiedHead, VerifiedHeadCache,
+    VerifiedRead, WindowCodes, accelerated_from, admit_append_limits, admit_prune_snapshot,
+    admit_snapshot_sequence, build_committed_batch, check_append_sequence, check_snapshot_size,
+    classify_record_reuse, encode_state_request, outstanding_count, scan_next_sequence, scan_start,
+    select_tail_batches, tombstone_count, validate_scan_limit, verify_full_head,
+    verify_head_against_cache, verify_tail_records,
 };
 
 /// Required resource ceilings for [`MemoryJournalStore`].
@@ -52,6 +53,15 @@ pub type MemoryStoreLimits = StoreLimits;
 pub struct MemoryJournalStore {
     limits: MemoryStoreLimits,
     inner: Mutex<Inner>,
+    /// Process-local chain-verification cache (spec D9), keyed by session.
+    ///
+    /// A separate lock from `inner`. Nothing ever holds the cache lock while
+    /// acquiring `inner`: reads that precede a load release it first, and
+    /// every nested use takes `inner` first and releases the cache lock
+    /// inside that critical section. Cache updates that must not be raced by
+    /// a concurrent writer (`append_sync`, `prune_sync`) are made while
+    /// `inner` is still held.
+    verified: VerifiedHeadCache,
 }
 
 impl MemoryJournalStore {
@@ -64,6 +74,7 @@ impl MemoryJournalStore {
         Ok(Self {
             limits: limits.validate()?,
             inner: Mutex::new(Inner::default()),
+            verified: VerifiedHeadCache::new(),
         })
     }
 
@@ -149,26 +160,17 @@ impl MemoryJournalStore {
         let head_checksum = committed.records.last().map(RecordEnvelope::checksum);
         let batch_id = request.batch_id();
         let session_id = request.session_id();
-        let record_entries = request
-            .records()
-            .iter()
-            .map(|record| {
-                (
-                    record.record_id(),
-                    RecordIndexEntry {
-                        batch_id,
-                        draft: record.clone(),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
+        let record_entries = record_index_entries(&request, batch_id);
 
         let session = inner.sessions.entry(session_id).or_default();
         session.head_sequence = last_sequence;
         session.head_checksum = head_checksum;
         session.records += request.records().len();
         session.batches.push(committed.clone());
-        session.mark_verified();
+        let head = VerifiedHead {
+            sequence: session.head_sequence,
+            checksum: session.head_checksum,
+        };
         for (record_id, entry) in record_entries {
             inner.records_by_id.insert(record_id, entry);
         }
@@ -179,18 +181,88 @@ impl MemoryJournalStore {
                 committed: committed.clone(),
             },
         );
+        // The chain this append extended was built by this process from the
+        // session's own head, so its head is verified by construction. This
+        // stays inside the `inner` critical section: releasing the lock first
+        // would let a concurrent append's newer head be overwritten by this
+        // older-but-valid one (the generation is unbumped, so the guard does
+        // not reject it) and cost the next load a full re-verification.
+        let read = self.verified.read(session_id);
+        self.verified.remember(session_id, read, head);
         Ok(committed)
     }
 
-    fn load_sync(&self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
-        let inner = self.lock()?;
-        let Some(session) = inner.sessions.get(&request.session_id) else {
-            return Ok(LoadedSession::empty(request.session_id));
+    /// Verify one session's chain, using (and maintaining) the shared
+    /// verified-head cache according to `cache_use`.
+    ///
+    /// The cache never changes the outcome: [`verify_head_against_cache`]
+    /// falls back to a full verification whenever the cached anchor is not
+    /// usable, so the reason codes are those of an uncached verification.
+    fn verify_session_head(
+        &self,
+        session_id: SessionId,
+        session: &SessionData,
+        read: VerifiedRead,
+        cache_use: CacheUse,
+    ) -> Result<Option<Digest>, StoreError> {
+        let records = flatten_records(session);
+        let cached = match cache_use {
+            CacheUse::Proving => read.head,
+            CacheUse::Windowed => None,
         };
-        verify_session(session)?;
+        match verify_head_against_cache(
+            &records,
+            session.head_sequence,
+            session.head_checksum,
+            cached,
+        ) {
+            Ok(head) => {
+                if cache_use == CacheUse::Proving {
+                    self.verified.remember(
+                        session_id,
+                        read,
+                        VerifiedHead {
+                            sequence: session.head_sequence,
+                            checksum: head,
+                        },
+                    );
+                }
+                Ok(head)
+            }
+            Err(error) => {
+                // Spec D9(b): an integrity failure invalidates whatever this
+                // process believed it had verified for this session.
+                if matches!(error, StoreError::Integrity { .. }) {
+                    self.verified.invalidate(session_id);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn load_sync(&self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
+        self.load_full(request.session_id, CacheUse::Proving)
+    }
+
+    /// Load and verify a whole session journal.
+    ///
+    /// `cache_use` is [`CacheUse::Windowed`] when a windowed request
+    /// degenerated to this path, which is why it takes the session id rather
+    /// than a [`LoadRequest`].
+    fn load_full(
+        &self,
+        session_id: SessionId,
+        cache_use: CacheUse,
+    ) -> Result<LoadedSession, StoreError> {
+        let read = self.verified.read(session_id);
+        let inner = self.lock()?;
+        let Some(session) = inner.sessions.get(&session_id) else {
+            return Ok(LoadedSession::empty(session_id));
+        };
+        self.verify_session_head(session_id, session, read, cache_use)?;
         let snapshot = session.snapshot.clone();
         Ok(LoadedSession {
-            session_id: request.session_id,
+            session_id,
             head_sequence: session.head_sequence,
             head_checksum: session.head_checksum,
             metadata: session.metadata.clone(),
@@ -201,16 +273,25 @@ impl MemoryJournalStore {
     }
 
     fn load_from_sync(&self, request: LoadFromRequest) -> Result<LoadedSession, StoreError> {
-        match request.window {
-            LoadWindow::Full => self.load_sync(LoadRequest {
-                session_id: request.session_id,
-            }),
+        let result = match request.window {
+            LoadWindow::Full => self.load_full(request.session_id, CacheUse::Proving),
             LoadWindow::FromSequence {
                 from_sequence,
                 prior_checksum,
             } => self.load_from_sequence(request.session_id, from_sequence, prior_checksum),
             LoadWindow::SnapshotPlusTail => self.load_snapshot_plus_tail(request.session_id),
+        };
+        // Spec D9(b): every integrity failure invalidates this process's
+        // proof, whichever window produced it. `load_full` already does this
+        // for the failures it owns; the windowed paths below report gaps,
+        // splits and undecodable snapshots without going through it, so the
+        // rule is applied once here for all three windows — matching sqlite
+        // and postgres, which invalidate on any `Integrity` from either
+        // entry point.
+        if matches!(result, Err(StoreError::Integrity { .. })) {
+            self.verified.invalidate(request.session_id);
         }
+        result
     }
 
     fn load_from_sequence(
@@ -221,7 +302,11 @@ impl MemoryJournalStore {
     ) -> Result<LoadedSession, StoreError> {
         let start = if from_sequence == 0 { 1 } else { from_sequence };
         if start <= 1 {
-            return self.load_sync(LoadRequest { session_id });
+            // The window covers the whole journal, so this is a plain full
+            // load — but it arrived as a windowed request, and windowed
+            // requests never touch the cache (sqlite and postgres pass no
+            // cached head down this same path and never cache its outcome).
+            return self.load_full(session_id, CacheUse::Windowed);
         }
         let inner = self.lock()?;
         let Some(session) = inner.sessions.get(&session_id) else {
@@ -245,7 +330,9 @@ impl MemoryJournalStore {
         };
         let Some(snapshot) = session.snapshot.as_ref() else {
             drop(inner);
-            return self.load_sync(LoadRequest { session_id });
+            // No snapshot to accelerate from: same windowed-request rule as
+            // `load_from_sequence` above.
+            return self.load_full(session_id, CacheUse::Windowed);
         };
         let Some(accelerated) = accelerated_from(snapshot) else {
             return Err(StoreError::Integrity {
@@ -264,18 +351,16 @@ impl MemoryJournalStore {
 
     fn scan_sync(&self, request: ScanRequest) -> Result<ScanPage, StoreError> {
         validate_scan_limit(request.limit)?;
-        let mut inner = self.lock()?;
-        let Some(session) = inner.sessions.get_mut(&request.session_id) else {
+        let read = self.verified.read(request.session_id);
+        let inner = self.lock()?;
+        let Some(session) = inner.sessions.get(&request.session_id) else {
             return Ok(ScanPage {
                 session_id: request.session_id,
                 records: Arc::from([]),
                 next_sequence: None,
             });
         };
-        if !session.head_is_verified() {
-            verify_session(session)?;
-            session.mark_verified();
-        }
+        self.verify_session_head(request.session_id, session, read, CacheUse::Proving)?;
         let start = scan_start(request.from_sequence);
         let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
         let (records, saw_more) = slice_records(session, start, limit);
@@ -390,9 +475,44 @@ impl MemoryJournalStore {
             .iter()
             .map(|batch| batch.records.len())
             .sum();
-        session.verified_head = None;
-        verify_session(session)?;
-        session.mark_verified();
+        // The retained journal is a different chain prefix than the one the
+        // cached proof described, so the proof is dropped and the pruned
+        // journal re-verified in full before a new one is recorded.
+        self.verified.invalidate(request.session_id);
+        let head = VerifiedHead {
+            sequence: session.head_sequence,
+            checksum: session.head_checksum,
+        };
+        let records = flatten_records(session);
+        let stored_head = session.head_checksum;
+        // `inner` is one mutex over *every* session, so nothing expensive may
+        // run under it. `records` is already an owned clone and `stored_head`
+        // a `Copy` digest, so the chain walk needs no lock at all: release it
+        // first, and every unrelated append/load/scan keeps running while this
+        // prune re-verifies.
+        drop(inner);
+        verify_full_head(&records, stored_head)?;
+        // The cache write does go back under `inner`, briefly, for
+        // `append_sync`'s reason: a concurrent writer's newer head must not be
+        // overwritten by this older-but-valid one. The generation guard alone
+        // cannot prevent that — an intervening append bumps nothing, so its
+        // proof would be silently replaced by the pre-append head verified
+        // above. Re-checking the head under the lock is what rules it out: if
+        // the session moved on, that writer has already recorded its own
+        // (newer, equally valid) proof and this one is simply dropped.
+        {
+            let inner = self.lock()?;
+            let head_unchanged = inner
+                .sessions
+                .get(&request.session_id)
+                .is_some_and(|session| {
+                    session.head_sequence == head.sequence && session.head_checksum == head.checksum
+                });
+            if head_unchanged {
+                let read = self.verified.read(request.session_id);
+                self.verified.remember(request.session_id, read, head);
+            }
+        }
         let _ = request.horizon;
         Ok(PruneReceipt {
             pruned_through_sequence,
@@ -480,6 +600,19 @@ impl JournalStore for MemoryJournalStore {
     }
 }
 
+/// Whether a full-journal verification may use the verified-head cache.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CacheUse {
+    /// A `load`/`scan`/`LoadWindow::Full` request: consult the cached proof,
+    /// and record the freshly verified head on success.
+    Proving,
+    /// A windowed request that degenerated to a full journal load: neither
+    /// read nor write the cache. Only a request for the whole journal proves
+    /// the whole chain, so a windowed request must not seed a proof later
+    /// loads would anchor on.
+    Windowed,
+}
+
 #[derive(Default)]
 struct Inner {
     sessions: BTreeMap<SessionId, SessionData>,
@@ -495,17 +628,6 @@ struct SessionData {
     records: usize,
     batches: Vec<CommittedBatch>,
     snapshot: Option<OpaqueSnapshot>,
-    verified_head: Option<(u64, Option<Digest>)>,
-}
-
-impl SessionData {
-    fn head_is_verified(&self) -> bool {
-        self.verified_head == Some((self.head_sequence, self.head_checksum))
-    }
-
-    fn mark_verified(&mut self) {
-        self.verified_head = Some((self.head_sequence, self.head_checksum));
-    }
 }
 
 struct BatchIndexEntry {
@@ -517,11 +639,6 @@ struct RecordIndexEntry {
     batch_id: AppendBatchId,
     #[allow(dead_code)]
     draft: RecordDraft,
-}
-
-fn verify_session(session: &SessionData) -> Result<(), StoreError> {
-    let records = flatten_records(session);
-    verify_full_head(&records, session.head_checksum).map(|_| ())
 }
 
 fn loaded_from_batches(
@@ -554,6 +671,26 @@ fn loaded_from_batches(
         snapshot: snapshot.clone(),
         accelerated: snapshot.as_ref().and_then(accelerated_from),
     })
+}
+
+/// Build the by-record-id index entries one append contributes.
+fn record_index_entries(
+    request: &AppendRequest,
+    batch_id: AppendBatchId,
+) -> Vec<(RecordId, RecordIndexEntry)> {
+    request
+        .records()
+        .iter()
+        .map(|record| {
+            (
+                record.record_id(),
+                RecordIndexEntry {
+                    batch_id,
+                    draft: record.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {

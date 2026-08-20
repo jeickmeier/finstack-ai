@@ -28,6 +28,34 @@ impl core::fmt::Debug for finstack_ai_store_common::SessionUsage
 pub fn finstack_ai_store_common::SessionUsage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_store_common::SessionUsage
 impl core::marker::StructuralPartialEq for finstack_ai_store_common::SessionUsage
+pub struct finstack_ai_store_common::VerifiedHead
+pub finstack_ai_store_common::VerifiedHead::checksum: core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
+pub finstack_ai_store_common::VerifiedHead::sequence: u64
+impl core::clone::Clone for finstack_ai_store_common::VerifiedHead
+pub fn finstack_ai_store_common::VerifiedHead::clone(&self) -> finstack_ai_store_common::VerifiedHead
+impl core::cmp::Eq for finstack_ai_store_common::VerifiedHead
+impl core::cmp::PartialEq for finstack_ai_store_common::VerifiedHead
+pub fn finstack_ai_store_common::VerifiedHead::eq(&self, &finstack_ai_store_common::VerifiedHead) -> bool
+impl core::fmt::Debug for finstack_ai_store_common::VerifiedHead
+pub fn finstack_ai_store_common::VerifiedHead::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_common::VerifiedHead
+impl core::marker::StructuralPartialEq for finstack_ai_store_common::VerifiedHead
+pub struct finstack_ai_store_common::VerifiedHeadCache
+impl finstack_ai_store_common::VerifiedHeadCache
+pub fn finstack_ai_store_common::VerifiedHeadCache::invalidate(&self, finstack_ai_kernel::primitives::ids::SessionId)
+pub fn finstack_ai_store_common::VerifiedHeadCache::new() -> Self
+pub fn finstack_ai_store_common::VerifiedHeadCache::read(&self, finstack_ai_kernel::primitives::ids::SessionId) -> finstack_ai_store_common::VerifiedRead
+pub fn finstack_ai_store_common::VerifiedHeadCache::remember(&self, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_store_common::VerifiedRead, finstack_ai_store_common::VerifiedHead)
+impl core::default::Default for finstack_ai_store_common::VerifiedHeadCache
+pub fn finstack_ai_store_common::VerifiedHeadCache::default() -> finstack_ai_store_common::VerifiedHeadCache
+pub struct finstack_ai_store_common::VerifiedRead
+pub finstack_ai_store_common::VerifiedRead::generation: u64
+pub finstack_ai_store_common::VerifiedRead::head: core::option::Option<finstack_ai_store_common::VerifiedHead>
+impl core::clone::Clone for finstack_ai_store_common::VerifiedRead
+pub fn finstack_ai_store_common::VerifiedRead::clone(&self) -> finstack_ai_store_common::VerifiedRead
+impl core::fmt::Debug for finstack_ai_store_common::VerifiedRead
+pub fn finstack_ai_store_common::VerifiedRead::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_common::VerifiedRead
 pub struct finstack_ai_store_common::WindowCodes
 pub finstack_ai_store_common::WindowCodes::checksum: &'static str
 pub finstack_ai_store_common::WindowCodes::gap: &'static str
@@ -63,4 +91,5 @@ pub fn finstack_ai_store_common::select_tail_batches(&[finstack_ai_kernel::reduc
 pub fn finstack_ai_store_common::tombstone_count(&finstack_ai_runtime::ports::journal::AcceleratedRestore) -> u64
 pub fn finstack_ai_store_common::validate_scan_limit(u32) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
 pub fn finstack_ai_store_common::verify_full_head(&[finstack_ai_kernel::records::envelope::RecordEnvelope], core::option::Option<finstack_ai_kernel::primitives::digest::Digest>) -> core::result::Result<core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::verify_head_against_cache(&[finstack_ai_kernel::records::envelope::RecordEnvelope], u64, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, core::option::Option<finstack_ai_store_common::VerifiedHead>) -> core::result::Result<core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_runtime::ports::journal::StoreError>
 pub fn finstack_ai_store_common::verify_tail_records(&[finstack_ai_kernel::records::envelope::RecordEnvelope], u64, finstack_ai_kernel::primitives::digest::Digest, u64, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_store_common::WindowCodes) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>

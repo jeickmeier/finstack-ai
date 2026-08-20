@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
 use finstack_ai_runtime::{
-    LoadFromRequest, LoadRequest, LoadedSession, MetadataReceipt, PruneReceipt, PruneRequest,
-    ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError,
-    WriteMetadataRequest,
+    LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt, PruneReceipt,
+    PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
+    StoreError, WriteMetadataRequest,
 };
 use finstack_ai_store_common::{
     admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size,
@@ -15,8 +15,9 @@ use crate::append::append_in_transaction;
 use crate::config::{SqliteStoreConfig, health_label, is_memory_path};
 use crate::error::{i64_from_u64, map_sqlite_error};
 use crate::load::{
-    VerifiedHead, accelerated_from, encode_state_request, load_session, load_session_row,
-    load_session_window, load_snapshot, outstanding_count, scan_session, tombstone_count,
+    VerifiedHead, VerifiedRead, accelerated_from, encode_state_request, load_session,
+    load_session_row, load_session_window, load_snapshot, outstanding_count, scan_session,
+    tombstone_count,
 };
 use crate::worker::{WorkerCtx, WorkerHandle};
 
@@ -210,21 +211,26 @@ impl WorkerCtx {
         Ok(value)
     }
 
-    pub(crate) fn remember(&mut self, session_id: SessionId, head: VerifiedHead) {
-        self.verified.insert(session_id, head);
+    /// Record `head` as this process's proof for `session_id`, presenting the
+    /// generation `read` was taken at (see `VerifiedHeadCache`).
+    pub(crate) fn remember(&self, session_id: SessionId, read: VerifiedRead, head: VerifiedHead) {
+        self.verified.remember(session_id, read, head);
     }
 
-    pub(crate) fn invalidate(&mut self, session_id: SessionId) {
-        self.verified.remove(&session_id);
+    /// Drop any cached proof for `session_id` (spec D9(b)).
+    pub(crate) fn invalidate(&self, session_id: SessionId) {
+        self.verified.invalidate(session_id);
     }
 
-    pub(crate) fn cached(&self, session_id: SessionId) -> Option<VerifiedHead> {
-        self.verified.get(&session_id).copied()
+    /// Read the cached proof for `session_id`, with the generation it was
+    /// read at.
+    pub(crate) fn cached(&self, session_id: SessionId) -> VerifiedRead {
+        self.verified.read(session_id)
     }
 
     pub(crate) fn append(&mut self, request: &AppendRequest) -> Result<CommittedBatch, StoreError> {
         let session_id = request.session_id();
-        let previous = self.cached(session_id);
+        let previous = self.cached(session_id).head;
         let limits = self.limits;
         let committed = self
             .with_immediate(|transaction| append_in_transaction(transaction, request, &limits))?;
@@ -240,8 +246,12 @@ impl WorkerCtx {
         if (genesis || prior_verified)
             && let Some(last) = committed.records.last()
         {
+            // Re-read after the invalidation above so the write presents the
+            // bumped generation.
+            let read = self.cached(session_id);
             self.remember(
                 session_id,
+                read,
                 VerifiedHead {
                     sequence: last.sequence(),
                     checksum: Some(last.checksum()),
@@ -252,14 +262,26 @@ impl WorkerCtx {
     }
 
     pub(crate) fn load(&mut self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
-        let loaded = load_session(
+        let read = self.cached(request.session_id);
+        let loaded = match load_session(
             &self.connection,
             request.session_id,
             self.limits.snapshot_bytes,
-            self.cached(request.session_id),
-        )?;
+            read.head,
+        ) {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                // Spec D9(b): an integrity failure invalidates whatever this
+                // process believed it had verified for this session.
+                if matches!(error, StoreError::Integrity { .. }) {
+                    self.invalidate(request.session_id);
+                }
+                return Err(error);
+            }
+        };
         self.remember(
             request.session_id,
+            read,
             VerifiedHead {
                 sequence: loaded.head_sequence,
                 checksum: loaded.head_checksum,
@@ -272,20 +294,38 @@ impl WorkerCtx {
         &mut self,
         request: LoadFromRequest,
     ) -> Result<LoadedSession, StoreError> {
-        let loaded = load_session_window(
+        let window = request.window;
+        let read = self.cached(request.session_id);
+        let loaded = match load_session_window(
             &self.connection,
             request.session_id,
             self.limits.snapshot_bytes,
-            request.window,
-            self.cached(request.session_id),
-        )?;
-        self.remember(
-            request.session_id,
-            VerifiedHead {
-                sequence: loaded.head_sequence,
-                checksum: loaded.head_checksum,
-            },
-        );
+            window,
+            read.head,
+        ) {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                // Spec D9(b), as in `load`.
+                if matches!(error, StoreError::Integrity { .. }) {
+                    self.invalidate(request.session_id);
+                }
+                return Err(error);
+            }
+        };
+        // Only a `Full` load proves the whole chain. A windowed load's tail
+        // is verified against a checksum the caller supplied, which says
+        // nothing about the prefix it omitted, so caching its head would let
+        // a later full load skip records this process never verified.
+        if matches!(window, LoadWindow::Full) {
+            self.remember(
+                request.session_id,
+                read,
+                VerifiedHead {
+                    sequence: loaded.head_sequence,
+                    checksum: loaded.head_checksum,
+                },
+            );
+        }
         Ok(loaded)
     }
 
