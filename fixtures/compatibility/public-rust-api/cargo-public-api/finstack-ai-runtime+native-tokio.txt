@@ -611,6 +611,39 @@ impl core::fmt::Debug for finstack_ai_runtime::NdjsonError
 pub fn finstack_ai_runtime::NdjsonError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::NdjsonError
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::NdjsonError
+pub enum finstack_ai_runtime::ObjectError
+pub finstack_ai_runtime::ObjectError::Integrity
+pub finstack_ai_runtime::ObjectError::Integrity::message: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ObjectError::InvalidKey
+pub finstack_ai_runtime::ObjectError::InvalidKey::message: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ObjectError::InvalidMetadata
+pub finstack_ai_runtime::ObjectError::InvalidMetadata::message: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ObjectError::Io
+pub finstack_ai_runtime::ObjectError::Io::message: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ObjectError::NotFound
+pub finstack_ai_runtime::ObjectError::ScopeMismatch
+pub finstack_ai_runtime::ObjectError::ScopeMismatch::actual: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_runtime::ObjectError::ScopeMismatch::expected: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_runtime::ObjectError::TooLarge
+pub finstack_ai_runtime::ObjectError::TooLarge::len: u64
+pub finstack_ai_runtime::ObjectError::TooLarge::max: u64
+pub finstack_ai_runtime::ObjectError::Unavailable
+pub finstack_ai_runtime::ObjectError::Unavailable::message: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ObjectError::Unsupported
+pub finstack_ai_runtime::ObjectError::Unsupported::operation: alloc::sync::Arc<str>
+impl finstack_ai_runtime::ObjectError
+pub const fn finstack_ai_runtime::ObjectError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai_runtime::ObjectError
+pub fn finstack_ai_runtime::ObjectError::clone(&self) -> finstack_ai_runtime::ObjectError
+impl core::cmp::Eq for finstack_ai_runtime::ObjectError
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectError
+pub fn finstack_ai_runtime::ObjectError::eq(&self, &finstack_ai_runtime::ObjectError) -> bool
+impl core::error::Error for finstack_ai_runtime::ObjectError
+impl core::fmt::Debug for finstack_ai_runtime::ObjectError
+pub fn finstack_ai_runtime::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_runtime::ObjectError
+pub fn finstack_ai_runtime::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectError
 pub enum finstack_ai_runtime::ObserverBackpressure
 pub finstack_ai_runtime::ObserverBackpressure::BlockBounded
 pub finstack_ai_runtime::ObserverBackpressure::BlockBounded::timeout: core::time::Duration
@@ -750,6 +783,13 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::PromptCacheImpact
 pub fn finstack_ai_runtime::PromptCacheImpact::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::PromptCacheImpact
 pub fn finstack_ai_runtime::PromptCacheImpact::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_runtime::PutPayload
+pub finstack_ai_runtime::PutPayload::Bytes(bytes::bytes::Bytes)
+pub finstack_ai_runtime::PutPayload::File(std::path::PathBuf)
+impl core::clone::Clone for finstack_ai_runtime::PutPayload
+pub fn finstack_ai_runtime::PutPayload::clone(&self) -> finstack_ai_runtime::PutPayload
+impl core::fmt::Debug for finstack_ai_runtime::PutPayload
+pub fn finstack_ai_runtime::PutPayload::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum finstack_ai_runtime::ResolvedMedia
 pub finstack_ai_runtime::ResolvedMedia::Bytes
 pub finstack_ai_runtime::ResolvedMedia::Bytes::bytes: alloc::sync::Arc<[u8]>
@@ -2642,6 +2682,123 @@ pub fn finstack_ai_runtime::NoopObserver::fmt(&self, &mut core::fmt::Formatter<'
 impl finstack_ai_runtime::Observer for finstack_ai_runtime::NoopObserver
 pub fn finstack_ai_runtime::NoopObserver::descriptor(&self) -> finstack_ai_runtime::ObserverDescriptor
 pub fn finstack_ai_runtime::NoopObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ObserverError>>
+pub struct finstack_ai_runtime::ObjectEntry
+pub finstack_ai_runtime::ObjectEntry::key: finstack_ai_runtime::ObjectKey
+pub finstack_ai_runtime::ObjectEntry::length: u64
+impl core::clone::Clone for finstack_ai_runtime::ObjectEntry
+pub fn finstack_ai_runtime::ObjectEntry::clone(&self) -> finstack_ai_runtime::ObjectEntry
+impl core::cmp::Eq for finstack_ai_runtime::ObjectEntry
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectEntry
+pub fn finstack_ai_runtime::ObjectEntry::eq(&self, &finstack_ai_runtime::ObjectEntry) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ObjectEntry
+pub fn finstack_ai_runtime::ObjectEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectEntry
+impl serde_core::ser::Serialize for finstack_ai_runtime::ObjectEntry
+pub fn finstack_ai_runtime::ObjectEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ObjectEntry
+pub fn finstack_ai_runtime::ObjectEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::ObjectKey(_)
+impl finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::as_str(&self) -> &str
+pub fn finstack_ai_runtime::ObjectKey::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ObjectError>
+impl core::clone::Clone for finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::clone(&self) -> finstack_ai_runtime::ObjectKey
+impl core::cmp::Eq for finstack_ai_runtime::ObjectKey
+impl core::cmp::Ord for finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::cmp(&self, &finstack_ai_runtime::ObjectKey) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::eq(&self, &finstack_ai_runtime::ObjectKey) -> bool
+impl core::cmp::PartialOrd for finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::partial_cmp(&self, &finstack_ai_runtime::ObjectKey) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<finstack_ai_runtime::ObjectKey> for alloc::sync::Arc<str>
+pub fn alloc::sync::Arc<str>::from(finstack_ai_runtime::ObjectKey) -> Self
+impl core::convert::TryFrom<alloc::sync::Arc<str>> for finstack_ai_runtime::ObjectKey
+pub type finstack_ai_runtime::ObjectKey::Error = finstack_ai_runtime::ObjectError
+pub fn finstack_ai_runtime::ObjectKey::try_from(alloc::sync::Arc<str>) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectKey
+impl serde_core::ser::Serialize for finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ObjectKey
+pub fn finstack_ai_runtime::ObjectKey::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::ObjectMetadata
+pub finstack_ai_runtime::ObjectMetadata::attributes: finstack_ai_kernel::primitives::raw_json::Metadata
+pub finstack_ai_runtime::ObjectMetadata::media_type: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ObjectMetadata::name: core::option::Option<alloc::sync::Arc<str>>
+impl core::clone::Clone for finstack_ai_runtime::ObjectMetadata
+pub fn finstack_ai_runtime::ObjectMetadata::clone(&self) -> finstack_ai_runtime::ObjectMetadata
+impl core::cmp::Eq for finstack_ai_runtime::ObjectMetadata
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectMetadata
+pub fn finstack_ai_runtime::ObjectMetadata::eq(&self, &finstack_ai_runtime::ObjectMetadata) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ObjectMetadata
+pub fn finstack_ai_runtime::ObjectMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectMetadata
+impl serde_core::ser::Serialize for finstack_ai_runtime::ObjectMetadata
+pub fn finstack_ai_runtime::ObjectMetadata::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ObjectMetadata
+pub fn finstack_ai_runtime::ObjectMetadata::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::ObjectPage
+pub finstack_ai_runtime::ObjectPage::entries: alloc::vec::Vec<finstack_ai_runtime::ObjectEntry>
+pub finstack_ai_runtime::ObjectPage::next: core::option::Option<finstack_ai_runtime::PageToken>
+impl core::clone::Clone for finstack_ai_runtime::ObjectPage
+pub fn finstack_ai_runtime::ObjectPage::clone(&self) -> finstack_ai_runtime::ObjectPage
+impl core::cmp::Eq for finstack_ai_runtime::ObjectPage
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectPage
+pub fn finstack_ai_runtime::ObjectPage::eq(&self, &finstack_ai_runtime::ObjectPage) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ObjectPage
+pub fn finstack_ai_runtime::ObjectPage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectPage
+pub struct finstack_ai_runtime::ObjectRef
+pub finstack_ai_runtime::ObjectRef::content_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_runtime::ObjectRef::key: finstack_ai_runtime::ObjectKey
+pub finstack_ai_runtime::ObjectRef::length: u64
+pub finstack_ai_runtime::ObjectRef::media_type: alloc::sync::Arc<str>
+pub finstack_ai_runtime::ObjectRef::scope_digest: finstack_ai_kernel::primitives::digest::Digest
+impl core::clone::Clone for finstack_ai_runtime::ObjectRef
+pub fn finstack_ai_runtime::ObjectRef::clone(&self) -> finstack_ai_runtime::ObjectRef
+impl core::cmp::Eq for finstack_ai_runtime::ObjectRef
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectRef
+pub fn finstack_ai_runtime::ObjectRef::eq(&self, &finstack_ai_runtime::ObjectRef) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ObjectRef
+pub fn finstack_ai_runtime::ObjectRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectRef
+impl serde_core::ser::Serialize for finstack_ai_runtime::ObjectRef
+pub fn finstack_ai_runtime::ObjectRef::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ObjectRef
+pub fn finstack_ai_runtime::ObjectRef::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::ObjectScope
+pub finstack_ai_runtime::ObjectScope::run_id: core::option::Option<finstack_ai_kernel::primitives::ids::RunId>
+pub finstack_ai_runtime::ObjectScope::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_runtime::ObjectScope::session_id: core::option::Option<finstack_ai_kernel::primitives::ids::SessionId>
+pub finstack_ai_runtime::ObjectScope::tenant_scope: alloc::sync::Arc<str>
+impl finstack_ai_runtime::ObjectScope
+pub fn finstack_ai_runtime::ObjectScope::digest(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_runtime::ObjectError>
+impl core::clone::Clone for finstack_ai_runtime::ObjectScope
+pub fn finstack_ai_runtime::ObjectScope::clone(&self) -> finstack_ai_runtime::ObjectScope
+impl core::cmp::Eq for finstack_ai_runtime::ObjectScope
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectScope
+pub fn finstack_ai_runtime::ObjectScope::eq(&self, &finstack_ai_runtime::ObjectScope) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ObjectScope
+pub fn finstack_ai_runtime::ObjectScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectScope
+impl serde_core::ser::Serialize for finstack_ai_runtime::ObjectScope
+pub fn finstack_ai_runtime::ObjectScope::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ObjectScope
+pub fn finstack_ai_runtime::ObjectScope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::ObjectStoreLimits
+pub finstack_ai_runtime::ObjectStoreLimits::max_object_bytes: u64
+impl core::clone::Clone for finstack_ai_runtime::ObjectStoreLimits
+pub fn finstack_ai_runtime::ObjectStoreLimits::clone(&self) -> finstack_ai_runtime::ObjectStoreLimits
+impl core::cmp::Eq for finstack_ai_runtime::ObjectStoreLimits
+impl core::cmp::PartialEq for finstack_ai_runtime::ObjectStoreLimits
+pub fn finstack_ai_runtime::ObjectStoreLimits::eq(&self, &finstack_ai_runtime::ObjectStoreLimits) -> bool
+impl core::default::Default for finstack_ai_runtime::ObjectStoreLimits
+pub fn finstack_ai_runtime::ObjectStoreLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_runtime::ObjectStoreLimits
+pub fn finstack_ai_runtime::ObjectStoreLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::ObjectStoreLimits
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectStoreLimits
 pub struct finstack_ai_runtime::ObserverDescriptor
 pub finstack_ai_runtime::ObserverDescriptor::component: finstack_ai_kernel::primitives::identity::ComponentRef
 pub finstack_ai_runtime::ObserverDescriptor::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
@@ -2771,6 +2928,23 @@ pub fn finstack_ai_runtime::OsRandomSource::fmt(&self, &mut core::fmt::Formatter
 impl core::marker::Copy for finstack_ai_runtime::OsRandomSource
 impl finstack_ai_runtime::RandomSource for finstack_ai_runtime::OsRandomSource
 pub fn finstack_ai_runtime::OsRandomSource::fill_bytes(&self, &mut [u8]) -> core::result::Result<(), finstack_ai_runtime::IdGenerationError>
+pub struct finstack_ai_runtime::PageToken(_)
+impl finstack_ai_runtime::PageToken
+pub const fn finstack_ai_runtime::PageToken::first() -> Self
+pub fn finstack_ai_runtime::PageToken::opaque(impl core::convert::AsRef<str>) -> Self
+pub fn finstack_ai_runtime::PageToken::value(&self) -> core::option::Option<&str>
+impl core::clone::Clone for finstack_ai_runtime::PageToken
+pub fn finstack_ai_runtime::PageToken::clone(&self) -> finstack_ai_runtime::PageToken
+impl core::cmp::Eq for finstack_ai_runtime::PageToken
+impl core::cmp::PartialEq for finstack_ai_runtime::PageToken
+pub fn finstack_ai_runtime::PageToken::eq(&self, &finstack_ai_runtime::PageToken) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::PageToken
+pub fn finstack_ai_runtime::PageToken::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::PageToken
+impl serde_core::ser::Serialize for finstack_ai_runtime::PageToken
+pub fn finstack_ai_runtime::PageToken::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::PageToken
+pub fn finstack_ai_runtime::PageToken::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_runtime::PendingContextEffect
 pub finstack_ai_runtime::PendingContextEffect::invocation: finstack_ai_kernel::effects::kinds::ComponentInvocation
 pub finstack_ai_runtime::PendingContextEffect::pipeline: finstack_ai_kernel::effects::kinds::PipelinePosition
@@ -2793,6 +2967,17 @@ pub fn finstack_ai_runtime::PendingToolEffect::eq(&self, &finstack_ai_runtime::P
 impl core::fmt::Debug for finstack_ai_runtime::PendingToolEffect
 pub fn finstack_ai_runtime::PendingToolEffect::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::PendingToolEffect
+pub struct finstack_ai_runtime::PresignedUrl
+pub finstack_ai_runtime::PresignedUrl::expires_in_secs: u64
+pub finstack_ai_runtime::PresignedUrl::url: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_runtime::PresignedUrl
+pub fn finstack_ai_runtime::PresignedUrl::clone(&self) -> finstack_ai_runtime::PresignedUrl
+impl core::cmp::Eq for finstack_ai_runtime::PresignedUrl
+impl core::cmp::PartialEq for finstack_ai_runtime::PresignedUrl
+pub fn finstack_ai_runtime::PresignedUrl::eq(&self, &finstack_ai_runtime::PresignedUrl) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::PresignedUrl
+pub fn finstack_ai_runtime::PresignedUrl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::PresignedUrl
 pub struct finstack_ai_runtime::ProcessConfinement
 impl finstack_ai_runtime::ProcessConfinement
 pub const fn finstack_ai_runtime::ProcessConfinement::backend(&self) -> finstack_ai_runtime::ConfinementBackend
@@ -3578,6 +3763,7 @@ pub const finstack_ai_runtime::CONFINEMENT_UNAVAILABLE: &str
 pub const finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED: &str
 pub const finstack_ai_runtime::CONTEXT_CONTRIBUTION_INVALID: &str
 pub const finstack_ai_runtime::MAX_ARTIFACT_BYTES: usize
+pub const finstack_ai_runtime::MAX_OBJECT_KEY_BYTES: usize
 pub const finstack_ai_runtime::MCP_SAMPLING_REQUIRED: &str
 pub const finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED: &str
 pub const finstack_ai_runtime::MODEL_RECONCILIATION_UNSUPPORTED: &str
@@ -3592,6 +3778,15 @@ pub const finstack_ai_runtime::MODEL_TOOL_CALL_ARGUMENTS_INVALID: &str
 pub const finstack_ai_runtime::MODEL_TOOL_CALL_DELTA_INVALID: &str
 pub const finstack_ai_runtime::MODEL_TOOL_CALL_INCOMPLETE: &str
 pub const finstack_ai_runtime::MODEL_USAGE_INVALID: &str
+pub const finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE: &str
+pub const finstack_ai_runtime::OBJECT_INVALID_KEY: &str
+pub const finstack_ai_runtime::OBJECT_INVALID_METADATA: &str
+pub const finstack_ai_runtime::OBJECT_IO_FAILURE: &str
+pub const finstack_ai_runtime::OBJECT_NOT_FOUND: &str
+pub const finstack_ai_runtime::OBJECT_SCOPE_MISMATCH: &str
+pub const finstack_ai_runtime::OBJECT_TOO_LARGE: &str
+pub const finstack_ai_runtime::OBJECT_UNAVAILABLE: &str
+pub const finstack_ai_runtime::OBJECT_UNSUPPORTED: &str
 pub const finstack_ai_runtime::OBSERVER_QUEUE_OVERFLOW: finstack_ai_runtime::ObserverDiagnostic
 pub const finstack_ai_runtime::SCAN_PAGE_MAX_RECORDS: u32
 pub const finstack_ai_runtime::SECRET_MAX_BYTES: usize
@@ -3654,6 +3849,15 @@ pub fn finstack_ai_runtime::Model::estimate_input_tokens(&self, &finstack_ai_run
 pub fn finstack_ai_runtime::Model::reconcile(&self, finstack_ai_runtime::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelReconcileResult, finstack_ai_runtime::ModelError>>
 pub fn finstack_ai_runtime::Model::request(&self, finstack_ai_runtime::ModelRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelEventStream, finstack_ai_runtime::ModelError>>
 pub fn finstack_ai_runtime::Model::warmup(&self, finstack_ai_runtime::ModelWarmupContext) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ModelError>>
+pub trait finstack_ai_runtime::ObjectStore: finstack_ai_runtime::PortObject
+pub fn finstack_ai_runtime::ObjectStore::delete(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ObjectError>>
+pub fn finstack_ai_runtime::ObjectStore::get(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey) -> finstack_ai_runtime::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::ObjectError>>
+pub fn finstack_ai_runtime::ObjectStore::get_to_file(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey, std::path::PathBuf) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ObjectRef, finstack_ai_runtime::ObjectError>>
+pub fn finstack_ai_runtime::ObjectStore::head(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ObjectRef, finstack_ai_runtime::ObjectError>>
+pub fn finstack_ai_runtime::ObjectStore::limits(&self) -> finstack_ai_runtime::ObjectStoreLimits
+pub fn finstack_ai_runtime::ObjectStore::list(&self, finstack_ai_runtime::ObjectScope, core::option::Option<finstack_ai_runtime::ObjectKey>, finstack_ai_runtime::PageToken) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ObjectPage, finstack_ai_runtime::ObjectError>>
+pub fn finstack_ai_runtime::ObjectStore::presign_get(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey, core::time::Duration) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::PresignedUrl, finstack_ai_runtime::ObjectError>>
+pub fn finstack_ai_runtime::ObjectStore::put(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey, finstack_ai_runtime::PutPayload, finstack_ai_runtime::ObjectMetadata) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ObjectRef, finstack_ai_runtime::ObjectError>>
 pub trait finstack_ai_runtime::Observer: finstack_ai_runtime::PortObject
 pub fn finstack_ai_runtime::Observer::descriptor(&self) -> finstack_ai_runtime::ObserverDescriptor
 pub fn finstack_ai_runtime::Observer::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ObserverError>>
@@ -3696,6 +3900,7 @@ pub fn finstack_ai_runtime::interaction_resume_action(&finstack_ai_kernel::state
 pub fn finstack_ai_runtime::journal_export_jsonl<T: serde_core::ser::Serialize>(&[T], finstack_ai_runtime::ObserverPayloadMode) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ObserverError>
 pub fn finstack_ai_runtime::model_resume_action(&finstack_ai_kernel::state::KernelState) -> finstack_ai_runtime::ModelResumeAction
 pub fn finstack_ai_runtime::observer_events_jsonl(&[finstack_ai_kernel::events::envelope::RunEvent], finstack_ai_runtime::ObserverPayloadMode) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ObserverError>
+pub fn finstack_ai_runtime::physical_object_key(core::option::Option<&str>, &finstack_ai_kernel::primitives::digest::Digest, &finstack_ai_runtime::ObjectKey) -> alloc::string::String
 pub const fn finstack_ai_runtime::resolve_checkpoint_sequence(u64, core::option::Option<u64>) -> u64
 pub fn finstack_ai_runtime::resolve_model_context_profile(finstack_ai_runtime::ModelContextProfile, core::option::Option<&finstack_ai_runtime::ModelContextProfileOverride>, core::option::Option<&finstack_ai_runtime::ModelContextProfileOverride>, bool) -> core::result::Result<finstack_ai_runtime::LockedModelContextProfile, finstack_ai_runtime::ModelError>
 pub fn finstack_ai_runtime::retry_decision(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId, core::option::Option<&finstack_ai_runtime::ModelCapabilities>, core::option::Option<&finstack_ai_runtime::ToolSpec>) -> finstack_ai_runtime::WorkflowRetryDecision
@@ -3704,6 +3909,7 @@ pub async fn finstack_ai_runtime::stage_required_artifact(&dyn finstack_ai_runti
 pub fn finstack_ai_runtime::support_bundle_versions(&str, &[&str]) -> serde_json::value::Value
 pub fn finstack_ai_runtime::tool_resume_action(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId) -> finstack_ai_runtime::ToolResumeAction
 pub fn finstack_ai_runtime::validate_compaction_result(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::BeforeModelInput, &finstack_ai_runtime::CompactionResult) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>
+pub fn finstack_ai_runtime::validate_object_metadata(&finstack_ai_runtime::ObjectMetadata) -> core::result::Result<(), finstack_ai_runtime::ObjectError>
 pub fn finstack_ai_runtime::validate_stage_outcome(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::StageInput, &finstack_ai_runtime::StageOutcome) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>
 pub fn finstack_ai_runtime::validate_staged_artifact(&finstack_ai_runtime::ArtifactScope, &[u8], &finstack_ai_runtime::ArtifactMetadata, &finstack_ai_kernel::primitives::handles::ArtifactRef) -> core::result::Result<(), finstack_ai_runtime::ArtifactError>
 pub fn finstack_ai_runtime::verify_authority(&finstack_ai_runtime::ToolCallContext) -> core::result::Result<(), finstack_ai_runtime::ToolError>
