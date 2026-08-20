@@ -1,3 +1,4 @@
+mod observer;
 mod record;
 mod store;
 
