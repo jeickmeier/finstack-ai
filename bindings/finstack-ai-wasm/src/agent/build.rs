@@ -140,6 +140,7 @@ pub(super) async fn build_agent(
                 context_providers,
                 middleware,
                 observers,
+                artifact_store: Some(Arc::clone(&document_ingest.artifact_store)),
                 output_schema: None,
             },
             child_runs: ChildRunPolicy::Deny,
