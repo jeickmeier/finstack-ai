@@ -329,6 +329,177 @@ async fn forget_and_correct_require_ids_and_are_idempotent() {
     assert!(record.expect("record").tombstoned);
 }
 
+fn expected_derived_id(body: &str) -> String {
+    let digest = Digest::blob_content(body.as_bytes());
+    let hex = digest.to_hex();
+    format!("mem-{}", &hex[..16.min(hex.len())])
+}
+
+#[tokio::test]
+async fn correct_memory_supersedes_and_is_idempotent() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy {
+        read: true,
+        write: true,
+        manage: true,
+        consolidate: false,
+        profile: false,
+    });
+    let scope = MemoryScope::try_new("tenant-a").expect("scope");
+
+    let remember_effect = EffectId::from_bytes([20; 16]);
+    let remember_args = br#"{"id":"mem-old","keywords":["alpha"],"body":"old body text"}"#;
+    let remember_result = call_and_extract(
+        &toolset,
+        context(remember_effect),
+        "remember",
+        remember_args,
+    )
+    .await;
+    assert!(!remember_result.is_error);
+
+    let correct_effect = EffectId::from_bytes([21; 16]);
+    let new_body = "new body text";
+    let correct_args = serde_json::json!({
+        "old_id": "mem-old",
+        "keywords": ["beta"],
+        "body": new_body,
+    });
+    let correct_args_bytes = serde_json::to_vec(&correct_args).expect("json");
+    let expected_new_id = expected_derived_id(new_body);
+
+    let first = call_and_extract(
+        &toolset,
+        context(correct_effect),
+        "correct_memory",
+        &correct_args_bytes,
+    )
+    .await;
+    assert!(!first.is_error);
+    let value: serde_json::Value = serde_json::from_str(first.output.as_str()).expect("json");
+    assert_eq!(value["old_id"].as_str(), Some("mem-old"));
+    assert_eq!(value["new_id"].as_str(), Some(expected_new_id.as_str()));
+
+    let old_record = store
+        .get(
+            scope.clone(),
+            crate::MemoryId::parse("mem-old").expect("id"),
+        )
+        .await
+        .expect("get")
+        .expect("old record present");
+    assert_eq!(
+        old_record
+            .superseded_by
+            .as_ref()
+            .map(crate::MemoryId::as_str),
+        Some(expected_new_id.as_str())
+    );
+
+    let new_record = store
+        .get(
+            scope.clone(),
+            crate::MemoryId::parse(&expected_new_id).expect("id"),
+        )
+        .await
+        .expect("get")
+        .expect("new record present");
+    assert_eq!(
+        new_record.supersedes.as_ref().map(crate::MemoryId::as_str),
+        Some("mem-old")
+    );
+
+    let before_replay = store
+        .list(
+            scope.clone(),
+            MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    let total_before = before_replay.total;
+
+    // Replay the same effect id with the same arguments: must succeed
+    // (no error) and must not create a duplicate record.
+    let replay = call_and_extract(
+        &toolset,
+        context(correct_effect),
+        "correct_memory",
+        &correct_args_bytes,
+    )
+    .await;
+    assert!(!replay.is_error);
+    let replay_value: serde_json::Value =
+        serde_json::from_str(replay.output.as_str()).expect("json");
+    assert_eq!(replay_value["old_id"].as_str(), Some("mem-old"));
+    assert_eq!(
+        replay_value["new_id"].as_str(),
+        Some(expected_new_id.as_str())
+    );
+
+    let after_replay = store
+        .list(
+            scope,
+            MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    assert_eq!(after_replay.total, total_before);
+}
+
+#[tokio::test]
+async fn correct_memory_stages_large_replacement_bodies_as_blobs() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy {
+        read: true,
+        write: true,
+        manage: true,
+        consolidate: false,
+        profile: false,
+    });
+    let scope = MemoryScope::try_new("tenant-a").expect("scope");
+
+    let remember_effect = EffectId::from_bytes([22; 16]);
+    let remember_args = br#"{"id":"mem-old-large","keywords":["alpha"],"body":"old body text"}"#;
+    let remember_result = call_and_extract(
+        &toolset,
+        context(remember_effect),
+        "remember",
+        remember_args,
+    )
+    .await;
+    assert!(!remember_result.is_error);
+
+    let correct_effect = EffectId::from_bytes([23; 16]);
+    let new_body = "y".repeat(crate::toolset::INLINE_BODY_MAX_BYTES + 1);
+    let correct_args = serde_json::json!({
+        "old_id": "mem-old-large",
+        "keywords": ["beta"],
+        "body": new_body,
+    });
+    let expected_new_id = expected_derived_id(&new_body);
+
+    let result = call_and_extract(
+        &toolset,
+        context(correct_effect),
+        "correct_memory",
+        serde_json::to_vec(&correct_args).expect("json").as_slice(),
+    )
+    .await;
+    assert!(!result.is_error);
+
+    let new_record = store
+        .get(scope, crate::MemoryId::parse(&expected_new_id).expect("id"))
+        .await
+        .expect("get")
+        .expect("new record present");
+    assert!(matches!(new_record.body, crate::MemoryBody::Blob(_)));
+    assert_eq!(new_record.preview.chars().count(), 256);
+}
+
 #[tokio::test]
 async fn scope_comes_from_configuration_not_arguments() {
     let (toolset, _store) = toolset_with_policy(MemoryPolicy::default());
