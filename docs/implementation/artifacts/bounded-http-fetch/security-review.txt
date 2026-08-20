@@ -550,6 +550,124 @@ FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
   `cargo test -p finstack-ai-tools-fetch` (64 tests),
   `cargo clippy -p finstack-ai-tools-fetch --all-targets` and
   `cargo deny check licenses` all clean.
+
+  UPDATE 5 (2026-08-20, fifth review pass — APPROACH CHANGED AGAIN):
+  the tokenizer-based guard from UPDATE 4 closed bypasses 4 and 5 as
+  claimed, but the same review compiled TWO MORE under-trip bypasses,
+  both reproduced as real SIGABRTs (exit 134) through the production
+  convert path. Both exploit the gap between a BARE TOKENIZER and a
+  TREE BUILDER — precisely the residual UPDATE 4's doc comment had
+  waved away as "net effect: over-counting, not under-counting":
+    (6a) Foreign content. `"<svg>" + "<input>".repeat(100_000)`. In the
+         SVG/MathML namespace an ordinary start tag carrying no
+         self-closing flag is inserted and STAYS OPEN; only names on the
+         foreign-content breakout list (br, img, hr, embed, meta, ...)
+         escape. `DepthCounter` applied the HTML void-element set
+         unconditionally to a namespace-less tokenizer name, so `input`
+         was treated as void and never pushed. Confirmed for input,
+         area, col, link, base, param, source, track and wbr, under both
+         `<svg>` and `<math>`. `"<svg>" + "<input>".repeat(520)` already
+         bypassed.
+    (6b) Rawtext + unterminated comment.
+         `"<title><!--</title>" + "<div>".repeat(100_000)`. The bare
+         tokenizer is never put into RCDATA/rawtext state (the tree
+         builder normally drives that switch), so it read the `<!--` as
+         comment-start and swallowed the ENTIRE remainder of the
+         document as comment data. An 18-byte prefix disabled the guard
+         outright. Same for textarea, style, script and xmp.
+  The UPDATE 4 doc comment's claim that the rawtext and foreign-content
+  divergences could only over-count was therefore PROVABLY FALSE, and
+  bypass 6 is exactly what it licensed. That text has been deleted, not
+  softened.
+  Root cause across all six rounds, stated plainly: AN APPROXIMATION OF
+  THE PARSER IS NOT THE PARSER. Three rounds of byte scanner and one
+  round of bare tokenizer each closed one production rule and left the
+  next one open.
+  Fix (this pass, approach change): stop approximating. The
+  `DepthCounter` `TokenSink`, `VOID_ELEMENTS` and all terminator logic
+  are DELETED. `exceeds_safe_nesting_depth` now runs
+  `html5ever::parse_document` — the same entry point `htmd` uses, with
+  the same `ParseOpts` defaults (`TreeBuilderOpts::scripting_enabled =
+  true`) — against `DepthSink`, a minimal counting `TreeSink` that
+  records tree SHAPE only and builds no DOM. Namespace tracking and the
+  foreign-content breakout list, RCDATA/rawtext/script-data tokenizer
+  state, implied end tags, foster parenting and the adoption agency
+  algorithm are all executed BY HTML5EVER. There is no separate model of
+  HTML left in markdown.rs to diverge from html5ever, so there is no
+  residual divergence class of the kind that produced bypasses 1-6.
+  Why parsing here is safe when htmd's parse is not: the hazard is
+  htmd's `Rc`-linked `RcDom`, which is walked and dropped recursively.
+  `DepthSink`'s handles are `usize` indices into a flat
+  `Vec<NodeRec>`; each `NodeRec` holds `Option<usize>`, `Vec<usize>`, a
+  `usize` depth, an atom-based `QualName` and a `bool`. No node owns
+  another node, so dropping the arena is one flat `Vec` loop, the
+  max-depth computation walks an explicit `Vec` stack, and html5ever's
+  own `TreeBuilder` keeps its open-element stack in a `Vec<usize>`.
+  Nothing recursive is ever built or dropped, at any depth.
+  Early exit: the document is fed in 4 KiB chunks and each attachment
+  records `parent depth + 1`; the moment an element lands past
+  `MAX_SCAN_DEPTH` the parse is ABANDONED (the parser is dropped, not
+  finished) and `true` returned. The 4 KiB granularity is load-bearing:
+  html5ever's own tree construction is quadratic in nesting depth for
+  common tags (`<div>` runs "has a p element in button scope", scanning
+  the open-element stack), so at a 64 KiB chunk a 2 MiB `<div>` bomb
+  cost ~900 ms; at 4 KiB it costs ~3 ms. When the parse instead runs to
+  completion the trip decision comes from an EXACT recomputation over
+  the finished tree, so the early-exit bookkeeping can only add trips,
+  never remove one.
+  Off-by-two fixed in the same change: the old guard counted only
+  explicitly written elements while the real DOM adds the implied
+  html/head/body, so real depth ~= explicit + 2 and the asserted
+  invariant "real > 512 => guard trips" was literally false for real
+  depths 513-514. Guard depth is now REAL depth (Document = 0), the
+  convention is stated on `MAX_SCAN_DEPTH`, and
+  `depth_convention_is_the_real_dom_depth_and_the_cap_boundary_is_exact`
+  pins both sides of the boundary: 510 explicit divs measures exactly
+  512 and converts; 511 measures 513 and returns None.
+  Residuals, all documented on the function, none able to under-trip:
+  (i) `<template>` contents are attached as an ordinary child here while
+  `RcDom` keeps them off the child list — over-counts; (ii)
+  `reparent_children` (adoption agency) does not rewrite recorded
+  depths below the moved subtree, which can stale the EARLY-EXIT
+  estimate only — the authoritative number is the exact recomputation;
+  (iii) `append_before_sibling` for a parentless sibling, which `RcDom`
+  panics on and this sink ignores, is recorded in
+  `saw_unexpected_shape` and asserted never to fire across the whole
+  corpus.
+  Tests. Both bypass-6 families added as x100_000 crash regressions
+  (`foreign_content_open_padding_does_not_bypass_the_depth_guard`,
+  `rawtext_unterminated_comment_prefix_does_not_bypass_the_depth_guard`)
+  plus name-by-name variants at N=1000 under `<svg>` and `<math>`
+  (`foreign_content_variants_do_not_bypass_the_depth_guard`) and for
+  title/textarea/style/script/xmp
+  (`rawtext_variants_do_not_bypass_the_depth_guard`); each variant first
+  asserts the REAL depth exceeds the cap so it cannot pass vacuously.
+  All bypass 1-5 regressions retained and green.
+  The generative test, which the reviewer graded "a regression net
+  dressed as a fuzzer", was fixed on all three counts: (a) its alphabet
+  gained `<svg>`/`<math>` wrappers (balanced and never-closed),
+  foreign-content breakout/self-closing negative controls, unbalanced
+  rawtext openers, and rawtext bodies opening an unterminated comment;
+  (b) its LCG used `next_u64() % bound`, i.e. the LOW bits, so
+  `below(2)` was near-strict alternation — it now maps the HIGH 32 bits
+  by a widening multiply, and `lcg_high_bits_are_not_visibly_periodic`
+  fails if the sequence is periodic again or if the wider range has
+  holes; (c) all 300 documents used to land at real depth 837-992, so
+  the 512 boundary was never probed — document size now ramps linearly
+  (25..8_980 tokens over 200 documents), real depth sweeps ~20 to ~800,
+  and the test now FAILS unless the corpus straddles the cap AND lands
+  within 64 of it. The differential helper additionally asserts, for
+  every corpus item, that the measured depth never falls below the real
+  DOM's and that the parentless-sibling fallback never fires.
+  Timings on 2 MiB adversarial inputs (release): `<div>`x419k 3.2 ms;
+  `<svg>`+`<input>`x299k 0.1 ms; rawtext+comment prefix 2.6 ms;
+  `<div><!--</div>-->`x116k 1.9 ms; `<div></span>`x174k 3.4 ms. Two
+  non-tripping 2 MiB inputs cost more because html5ever itself does:
+  2 MiB of flat `<p>x</p>` 78 ms, and the adoption-agency bomb
+  `<b><p>`x349k 285 ms (htmd would pay the same again on such input).
+  `cargo test -p finstack-ai-tools-fetch` (70 tests),
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` and
+  `cargo deny check licenses` all clean.
   Original finding text retained below for the record.
 
   --- original finding ---

@@ -6,235 +6,563 @@
 //! inlining the original text, which is already budget-checked. This
 //! function never returns an error.
 
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
-use html5ever::tendril::StrTendril;
-use html5ever::tokenizer::{
-    BufferQueue, Tag, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
+use html5ever::interface::tree_builder::{
+    ElemName, ElementFlags, NodeOrText, QuirksMode, TreeSink,
 };
+use html5ever::tendril::{StrTendril, TendrilSink};
+use html5ever::{Attribute, LocalName, Namespace, ParseOpts, QualName, parse_document};
 use htmd::HtmlToMarkdown;
 
-/// Cap on the nesting-depth scan performed by [`exceeds_safe_nesting_depth`]
-/// before a document is handed to `htmd`/`html5ever`'s full tree-building
-/// parse. See that function's doc comment for what "depth" means here and
-/// why the cap is heuristic rather than exact.
+/// Maximum tolerated element-nesting depth of the **real** DOM `html5ever`
+/// builds for a document.
+///
+/// # Depth convention
+///
+/// "Depth" here is exactly the quantity the differential test's
+/// `real_dom_max_depth` measures against `markup5ever_rcdom`: the number of
+/// ancestors an element node has, counting from the `Document` node at
+/// depth 0. Because html5ever's tree builder synthesises the implied
+/// `<html>`, `<head>` and `<body>` elements, a document written as
+/// `<div>` × N has real depth `N + 2` (`html` = 1, `body` = 2, first `div`
+/// = 3), *not* N. Earlier revisions of this guard counted only explicitly
+/// written elements and so were off by two against the invariant they
+/// claimed to uphold; [`exceeds_safe_nesting_depth`] now measures the real
+/// tree, so guard depth and real depth are the same number and the
+/// comparison (`real > MAX_SCAN_DEPTH` ⇒ trip) is exact.
+///
+/// 512 is well above anything a legitimate document nests by hand or by
+/// templating, and well below the depth at which `htmd`'s recursive DOM
+/// walk (and `RcDom`'s construction) risks exhausting the stack.
 const MAX_SCAN_DEPTH: usize = 512;
 
-/// HTML void elements (per the living standard, never have a closing tag)
-/// that must not push onto the depth-tracking stack in
-/// [`exceeds_safe_nesting_depth`].
-const VOID_ELEMENTS: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
-    "track", "wbr",
-];
+/// Index into [`DepthTree::nodes`]. This is the `TreeSink::Handle` type: a
+/// plain integer, never a reference-counted node, which is what keeps the
+/// whole measurement free of recursive structures (see
+/// [`exceeds_safe_nesting_depth`]).
+type NodeId = usize;
 
-/// [`TokenSink`] that tracks the depth of the open-element stack a real
-/// html5ever tree builder would maintain, without building a tree, and
-/// signals early once [`MAX_SCAN_DEPTH`] would be exceeded. See
-/// [`exceeds_safe_nesting_depth`]'s doc comment for the full rationale.
-struct DepthCounter {
-    stack: RefCell<Vec<html5ever::LocalName>>,
-    exceeded: Cell<bool>,
+/// One node of the flat arena. Holds only integers, a cheap atom-based
+/// [`QualName`], and a `Vec<NodeId>` — no owning links to other nodes, so
+/// dropping the arena is a flat `Vec` drop with no recursion at any depth.
+struct NodeRec {
+    parent: Option<NodeId>,
+    children: Vec<NodeId>,
+    /// Depth recorded when this node was last attached to a parent. Used
+    /// only for the early-exit fast path; [`DepthTree::max_element_depth`]
+    /// recomputes depth exactly and is what the trip decision uses whenever
+    /// the parse runs to completion.
+    depth: usize,
+    /// `Some` only for element nodes; `None` for the document root,
+    /// comments, processing instructions and template-content roots.
+    /// Only element nodes contribute to the measured depth, matching
+    /// `real_dom_max_depth`'s `NodeData::Element` filter.
+    name: Option<QualName>,
+    mathml_annotation_xml_integration_point: bool,
 }
 
-impl TokenSink for DepthCounter {
-    type Handle = ();
+/// Owned [`ElemName`] handed back from [`TreeSink::elem_name`].
+///
+/// `QualName` is three interned atoms, so cloning one out of the arena is
+/// cheap and avoids handing out a borrow of the `RefCell` (which html5ever
+/// holds across further sink calls).
+#[derive(Debug)]
+struct OwnedElemName(QualName);
 
-    fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<()> {
-        let Token::TagToken(Tag { kind, name, .. }) = token else {
-            // Comments, bogus comments, CDATA-as-bogus-comment, doctypes,
-            // NUL characters, and ordinary character data never affect
-            // depth and are ignored outright -- the tokenizer has already
-            // done the real parsing work of telling these apart from tags.
-            return TokenSinkResult::Continue;
-        };
-        match kind {
-            TagKind::StartTag => {
-                // Void elements never hold the open-elements stack open,
-                // regardless of a trailing self-closing `/` (which the
-                // tokenizer resolves per-spec; void status is what actually
-                // matters, not the flag). Everything else is pushed exactly
-                // once, using the exact name the tokenizer parsed -- no
-                // truncation is possible here, because this name is
-                // produced by the same tag-name tokenizer state
-                // html5ever's tree builder itself consumes.
-                if !VOID_ELEMENTS.contains(&&*name) {
-                    let mut stack = self.stack.borrow_mut();
-                    stack.push(name);
-                    if stack.len() > MAX_SCAN_DEPTH {
-                        self.exceeded.set(true);
-                        drop(stack);
-                        // There is no explicit "abort" TokenSinkResult; but
-                        // returning `Script` causes the tokenizer's run
-                        // loop to return early rather than keep tokenizing
-                        // the rest of a potentially huge document (see
-                        // `html5ever::tokenizer::Tokenizer::run`, which
-                        // matches this variant and returns immediately).
-                        // `Handle = ()` here has no meaning beyond that.
-                        return TokenSinkResult::Script(());
-                    }
-                }
-            }
-            TagKind::EndTag => {
-                // Pop only on an exact match with the top of the stack,
-                // mirroring html5ever's tree-construction rule that an end
-                // tag with no matching open element is ignored rather than
-                // treated as a decrement.
-                let mut stack = self.stack.borrow_mut();
-                if stack.last() == Some(&name) {
-                    stack.pop();
-                }
-            }
-        }
-        TokenSinkResult::Continue
+impl ElemName for OwnedElemName {
+    fn ns(&self) -> &Namespace {
+        &self.0.ns
+    }
+
+    fn local_name(&self) -> &LocalName {
+        &self.0.local
     }
 }
 
-/// Cheap pre-parse guard against pathologically deep HTML (F-4): `htmd`'s
-/// underlying `html5ever` tree-building parse produces a DOM that is
-/// walked, and dropped, recursively, so a document with tens or hundreds of
-/// thousands of nested elements can exhaust the stack and abort the process
-/// rather than returning an error — confirmed repeatedly by SIGABRT
-/// reproductions during this guard's development.
+/// The flat arena a [`DepthSink`] writes into, shared with the caller of
+/// [`measure_nesting_depth`] through an [`Rc`] so the parse can be abandoned
+/// mid-document without needing the sink back out of the parser.
+struct DepthTree {
+    nodes: RefCell<Vec<NodeRec>>,
+    /// Set the moment an element is attached at a depth past
+    /// [`MAX_SCAN_DEPTH`]. Purely an early-exit signal: it lets the caller
+    /// abandon the parse instead of building the rest of a hostile
+    /// document, and it can only ever *over*-trip.
+    exceeded: Cell<bool>,
+    /// Set when a structural operation is impossible to honour (e.g. a
+    /// sibling insertion for a node the tree builder never parented). Only
+    /// used to avoid panicking; asserted never to fire in the tests.
+    saw_unexpected_shape: Cell<bool>,
+}
+
+impl DepthTree {
+    fn new() -> Self {
+        let root = NodeRec {
+            parent: None,
+            children: Vec::new(),
+            depth: 0,
+            name: None,
+            mathml_annotation_xml_integration_point: false,
+        };
+        Self {
+            nodes: RefCell::new(vec![root]),
+            exceeded: Cell::new(false),
+            saw_unexpected_shape: Cell::new(false),
+        }
+    }
+
+    fn push_node(&self, name: Option<QualName>, integration_point: bool) -> NodeId {
+        let mut nodes = self.nodes.borrow_mut();
+        nodes.push(NodeRec {
+            parent: None,
+            children: Vec::new(),
+            depth: 0,
+            name,
+            mathml_annotation_xml_integration_point: integration_point,
+        });
+        nodes.len() - 1
+    }
+
+    /// Record `child`'s depth as `parent_depth + 1` and raise the early-exit
+    /// flag if that puts an element past the cap.
+    fn record_depth(&self, parent: NodeId, child: NodeId) {
+        let mut nodes = self.nodes.borrow_mut();
+        let parent_depth = nodes.get(parent).map_or(0, |node| node.depth);
+        let depth = parent_depth.saturating_add(1);
+        let is_element = match nodes.get_mut(child) {
+            Some(node) => {
+                node.depth = depth;
+                node.name.is_some()
+            },
+            None => return,
+        };
+        if is_element && depth > MAX_SCAN_DEPTH {
+            self.exceeded.set(true);
+        }
+    }
+
+    /// Detach `child` from whatever parent it currently has, if any.
+    fn detach(&self, child: NodeId) {
+        let mut nodes = self.nodes.borrow_mut();
+        let Some(parent) = nodes.get(child).and_then(|node| node.parent) else {
+            return;
+        };
+        if let Some(parent_node) = nodes.get_mut(parent) {
+            parent_node.children.retain(|&id| id != child);
+        }
+        if let Some(child_node) = nodes.get_mut(child) {
+            child_node.parent = None;
+        }
+    }
+
+    /// Append `child` as the last child of `parent`.
+    fn attach(&self, parent: NodeId, child: NodeId) {
+        self.detach(child);
+        let mut nodes = self.nodes.borrow_mut();
+        if let Some(parent_node) = nodes.get_mut(parent) {
+            parent_node.children.push(child);
+        }
+        if let Some(child_node) = nodes.get_mut(child) {
+            child_node.parent = Some(parent);
+        }
+        drop(nodes);
+        self.record_depth(parent, child);
+    }
+
+    /// The real maximum element depth of the tree built so far, measured by
+    /// an **iterative** walk over an explicit `Vec` stack of integers.
+    /// There is deliberately no recursive traversal anywhere in this file.
+    fn max_element_depth(&self) -> usize {
+        let nodes = self.nodes.borrow();
+        let mut max_depth = 0usize;
+        let mut stack: Vec<(NodeId, usize)> = vec![(0, 0)];
+        while let Some((id, depth)) = stack.pop() {
+            let Some(node) = nodes.get(id) else {
+                continue;
+            };
+            if node.name.is_some() {
+                max_depth = max_depth.max(depth);
+            }
+            for &child in &node.children {
+                stack.push((child, depth + 1));
+            }
+        }
+        max_depth
+    }
+}
+
+/// A [`TreeSink`] that records tree *shape* and nothing else.
 ///
-/// # History: five rounds, one lesson
+/// html5ever's real `TreeBuilder` drives this sink exactly as it drives
+/// `RcDom`, so namespace tracking (foreign content), RCDATA/rawtext
+/// tokenizer-state switching, implied end tags, foster parenting and the
+/// adoption agency algorithm are all performed **by html5ever**, not
+/// approximated here. See [`exceeds_safe_nesting_depth`].
+struct DepthSink {
+    tree: Rc<DepthTree>,
+}
+
+impl TreeSink for DepthSink {
+    type Handle = NodeId;
+    type Output = Self;
+    type ElemName<'a>
+        = OwnedElemName
+    where
+        Self: 'a;
+
+    fn finish(self) -> Self {
+        self
+    }
+
+    fn parse_error(&self, _msg: Cow<'static, str>) {}
+
+    fn get_document(&self) -> NodeId {
+        0
+    }
+
+    fn elem_name<'a>(&'a self, target: &'a NodeId) -> OwnedElemName {
+        let nodes = self.tree.nodes.borrow();
+        let name = nodes
+            .get(*target)
+            .and_then(|node| node.name.clone())
+            // Unreachable in practice (html5ever only calls this for
+            // elements) but this crate denies `panic!`/`expect`, and a
+            // synthetic name is harmless: it can only make the tree builder
+            // *close* elements it would have kept open, i.e. under-count,
+            // and it never fires.
+            .unwrap_or_else(|| {
+                QualName::new(
+                    None,
+                    Namespace::from("http://www.w3.org/1999/xhtml"),
+                    LocalName::from("div"),
+                )
+            });
+        OwnedElemName(name)
+    }
+
+    fn create_element(
+        &self,
+        name: QualName,
+        _attrs: Vec<Attribute>,
+        flags: ElementFlags,
+    ) -> NodeId {
+        let id = self.tree.push_node(Some(name), flags.mathml_annotation_xml_integration_point);
+        if flags.template {
+            // `RcDom` keeps template contents *outside* the child list, so
+            // its own depth walk (and `htmd`'s markdown walk) never
+            // descends into it. We attach it as an ordinary child instead:
+            // that can only over-count, which is the fail-closed direction.
+            let contents = self.tree.push_node(None, false);
+            self.tree.attach(id, contents);
+        }
+        id
+    }
+
+    fn create_comment(&self, _text: StrTendril) -> NodeId {
+        self.tree.push_node(None, false)
+    }
+
+    fn create_pi(&self, _target: StrTendril, _data: StrTendril) -> NodeId {
+        self.tree.push_node(None, false)
+    }
+
+    fn append(&self, parent: &NodeId, child: NodeOrText<NodeId>) {
+        // Text nodes are always leaves, and `real_dom_max_depth` only
+        // measures element nodes, so text is dropped rather than
+        // materialised. This changes no depth and saves an allocation per
+        // text run.
+        if let NodeOrText::AppendNode(node) = child {
+            self.tree.attach(*parent, node);
+        }
+    }
+
+    fn append_before_sibling(&self, sibling: &NodeId, new_node: NodeOrText<NodeId>) {
+        let NodeOrText::AppendNode(node) = new_node else {
+            return;
+        };
+        let parent = self.tree.nodes.borrow().get(*sibling).and_then(|n| n.parent);
+        let Some(parent) = parent else {
+            // `RcDom` panics here; this crate must not. Recorded so the
+            // (deliberately conservative) behaviour is visible in tests.
+            self.tree.saw_unexpected_shape.set(true);
+            return;
+        };
+        self.tree.detach(node);
+        let mut nodes = self.tree.nodes.borrow_mut();
+        if let Some(parent_node) = nodes.get_mut(parent) {
+            let index = parent_node
+                .children
+                .iter()
+                .position(|&id| id == *sibling)
+                .unwrap_or(parent_node.children.len());
+            parent_node.children.insert(index, node);
+        }
+        if let Some(child_node) = nodes.get_mut(node) {
+            child_node.parent = Some(parent);
+        }
+        drop(nodes);
+        self.tree.record_depth(parent, node);
+    }
+
+    fn append_based_on_parent_node(
+        &self,
+        element: &NodeId,
+        prev_element: &NodeId,
+        child: NodeOrText<NodeId>,
+    ) {
+        let has_parent = self
+            .tree
+            .nodes
+            .borrow()
+            .get(*element)
+            .is_some_and(|node| node.parent.is_some());
+        if has_parent {
+            self.append_before_sibling(element, child);
+        } else {
+            self.append(prev_element, child);
+        }
+    }
+
+    fn append_doctype_to_document(
+        &self,
+        _name: StrTendril,
+        _public_id: StrTendril,
+        _system_id: StrTendril,
+    ) {
+        // A doctype is a non-element leaf directly under the document; it
+        // cannot affect the maximum *element* depth.
+    }
+
+    fn get_template_contents(&self, target: &NodeId) -> NodeId {
+        // The contents node is the template element's first (and, at
+        // creation time, only) child; see `create_element`.
+        self.tree.nodes
+            .borrow()
+            .get(*target)
+            .and_then(|node| node.children.first().copied())
+            .unwrap_or(*target)
+    }
+
+    fn same_node(&self, x: &NodeId, y: &NodeId) -> bool {
+        x == y
+    }
+
+    fn set_quirks_mode(&self, _mode: QuirksMode) {}
+
+    fn add_attrs_if_missing(&self, _target: &NodeId, _attrs: Vec<Attribute>) {
+        // Attributes never affect nesting depth and are not stored.
+    }
+
+    fn remove_from_parent(&self, target: &NodeId) {
+        self.tree.detach(*target);
+    }
+
+    fn reparent_children(&self, node: &NodeId, new_parent: &NodeId) {
+        let moved = {
+            let mut nodes = self.tree.nodes.borrow_mut();
+            match nodes.get_mut(*node) {
+                Some(source) => std::mem::take(&mut source.children),
+                None => return,
+            }
+        };
+        let mut nodes = self.tree.nodes.borrow_mut();
+        for &child in &moved {
+            if let Some(child_node) = nodes.get_mut(child) {
+                child_node.parent = Some(*new_parent);
+            }
+        }
+        if let Some(target) = nodes.get_mut(*new_parent) {
+            target.children.extend(moved);
+        }
+    }
+
+    fn is_mathml_annotation_xml_integration_point(&self, target: &NodeId) -> bool {
+        self.tree.nodes
+            .borrow()
+            .get(*target)
+            .is_some_and(|node| node.mathml_annotation_xml_integration_point)
+    }
+}
+
+/// Pre-parse guard against pathologically deep HTML (F-4).
 ///
-/// This guard went through five review rounds before landing on its current
-/// design, and every one of the first four found a new way a hand-rolled
-/// byte scanner disagreed with html5ever's real tokenizer:
-///   1. An integer counter that decremented on any `</...>` unconditionally
-///      — bypassed by mismatched-close padding (`<div></span>` repeated),
-///      since html5ever ignores an end tag with no matching open element
-///      rather than treating it as a decrement.
-///   2. A tag-name stack that treated any trailing `/` as self-closing —
-///      bypassed by `<div/>` repeated, since HTML5 only honors a
-///      self-closing slash on void and foreign-content (SVG/MathML)
-///      elements; on an ordinary element it is ignored and the element
-///      stays open.
-///   3. A name parser that stopped at the first byte outside
-///      `[A-Za-z0-9\-:]` — bypassed by `<img_x>` repeated, since a byte like
-///      `_` truncated the parsed name to the void element "img" while
-///      html5ever's real tokenizer appends that byte to the name, building
-///      a different, non-void, stays-open element.
-///   4. Adding a terminator check for that truncation still had no notion
-///      of comments, CDATA, bogus comments, or doctypes at all — bypassed
-///      by `<div><!--</div>-->` repeated (the scanner read the `</div>`
-///      *inside* the comment as a real close for the genuinely open `div`)
-///      and by `NUL` inside a name being treated as a terminator when
-///      html5ever actually replaces NUL with U+FFFD as a name
-///      *continuation* byte, not a terminator.
+/// `htmd`'s conversion parses the document into an `RcDom` and then walks —
+/// and drops — that DOM recursively, so a document with tens or hundreds of
+/// thousands of nested elements exhausts the stack and **aborts the
+/// process** (SIGABRT) rather than returning an error. This guard runs
+/// first and returns `true` when the document's real nesting depth exceeds
+/// [`MAX_SCAN_DEPTH`], in which case [`html_to_markdown`] returns `None`
+/// and the caller falls back to inlining plain text.
 ///
-/// Each fix closed the specific bypass a reviewer found by hand-compiling a
-/// differential harness against the real parser — and each fix left room
-/// for the next one, because a hand-rolled scanner cannot be made to agree
-/// with a real tokenizer by iterative patching; there is always another
-/// production rule it doesn't know about.
+/// # Why this measures with the real tree builder
 ///
-/// # Current design: drive html5ever's own tokenizer
+/// Five earlier revisions approximated the parse — first with a hand-rolled
+/// byte scanner (bypassed by mismatched-close padding, by self-closing
+/// non-void tags, by tag-name truncation, by `</div>` inside a comment, and
+/// by `NUL` inside a tag name), then with html5ever's bare *tokenizer*
+/// (bypassed by `<svg>` + `<input>`×N, where an ordinary start tag in the
+/// SVG/MathML namespace stays open because the HTML void-element list does
+/// not apply there, and by `<title><!--</title>` + `<div>`×N, where the
+/// absence of a tree builder meant the tokenizer never entered RCDATA state
+/// and swallowed the whole document as one comment). Every round closed one
+/// production rule and left the next one open. The lesson, paid for six
+/// times: **an approximation of the parser is not the parser.**
 ///
-/// This version does not parse HTML itself at all. It drives
-/// `html5ever::tokenizer::Tokenizer` — the same tokenizer html5ever's tree
-/// builder consumes, and thus the same one `htmd` uses internally — with a
-/// [`DepthCounter`] [`TokenSink`] that:
-///   - on a start tag: pushes the tokenizer-supplied name onto a stack
-///     unless it is a [`VOID_ELEMENTS`] entry, and stops early (via
-///     [`TokenSinkResult::Script`], the only early-exit signal a bare
-///     tokenizer honors) the moment the stack would exceed
-///     [`MAX_SCAN_DEPTH`], so a pathological document is never tokenized in
-///     full;
-///   - on an end tag: pops only when the name exactly matches the top of
-///     the stack, exactly as html5ever's tree builder does for unmatched
-///     end tags;
-///   - ignores every other token kind (comments, bogus comments treated as
-///     comments, CDATA-outside-foreign-content treated as a bogus comment,
-///     doctypes, character data, and NUL characters) outright.
+/// So this version does not approximate anything. It runs
+/// [`parse_document`] — the same entry point, with the same
+/// [`ParseOpts`] defaults `htmd` uses (including
+/// `TreeBuilderOpts::scripting_enabled = true`) — against a [`DepthSink`]
+/// that implements [`TreeSink`] and records tree shape only. Namespace
+/// tracking and the foreign-content breakout list, RCDATA/rawtext/script
+/// tokenizer-state switching, implied end tags, foster parenting and the
+/// adoption agency algorithm are executed by html5ever itself, exactly as
+/// they are for `RcDom`. There is no separate model of HTML left in this
+/// file to diverge from html5ever, and therefore no residual divergence
+/// class of the kind that produced bypasses 1–6.
 ///
-/// Because comments, bogus comments, CDATA, doctypes, NUL-in-a-name,
-/// attribute values containing `>` or `</div>`-looking text, character
-/// references, and case folding are all resolved *inside the tokenizer
-/// itself* — identically to what the tree builder will see, since it is
-/// the literal same component — none of the five prior bypasses are
-/// reachable through this scan any more: there is no separate byte-scanning
-/// logic left to disagree with html5ever about what a tag, a comment, or a
-/// truncated name is.
+/// # Why parsing here is safe when `htmd`'s parse is not
 ///
-/// ## What is NOT claimed
+/// The danger in `htmd` is not the parse but the `Rc`-linked tree it
+/// produces: walking and dropping it recurses once per level.
+/// [`DepthSink`] never builds such a structure. Its handles are `usize`
+/// indices; its entire state is a flat `Vec<NodeRec>` (see [`DepthTree`]),
+/// where each `NodeRec` holds `Option<usize>`, `Vec<usize>`, a `usize`, an
+/// atom-based [`QualName`] and a `bool`. No node owns another node, so:
+///   - dropping the arena drops a `Vec` of `Vec<usize>` — one flat loop, no
+///     recursion, no depth-proportional stack use, and the same is true
+///     when the parse is abandoned mid-document;
+///   - [`DepthTree::max_element_depth`] walks with an explicit `Vec` stack,
+///     never the call stack;
+///   - html5ever's own `TreeBuilder` keeps its open-element stack in a
+///     `Vec<Handle>` = `Vec<usize>` and is likewise non-recursive.
 ///
-/// This does **not** claim to only ever reject more documents than
-/// strictly necessary, never fewer — that claim was accurate-sounding but
-/// false for every prior hand-rolled version, and is not repeated here.
-/// What *is* true: this scan uses the exact same tokenizer as the real
-/// parse, so the only remaining divergence from what the tree builder
-/// would do is where this scan is *not* the tree builder:
-///   - **Rawtext state.** A real tree builder switches the tokenizer into
-///     rawtext mode for `<script>`, `<style>`, `<textarea>`, and `<title>`
-///     content (so a literal `<div>` or `</div>` inside a `<script>` body
-///     is just text, not markup). The bare tokenizer used here has no tree
-///     builder driving that switch, so it tokenizes rawtext-element bodies
-///     as ordinary markup. Every fake tag this produces is still pushed
-///     under the same last-in-first-out matching discipline as real tags,
-///     so a fake push can only ever get "stuck" behind (blocking a correct
-///     pop of) whatever is really open — it cannot itself cause an
-///     erroneous pop of a genuinely open ancestor, because a pop only
-///     applies when the name exactly matches the current top, and entering
-///     a rawtext element's body always pushes that element as the new top
-///     first. Net effect: over-counting, not under-counting.
-///   - **Implied end tags and the adoption agency.** html5ever's real tree
-///     construction algorithm auto-closes some elements implicitly (e.g. a
-///     new `<li>` closing a previous open `<li>`) and resolves certain
-///     misnesting patterns (e.g. `<b><i></b>`) via the adoption agency
-///     algorithm. Both are tree-construction rules, not tokenizer rules,
-///     so this scan does not model them: an element that the real tree
-///     builder would have implicitly closed stays open in this scan's
-///     stack. Net effect: over-counting, not under-counting.
-///   - **Foreign content (SVG/MathML) self-closing.** The tokenizer reports
-///     a `self_closing` flag on every tag, but whether that flag is
-///     honored depends on the element's namespace, which only the tree
-///     builder tracks. This scan ignores the flag entirely (matching round
-///     2's fix) and always pushes non-void elements regardless, so a
-///     genuine foreign-content self-closing element (`<path/>`,
-///     `<circle/>`) is over-counted as staying open.
+/// So the deepest input this guard can be handed costs memory proportional
+/// to the (already capped) input size and constant stack.
 ///
-/// In every documented case above, the divergence biases toward this scan
-/// tracking *more* open elements than the real tree builder would, which is
-/// the fail-closed direction: a legitimate document using these patterns at
-/// extreme scale could trip this guard and fall back to plain-text
-/// delivery even though html5ever would have handled it without unbounded
-/// real nesting. That fallback is inline text, not an error, so this is an
-/// accepted, documented tradeoff. No divergence that causes *under*-
-/// counting (missing a push, or an erroneous pop of something genuinely
-/// open) is known; the differential and generative tests below exist
-/// specifically to keep checking that claim rather than asserting it once
-/// and trusting it forever.
+/// # Early exit
 ///
-/// A differential test
-/// (`differential_guard_never_under_trips_against_the_real_parser`) and a
-/// seeded-PRNG generative test
-/// (`generative_fuzz_guard_never_under_trips_against_the_real_parser`,
-/// below) parse adversarial and randomized corpora with the real
-/// `html5ever` + `markup5ever_rcdom` parser and assert the invariant this
-/// whole function exists to uphold: whenever the real DOM's depth exceeds
-/// [`MAX_SCAN_DEPTH`], this guard trips. It may trip early (over-count); it
-/// must never fail to trip when the real parser would recurse past the cap.
+/// The document is fed to the parser in [`FEED_CHUNK_BYTES`] chunks. Each
+/// attachment records the child's depth as `parent depth + 1`; the moment
+/// an element lands past [`MAX_SCAN_DEPTH`] the parse is abandoned and
+/// `true` is returned without building the rest of a hostile document. When
+/// the parse instead runs to completion, the trip decision comes from
+/// [`DepthTree::max_element_depth`], an exact recomputation over the
+/// finished tree — so the early-exit bookkeeping can only ever *add* trips,
+/// never remove one.
 ///
-/// `MAX_SCAN_DEPTH` (512) is well above any HTML a legitimate document is
-/// likely to nest by hand or by templating, and well below the depth that
-/// risks stack exhaustion in the underlying parser/DOM-walk/Drop.
+/// # Residuals
+///
+/// Three. None can cause an under-trip; the first and third can only make
+/// this guard reject a document `htmd` would have survived, producing a
+/// plain-text fallback rather than an error, and the second affects only
+/// the (advisory) early-exit estimate:
+///   - `<template>` contents are attached as an ordinary child here, while
+///     `RcDom` keeps them off the child list (so neither its depth walk nor
+///     `htmd`'s markdown walk descends into them).
+///   - `TreeSink::reparent_children` (the adoption agency) moves a subtree
+///     without rewriting the recorded depths of the nodes below it, so the
+///     *early-exit* estimate can be stale afterwards. It is only an
+///     estimate: the authoritative number is the exact recomputation above,
+///     which reads the final parent/child links and is unaffected.
+///   - `TreeSink::append_before_sibling` for a parentless sibling — which
+///     `RcDom` treats as a panic-worthy invariant violation and this sink
+///     ignores — would drop a subtree from the measurement; it is recorded
+///     in `saw_unexpected_shape` and asserted never to fire in the tests.
+///
+/// The differential test
+/// (`differential_guard_never_under_trips_against_the_real_parser`) and the
+/// seeded generative test
+/// (`generative_fuzz_guard_never_under_trips_against_the_real_parser`)
+/// assert the one invariant that matters, against the real
+/// `html5ever` + `markup5ever_rcdom` parse: whenever the real DOM's depth
+/// exceeds [`MAX_SCAN_DEPTH`], this guard trips.
 fn exceeds_safe_nesting_depth(html: &str) -> bool {
-    let sink = DepthCounter {
-        stack: RefCell::new(Vec::new()),
-        exceeded: Cell::new(false),
+    measure_nesting_depth(html).exceeds
+}
+
+/// Outcome of one measurement pass. Exposed (rather than folded into a
+/// `bool`) so the tests can assert the exact depth at the cap boundary and
+/// that the conservative `saw_unexpected_shape` path never fires.
+// `depth` and `saw_unexpected_shape` exist for the tests' benefit -- they
+// pin the depth convention at the cap boundary and the never-fires claim
+// about the parentless-sibling fallback. Production only needs `exceeds`.
+#[cfg_attr(not(test), allow(dead_code))]
+struct Measurement {
+    /// Whether the document's real nesting depth exceeds [`MAX_SCAN_DEPTH`].
+    exceeds: bool,
+    /// The exact real depth, or `None` when the parse was abandoned early
+    /// (in which case `exceeds` is already `true`).
+    depth: Option<usize>,
+    /// See [`DepthTree::saw_unexpected_shape`].
+    saw_unexpected_shape: bool,
+}
+
+/// Bytes handed to the parser per `process` call.
+///
+/// This is the granularity of the early exit, and it matters more than it
+/// looks: html5ever's own tree construction is quadratic in nesting depth
+/// for common tags (`<div>` runs "has a `p` element in button scope", which
+/// scans the open-element stack), so the cost of a hostile chunk grows with
+/// the square of how deep it gets. 4 KiB bounds the depth reachable inside
+/// one chunk to roughly a thousand levels — far enough past
+/// [`MAX_SCAN_DEPTH`] to make the decision, cheap enough that the scan of a
+/// 2 MiB `<div>`-bomb finishes in single-digit milliseconds. Measured: at
+/// 64 KiB the same input took ~900 ms.
+const FEED_CHUNK_BYTES: usize = 4 * 1024;
+
+/// Drive html5ever's real `parse_document` over `html` with a [`DepthSink`],
+/// abandoning the parse as soon as an element is attached past the cap.
+fn measure_nesting_depth(html: &str) -> Measurement {
+    let tree = Rc::new(DepthTree::new());
+    let sink = DepthSink {
+        tree: Rc::clone(&tree),
     };
-    let input = BufferQueue::default();
-    input.push_back(StrTendril::from_slice(html));
-    let tokenizer = Tokenizer::new(sink, TokenizerOpts::default());
-    // A single `feed` call processes the whole buffer (it is one tendril
-    // covering the entire document); we deliberately never call `feed`
-    // again or `end()` -- if the sink already tripped, there is nothing
-    // further to learn and no reason to keep tokenizing a possibly huge
-    // remainder.
-    let _ = tokenizer.feed(&input);
-    tokenizer.sink.exceeded.get()
+    let mut parser = parse_document(sink, ParseOpts::default());
+
+    let mut rest = html;
+    let mut abandoned = false;
+    while !rest.is_empty() {
+        let mut end = FEED_CHUNK_BYTES.min(rest.len());
+        while end > 0 && !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == 0 {
+            // Only reachable if a single char exceeded the chunk size,
+            // which cannot happen for UTF-8; feed the remainder rather
+            // than loop forever.
+            end = rest.len();
+        }
+        let (chunk, remainder) = rest.split_at(end);
+        parser.process(StrTendril::from_slice(chunk));
+        rest = remainder;
+        if tree.exceeded.get() {
+            abandoned = true;
+            break;
+        }
+    }
+
+    if abandoned {
+        // Drop the parser without finishing it. Everything being dropped —
+        // the tree builder's `Vec<usize>` open-element stack and this
+        // arena's `Vec<NodeRec>` — is flat, so no recursive `Drop` runs.
+        drop(parser);
+        return Measurement {
+            exceeds: true,
+            depth: None,
+            saw_unexpected_shape: tree.saw_unexpected_shape.get(),
+        };
+    }
+
+    drop(parser.finish());
+    let depth = tree.max_element_depth();
+    Measurement {
+        exceeds: depth > MAX_SCAN_DEPTH,
+        depth: Some(depth),
+        saw_unexpected_shape: tree.saw_unexpected_shape.get(),
+    }
 }
 
 /// Convert `html` to Markdown, dropping scripts/styles/comments.
@@ -448,6 +776,100 @@ mod tests {
         );
     }
 
+    #[test]
+    fn foreign_content_open_padding_does_not_bypass_the_depth_guard() {
+        // Bypass 6a regression: inside the SVG/MathML namespace an ordinary
+        // start tag with no self-closing flag is inserted and STAYS OPEN.
+        // Only names on the foreign-content breakout list (br, img, hr,
+        // embed, meta, ...) escape, and `input` is not one of them. The
+        // previous tokenizer-based guard applied the *HTML* void-element
+        // set to a namespace-less tokenizer name, so it never pushed and
+        // the document sailed through into a real SIGABRT.
+        let html = format!("<svg>{}", "<input>".repeat(100_000));
+        assert!(
+            html_to_markdown(&html, BIG_CAP).is_none(),
+            "expected the depth guard to trip on foreign-content open padding"
+        );
+    }
+
+    #[test]
+    fn rawtext_unterminated_comment_prefix_does_not_bypass_the_depth_guard() {
+        // Bypass 6b regression: an 18-byte prefix disabled the whole guard.
+        // A bare tokenizer is never put into RCDATA state (the tree builder
+        // normally drives that switch), so it read the `<!--` as
+        // comment-start and swallowed the entire rest of the document.
+        let html = format!("<title><!--</title>{}", "<div>".repeat(100_000));
+        assert!(
+            html_to_markdown(&html, BIG_CAP).is_none(),
+            "expected the depth guard to trip on a rawtext + unterminated-comment prefix"
+        );
+    }
+
+    #[test]
+    fn foreign_content_variants_do_not_bypass_the_depth_guard() {
+        // The same shape as 6a for every name the reviewer confirmed stays
+        // open in foreign content, under both `<svg>` and `<math>`.
+        const N: usize = 1_000;
+        const FOREIGN_STAYS_OPEN: &[&str] = &[
+            "input", "area", "col", "link", "base", "param", "source", "track", "wbr",
+        ];
+        for wrapper in ["svg", "math"] {
+            for name in FOREIGN_STAYS_OPEN {
+                let html = format!("<{wrapper}>{}", format!("<{name}>").repeat(N));
+                let label = format!("<{wrapper}> + <{name}>x{N}");
+                let real_depth = real_dom_max_depth(&html);
+                assert!(
+                    real_depth > super::MAX_SCAN_DEPTH,
+                    "{label}: expected real nesting past the cap, got {real_depth}                      -- this case would otherwise pass vacuously"
+                );
+                assert_guard_never_under_trips(&label, &html);
+            }
+        }
+    }
+
+    #[test]
+    fn rawtext_variants_do_not_bypass_the_depth_guard() {
+        // The same shape as 6b for every rawtext/RCDATA element.
+        const N: usize = 1_000;
+        for name in ["title", "textarea", "style", "script", "xmp"] {
+            let html = format!("<{name}><!--</{name}>{}", "<div>".repeat(N));
+            let label = format!("<{name}><!--</{name}> + <div>x{N}");
+            let real_depth = real_dom_max_depth(&html);
+            assert!(
+                real_depth > super::MAX_SCAN_DEPTH,
+                "{label}: expected real nesting past the cap, got {real_depth}                  -- this case would otherwise pass vacuously"
+            );
+            assert_guard_never_under_trips(&label, &html);
+        }
+    }
+
+    #[test]
+    fn depth_convention_is_the_real_dom_depth_and_the_cap_boundary_is_exact() {
+        // The off-by-two this replaces: the old guard counted only
+        // explicitly written elements, while the real DOM adds the implied
+        // `html`/`body`, so `real > 512 => guard trips` was literally false
+        // at real depths 513-514. Now guard depth *is* real depth.
+        let at_cap = nested_divs(super::MAX_SCAN_DEPTH - 2);
+        assert_eq!(
+            real_dom_max_depth(&at_cap),
+            super::MAX_SCAN_DEPTH,
+            "sanity: N explicit divs must produce real depth N + 2"
+        );
+        let measured = super::measure_nesting_depth(&at_cap);
+        assert_eq!(measured.depth, Some(super::MAX_SCAN_DEPTH));
+        assert!(!measured.exceeds, "exactly at the cap must not trip");
+        assert!(!measured.saw_unexpected_shape);
+        assert!(html_to_markdown(&at_cap, BIG_CAP).is_some());
+
+        let one_past = nested_divs(super::MAX_SCAN_DEPTH - 1);
+        assert_eq!(real_dom_max_depth(&one_past), super::MAX_SCAN_DEPTH + 1);
+        assert!(
+            super::exceeds_safe_nesting_depth(&one_past),
+            "one past the cap must trip"
+        );
+        assert!(html_to_markdown(&one_past, BIG_CAP).is_none());
+    }
+
     // --- Differential test against the real parser -------------------------
     //
     // Five bypasses have now slipped through this guard's various
@@ -488,16 +910,35 @@ mod tests {
 
     /// Assert the guard's core invariant for one document: if the real DOM
     /// exceeds the cap, the guard must trip. Never asserts the converse.
+    ///
+    /// Two further checks ride along, both consequences of the guard now
+    /// measuring with the real tree builder rather than approximating it:
+    /// the measured depth must never come out *below* the real depth (the
+    /// only documented divergence, `<template>` contents, over-counts), and
+    /// the conservative parentless-sibling fallback must never fire.
     fn assert_guard_never_under_trips(label: &str, html: &str) {
         let real_depth = real_dom_max_depth(html);
+        let measured = super::measure_nesting_depth(html);
         if real_depth > super::MAX_SCAN_DEPTH {
             assert!(
-                super::exceeds_safe_nesting_depth(html),
+                measured.exceeds,
                 "{label:?}: real DOM depth {real_depth} exceeds MAX_SCAN_DEPTH \
                  ({}) but the guard did not trip -- this is a bypass",
                 super::MAX_SCAN_DEPTH
             );
         }
+        if let Some(depth) = measured.depth {
+            assert!(
+                depth >= real_depth,
+                "{label:?}: guard measured depth {depth} below the real DOM's \
+                 {real_depth} -- the measurement has drifted from the parser"
+            );
+        }
+        assert!(
+            !measured.saw_unexpected_shape,
+            "{label:?}: the parentless-sibling fallback fired; the sink is \
+             no longer mirroring what html5ever asks of a tree sink"
+        );
     }
 
     #[test]
@@ -595,9 +1036,21 @@ mod tests {
         }
 
         /// Uniform-ish value in `0..bound` (`bound` must be nonzero).
+        ///
+        /// Takes the HIGH 32 bits and maps them onto the range by a
+        /// widening multiply. An LCG's LOW bits have tiny periods -- bit 0
+        /// simply alternates -- so the previous `next_u64() % bound`
+        /// degenerated to near-strict alternation for small bounds,
+        /// especially `below(2)`, which silently drained the variety out of
+        /// the generated corpus. `lcg_high_bits_are_not_visibly_periodic`
+        /// pins this down.
         fn below(&mut self, bound: usize) -> usize {
-            let bound_u64 = u64::try_from(bound).unwrap_or(u64::MAX);
-            usize::try_from(self.next_u64() % bound_u64).unwrap_or(0)
+            if bound == 0 {
+                return 0;
+            }
+            let high = u128::from(self.next_u64() >> 32);
+            let scaled = (high * u128::try_from(bound).unwrap_or(u128::MAX)) >> 32;
+            usize::try_from(scaled).unwrap_or(0)
         }
 
         fn choose<'a, T>(&mut self, items: &'a [T]) -> &'a T {
@@ -607,24 +1060,28 @@ mod tests {
 
     const FUZZ_VOID_NAMES: &[&str] = &["br", "img", "input", "hr", "area", "meta"];
     const FUZZ_NON_VOID_NAMES: &[&str] = &["div", "span", "p", "section", "article", "b", "i", "li"];
-    const FUZZ_RAWTEXT_NAMES: &[&str] = &["script", "style", "textarea", "title"];
+    const FUZZ_RAWTEXT_NAMES: &[&str] = &["script", "style", "textarea", "title", "xmp"];
+    /// Names that stay open inside foreign content (SVG/MathML) because
+    /// they are not on the breakout list -- the shape of bypass 6a.
+    const FUZZ_FOREIGN_STAYS_OPEN: &[&str] = &["input", "area", "col", "link", "track", "wbr"];
+    /// Names on the foreign-content breakout list, which do *not* stay open.
+    const FUZZ_FOREIGN_BREAKOUT: &[&str] = &["br", "img", "hr", "embed", "meta"];
     /// Bytes html5ever's tokenizer treats as name *continuation* (never a
     /// terminator), so appending one mid-name changes the parsed identity
     /// rather than ending it -- exactly the shape bypass 3 exploited.
     const FUZZ_ODD_SUFFIXES: &[&str] = &["_x", ".y", "@z", "\u{00ef}"];
 
-    /// Append one random "token" to `doc`, biased toward opening tags so a
-    /// meaningful fraction of generated documents actually nest past the
-    /// cap (the invariant under test is conditional on that, so a corpus
-    /// that never nests deeply would exercise nothing).
+    /// Append one random "token" to `doc`.
+    ///
+    /// The alphabet deliberately spans every shape that has ever bypassed
+    /// this guard, including round 6's two families (foreign content, and
+    /// rawtext elements whose body opens an unterminated comment), plus
+    /// unbalanced rawtext and foreign openers so the generator can also
+    /// build shapes nobody has hand-written yet.
     fn push_random_token(doc: &mut String, rng: &mut Lcg) {
-        match rng.below(20) {
-            // Plain non-void open (~55%): the main depth-building token.
-            // Heavily biased so a meaningful share of generated documents
-            // actually nest past the cap -- the invariant under test is
-            // conditional on that, so a corpus that never nests deeply
-            // would exercise nothing.
-            0..=10 => {
+        match rng.below(24) {
+            // Plain non-void open (~42%): the main depth-building token.
+            0..=9 => {
                 let name = rng.choose(FUZZ_NON_VOID_NAMES);
                 doc.push('<');
                 doc.push_str(name);
@@ -632,65 +1089,115 @@ mod tests {
                     doc.push_str(" title=\"a>b\"");
                 }
                 doc.push('>');
-            }
-            // Non-void open with an odd trailing byte before `>` (~15%):
-            // must still count as an open (bypass 3/5 shape), never as the
-            // void element it superficially resembles.
-            11..=13 => {
+            },
+            // Non-void open with an odd trailing byte before `>`: must
+            // still count as an open (bypass 3/5 shape), never as the void
+            // element it superficially resembles.
+            10..=12 => {
                 let name = rng.choose(FUZZ_VOID_NAMES);
                 let suffix = rng.choose(FUZZ_ODD_SUFFIXES);
                 doc.push('<');
                 doc.push_str(name);
                 doc.push_str(suffix);
                 doc.push('>');
-            }
-            // Genuine void open (~5%): must never hold the stack open.
-            14 => {
+            },
+            // Genuine void open: must never hold the stack open.
+            13 => {
                 let name = rng.choose(FUZZ_VOID_NAMES);
                 doc.push('<');
                 doc.push_str(name);
                 doc.push('>');
-            }
-            // Matching close (~5%).
+            },
+            // Matching close.
+            14 => {
+                let name = rng.choose(FUZZ_NON_VOID_NAMES);
+                doc.push_str("</");
+                doc.push_str(name);
+                doc.push('>');
+            },
+            // Mismatching / truncated / NUL-padded close: must never pop an
+            // unrelated genuinely open element.
             15 => {
                 let name = rng.choose(FUZZ_NON_VOID_NAMES);
-                doc.push_str("</");
-                doc.push_str(name);
-                doc.push('>');
-            }
-            // Mismatching / truncated / NUL-padded close (~5%): must never
-            // pop an unrelated genuinely open element.
-            16 => {
-                let name = rng.choose(FUZZ_NON_VOID_NAMES);
                 let suffix = rng.choose(FUZZ_ODD_SUFFIXES);
                 doc.push_str("</");
                 doc.push_str(name);
                 doc.push_str(suffix);
                 doc.push('>');
-            }
-            // Comment / CDATA / bogus comment / doctype, each wrapping a
-            // fake close that must never reach real tag content (~10%
-            // combined).
-            17 => {
-                doc.push_str("<div><!--</div>-->");
-            }
-            18 => match rng.below(3) {
+            },
+            // Comment wrapping a fake close (bypass 4 shape).
+            16 => doc.push_str("<div><!--</div>-->"),
+            // CDATA / processing instruction / doctype wrapping a fake
+            // close.
+            17 => match rng.below(3) {
                 0 => doc.push_str("<div><![CDATA[</div>]]>"),
                 1 => doc.push_str("<div><?</div>>"),
                 _ => doc.push_str("<div><!DOCTYPE </div>>"),
             },
-            // Rawtext block containing a fake nested tag and a fake close
-            // (~5%): exercises the documented rawtext-state residual.
-            _ => {
+            // Balanced rawtext block containing fake markup: the body is
+            // text, so it must contribute no depth at all.
+            18 => {
+                let name = rng.choose(FUZZ_RAWTEXT_NAMES);
+                doc.push('<');
+                doc.push_str(name);
+                doc.push_str("><div></div></");
+                doc.push_str(name);
+                doc.push('>');
+            },
+            // Rawtext element whose body opens an unterminated comment
+            // (bypass 6b): the tree builder is in RCDATA/rawtext state, so
+            // `<!--` is text and the element closes normally -- everything
+            // after it nests for real.
+            19 => {
+                let name = rng.choose(FUZZ_RAWTEXT_NAMES);
+                doc.push('<');
+                doc.push_str(name);
+                doc.push_str("><!--</");
+                doc.push_str(name);
+                doc.push('>');
+            },
+            // Unbalanced rawtext open, with no close at all.
+            20 => {
                 let name = rng.choose(FUZZ_RAWTEXT_NAMES);
                 doc.push('<');
                 doc.push_str(name);
                 doc.push('>');
-                doc.push_str("<div></div>");
-                doc.push_str("</");
-                doc.push_str(name);
+            },
+            // Balanced foreign-content block whose children stay open
+            // (bypass 6a shape) -- HTML void status does not apply in the
+            // SVG/MathML namespace.
+            21 => {
+                let wrapper = if rng.below(2) == 0 { "svg" } else { "math" };
+                let count = 1 + rng.below(4);
+                doc.push('<');
+                doc.push_str(wrapper);
                 doc.push('>');
-            }
+                for _ in 0..count {
+                    doc.push('<');
+                    doc.push_str(rng.choose(FUZZ_FOREIGN_STAYS_OPEN));
+                    doc.push('>');
+                }
+                doc.push_str("</");
+                doc.push_str(wrapper);
+                doc.push('>');
+            },
+            // Bare, never-closed foreign-content opener: everything after
+            // it is parsed in the foreign namespace.
+            22 => {
+                let wrapper = if rng.below(2) == 0 { "svg" } else { "math" };
+                doc.push('<');
+                doc.push_str(wrapper);
+                doc.push('>');
+            },
+            // Foreign content using breakout names and a self-closing
+            // slash, both of which *do* terminate the element there -- the
+            // negative control for the two cases above.
+            _ => {
+                doc.push_str("<svg><path/>");
+                doc.push('<');
+                doc.push_str(rng.choose(FUZZ_FOREIGN_BREAKOUT));
+                doc.push_str("></svg>");
+            },
         }
     }
 
@@ -706,35 +1213,91 @@ mod tests {
     }
 
     #[test]
-    fn generative_fuzz_guard_never_under_trips_against_the_real_parser() {
-        // Fixed seed base: deterministic corpus, stable CI. The token
-        // alphabet is heavily biased toward opening tags (see
-        // `push_random_token`) so a meaningful share of documents actually
-        // nest past the cap -- the invariant under test is conditional on
-        // that, so a corpus that never nests deeply would exercise
-        // nothing. That bias needs ~1_300 tokens per document (tens of KB,
-        // larger than a first-pass "few KB" estimate) before the expected
-        // depth reliably clears MAX_SCAN_DEPTH (512); the vacuousness
-        // assertion below exists precisely to catch this sizing drifting
-        // wrong again. Runs in low single-digit seconds for 300 documents.
-        const DOC_COUNT: u64 = 300;
-        const TOKENS_PER_DOC: usize = 1_300;
-        const SEED_BASE: u64 = 0x5EED_00F4_0000_0001;
-
-        let mut any_exceeded_cap = false;
-        for i in 0..DOC_COUNT {
-            let seed = SEED_BASE.wrapping_add(i.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-            let html = generate_fuzz_doc(seed, TOKENS_PER_DOC);
-            let real_depth = real_dom_max_depth(&html);
-            if real_depth > super::MAX_SCAN_DEPTH {
-                any_exceeded_cap = true;
-            }
-            assert_guard_never_under_trips(&format!("fuzz#{i}"), &html);
+    fn lcg_high_bits_are_not_visibly_periodic() {
+        // Guards the fix for the reviewer's finding (b): the generator used
+        // `next_u64() % bound`, i.e. the LOW bits of an LCG, and `below(2)`
+        // degenerated into near-strict alternation. Two cheap checks that a
+        // strictly (or near-strictly) alternating sequence cannot pass: at
+        // least one run of three equal values, and a transition count far
+        // from the 511 an alternating sequence produces.
+        let mut rng = Lcg(0x5EED_00F4_0000_0001);
+        let bits: Vec<usize> = (0..512).map(|_| rng.below(2)).collect();
+        let transitions = bits.windows(2).filter(|w| w[0] != w[1]).count();
+        assert!(
+            (150..=360).contains(&transitions),
+            "below(2) produced {transitions} transitions in 512 draws; \
+             ~256 is random, 511 is strict alternation"
+        );
+        assert!(
+            bits.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]),
+            "below(2) never produced a run of three -- still periodic"
+        );
+        // And the wider bound must actually cover its whole range.
+        let mut rng = Lcg(0x5EED_00F4_0000_0002);
+        let mut seen = [false; 24];
+        for _ in 0..2_000 {
+            seen[rng.below(24)] = true;
         }
         assert!(
-            any_exceeded_cap,
+            seen.iter().all(|hit| *hit),
+            "below(24) left holes in its range"
+        );
+    }
+
+    #[test]
+    fn generative_fuzz_guard_never_under_trips_against_the_real_parser() {
+        // Fixed seed base: deterministic corpus, stable CI.
+        //
+        // Reviewer finding (c): every generated document used to land at
+        // real depth 837-992, so the 512 boundary was never probed and a
+        // boundary bug would have been invisible. Document size now ramps
+        // linearly across the corpus, spreading real depth from a few dozen
+        // to well over a thousand, and the assertions below fail if that
+        // spread ever stops straddling -- and closely approaching -- the
+        // cap.
+        const DOC_COUNT: usize = 200;
+        const SEED_BASE: u64 = 0x5EED_00F4_0000_0001;
+        /// Half-width of the "close to the cap" window that must be hit.
+        const BOUNDARY_WINDOW: usize = 64;
+
+        let mut below_cap = 0usize;
+        let mut above_cap = 0usize;
+        let mut near_boundary = 0usize;
+        for i in 0..DOC_COUNT {
+            // 25 .. 8_980 tokens: a linear ramp, so real depth sweeps the
+            // whole interesting range instead of clustering above it.
+            let token_count = 25 + i * 45;
+            let seed = SEED_BASE
+                .wrapping_add(u64::try_from(i).unwrap_or(0).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let html = generate_fuzz_doc(seed, token_count);
+            let real_depth = real_dom_max_depth(&html);
+            if real_depth > super::MAX_SCAN_DEPTH {
+                above_cap += 1;
+            } else {
+                below_cap += 1;
+            }
+            if real_depth.abs_diff(super::MAX_SCAN_DEPTH) <= BOUNDARY_WINDOW {
+                near_boundary += 1;
+            }
+            assert_guard_never_under_trips(&format!("fuzz#{i}(tokens={token_count})"), &html);
+        }
+
+        assert!(
+            above_cap > 0,
             "generative corpus never exceeded MAX_SCAN_DEPTH -- the invariant \
              above passed vacuously; widen the token alphabet's open-tag bias"
         );
+        assert!(
+            below_cap > 0,
+            "generative corpus never stayed under MAX_SCAN_DEPTH -- the size \
+             ramp starts too high to probe the boundary from below"
+        );
+        assert!(
+            near_boundary > 0,
+            "no generated document landed within {BOUNDARY_WINDOW} of the cap \
+             -- the size distribution has drifted away from the boundary again"
+        );
     }
+
 }
+

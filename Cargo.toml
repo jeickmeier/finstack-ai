@@ -205,8 +205,9 @@ url = "2"
 htmd = "0.5"
 # The real parser/DOM behind `htmd`. `html5ever` is a real (non-dev)
 # dependency of finstack-ai-tools-fetch: its pre-parse nesting-depth guard
-# (F-4) drives html5ever's own tokenizer directly (not a hand-rolled byte
-# scanner) so its behavior agrees with what htmd's tree builder will see.
+# (F-4) runs html5ever's own `parse_document` against a counting `TreeSink`
+# (not a hand-rolled scanner or a bare tokenizer), so the depth it measures
+# is the depth htmd's tree builder actually produces.
 # `markup5ever_rcdom` stays dev-only, used by that crate's differential test
 # to build the real DOM and compare its depth against the guard. Both are
 # already in the dependency tree (and license-cleared) via `htmd` above;
