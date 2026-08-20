@@ -727,3 +727,18 @@ fn v1_schema_applies_from_user_version_zero() {
         .expect("version");
     assert_eq!(version, SCHEMA_USER_VERSION);
 }
+
+#[test]
+fn append_identity_encoding_is_stable() {
+    // Pins the persisted `batches.request_cbor` encoding. If this test fails,
+    // existing databases will mis-detect batch-id replays as
+    // `append_batch_id_reuse`. Do not update the constant without a schema
+    // migration story.
+    let frozen = request(7, 3, 1, vec![draft(70, 3), draft(71, 3)]);
+    let bytes = crate::append::request_cbor(&frozen).expect("encode identity");
+    let digest = finstack_ai_kernel::Digest::raw_json(&bytes);
+    assert_eq!(
+        digest.to_hex(),
+        "c7aceba03fb3311d46d5be1e5647be58e9161b52c803c04bc82d13cfd64a1290"
+    );
+}

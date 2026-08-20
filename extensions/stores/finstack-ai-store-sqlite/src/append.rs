@@ -139,7 +139,7 @@ fn request_identity(request: &AppendRequest) -> Result<AppendIdentity, StoreErro
     })
 }
 
-fn request_cbor(request: &AppendRequest) -> Result<Vec<u8>, StoreError> {
+pub(crate) fn request_cbor(request: &AppendRequest) -> Result<Vec<u8>, StoreError> {
     encode(&request_identity(request)?).map_err(protocol_error)
 }
 
