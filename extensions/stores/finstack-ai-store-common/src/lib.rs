@@ -24,9 +24,16 @@
     )
 )]
 
+mod append;
 mod error;
 mod snapshot;
+#[cfg(test)]
+mod test_support;
 
+pub use append::{
+    AppendIdentity, SessionUsage, admit_append_limits, build_committed_batch,
+    check_append_sequence, classify_record_reuse, request_cbor, request_identity,
+};
 pub use error::protocol_error;
 pub use snapshot::{
     accelerated_from, admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size,
