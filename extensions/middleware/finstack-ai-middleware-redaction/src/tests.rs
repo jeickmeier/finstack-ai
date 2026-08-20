@@ -39,6 +39,7 @@ fn middleware_context() -> finstack_ai_runtime::MiddlewareContext {
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
     finstack_ai_runtime::MiddlewareContext {
         run: RunCallContext {
+            relation_depth: 0,
             locator: OperationLocator::try_new(
                 "tenant-a",
                 SessionId::from_bytes([1; 16]),

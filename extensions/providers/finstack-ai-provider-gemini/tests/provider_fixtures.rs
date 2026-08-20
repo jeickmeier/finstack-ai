@@ -388,6 +388,7 @@ fn request(draft: ModelRequestDraft) -> ModelRequest {
     ModelRequest {
         call: ModelCallContext {
             run: RunCallContext {
+                relation_depth: 0,
                 locator: OperationLocator::try_new(
                     "tenant-a",
                     SessionId::parse("01234567-89ab-7cde-89ab-0123456789a1").expect("session"),

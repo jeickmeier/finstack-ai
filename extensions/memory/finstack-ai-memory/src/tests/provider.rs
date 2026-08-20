@@ -21,6 +21,7 @@ fn context() -> ContextCallContext {
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
     ContextCallContext {
         run: RunCallContext {
+            relation_depth: 0,
             locator: OperationLocator::try_new(
                 "tenant-a",
                 id(1, |value| SessionId::parse(value).expect("session")),

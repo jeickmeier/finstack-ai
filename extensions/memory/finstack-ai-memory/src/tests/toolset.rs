@@ -56,6 +56,7 @@ fn run_context(effect_id: EffectId) -> RunCallContext {
 
 fn run_context_for_tenant(effect_id: EffectId, tenant: &str) -> RunCallContext {
     RunCallContext {
+        relation_depth: 0,
         locator: OperationLocator::try_new(
             tenant,
             SessionId::from_bytes([1; 16]),
@@ -353,6 +354,7 @@ fn expected_derived_id(tenant: &str, body: &str) -> String {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn correct_memory_supersedes_and_is_idempotent() {
     let (toolset, store) = toolset_with_policy(MemoryPolicy {
         read: true,

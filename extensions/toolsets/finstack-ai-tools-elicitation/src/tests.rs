@@ -13,6 +13,7 @@ use std::sync::Arc;
 fn context(principal_scope: &str) -> ToolCallContext {
     ToolCallContext {
         run: RunCallContext {
+            relation_depth: 0,
             locator: OperationLocator::try_new(
                 "tenant-a",
                 SessionId::from_bytes([1; 16]),

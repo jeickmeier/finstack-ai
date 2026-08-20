@@ -46,6 +46,7 @@ fn benchmark_request() -> ModelRequest {
     ModelRequest {
         call: ModelCallContext {
             run: RunCallContext {
+                relation_depth: 0,
                 locator: OperationLocator::try_new(
                     "bench",
                     SessionId::parse("01234567-89ab-7cde-89ab-0123456789b1").expect("session"),

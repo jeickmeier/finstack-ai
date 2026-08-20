@@ -1055,6 +1055,7 @@ mod tests {
     fn tool_context() -> crate::ToolCallContext {
         crate::ToolCallContext {
             run: RunCallContext {
+                relation_depth: 0,
                 locator: OperationLocator::try_new(
                     "tenant-a",
                     SessionId::from_bytes([1; 16]),
