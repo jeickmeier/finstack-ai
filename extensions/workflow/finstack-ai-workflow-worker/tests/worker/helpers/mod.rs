@@ -7,12 +7,12 @@ use std::time::Duration as StdDuration;
 
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, BudgetPropagation, CancellationPropagation, ContentBlock,
-    DeadlinePropagation, Digest, EffectId, EffectOutputContract, EffectOutputKind, ErrorCategory,
-    Id, IdTag, KernelInput, KernelState, Message, MessageRole, Metadata, OperationLocator,
-    OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordBody,
-    ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy,
-    RunRelation, RunSecurityContext, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv,
-    Usage,
+    DeadlinePropagation, Digest, Duration as KernelDuration, EffectId, EffectOutputContract,
+    EffectOutputKind, ErrorCategory, Id, IdTag, KernelInput, KernelState, Message, MessageRole,
+    Metadata, OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds,
+    RawJson, RecordBody, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety,
+    RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Stage,
+    StageCursor, TextBlock, Timestamp, TransitionEnv, Usage,
 };
 use finstack_ai_runtime::{
     Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError, JournalStore,
@@ -474,4 +474,57 @@ pub(crate) async fn attach_session(
         .await
         .expect("attach")
         .with_ports(model, locked_profile(), None)
+}
+
+/// Drive a fresh run onto a retry timer and hand back the attached session.
+///
+/// Mirrors `timer_survives_worker_restart` in `finstack-ai-workflow-local`:
+/// spawn an owner, drive to the model request, submit the `Retry` directive,
+/// wait for `Sleeping`, drop the owner, then re-attach and drive until the
+/// timer wait is classified. The returned session is parked but not yet
+/// indexed — callers pass it to `park`.
+pub(crate) async fn park_on_retry_timer(
+    store: &Arc<MemoryJournalStore>,
+    model: &Arc<dyn Model>,
+    clock: &ExternalClock,
+    seed: u64,
+) -> WorkflowSession {
+    let owner = spawn_model_owner(
+        CommitCoordinator::new(store.clone()),
+        Arc::clone(model),
+        clock.clone(),
+        seed,
+    )
+    .await;
+    drive_to_active_model_request(&owner.handle()).await;
+    wait_state(store, |state| state.phase == Some(RunPhase::BeforeFinalize)).await;
+    owner
+        .handle()
+        .submit(
+            env(2_300, &[7, 8, 9], &[3], &[4], &[], &[], &[], 105),
+            stage(
+                Stage::BeforeFinalize,
+                ReducerStageOutcome::Retry(
+                    RetryDirective::try_new(
+                        RetryClassification::Model,
+                        KernelDuration::from_millis(10),
+                        "retry-v1",
+                    )
+                    .expect("directive"),
+                ),
+            ),
+        )
+        .await
+        .expect("schedule retry");
+    wait_state(store, |state| state.phase == Some(RunPhase::Sleeping)).await;
+    drop(owner);
+
+    let mut session =
+        attach_session(Arc::clone(store), Arc::clone(model), clock.clone(), seed).await;
+    let wait = session.drive_until_wait().await.expect("timer");
+    assert!(
+        matches!(wait, finstack_ai_runtime::WorkflowWait::Timer { .. }),
+        "expected a timer wait, got {wait:?}"
+    );
+    session
 }
