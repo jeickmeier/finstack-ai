@@ -74,6 +74,7 @@ Index last reconciled: 2026-08-18 (ADR-048 accepted for shared authority and pro
 | ADR-047 | `retire-multi-protocol-gateway` | Ecosystem lead | Phase 14 / PR-094 | Accepted | Standalone | In progress | Missing (local uncommitted crate deletion; `Agent::gateway` remains a dispatcher; no evidence id) |
 | ADR-048 | `shared-authority-and-provider-secret` | Core/runtime lead | Phase 14 / PR-085 then leaf waves | Accepted | Standalone | In progress | Missing (local types only; no evidence id) |
 | ADR-050 | `object-store-contract` | Core/runtime lead | `docs/superpowers/plans/2026-08-19-object-store.md` | Accepted | Standalone | In progress | Missing (local types only; no evidence id) |
+| ADR-051 | `gemini-native-provider` | Ecosystem lead | `docs/superpowers/plans/2026-08-20-gemini-provider.md` | Accepted | Standalone | Not started | Missing (decision record only; leaf crate implementation is later tasks in the same plan; no evidence id) |
 
 ## Security review seed
 
