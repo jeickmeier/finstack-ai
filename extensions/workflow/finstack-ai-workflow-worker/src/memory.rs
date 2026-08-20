@@ -8,17 +8,20 @@ use finstack_ai_kernel::{SessionId, Timestamp};
 
 use crate::error::WorkerError;
 use crate::fires::{FireRow, FireStatus, FireStore};
+use crate::inbox::{InboxRow, InboxStore};
 use crate::wake::{WakeIndexStore, WakeRow, lease_deadline, lease_open, wake_due};
 
 type WakeRows = BTreeMap<(Arc<str>, SessionId), WakeRow>;
 type FireRows = BTreeMap<(Arc<str>, Arc<str>, u64), FireRow>;
+type InboxRows = BTreeMap<(Arc<str>, SessionId, Arc<str>), InboxRow>;
 
-/// In-memory worker store. Implements the wake index and cron-fire tables
-/// (and, in a later task, the inbox table) behind a single mutex per table.
+/// In-memory worker store. Implements the wake index, cron-fire, and inbox
+/// tables behind a single mutex per table.
 #[derive(Debug, Default)]
 pub struct MemoryWorkerStore {
     wake: Mutex<WakeRows>,
     fires: Mutex<FireRows>,
+    inbox: Mutex<InboxRows>,
 }
 
 impl MemoryWorkerStore {
@@ -206,6 +209,50 @@ impl FireStore for MemoryWorkerStore {
             .filter(|row| row.status == FireStatus::Claimed)
             .cloned()
             .collect())
+    }
+}
+
+impl InboxStore for MemoryWorkerStore {
+    fn insert(&self, row: &InboxRow) -> Result<(), WorkerError> {
+        let mut inbox = self
+            .inbox
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        let key = (
+            Arc::clone(&row.tenant_scope),
+            row.session_id,
+            Arc::clone(&row.pending_id),
+        );
+        inbox.insert(key, row.clone());
+        Ok(())
+    }
+
+    fn load_all(&self) -> Result<Vec<InboxRow>, WorkerError> {
+        let inbox = self
+            .inbox
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        Ok(inbox.values().cloned().collect())
+    }
+
+    fn delete(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        pending_id: &str,
+    ) -> Result<(), WorkerError> {
+        let mut inbox = self
+            .inbox
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        inbox.remove(&(Arc::from(tenant_scope), session_id, Arc::from(pending_id)));
+        Ok(())
     }
 }
 

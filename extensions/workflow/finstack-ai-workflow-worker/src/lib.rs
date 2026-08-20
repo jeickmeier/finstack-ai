@@ -6,6 +6,7 @@
 
 mod error;
 mod fires;
+mod inbox;
 mod memory;
 mod park;
 mod sqlite;
@@ -13,6 +14,7 @@ mod wake;
 
 pub use error::WorkerError;
 pub use fires::{FireRow, FireStatus, FireStore, idempotency_key};
+pub use inbox::{InboxKind, InboxRow, InboxStore};
 pub use memory::MemoryWorkerStore;
 pub use park::park;
 pub use sqlite::SqliteWorkerStore;

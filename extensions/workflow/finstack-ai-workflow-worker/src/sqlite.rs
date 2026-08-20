@@ -1,12 +1,11 @@
 //! Sqlite-backed adapter tables for the workflow worker.
 //!
-//! [`SqliteWorkerStore`] owns three tables in one file: the wake index (this
-//! task), and the cron-fire and inbox tables used by later tasks. None of
-//! them touch `PRAGMA user_version` — they are adapter state, not kernel
-//! journal records.
+//! [`SqliteWorkerStore`] owns three tables in one file: the wake index, the
+//! cron-fire table, and the response inbox. None of them touch `PRAGMA
+//! user_version` — they are adapter state, not kernel journal records.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{Id, LaneId, RunId, SessionId, Timestamp};
@@ -14,6 +13,7 @@ use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::error::WorkerError;
 use crate::fires::{FireRow, FireStatus, FireStore};
+use crate::inbox::{InboxKind, InboxRow, InboxStore};
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
 
 const WORKER_DDL: &str = "
@@ -544,6 +544,122 @@ impl FireStore for SqliteWorkerStore {
                 )?);
             }
             Ok(out)
+        })
+    }
+}
+
+const INBOX_SELECT: &str = "SELECT tenant_scope, session_id, pending_id, kind, payload,
+       received_unix_ms
+FROM finstack_workflow_worker_inbox";
+
+/// Decode one row from [`INBOX_SELECT`] into an [`InboxRow`].
+fn decode_inbox_row(
+    tenant_scope: String,
+    session_id: &str,
+    pending_id: String,
+    kind: &str,
+    payload: Vec<u8>,
+    received_unix_ms: i64,
+) -> Result<InboxRow, WorkerError> {
+    let session_id: SessionId = Id::parse(session_id).map_err(|_| WorkerError::StoreIntegrity {
+        code: "sqlite_inbox_row",
+    })?;
+    let received_at =
+        Timestamp::from_unix_ms(received_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
+            code: "sqlite_inbox_row",
+        })?;
+    Ok(InboxRow {
+        tenant_scope: tenant_scope.into(),
+        session_id,
+        pending_id: pending_id.into(),
+        kind: InboxKind::parse(kind)?,
+        payload: Arc::from(payload.into_boxed_slice()),
+        received_at,
+    })
+}
+
+impl InboxStore for SqliteWorkerStore {
+    fn insert(&self, row: &InboxRow) -> Result<(), WorkerError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO finstack_workflow_worker_inbox (
+                    tenant_scope, session_id, pending_id, kind, payload, received_unix_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    row.tenant_scope.as_ref(),
+                    row.session_id.to_canonical_string(),
+                    row.pending_id.as_ref(),
+                    row.kind.as_str(),
+                    row.payload.as_ref(),
+                    row.received_at.as_unix_ms(),
+                ],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_insert",
+            })?;
+            Ok(())
+        })
+    }
+
+    fn load_all(&self) -> Result<Vec<InboxRow>, WorkerError> {
+        self.with_conn(|conn| {
+            let sql = format!("{INBOX_SELECT} ORDER BY tenant_scope, session_id, pending_id");
+            let mut stmt = conn.prepare(&sql).map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_query",
+            })?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Vec<u8>>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                })
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_query",
+                })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (tenant_scope, session_id, pending_id, kind, payload, received_unix_ms) =
+                    row.map_err(|_| WorkerError::StoreIntegrity {
+                        code: "sqlite_inbox_row",
+                    })?;
+                out.push(decode_inbox_row(
+                    tenant_scope,
+                    &session_id,
+                    pending_id,
+                    &kind,
+                    payload,
+                    received_unix_ms,
+                )?);
+            }
+            Ok(out)
+        })
+    }
+
+    fn delete(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        pending_id: &str,
+    ) -> Result<(), WorkerError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM finstack_workflow_worker_inbox
+                 WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3",
+                params![
+                    tenant_scope,
+                    session_id.to_canonical_string(),
+                    pending_id,
+                ],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_delete",
+            })?;
+            Ok(())
         })
     }
 }
