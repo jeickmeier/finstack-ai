@@ -14,7 +14,10 @@ use finstack_ai_runtime::{
 
 use crate::record::{MemoryId, MemoryRecord, MemoryScope};
 
-use super::{MatchEvidence, MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome};
+use super::{
+    MatchEvidence, MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStore,
+    MemoryStoreError, PutOutcome,
+};
 
 /// In-process [`ArtifactStore`] used only by this reference provider.
 #[derive(Debug, Default)]
@@ -147,11 +150,13 @@ impl MemoryStore for InProcessMemoryStore {
                 .map_err(|_| MemoryStoreError::InvalidRecord {
                     reason: "memory_record_invalid",
                 })?;
+            // Lock ordering: `records` before `applied_keys`, consistently
+            // across every method that needs both, to avoid deadlock.
+            let mut records = self.records.lock().map_err(|_| lock_error())?;
             let newly_applied = self.claim_key(&idempotency_key)?;
             if !newly_applied {
                 return Ok(PutOutcome::AlreadyApplied);
             }
-            let mut records = self.records.lock().map_err(|_| lock_error())?;
             records.insert(record.id.clone(), record);
             Ok(PutOutcome::Inserted)
         })();
@@ -184,7 +189,9 @@ impl MemoryStore for InProcessMemoryStore {
             let mut hits: Vec<MemoryHit> = records
                 .values()
                 .filter(|record| {
-                    scope.permits(&record.scope) && !record.tombstoned && record.superseded_by.is_none()
+                    scope.permits(&record.scope)
+                        && !record.tombstoned
+                        && record.superseded_by.is_none()
                 })
                 .filter_map(|record| match_record(record, &query))
                 .collect();
@@ -206,14 +213,14 @@ impl MemoryStore for InProcessMemoryStore {
         id: MemoryId,
     ) -> PortFuture<Result<(), MemoryStoreError>> {
         let result = (|| -> Result<(), MemoryStoreError> {
-            let newly_applied = self.claim_key(&idempotency_key)?;
-            if !newly_applied {
-                return Ok(());
-            }
             let mut records = self.records.lock().map_err(|_| lock_error())?;
             let record = records.get_mut(&id).ok_or(MemoryStoreError::NotFound)?;
             if !scope.permits(&record.scope) {
                 return Err(MemoryStoreError::NotFound);
+            }
+            let newly_applied = self.claim_key(&idempotency_key)?;
+            if !newly_applied {
+                return Ok(());
             }
             record.tombstoned = true;
             Ok(())
@@ -234,16 +241,16 @@ impl MemoryStore for InProcessMemoryStore {
                 .map_err(|_| MemoryStoreError::InvalidRecord {
                     reason: "memory_record_invalid",
                 })?;
-            let newly_applied = self.claim_key(&idempotency_key)?;
-            if !newly_applied {
-                return Ok(());
-            }
             let mut records = self.records.lock().map_err(|_| lock_error())?;
             {
                 let old_record = records.get(&old).ok_or(MemoryStoreError::NotFound)?;
                 if !scope.permits(&old_record.scope) {
                     return Err(MemoryStoreError::NotFound);
                 }
+            }
+            let newly_applied = self.claim_key(&idempotency_key)?;
+            if !newly_applied {
+                return Ok(());
             }
             replacement.supersedes = Some(old.clone());
             let replacement_id = replacement.id.clone();
