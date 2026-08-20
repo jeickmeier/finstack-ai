@@ -51,6 +51,28 @@ registered on the same `Agent::openai` construction simultaneously. All
 OpenRouter media tool calls are billed to the configured OpenRouter API
 key, independent of which provider serves the chat model.
 
+## Media input
+
+A host-supplied `MediaResolver` (ADR-049) turns a kernel `BlobRef` into
+bytes or a URL a provider can put on the wire. It is not a registered
+port — construct an implementation and attach it to a provider config
+with `with_media_resolver` (`OpenRouterConfig`, `OpenAIConfig`,
+`AnthropicConfig`, `OllamaConfig`), mirroring ADR-048's
+`with_credential_store`. Without a configured resolver, a media-bearing
+user message fails closed rather than being silently dropped. Each
+provider also advertises per-model `InputCapabilities` toggles
+(`with_input_images`, `with_input_audio`, `with_input_files`) that gate
+which `ContentBlock` variants are accepted; the OpenRouter catalog fetch
+can set these automatically from `architecture.input_modalities`. The
+supported modalities differ by provider:
+
+| Provider | Images | Files / documents | Audio |
+| --- | --- | --- | --- |
+| `finstack-ai-provider-openrouter` | Yes | Yes | Yes (unverified on Responses; see crate README) |
+| `finstack-ai-provider-openai` | Yes | Yes | Yes |
+| `finstack-ai-provider-anthropic` | Yes | Yes (documents) | No |
+| `finstack-ai-provider-ollama` | Yes (base64 only) | No | No |
+
 `GatewayAgentSpec.wire_protocol` selects the dedicated leaf. Required
 construction fields include `hard_input_bytes` and `max_output_tokens`.
 Dedicated crate rustdoc on each `*Provider::try_new` is the same

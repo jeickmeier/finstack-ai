@@ -86,6 +86,16 @@ unpublished.
   `media_tools` / `openrouter_media_api_key` / `openrouter_media_referer`
   / `openrouter_media_title` keyword arguments; both crates stay off the
   wasm-host dependency graph.
+- Added a host-supplied `MediaResolver` port-object contract (ADR-049,
+  following the ADR-048 `CredentialStore` precedent) resolving a kernel
+  `BlobRef` to bytes or a URL. `with_media_resolver` is available on all
+  four provider configs (`OpenRouterConfig`, `OpenAIConfig`,
+  `AnthropicConfig`, `OllamaConfig`); each also gains per-model
+  `with_input_images` / `with_input_audio` / `with_input_files` toggles.
+  Without a configured resolver, media-bearing user messages fail closed.
+  Modality support differs by provider: OpenRouter and OpenAI accept
+  images, files, and audio; Anthropic accepts images and documents but
+  not audio; Ollama accepts base64 images only.
 
 ### Changed
 

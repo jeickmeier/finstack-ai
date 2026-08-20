@@ -65,3 +65,10 @@ Hosts should enable `with_input_audio` only after confirming the target model
 accepts audio input on the Responses endpoint; audio content resolved to a
 URL (rather than inline bytes) is always rejected, since `OpenRouter`'s
 documented audio input is base64-only.
+
+## Media generation
+
+For outbound image/speech/transcription/video generation tools (as opposed
+to the media *input* above), see the `finstack-ai-tools-openrouter-media`
+and `finstack-ai-tools-openai-media` toolset crates, registrable from any
+linked constructor including `Agent::openrouter`.
