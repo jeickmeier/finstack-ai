@@ -265,6 +265,49 @@ impl BillingObserver {
         }
     }
 
+    /// Export the ledger as JSONL. All numerics are decimal strings; content
+    /// payloads are never included.
+    #[must_use]
+    pub fn export_jsonl(&self) -> String {
+        let snapshot = self.snapshot();
+        let mut out = String::new();
+        for row in &snapshot.spend {
+            let line = serde_json::json!({
+                "kind": "spend",
+                "session_id": row.session_id.to_string(),
+                "run_id": row.run_id.to_string(),
+                "model": row.model.as_deref(),
+                "provider": row.provider.as_ref().map(render_component),
+                "unit": row.unit.as_ref(),
+                "pricing_policy_version": row.pricing_policy_version.as_ref(),
+                "micros": row.micros.to_string(),
+                "costed_effects": row.costed_effects.to_string(),
+            });
+            push_line(&mut out, &line);
+        }
+        for row in &snapshot.usage {
+            let line = serde_json::json!({
+                "kind": "usage",
+                "session_id": row.session_id.to_string(),
+                "run_id": row.run_id.to_string(),
+                "model": row.model.as_deref(),
+                "input_tokens": row.input_tokens.to_string(),
+                "output_tokens": row.output_tokens.to_string(),
+                "effects": row.effects.to_string(),
+                "uncosted_effects": row.uncosted_effects.to_string(),
+            });
+            push_line(&mut out, &line);
+        }
+        let summary = serde_json::json!({
+            "kind": "summary",
+            "unattributed_effects": snapshot.unattributed_effects.to_string(),
+            "overflowed_events": snapshot.overflowed_events.to_string(),
+            "dropped_events": snapshot.dropped_events.to_string(),
+        });
+        push_line(&mut out, &summary);
+        out
+    }
+
     fn ingest(&self, event: &RunEvent) {
         let Ok(mut state) = self.state.lock() else {
             return;
@@ -411,6 +454,29 @@ fn settle(
         }
     }
     true
+}
+
+/// Render a component reference as `id@major.minor.patch`, or bare `id` when
+/// the version is absent.
+fn render_component(component: &ComponentRef) -> String {
+    match component.version() {
+        Some(version) => format!(
+            "{}@{}.{}.{}",
+            component.id(),
+            version.major,
+            version.minor,
+            version.patch
+        ),
+        None => component.id().to_string(),
+    }
+}
+
+/// Append one JSON value as a line to `out`.
+fn push_line(out: &mut String, value: &serde_json::Value) {
+    if let Ok(text) = serde_json::to_string(value) {
+        out.push_str(&text);
+        out.push('\n');
+    }
 }
 
 /// Extract a bounded top-level `"model"` string from canonical request JSON.

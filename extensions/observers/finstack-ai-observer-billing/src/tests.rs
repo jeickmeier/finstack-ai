@@ -296,3 +296,36 @@ async fn drop_progress_overflow_is_diagnosed() {
     assert!(billing.dropped() >= 1);
     assert_eq!(billing.snapshot().dropped_events, billing.dropped());
 }
+
+const CANARY: &str = "CANARY_SECRET_VALUE";
+
+#[tokio::test]
+async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
+    let billing =
+        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let request = format!(r#"{{"model":"demo-model-1","system":"{CANARY}"}}"#);
+    billing
+        .observe(Arc::from([
+            model_event(1, 7, requested(7, &request)),
+            model_event(2, 7, completed(7, Some(usage(10, 20, Some(cost("USD", 1_250_000, "prices-v1")))))),
+        ]))
+        .await
+        .expect("observe");
+    let text = billing.export_jsonl();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 3);
+    let spend: serde_json::Value = serde_json::from_str(lines[0]).expect("spend json");
+    assert_eq!(spend["kind"], "spend");
+    assert_eq!(spend["micros"], "1250000");
+    assert_eq!(spend["unit"], "USD");
+    assert_eq!(spend["pricing_policy_version"], "prices-v1");
+    assert_eq!(spend["model"], "demo-model-1");
+    assert!(spend["micros"].is_string());
+    let usage_line: serde_json::Value = serde_json::from_str(lines[1]).expect("usage json");
+    assert_eq!(usage_line["kind"], "usage");
+    assert_eq!(usage_line["input_tokens"], "10");
+    let summary: serde_json::Value = serde_json::from_str(lines[2]).expect("summary json");
+    assert_eq!(summary["kind"], "summary");
+    assert_eq!(summary["unattributed_effects"], "0");
+    assert!(!text.contains(CANARY));
+}
