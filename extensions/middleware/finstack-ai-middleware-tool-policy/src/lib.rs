@@ -24,8 +24,8 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentInvocation, Digest, ErrorCategory, InvocationRecovery, Metadata, Stage,
-    Version,
+    ComponentId, ComponentInvocation, Digest, ErrorCategory, ErrorDescriptor, InvocationRecovery,
+    Metadata, Stage, Version,
 };
 use finstack_ai_runtime::{
     Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
@@ -37,11 +37,16 @@ mod eval;
 
 pub use config::*;
 
+use eval::{PolicyVerdict, evaluate_before_model};
+
 const TOOL_POLICY_VERSION: Version = Version {
     major: 1,
     minor: 0,
     patch: 0,
 };
+
+/// Stable code for a `before_model` jailbreak trigger fail outcome.
+pub const TOOL_POLICY_JAILBREAK_TRIGGERED: &str = "tool_policy_jailbreak_triggered";
 
 /// Policy filter middleware that narrows the model-visible tool set at
 /// `before_model` and `before_tool_batch`.
@@ -104,15 +109,42 @@ impl Middleware for ToolPolicyMiddleware {
 
     fn invoke(
         &self,
-        _ctx: MiddlewareContext,
+        ctx: MiddlewareContext,
         input: StageInput,
     ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
-        let _config = self.config.clone();
+        let config = self.config.clone();
         Box::pin(async move {
             match input {
-                StageInput::BeforeModel(_) | StageInput::BeforeToolBatch { .. } => {
-                    Ok(StageOutcome::Continue)
+                StageInput::BeforeModel(before_model) => {
+                    match evaluate_before_model(
+                        &config,
+                        &before_model,
+                        &ctx.run.authorization.roles,
+                    ) {
+                        PolicyVerdict::Identity => Ok(StageOutcome::Continue),
+                        PolicyVerdict::Retain(tools) => Ok(StageOutcome::FilterTools(
+                            tools.into_iter().collect::<Vec<_>>().into(),
+                        )),
+                        PolicyVerdict::Fail { reason } => Ok(StageOutcome::Fail(Box::new(
+                            ErrorDescriptor::new(
+                                reason,
+                                "tool policy jailbreak trigger matched",
+                                ErrorCategory::Validation,
+                                false,
+                            )
+                            .map_err(|_| {
+                                MiddlewareError::try_new(
+                                    reason,
+                                    ErrorCategory::Validation,
+                                    "tool policy jailbreak trigger matched",
+                                    Metadata::empty(),
+                                )
+                                .unwrap_or_else(Into::into)
+                            })?,
+                        ))),
+                    }
                 }
+                StageInput::BeforeToolBatch { .. } => Ok(StageOutcome::Continue),
                 _ => Err(MiddlewareError::try_new(
                     finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
                     ErrorCategory::Middleware,

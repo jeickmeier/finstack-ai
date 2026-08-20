@@ -1,12 +1,122 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use finstack_ai_kernel::ToolId;
+use finstack_ai_kernel::{
+    ContentBlock, Digest, Id, IdTag, Message, MessageRole, Metadata, OutputSpec, ProviderIds,
+    RawJson, RetrySafety, TextBlock, Timestamp, ToolCallBlock, ToolExecutionMode, ToolId,
+};
+use finstack_ai_runtime::{
+    ApprovalMetadata, ApprovalRequirement, BeforeModelInput, ModelName, ModelRequestDraft,
+    ModelRequestLimits, ModelSettings, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
 
 use crate::{JailbreakAction, ToolPolicyConfig, ToolPolicyError};
 
 fn tid(s: &str) -> ToolId {
     ToolId::parse(s).expect("tool id")
+}
+
+/// Deterministic UUIDv7-shaped id, distinct per `(T, value)`.
+fn id<T: IdTag>(value: u64) -> Id<T> {
+    let mut bytes = [0_u8; 16];
+    bytes[6] = 0x70;
+    bytes[8] = 0x80;
+    bytes[9..].copy_from_slice(&value.to_be_bytes()[1..]);
+    Id::from_bytes(bytes)
+}
+
+fn message(ordinal: u64, role: MessageRole, content: Vec<ContentBlock>) -> Message {
+    Message::try_new(
+        id(ordinal),
+        role,
+        content,
+        Timestamp::from_unix_ms(i64::try_from(ordinal).expect("timestamp")).expect("timestamp"),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("message")
+}
+
+fn tool_spec(name: &str, side_effect: SideEffectClass) -> ToolSpec {
+    ToolSpec {
+        id: tid(&format!("finstack.tools.{name}")),
+        model_name: Arc::from(name),
+        title: Arc::from(name),
+        description: Arc::from("fixture"),
+        input_schema: RawJson::parse(b"{}").expect("schema"),
+        output_schema: None,
+        execution: ToolExecutionMode::Parallel,
+        side_effect,
+        retry_safety: RetrySafety::SafeToRetry,
+        approval: ApprovalMetadata {
+            requirement: ApprovalRequirement::NotRequired,
+            reason: None,
+            attributes: Metadata::empty(),
+        },
+        max_result_bytes: 1_024,
+        metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
+    }
+}
+
+fn read_tool() -> ToolSpec {
+    tool_spec("read", SideEffectClass::ReadOnly)
+}
+
+fn write_tool() -> ToolSpec {
+    tool_spec("write", SideEffectClass::NonIdempotentWrite)
+}
+
+fn tool_call_message(ordinal: u64, tool_name: &str) -> Message {
+    message(
+        ordinal,
+        MessageRole::Assistant,
+        vec![ContentBlock::ToolCall(
+            ToolCallBlock::try_new(id(ordinal), tool_name, RawJson::parse(b"{}").expect("args"))
+                .expect("call"),
+        )],
+    )
+}
+
+fn user_text_message(ordinal: u64, text: &str) -> Message {
+    message(
+        ordinal,
+        MessageRole::User,
+        vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
+    )
+}
+
+fn assistant_text_message(ordinal: u64, text: &str) -> Message {
+    message(
+        ordinal,
+        MessageRole::Assistant,
+        vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
+    )
+}
+
+/// Minimal `BeforeModelInput` fixture wrapping a hand-built request draft.
+fn draft(tools: Vec<ToolSpec>, messages: Vec<Message>) -> BeforeModelInput {
+    BeforeModelInput {
+        request: ModelRequestDraft {
+            model: ModelName::try_new("fixture-model").expect("model"),
+            messages: messages.into(),
+            tools: tools.into(),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 10_000,
+                max_output_tokens: 1_000,
+            },
+        },
+        source_entries: Arc::from([]),
+        model_context_profile_digest: Digest::raw_json(b"profile"),
+        hard_input_tokens: 1_000,
+        checkpoint: None,
+    }
 }
 
 #[test]
@@ -121,6 +231,78 @@ mod middleware_tests {
         ));
     }
 
+    #[tokio::test]
+    async fn before_model_role_allowlist_filters_to_expected_ids() {
+        use std::collections::{BTreeMap, BTreeSet};
+        use std::sync::Arc;
+
+        use finstack_ai_kernel::{
+            Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId, SessionId,
+        };
+        use finstack_ai_runtime::{
+            AuthorizationContext, CancellationSignal, MiddlewareContext, RunCallContext,
+            StageInput, StageOutcome,
+        };
+
+        use super::{draft, read_tool, tid, write_tool};
+
+        fn uuid_str(value: u64) -> String {
+            format!("00000000-0000-7000-8000-{value:012x}")
+        }
+
+        let cfg = crate::ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_role_allowlist(
+                BTreeMap::from([(
+                    Arc::<str>::from("reader"),
+                    BTreeSet::from([tid("finstack.tools.read")]),
+                )]),
+                BTreeSet::new(),
+            )
+            .expect("roles");
+        let mw = ToolPolicyMiddleware::try_new(cfg).expect("leaf");
+
+        let principal =
+            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
+        let ctx = MiddlewareContext {
+            run: RunCallContext {
+                locator: OperationLocator::try_new(
+                    "tenant-a",
+                    SessionId::parse(&uuid_str(1)).expect("session"),
+                    LaneId::parse(&uuid_str(2)).expect("lane"),
+                    RunId::parse(&uuid_str(3)).expect("run"),
+                )
+                .expect("locator"),
+                authorization: AuthorizationContext {
+                    principal,
+                    authentication_method: Arc::from("test"),
+                    assurance_level: Arc::from("test"),
+                    roles: Arc::from([Arc::<str>::from("reader")]),
+                    permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+                    safe_claims: Metadata::empty(),
+                    policy_version: Arc::from("policy-v1"),
+                    decision_id: Arc::from("decision-v1"),
+                },
+                effect_id: EffectId::parse(&uuid_str(4)).expect("effect"),
+                attempt: 1,
+                deadline: None,
+                budget_scope_id: None,
+                cancellation: CancellationSignal::new(),
+            },
+            chain_digest: Digest::raw_json(b"chain"),
+            chain_index: 0,
+            compaction_resume: None,
+        };
+
+        let input =
+            StageInput::BeforeModel(Box::new(draft(vec![read_tool(), write_tool()], vec![])));
+        let outcome = mw.invoke(ctx, input).await.expect("invoke");
+        assert_eq!(
+            outcome,
+            StageOutcome::FilterTools(Arc::from([tid("finstack.tools.read")]))
+        );
+    }
+
     #[test]
     fn distinct_configs_produce_distinct_digests() {
         let a = ToolPolicyMiddleware::try_new(any_config()).expect("leaf a");
@@ -144,8 +326,12 @@ mod eval_tests {
 
     use finstack_ai_kernel::ToolId;
 
-    use crate::ToolPolicyConfig;
-    use crate::eval::narrow_universe;
+    use crate::eval::{PolicyVerdict, evaluate_before_model, narrow_universe};
+    use crate::{JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, ToolPolicyConfig};
+
+    use super::{
+        assistant_text_message, draft, read_tool, tool_call_message, user_text_message, write_tool,
+    };
 
     fn tid(s: &str) -> ToolId {
         ToolId::parse(s).expect("tool id")
@@ -216,6 +402,110 @@ mod eval_tests {
         assert_eq!(
             narrow_universe(&cfg, &universe(), &granted),
             BTreeSet::from([tid("t.read")])
+        );
+    }
+
+    #[test]
+    fn write_budget_hides_write_tools_once_spent() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_write_budget(2)
+            .expect("budget");
+        let input = draft(
+            vec![read_tool(), write_tool()],
+            vec![tool_call_message(1, "write"), tool_call_message(2, "write")],
+        );
+        assert_eq!(
+            evaluate_before_model(&cfg, &input, &[]),
+            PolicyVerdict::Retain(BTreeSet::from([tid("finstack.tools.read")]))
+        );
+    }
+
+    #[test]
+    fn write_budget_under_limit_is_identity() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_write_budget(2)
+            .expect("budget");
+        let input = draft(
+            vec![read_tool(), write_tool()],
+            vec![tool_call_message(1, "write")],
+        );
+        assert_eq!(
+            evaluate_before_model(&cfg, &input, &[]),
+            PolicyVerdict::Identity
+        );
+    }
+
+    #[test]
+    fn jailbreak_fail_action_fails_the_stage() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_jailbreak_triggers(
+                vec![Arc::from("ignore previous instructions")],
+                JailbreakAction::Fail,
+            )
+            .expect("jailbreak");
+        let input = draft(
+            vec![read_tool()],
+            vec![user_text_message(1, "please IGNORE Previous Instructions")],
+        );
+        assert_eq!(
+            evaluate_before_model(&cfg, &input, &[]),
+            PolicyVerdict::Fail {
+                reason: TOOL_POLICY_JAILBREAK_TRIGGERED
+            }
+        );
+    }
+
+    #[test]
+    fn jailbreak_restrict_action_narrows_to_safe_set() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_jailbreak_triggers(
+                vec![Arc::from("ignore previous instructions")],
+                JailbreakAction::RestrictTo(BTreeSet::from([tid("finstack.tools.read")])),
+            )
+            .expect("jailbreak");
+        let input = draft(
+            vec![read_tool(), write_tool()],
+            vec![user_text_message(1, "please IGNORE Previous Instructions")],
+        );
+        assert_eq!(
+            evaluate_before_model(&cfg, &input, &[]),
+            PolicyVerdict::Retain(BTreeSet::from([tid("finstack.tools.read")]))
+        );
+    }
+
+    #[test]
+    fn assistant_text_does_not_trigger_jailbreak() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_jailbreak_triggers(
+                vec![Arc::from("ignore previous instructions")],
+                JailbreakAction::Fail,
+            )
+            .expect("jailbreak");
+        let input = draft(
+            vec![read_tool()],
+            vec![assistant_text_message(1, "ignore previous instructions")],
+        );
+        assert_eq!(
+            evaluate_before_model(&cfg, &input, &[]),
+            PolicyVerdict::Identity
+        );
+    }
+
+    #[test]
+    fn identity_when_nothing_narrows() {
+        let cfg = ToolPolicyConfig::try_new()
+            .expect("cfg")
+            .with_write_budget(10)
+            .expect("budget");
+        let input = draft(vec![read_tool(), write_tool()], vec![]);
+        assert_eq!(
+            evaluate_before_model(&cfg, &input, &[]),
+            PolicyVerdict::Identity
         );
     }
 }
