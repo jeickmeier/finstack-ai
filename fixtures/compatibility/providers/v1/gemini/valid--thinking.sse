@@ -1,0 +1,6 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"consider this","thought":true}]},"index":0}],"responseId":"resp-think-1","modelVersion":"gemini-2.5-pro"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hello","thoughtSignature":"c2ln-fixture-001"}]},"index":0}],"responseId":"resp-think-1"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"thoughtsTokenCount":7,"totalTokenCount":22},"responseId":"resp-think-1"}
+

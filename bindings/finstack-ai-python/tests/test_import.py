@@ -20,6 +20,7 @@ def test_import_finstack_ai() -> None:
     assert finstack_ai.linked_providers() == (
         "openai",
         "anthropic",
+        "gemini",
         "ollama",
         "openrouter",
     )
@@ -43,6 +44,7 @@ def test_provider_namespace_is_lazy() -> None:
 
     assert providers.openai.is_available()
     assert providers.anthropic.is_available()
+    assert providers.gemini.is_available()
     assert providers.ollama.is_available()
     assert finstack_ai.health() == "ok"
 
@@ -149,6 +151,48 @@ def test_anthropic_http_credentials_fail_closed_without_leaking_the_canary() -> 
     async def construct() -> None:
         with pytest.raises(finstack_ai.ConfigurationError) as caught:
             await finstack_ai.Agent.anthropic(
+                "http://127.0.0.1:9",
+                "fixture-model",
+                api_key=canary,
+            )
+        assert caught.value.code == "agent_run_invalid_configuration"
+        assert canary not in str(caught.value)
+        assert canary not in repr(caught.value)
+
+    asyncio.run(construct())
+
+
+def test_gemini_and_ollama_factories_construct_without_import_side_effects() -> None:
+    import asyncio
+
+    import finstack_ai
+
+    async def construct() -> None:
+        gemini = await finstack_ai.Agent.gemini(
+            "http://127.0.0.1:9",
+            "fixture-model",
+            instruction="Answer concisely.",
+        )
+        ollama = await finstack_ai.Agent.ollama(
+            "http://127.0.0.1:11434",
+            "fixture-model",
+        )
+        assert gemini.capability_catalog() == []
+        assert ollama.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
+def test_gemini_http_credentials_fail_closed_without_leaking_the_canary() -> None:
+    import asyncio
+
+    import finstack_ai
+
+    canary = "AIza-secret-canary-055"
+
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError) as caught:
+            await finstack_ai.Agent.gemini(
                 "http://127.0.0.1:9",
                 "fixture-model",
                 api_key=canary,

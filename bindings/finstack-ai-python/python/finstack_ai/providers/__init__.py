@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .. import linked_providers
 
-__all__ = ["anthropic", "ollama", "openai", "openrouter"]
+__all__ = ["anthropic", "gemini", "ollama", "openai", "openrouter"]
 
 
 class _ProviderAvailability:
@@ -25,5 +25,6 @@ class _ProviderAvailability:
 
 openai = _ProviderAvailability("openai")
 anthropic = _ProviderAvailability("anthropic")
+gemini = _ProviderAvailability("gemini")
 ollama = _ProviderAvailability("ollama")
 openrouter = _ProviderAvailability("openrouter")

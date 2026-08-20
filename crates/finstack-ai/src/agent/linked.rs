@@ -159,6 +159,20 @@ pub struct AnthropicAgentSpec {
     pub common: LinkedCommon,
 }
 
+/// Arguments for [`Agent::gemini`].
+pub struct GeminiAgentSpec {
+    /// Gemini `generateContent` base URL (Generative Language API).
+    pub endpoint: String,
+    /// Model name.
+    pub model: String,
+    /// Optional API key. HTTPS is required when set.
+    pub api_key: Option<String>,
+    /// Optional `OpenRouter` media-toolset registration.
+    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
+}
+
 /// Arguments for [`Agent::ollama`].
 pub struct OllamaAgentSpec {
     /// Native `/api/chat` base URL.
@@ -177,8 +191,8 @@ pub struct GatewayAgentSpec {
     pub endpoint: String,
     /// Configured model name.
     pub model: String,
-    /// Wire protocol: `openai_responses`, `anthropic_messages`, or `ollama_chat`.
-    /// `openai_chat` is a configuration error.
+    /// Wire protocol: `openai_responses`, `anthropic_messages`, `ollama_chat`,
+    /// or `gemini_generate_content`. `openai_chat` is a configuration error.
     pub wire_protocol: String,
     /// Named credential reference. Never a secret literal.
     pub credential_name: String,
@@ -326,6 +340,22 @@ impl Agent {
         anthropic_inner(spec).await
     }
 
+    /// Construct a Gemini `generateContent` agent.
+    ///
+    /// Does not read environment variables. Does not hardcode the Google
+    /// host: `spec.endpoint` is passed straight into the provider's
+    /// `GeminiConfig::try_new` (ADR-047). HTTPS is required when `api_key`
+    /// is set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
+    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the URL, model, or
+    /// credential pairing is invalid.
+    pub async fn gemini(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+        gemini_inner(spec).await
+    }
+
     /// Construct a keyless Ollama `/api/chat` agent.
     ///
     /// Does not read environment variables.
@@ -340,8 +370,8 @@ impl Agent {
 
     /// Construct a config-driven gateway agent.
     ///
-    /// Dispatches onto the dedicated openai, anthropic, or ollama provider
-    /// under `native-tokio` only. Does not read environment variables. HTTPS
+    /// Dispatches onto the dedicated openai, anthropic, ollama, or gemini
+    /// provider under `native-tokio` only. Does not read environment variables. HTTPS
     /// is required off loopback and whenever a credential is set. `openai_chat`
     /// is a configuration error.
     ///
@@ -530,6 +560,56 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
 }
 
 #[cfg(feature = "native-tokio")]
+async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    use finstack_ai_provider_gemini::{
+        Authentication, GeminiConfig, GeminiModelConfig, GeminiProvider, SecretString,
+    };
+
+    let model_name = ModelName::try_new(&spec.model).map_err(|error| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            format!("{}: {}", error.code(), error.message()),
+        )
+    })?;
+    let mut config =
+        GeminiConfig::try_new(spec.endpoint).map_err(|error| model_configuration_error(&error))?;
+    if let Some(api_key) = spec.api_key {
+        config = config.with_authentication(Authentication::ApiKey(
+            SecretString::try_new(api_key).map_err(|_| secret_configuration_error())?,
+        ));
+    }
+    let model_config = GeminiModelConfig::try_new(
+        &spec.model,
+        LINKED_CONTEXT_WINDOW_TOKENS,
+        LINKED_CONTEXT_WINDOW_TOKENS,
+        LINKED_ANTHROPIC_OUTPUT_TOKENS,
+    )
+    .map_err(|error| model_configuration_error(&error))?
+    .with_provider_overhead_tokens(LINKED_PROVIDER_OVERHEAD_TOKENS);
+    let provider: Arc<dyn Model> = Arc::new(
+        GeminiProvider::try_new(config, vec![model_config])
+            .map_err(|error| model_configuration_error(&error))?,
+    );
+    let mut common = spec.common;
+    if let Some(media) = spec.openrouter_media {
+        register_openrouter_media(&mut common.ports, media)?;
+    }
+    build_linked_provider(
+        (
+            "python.agent.gemini",
+            "python.bundle.gemini",
+            "python.model.gemini",
+        ),
+        provider,
+        model_name,
+        common,
+        empty_model_settings()?,
+        DEFAULT_TIMEOUT,
+    )
+    .await
+}
+
+#[cfg(feature = "native-tokio")]
 async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 
@@ -595,14 +675,14 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
             Authentication::ApiKey(secret) => Authentication::Bearer(secret),
             other => other,
         },
-        "anthropic_messages" => match authentication {
+        "anthropic_messages" | "gemini_generate_content" => match authentication {
             Authentication::Bearer(secret) => Authentication::ApiKey(secret),
             other => other,
         },
         _ => {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
-                "gateway wire_protocol must be openai_responses, anthropic_messages, or ollama_chat",
+                "gateway wire_protocol must be openai_responses, anthropic_messages, ollama_chat, or gemini_generate_content",
             ));
         }
     };
@@ -725,11 +805,49 @@ fn gateway_provider(
                 model_name,
             ))
         }
+        "gemini_generate_content" => {
+            gateway_gemini_provider(endpoint, model, hard_input_bytes, store, reference)
+        }
         _ => Err(AgentRunError::configuration(
             AGENT_RUN_INVALID_CONFIGURATION,
-            "gateway wire_protocol must be openai_responses, anthropic_messages, or ollama_chat",
+            "gateway wire_protocol must be openai_responses, anthropic_messages, ollama_chat, or gemini_generate_content",
         )),
     }
+}
+
+#[cfg(feature = "native-tokio")]
+fn gateway_gemini_provider(
+    endpoint: &str,
+    model: &str,
+    hard_input_bytes: u64,
+    store: finstack_ai_runtime::CredentialStore,
+    reference: finstack_ai_runtime::CredentialReference,
+) -> Result<(Arc<dyn Model>, ModelName), AgentRunError> {
+    use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
+
+    let config = GeminiConfig::try_new(endpoint)
+        .map_err(|error| model_configuration_error(&error))?
+        .with_credentials(store, reference);
+    let model_name = ModelName::try_new(model).map_err(|error| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            format!("{}: {}", error.code(), error.message()),
+        )
+    })?;
+    let model = GeminiModelConfig::try_new(
+        model,
+        hard_input_bytes,
+        LINKED_CONTEXT_WINDOW_TOKENS,
+        LINKED_ANTHROPIC_OUTPUT_TOKENS,
+    )
+    .map_err(|error| model_configuration_error(&error))?;
+    Ok((
+        Arc::new(
+            GeminiProvider::try_new(config, vec![model])
+                .map_err(|error| model_configuration_error(&error))?,
+        ),
+        model_name,
+    ))
 }
 
 #[cfg(feature = "native-tokio")]
@@ -794,6 +912,11 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "anthropic").await
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "gemini").await
 }
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -1378,6 +1501,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gemini_constructs_without_a_network_request() {
+        let built = Agent::gemini(GeminiAgentSpec {
+            endpoint: "http://127.0.0.1:9".into(),
+            model: "fixture-model".into(),
+            api_key: None,
+            openrouter_media: None,
+            common: LinkedCommon {
+                instruction: Some("Answer concisely.".into()),
+                ..common()
+            },
+        })
+        .await
+        .expect("gemini construct");
+        assert!(built.agent.capability_catalog().is_empty());
+        assert_eq!(built.default_timeout, DEFAULT_TIMEOUT);
+        let component = built
+            .agent
+            .resolved()
+            .run_plan()
+            .model()
+            .descriptor()
+            .component
+            .clone();
+        assert_eq!(component.id().as_str(), "python.model.gemini");
+    }
+
+    #[tokio::test]
+    async fn gemini_http_credentials_fail_closed_without_leaking_the_canary() {
+        let canary = "AIza-secret-canary-055";
+        let error = Agent::gemini(GeminiAgentSpec {
+            endpoint: "http://127.0.0.1:9".into(),
+            model: "fixture-model".into(),
+            api_key: Some(canary.into()),
+            openrouter_media: None,
+            common: common(),
+        })
+        .await
+        .err()
+        .expect("http + key");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(!error.to_string().contains(canary));
+    }
+
+    #[tokio::test]
     async fn ollama_constructs_without_a_network_request() {
         let built = Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
@@ -1448,6 +1615,28 @@ mod tests {
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("HTTPS"));
         assert!(!error.to_string().contains(canary));
+    }
+
+    #[tokio::test]
+    async fn gateway_gemini_generate_content_constructs_without_a_network_request() {
+        let mut spec = gateway_spec();
+        spec.wire_protocol = "gemini_generate_content".into();
+        let built = Agent::gateway(spec)
+            .await
+            .expect("gateway gemini construct");
+        assert!(built.agent.capability_catalog().is_empty());
+    }
+
+    #[tokio::test]
+    async fn gateway_rejects_a_misspelled_gemini_protocol() {
+        let mut spec = gateway_spec();
+        spec.wire_protocol = "gemini_generatecontent".into();
+        let error = Agent::gateway(spec)
+            .await
+            .err()
+            .expect("misspelled gemini protocol stays an error");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("gemini_generate_content"));
     }
 
     #[tokio::test]

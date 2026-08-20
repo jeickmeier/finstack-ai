@@ -1,4 +1,4 @@
-//! Cross-provider catalog identity and leaf metadata refresh.
+//! Capability-catalog identity and leaf metadata refresh for the Gemini leaf.
 
 use std::sync::Arc;
 
@@ -6,10 +6,7 @@ use finstack_ai::runtime::{JournalStore, Model, ModelName};
 use finstack_ai::{Agent, CapabilityActivation, CapabilitySpec, InstructionSpec};
 use finstack_ai_kernel::CapabilityId;
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
-use finstack_ai_provider_anthropic::{AnthropicConfig, AnthropicModelConfig, AnthropicProvider};
 use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
-use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
-use finstack_ai_provider_openai::{OpenAiConfig, OpenAiModelConfig, OpenAiProvider};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
 
@@ -20,12 +17,9 @@ const VERSION: Version = Version {
 };
 
 #[tokio::test]
-async fn capability_catalog_is_identical_across_scripted_compatible_anthropic_and_ollama() {
+async fn capability_catalog_is_identical_across_scripted_and_gemini() {
     let catalogs = [
         catalog_for(scripted()).await,
-        catalog_for(openai_model()).await,
-        catalog_for(anthropic_model()).await,
-        catalog_for(ollama_model()).await,
         catalog_for(gemini_model()).await,
     ];
     for catalog in &catalogs[1..] {
@@ -39,41 +33,24 @@ async fn capability_catalog_is_identical_across_scripted_compatible_anthropic_an
 
 #[test]
 fn leaf_metadata_refresh_updates_advertised_flags_without_a_network() {
-    let anthropic = AnthropicProvider::try_new(
-        AnthropicConfig::try_new("http://127.0.0.1:9").expect("config"),
+    let gemini = GeminiProvider::try_new(
+        GeminiConfig::try_new("http://127.0.0.1:9").expect("config"),
         vec![
-            AnthropicModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
-                .expect("model"),
+            GeminiModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096).expect("model"),
         ],
     )
     .expect("provider");
     let name = ModelName::try_new("fixture-model").expect("name");
-    assert!(!anthropic.capabilities(&name).reasoning);
-    assert!(!anthropic.capabilities(&name).prompt_cache);
-    let mut update = anthropic.capabilities(&name);
+    assert!(!gemini.capabilities(&name).reasoning);
+    assert!(!gemini.capabilities(&name).prompt_cache);
+    let mut update = gemini.capabilities(&name);
     update.reasoning = true;
     update.prompt_cache = true;
-    anthropic
-        .refresh_model_metadata(&name, update)
+    gemini
+        .refresh_model_metadata(&name, &update)
         .expect("refresh");
-    assert!(anthropic.capabilities(&name).reasoning);
-    assert!(anthropic.capabilities(&name).prompt_cache);
-
-    let openai = OpenAiProvider::try_new(
-        OpenAiConfig::try_new("http://127.0.0.1:9").expect("config"),
-        vec![
-            OpenAiModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
-                .expect("model"),
-        ],
-    )
-    .expect("provider");
-    assert!(!openai.capabilities(&name).reasoning);
-    let mut update = openai.capabilities(&name);
-    update.reasoning = true;
-    openai
-        .refresh_model_metadata(&name, update)
-        .expect("refresh");
-    assert!(openai.capabilities(&name).reasoning);
+    assert!(gemini.capabilities(&name).reasoning);
+    assert!(gemini.capabilities(&name).prompt_cache);
 }
 
 async fn catalog_for(model: Arc<dyn Model>) -> String {
@@ -173,45 +150,6 @@ fn scripted() -> Arc<dyn Model> {
         },
         Vec::new(),
     ))
-}
-
-fn openai_model() -> Arc<dyn Model> {
-    Arc::new(
-        OpenAiProvider::try_new(
-            OpenAiConfig::try_new("http://127.0.0.1:9").expect("config"),
-            vec![
-                OpenAiModelConfig::try_new("preview-1", 1_000_000, 128_000, 4_096, 4_096, 256)
-                    .expect("model"),
-            ],
-        )
-        .expect("provider"),
-    )
-}
-
-fn ollama_model() -> Arc<dyn Model> {
-    Arc::new(
-        OllamaProvider::try_new(
-            OllamaConfig::try_new("http://127.0.0.1:9").expect("config"),
-            vec![
-                OllamaModelConfig::try_new("preview-1", 1_000_000, 128_000, 4_096, 4_096, 256)
-                    .expect("model"),
-            ],
-        )
-        .expect("provider"),
-    )
-}
-
-fn anthropic_model() -> Arc<dyn Model> {
-    Arc::new(
-        AnthropicProvider::try_new(
-            AnthropicConfig::try_new("http://127.0.0.1:9").expect("config"),
-            vec![
-                AnthropicModelConfig::try_new("preview-1", 1_000_000, 128_000, 4_096, 4_096, 256)
-                    .expect("model"),
-            ],
-        )
-        .expect("provider"),
-    )
 }
 
 fn gemini_model() -> Arc<dyn Model> {

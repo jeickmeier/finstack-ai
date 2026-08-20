@@ -182,9 +182,11 @@ pub use middleware::{
 pub use model::{
     AnthropicMessagesAssembly, ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement,
     AssembledModelStream, Authentication, AuthorizationContext, CancellationSignal,
-    CredentialReference, CredentialRejected, CredentialStore, InputCapabilities,
-    LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, MODEL_REQUEST_INVALID,
-    MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
+    CredentialReference, CredentialRejected, CredentialStore, GEMINI_CACHED_TOKENS_KEY,
+    GEMINI_CODE_RESULT_MEDIA_TYPE, GEMINI_CONTINUATION_PROVIDER, GEMINI_EXECUTABLE_CODE_MEDIA_TYPE,
+    GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly,
+    InputCapabilities, LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED,
+    MODEL_REQUEST_INVALID, MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
     MODEL_STREAM_ERROR_AFTER_COMPLETION, MODEL_STREAM_ITEM_AFTER_COMPLETION,
     MODEL_STREAM_LIMIT_EXCEEDED, MODEL_STREAM_MISSING_COMPLETION,
     MODEL_TOOL_CALL_ARGUMENTS_INVALID, MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE,
@@ -200,7 +202,7 @@ pub use model::{
     SseEvent, SseEventParser, SseParseError, StreamNormError, StreamNormKind,
     StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
     ToolDeferralSupport, ToolSpec, UsageDelta, model_resume_action, resolve_draft_media,
-    resolve_model_context_profile, secret_is_valid,
+    resolve_model_context_profile, secret_is_valid, thinking_level_budget,
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use model::{MODEL_PROFILE_INVALID, map_model_reconcile_result, model_retry_allowed};

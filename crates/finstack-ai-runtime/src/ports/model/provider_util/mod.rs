@@ -2,6 +2,7 @@
 
 mod anthropic_messages;
 mod credentials;
+mod gemini_generate_content;
 mod media;
 mod ndjson;
 mod ollama_chat;
@@ -11,6 +12,11 @@ mod sse;
 
 pub use anthropic_messages::AnthropicMessagesAssembly;
 pub use credentials::{Authentication, CredentialReference, CredentialRejected, CredentialStore};
+pub use gemini_generate_content::{
+    GEMINI_CACHED_TOKENS_KEY, GEMINI_CODE_RESULT_MEDIA_TYPE, GEMINI_CONTINUATION_PROVIDER,
+    GEMINI_EXECUTABLE_CODE_MEDIA_TYPE, GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY,
+    GeminiGenerateContentAssembly,
+};
 pub use media::{
     MediaResolveError, MediaResolveKind, MediaResolver, ResolveDraftMediaError, ResolvedMedia,
     resolve_draft_media,
@@ -20,6 +26,21 @@ pub use ollama_chat::{OllamaChatAssembly, OllamaReplayEntry};
 pub use openai_responses::OpenAiResponsesAssembly;
 pub use secret::{SECRET_MAX_BYTES, SecretRejected, SecretString, secret_is_valid};
 pub use sse::{SseEvent, SseEventParser, SseParseError};
+
+/// Budget tiers for the portable `thinking_level` setting.
+///
+/// Every leaf that honors `thinking_level` maps `low`/`medium`/`high` through
+/// this one table so the setting means the same token budget on every
+/// provider; returns `None` for values outside the allowlist.
+#[must_use]
+pub fn thinking_level_budget(level: &str) -> Option<u64> {
+    match level {
+        "low" => Some(1_024),
+        "medium" => Some(4_096),
+        "high" => Some(8_192),
+        _ => None,
+    }
+}
 
 /// Kind of a shared stream-normalization failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

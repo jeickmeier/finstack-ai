@@ -1,5 +1,5 @@
 [package]
-name = "finstack-ai-provider-anthropic"
+name = "finstack-ai-provider-gemini"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Anthropic Messages provider for finstack-ai"
+description = "Gemini generateContent provider for finstack-ai"
 readme = "README.md"
 
 [features]
@@ -27,9 +27,6 @@ tokio = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 finstack-ai = { workspace = true, features = ["native-tokio"] }
-finstack-ai-provider-gemini = { workspace = true }
-finstack-ai-provider-openai = { workspace = true }
-finstack-ai-provider-ollama = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-test = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
