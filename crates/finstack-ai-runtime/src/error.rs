@@ -51,8 +51,18 @@ impl PortErrorData {
         retryable: bool,
         message: &'static str,
     ) -> Self {
+        const INTERNAL: finstack_ai_kernel::StaticErrorCode =
+            match ErrorCode::static_literal("internal") {
+                Some(code) => code,
+                None => panic!("invalid internal error code"),
+            };
+        let validated = ErrorCode::static_literal(code);
+        debug_assert!(
+            validated.is_some(),
+            "invalid frozen runtime error code: {code}"
+        );
         Self {
-            code: ErrorCode::from_static(code),
+            code: ErrorCode::from_static(validated.unwrap_or(INTERNAL)),
             category,
             retryable,
             message: Arc::from(message),

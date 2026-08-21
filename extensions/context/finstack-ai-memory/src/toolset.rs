@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    Digest, ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
+    ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
     ValidatedToolCall,
 };
 use finstack_ai_runtime::{
@@ -664,7 +664,7 @@ fn matched_str(matched: &MatchEvidence) -> String {
 /// first write into a conflict with another tenant's record, nor let the
 /// conflict reveal that some other scope holds that exact body.
 fn derive_id(tenant: &str, body: &str) -> String {
-    let digest = Digest::from_fixed_domain(
+    let digest = finstack_ai_kernel::fixed_domain_digest!(
         "memory-tool-derived-id",
         1,
         format!("{tenant}\0{body}").as_bytes(),

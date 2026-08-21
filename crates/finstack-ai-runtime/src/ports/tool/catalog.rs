@@ -408,7 +408,7 @@ fn synthetic(
         .to_descriptor()
         .unwrap_or_else(|fallback| ErrorDescriptor {
             code: ErrorCode::new(fallback.code())
-                .unwrap_or_else(|_| ErrorCode::from_static("internal")),
+                .unwrap_or_else(|_| finstack_ai_kernel::static_error_code!("internal")),
             message: Arc::from(fallback.message()),
             category: fallback.category(),
             retryable: fallback.retryable(),

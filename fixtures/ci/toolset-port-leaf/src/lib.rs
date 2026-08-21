@@ -42,7 +42,7 @@ impl LeafToolset {
     #[must_use]
     pub fn spec() -> ToolSpec {
         ToolSpec {
-            id: ToolId::from_static("finstack.tools.leaf_echo"),
+            id: finstack_ai_kernel::static_key!(ToolId, "finstack.tools.leaf_echo"),
             model_name: Arc::from("leaf_echo"),
             title: Arc::from("Leaf echo"),
             description: Arc::from("Public conformance sample tool"),

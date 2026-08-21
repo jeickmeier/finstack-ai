@@ -307,9 +307,7 @@ fn a_fold_that_crosses_a_limit_still_lands_through_the_choke_point() {
 
 fn verify_model_response(text: &str) -> crate::ModelResponse {
     crate::ModelResponse {
-        assistant_content: Arc::from([ContentBlock::Text(
-            TextBlock::try_new(text).expect("text"),
-        )]),
+        assistant_content: Arc::from([ContentBlock::Text(TextBlock::try_new(text).expect("text"))]),
         tool_calls: Arc::from([]),
         usage: finstack_ai_kernel::Usage::empty(),
         provider_ids: ProviderIds::empty(),
@@ -408,7 +406,7 @@ fn drive_to_before_finalize(coordinator: &mut CommitCoordinator) -> Message {
 
 /// End to end through the choke point: a `finstack.middleware.verify`
 /// component bounces a `Completed` candidate at `BeforeFinalize` with a
-/// `Verification` retry. The kernel side of this is pinned in
+/// framework-classified retry. The kernel side of this is pinned in
 /// `crates/finstack-ai-kernel/tests/model_only_reducer/termination/verification_retry.rs`;
 /// this test is the promotion claim that the same bounce lands through the
 /// runtime's own choke point, `settle_facade_stage`, and that the run
@@ -416,7 +414,7 @@ fn drive_to_before_finalize(coordinator: &mut CommitCoordinator) -> Message {
 /// timer fires — with the bounced assistant message still in
 /// `state.messages`, which is what Task 5's feedback design depends on.
 #[test]
-fn a_verification_bounce_at_before_finalize_lands_end_to_end() {
+fn a_framework_verifier_bounce_at_before_finalize_lands_end_to_end() {
     let mut coordinator = accepted_coordinator_with_dispatcher(RunLimits {
         max_retries: Some(3),
         ..RunLimits::empty()
@@ -425,11 +423,11 @@ fn a_verification_bounce_at_before_finalize_lands_end_to_end() {
     let sources = test_sources();
 
     let retry = finstack_ai_kernel::RetryDirective::try_new(
-        finstack_ai_kernel::RetryClassification::Verification,
+        finstack_ai_kernel::RetryClassification::Framework,
         finstack_ai_kernel::Duration::from_millis(1),
         "verify-policy-v1",
     )
-    .expect("verification retry directive");
+    .expect("framework retry directive");
     let driver = driver_for(
         "finstack.middleware.verify",
         Stage::BeforeFinalize,
@@ -450,12 +448,12 @@ fn a_verification_bounce_at_before_finalize_lands_end_to_end() {
             outcome: ReducerStageOutcome::FinalizeAccepted,
         },
     ))
-    .expect("a Verification bounce must commit over a Completed candidate");
+    .expect("a framework verifier bounce must commit over a Completed candidate");
 
     // ---- Step 1: the bounce lands as a retry, not a terminal -----------
     assert!(
         coordinator.state().terminal.is_none(),
-        "a Verification bounce must not terminate the run: {:?}",
+        "a framework verifier bounce must not terminate the run: {:?}",
         coordinator.state().terminal
     );
     let pending = coordinator
@@ -466,7 +464,7 @@ fn a_verification_bounce_at_before_finalize_lands_end_to_end() {
         .expect("the bounce must leave a pending retry");
     assert_eq!(
         pending.classification,
-        finstack_ai_kernel::RetryClassification::Verification
+        finstack_ai_kernel::RetryClassification::Framework
     );
 
     let committed = outcome.committed.as_ref().expect("committed batch");
@@ -480,12 +478,12 @@ fn a_verification_bounce_at_before_finalize_lands_end_to_end() {
         .expect("a RetryScheduled record must land in the journal");
     assert_eq!(
         scheduled.classification,
-        finstack_ai_kernel::RetryClassification::Verification
+        finstack_ai_kernel::RetryClassification::Framework
     );
     assert_eq!(
         scheduled.prior_error.code.as_str(),
         "candidate_rejected",
-        "a Verification bounce over a Completed candidate must carry the kernel's own error"
+        "a framework verifier bounce over a Completed candidate must carry the kernel's own error"
     );
 
     // ---- Step 2: settle the timer and re-enter PreparingContext --------
@@ -501,7 +499,8 @@ fn a_verification_bounce_at_before_finalize_lands_end_to_end() {
     .expect("the retry timer fires");
 
     assert_eq!(
-        coordinator.state().cycle, 1,
+        coordinator.state().cycle,
+        1,
         "the fired timer must open cycle n + 1"
     );
     assert_eq!(

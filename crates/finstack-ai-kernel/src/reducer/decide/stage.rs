@@ -285,7 +285,7 @@ fn stage_bodies(
 /// Resolves the safe failure descriptor a retry attaches to `RetryScheduled`.
 ///
 /// A `Failed` candidate reuses its own retryable error. A `Completed`
-/// candidate only admits a retry when `Verification` bounced it at
+/// candidate only admits a retry when `Framework` middleware bounced it at
 /// `before_finalize`, in which case a kernel-owned, middleware-agnostic
 /// descriptor is synthesized.
 fn retry_prior_error(
@@ -303,7 +303,7 @@ fn retry_prior_error(
             Ok(error.clone())
         }
         Some(TerminalCandidate::Completed { .. })
-            if directive.classification == RetryClassification::Verification =>
+            if directive.classification == RetryClassification::Framework =>
         {
             crate::ErrorDescriptor::new(
                 "candidate_rejected",

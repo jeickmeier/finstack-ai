@@ -50,7 +50,23 @@ pub struct Digest(
     #[serde(serialize_with = "serialize_hex", deserialize_with = "deserialize_hex")] [u8; 32],
 );
 
+/// Compile-time validated domain for [`Digest::from_fixed_domain`].
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaticDigestDomain(&'static str);
+
 impl Digest {
+    /// Validate a compile-time digest domain without allocating.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn static_domain(domain: &'static str) -> Option<StaticDigestDomain> {
+        if domain_is_valid(domain) {
+            Some(StaticDigestDomain(domain))
+        } else {
+            None
+        }
+    }
+
     /// Borrow the raw digest bytes.
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; 32] {
@@ -197,29 +213,25 @@ impl Digest {
     ///
     /// # Arguments
     ///
-    /// * `domain` - Non-empty, NUL-free domain already owned by this crate.
+    /// * `domain` - A compile-time-validated non-empty, NUL-free domain.
     /// * `schema_version` - Domain schema version mixed into the digest.
     /// * `canonical_bytes` - Payload bytes hashed under that domain.
     ///
     /// # Examples
     ///
     /// ```
-    /// use finstack_ai_kernel::Digest;
+    /// use finstack_ai_kernel::{Digest, fixed_domain_digest};
     ///
-    /// let digest = Digest::from_fixed_domain("raw-json", 1, b"{}");
+    /// let digest = fixed_domain_digest!("raw-json", 1, b"{}");
     /// assert_eq!(digest, Digest::raw_json(b"{}"));
     /// ```
     #[must_use]
     pub fn from_fixed_domain(
-        domain: &'static str,
+        domain: StaticDigestDomain,
         schema_version: u32,
         canonical_bytes: &[u8],
     ) -> Self {
-        debug_assert!(
-            domain_is_valid(domain),
-            "fixed digest domain must be non-empty and NUL-free: {domain:?}"
-        );
-        Self::hash_domain(domain, schema_version, canonical_bytes)
+        Self::hash_domain(domain.0, schema_version, canonical_bytes)
     }
 
     /// Digest for a canonical resolved middleware chain.
@@ -231,6 +243,28 @@ impl Digest {
             canonical_bytes,
         )
     }
+}
+
+/// Hash bytes under a compile-time-validated digest domain.
+///
+/// Invalid domains fail during compilation:
+///
+/// ```compile_fail
+/// use finstack_ai_kernel::fixed_domain_digest;
+///
+/// let _ = fixed_domain_digest!("", 1, b"payload");
+/// ```
+#[macro_export]
+macro_rules! fixed_domain_digest {
+    ($domain:expr, $schema_version:expr, $canonical_bytes:expr $(,)?) => {{
+        let validated = const {
+            match $crate::Digest::static_domain($domain) {
+                Some(validated) => validated,
+                None => panic!("invalid static digest domain"),
+            }
+        };
+        $crate::Digest::from_fixed_domain(validated, $schema_version, $canonical_bytes)
+    }};
 }
 
 impl fmt::Debug for Digest {
@@ -477,5 +511,20 @@ mod tests {
             Digest::domain_separated("", 1, payload).expect_err("empty"),
             DigestError::InvalidDomain { .. }
         ));
+    }
+
+    #[test]
+    fn static_domains_share_the_runtime_validation_contract() {
+        for domain in ["raw-json", "remote-bearer", "", "bad\0domain"] {
+            assert_eq!(
+                Digest::static_domain(domain).is_some(),
+                Digest::domain_separated(domain, 1, b"payload").is_ok(),
+                "static/runtime validation drifted for {domain:?}",
+            );
+        }
+        assert_eq!(
+            crate::fixed_domain_digest!("raw-json", 1, b"{}"),
+            Digest::raw_json(b"{}"),
+        );
     }
 }

@@ -302,10 +302,16 @@ impl GeminiGenerateContentAssembly {
         };
         let mut counters = BTreeMap::new();
         if let Some(value) = usage.thoughts_token_count.filter(|value| *value > 0) {
-            counters.insert(LimitKey::from_static(GEMINI_THOUGHTS_TOKENS_KEY), value);
+            counters.insert(
+                finstack_ai_kernel::static_key!(LimitKey, GEMINI_THOUGHTS_TOKENS_KEY),
+                value,
+            );
         }
         if let Some(value) = usage.cached_content_token_count.filter(|value| *value > 0) {
-            counters.insert(LimitKey::from_static(GEMINI_CACHED_TOKENS_KEY), value);
+            counters.insert(
+                finstack_ai_kernel::static_key!(LimitKey, GEMINI_CACHED_TOKENS_KEY),
+                value,
+            );
         }
         for (key, value) in self.usage.extension_counters() {
             counters.entry(key.clone()).or_insert(*value);
@@ -624,12 +630,18 @@ mod tests {
         let counters = response.usage.extension_counters();
         assert_eq!(counters.len(), 1);
         assert_eq!(
-            counters.get(&LimitKey::from_static(GEMINI_THOUGHTS_TOKENS_KEY)),
+            counters.get(&finstack_ai_kernel::static_key!(
+                LimitKey,
+                GEMINI_THOUGHTS_TOKENS_KEY
+            )),
             Some(&7)
         );
         assert!(
             counters
-                .get(&LimitKey::from_static(GEMINI_CACHED_TOKENS_KEY))
+                .get(&finstack_ai_kernel::static_key!(
+                    LimitKey,
+                    GEMINI_CACHED_TOKENS_KEY
+                ))
                 .is_none()
         );
     }

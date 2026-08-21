@@ -5,7 +5,7 @@ deterministic `EvidenceVerifier` and runs it at two stages:
 
 - `before_finalize` judges the terminal candidate's canonical assistant
   `Message`. `Verdict::Accept` continues; `Verdict::Bounce` requests a
-  semantic `RetryClassification::Verification` retry (`StageOutcome::Retry`);
+  semantic `RetryClassification::Framework` retry (`StageOutcome::Retry`);
   `Verdict::Reject` fails the run with the stable, non-retryable
   `verify_rejected` code.
 - `before_model` re-derives the same verdict, statelessly, from the trailing
@@ -45,7 +45,7 @@ notes are truncated rather than rejected.
 1. The candidate lands at `before_finalize`. The verifier returns
    `Verdict::Bounce(findings)`.
 2. `VerifyMiddleware` turns that into `StageOutcome::Retry` carrying a
-   `RetryDirective { classification: Verification, backoff, policy_version }`
+   `RetryDirective { classification: Framework, backoff, policy_version }`
    from the configured `VerifyPolicy`.
 3. The kernel commits `RetryScheduled` — for a `Completed` candidate this is
    the one case where a *terminal, non-failed* candidate is still admitted
@@ -58,8 +58,9 @@ notes are truncated rather than rejected.
    trailing draft message (byte-identical canonical JSON) and, if still not
    `Accept`, contributes one `AddContext` item summarizing the findings so
    the model has feedback for its next attempt. Nothing about the bounce is
-   journaled beyond the `RetryScheduled` record — recovery just re-runs the
-   pure verifier.
+   journaled beyond the `RetryScheduled` record. The durable
+   `candidate_rejected` error and `policy_version` retain the bounce's
+   attribution; recovery just re-runs the pure verifier.
 
 ## The determinism obligation
 

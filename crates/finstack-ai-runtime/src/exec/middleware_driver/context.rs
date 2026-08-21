@@ -119,7 +119,8 @@ const DOMAIN_MIDDLEWARE_STAGE_INVOCATION: &str = "middleware-stage-invocation";
 pub fn derived_stage_effect_id(locator: &OperationLocator, cycle: u64, stage: Stage) -> EffectId {
     let canonical = serde_json_canonicalizer::to_vec(&(locator, cycle, stage_name(stage)))
         .unwrap_or_else(|_| Vec::new());
-    let digest = Digest::from_fixed_domain(DOMAIN_MIDDLEWARE_STAGE_INVOCATION, 1, &canonical);
+    let digest =
+        finstack_ai_kernel::fixed_domain_digest!(DOMAIN_MIDDLEWARE_STAGE_INVOCATION, 1, &canonical);
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&digest.as_bytes()[..16]);
     EffectId::from_bytes(bytes)

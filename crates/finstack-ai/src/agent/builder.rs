@@ -558,7 +558,7 @@ impl Extension for NativeAgentBuilder {
 }
 
 fn native_builder_source() -> ComponentId {
-    ComponentId::from_static("finstack.sdk.native-builder")
+    finstack_ai_kernel::static_key!(ComponentId, "finstack.sdk.native-builder")
 }
 
 fn registration_metadata(component: &ComponentRef) -> RegistrationMetadata {

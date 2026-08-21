@@ -33,9 +33,9 @@ use finstack_ai_runtime::{
     ObserverPayloadMode, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
 };
 
-fn invocation(id: &'static str) -> ComponentInvocation {
+fn invocation(component: ComponentId) -> ComponentInvocation {
     ComponentInvocation {
-        component: ComponentId::from_static(id),
+        component,
         version: Version {
             major: 1,
             minor: 0,
@@ -52,7 +52,10 @@ pub struct LeafContextProvider;
 impl ContextProvider for LeafContextProvider {
     fn descriptor(&self) -> ContextProviderDescriptor {
         ContextProviderDescriptor {
-            invocation: invocation("fixture.context"),
+            invocation: invocation(finstack_ai_kernel::static_key!(
+                ComponentId,
+                "fixture.context"
+            )),
             trusted_application_instructions: false,
             metadata: Metadata::empty(),
         }
@@ -73,7 +76,10 @@ pub struct LeafMiddleware;
 impl Middleware for LeafMiddleware {
     fn descriptor(&self) -> MiddlewareDescriptor {
         MiddlewareDescriptor {
-            invocation: invocation("fixture.middleware"),
+            invocation: invocation(finstack_ai_kernel::static_key!(
+                ComponentId,
+                "fixture.middleware"
+            )),
             stages: StageMask::from_stages([Stage::BeforeRun]),
             order: MiddlewareOrder {
                 tier: OrderTier::Standard,
@@ -102,7 +108,7 @@ impl Observer for LeafObserver {
     fn descriptor(&self) -> ObserverDescriptor {
         ObserverDescriptor {
             component: finstack_ai_kernel::ComponentRef::new(
-                ComponentId::from_static("fixture.observer"),
+                finstack_ai_kernel::static_key!(ComponentId, "fixture.observer"),
                 Some(Version {
                     major: 1,
                     minor: 0,

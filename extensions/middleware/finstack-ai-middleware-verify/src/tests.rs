@@ -185,7 +185,7 @@ async fn before_finalize_accept_continues() {
 }
 
 #[tokio::test]
-async fn before_finalize_bounce_retries_with_verification_classification() {
+async fn before_finalize_bounce_retries_with_framework_classification() {
     let verifier = Arc::new(ScriptedVerifier::default());
     let mw = middleware(verifier);
     let input = finalize_input("please bounce this", true);
@@ -194,7 +194,7 @@ async fn before_finalize_bounce_retries_with_verification_classification() {
         StageOutcome::Retry(directive) => {
             assert_eq!(
                 directive.classification,
-                finstack_ai_kernel::RetryClassification::Verification
+                finstack_ai_kernel::RetryClassification::Framework
             );
             assert_eq!(directive.backoff.as_millis(), 250);
             assert_eq!(directive.policy_version.as_ref(), "policy-v1");

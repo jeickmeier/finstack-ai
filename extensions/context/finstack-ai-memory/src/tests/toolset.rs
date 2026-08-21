@@ -344,7 +344,7 @@ async fn forget_and_correct_require_ids_and_are_idempotent() {
 }
 
 fn expected_derived_id(tenant: &str, body: &str) -> String {
-    let digest = Digest::from_fixed_domain(
+    let digest = finstack_ai_kernel::fixed_domain_digest!(
         "memory-tool-derived-id",
         1,
         format!("{tenant}\0{body}").as_bytes(),

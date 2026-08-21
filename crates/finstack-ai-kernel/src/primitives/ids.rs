@@ -317,7 +317,39 @@ pub struct Key<T: KeyTag> {
     _marker: PhantomData<fn() -> T>,
 }
 
+/// Compile-time validated input for [`Key::from_static`].
+///
+/// Construct this through [`Key::static_literal`] or the
+/// [`static_key!`](crate::static_key) macro.
+#[doc(hidden)]
+pub struct StaticKey<T: KeyTag> {
+    value: &'static str,
+    _marker: PhantomData<fn() -> T>,
+}
+
+impl<T: KeyTag> Clone for StaticKey<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: KeyTag> Copy for StaticKey<T> {}
+
 impl<T: KeyTag> Key<T> {
+    /// Validate a compile-time key literal without allocating.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn static_literal(input: &'static str) -> Option<StaticKey<T>> {
+        if key_literal_is_valid(input, T::REQUIRES_NAMESPACE) {
+            Some(StaticKey {
+                value: input,
+                _marker: PhantomData,
+            })
+        } else {
+            None
+        }
+    }
+
     /// Parse and validate a namespaced key.
     ///
     /// Accepted forms:
@@ -364,26 +396,20 @@ impl<T: KeyTag> Key<T> {
     ///
     /// # Arguments
     ///
-    /// * `input` - A validated local alias or namespaced id already owned by
-    ///   this crate. Debug builds assert the same rules as [`Key::parse`].
+    /// * `input` - A compile-time-validated local alias or namespaced id.
     ///
     /// # Examples
     ///
     /// ```
-    /// use finstack_ai_kernel::ToolId;
+    /// use finstack_ai_kernel::{ToolId, static_key};
     ///
-    /// let id = ToolId::from_static("search.web");
+    /// let id = static_key!(ToolId, "search.web");
     /// assert_eq!(id.as_str(), "search.web");
     /// ```
     #[must_use]
-    pub fn from_static(input: &'static str) -> Self {
-        debug_assert!(
-            validate_key(input, T::REQUIRES_NAMESPACE).is_ok(),
-            "static {} key must be valid: {input}",
-            T::NAME
-        );
+    pub fn from_static(input: StaticKey<T>) -> Self {
         Self {
-            value: Arc::from(input),
+            value: Arc::from(input.value),
             _marker: PhantomData,
         }
     }
@@ -524,6 +550,51 @@ fn validate_key(input: &str, requires_namespace: bool) -> Result<(), KeyParseErr
     Ok(())
 }
 
+const fn key_literal_is_valid(input: &str, requires_namespace: bool) -> bool {
+    let bytes = input.as_bytes();
+    if bytes.is_empty() || bytes.len() > KEY_MAX_BYTES || !bytes[0].is_ascii_lowercase() {
+        return false;
+    }
+    let mut index = 1;
+    let mut saw_dot = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'.' {
+            saw_dot = true;
+        } else if !(byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || byte == b'_'
+            || byte == b'-')
+        {
+            return false;
+        }
+        index += 1;
+    }
+    !requires_namespace || saw_dot
+}
+
+/// Construct a [`Key`] alias from a compile-time-validated literal.
+///
+/// Invalid literals fail during compilation:
+///
+/// ```compile_fail
+/// use finstack_ai_kernel::{ToolId, static_key};
+///
+/// let _ = static_key!(ToolId, "missing_namespace");
+/// ```
+#[macro_export]
+macro_rules! static_key {
+    ($key:ty, $input:expr) => {{
+        let validated = const {
+            match <$key>::static_literal($input) {
+                Some(validated) => validated,
+                None => panic!("invalid static key"),
+            }
+        };
+        <$key>::from_static(validated)
+    }};
+}
+
 /// Session identifier.
 pub type SessionId = Id<SessionTag>;
 /// Lane identifier.
@@ -625,5 +696,26 @@ mod tests {
                 .kind,
             KeyParseErrorKind::TooLong
         ));
+    }
+
+    #[test]
+    fn static_keys_share_the_runtime_validation_contract() {
+        for key in [
+            "finstack.tools.filesystem",
+            "missing_namespace",
+            "Invalid.start",
+            "bad/character",
+            "",
+        ] {
+            assert_eq!(
+                ToolId::static_literal(key).is_some(),
+                ToolId::parse(key).is_ok(),
+                "static/runtime validation drifted for {key:?}",
+            );
+        }
+        assert_eq!(
+            crate::static_key!(ToolId, "finstack.tools.filesystem").as_str(),
+            "finstack.tools.filesystem",
+        );
     }
 }

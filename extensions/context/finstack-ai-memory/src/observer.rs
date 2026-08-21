@@ -133,7 +133,7 @@ impl Observer for MemoryObserver {
                 let id = if let Some(id) = candidate.id.clone() {
                     id
                 } else {
-                    let digest = finstack_ai_kernel::Digest::from_fixed_domain(
+                    let digest = finstack_ai_kernel::fixed_domain_digest!(
                         "memory-observer-capture",
                         1,
                         format!("{run_text}\0{ref_text}\0{index}\0{}", candidate.body).as_bytes(),

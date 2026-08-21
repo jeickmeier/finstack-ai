@@ -623,7 +623,7 @@ fn completed_response(text: &str, calls: &[ModelToolCall], completion_id: &str) 
 
 fn model_deferral(step: &ScriptedStep) -> Result<ModelStreamItem, ModelError> {
     let handle = step.id.as_deref().unwrap_or("scripted-deferral");
-    let provider = ComponentId::from_static("finstack.model.scripted");
+    let provider = finstack_ai_kernel::static_key!(ComponentId, "finstack.model.scripted");
     let handle =
         ExternalHandleRef::try_new(provider, handle, Metadata::empty().as_raw_json().clone())
             .map_err(|_| {

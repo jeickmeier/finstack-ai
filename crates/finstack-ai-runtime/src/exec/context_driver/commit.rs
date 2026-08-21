@@ -62,7 +62,7 @@ pub(crate) fn derived_context_effect_id(
     let canonical =
         serde_json_canonicalizer::to_vec(&(locator, cycle, CONTEXT_STAGE, provider_index))
             .unwrap_or_else(|_| Vec::new());
-    let digest = Digest::from_fixed_domain(DOMAIN_CONTEXT_INVOCATION, 1, &canonical);
+    let digest = finstack_ai_kernel::fixed_domain_digest!(DOMAIN_CONTEXT_INVOCATION, 1, &canonical);
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&digest.as_bytes()[..16]);
     EffectId::from_bytes(bytes)

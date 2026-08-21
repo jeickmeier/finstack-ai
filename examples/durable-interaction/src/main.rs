@@ -229,7 +229,10 @@ fn locator() -> Result<OperationLocator, BoxError> {
 
 fn tools() -> Result<Arc<[ToolSpec]>, BoxError> {
     Ok(Arc::from([ToolSpec {
-        id: finstack_ai_kernel::ToolId::from_static("finstack.tools.echo"),
+        id: finstack_ai_kernel::static_key!(
+            finstack_ai_kernel::ToolId,
+            "finstack.tools.echo"
+        ),
         model_name: Arc::from("echo"),
         title: Arc::from("echo"),
         description: Arc::from("echo"),

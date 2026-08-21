@@ -32,12 +32,12 @@ pub use diagnostic::{Diagnostic, DiagnosticSeverity, Sensitivity};
 pub use digest::{
     AGENT_SPEC_DIGEST_SCHEMA_VERSION, DOMAIN_AGENT_SPEC, DOMAIN_RECORD_ENVELOPE,
     DOMAIN_RECORD_PAYLOAD, Digest, DigestError, RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION,
-    RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION,
+    RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION, StaticDigestDomain,
 };
 pub(crate) use digest::{DigestWriter, HEX_DIGITS, str_from_ascii};
 pub use error::{
     ErrorCategory, ErrorCode, ErrorCodeError, ErrorDescriptor, ErrorDescriptorError,
-    ErrorIdentifiers,
+    ErrorIdentifiers, StaticErrorCode,
 };
 pub use handles::{ArtifactRef, ExternalHandleRef};
 pub use identity::{
@@ -51,8 +51,8 @@ pub use ids::{
     EventId, EventTag, Id, IdParseError, IdTag, InteractionId, InteractionTag, KEY_MAX_BYTES, Key,
     KeyParseError, KeyParseErrorKind, KeyTag, LaneId, LaneTag, LimitKey, LimitTag, MessageId,
     MessageTag, ModelRequestId, ModelRequestTag, RecordId, RecordTag, RunId, RunTag, SessionId,
-    SessionTag, ToolBatchId, ToolBatchTag, ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId,
-    TurnTag,
+    SessionTag, StaticKey, ToolBatchId, ToolBatchTag, ToolCallId, ToolCallTag, ToolId, ToolTag,
+    TurnId, TurnTag,
 };
 pub use label::{hex_nibble, label_is_valid};
 pub use raw_json::{

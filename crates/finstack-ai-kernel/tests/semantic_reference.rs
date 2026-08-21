@@ -1,11 +1,16 @@
 //! Compiler-exhaustive drift guard for the candidate-v1 semantic reference.
 
 use finstack_ai_kernel::{
-    EffectInput, KernelInput, PostCommitAction, RecordBody, RunEventBody, RunPhase,
+    CancellationInitiator, CapabilityActivationSource, ChildPlacement, EffectInput, EffectKind,
+    EffectOutputKind, EffectPurpose, ExternalEffectOutcome, InteractionSettled, InvocationRecovery,
+    JsonSchemaDraft, KernelInput, LimitDimension, ModelSettlement, NestedModelKind,
+    OutputEndStrategy, OutputSpec, PostCommitAction, RecordBody, ReducerStageOutcome,
+    RetryClassification, RetrySafety, RunEventBody, RunPhase, Stage, StageDisposition,
+    StructuredResultSource, ToolBatchContinuation, ToolBatchOutcome, ToolCallPlan,
+    ToolExecutionMode, ToolFailurePolicy, ToolSettlement, ValidationOutcome,
 };
 
-const REFERENCE: &str =
-    include_str!("../../../docs/implementation/kernel-semantics-candidate-v1.md");
+const REFERENCE: &str = include_str!("fixtures/candidate_v1_nested_vocabulary.md");
 
 macro_rules! named_variants {
     ($fn:ident, $all:ident, $ty:ty, $($pat:pat => $label:literal),+ $(,)?) => {
@@ -18,33 +23,290 @@ macro_rules! named_variants {
     };
 }
 
+macro_rules! documented_wire_variants {
+    (
+        $test:ident, $ty:ty, $type_name:literal, $serde_form:literal, $unknown_probe:literal,
+        $($pat:pat => $variant:literal => $wire:literal),+ $(,)?
+    ) => {
+        #[test]
+        fn $test() {
+            fn vocabulary(value: &$ty) -> (&'static str, &'static str) {
+                match value {
+                    $($pat => ($variant, $wire),)+
+                }
+            }
+
+            let _ = vocabulary as fn(&$ty) -> (&'static str, &'static str);
+            let mappings = [$(format!(
+                "`{}::{}` → `{}`",
+                $type_name,
+                $variant,
+                $wire,
+            )),+]
+            .join("; ");
+            let expected_row = format!(
+                "| `{}` | {} | {} |",
+                $type_name,
+                $serde_form,
+                mappings,
+            );
+            assert_eq!(
+                REFERENCE
+                    .lines()
+                    .filter(|line| *line == expected_row)
+                    .count(),
+                1,
+                "semantic reference must contain exactly one row: {expected_row}",
+            );
+
+            let error = match serde_json::from_str::<$ty>($unknown_probe) {
+                Ok(_) => panic!(
+                    "{} unexpectedly accepted the reserved unknown wire variant",
+                    $type_name,
+                ),
+                Err(error) => error.to_string(),
+            };
+            assert!(
+                error.contains("unknown variant `__unknown__`"),
+                "{} no longer uses the documented serde form: {error}",
+                $type_name,
+            );
+            for wire in [$($wire),+] {
+                assert!(
+                    error.contains(wire),
+                    "{} serde vocabulary omitted `{wire}`: {error}",
+                    $type_name,
+                );
+            }
+        }
+    };
+}
+
+documented_wire_variants! {
+    stage_vocabulary, Stage, "Stage", "scalar `snake_case`", r#""__unknown__""#,
+    Stage::BeforeRun => "BeforeRun" => "before_run",
+    Stage::PrepareContext => "PrepareContext" => "prepare_context",
+    Stage::BeforeModel => "BeforeModel" => "before_model",
+    Stage::AfterModel => "AfterModel" => "after_model",
+    Stage::BeforeToolBatch => "BeforeToolBatch" => "before_tool_batch",
+    Stage::AfterToolBatch => "AfterToolBatch" => "after_tool_batch",
+    Stage::BeforeFinalize => "BeforeFinalize" => "before_finalize",
+}
+
+documented_wire_variants! {
+    reducer_stage_outcome_vocabulary, ReducerStageOutcome, "ReducerStageOutcome", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    ReducerStageOutcome::Continue => "Continue" => "continue",
+    ReducerStageOutcome::ContextPrepared { .. } => "ContextPrepared" => "context_prepared",
+    ReducerStageOutcome::ModelRequestPrepared { .. } => "ModelRequestPrepared" => "model_request_prepared",
+    ReducerStageOutcome::ToolBatchPrepared { .. } => "ToolBatchPrepared" => "tool_batch_prepared",
+    ReducerStageOutcome::FinalizeAccepted => "FinalizeAccepted" => "finalize_accepted",
+    ReducerStageOutcome::ContinueModel { .. } => "ContinueModel" => "continue_model",
+    ReducerStageOutcome::Retry(_) => "Retry" => "retry",
+    ReducerStageOutcome::Fail(_) => "Fail" => "fail",
+}
+
+documented_wire_variants! {
+    tool_settlement_vocabulary, ToolSettlement, "ToolSettlement", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    ToolSettlement::Completed(_) => "Completed" => "completed",
+    ToolSettlement::Deferred(_) => "Deferred" => "deferred",
+    ToolSettlement::Failed(_) => "Failed" => "failed",
+}
+
+documented_wire_variants! {
+    model_settlement_vocabulary, ModelSettlement, "ModelSettlement", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    ModelSettlement::Completed { .. } => "Completed" => "completed",
+    ModelSettlement::Deferred(_) => "Deferred" => "deferred",
+    ModelSettlement::Failed(_) => "Failed" => "failed",
+}
+
+documented_wire_variants! {
+    external_effect_outcome_vocabulary, ExternalEffectOutcome, "ExternalEffectOutcome", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    ExternalEffectOutcome::Completed { .. } => "Completed" => "completed",
+    ExternalEffectOutcome::Failed { .. } => "Failed" => "failed",
+}
+
+documented_wire_variants! {
+    interaction_settled_vocabulary, InteractionSettled, "InteractionSettled", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    InteractionSettled::Resolved(_) => "Resolved" => "resolved",
+    InteractionSettled::Expired(_) => "Expired" => "expired",
+    InteractionSettled::Cancelled(_) => "Cancelled" => "cancelled",
+}
+
+documented_wire_variants! {
+    cancellation_initiator_vocabulary, CancellationInitiator, "CancellationInitiator", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    CancellationInitiator::Principal { .. } => "Principal" => "principal",
+    CancellationInitiator::ParentRun { .. } => "ParentRun" => "parent_run",
+    CancellationInitiator::Deadline => "Deadline" => "deadline",
+    CancellationInitiator::RuntimeShutdown => "RuntimeShutdown" => "runtime_shutdown",
+}
+
+documented_wire_variants! {
+    json_schema_draft_vocabulary, JsonSchemaDraft, "JsonSchemaDraft", "scalar `snake_case`", r#""__unknown__""#,
+    JsonSchemaDraft::Draft202012 => "Draft202012" => "draft202012",
+}
+
+documented_wire_variants! {
+    output_spec_vocabulary, OutputSpec, "OutputSpec", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    OutputSpec::PlainText => "PlainText" => "plain_text",
+    OutputSpec::JsonSchema { .. } => "JsonSchema" => "json_schema",
+}
+
+documented_wire_variants! {
+    output_end_strategy_vocabulary, OutputEndStrategy, "OutputEndStrategy", "scalar `snake_case`", r#""__unknown__""#,
+    OutputEndStrategy::Early => "Early" => "early",
+    OutputEndStrategy::Exhaustive => "Exhaustive" => "exhaustive",
+}
+
+documented_wire_variants! {
+    validation_outcome_vocabulary, ValidationOutcome, "ValidationOutcome", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    ValidationOutcome::Valid => "Valid" => "valid",
+    ValidationOutcome::Invalid { .. } => "Invalid" => "invalid",
+}
+
+documented_wire_variants! {
+    stage_disposition_vocabulary, StageDisposition, "StageDisposition", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    StageDisposition::Continued => "Continued" => "continued",
+    StageDisposition::ContextPrepared { .. } => "ContextPrepared" => "context_prepared",
+    StageDisposition::ModelRequested { .. } => "ModelRequested" => "model_requested",
+    StageDisposition::ToolBatchPrepared { .. } => "ToolBatchPrepared" => "tool_batch_prepared",
+    StageDisposition::FinalizeAccepted => "FinalizeAccepted" => "finalize_accepted",
+    StageDisposition::ContinueModel { .. } => "ContinueModel" => "continue_model",
+    StageDisposition::RetryScheduled { .. } => "RetryScheduled" => "retry_scheduled",
+    StageDisposition::Failed { .. } => "Failed" => "failed",
+}
+
+documented_wire_variants! {
+    retry_classification_vocabulary, RetryClassification, "RetryClassification", "scalar `snake_case`", r#""__unknown__""#,
+    RetryClassification::Model => "Model" => "model",
+    RetryClassification::Tool => "Tool" => "tool",
+    RetryClassification::Validation => "Validation" => "validation",
+    RetryClassification::Framework => "Framework" => "framework",
+}
+
+documented_wire_variants! {
+    child_placement_vocabulary, ChildPlacement, "ChildPlacement", "scalar `snake_case`", r#""__unknown__""#,
+    ChildPlacement::CompatibleLaneInParentSession => "CompatibleLaneInParentSession" => "compatible_lane_in_parent_session",
+    ChildPlacement::IsolatedChildSession => "IsolatedChildSession" => "isolated_child_session",
+    ChildPlacement::RemoteChildSession => "RemoteChildSession" => "remote_child_session",
+}
+
+documented_wire_variants! {
+    tool_execution_mode_vocabulary, ToolExecutionMode, "ToolExecutionMode", "scalar `snake_case`", r#""__unknown__""#,
+    ToolExecutionMode::Parallel => "Parallel" => "parallel",
+    ToolExecutionMode::Sequential => "Sequential" => "sequential",
+    ToolExecutionMode::Barrier => "Barrier" => "barrier",
+}
+
+documented_wire_variants! {
+    tool_failure_policy_vocabulary, ToolFailurePolicy, "ToolFailurePolicy", "scalar `snake_case`", r#""__unknown__""#,
+    ToolFailurePolicy::ReturnToModel => "ReturnToModel" => "return_to_model",
+    ToolFailurePolicy::FailRun => "FailRun" => "fail_run",
+}
+
+documented_wire_variants! {
+    tool_batch_continuation_vocabulary, ToolBatchContinuation, "ToolBatchContinuation", "scalar `snake_case`", r#""__unknown__""#,
+    ToolBatchContinuation::ContinueModel => "ContinueModel" => "continue_model",
+    ToolBatchContinuation::Finalize => "Finalize" => "finalize",
+}
+
+documented_wire_variants! {
+    tool_call_plan_vocabulary, ToolCallPlan, "ToolCallPlan", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    ToolCallPlan::Execute(_) => "Execute" => "execute",
+    ToolCallPlan::SyntheticClosure(_) => "SyntheticClosure" => "synthetic_closure",
+}
+
+documented_wire_variants! {
+    tool_batch_outcome_vocabulary, ToolBatchOutcome, "ToolBatchOutcome", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    ToolBatchOutcome::ContinueModel => "ContinueModel" => "continue_model",
+    ToolBatchOutcome::Finalize => "Finalize" => "finalize",
+    ToolBatchOutcome::Failed { .. } => "Failed" => "failed",
+}
+
+documented_wire_variants! {
+    effect_kind_vocabulary, EffectKind, "EffectKind", "scalar `snake_case`", r#""__unknown__""#,
+    EffectKind::Model => "Model" => "model",
+    EffectKind::Tool => "Tool" => "tool",
+    EffectKind::Context => "Context" => "context",
+    EffectKind::Middleware => "Middleware" => "middleware",
+    EffectKind::Interaction => "Interaction" => "interaction",
+    EffectKind::Timer => "Timer" => "timer",
+}
+
+documented_wire_variants! {
+    retry_safety_vocabulary, RetrySafety, "RetrySafety", "scalar `snake_case`", r#""__unknown__""#,
+    RetrySafety::SafeToRetry => "SafeToRetry" => "safe_to_retry",
+    RetrySafety::IdempotentWithKey => "IdempotentWithKey" => "idempotent_with_key",
+    RetrySafety::AtMostOnce => "AtMostOnce" => "at_most_once",
+    RetrySafety::Unknown => "Unknown" => "unknown",
+}
+
+documented_wire_variants! {
+    effect_output_kind_vocabulary, EffectOutputKind, "EffectOutputKind", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    EffectOutputKind::ModelResponse => "ModelResponse" => "model_response",
+    EffectOutputKind::ToolResult => "ToolResult" => "tool_result",
+    EffectOutputKind::ContextContribution => "ContextContribution" => "context_contribution",
+    EffectOutputKind::MiddlewareOutcome => "MiddlewareOutcome" => "middleware_outcome",
+    EffectOutputKind::InteractionResolution => "InteractionResolution" => "interaction_resolution",
+    EffectOutputKind::TimerFiring => "TimerFiring" => "timer_firing",
+    EffectOutputKind::ArtifactReceipt => "ArtifactReceipt" => "artifact_receipt",
+    EffectOutputKind::Custom { .. } => "Custom" => "custom",
+}
+
+documented_wire_variants! {
+    invocation_recovery_vocabulary, InvocationRecovery, "InvocationRecovery", "scalar `snake_case`", r#""__unknown__""#,
+    InvocationRecovery::RecomputeSafe => "RecomputeSafe" => "recompute_safe",
+    InvocationRecovery::Reconcile => "Reconcile" => "reconcile",
+    InvocationRecovery::NonRepeatable => "NonRepeatable" => "non_repeatable",
+}
+
+documented_wire_variants! {
+    effect_purpose_vocabulary, EffectPurpose, "EffectPurpose", "internal `kind` tag", r#"{"kind":"__unknown__"}"#,
+    EffectPurpose::CompactionSummary { .. } => "CompactionSummary" => "compaction_summary",
+    EffectPurpose::NestedModel { .. } => "NestedModel" => "nested_model",
+}
+
+documented_wire_variants! {
+    nested_model_kind_vocabulary, NestedModelKind, "NestedModelKind", "scalar `snake_case`", r#""__unknown__""#,
+    NestedModelKind::McpSampling => "McpSampling" => "mcp_sampling",
+}
+
+documented_wire_variants! {
+    limit_dimension_vocabulary, LimitDimension, "LimitDimension", "internal `kind` tag", r#"{"kind":"__unknown__"}"#,
+    LimitDimension::ModelRequests => "ModelRequests" => "model_requests",
+    LimitDimension::Turns => "Turns" => "turns",
+    LimitDimension::ToolCalls => "ToolCalls" => "tool_calls",
+    LimitDimension::ParallelTools => "ParallelTools" => "parallel_tools",
+    LimitDimension::InputTokens => "InputTokens" => "input_tokens",
+    LimitDimension::OutputTokens => "OutputTokens" => "output_tokens",
+    LimitDimension::ContextBytes => "ContextBytes" => "context_bytes",
+    LimitDimension::OutputBytes => "OutputBytes" => "output_bytes",
+    LimitDimension::Retries => "Retries" => "retries",
+    LimitDimension::WallTime => "WallTime" => "wall_time",
+    LimitDimension::Cost => "Cost" => "cost",
+    LimitDimension::Extension { .. } => "Extension" => "extension",
+}
+
+documented_wire_variants! {
+    capability_activation_source_vocabulary, CapabilityActivationSource, "CapabilityActivationSource", "scalar `snake_case`", r#""__unknown__""#,
+    CapabilityActivationSource::Always => "Always" => "always",
+    CapabilityActivationSource::Application => "Application" => "application",
+    CapabilityActivationSource::Model => "Model" => "model",
+}
+
+documented_wire_variants! {
+    structured_result_source_vocabulary, StructuredResultSource, "StructuredResultSource", "external `snake_case` tag", r#"{"__unknown__":null}"#,
+    StructuredResultSource::JsonBlock { .. } => "JsonBlock" => "json_block",
+    StructuredResultSource::InternalTool { .. } => "InternalTool" => "internal_tool",
+}
+
 #[test]
-fn reference_contains_every_stable_vocabulary_and_invariant() {
-    for name in PHASE_NAMES
-        .iter()
-        .chain(INPUT_NAMES)
-        .chain(RECORD_NAMES)
-        .chain(EVENT_NAMES)
-        .chain(EFFECT_NAMES)
-        .chain(ACTION_NAMES)
-    {
-        assert!(
-            REFERENCE.contains(name),
-            "semantic reference missing {name}"
-        );
-    }
-    for ordinal in 1..=12 {
-        assert!(
-            REFERENCE.contains(&format!("INV-{ordinal:03}")),
-            "semantic reference missing INV-{ordinal:03}"
-        );
-    }
-    for fixture_family in ["golden-trace/v1", "public-rust-api/v1", "conformance/v1"] {
-        assert!(
-            REFERENCE.contains(fixture_family),
-            "missing fixture inventory {fixture_family}"
-        );
-    }
+fn top_level_vocabularies_remain_compiler_exhaustive() {
+    assert_eq!(PHASE_NAMES.len(), 18);
+    assert_eq!(INPUT_NAMES.len(), 15);
+    assert_eq!(RECORD_NAMES.len(), 40);
+    assert_eq!(EVENT_NAMES.len(), 22);
+    assert_eq!(EFFECT_NAMES.len(), 6);
+    assert_eq!(ACTION_NAMES.len(), 2);
     let _ = (
         phase_name as fn(RunPhase) -> &'static str,
         input_name as fn(&KernelInput) -> &'static str,

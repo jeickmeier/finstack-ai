@@ -27,9 +27,12 @@ unpublished.
   reads, and HTML→Markdown conversion for inline delivery. Exported from
   Python as `HttpFetchToolset` (`finstack_ai`). New workspace dependencies
   `url` and `htmd`.
-- Kernel constructors for crate-owned literals: `ErrorCode::from_static`,
-  `Key::from_static` (including `ComponentId` / `ToolId` / `LimitKey`),
-  `Digest::from_fixed_domain`, and the `UNIX_EPOCH` timestamp constant.
+- Compile-time-checked kernel constructors for crate-owned error-code, key,
+  and digest-domain literals: `static_error_code!`, `static_key!`, and
+  `fixed_domain_digest!`. The sealed `ErrorCode::from_static`,
+  `Key::from_static`, and `Digest::from_fixed_domain` paths no longer permit
+  invalid semantic values in release builds. The `UNIX_EPOCH` timestamp
+  constant is also available for owned constants.
 - Crate-level `forbid(unsafe_code)` (except FFI/host crates) plus Clippy
   denials for `unwrap` / `expect` / `panic` / `unreachable` in production
   library and binary code. Unit tests remain allowed.
@@ -115,8 +118,8 @@ unpublished.
   (`load_from_splits_batch` / `snapshot_splits_batch`) instead of returning a
   reconstructed batch that splits a committed one; unify the memory store's
   hole-at-start code to the `gap` reason codes.
-- Kernel gains `RetryClassification::Verification` and admits a `Retry` of
-  that classification at `before_finalize` over a `Completed` candidate (not
+- Kernel admits a `RetryClassification::Framework` retry at
+  `before_finalize` over a `Completed` candidate (not
   only a `Failed` one), synthesizing a retryable `candidate_rejected`
   (`Validation`) prior error since a bounced-but-otherwise-successful
   candidate has no middleware error to reuse. Runtime's
@@ -131,7 +134,8 @@ unpublished.
   `Reject`), the pluggable `EvidenceVerifier` trait, `VerifyPolicy`, and
   `VerifyMiddleware`. It runs at both `before_model` and `before_finalize`,
   feeding the verifier byte-identical JCS-canonical `Message` JSON at both
-  call sites; a `Bounce` retries with `RetryClassification::Verification`
+  call sites; a `Bounce` retries with `RetryClassification::Framework`,
+  retaining attribution through `candidate_rejected` and `policy_version`,
   and a `Reject` fails the run with the stable, non-retryable
   `verify_rejected` code.
 - `finstack-ai-workflow-hitl`: new HITL router battery (UC-05) — interaction

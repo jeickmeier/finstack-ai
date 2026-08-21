@@ -173,9 +173,9 @@ pub use primitives::{
     Metadata, ModelRequestId, ModelRequestTag, RAW_JSON_MAX_BYTES, RAW_JSON_MAX_DEPTH,
     RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION, RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION, RawJson,
     RawJsonError, RecordId, RecordTag, RunId, RunTag, SEMANTIC_ARRAY_MAX_ITEMS,
-    SEMANTIC_MAP_MAX_ENTRIES, SessionId, SessionTag, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError,
-    Timestamp, ToolBatchId, ToolBatchTag, ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId,
-    TurnTag, UNIX_EPOCH,
+    SEMANTIC_MAP_MAX_ENTRIES, SessionId, SessionTag, StaticDigestDomain, StaticErrorCode,
+    StaticKey, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp, ToolBatchId, ToolBatchTag,
+    ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId, TurnTag, UNIX_EPOCH,
 };
 pub use primitives::{
     AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, BoundedMap, ComponentRef,

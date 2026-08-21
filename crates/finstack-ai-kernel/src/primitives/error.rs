@@ -19,6 +19,14 @@ use crate::primitives::{
 #[serde(transparent)]
 pub struct ErrorCode(Arc<str>);
 
+/// Compile-time validated input for [`ErrorCode::from_static`].
+///
+/// Construct this through [`ErrorCode::static_literal`] or the
+/// [`static_error_code!`](crate::static_error_code) macro.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaticErrorCode(&'static str);
+
 impl ErrorCode {
     /// Construct a stable error code.
     ///
@@ -50,30 +58,37 @@ impl ErrorCode {
         Ok(Self(Arc::<str>::from(code)))
     }
 
-    /// Construct a code from a compile-time `snake_case` literal.
+    /// Validate a compile-time `snake_case` literal without allocating.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn static_literal(code: &'static str) -> Option<StaticErrorCode> {
+        if error_code_is_valid(code) {
+            Some(StaticErrorCode(code))
+        } else {
+            None
+        }
+    }
+
+    /// Construct a code from a validated compile-time literal.
     ///
     /// Use this for frozen engine codes that are part of the crate source.
     /// [`ErrorCode::new`] remains the fallible constructor for untrusted text.
     ///
     /// # Arguments
     ///
-    /// * `code` - Lowercase `snake_case` identifier already owned by this crate.
+    /// * `code` - A validated lowercase `snake_case` literal.
     ///
     /// # Examples
     ///
     /// ```
-    /// use finstack_ai_kernel::ErrorCode;
+    /// use finstack_ai_kernel::{ErrorCode, static_error_code};
     ///
-    /// let code = ErrorCode::from_static("invalid_input");
+    /// let code = static_error_code!("invalid_input");
     /// assert_eq!(code.as_str(), "invalid_input");
     /// ```
     #[must_use]
-    pub fn from_static(code: &'static str) -> Self {
-        debug_assert!(
-            validate_error_code(code).is_ok(),
-            "static error code must be lowercase snake_case: {code}"
-        );
-        Self(Arc::from(code))
+    pub fn from_static(code: StaticErrorCode) -> Self {
+        Self(Arc::from(code.0))
     }
 
     /// Borrow the code text.
@@ -171,6 +186,49 @@ fn validate_error_code(code: &str) -> Result<(), ErrorCodeError> {
         return Err(invalid());
     }
     Ok(())
+}
+
+const fn error_code_is_valid(code: &str) -> bool {
+    let bytes = code.as_bytes();
+    if bytes.is_empty() || bytes.len() > LABEL_MAX_BYTES || !bytes[0].is_ascii_lowercase() {
+        return false;
+    }
+    let mut index = 1;
+    let mut previous_underscore = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte.is_ascii_lowercase() || byte.is_ascii_digit() {
+            previous_underscore = false;
+        } else if byte == b'_' && !previous_underscore {
+            previous_underscore = true;
+        } else {
+            return false;
+        }
+        index += 1;
+    }
+    !previous_underscore
+}
+
+/// Construct an [`ErrorCode`] from a compile-time-validated literal.
+///
+/// Invalid literals fail during compilation:
+///
+/// ```compile_fail
+/// use finstack_ai_kernel::static_error_code;
+///
+/// let _ = static_error_code!("InvalidCode");
+/// ```
+#[macro_export]
+macro_rules! static_error_code {
+    ($code:expr) => {{
+        let validated = const {
+            match $crate::ErrorCode::static_literal($code) {
+                Some(validated) => validated,
+                None => panic!("invalid static error code"),
+            }
+        };
+        $crate::ErrorCode::from_static(validated)
+    }};
 }
 
 /// Stable error category (TDD §30.2).
@@ -483,6 +541,25 @@ mod tests {
         assert!(ErrorCode::new("double__underscore").is_err());
         assert!(ErrorCode::new("").is_err());
         assert!(serde_json::from_str::<ErrorCode>("\"Not_Snake\"").is_err());
+    }
+
+    #[test]
+    fn static_error_codes_share_the_runtime_validation_contract() {
+        for code in [
+            "internal",
+            "raw_json_too_large",
+            "InvalidCode",
+            "double__underscore",
+            "trailing_",
+            "",
+        ] {
+            assert_eq!(
+                ErrorCode::static_literal(code).is_some(),
+                ErrorCode::new(code).is_ok(),
+                "static/runtime validation drifted for {code:?}",
+            );
+        }
+        assert_eq!(crate::static_error_code!("internal").as_str(), "internal");
     }
 
     #[test]

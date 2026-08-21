@@ -1737,12 +1737,12 @@ async fn complete_external_routes_a_deferred_tool_effect() {
 }
 
 /// `before_finalize` middleware that supersedes the first finalize candidate
-/// with a `Verification` retry, then lets every subsequent candidate through.
-struct FinalizeVerificationRetry {
+/// with a framework-classified retry, then lets every subsequent candidate through.
+struct FinalizeVerifierRetry {
     fired: AtomicBool,
 }
 
-impl FinalizeVerificationRetry {
+impl FinalizeVerifierRetry {
     fn new() -> Self {
         Self {
             fired: AtomicBool::new(false),
@@ -1750,7 +1750,7 @@ impl FinalizeVerificationRetry {
     }
 }
 
-impl Middleware for FinalizeVerificationRetry {
+impl Middleware for FinalizeVerifierRetry {
     fn descriptor(&self) -> MiddlewareDescriptor {
         MiddlewareDescriptor {
             invocation: ComponentInvocation {
@@ -1783,7 +1783,7 @@ impl Middleware for FinalizeVerificationRetry {
                 return Ok(StageOutcome::Continue);
             }
             let directive = RetryDirective::try_new(
-                RetryClassification::Verification,
+                RetryClassification::Framework,
                 finstack_ai_kernel::Duration::from_millis(1),
                 "test-finalize-verification-retry-v1",
             )
@@ -1811,7 +1811,7 @@ async fn drive_loop_continues_past_a_superseded_finalize() {
         })
         .expect("store"),
     );
-    let middleware: Arc<dyn Middleware> = Arc::new(FinalizeVerificationRetry::new());
+    let middleware: Arc<dyn Middleware> = Arc::new(FinalizeVerifierRetry::new());
     let agent = Agent::builder(
         AgentId::parse("test.agent.finalize-retry").expect("agent"),
         BundleId::parse("test.bundle.finalize-retry").expect("bundle"),
@@ -1852,7 +1852,7 @@ async fn drive_loop_continues_past_a_superseded_finalize() {
         })
         .await
         .expect("load journal");
-    let verification_retries = loaded
+    let verifier_retries = loaded
         .committed_batches
         .iter()
         .flat_map(|batch| batch.records.iter())
@@ -1860,12 +1860,12 @@ async fn drive_loop_continues_past_a_superseded_finalize() {
             matches!(
                 record.body(),
                 RecordBody::RetryScheduled(retry)
-                    if retry.classification == RetryClassification::Verification
+                    if retry.classification == RetryClassification::Framework
             )
         })
         .count();
     assert_eq!(
-        verification_retries, 1,
-        "journal must show exactly one Verification retry"
+        verifier_retries, 1,
+        "journal must show exactly one framework verifier retry"
     );
 }

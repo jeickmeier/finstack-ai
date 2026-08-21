@@ -1,4 +1,7 @@
 pub mod finstack_ai_kernel
+pub macro finstack_ai_kernel::fixed_domain_digest!
+pub macro finstack_ai_kernel::static_error_code!
+pub macro finstack_ai_kernel::static_key!
 pub enum finstack_ai_kernel::ActiveToolCallStatus
 pub finstack_ai_kernel::ActiveToolCallStatus::Buffered
 pub finstack_ai_kernel::ActiveToolCallStatus::Buffered::error: core::option::Option<finstack_ai_kernel::ErrorDescriptor>
@@ -1570,7 +1573,6 @@ pub finstack_ai_kernel::RetryClassification::Framework
 pub finstack_ai_kernel::RetryClassification::Model
 pub finstack_ai_kernel::RetryClassification::Tool
 pub finstack_ai_kernel::RetryClassification::Validation
-pub finstack_ai_kernel::RetryClassification::Verification
 impl core::clone::Clone for finstack_ai_kernel::RetryClassification
 pub fn finstack_ai_kernel::RetryClassification::clone(&self) -> finstack_ai_kernel::RetryClassification
 impl core::cmp::Eq for finstack_ai_kernel::RetryClassification
@@ -3080,7 +3082,7 @@ pub fn finstack_ai_kernel::Digest::blob_content(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::domain_separated(&str, u32, &[u8]) -> core::result::Result<Self, finstack_ai_kernel::DigestError>
 pub fn finstack_ai_kernel::Digest::effect_input(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::effect_output(&[u8]) -> Self
-pub fn finstack_ai_kernel::Digest::from_fixed_domain(&'static str, u32, &[u8]) -> Self
+pub fn finstack_ai_kernel::Digest::from_fixed_domain(StaticDigestDomain, u32, &[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::from_hex(&str) -> core::result::Result<Self, finstack_ai_kernel::DigestError>
 pub fn finstack_ai_kernel::Digest::middleware_chain(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::raw_json(&[u8]) -> Self
@@ -3309,7 +3311,7 @@ pub fn finstack_ai_kernel::EntryAppended::deserialize<__D>(__D) -> core::result:
 pub struct finstack_ai_kernel::ErrorCode(_)
 impl finstack_ai_kernel::ErrorCode
 pub fn finstack_ai_kernel::ErrorCode::as_str(&self) -> &str
-pub fn finstack_ai_kernel::ErrorCode::from_static(&'static str) -> Self
+pub fn finstack_ai_kernel::ErrorCode::from_static(StaticErrorCode) -> Self
 pub fn finstack_ai_kernel::ErrorCode::new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_kernel::ErrorCodeError>
 impl core::clone::Clone for finstack_ai_kernel::ErrorCode
 pub fn finstack_ai_kernel::ErrorCode::clone(&self) -> finstack_ai_kernel::ErrorCode
@@ -3771,7 +3773,7 @@ pub fn finstack_ai_kernel::KernelState::deserialize<D>(D) -> core::result::Resul
 #[repr(transparent)] pub struct finstack_ai_kernel::Key<T: finstack_ai_kernel::KeyTag>
 impl<T: finstack_ai_kernel::KeyTag> finstack_ai_kernel::Key<T>
 pub fn finstack_ai_kernel::Key<T>::as_str(&self) -> &str
-pub fn finstack_ai_kernel::Key<T>::from_static(&'static str) -> Self
+pub fn finstack_ai_kernel::Key<T>::from_static(StaticKey<T>) -> Self
 pub fn finstack_ai_kernel::Key<T>::parse(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_kernel::KeyParseError>
 impl<'de, T: finstack_ai_kernel::KeyTag> serde_core::de::Deserialize<'de> for finstack_ai_kernel::Key<T>
 pub fn finstack_ai_kernel::Key<T>::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>

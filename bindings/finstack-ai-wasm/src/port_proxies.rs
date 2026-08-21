@@ -67,7 +67,7 @@ fn model_response() -> ModelResponse {
 
 fn tool_spec() -> ToolSpec {
     ToolSpec {
-        id: ToolId::from_static("finstack.tools.wasm_proxy"),
+        id: finstack_ai_kernel::static_key!(ToolId, "finstack.tools.wasm_proxy"),
         model_name: Arc::from("wasm_proxy"),
         title: Arc::from("WASM proxy"),
         description: Arc::from("Compile-only JS promise proxy"),
@@ -98,9 +98,9 @@ fn tool_result() -> ToolResult {
     }
 }
 
-fn invocation(id: &'static str) -> ComponentInvocation {
+fn invocation(component: ComponentId) -> ComponentInvocation {
     ComponentInvocation {
-        component: ComponentId::from_static(id),
+        component,
         version: Version {
             major: 1,
             minor: 0,
@@ -242,7 +242,10 @@ pub struct NativeContextProviderProxy;
 impl ContextProvider for NativeContextProviderProxy {
     fn descriptor(&self) -> ContextProviderDescriptor {
         ContextProviderDescriptor {
-            invocation: invocation("wasm.native.context"),
+            invocation: invocation(finstack_ai_kernel::static_key!(
+                ComponentId,
+                "wasm.native.context"
+            )),
             trusted_application_instructions: false,
             metadata: Metadata::empty(),
         }
@@ -266,7 +269,10 @@ pub struct NativeMiddlewareProxy;
 impl Middleware for NativeMiddlewareProxy {
     fn descriptor(&self) -> MiddlewareDescriptor {
         MiddlewareDescriptor {
-            invocation: invocation("wasm.native.middleware"),
+            invocation: invocation(finstack_ai_kernel::static_key!(
+                ComponentId,
+                "wasm.native.middleware"
+            )),
             stages: StageMask::from_stages([Stage::BeforeRun]),
             order: MiddlewareOrder {
                 tier: OrderTier::Standard,
@@ -340,7 +346,7 @@ impl Observer for NativeObserverProxy {
     fn descriptor(&self) -> ObserverDescriptor {
         ObserverDescriptor {
             component: ComponentRef::new(
-                ComponentId::from_static("wasm.native.observer"),
+                finstack_ai_kernel::static_key!(ComponentId, "wasm.native.observer"),
                 Some(Version {
                     major: 1,
                     minor: 0,
@@ -516,7 +522,10 @@ impl JsContextProviderProxy {
 impl ContextProvider for JsContextProviderProxy {
     fn descriptor(&self) -> ContextProviderDescriptor {
         ContextProviderDescriptor {
-            invocation: invocation("wasm.js.context"),
+            invocation: invocation(finstack_ai_kernel::static_key!(
+                ComponentId,
+                "wasm.js.context"
+            )),
             trusted_application_instructions: false,
             metadata: Metadata::empty(),
         }
@@ -556,7 +565,10 @@ impl JsMiddlewareProxy {
 impl Middleware for JsMiddlewareProxy {
     fn descriptor(&self) -> MiddlewareDescriptor {
         MiddlewareDescriptor {
-            invocation: invocation("wasm.js.middleware"),
+            invocation: invocation(finstack_ai_kernel::static_key!(
+                ComponentId,
+                "wasm.js.middleware"
+            )),
             stages: StageMask::from_stages([Stage::BeforeRun]),
             order: MiddlewareOrder {
                 tier: OrderTier::Standard,
@@ -659,7 +671,7 @@ impl Observer for JsObserverProxy {
     fn descriptor(&self) -> ObserverDescriptor {
         ObserverDescriptor {
             component: ComponentRef::new(
-                ComponentId::from_static("wasm.js.observer"),
+                finstack_ai_kernel::static_key!(ComponentId, "wasm.js.observer"),
                 Some(Version {
                     major: 1,
                     minor: 0,

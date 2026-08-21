@@ -19,16 +19,16 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AppendBatchId, BudgetPropagation, CancellationPropagation,
     CommittedBatch, ContentBlock, DeadlinePropagation, Decision, Digest, EffectId, EventId, Id,
-    IdTag, Kernel, KernelInput, KernelState, LaneId, Message, MessageId, MessageRole, Metadata,
-    ModelRequestId, OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds,
-    RAW_JSON_MAX_BYTES, RawJson, RecordDraft, RecordEnvelope, RecordId, ReducerStageOutcome,
-    RunAccepted, RunId, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
-    SessionId, Stage, StageCursor, StageSettled, TextBlock, Timestamp, ToolCallBlock,
-    ToolCallIdentity, ToolCallTag, TransitionEnv, TurnId, TurnTag, Usage,
+    IdTag, Kernel, KernelError, KernelInput, KernelState, LaneId, Message, MessageId, MessageRole,
+    Metadata, ModelRequestId, OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef,
+    ProviderIds, RAW_JSON_MAX_BYTES, RawJson, RecordDraft, RecordEnvelope, RecordId,
+    ReducerStageOutcome, RunAccepted, RunId, RunLimits, RunPropagationPolicy, RunRelation,
+    RunSecurityContext, SessionId, Stage, StageCursor, StageSettled, TextBlock, Timestamp,
+    ToolCallBlock, ToolCallIdentity, ToolCallTag, TransitionEnv, TurnId, TurnTag, Usage,
 };
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, InputCapabilities, Model, ModelCallContext,
@@ -168,8 +168,11 @@ fn tool_call_block(ordinal: u64) -> ToolCallBlock {
     .expect("tool call")
 }
 
-/// Messages plus authored tool identities so `validate_tool_state` runs.
-fn activated_state(tool_count: usize, message_count: usize) -> KernelState {
+/// Total messages plus authored tool identities so `validate_tool_state` runs.
+fn activated_state(tool_count: usize, total_message_count: usize) -> KernelState {
+    let filler_count = total_message_count
+        .checked_sub(tool_count)
+        .expect("tool count must not exceed total message count");
     let tools = (0..tool_count)
         .map(|index| {
             let ordinal = u64::try_from(index + 1).expect("ordinal");
@@ -177,7 +180,7 @@ fn activated_state(tool_count: usize, message_count: usize) -> KernelState {
             let identity = ToolCallIdentity {
                 cycle: 0,
                 turn_id: bench_id::<TurnTag>(3),
-                source_message_id: bench_id(1_000 + ordinal),
+                source_message_id: bench_id(8_192 + ordinal),
                 tool_batch_id: None,
                 effect_id: None,
                 call: call.clone(),
@@ -185,7 +188,7 @@ fn activated_state(tool_count: usize, message_count: usize) -> KernelState {
             (call, identity)
         })
         .collect::<Vec<_>>();
-    let mut messages = (0..message_count).map(filler_message).collect::<Vec<_>>();
+    let mut messages = (0..filler_count).map(filler_message).collect::<Vec<_>>();
     for (call, identity) in &tools {
         messages.push(
             Message::try_new(
@@ -209,6 +212,112 @@ fn activated_state(tool_count: usize, message_count: usize) -> KernelState {
             .collect(),
         ..KernelState::default()
     }
+}
+
+fn prove_activated_fixture(state: &KernelState, accept_batch: &CommittedBatch) -> KernelState {
+    state.validate().expect("activated state must validate");
+    Kernel::try_restore(state.clone()).expect("activated state must restore");
+
+    let mut accepted_kernel =
+        Kernel::try_restore(state.clone()).expect("accepted fixture must restore");
+    accepted_kernel
+        .apply(accept_batch, 0)
+        .expect("accepted fixture apply must succeed");
+    accepted_kernel
+        .state()
+        .validate()
+        .expect("accepted fixture result must validate");
+
+    let mut rejected = state.clone();
+    rejected.last_applied_sequence = 32;
+    let mut rejected_kernel =
+        Kernel::try_restore(rejected.clone()).expect("rejected fixture must restore");
+    let rejected_hash = rejected_kernel
+        .state()
+        .state_hash()
+        .expect("rejected fixture hash");
+    let rejection = rejected_kernel
+        .apply(accept_batch, 0)
+        .expect_err("sequence must fail");
+    assert_eq!(rejection, KernelError::CommittedBatchRangeMismatch);
+    assert_eq!(
+        rejected_kernel
+            .state()
+            .state_hash()
+            .expect("post-rejection fixture hash"),
+        rejected_hash,
+        "sequence rejection must leave state unchanged",
+    );
+    rejected
+}
+
+fn bench_activated_cell(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    state: &KernelState,
+    rejected: &KernelState,
+    label: &str,
+    accept_batch: &CommittedBatch,
+) {
+    group.bench_with_input(
+        BenchmarkId::new("activated_validate", label),
+        state,
+        |bencher, state| {
+            bencher.iter(|| state.validate().expect("validate"));
+        },
+    );
+    group.bench_with_input(
+        BenchmarkId::new("activated_state_hash", label),
+        state,
+        |bencher, state| {
+            // `state_hash` intentionally includes validation before producing
+            // the canonical projection hash.
+            bencher.iter(|| black_box(state.state_hash().expect("state hash")));
+        },
+    );
+    group.bench_with_input(
+        BenchmarkId::new("activated_restore", label),
+        state,
+        |bencher, state| {
+            bencher.iter_batched(
+                || state.clone(),
+                |state| black_box(Kernel::try_restore(state).expect("restore")),
+                BatchSize::LargeInput,
+            );
+        },
+    );
+    group.bench_with_input(
+        BenchmarkId::new("activated_apply_accept", label),
+        state,
+        |bencher, state| {
+            bencher.iter_batched(
+                || Kernel::try_restore(state.clone()).expect("restore"),
+                |mut kernel| {
+                    let events = kernel
+                        .apply(black_box(accept_batch), 0)
+                        .expect("apply must succeed");
+                    black_box((kernel, events))
+                },
+                BatchSize::LargeInput,
+            );
+        },
+    );
+    group.bench_with_input(
+        BenchmarkId::new("activated_apply_sequence_reject", label),
+        rejected,
+        |bencher, state| {
+            bencher.iter_batched(
+                || Kernel::try_restore(state.clone()).expect("restore"),
+                |mut kernel| {
+                    let error = kernel
+                        .apply(black_box(accept_batch), 0)
+                        .expect_err("sequence must fail");
+                    assert_eq!(error, KernelError::CommittedBatchRangeMismatch);
+                    black_box((kernel, error))
+                },
+                BatchSize::LargeInput,
+            );
+        },
+    );
 }
 
 /// Growth-shaped benchmarks over conversation length.
@@ -248,9 +357,9 @@ fn state_scaling(c: &mut Criterion) {
         &[0, 64, 256]
     };
     let message_counts: &[usize] = if bench_quick() {
-        &[16, 128, 1_024]
+        &[64, 128, 1_024]
     } else {
-        &[16, 1_024, 4_096]
+        &[256, 1_024, 4_096]
     };
     let (empty_kernel, accept_env, accept_input) = accept_run_input();
     let accept_decision = empty_kernel
@@ -260,50 +369,9 @@ fn state_scaling(c: &mut Criterion) {
     for &tools in tool_counts {
         for &messages in message_counts {
             let state = activated_state(tools, messages);
-            state.validate().expect("activated state must validate");
+            let rejected = prove_activated_fixture(&state, &accept_batch);
             let label = format!("tools{tools}_messages{messages}");
-            group.bench_with_input(
-                BenchmarkId::new("activated_validate", &label),
-                &state,
-                |bencher, state| {
-                    bencher.iter(|| state.validate().expect("validate"));
-                },
-            );
-            group.bench_with_input(
-                BenchmarkId::new("activated_state_hash", &label),
-                &state,
-                |bencher, state| {
-                    bencher.iter(|| black_box(state.state_hash().expect("state hash")));
-                },
-            );
-            group.bench_with_input(
-                BenchmarkId::new("activated_apply_accept", &label),
-                &state,
-                |bencher, state| {
-                    bencher.iter(|| {
-                        let mut kernel =
-                            Kernel::try_restore(black_box(state.clone())).expect("restore");
-                        let events = kernel.apply(black_box(&accept_batch), 0);
-                        black_box(events)
-                    });
-                },
-            );
-            let mut rejected = state.clone();
-            rejected.last_applied_sequence = 32;
-            group.bench_with_input(
-                BenchmarkId::new("activated_apply_rollback", &label),
-                &rejected,
-                |bencher, state| {
-                    bencher.iter(|| {
-                        let mut kernel =
-                            Kernel::try_restore(black_box(state.clone())).expect("restore");
-                        let error = kernel
-                            .apply(black_box(&accept_batch), 0)
-                            .expect_err("sequence must fail");
-                        black_box(error)
-                    });
-                },
-            );
+            bench_activated_cell(&mut group, &state, &rejected, &label, &accept_batch);
         }
     }
     let tool_state = activated_state(16, 128);

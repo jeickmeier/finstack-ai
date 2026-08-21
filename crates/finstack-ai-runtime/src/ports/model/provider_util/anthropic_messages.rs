@@ -367,10 +367,16 @@ impl AnthropicMessagesAssembly {
     fn apply_usage(&mut self, usage: &WireUsage) -> Result<Vec<ModelStreamItem>, StreamNormError> {
         let mut counters = BTreeMap::new();
         if let Some(value) = usage.cache_creation_input_tokens.filter(|value| *value > 0) {
-            counters.insert(LimitKey::from_static(CACHE_CREATION_KEY), value);
+            counters.insert(
+                finstack_ai_kernel::static_key!(LimitKey, CACHE_CREATION_KEY),
+                value,
+            );
         }
         if let Some(value) = usage.cache_read_input_tokens.filter(|value| *value > 0) {
-            counters.insert(LimitKey::from_static(CACHE_READ_KEY), value);
+            counters.insert(
+                finstack_ai_kernel::static_key!(LimitKey, CACHE_READ_KEY),
+                value,
+            );
         }
         let input_tokens = usage.input_tokens.or(self.usage.input_tokens());
         let output_tokens = usage.output_tokens.or(self.usage.output_tokens());

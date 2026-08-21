@@ -126,7 +126,7 @@ impl AuthVerifier for StaticAuthVerifier {
 }
 
 fn bearer_digest(token: &[u8]) -> Digest {
-    Digest::from_fixed_domain("remote-bearer", 1, token)
+    finstack_ai_kernel::fixed_domain_digest!("remote-bearer", 1, token)
 }
 
 fn constant_time_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {

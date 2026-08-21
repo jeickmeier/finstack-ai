@@ -5,7 +5,7 @@
 //!
 //! - `before_finalize` judges the terminal candidate's canonical assistant
 //!   message. `Accept` continues, `Bounce` requests a semantic
-//!   [`finstack_ai_kernel::RetryClassification::Verification`] retry, and
+//!   [`finstack_ai_kernel::RetryClassification::Framework`] retry, and
 //!   `Reject` fails the run with the stable `verify_rejected` code.
 //! - `before_model` re-derives the same verdict from the trailing draft
 //!   message (present on the bounce cycle), fed to the verifier as the same
@@ -241,7 +241,7 @@ impl Middleware for VerifyMiddleware {
                         Verdict::Accept => Ok(StageOutcome::Continue),
                         Verdict::Bounce(_findings) => {
                             let directive = RetryDirective::try_new(
-                                RetryClassification::Verification,
+                                RetryClassification::Framework,
                                 backoff,
                                 policy_version.as_ref(),
                             )
