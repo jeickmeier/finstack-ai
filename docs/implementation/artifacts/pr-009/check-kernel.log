@@ -1,6 +1,0 @@
-$ mise run check-kernel
-[check-kernel] $ cargo check -p finstack-ai-kernel --locked
-    Checking finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.90s
-
-exit_status=0

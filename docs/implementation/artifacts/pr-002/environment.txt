@@ -1,9 +1,0 @@
-date: 2026-08-08T15:35:31Z
-uname: Darwin Jons-MacBook-Pro.local 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:28:34 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6050 arm64
-rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
-cargo: cargo 1.97.1 (c980f4866 2026-06-30)
-python: Python 3.9.6
-uv: uv 0.10.11 (006b56b12 2026-03-16)
-mise: 2026.8.3 macos-arm64 (2026-08-07)
-commit: ee9754fe2d0f015181dcefa97e715392aadd28ed
-branch: main

@@ -1,4 +1,0 @@
-fixtures/architecture/README.md
-fixtures/architecture/cases/source-guards.toml
-fixtures/architecture/cases/valid-waiver.toml
-fixtures/architecture/forbidden-kernel/cases.toml

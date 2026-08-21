@@ -1,8 +1,0 @@
-[release-smoke] $ uv run --no-project python tools/ci/release.py smoke
-+ cargo build --release -p finstack-ai-ci-smoke --locked
-    Finished `release` profile [optimized] target(s) in 0.00s
-+ /Users/jeickmeier/Projects/finstack-ai/target/ci-release-build/release/finstack-ai-ci-smoke
-finstack-ai-ci-smoke 0.0.1
-staged binary: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/finstack-ai-ci-smoke
-sha256: f4b52a505b468f9834fb8b199cda4dd2382d8c81a630a5e680461264bc6799e7
-metadata: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/build-metadata.json

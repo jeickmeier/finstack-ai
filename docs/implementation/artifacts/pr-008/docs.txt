@@ -1,4 +1,0 @@
-[docs] $ cargo doc --workspace --no-deps --locked
- Documenting finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.59s
-   Generated /Users/jeickmeier/Projects/finstack-ai/target/doc/finstack_ai/index.html and 7 other files

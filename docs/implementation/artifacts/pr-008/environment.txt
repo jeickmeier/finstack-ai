@@ -1,9 +1,0 @@
-PR-008 validation environment
-Date (UTC): 2026-08-08T23:47:32Z
-Host: Darwin arm64 (macOS 26.5.2)
-Branch: pr-008-contract-amendment
-Implementation commit: 7b5ededc2054b0b7dde8373efbe0ec95ba02b71b
-rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
-cargo: cargo 1.97.1 (c980f4866 2026-06-30)
-active toolchain: stable-aarch64-apple-darwin (default)
-wasm32-unknown-unknown: available via rustup

@@ -1,3 +1,0 @@
-[supply-chain] $ echo "controls: Engineering Standards §9; Threat Model TM-18; …
-controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13
-advisories ok, bans ok, licenses ok, sources ok

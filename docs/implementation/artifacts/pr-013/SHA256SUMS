@@ -1,6 +1,0 @@
-c230e4f744ebb658f466a8994247010fc5496d54c874f8a4f73b33809f9dd7e6  docs/implementation/artifacts/pr-013/candidate-validation.txt
-dca19550c42311047ce8abafa9a74ad551704956261339af17a55ea1f880a23b  docs/implementation/artifacts/pr-013/golden-trace-SHA256SUMS
-1c421933d3abb9519bf3f71facf73462c94dc898cdbaf5f3d09f5336c59e046e  docs/implementation/artifacts/pr-013/security-review.txt
-a90e24f4ddfc8e171570f3e3917da3a6b93be4f8350c3fff07e2eb8f5a90be8a  docs/implementation/artifacts/pr-013/hosted-validation.txt
-572f671842c217e3df1a2e03d3951700cd97b2ab7f4ee69c6be5fcc8fc98460c  docs/implementation/artifacts/pr-013/g1-decision.txt
-f2dc0f68f6edbc46fa7a514e8ad2f41dc908e2da2a2f2136e0f8103949c19480  docs/implementation/kernel-semantics-candidate-v1.md

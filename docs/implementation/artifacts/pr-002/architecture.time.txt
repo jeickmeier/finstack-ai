@@ -1,9 +1,0 @@
-[architecture] $ uv run --no-project python -m unittest discover -s tools/archi…
-----------------------------------------------------------------------
-Ran 21 tests in 0.060s
-
-OK
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-real 0.32
-user 0.04
-sys 0.03

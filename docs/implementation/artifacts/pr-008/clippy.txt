@@ -1,3 +1,0 @@
-[clippy] $ cargo clippy --workspace --all-targets --locked -- -D warnings
-    Checking finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.46s

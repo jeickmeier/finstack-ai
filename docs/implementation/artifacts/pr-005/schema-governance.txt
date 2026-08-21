@@ -1,9 +1,0 @@
-$ SCHEMA_GOVERNANCE_BASE="$(git rev-parse main)" mise run schema-governance
-exit=0
-
-STDOUT:
-schema-governance: ok
-
-STDERR:
-[schema-governance] $ uv run --no-project python tools/schema_governance/check.…
-

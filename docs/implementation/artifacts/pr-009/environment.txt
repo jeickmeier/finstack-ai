@@ -1,8 +1,0 @@
-timestamp_utc=2026-08-09T14:02:00Z
-cwd=/Users/jeickmeier/Projects/finstack-ai
-branch=main
-head=5843dce6d77498a75acdc15d816586cb26098456
-dirty=no (after integration commit; close-docs commit follows)
-uname=Darwin arm64
-rustc=rustc 1.97.1 (8bab26f4f 2026-07-14)
-cargo=cargo 1.97.1 (c980f4866 2026-06-30)

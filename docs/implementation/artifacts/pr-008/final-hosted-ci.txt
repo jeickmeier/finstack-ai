@@ -1,9 +1,0 @@
-PR-008 final hosted CI evidence
-Date (UTC): 2026-08-09T01:11:09Z
-PR: https://github.com/jeickmeier/finstack-ai/pull/5
-PR head: 44d86b0c8371f6ee4e9ad14014e9fc35ea807c3a
-Merge commit: 4b68a9397a8e07a581f34dfc34f0bfb96873c00d
-ci: https://github.com/jeickmeier/finstack-ai/actions/runs/31287302464 (success)
-security: https://github.com/jeickmeier/finstack-ai/actions/runs/31287302447 (success)
-nightly: https://github.com/jeickmeier/finstack-ai/actions/runs/31287302474 (success)
-Result: all 13 attached checks passed

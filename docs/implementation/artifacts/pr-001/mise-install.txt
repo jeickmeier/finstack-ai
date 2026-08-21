@@ -1,2 +1,0 @@
-[install] $ mise install
-mise all tools are installed
