@@ -359,6 +359,24 @@ export class Run {
             throw FinstackError.fromUnknown(error);
         }
     }
+    /** Read the latest confirmed run-state snapshot. */
+    async liveState() {
+        try {
+            return (await this.#handle.liveState());
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /** Wait until the latest-only view advances beyond `revision`. */
+    async waitForLiveState(revision) {
+        try {
+            return (await this.#handle.waitForLiveState(BigInt(revision)));
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
     /**
      * Snapshot bounded, redacted observer-delivery diagnostics.
      *

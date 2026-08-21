@@ -180,6 +180,10 @@ pub struct CommitCoordinator {
     /// journal and snapshot representation, and initialized empty on recovery.
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     compaction_checkpoint: Option<crate::middleware::CompactionCheckpoint>,
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    live_state_publisher: Option<Arc<dyn crate::exec::live_state::LiveStatePublisher>>,
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    record_kinds: Vec<Arc<str>>,
 }
 
 impl CommitCoordinator {
@@ -217,6 +221,10 @@ impl CommitCoordinator {
             last_middleware_effect_id: None,
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             compaction_checkpoint: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            live_state_publisher: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            record_kinds: Vec::new(),
         }
     }
 
@@ -320,6 +328,26 @@ impl CommitCoordinator {
     #[must_use]
     pub const fn state(&self) -> &KernelState {
         self.kernel.state()
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn install_live_state_publisher(
+        &mut self,
+        publisher: Arc<dyn crate::exec::live_state::LiveStatePublisher>,
+    ) {
+        self.live_state_publisher = Some(publisher);
+        self.publish_live_state();
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn publish_live_state(&self) {
+        if let Some(publisher) = &self.live_state_publisher {
+            publisher.publish_semantic(
+                self.state(),
+                self.fault.map(|fault| fault.code),
+                &self.record_kinds,
+            );
+        }
     }
 
     /// Journal store used to commit and recover this coordinator.

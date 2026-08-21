@@ -5,6 +5,8 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_CONTROL_BYTES = 16 * 1024;
 /** Maximum transferred event-batch bytes (Threat Model §8.3). */
 export const MAX_TRANSFER_BYTES = 256 * 1024;
+/** Maximum transferred message-bearing live-state snapshot bytes. */
+export const MAX_LIVE_STATE_BYTES = 16 * 1024 * 1024;
 /**
  * Encode a control envelope and reject oversized payloads.
  *
@@ -86,6 +88,23 @@ export function decodeMainToWorker(data) {
             }
             return message;
         }
+        case "liveState":
+            return {
+                v: 1,
+                type,
+                id: requiredString(record, "id"),
+                agentId: requiredString(record, "agentId"),
+                runId: requiredString(record, "runId"),
+            };
+        case "waitForLiveState":
+            return {
+                v: 1,
+                type,
+                id: requiredString(record, "id"),
+                agentId: requiredString(record, "agentId"),
+                runId: requiredString(record, "runId"),
+                revision: requiredNumber(record, "revision"),
+            };
         case "closeEvents":
             return {
                 v: 1,
@@ -212,6 +231,12 @@ export function decodeWorkerToMain(data) {
                 type,
                 id: requiredString(record, "id"),
                 snapshot: requiredInspect(record.snapshot),
+            };
+        case "state":
+            return {
+                v: 1,
+                type,
+                id: requiredString(record, "id"),
             };
         default: {
             const _exhaustive = type;

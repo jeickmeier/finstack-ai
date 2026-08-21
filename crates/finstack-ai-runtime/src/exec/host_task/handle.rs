@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 
 use finstack_ai_kernel::{KernelInput, TransitionEnv};
 
+use crate::LiveRunState;
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport, TimerDiagnostics};
 use crate::{CommitOutcome, EventSubscription, EventSubscriptionConfig, EventSubscriptionError};
 use crate::{ObserverDiagnostic, ObserverDiagnostics};
@@ -109,6 +110,70 @@ impl RunHandle {
         )
     }
 
+    /// Read the latest confirmed semantic and lifecycle snapshot.
+    #[must_use]
+    pub fn live_state(&self) -> LiveRunState {
+        self.shared.live_state.lock().map_or_else(
+            |_| {
+                let mut snapshot =
+                    LiveRunState::initial(&finstack_ai_kernel::KernelState::default());
+                snapshot.status = RunStatus::Faulted {
+                    code: "live_state_lock_poisoned",
+                };
+                snapshot.fault_code = Some(Arc::from("live_state_lock_poisoned"));
+                snapshot
+            },
+            |snapshot| snapshot.clone(),
+        )
+    }
+
+    /// Wait until the latest-only view advances beyond `after_revision`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a fault if the live-state lock is poisoned.
+    pub async fn wait_for_live_state(
+        &self,
+        after_revision: u64,
+    ) -> Result<LiveRunState, RunHandleError> {
+        loop {
+            let notified = self.shared.live_state_changed.notified();
+            let current = self
+                .shared
+                .live_state
+                .lock()
+                .map_err(|_| RunHandleError::Faulted {
+                    code: "live_state_lock_poisoned",
+                })?
+                .clone();
+            if current.revision > after_revision {
+                return Ok(current);
+            }
+            notified.await;
+        }
+    }
+
+    #[allow(
+        dead_code,
+        reason = "native workflow classification consumes the peer API"
+    )]
+    pub(crate) fn kernel_state(&self) -> Option<finstack_ai_kernel::KernelState> {
+        self.shared
+            .kernel_state
+            .lock()
+            .ok()
+            .map(|state| state.clone())
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn record_kinds(&self) -> Arc<[Arc<str>]> {
+        self.shared
+            .record_kinds
+            .lock()
+            .map_or_else(|_| Arc::from([]), |kinds| Arc::clone(&kinds))
+    }
+
     /// Read the shutdown report after the owner has settled.
     #[must_use]
     pub fn shutdown_report(&self) -> Option<ShutdownReport> {
@@ -148,9 +213,6 @@ impl RunHandle {
     }
 
     pub(super) fn set_status(&self, status: RunStatus) {
-        if let Ok(mut current) = self.shared.status.lock() {
-            *current = status;
-        }
-        self.shared.status_changed.notify_waiters();
+        self.shared.publish_lifecycle(status);
     }
 }

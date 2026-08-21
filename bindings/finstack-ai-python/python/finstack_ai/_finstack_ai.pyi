@@ -805,6 +805,24 @@ class ObserverDiagnostics(TypedDict):
     dropped: int
     recent: list[ObserverDiagnostic]
 
+class RunStateSnapshot(TypedDict):
+    """Latest confirmed semantic and runtime lifecycle state."""
+
+    revision: int
+    journal_sequence: int
+    status: Literal["running", "shutting_down", "stopped", "faulted"]
+    fault_code: str | None
+    phase: str | None
+    cycle: int
+    prepared_context_messages: list[dict[str, object]]
+    committed_run_messages: list[dict[str, object]]
+    active_capabilities: list[dict[str, object]]
+    resolved_plan_digest: str | None
+    pending_interaction: dict[str, object] | None
+    validation_failure: dict[str, object] | None
+    retry_attempts: int
+    terminal: dict[str, object] | None
+
 class Run:
     """Shared control and observation handle for one Rust-owned run."""
 
@@ -824,6 +842,10 @@ class Run:
             CancelledError: The run reached its durable cancelled terminal.
             TimeoutError: The operational deadline elapsed.
         """
+    async def live_state(self) -> RunStateSnapshot:
+        """Read the latest confirmed run-state snapshot."""
+    async def wait_for_live_state(self, revision: int) -> RunStateSnapshot:
+        """Wait until the latest-only view advances beyond ``revision``."""
     async def observer_diagnostics(self) -> ObserverDiagnostics:
         """Snapshot bounded, redacted observer-delivery diagnostics.
 

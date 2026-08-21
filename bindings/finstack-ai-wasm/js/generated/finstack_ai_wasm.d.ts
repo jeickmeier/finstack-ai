@@ -463,6 +463,10 @@ export class Run {
      */
     closeEvents(): Promise<any>;
     /**
+     * Read the latest confirmed semantic and lifecycle snapshot.
+     */
+    liveState(): Promise<any>;
+    /**
      * Receive the next transport batch, or `undefined` after close/terminal.
      *
      * # Errors
@@ -493,6 +497,10 @@ export class Run {
      * wasm-host fails closed with `agent_run_unsupported_plan`.
      */
     startChild(child: Agent, input: string, placement: string, route_endpoint?: string | null, route_service?: string | null, route_id?: string | null, route_token?: string | null): Promise<any>;
+    /**
+     * Wait until the latest-only view advances beyond `revision`.
+     */
+    waitForLiveState(revision: bigint): Promise<any>;
     /**
      * Immutable operation locator snapshot.
      */
@@ -797,12 +805,14 @@ export interface InitOutput {
     readonly runNoopTrace: (a: number) => void;
     readonly run_cancel: (a: number, b: number, c: number) => number;
     readonly run_closeEvents: (a: number) => number;
+    readonly run_liveState: (a: number) => number;
     readonly run_locator: (a: number) => number;
     readonly run_nextEventBatch: (a: number) => number;
     readonly run_observerDiagnostics: (a: number) => number;
     readonly run_result: (a: number) => number;
     readonly run_session: (a: number) => number;
     readonly run_startChild: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
+    readonly run_waitForLiveState: (a: number, b: bigint) => number;
     readonly runresult_activeCapabilities: (a: number, b: number) => void;
     readonly runresult_locator: (a: number) => number;
     readonly runresult_retryAttempts: (a: number) => number;
@@ -821,9 +831,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_5165: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_5179: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_455: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_5196: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5210: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_460: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

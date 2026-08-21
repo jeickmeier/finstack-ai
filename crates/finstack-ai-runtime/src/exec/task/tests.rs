@@ -26,6 +26,38 @@ struct BlockingStore {
     block_every_call: bool,
 }
 
+#[test]
+fn live_state_wait_observes_lifecycle_and_retains_terminal_snapshot() {
+    runtime().block_on(async {
+        let store = Arc::new(BlockingStore::new(false));
+        let mut owner = RunTaskOwner::spawn(
+            CommitCoordinator::new(store),
+            RunTaskConfig {
+                command_capacity: 1,
+                event_hub: EventHubConfig {
+                    source_capacity: 8,
+                    max_subscribers: 4,
+                },
+                shutdown_deadline: Duration::from_millis(100),
+                approval_grant: ApprovalGrantMode::PerCall,
+            },
+        )
+        .expect("owner");
+        let handle = owner.handle();
+        let initial = handle.live_state();
+        handle.shutdown();
+        let shutting_down = handle
+            .wait_for_live_state(initial.revision)
+            .await
+            .expect("lifecycle revision");
+        assert_eq!(shutting_down.status, RunStatus::ShuttingDown);
+        let _ = owner.shutdown().await;
+        let terminal = handle.live_state();
+        assert_eq!(terminal.status, RunStatus::Stopped);
+        assert!(terminal.revision > shutting_down.revision);
+    });
+}
+
 impl BlockingStore {
     fn new(block_every_call: bool) -> Self {
         Self {

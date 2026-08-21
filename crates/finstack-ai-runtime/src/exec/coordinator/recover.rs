@@ -75,6 +75,10 @@ impl CommitCoordinator {
             last_middleware_effect_id: None,
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             compaction_checkpoint: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            live_state_publisher: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            record_kinds: loaded_record_kinds(&loaded),
         })
     }
 
@@ -150,6 +154,10 @@ impl CommitCoordinator {
             last_middleware_effect_id: None,
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             compaction_checkpoint: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            live_state_publisher: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            record_kinds: loaded_record_kinds(&loaded),
         })
     }
 
@@ -226,6 +234,16 @@ pub(super) fn completed_effect_pairs(
                 .remove(&effect_id)
                 .map(|terminal| (effect_id, (request, terminal)))
         })
+        .collect()
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(super) fn loaded_record_kinds(loaded: &LoadedSession) -> Vec<Arc<str>> {
+    loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .map(|record| Arc::from(record.body().kind_name()))
         .collect()
 }
 

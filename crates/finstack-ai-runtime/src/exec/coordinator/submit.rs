@@ -128,6 +128,9 @@ impl CommitCoordinator {
             self.maybe_commit_conversation_siblings(&committed).await?;
 
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            self.publish_live_state();
+
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             self.publish_events(Arc::clone(&events)).await?;
 
             let diagnostics: Arc<[Diagnostic]> = decision.diagnostics.into();
@@ -213,6 +216,7 @@ impl CommitCoordinator {
         {
             self.replayed_completed_effects = super::recover::completed_effect_pairs(loaded);
             self.replayed_extension_envelopes = super::recover::extension_request_envelopes(loaded);
+            self.record_kinds = super::recover::loaded_record_kinds(loaded);
             // A reload is a recovery boundary. Checkpoints are deliberately
             // not reconstructed from journal or snapshot state.
             self.discard_compaction_checkpoint();
@@ -234,6 +238,8 @@ impl CommitCoordinator {
         } else {
             self.session = project_loaded(loaded).map_err(|code| self.boundary_fault(code))?;
         }
+        #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+        self.publish_live_state();
         Ok(())
     }
 
@@ -244,10 +250,19 @@ impl CommitCoordinator {
         for batch in loaded.committed_batches.iter() {
             apply_batch_to_session(&mut self.session, batch)
                 .map_err(|code| self.boundary_fault(code))?;
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            self.record_kinds.extend(
+                batch
+                    .records
+                    .iter()
+                    .map(|record| Arc::from(record.body().kind_name())),
+            );
         }
         adopt_session_head(&mut self.kernel, loaded.head_sequence)
             .map_err(|code| self.boundary_fault(code))?;
         self.head_checksum = loaded.head_checksum;
+        #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+        self.publish_live_state();
         Ok(())
     }
 

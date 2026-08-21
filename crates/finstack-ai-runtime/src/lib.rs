@@ -241,6 +241,8 @@ pub use tool::{
 pub(crate) use tool::{TOOL_PANICKED, TOOL_STREAM_INVALID};
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub use exec::live_state::LiveRunState;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use run_types::{
     ModelTaskConfig, RetryBackoffPolicy, RunHandleError, RunStatus, RunTaskConfig,
     SameIdentityRetryPolicy, ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,

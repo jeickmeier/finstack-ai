@@ -57,6 +57,25 @@ export interface ObserverDiagnostics {
     /** Most recent redacted diagnostics in source order. */
     readonly recent: readonly ObserverDiagnostic[];
 }
+/** Canonical Rust-owned message wire shape. */
+export type MessageWire = Readonly<Record<string, unknown>>;
+/** Latest confirmed semantic and runtime lifecycle state. */
+export interface RunStateSnapshot {
+    readonly revision: number;
+    readonly journalSequence: number;
+    readonly status: "running" | "shutting_down" | "stopped" | "faulted";
+    readonly faultCode?: string;
+    readonly phase?: string;
+    readonly cycle: number;
+    readonly preparedContextMessages: readonly MessageWire[];
+    readonly committedRunMessages: readonly MessageWire[];
+    readonly activeCapabilities: readonly Readonly<Record<string, unknown>>[];
+    readonly resolvedPlanDigest?: string;
+    readonly pendingInteraction?: Readonly<Record<string, unknown>>;
+    readonly validationFailure?: Readonly<Record<string, unknown>>;
+    readonly retryAttempts: number;
+    readonly terminal?: Readonly<Record<string, unknown>>;
+}
 /**
  * How a run parks and releases paid-tool approvals.
  *
@@ -330,6 +349,10 @@ export declare class Run {
      * ```
      */
     result(): Promise<RunResult>;
+    /** Read the latest confirmed run-state snapshot. */
+    liveState(): Promise<RunStateSnapshot>;
+    /** Wait until the latest-only view advances beyond `revision`. */
+    waitForLiveState(revision: number): Promise<RunStateSnapshot>;
     /**
      * Snapshot bounded, redacted observer-delivery diagnostics.
      *

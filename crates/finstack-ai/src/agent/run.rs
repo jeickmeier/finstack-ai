@@ -3,8 +3,6 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 #[cfg(feature = "native-tokio")]
 use finstack_ai_kernel::ValidationOutcome;
 use finstack_ai_kernel::{CancelRequested, CancellationInitiator, KernelInput, OperationLocator};
-#[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::CommitCoordinator;
 use finstack_ai_runtime::{EventBatch, EventSubscription, RunHandle};
 
 #[cfg(feature = "native-tokio")]
@@ -14,9 +12,7 @@ use finstack_ai_runtime::host_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::native_driver as driver;
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::{
-    InteractionRouter, JsonSchemaToolValidatorCompiler, ToolValidatorCompiler,
-};
+use finstack_ai_runtime::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
 
 use super::prepare::{NativeIds, submit};
 use super::types::{AgentRunError, AgentRunOutput};
@@ -205,6 +201,32 @@ impl AgentRun {
         )
     }
 
+    /// Read the latest confirmed semantic and lifecycle snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns the retained startup failure when no runtime handle was
+    /// published.
+    pub async fn live_state(&self) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+        Ok(self.runtime_handle().await?.live_state())
+    }
+
+    /// Wait until the latest-only run view advances beyond `after_revision`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the retained startup failure or runtime-owner wait failure.
+    pub async fn wait_for_live_state(
+        &self,
+        after_revision: u64,
+    ) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+        self.runtime_handle()
+            .await?
+            .wait_for_live_state(after_revision)
+            .await
+            .map_err(AgentRunError::runtime)
+    }
+
     /// List the outstanding typed interaction for this run (0 or 1).
     ///
     /// Native-only. Browser WASM list/resolve stays on the worker client.
@@ -218,39 +240,12 @@ impl AgentRun {
     /// be listed through [`InteractionRouter`].
     #[cfg(feature = "native-tokio")]
     pub async fn list_interactions(&self) -> Result<Vec<InteractionRequest>, AgentRunError> {
-        let CancellationInitiator::Principal {
-            principal,
-            authorization,
-        } = &self.inner.cancellation_initiator
-        else {
-            return Err(AgentRunError::runtime_message(
-                "interaction list requires a principal-authored run",
-            ));
-        };
-        let Ok(recovered) = CommitCoordinator::recover_run(
-            Arc::clone(&self.inner.store),
-            self.inner.locator.session_id,
-            Some(self.inner.locator.run_id),
-        )
-        .await
-        else {
-            return Ok(Vec::new());
-        };
-        if recovered.state().accepted.is_none() {
-            return Ok(Vec::new());
-        }
-        let router = InteractionRouter::trusted(Arc::clone(&self.inner.store))
-            .await
-            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-        router
-            .list(
-                &self.inner.locator,
-                principal,
-                authorization,
-                NativeIds::now()?,
-            )
-            .await
-            .map_err(|error| AgentRunError::runtime_message(error.to_string()))
+        Ok(self
+            .live_state()
+            .await?
+            .pending_interaction
+            .map(|pending| vec![pending.request])
+            .unwrap_or_default())
     }
 
     /// Resolve the outstanding interaction through the live run handle.
@@ -275,13 +270,7 @@ impl AgentRun {
         &self,
         resolution: InteractionResolution,
     ) -> Result<(), AgentRunError> {
-        if let Ok(recovered) = CommitCoordinator::recover_run(
-            Arc::clone(&self.inner.store),
-            self.inner.locator.session_id,
-            Some(self.inner.locator.run_id),
-        )
-        .await
-            && let Some(pending) = recovered.state().pending_interaction.as_ref()
+        if let Some(pending) = self.live_state().await?.pending_interaction.as_ref()
             && pending.request.interaction_id() == resolution.interaction_id()
         {
             validate_resolution_response(pending.request.response_schema(), resolution.response())?;

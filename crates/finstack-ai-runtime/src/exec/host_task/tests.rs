@@ -49,6 +49,26 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
+#[test]
+fn live_state_wait_observes_host_lifecycle_and_retains_terminal_snapshot() {
+    let store = Arc::new(MemoryStore::new());
+    let mut owner =
+        RunTaskOwner::spawn(CommitCoordinator::new(store), run_config()).expect("owner");
+    let handle = owner.handle();
+    let initial = handle.live_state();
+    handle.shutdown();
+    let shutting_down = block_on(handle.wait_for_live_state(initial.revision)).expect("revision");
+    assert!(matches!(
+        shutting_down.status,
+        crate::RunStatus::ShuttingDown | crate::RunStatus::Stopped
+    ));
+    let _ = block_on(owner.shutdown());
+    let terminal = handle.live_state();
+    assert_eq!(terminal.status, crate::RunStatus::Stopped);
+    assert!(terminal.revision >= shutting_down.revision);
+    assert!(terminal.revision > initial.revision);
+}
+
 struct MemoryStore {
     batches: Mutex<Vec<CommittedBatch>>,
     requests: Mutex<BTreeMap<finstack_ai_kernel::AppendBatchId, AppendRequest>>,

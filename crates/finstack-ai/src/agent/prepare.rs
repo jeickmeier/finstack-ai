@@ -12,13 +12,13 @@ use finstack_ai_kernel::{
     Timestamp, TransitionEnv, TurnTag,
 };
 use finstack_ai_runtime::{
-    ApprovalGrantMode, CommitCoordinator, ContextProvider, EventBatchConfig, EventFilter,
-    EventHubConfig, EventLagPolicy, EventSubscriptionConfig, LaneAppendIds,
-    LockedModelContextProfile, Model, ModelContextProfileOverride, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelSettings, ModelTaskConfig, Observer, ProgressCoalescing, ReadyModel,
-    RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SessionCreateIds,
-    SessionError, SessionRuntime, StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig,
-    UuidV7Generator, resolve_model_context_profile,
+    ApprovalGrantMode, ContextProvider, EventBatchConfig, EventFilter, EventHubConfig,
+    EventLagPolicy, EventSubscriptionConfig, LaneAppendIds, LockedModelContextProfile, Model,
+    ModelContextProfileOverride, ModelName, ModelRequestDraft, ModelRequestLimits, ModelSettings,
+    ModelTaskConfig, Observer, ProgressCoalescing, ReadyModel, RunHandle, RunTaskConfig,
+    RunTaskOwner, SameIdentityRetryPolicy, SessionCreateIds, SessionError, SessionRuntime,
+    StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig, UuidV7Generator,
+    resolve_model_context_profile,
 };
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -379,7 +379,6 @@ impl Agent {
             timeout,
             Box::pin(self.drive(
                 &handle,
-                prepared.store,
                 prepared.session_id,
                 prepared.lane_id,
                 prepared.accepted,
@@ -641,80 +640,50 @@ pub(super) async fn submit(
     Ok(())
 }
 
-pub(super) async fn recover_state(
-    store: Arc<dyn finstack_ai_runtime::JournalStore>,
-    session_id: SessionId,
-    run_id: finstack_ai_kernel::RunId,
-) -> Result<finstack_ai_kernel::KernelState, AgentRunError> {
-    CommitCoordinator::recover_run(store, session_id, Some(run_id))
-        .await
-        .map(|coordinator| coordinator.state().clone())
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))
-}
-
 pub(super) async fn wait_for_phase(
     handle: &RunHandle,
-    store: Arc<dyn finstack_ai_runtime::JournalStore>,
-    session_id: SessionId,
-    run_id: finstack_ai_kernel::RunId,
     phases: &[RunPhase],
-) -> Result<finstack_ai_kernel::KernelState, AgentRunError> {
-    let mut events = handle
-        .subscribe_observer(observer_event_subscription())
-        .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
     loop {
-        let state = recover_state(Arc::clone(&store), session_id, run_id).await?;
+        let state = handle.live_state();
         if state.phase.is_some_and(|phase| phases.contains(&phase)) {
             return Ok(state);
         }
-        if let finstack_ai_runtime::RunStatus::Faulted { code } = handle.status() {
+        if let finstack_ai_runtime::RunStatus::Faulted { code } = state.status {
             return Err(AgentRunError::runtime_message(format!(
                 "runtime task faulted: {code}"
             )));
         }
-        wait_for_progress_hint(&mut events).await?;
+        handle
+            .wait_for_live_state(state.revision)
+            .await
+            .map_err(AgentRunError::runtime)?;
     }
 }
 
 pub(super) async fn wait_for_cycle(
     handle: &RunHandle,
-    store: Arc<dyn finstack_ai_runtime::JournalStore>,
-    session_id: SessionId,
-    run_id: finstack_ai_kernel::RunId,
     prior_cycle: u64,
-) -> Result<finstack_ai_kernel::KernelState, AgentRunError> {
-    let mut events = handle
-        .subscribe_observer(observer_event_subscription())
-        .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
     loop {
-        let state = recover_state(Arc::clone(&store), session_id, run_id).await?;
+        let state = handle.live_state();
         if state.cycle > prior_cycle || state.terminal.is_some() {
             return Ok(state);
         }
-        if let finstack_ai_runtime::RunStatus::Faulted { code } = handle.status() {
+        if let finstack_ai_runtime::RunStatus::Faulted { code } = state.status {
             return Err(AgentRunError::runtime_message(format!(
                 "runtime task faulted: {code}"
             )));
         }
-        wait_for_progress_hint(&mut events).await?;
-    }
-}
-
-async fn wait_for_progress_hint(
-    events: &mut finstack_ai_runtime::EventSubscription,
-) -> Result<(), AgentRunError> {
-    match driver::timeout(Duration::from_millis(100), events.next_batch()).await {
-        Ok(Some(_)) | Err(_) => Ok(()),
-        Ok(None) => Err(AgentRunError::runtime_message(
-            "runtime event stream closed while awaiting state progress",
-        )),
+        handle
+            .wait_for_live_state(state.revision)
+            .await
+            .map_err(AgentRunError::runtime)?;
     }
 }
 
 pub(super) fn ensure_nonterminal_failure(
-    state: &finstack_ai_kernel::KernelState,
+    state: &finstack_ai_runtime::LiveRunState,
 ) -> Result<(), AgentRunError> {
     match state.terminal.as_ref() {
         Some(TerminalState::Failed(failed)) => Err(AgentRunError::runtime_message(format!(
@@ -771,9 +740,9 @@ pub(super) fn model_draft(
 }
 
 pub(super) fn structured_candidate(
-    state: &finstack_ai_kernel::KernelState,
+    state: &finstack_ai_runtime::LiveRunState,
 ) -> Option<(MessageId, RawJson, StructuredResultSource)> {
-    let message = state.messages.last()?;
+    let message = state.committed_run_messages.last()?;
     for (index, block) in message.content().iter().enumerate() {
         match block {
             ContentBlock::Json(value) => {

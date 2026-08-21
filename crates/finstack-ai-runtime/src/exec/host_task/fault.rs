@@ -36,10 +36,7 @@ pub(super) fn fault_shared(shared: &Shared, code: &'static str) {
     if let Ok(mut intake) = shared.intake.lock() {
         intake.take();
     }
-    if let Ok(mut status) = shared.status.lock() {
-        *status = RunStatus::Faulted { code };
-    }
-    shared.status_changed.notify_waiters();
+    shared.publish_lifecycle(RunStatus::Faulted { code });
     shared.work.notify_waiters();
 }
 
@@ -51,10 +48,7 @@ pub(super) fn finish_worker(shared: &Shared) {
             .map_or(RunStatus::Stopped, |status| *status),
         RunStatus::Faulted { .. }
     ) {
-        if let Ok(mut status) = shared.status.lock() {
-            *status = RunStatus::Stopped;
-        }
-        shared.status_changed.notify_waiters();
+        shared.publish_lifecycle(RunStatus::Stopped);
     }
     shared.events.close();
 }

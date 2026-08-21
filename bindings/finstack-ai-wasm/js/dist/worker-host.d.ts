@@ -1,4 +1,4 @@
-import type { SessionInspectSnapshot } from "./agent.js";
+import type { RunStateSnapshot, SessionInspectSnapshot } from "./agent.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 /**
  * Structural Agent surface used inside the worker. The factory supplies the
@@ -15,6 +15,8 @@ export interface WorkerHostRun {
     };
     events(options?: EventOptions): AsyncIterable<WorkerHostEventBatch>;
     result(): Promise<WorkerHostRunResult>;
+    liveState(): Promise<RunStateSnapshot>;
+    waitForLiveState(revision: number): Promise<RunStateSnapshot>;
     cancel(reason?: string): Promise<void>;
     closeEvents(): Promise<void>;
 }

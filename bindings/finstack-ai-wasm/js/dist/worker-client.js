@@ -1,5 +1,5 @@
 import { FinstackError, sessionSnapshot } from "./errors.js";
-import { decodeWorkerToMain, encodeControl, requireTransfer, } from "./worker-protocol.js";
+import { decodeWorkerToMain, encodeControl, MAX_LIVE_STATE_BYTES, requireTransfer, } from "./worker-protocol.js";
 /**
  * Snapshot facade reconstructed from a transferred event-batch buffer.
  *
@@ -241,6 +241,43 @@ export class WorkerRun {
      */
     async result() {
         return this.#state.finished;
+    }
+    /** Read the worker-hosted run's latest confirmed state. */
+    async liveState() {
+        await this.#state.started;
+        const message = await this.#client.request({
+            v: 1,
+            type: "liveState",
+            id: this.#client.nextId(),
+            agentId: this.#state.agentId,
+            runId: this.#state.runId,
+        });
+        if (message.type !== "state" || message.snapshot === undefined) {
+            throw new FinstackError("worker live state response is invalid", {
+                code: "agent_run_runtime_failure",
+                retryable: false,
+            });
+        }
+        return message.snapshot;
+    }
+    /** Wait until the worker-hosted latest-only view advances. */
+    async waitForLiveState(revision) {
+        await this.#state.started;
+        const message = await this.#client.request({
+            v: 1,
+            type: "waitForLiveState",
+            id: this.#client.nextId(),
+            agentId: this.#state.agentId,
+            runId: this.#state.runId,
+            revision,
+        });
+        if (message.type !== "state" || message.snapshot === undefined) {
+            throw new FinstackError("worker live state response is invalid", {
+                code: "agent_run_runtime_failure",
+                retryable: false,
+            });
+        }
+        return message.snapshot;
     }
     /**
      * Submit idempotent durable cancellation.
@@ -568,6 +605,17 @@ export class WorkerClient {
             case "inspected":
                 this.#resolve(message.id, message);
                 return;
+            case "state": {
+                if (bytes === undefined || bytes.byteLength > MAX_LIVE_STATE_BYTES) {
+                    throw new FinstackError("worker live state transfer is invalid", {
+                        code: "agent_run_invalid_configuration",
+                        retryable: false,
+                    });
+                }
+                const snapshot = JSON.parse(new TextDecoder().decode(bytes));
+                this.#resolve(message.id, { ...message, snapshot });
+                return;
+            }
             case "started": {
                 const state = this.#starting.get(message.id);
                 this.#starting.delete(message.id);

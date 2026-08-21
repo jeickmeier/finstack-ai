@@ -105,6 +105,27 @@ export interface ObserverDiagnostics {
   readonly recent: readonly ObserverDiagnostic[];
 }
 
+/** Canonical Rust-owned message wire shape. */
+export type MessageWire = Readonly<Record<string, unknown>>;
+
+/** Latest confirmed semantic and runtime lifecycle state. */
+export interface RunStateSnapshot {
+  readonly revision: number;
+  readonly journalSequence: number;
+  readonly status: "running" | "shutting_down" | "stopped" | "faulted";
+  readonly faultCode?: string;
+  readonly phase?: string;
+  readonly cycle: number;
+  readonly preparedContextMessages: readonly MessageWire[];
+  readonly committedRunMessages: readonly MessageWire[];
+  readonly activeCapabilities: readonly Readonly<Record<string, unknown>>[];
+  readonly resolvedPlanDigest?: string;
+  readonly pendingInteraction?: Readonly<Record<string, unknown>>;
+  readonly validationFailure?: Readonly<Record<string, unknown>>;
+  readonly retryAttempts: number;
+  readonly terminal?: Readonly<Record<string, unknown>>;
+}
+
 /**
  * How a run parks and releases paid-tool approvals.
  *
@@ -580,6 +601,24 @@ export class Run {
   async result(): Promise<RunResult> {
     try {
       return new RunResult(await this.#handle.result());
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /** Read the latest confirmed run-state snapshot. */
+  async liveState(): Promise<RunStateSnapshot> {
+    try {
+      return (await this.#handle.liveState()) as RunStateSnapshot;
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /** Wait until the latest-only view advances beyond `revision`. */
+  async waitForLiveState(revision: number): Promise<RunStateSnapshot> {
+    try {
+      return (await this.#handle.waitForLiveState(BigInt(revision))) as RunStateSnapshot;
     } catch (error) {
       throw FinstackError.fromUnknown(error);
     }

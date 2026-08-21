@@ -1,4 +1,4 @@
-import type { SessionInspectSnapshot } from "./agent.js";
+import type { RunStateSnapshot, SessionInspectSnapshot } from "./agent.js";
 import { FinstackError } from "./errors.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 import { type LagPolicy, type MainToWorker, type WorkerToMain } from "./worker-protocol.js";
@@ -184,6 +184,10 @@ export declare class WorkerRun {
      * ```
      */
     result(): Promise<RunResultSnapshot>;
+    /** Read the worker-hosted run's latest confirmed state. */
+    liveState(): Promise<RunStateSnapshot>;
+    /** Wait until the worker-hosted latest-only view advances. */
+    waitForLiveState(revision: number): Promise<RunStateSnapshot>;
     /**
      * Submit idempotent durable cancellation.
      *

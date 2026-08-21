@@ -56,6 +56,34 @@ impl Run {
         })
     }
 
+    /// Read the latest confirmed semantic and lifecycle snapshot.
+    #[wasm_bindgen(js_name = liveState)]
+    pub fn live_state(&self) -> js_sys::Promise {
+        let run = self.inner.clone();
+        executor::drive(async move {
+            let locator = run.locator().clone();
+            let state = run
+                .live_state()
+                .await
+                .map_err(|error| agent_error(&error, Some(&locator)))?;
+            live_state_object(&state)
+        })
+    }
+
+    /// Wait until the latest-only view advances beyond `revision`.
+    #[wasm_bindgen(js_name = waitForLiveState)]
+    pub fn wait_for_live_state(&self, revision: u64) -> js_sys::Promise {
+        let run = self.inner.clone();
+        executor::drive(async move {
+            let locator = run.locator().clone();
+            let state = run
+                .wait_for_live_state(revision)
+                .await
+                .map_err(|error| agent_error(&error, Some(&locator)))?;
+            live_state_object(&state)
+        })
+    }
+
     /// Snapshot bounded, redacted observer-delivery diagnostics.
     ///
     /// # Errors
@@ -150,6 +178,35 @@ impl Run {
         self.inner.close_events();
         js_sys::Promise::resolve(&JsValue::UNDEFINED)
     }
+}
+
+fn live_state_object(state: &finstack_ai::runtime::LiveRunState) -> Result<JsValue, JsValue> {
+    let status = match state.status {
+        finstack_ai::runtime::RunStatus::Running => "running",
+        finstack_ai::runtime::RunStatus::ShuttingDown => "shutting_down",
+        finstack_ai::runtime::RunStatus::Stopped => "stopped",
+        finstack_ai::runtime::RunStatus::Faulted { .. } => "faulted",
+    };
+    let value = serde_json::json!({
+        "revision": state.revision,
+        "journalSequence": state.journal_sequence,
+        "status": status,
+        "faultCode": state.fault_code,
+        "phase": state.phase,
+        "cycle": state.cycle,
+        "preparedContextMessages": state.prepared_context_messages,
+        "committedRunMessages": state.committed_run_messages,
+        "activeCapabilities": state.active_capabilities,
+        "resolvedPlanDigest": state.resolved_plan_digest,
+        "pendingInteraction": state.pending_interaction,
+        "validationFailure": state.validation_failure,
+        "retryAttempts": state.retry_attempts,
+        "terminal": state.terminal,
+    });
+    js_sys::JSON::parse(
+        &serde_json::to_string(&value)
+            .map_err(|_| JsValue::from_str("live state serialization failed"))?,
+    )
 }
 
 fn observer_diagnostics_object(

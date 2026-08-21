@@ -6,6 +6,7 @@ use finstack_ai_kernel::{KernelInput, TransitionEnv};
 
 use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
 use crate::event_hub::EventHubHandle;
+use crate::exec::live_state::{LiveRunState, LiveStatePublisher};
 use crate::host_driver::Signal;
 use crate::observer::ObserverDiagnosticBuffer;
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
@@ -18,6 +19,10 @@ pub(super) struct Shared {
     pub(super) shutting_down: AtomicBool,
     pub(super) status: Mutex<RunStatus>,
     pub(super) status_changed: Signal,
+    pub(super) live_state: Mutex<LiveRunState>,
+    pub(super) kernel_state: Mutex<finstack_ai_kernel::KernelState>,
+    pub(super) record_kinds: Mutex<Arc<[Arc<str>]>>,
+    pub(super) live_state_changed: Signal,
     pub(super) events: EventHubHandle,
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
     pub(super) timer_already_due: AtomicU64,
@@ -27,12 +32,21 @@ pub(super) struct Shared {
 }
 
 impl Shared {
-    pub(super) fn new(events: EventHubHandle, capacity: usize) -> Arc<Self> {
+    pub(super) fn new(
+        events: EventHubHandle,
+        capacity: usize,
+        initial_live_state: LiveRunState,
+        initial_kernel_state: finstack_ai_kernel::KernelState,
+    ) -> Arc<Self> {
         Arc::new(Self {
             intake: Mutex::new(Some(Arc::new(CommandIntake::new(capacity)))),
             shutting_down: AtomicBool::new(false),
             status: Mutex::new(RunStatus::Running),
             status_changed: Signal::new(),
+            live_state: Mutex::new(initial_live_state),
+            kernel_state: Mutex::new(initial_kernel_state),
+            record_kinds: Mutex::new(Arc::from([])),
+            live_state_changed: Signal::new(),
             events,
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
@@ -40,6 +54,50 @@ impl Shared {
             observer_diagnostics: Mutex::new(ObserverDiagnosticBuffer::default()),
             work: Signal::new(),
         })
+    }
+
+    pub(super) fn publish_lifecycle(&self, status: RunStatus) {
+        if let Ok(mut current) = self.status.lock() {
+            *current = status;
+        }
+        self.status_changed.notify_waiters();
+        if let Ok(mut current) = self.live_state.lock() {
+            *current = current.next_lifecycle(status);
+        }
+        self.live_state_changed.notify_waiters();
+    }
+}
+
+impl LiveStatePublisher for Shared {
+    fn publish_semantic(
+        &self,
+        state: &finstack_ai_kernel::KernelState,
+        fault_code: Option<&'static str>,
+        record_kinds: &[Arc<str>],
+    ) {
+        if let Ok(mut current) = self.kernel_state.lock() {
+            *current = state.clone();
+        }
+        if let Ok(mut current) = self.record_kinds.lock() {
+            *current = record_kinds.into();
+        }
+        let status = self.status.lock().map_or(
+            RunStatus::Faulted {
+                code: "run_status_lock_poisoned",
+            },
+            |status| *status,
+        );
+        if let Ok(mut current) = self.live_state.lock() {
+            *current = LiveRunState::next_semantic(
+                current.revision,
+                status,
+                fault_code
+                    .map(Arc::from)
+                    .or_else(|| current.fault_code.clone()),
+                state,
+            );
+        }
+        self.live_state_changed.notify_waiters();
     }
 }
 

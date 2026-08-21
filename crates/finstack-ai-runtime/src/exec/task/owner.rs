@@ -8,6 +8,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
+use crate::LiveRunState;
 use crate::event_hub::event_hub;
 use crate::native::model::{ModelDispatcher, run_model_jobs};
 use crate::native::timer::{TimerDispatcher, run_timer_jobs};
@@ -213,10 +214,15 @@ impl RunTaskOwner {
         coordinator.install_event_publisher(Arc::new(event_handle.clone()));
         let (sender, receiver) = mpsc::channel(config.command_capacity);
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
+        let (live_state_sender, live_state_receiver) =
+            watch::channel(LiveRunState::initial(coordinator.state()));
         let shared = Arc::new(Shared {
             sender: Mutex::new(Some(sender)),
             shutting_down: AtomicBool::new(false),
             status: status_sender,
+            live_state: live_state_sender,
+            kernel_state: Mutex::new(coordinator.state().clone()),
+            record_kinds: Mutex::new(Arc::from([])),
             events: event_handle,
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
@@ -226,7 +232,9 @@ impl RunTaskOwner {
         let handle = RunHandle {
             shared: Arc::clone(&shared),
             status: status_receiver,
+            live_state: live_state_receiver,
         };
+        coordinator.install_live_state_publisher(shared.clone());
         let mut tasks = JoinSet::new();
         tasks.spawn(run_worker(coordinator, receiver, shared));
         tasks.spawn(event_task.run());
@@ -409,10 +417,15 @@ impl RunTaskOwner {
         }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
+        let (live_state_sender, live_state_receiver) =
+            watch::channel(LiveRunState::initial(coordinator.state()));
         let shared = Arc::new(Shared {
             sender: Mutex::new(Some(sender)),
             shutting_down: AtomicBool::new(false),
             status: status_sender,
+            live_state: live_state_sender,
+            kernel_state: Mutex::new(coordinator.state().clone()),
+            record_kinds: Mutex::new(Arc::from([])),
             events: event_handle,
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
@@ -422,7 +435,9 @@ impl RunTaskOwner {
         let handle = RunHandle {
             shared: Arc::clone(&shared),
             status: status_receiver,
+            live_state: live_state_receiver,
         };
+        coordinator.install_live_state_publisher(shared.clone());
         let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         tasks.spawn(run_worker_with_model(
             coordinator,
@@ -696,10 +711,15 @@ impl RunTaskOwner {
         }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
+        let (live_state_sender, live_state_receiver) =
+            watch::channel(LiveRunState::initial(coordinator.state()));
         let shared = Arc::new(Shared {
             sender: Mutex::new(Some(sender)),
             shutting_down: AtomicBool::new(false),
             status: status_sender,
+            live_state: live_state_sender,
+            kernel_state: Mutex::new(coordinator.state().clone()),
+            record_kinds: Mutex::new(Arc::from([])),
             events: event_handle,
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
@@ -709,7 +729,9 @@ impl RunTaskOwner {
         let handle = RunHandle {
             shared: Arc::clone(&shared),
             status: status_receiver,
+            live_state: live_state_receiver,
         };
+        coordinator.install_live_state_publisher(shared.clone());
         let due_poll_clock = sources.clock();
         tasks.spawn(run_worker_with_model_and_tools(
             coordinator,
@@ -839,7 +861,7 @@ impl RunTaskOwner {
             self.tasks.abort_all();
             while self.tasks.join_next().await.is_some() {}
             if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
-                self.handle.shared.status.send_replace(RunStatus::Stopped);
+                self.handle.shared.publish_lifecycle(RunStatus::Stopped);
             }
         }
         let observers_joined = timeout(self.shutdown_deadline, async {
@@ -891,7 +913,7 @@ impl Drop for RunTaskOwner {
             self.tasks.abort_all();
             self.observer_tasks.abort_all();
             if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
-                self.handle.shared.status.send_replace(RunStatus::Stopped);
+                self.handle.shared.publish_lifecycle(RunStatus::Stopped);
             }
             if let Ok(mut value) = self.handle.shared.shutdown_report.lock() {
                 *value = Some(ShutdownReport {

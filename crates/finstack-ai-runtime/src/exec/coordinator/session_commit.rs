@@ -165,6 +165,13 @@ impl CommitCoordinator {
         apply_batch_to_session(&mut self.session, committed)
             .map_err(|code| self.boundary_fault(code))?;
         self.note_head_checksum(committed);
+        #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+        self.record_kinds.extend(
+            committed
+                .records
+                .iter()
+                .map(|record| std::sync::Arc::from(record.body().kind_name())),
+        );
         Ok(())
     }
 

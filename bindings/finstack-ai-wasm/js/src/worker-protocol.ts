@@ -1,4 +1,4 @@
-import type { SessionInspectSnapshot } from "./agent.js";
+import type { RunStateSnapshot, SessionInspectSnapshot } from "./agent.js";
 import { FinstackError, sessionSnapshot } from "./errors.js";
 import type { RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 
@@ -10,6 +10,9 @@ export const MAX_CONTROL_BYTES = 16 * 1024;
 
 /** Maximum transferred event-batch bytes (Threat Model §8.3). */
 export const MAX_TRANSFER_BYTES = 256 * 1024;
+
+/** Maximum transferred message-bearing live-state snapshot bytes. */
+export const MAX_LIVE_STATE_BYTES = 16 * 1024 * 1024;
 
 /** Slow-consumer policy for the worker-to-UI queue. */
 export type LagPolicy = "drop-progress" | "disconnect" | "block-bounded";
@@ -41,6 +44,15 @@ export type MainToWorker =
       agentId: string;
       runId: string;
       reason?: string;
+    }
+  | { v: 1; type: "liveState"; id: string; agentId: string; runId: string }
+  | {
+      v: 1;
+      type: "waitForLiveState";
+      id: string;
+      agentId: string;
+      runId: string;
+      revision: number;
     }
   | { v: 1; type: "closeEvents"; id: string; agentId: string; runId: string }
   | { v: 1; type: "ack"; agentId: string; runId: string; lastSequence: number }
@@ -98,7 +110,8 @@ export type WorkerToMain =
       policy: LagPolicy;
     }
   | { v: 1; type: "terminated"; reason: string }
-  | { v: 1; type: "inspected"; id: string; snapshot: SessionInspectSnapshot };
+  | { v: 1; type: "inspected"; id: string; snapshot: SessionInspectSnapshot }
+  | { v: 1; type: "state"; id: string; snapshot?: RunStateSnapshot };
 
 /**
  * Encode a control envelope and reject oversized payloads.
@@ -184,6 +197,23 @@ export function decodeMainToWorker(data: unknown): MainToWorker {
       }
       return message;
     }
+    case "liveState":
+      return {
+        v: 1,
+        type,
+        id: requiredString(record, "id"),
+        agentId: requiredString(record, "agentId"),
+        runId: requiredString(record, "runId"),
+      };
+    case "waitForLiveState":
+      return {
+        v: 1,
+        type,
+        id: requiredString(record, "id"),
+        agentId: requiredString(record, "agentId"),
+        runId: requiredString(record, "runId"),
+        revision: requiredNumber(record, "revision"),
+      };
     case "closeEvents":
       return {
         v: 1,
@@ -311,6 +341,12 @@ export function decodeWorkerToMain(data: unknown): WorkerToMain {
         type,
         id: requiredString(record, "id"),
         snapshot: requiredInspect(record.snapshot),
+      };
+    case "state":
+      return {
+        v: 1,
+        type,
+        id: requiredString(record, "id"),
       };
     default: {
       const _exhaustive: never = type as never;

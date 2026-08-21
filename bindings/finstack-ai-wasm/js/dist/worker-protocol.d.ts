@@ -1,4 +1,4 @@
-import type { SessionInspectSnapshot } from "./agent.js";
+import type { RunStateSnapshot, SessionInspectSnapshot } from "./agent.js";
 import type { RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 /** Protocol version carried on every worker message. */
 export declare const PROTOCOL_VERSION = 1;
@@ -6,6 +6,8 @@ export declare const PROTOCOL_VERSION = 1;
 export declare const MAX_CONTROL_BYTES: number;
 /** Maximum transferred event-batch bytes (Threat Model §8.3). */
 export declare const MAX_TRANSFER_BYTES: number;
+/** Maximum transferred message-bearing live-state snapshot bytes. */
+export declare const MAX_LIVE_STATE_BYTES: number;
 /** Slow-consumer policy for the worker-to-UI queue. */
 export type LagPolicy = "drop-progress" | "disconnect" | "block-bounded";
 /** Main-thread to worker commands. */
@@ -36,6 +38,19 @@ export type MainToWorker = {
     agentId: string;
     runId: string;
     reason?: string;
+} | {
+    v: 1;
+    type: "liveState";
+    id: string;
+    agentId: string;
+    runId: string;
+} | {
+    v: 1;
+    type: "waitForLiveState";
+    id: string;
+    agentId: string;
+    runId: string;
+    revision: number;
 } | {
     v: 1;
     type: "closeEvents";
@@ -118,6 +133,11 @@ export type WorkerToMain = {
     type: "inspected";
     id: string;
     snapshot: SessionInspectSnapshot;
+} | {
+    v: 1;
+    type: "state";
+    id: string;
+    snapshot?: RunStateSnapshot;
 };
 /**
  * Encode a control envelope and reject oversized payloads.

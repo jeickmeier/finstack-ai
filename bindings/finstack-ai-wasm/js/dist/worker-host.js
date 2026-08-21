@@ -113,6 +113,16 @@ export function exposeWorkerHost(factory) {
                 post({ v: 1, type: "ready", id: message.id });
                 return;
             }
+            case "liveState": {
+                const slot = requireRun(message.agentId, message.runId);
+                postState(message.id, await slot.run.liveState());
+                return;
+            }
+            case "waitForLiveState": {
+                const slot = requireRun(message.agentId, message.runId);
+                postState(message.id, await slot.run.waitForLiveState(message.revision));
+                return;
+            }
             case "closeEvents": {
                 const slot = requireRun(message.agentId, message.runId);
                 slot.closed = true;
@@ -284,6 +294,10 @@ export function exposeWorkerHost(factory) {
             return;
         }
         scope.postMessage(encoded);
+    }
+    function postState(id, snapshot) {
+        const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+        post({ v: 1, type: "state", id }, [bytes.buffer]);
     }
     function postError(slot, error, requestId) {
         const message = {

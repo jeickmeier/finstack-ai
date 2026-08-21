@@ -69,6 +69,35 @@ impl PyRun {
         })
     }
 
+    /// Read the latest confirmed semantic and lifecycle snapshot.
+    fn live_state<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let run = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let locator = run.locator().clone();
+            match run.live_state().await {
+                Ok(state) => Python::attach(|py| live_state_to_python(py, &state)),
+                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
+            }
+        })
+    }
+
+    /// Wait until the latest-only view advances beyond `revision`.
+    #[pyo3(text_signature = "($self, revision)")]
+    fn wait_for_live_state<'py>(
+        &self,
+        py: Python<'py>,
+        revision: u64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let run = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let locator = run.locator().clone();
+            match run.wait_for_live_state(revision).await {
+                Ok(state) => Python::attach(|py| live_state_to_python(py, &state)),
+                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
+            }
+        })
+    }
+
     /// Snapshot bounded, redacted observer-delivery diagnostics.
     #[pyo3(text_signature = "($self)")]
     fn observer_diagnostics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -243,6 +272,35 @@ impl PyRun {
             Ok(())
         })
     }
+}
+
+fn live_state_to_python(
+    py: Python<'_>,
+    state: &finstack_ai::runtime::LiveRunState,
+) -> PyResult<Py<PyAny>> {
+    let status = match state.status {
+        finstack_ai::runtime::RunStatus::Running => "running",
+        finstack_ai::runtime::RunStatus::ShuttingDown => "shutting_down",
+        finstack_ai::runtime::RunStatus::Stopped => "stopped",
+        finstack_ai::runtime::RunStatus::Faulted { .. } => "faulted",
+    };
+    let value = serde_json::json!({
+        "revision": state.revision,
+        "journal_sequence": state.journal_sequence,
+        "status": status,
+        "fault_code": state.fault_code,
+        "phase": state.phase,
+        "cycle": state.cycle,
+        "prepared_context_messages": state.prepared_context_messages,
+        "committed_run_messages": state.committed_run_messages,
+        "active_capabilities": state.active_capabilities,
+        "resolved_plan_digest": state.resolved_plan_digest,
+        "pending_interaction": state.pending_interaction,
+        "validation_failure": state.validation_failure,
+        "retry_attempts": state.retry_attempts,
+        "terminal": state.terminal,
+    });
+    json_to_py(py, &value)
 }
 
 fn observer_diagnostics_to_python(

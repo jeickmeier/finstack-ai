@@ -643,14 +643,27 @@ impl WorkflowSession {
     pub async fn drive_until_wait(&mut self) -> Result<WorkflowWait, WorkflowDriverError> {
         tokio::time::timeout(self.drive_timeout, async {
             loop {
+                if let Some(owner) = self.owner.as_ref() {
+                    let handle = owner.handle();
+                    self.last_state = handle.kernel_state().ok_or(WorkflowDriverError::Spawn {
+                        code: "live_state_unavailable",
+                    })?;
+                    if let Some(wait) = classify_wait(&self.last_state) {
+                        return Ok(wait);
+                    }
+                    let revision = handle.live_state().revision;
+                    handle.wait_for_live_state(revision).await.map_err(|_| {
+                        WorkflowDriverError::Spawn {
+                            code: "live_state_wait_failed",
+                        }
+                    })?;
+                    continue;
+                }
                 self.refresh_state().await?;
                 if let Some(wait) = classify_wait(&self.last_state) {
                     return Ok(wait);
                 }
-                if self.owner.is_none() {
-                    Box::pin(self.spawn_owner()).await?;
-                }
-                tokio::task::yield_now().await;
+                Box::pin(self.spawn_owner()).await?;
             }
         })
         .await

@@ -51,11 +51,11 @@ pub(super) async fn run_worker(
                 sender.take();
             }
             receiver.close();
-            shared.status.send_replace(RunStatus::Faulted { code });
+            shared.publish_lifecycle(RunStatus::Faulted { code });
         }
     }
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
-        shared.status.send_replace(RunStatus::Stopped);
+        shared.publish_lifecycle(RunStatus::Stopped);
     }
     shared.events.close().await;
 }
@@ -168,7 +168,7 @@ pub(super) async fn run_worker_with_model<C, R>(
         }
     }
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
-        shared.status.send_replace(RunStatus::Stopped);
+        shared.publish_lifecycle(RunStatus::Stopped);
     }
     shared.events.close().await;
 }
@@ -395,7 +395,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
         }
     }
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
-        shared.status.send_replace(RunStatus::Stopped);
+        shared.publish_lifecycle(RunStatus::Stopped);
     }
     shared.events.close().await;
 }

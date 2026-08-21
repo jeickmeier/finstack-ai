@@ -17,7 +17,7 @@ pub(super) fn fault_worker(
         sender.take();
     }
     receiver.close();
-    shared.status.send_replace(RunStatus::Faulted { code });
+    shared.publish_lifecycle(RunStatus::Faulted { code });
 }
 
 pub(super) fn model_runtime_fault(error: &RunHandleError) -> &'static str {

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use finstack_ai_kernel::OperationLocator;
 
+use crate::LiveRunState;
 use crate::context::CONTEXT_RECOVERY_UNCERTAIN;
 use crate::coordinator::{CommitCoordinator, PostCommitDispatcher};
 use crate::event_hub::event_hub;
@@ -57,7 +58,13 @@ impl RunTaskOwner {
         let (event_handle, ()) =
             event_hub(config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
         coordinator.install_event_publisher(Arc::new(event_handle.clone()));
-        let shared = Shared::new(event_handle, config.command_capacity);
+        let shared = Shared::new(
+            event_handle,
+            config.command_capacity,
+            LiveRunState::initial(coordinator.state()),
+            coordinator.state().clone(),
+        );
+        coordinator.install_live_state_publisher(shared.clone());
         let handle = RunHandle {
             shared: Arc::clone(&shared),
         };
@@ -395,7 +402,13 @@ impl RunTaskOwner {
             }
         }
 
-        let shared = Shared::new(event_handle, run_config.command_capacity);
+        let shared = Shared::new(
+            event_handle,
+            run_config.command_capacity,
+            LiveRunState::initial(coordinator.state()),
+            coordinator.state().clone(),
+        );
+        coordinator.install_live_state_publisher(shared.clone());
         let handle = RunHandle {
             shared: Arc::clone(&shared),
         };

@@ -1,4 +1,4 @@
-import type { SessionInspectSnapshot } from "./agent.js";
+import type { RunStateSnapshot, SessionInspectSnapshot } from "./agent.js";
 import { FinstackError } from "./errors.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 import {
@@ -22,6 +22,8 @@ export interface WorkerHostRun {
   readonly locator: { toDict(): SessionSnapshot };
   events(options?: EventOptions): AsyncIterable<WorkerHostEventBatch>;
   result(): Promise<WorkerHostRunResult>;
+  liveState(): Promise<RunStateSnapshot>;
+  waitForLiveState(revision: number): Promise<RunStateSnapshot>;
   cancel(reason?: string): Promise<void>;
   closeEvents(): Promise<void>;
 }
@@ -190,6 +192,16 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
         const slot = requireRun(message.agentId, message.runId);
         await slot.run.cancel(message.reason);
         post({ v: 1, type: "ready", id: message.id });
+        return;
+      }
+      case "liveState": {
+        const slot = requireRun(message.agentId, message.runId);
+        postState(message.id, await slot.run.liveState());
+        return;
+      }
+      case "waitForLiveState": {
+        const slot = requireRun(message.agentId, message.runId);
+        postState(message.id, await slot.run.waitForLiveState(message.revision));
         return;
       }
       case "closeEvents": {
@@ -375,6 +387,11 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
       return;
     }
     scope.postMessage(encoded);
+  }
+
+  function postState(id: string, snapshot: RunStateSnapshot): void {
+    const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+    post({ v: 1, type: "state", id }, [bytes.buffer]);
   }
 
   function postError(
