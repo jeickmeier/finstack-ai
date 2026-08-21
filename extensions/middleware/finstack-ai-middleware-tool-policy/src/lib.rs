@@ -35,7 +35,7 @@ use finstack_ai_runtime::{
 mod config;
 mod eval;
 
-pub use config::*;
+pub use config::{JailbreakAction, ToolPolicyConfig, ToolPolicyError};
 
 use eval::{PolicyVerdict, evaluate_before_model, evaluate_before_tool_batch};
 

@@ -1,233 +1,38 @@
-use std::future::Future;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
+use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ArtifactId, ArtifactRef, BlobRef, ContentBlock, Digest, Id, IdTag, LaneId, MediaRef, Message,
-    MessageRole, Metadata, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId,
-    SessionId, TextBlock, Timestamp,
+    ArtifactId, ArtifactRef, BlobRef, ContentBlock, Digest, Message, MessageRole, Metadata,
+    TEXT_MAX_BYTES, ToolCallId, ToolResultBlock,
 };
-use finstack_ai_runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, AuthorizationContext,
-    BeforeModelInput, Bytes, CancellationSignal, Middleware as _, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelSettings, PortFuture, RunCallContext, StageInput, StageOutcome,
-};
-
 use finstack_ai_memory::InProcessArtifactStore;
+use finstack_ai_runtime::{
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
+    MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware as _, MiddlewareError, ModelRequestDraft,
+    PortFuture, StageOutcome,
+};
+use finstack_ai_tools_document::parser::DocumentLimits;
 
-use crate::{AttachmentIndex, DocumentIngestMiddleware};
+use crate::{
+    ATTACHMENT_INDEX_CAPACITY, AttachmentIndex, DocumentIngestMiddleware, FALLBACK_NOTE_TEXT,
+    LIMITS_IDENTITY_VERSION, PARSE_CACHE_CAPACITY, ParseCache, ParseCacheKey, fallback_text_block,
+    limits_identity_bytes, note_block, rebuild_message, skip_note_message,
+};
 
-const SAMPLE_CSV: &[u8] = include_bytes!("../../../../fixtures/documents/sample.csv");
+#[path = "test_support.rs"]
+mod test_support;
+
+use test_support::{
+    CaptureArtifactStore, SAMPLE_CSV, before_model_input, before_model_input_with_file, blob_of,
+    block_on, file_block, message, middleware_context, stage, text,
+};
+
 const SCANNED_PDF: &[u8] = include_bytes!("../../../../fixtures/documents/scanned.pdf");
 
-fn block_on<T>(future: impl Future<Output = T>) -> T {
-    let mut context = Context::from_waker(Waker::noop());
-    let mut future = std::pin::pin!(future);
-    loop {
-        match future.as_mut().poll(&mut context) {
-            Poll::Ready(value) => return value,
-            Poll::Pending => std::thread::yield_now(),
-        }
-    }
-}
+/// RFC 8785 canonical JSON for [`DocumentLimits::default`] under
+/// [`LIMITS_IDENTITY_VERSION`].
+const PINNED_DEFAULT_LIMITS_IDENTITY: &[u8] = br#"{"max_input_bytes":4194304,"max_output_bytes":1048576,"max_pages":500,"version":"document-ingest-limits-v1"}"#;
 
-fn id<T: IdTag>(value: u64) -> Id<T> {
-    let mut bytes = [0_u8; 16];
-    bytes[6] = 0x70;
-    bytes[8] = 0x80;
-    bytes[9..].copy_from_slice(&value.to_be_bytes()[1..]);
-    Id::from_bytes(bytes)
-}
-
-/// Test-only in-memory `ArtifactStore` that captures every `stage_put` call
-/// and serves `get` by content-digest match. Copied from
-/// `extensions/toolsets/finstack-ai-tools-document/src/tests.rs`.
-#[derive(Clone, Default)]
-struct CaptureArtifactStore {
-    staged: Arc<Mutex<Vec<(ArtifactScope, Bytes, ArtifactMetadata)>>>,
-}
-
-impl ArtifactStore for CaptureArtifactStore {
-    fn stage_put(
-        &self,
-        scope: ArtifactScope,
-        content: Bytes,
-        metadata: ArtifactMetadata,
-    ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
-        let staged = Arc::clone(&self.staged);
-        Box::pin(async move {
-            staged.lock().expect("capture lock").push((
-                scope.clone(),
-                content.clone(),
-                metadata.clone(),
-            ));
-            let content_digest = Digest::blob_content(&content);
-            let blob = BlobRef::try_new(
-                "capture-blob",
-                metadata.media_type.as_ref(),
-                u64::try_from(content.len()).expect("length"),
-                Some(content_digest),
-                metadata.name.as_deref(),
-            )
-            .expect("blob");
-            Ok(ArtifactRef::try_new(
-                ArtifactId::from_bytes([9; 16]),
-                metadata.kind.as_ref(),
-                blob,
-                content_digest,
-                scope.digest().expect("scope digest"),
-                metadata.attributes,
-            )
-            .expect("artifact"))
-        })
-    }
-
-    fn get(
-        &self,
-        _scope: ArtifactScope,
-        artifact: ArtifactRef,
-    ) -> PortFuture<Result<Bytes, ArtifactError>> {
-        let staged = Arc::clone(&self.staged);
-        Box::pin(async move {
-            staged
-                .lock()
-                .expect("capture lock")
-                .iter()
-                .find(|(_, content, _)| Digest::blob_content(content) == artifact.content_digest())
-                .map(|(_, content, _)| content.clone())
-                .ok_or(ArtifactError::NotFound)
-        })
-    }
-}
-
-fn test_scope() -> ArtifactScope {
-    ArtifactScope {
-        tenant_scope: Arc::from("tenant-a"),
-        session_id: SessionId::from_bytes([1; 16]),
-        run_id: Some(RunId::from_bytes([3; 16])),
-        sensitivity: finstack_ai_kernel::Sensitivity::Internal,
-    }
-}
-
-/// Stage `bytes` into `store` and return the exact `ArtifactRef` it
-/// produced. Callers must separately `AttachmentIndex::insert` this ref for
-/// the middleware to be able to resolve the corresponding `BlobRef` (spec
-/// decision 19) — the dangling-file test deliberately skips that step.
-fn stage(store: &dyn ArtifactStore, bytes: &[u8], media: &str, name: &str) -> ArtifactRef {
-    block_on(finstack_ai_runtime::stage_required_artifact(
-        store,
-        test_scope(),
-        Bytes::copy_from_slice(bytes),
-        ArtifactMetadata {
-            kind: Arc::from("attachment"),
-            media_type: Arc::from(media),
-            name: Some(Arc::from(name)),
-            attributes: Metadata::empty(),
-        },
-    ))
-    .expect("staged")
-}
-
-/// The exact `BlobRef` carried on the wire for a staged artifact.
-fn blob_of(artifact: &ArtifactRef) -> BlobRef {
-    artifact.blob().clone()
-}
-
-fn middleware_context() -> finstack_ai_runtime::MiddlewareContext {
-    let principal =
-        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
-    finstack_ai_runtime::MiddlewareContext {
-        run: RunCallContext {
-            locator: OperationLocator::try_new(
-                "tenant-a",
-                SessionId::from_bytes([1; 16]),
-                LaneId::from_bytes([2; 16]),
-                RunId::from_bytes([3; 16]),
-            )
-            .expect("locator"),
-            authorization: AuthorizationContext {
-                principal,
-                authentication_method: Arc::from("test"),
-                assurance_level: Arc::from("test"),
-                roles: Arc::from([]),
-                permitted_scopes: Arc::from([Arc::from("tenant-a")]),
-                safe_claims: Metadata::empty(),
-                policy_version: Arc::from("policy-v1"),
-                decision_id: Arc::from("decision-v1"),
-            },
-            effect_id: id::<finstack_ai_kernel::EffectTag>(4),
-            attempt: 1,
-            deadline: None,
-            budget_scope_id: None,
-            cancellation: CancellationSignal::new(),
-            relation_depth: 0,
-        },
-        chain_digest: Digest::raw_json(b"chain"),
-        chain_index: 0,
-        compaction_resume: None,
-    }
-}
-
-fn message(ordinal: u64, role: MessageRole, content: Vec<ContentBlock>) -> Message {
-    Message::try_new(
-        id(ordinal),
-        role,
-        content,
-        Timestamp::from_unix_ms(i64::try_from(ordinal).expect("ts")).expect("ts"),
-        None,
-        ProviderIds::empty(),
-        Metadata::empty(),
-    )
-    .expect("message")
-}
-
-fn text(value: &str) -> ContentBlock {
-    ContentBlock::Text(TextBlock::try_new(value).expect("text"))
-}
-
-fn file_block(blob: BlobRef) -> ContentBlock {
-    ContentBlock::File(MediaRef::new(blob))
-}
-
-fn draft_with_messages(messages: Vec<Message>) -> ModelRequestDraft {
-    ModelRequestDraft {
-        model: ModelName::try_new("preview-model").expect("model"),
-        messages: messages.into(),
-        tools: Arc::from([]),
-        output: OutputSpec::PlainText,
-        settings: ModelSettings {
-            values: RawJson::parse(b"{}").expect("settings"),
-        },
-        limits: ModelRequestLimits {
-            max_input_bytes: 1_000_000,
-            max_input_tokens: 10_000,
-            max_output_tokens: 1_000,
-        },
-    }
-}
-
-fn before_model_input(messages: Vec<Message>) -> StageInput {
-    StageInput::BeforeModel(Box::new(BeforeModelInput {
-        request: draft_with_messages(messages),
-        source_entries: Arc::from([]),
-        model_context_profile_digest: Digest::raw_json(b"profile"),
-        hard_input_tokens: 10_000,
-        checkpoint: None,
-    }))
-}
-
-fn before_model_input_with_file(artifact: &ArtifactRef) -> StageInput {
-    before_model_input(vec![message(
-        1,
-        MessageRole::User,
-        vec![
-            text("please review the attachment"),
-            file_block(blob_of(artifact)),
-        ],
-    )])
-}
-
-fn before_model_input_with_dangling_file() -> StageInput {
+fn before_model_input_with_dangling_file() -> finstack_ai_runtime::StageInput {
     let blob = BlobRef::try_new(
         "never-staged-blob",
         "text/csv",
@@ -243,7 +48,7 @@ fn before_model_input_with_dangling_file() -> StageInput {
     )])
 }
 
-fn before_model_input_text_only() -> StageInput {
+fn before_model_input_text_only() -> finstack_ai_runtime::StageInput {
     before_model_input(vec![message(
         1,
         MessageRole::User,
@@ -265,12 +70,98 @@ fn all_text(draft: &ModelRequestDraft) -> String {
 }
 
 fn has_file_blocks(draft: &ModelRequestDraft) -> bool {
-    draft.messages.iter().any(|message| {
-        message
-            .content()
-            .iter()
-            .any(|block| matches!(block, ContentBlock::File(_)))
-    })
+    draft.messages.iter().any(message_has_file_blocks)
+}
+
+fn message_has_file_blocks(message: &Message) -> bool {
+    message
+        .content()
+        .iter()
+        .any(|block| matches!(block, ContentBlock::File(_)))
+}
+
+fn tool_result_block() -> ContentBlock {
+    ContentBlock::ToolResult(
+        ToolResultBlock::try_new(
+            ToolCallId::from_bytes([9; 16]),
+            vec![text("tool body")],
+            false,
+        )
+        .expect("tool result"),
+    )
+}
+
+fn tool_role_message() -> Message {
+    message(2, MessageRole::Tool, vec![tool_result_block()])
+}
+
+fn construction_error_has_no_file_blocks(error: &MiddlewareError) {
+    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
+    let text = error.to_string();
+    assert!(
+        !text.contains("File") && !text.contains("file") && !text.contains("blob-"),
+        "construction error must not leak File blocks or blob identity: {text}"
+    );
+}
+
+/// Store that is index-resolvable but always fails `get`.
+struct FailingGetStore;
+
+impl ArtifactStore for FailingGetStore {
+    fn stage_put(
+        &self,
+        _scope: ArtifactScope,
+        _content: Bytes,
+        _metadata: ArtifactMetadata,
+    ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("unavailable"),
+            })
+        })
+    }
+
+    fn get(
+        &self,
+        _scope: ArtifactScope,
+        _artifact: ArtifactRef,
+    ) -> PortFuture<Result<Bytes, ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("unavailable"),
+            })
+        })
+    }
+}
+
+fn indexed_artifact(ordinal: usize) -> (BlobRef, ArtifactRef) {
+    let digest = Digest::blob_content(&ordinal.to_be_bytes());
+    let blob = BlobRef::try_new(
+        format!("blob-{ordinal}"),
+        "text/csv",
+        1,
+        Some(digest),
+        None::<&str>,
+    )
+    .expect("blob");
+    let artifact = ArtifactRef::try_new(
+        ArtifactId::from_bytes([1; 16]),
+        "attachment",
+        blob.clone(),
+        digest,
+        Digest::raw_json(b"scope"),
+        Metadata::empty(),
+    )
+    .expect("artifact");
+    (blob, artifact)
+}
+
+fn parse_key(ordinal: usize) -> ParseCacheKey {
+    ParseCacheKey {
+        digest: Digest::blob_content(&ordinal.to_be_bytes()),
+        media_type: "text/csv".to_owned(),
+        name: format!("{ordinal}.csv"),
+    }
 }
 
 #[test]
@@ -345,6 +236,7 @@ fn unresolvable_artifact_is_fail_soft_note() {
     };
     let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
     assert!(all_text(&draft).contains("could not be read"));
+    assert!(!has_file_blocks(&draft));
 }
 
 #[test]
@@ -442,6 +334,115 @@ fn digest_mismatch_is_fail_soft_note() {
 }
 
 #[test]
+fn store_fetch_failure_is_fail_soft_and_must_strip() {
+    let store = Arc::new(FailingGetStore);
+    let index = Arc::new(AttachmentIndex::default());
+    let (blob, artifact) = indexed_artifact(1);
+    index.insert(artifact);
+    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let outcome = block_on(middleware.invoke(
+        middleware_context(),
+        before_model_input(vec![message(
+            1,
+            MessageRole::User,
+            vec![text("please review the attachment"), file_block(blob)],
+        )]),
+    ))
+    .expect("fail-soft outcome is Ok");
+    let StageOutcome::Replace(json) = outcome else {
+        panic!("expected Replace");
+    };
+    let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
+    assert!(all_text(&draft).contains("could not be read"));
+    assert!(!has_file_blocks(&draft));
+}
+
+#[test]
+fn parser_failure_is_fail_soft_and_must_strip() {
+    let store = Arc::new(CaptureArtifactStore::default());
+    let index = Arc::new(AttachmentIndex::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
+    index.insert(artifact.clone());
+    let middleware = DocumentIngestMiddleware::try_with_limits(
+        store,
+        index,
+        DocumentLimits {
+            max_input_bytes: 1,
+            ..DocumentLimits::default()
+        },
+    )
+    .expect("middleware");
+    let outcome = block_on(middleware.invoke(
+        middleware_context(),
+        before_model_input_with_file(&artifact),
+    ))
+    .expect("fail-soft outcome is Ok");
+    let StageOutcome::Replace(json) = outcome else {
+        panic!("expected Replace");
+    };
+    let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
+    assert!(all_text(&draft).contains("could not be parsed"));
+    assert!(!has_file_blocks(&draft));
+}
+
+#[test]
+fn rebuild_message_invalid_blocks_uses_skip_note_without_files() {
+    let (blob, _) = indexed_artifact(1);
+    let original = message(
+        1,
+        MessageRole::User,
+        vec![text("please review the attachment"), file_block(blob)],
+    );
+    let rebuilt = rebuild_message(&original, vec![tool_result_block()]).expect("skip note");
+    assert!(!message_has_file_blocks(&rebuilt));
+    assert_eq!(rebuilt.content().len(), 1);
+    let ContentBlock::Text(note) = &rebuilt.content()[0] else {
+        panic!("expected skip-note text");
+    };
+    assert_eq!(note.text(), FALLBACK_NOTE_TEXT);
+}
+
+#[test]
+fn rebuild_message_construction_failure_has_no_file_blocks() {
+    let (blob, _) = indexed_artifact(1);
+    let original = tool_role_message();
+    let error = rebuild_message(&original, vec![file_block(blob)]).expect_err("tool skip fails");
+    construction_error_has_no_file_blocks(&error);
+    assert!(
+        error
+            .to_string()
+            .contains("document ingest message could not be constructed")
+    );
+}
+
+#[test]
+fn skip_note_message_construction_failure_has_no_file_blocks() {
+    let error = skip_note_message(&tool_role_message()).expect_err("tool skip fails");
+    construction_error_has_no_file_blocks(&error);
+    assert!(
+        error
+            .to_string()
+            .contains("document ingest message could not be constructed")
+    );
+}
+
+#[test]
+fn note_block_oversized_text_uses_fallback_without_files() {
+    let oversized = "x".repeat(TEXT_MAX_BYTES + 1);
+    let block = note_block(&oversized).expect("fallback note");
+    let ContentBlock::Text(note) = block else {
+        panic!("expected text fallback, not a File block");
+    };
+    assert_eq!(note.text(), FALLBACK_NOTE_TEXT);
+}
+
+#[test]
+fn fallback_text_block_constructs_static_note() {
+    let note = fallback_text_block().expect("static note");
+    assert_eq!(note.text(), FALLBACK_NOTE_TEXT);
+}
+
+#[test]
 fn repeated_invocations_are_byte_identical() {
     // Multi-cycle runs hit BeforeModel repeatedly with the same attachment;
     // the parse memo must keep every invocation's Replace JSON
@@ -507,6 +508,101 @@ fn parse_memo_keys_on_declared_name() {
     }
 }
 
+fn ingest_with_limits(limits: DocumentLimits) -> DocumentIngestMiddleware {
+    DocumentIngestMiddleware::try_with_limits(
+        Arc::new(CaptureArtifactStore::default()),
+        Arc::new(AttachmentIndex::default()),
+        limits,
+    )
+    .expect("middleware")
+}
+
+fn configuration_digest_of(limits: DocumentLimits) -> Digest {
+    ingest_with_limits(limits)
+        .descriptor()
+        .invocation
+        .configuration_digest
+}
+
+#[test]
+fn configuration_digest_differs_for_different_limits() {
+    let base = DocumentLimits::default();
+    let larger_input = DocumentLimits {
+        max_input_bytes: base.max_input_bytes + 1,
+        ..base.clone()
+    };
+    let larger_output = DocumentLimits {
+        max_output_bytes: base.max_output_bytes + 1,
+        ..base.clone()
+    };
+    let more_pages = DocumentLimits {
+        max_pages: base.max_pages + 1,
+        ..base.clone()
+    };
+    let base_digest = configuration_digest_of(base);
+    let input_digest = configuration_digest_of(larger_input);
+    let output_digest = configuration_digest_of(larger_output);
+    let pages_digest = configuration_digest_of(more_pages);
+    assert_ne!(base_digest, input_digest);
+    assert_ne!(base_digest, output_digest);
+    assert_ne!(base_digest, pages_digest);
+    assert_ne!(input_digest, output_digest);
+    assert_ne!(input_digest, pages_digest);
+    assert_ne!(output_digest, pages_digest);
+}
+
+#[test]
+fn try_new_digest_matches_equivalent_explicit_store_limits() {
+    let max_artifact_bytes = 64 * 1024 * 1024;
+    let store: Arc<dyn ArtifactStore> =
+        Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(max_artifact_bytes));
+    let derived =
+        DocumentIngestMiddleware::try_new(Arc::clone(&store), Arc::new(AttachmentIndex::default()))
+            .expect("try_new");
+    let explicit = DocumentIngestMiddleware::try_with_limits(
+        store,
+        Arc::new(AttachmentIndex::default()),
+        DocumentLimits {
+            max_input_bytes: u64::try_from(max_artifact_bytes).expect("fits u64"),
+            ..DocumentLimits::default()
+        },
+    )
+    .expect("try_with_limits");
+    assert_eq!(
+        derived.descriptor().invocation.configuration_digest,
+        explicit.descriptor().invocation.configuration_digest,
+    );
+}
+
+#[test]
+fn configuration_identity_pins_canonical_bytes_and_version_tag() {
+    assert_eq!(LIMITS_IDENTITY_VERSION, "document-ingest-limits-v1");
+    let defaults = DocumentLimits::default();
+    let bytes = limits_identity_bytes(&defaults).expect("encode defaults");
+    assert_eq!(bytes, PINNED_DEFAULT_LIMITS_IDENTITY);
+    assert!(
+        bytes
+            .windows(LIMITS_IDENTITY_VERSION.len())
+            .any(|window| window == LIMITS_IDENTITY_VERSION.as_bytes()),
+        "canonical identity must contain the version tag"
+    );
+
+    let middleware = DocumentIngestMiddleware::try_with_limits(
+        Arc::new(CaptureArtifactStore::default()),
+        Arc::new(AttachmentIndex::default()),
+        defaults,
+    )
+    .expect("middleware");
+    let digest = middleware.descriptor().invocation.configuration_digest;
+    assert_eq!(digest, Digest::raw_json(PINNED_DEFAULT_LIMITS_IDENTITY));
+    assert_eq!(
+        digest.to_hex(),
+        "cc84a3bd94ea6400617b7b2309c0e3c876fd9cf642859137206e0df716b2c2b0"
+    );
+    assert_ne!(digest, Digest::raw_json(b"document-ingest-v1"));
+    assert_ne!(PINNED_DEFAULT_LIMITS_IDENTITY, b"document-ingest-v1");
+}
+
 #[test]
 fn ingest_limit_follows_the_store_ceiling() {
     let store: Arc<dyn ArtifactStore> =
@@ -520,28 +616,12 @@ fn ingest_limit_follows_the_store_ceiling() {
 fn attachment_index_fifo_evicts_oldest_entry_at_capacity() {
     let index = AttachmentIndex::default();
     let mut last = None;
-    for ordinal in 0..1025_u16 {
-        let blob = BlobRef::try_new(
-            format!("blob-{ordinal}"),
-            "text/csv",
-            1,
-            Some(Digest::blob_content(&ordinal.to_be_bytes())),
-            None::<&str>,
-        )
-        .expect("blob");
-        let artifact = ArtifactRef::try_new(
-            ArtifactId::from_bytes([1; 16]),
-            "attachment",
-            blob.clone(),
-            Digest::blob_content(&ordinal.to_be_bytes()),
-            Digest::raw_json(b"scope"),
-            Metadata::empty(),
-        )
-        .expect("artifact");
+    for ordinal in 0..=ATTACHMENT_INDEX_CAPACITY {
+        let (blob, artifact) = indexed_artifact(ordinal);
         index.insert(artifact);
         last = Some(blob);
     }
-    let first_blob = BlobRef::try_new("blob-0", "text/csv", 1, None, None::<&str>).expect("blob");
+    let (first_blob, _) = indexed_artifact(0);
     assert!(
         index.lookup(&first_blob).is_none(),
         "oldest entry must be evicted"
@@ -551,4 +631,109 @@ fn attachment_index_fifo_evicts_oldest_entry_at_capacity() {
         index.lookup(&last_blob).is_some(),
         "most recent entry must remain"
     );
+}
+
+#[test]
+fn attachment_index_reinsert_refreshes_value_without_changing_fifo_order() {
+    let index = AttachmentIndex::default();
+    for ordinal in 0..ATTACHMENT_INDEX_CAPACITY {
+        let (_, artifact) = indexed_artifact(ordinal);
+        index.insert(artifact);
+    }
+    let (first_blob, refreshed) = indexed_artifact(0);
+    let refreshed = ArtifactRef::try_new(
+        ArtifactId::from_bytes([2; 16]),
+        "attachment",
+        refreshed.blob().clone(),
+        Digest::blob_content(b"refreshed"),
+        Digest::raw_json(b"scope"),
+        Metadata::empty(),
+    )
+    .expect("refreshed artifact");
+    index.insert(refreshed.clone());
+    assert_eq!(
+        index.lookup(&first_blob).expect("still present").id(),
+        refreshed.id(),
+        "reinsert must refresh the stored ArtifactRef"
+    );
+
+    let overflow = ATTACHMENT_INDEX_CAPACITY;
+    let (overflow_blob, overflow_artifact) = indexed_artifact(overflow);
+    index.insert(overflow_artifact);
+    assert!(
+        index.lookup(&first_blob).is_none(),
+        "reinsert must not move the oldest key in FIFO order"
+    );
+    assert!(index.lookup(&overflow_blob).is_some());
+    let (second_blob, _) = indexed_artifact(1);
+    assert!(
+        index.lookup(&second_blob).is_some(),
+        "the next-oldest key must survive the overflow insert"
+    );
+}
+
+#[test]
+fn attachment_index_recovers_from_poison() {
+    let index = AttachmentIndex::default();
+    let (blob, artifact) = indexed_artifact(0);
+    index.insert(artifact);
+    index.map.poison();
+    assert!(
+        index.lookup(&blob).is_some(),
+        "poison recovery must keep existing entries"
+    );
+    let (next_blob, next_artifact) = indexed_artifact(1);
+    index.insert(next_artifact);
+    assert!(index.lookup(&next_blob).is_some());
+}
+
+#[test]
+fn parse_cache_fifo_evicts_oldest_entry_at_capacity() {
+    let cache = ParseCache::default();
+    for ordinal in 0..=PARSE_CACHE_CAPACITY {
+        cache.insert(parse_key(ordinal), format!("note-{ordinal}"));
+    }
+    assert!(
+        cache.lookup(&parse_key(0)).is_none(),
+        "oldest parse-cache entry must be evicted"
+    );
+    assert_eq!(
+        cache.lookup(&parse_key(PARSE_CACHE_CAPACITY)).as_deref(),
+        Some(format!("note-{PARSE_CACHE_CAPACITY}").as_str())
+    );
+}
+
+#[test]
+fn parse_cache_reinsert_refreshes_value_without_changing_fifo_order() {
+    let cache = ParseCache::default();
+    for ordinal in 0..PARSE_CACHE_CAPACITY {
+        cache.insert(parse_key(ordinal), format!("note-{ordinal}"));
+    }
+    cache.insert(parse_key(0), "refreshed".to_owned());
+    assert_eq!(cache.lookup(&parse_key(0)).as_deref(), Some("refreshed"));
+
+    cache.insert(parse_key(PARSE_CACHE_CAPACITY), "overflow".to_owned());
+    assert!(
+        cache.lookup(&parse_key(0)).is_none(),
+        "reinsert must not move the oldest parse-cache key"
+    );
+    assert_eq!(
+        cache.lookup(&parse_key(1)).as_deref(),
+        Some("note-1"),
+        "the next-oldest parse-cache key must survive overflow"
+    );
+    assert_eq!(
+        cache.lookup(&parse_key(PARSE_CACHE_CAPACITY)).as_deref(),
+        Some("overflow")
+    );
+}
+
+#[test]
+fn parse_cache_recovers_from_poison() {
+    let cache = ParseCache::default();
+    cache.insert(parse_key(0), "kept".to_owned());
+    cache.poison();
+    assert_eq!(cache.lookup(&parse_key(0)).as_deref(), Some("kept"));
+    cache.insert(parse_key(1), "added".to_owned());
+    assert_eq!(cache.lookup(&parse_key(1)).as_deref(), Some("added"));
 }

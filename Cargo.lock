@@ -1279,6 +1279,7 @@ dependencies = [
  "finstack-ai-memory",
  "finstack-ai-runtime",
  "finstack-ai-tools-document",
+ "serde",
  "serde_json",
  "serde_json_canonicalizer",
  "thiserror",

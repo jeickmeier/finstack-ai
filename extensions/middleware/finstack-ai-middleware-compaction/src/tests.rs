@@ -130,6 +130,108 @@ fn history() -> BeforeModelInput {
     }
 }
 
+fn unpaired_history() -> BeforeModelInput {
+    let complete_id = id::<ToolCallTag>(60);
+    let unpaired_id = id::<ToolCallTag>(61);
+    let entries: Arc<[CompactionSourceEntry]> = Arc::from([
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(30),
+            message: message(10, MessageRole::System, text("system policy")),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"sys"),
+            protected: true,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(31),
+            message: message(11, MessageRole::User, text(&"droppable ".repeat(40))),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"old"),
+            protected: false,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(32),
+            message: message(
+                12,
+                MessageRole::Assistant,
+                vec![ContentBlock::ToolCall(
+                    ToolCallBlock::try_new(
+                        complete_id,
+                        "lookup",
+                        RawJson::parse(b"{\"q\":\"complete\"}").expect("args"),
+                    )
+                    .expect("call"),
+                )],
+            ),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"call"),
+            protected: false,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(33),
+            message: message(
+                13,
+                MessageRole::Tool,
+                vec![ContentBlock::ToolResult(
+                    ToolResultBlock::try_new(complete_id, text(&"tool-body-".repeat(40)), false)
+                        .expect("result"),
+                )],
+            ),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"result"),
+            protected: false,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(34),
+            message: message(
+                14,
+                MessageRole::Assistant,
+                vec![ContentBlock::ToolCall(
+                    ToolCallBlock::try_new(
+                        unpaired_id,
+                        "lookup",
+                        RawJson::parse(b"{\"q\":\"inflight\"}").expect("args"),
+                    )
+                    .expect("unpaired"),
+                )],
+            ),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"inflight"),
+            protected: false,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(35),
+            message: message(15, MessageRole::User, text("current question")),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"user"),
+            protected: true,
+        },
+    ]);
+    BeforeModelInput {
+        request: ModelRequestDraft {
+            model: ModelName::try_new("preview-model").expect("model"),
+            messages: entries
+                .iter()
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>()
+                .into(),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 10_000,
+                max_output_tokens: 1_000,
+            },
+        },
+        source_entries: entries,
+        model_context_profile_digest: Digest::raw_json(b"profile"),
+        hard_input_tokens: 10_000,
+        checkpoint: None,
+    }
+}
+
 fn middleware_ctx(resume: Option<CompactionModelResume>) -> MiddlewareContext {
     let principal =
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
@@ -262,11 +364,118 @@ async fn sliding_window_preserves_protected_bytes_and_passes_conformance() {
 }
 
 #[tokio::test]
+async fn sliding_window_unpaired_call_regression_analyzes_pairs_once() {
+    reset_pair_analysis_count();
+    let middleware =
+        CompactionMiddleware::try_new(CompactionConfig::sliding_window(80, 0)).expect("middleware");
+    let input = unpaired_history();
+    let before = serde_json::to_vec(&input.source_entries).expect("before");
+    let outcome = invoke(&middleware, input.clone(), None)
+        .await
+        .expect("invoke");
+    let after = serde_json::to_vec(&input.source_entries).expect("after");
+    assert_eq!(
+        before, after,
+        "canonical source entries must stay immutable"
+    );
+    assert_eq!(
+        pair_analysis_count(),
+        1,
+        "sliding-window must collect tool pairs once per invocation"
+    );
+    let StageOutcome::CompactContext(result) = outcome else {
+        panic!("expected compact context");
+    };
+
+    let replacement_ids = result
+        .replacement_messages
+        .iter()
+        .map(|message| *message.id())
+        .collect::<Vec<_>>();
+    let source_order_ids = input
+        .source_entries
+        .iter()
+        .filter(|entry| replacement_ids.contains(entry.message.id()))
+        .map(|entry| *entry.message.id())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        replacement_ids, source_order_ids,
+        "retained messages must keep source order"
+    );
+
+    for entry in input.source_entries.iter().filter(|entry| entry.protected) {
+        let replacement = result
+            .replacement_messages
+            .iter()
+            .find(|message| message.id() == entry.message.id())
+            .expect("protected retained");
+        assert_eq!(
+            serde_json::to_vec(replacement).expect("rep"),
+            serde_json::to_vec(&entry.message).expect("src")
+        );
+    }
+
+    let unpaired = &input.source_entries[4];
+    assert!(
+        result
+            .replacement_messages
+            .iter()
+            .any(|message| message.id() == unpaired.message.id()),
+        "incomplete in-flight tool calls must be retained"
+    );
+
+    let complete_call = input.source_entries[2].message.id();
+    let complete_result = input.source_entries[3].message.id();
+    let dropped_call = !result
+        .replacement_messages
+        .iter()
+        .any(|message| message.id() == complete_call);
+    let dropped_result = !result
+        .replacement_messages
+        .iter()
+        .any(|message| message.id() == complete_result);
+    assert_eq!(
+        dropped_call, dropped_result,
+        "complete tool pairs must be dropped or retained atomically"
+    );
+    assert!(
+        dropped_call,
+        "fixture must drop the complete pair so atomicity is exercised"
+    );
+
+    validate_stage_outcome(
+        &middleware.descriptor(),
+        &StageInput::BeforeModel(Box::new(input.clone())),
+        &StageOutcome::CompactContext(result.clone()),
+    )
+    .expect("stage");
+}
+
+fn summarize_model() -> ComponentRef {
+    ComponentRef::new(
+        ComponentId::parse("finstack.model.summarize").expect("id"),
+        Some(Version {
+            major: 0,
+            minor: 0,
+            patch: 4,
+        }),
+    )
+}
+
+fn summarize_config() -> CompactionConfig {
+    CompactionConfig::summarize(
+        8,
+        0,
+        summarize_model(),
+        id(9),
+        Digest::raw_json(b"explicit-residency"),
+    )
+}
+
+#[tokio::test]
 async fn large_tool_output_keeps_pairs_and_shortens_bodies() {
-    let mut config = CompactionConfig::sliding_window(8, 0);
-    config.strategy = CompactionStrategy::LargeToolOutput;
-    config.large_tool_output_bytes = 16;
-    let middleware = CompactionMiddleware::try_new(config).expect("middleware");
+    let middleware = CompactionMiddleware::try_new(CompactionConfig::large_tool_output(8, 0, 16))
+        .expect("middleware");
     let input = history();
     let outcome = invoke(&middleware, input.clone(), None)
         .await
@@ -297,26 +506,17 @@ async fn large_tool_output_keeps_pairs_and_shortens_bodies() {
 }
 
 #[tokio::test]
-async fn summarize_requests_child_model_and_resume_does_not_recurse() {
-    let mut config = CompactionConfig::sliding_window(8, 0);
-    config.strategy = CompactionStrategy::Summarize;
-    config.secondary_model_authorized = true;
-    config.summarize_model = Some(ComponentRef::new(
-        ComponentId::parse("finstack.model.summarize").expect("id"),
-        Some(Version {
-            major: 0,
-            minor: 0,
-            patch: 4,
-        }),
-    ));
-    config.budget_scope_id = Some(id(9));
-    let middleware = CompactionMiddleware::try_new(config).expect("middleware");
-    let input = history();
-    let first = invoke(&middleware, input.clone(), None)
+async fn summarize_first_invoke_fails_closed_without_resume() {
+    let middleware = CompactionMiddleware::try_new(summarize_config()).expect("middleware");
+    let error = invoke(&middleware, history(), None)
         .await
-        .expect("first");
-    assert!(matches!(first, StageOutcome::RequestCompactionModel(_)));
+        .expect_err("denied");
+    assert_eq!(error.code(), COMPACTION_MODEL_NOT_AUTHORIZED);
+}
 
+#[tokio::test]
+async fn summarize_resume_lands_compact_context() {
+    let middleware = CompactionMiddleware::try_new(summarize_config()).expect("middleware");
     let resume = CompactionModelResume {
         request_id: id(70),
         effect_id: id(71),
@@ -330,22 +530,115 @@ async fn summarize_requests_child_model_and_resume_does_not_recurse() {
         },
         resume_state: RawJson::parse(b"{}").expect("resume"),
     };
-    let second = invoke(&middleware, input, Some(resume))
+    let second = invoke(&middleware, history(), Some(resume))
         .await
         .expect("resume");
     assert!(matches!(second, StageOutcome::CompactContext(_)));
 }
 
-#[tokio::test]
-async fn unauthorized_secondary_model_fails_before_dispatch() {
-    let mut config = CompactionConfig::sliding_window(8, 0);
-    config.strategy = CompactionStrategy::Summarize;
-    config.secondary_model_authorized = false;
-    let middleware = CompactionMiddleware::try_new(config).expect("middleware");
-    let error = invoke(&middleware, history(), None)
-        .await
-        .expect_err("denied");
-    assert_eq!(error.code(), COMPACTION_MODEL_NOT_AUTHORIZED);
+#[test]
+fn constructor_configs_preserve_serialized_identity() {
+    let sliding = CompactionConfig::sliding_window(8, 0);
+    let sliding_json = serde_json::to_value(&sliding).expect("sliding json");
+    let keys = sliding_json
+        .as_object()
+        .expect("object")
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        keys,
+        [
+            "strategy",
+            "threshold_tokens",
+            "hysteresis_tokens",
+            "large_tool_output_bytes",
+            "summarize_model",
+            "budget_scope_id",
+            "residency_policy_digest",
+            "secondary_model_authorized",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    );
+    let sliding_bytes =
+        String::from_utf8(serde_json::to_vec(&sliding).expect("sliding bytes")).expect("utf8");
+    assert!(
+        sliding_bytes.starts_with("{\"strategy\":\"sliding_window\""),
+        "struct field order must keep the previous serialization key sequence: {sliding_bytes}"
+    );
+    assert!(
+        sliding_bytes.contains("\"secondary_model_authorized\":false"),
+        "leaf config must still serialize secondary_model_authorized as false: {sliding_bytes}"
+    );
+    assert_eq!(sliding_json["strategy"], "sliding_window");
+    assert_eq!(sliding_json["threshold_tokens"], 8);
+    assert_eq!(sliding_json["hysteresis_tokens"], 0);
+    assert_eq!(sliding_json["large_tool_output_bytes"], 2_048);
+    assert_eq!(sliding_json["summarize_model"], serde_json::Value::Null);
+    assert_eq!(sliding_json["budget_scope_id"], serde_json::Value::Null);
+    assert_eq!(sliding_json["secondary_model_authorized"], false);
+
+    let mut previous_large = CompactionConfig::sliding_window(8, 0);
+    previous_large.strategy = CompactionStrategy::LargeToolOutput;
+    previous_large.large_tool_output_bytes = 16;
+    let large = CompactionConfig::large_tool_output(8, 0, 16);
+    assert_eq!(
+        serde_json::to_vec(&large).expect("large"),
+        serde_json::to_vec(&previous_large).expect("previous large")
+    );
+    let large_middleware =
+        CompactionMiddleware::try_new(CompactionConfig::large_tool_output(8, 0, 16))
+            .expect("large middleware");
+    let previous_large_middleware =
+        CompactionMiddleware::try_new(previous_large).expect("previous large middleware");
+    assert_eq!(
+        large_middleware
+            .descriptor()
+            .invocation
+            .configuration_digest,
+        previous_large_middleware
+            .descriptor()
+            .invocation
+            .configuration_digest
+    );
+
+    let sliding_middleware =
+        CompactionMiddleware::try_new(CompactionConfig::sliding_window(8, 0)).expect("sliding");
+    let sliding_again = CompactionMiddleware::try_new(CompactionConfig::sliding_window(8, 0))
+        .expect("sliding again");
+    assert_eq!(
+        sliding_middleware
+            .descriptor()
+            .invocation
+            .configuration_digest,
+        sliding_again.descriptor().invocation.configuration_digest
+    );
+    assert_eq!(
+        sliding_middleware
+            .descriptor()
+            .invocation
+            .configuration_digest,
+        Digest::raw_json(&serde_json::to_vec(&sliding).expect("sliding bytes"))
+    );
+
+    let summarize = summarize_config();
+    let summarize_json = serde_json::to_value(&summarize).expect("summarize json");
+    assert_eq!(summarize_json["strategy"], "summarize");
+    assert_eq!(summarize_json["secondary_model_authorized"], false);
+    assert_eq!(summarize_json["large_tool_output_bytes"], 2_048);
+    let summarize_middleware =
+        CompactionMiddleware::try_new(summarize_config()).expect("summarize");
+    let summarize_again =
+        CompactionMiddleware::try_new(summarize_config()).expect("summarize again");
+    assert_eq!(
+        summarize_middleware
+            .descriptor()
+            .invocation
+            .configuration_digest,
+        summarize_again.descriptor().invocation.configuration_digest
+    );
 }
 
 #[tokio::test]

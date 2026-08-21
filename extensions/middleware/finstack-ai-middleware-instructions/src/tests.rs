@@ -7,6 +7,14 @@ fn entry(label: &str, text: &str) -> PolicyEntry {
     }
 }
 
+fn assert_configuration_error(error: &InstructionsError, reason: &'static str) {
+    assert_eq!(error, &InstructionsError::Configuration { reason });
+    assert_eq!(
+        error.to_string(),
+        format!("instructions_configuration_invalid: {reason}")
+    );
+}
+
 #[test]
 fn valid_config_passes_validation() {
     let config = PolicyInstructionsConfig {
@@ -18,17 +26,14 @@ fn valid_config_passes_validation() {
             entry("as-of", "Treat 2026-08-20 as the current date."),
         ],
     };
-    config.validate().expect("valid");
+    InstructionsMiddleware::try_new(config).expect("valid");
 }
 
 #[test]
 fn empty_entries_are_rejected() {
     let config = PolicyInstructionsConfig { entries: vec![] };
-    let error = config.validate().expect_err("empty");
-    assert_eq!(
-        error.to_string(),
-        "instructions_configuration_invalid: entries_empty"
-    );
+    let error = InstructionsMiddleware::try_new(config).expect_err("empty");
+    assert_configuration_error(&error, "entries_empty");
 }
 
 #[test]
@@ -38,11 +43,8 @@ fn more_than_sixteen_entries_are_rejected() {
             .map(|i| entry(&format!("rule-{i}"), "text"))
             .collect(),
     };
-    let error = config.validate().expect_err("too many");
-    assert_eq!(
-        error.to_string(),
-        "instructions_configuration_invalid: entries_exceed_maximum"
-    );
+    let error = InstructionsMiddleware::try_new(config).expect_err("too many");
+    assert_configuration_error(&error, "entries_exceed_maximum");
 }
 
 #[test]
@@ -50,16 +52,16 @@ fn blank_label_or_text_is_rejected() {
     let blank_label = PolicyInstructionsConfig {
         entries: vec![entry("", "text")],
     };
-    assert_eq!(
-        blank_label.validate().expect_err("label").to_string(),
-        "instructions_configuration_invalid: entry_label_empty"
+    assert_configuration_error(
+        &InstructionsMiddleware::try_new(blank_label).expect_err("label"),
+        "entry_label_empty",
     );
     let blank_text = PolicyInstructionsConfig {
         entries: vec![entry("locale", "   ")],
     };
-    assert_eq!(
-        blank_text.validate().expect_err("text").to_string(),
-        "instructions_configuration_invalid: entry_text_empty"
+    assert_configuration_error(
+        &InstructionsMiddleware::try_new(blank_text).expect_err("text"),
+        "entry_text_empty",
     );
 }
 
@@ -68,15 +70,15 @@ fn oversized_label_is_rejected() {
     let ok = PolicyInstructionsConfig {
         entries: vec![entry(&"a".repeat(MAX_POLICY_LABEL_BYTES), "text")],
     };
-    ok.validate()
+    InstructionsMiddleware::try_new(ok)
         .expect("a 249-byte label still fits the 256-byte source id");
 
     let too_long = PolicyInstructionsConfig {
         entries: vec![entry(&"a".repeat(MAX_POLICY_LABEL_BYTES + 1), "text")],
     };
-    assert_eq!(
-        too_long.validate().expect_err("too long").to_string(),
-        "instructions_configuration_invalid: entry_label_too_long"
+    assert_configuration_error(
+        &InstructionsMiddleware::try_new(too_long).expect_err("too long"),
+        "entry_label_too_long",
     );
 }
 
@@ -102,9 +104,9 @@ fn label_with_nul_is_rejected() {
     let config = PolicyInstructionsConfig {
         entries: vec![entry("bad\0label", "text")],
     };
-    assert_eq!(
-        config.validate().expect_err("nul").to_string(),
-        "instructions_configuration_invalid: entry_label_invalid"
+    assert_configuration_error(
+        &InstructionsMiddleware::try_new(config).expect_err("nul"),
+        "entry_label_invalid",
     );
 }
 
@@ -289,10 +291,7 @@ async fn wrong_stage_input_is_rejected() {
 async fn invalid_config_is_rejected_at_construction() {
     let error = InstructionsMiddleware::try_new(PolicyInstructionsConfig { entries: vec![] })
         .expect_err("invalid");
-    assert_eq!(
-        error.to_string(),
-        "instructions_configuration_invalid: entries_empty"
-    );
+    assert_configuration_error(&error, "entries_empty");
 }
 
 #[tokio::test]

@@ -9,13 +9,19 @@
 One `MiddlewareRole::ContextCompactor` leaf. Strategies are selected by
 configuration, not by registering a second compactor:
 
-- `finstack.compaction.sliding_window`
-- `finstack.compaction.large_tool_output`
-- `finstack.compaction.summarize`
+- `CompactionConfig::sliding_window(threshold_tokens, hysteresis_tokens)`
+  (`finstack.compaction.sliding_window`)
+- `CompactionConfig::large_tool_output(threshold_tokens, hysteresis_tokens, byte_limit)`
+  (`finstack.compaction.large_tool_output`)
+- `CompactionConfig::summarize(threshold_tokens, hysteresis_tokens, model, budget_scope, residency_policy_digest)`
+  (`finstack.compaction.summarize`)
 
-Deterministic strategies complete as `CompactContext`. Summarize returns
-`RequestCompactionModel` and never depends on a `Model` handle or a
-middleware-owned child effect. Canonical history is not mutated.
+Deterministic strategies complete as `CompactContext`. Summarize never
+depends on a `Model` handle or a middleware-owned child effect. A first
+summarize invoke without resume fails closed
+(`COMPACTION_MODEL_NOT_AUTHORIZED`). Configuration cannot self-authorize
+secondary-model dispatch; runtime authorization is owned by PR-112.
+Canonical history is not mutated.
 
 ## Landing
 
@@ -31,8 +37,25 @@ middleware-owned child effect. Canonical history is not mutated.
 This crate is a T1 native adapter. It is not isolated.
 
 ```rust
+use finstack_ai_kernel::{BudgetScopeId, ComponentId, ComponentRef, Digest, Version};
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 
-let config = CompactionConfig::sliding_window(1_024, 256);
-let middleware = CompactionMiddleware::try_new(config).expect("compaction");
+let sliding = CompactionConfig::sliding_window(1_024, 256);
+let large = CompactionConfig::large_tool_output(1_024, 256, 2_048);
+let summarize = CompactionConfig::summarize(
+    1_024,
+    256,
+    ComponentRef::new(
+        ComponentId::parse("finstack.model.summarize").expect("id"),
+        Some(Version {
+            major: 0,
+            minor: 0,
+            patch: 4,
+        }),
+    ),
+    BudgetScopeId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("budget"),
+    Digest::raw_json(b"residency-policy"),
+);
+let middleware = CompactionMiddleware::try_new(sliding).expect("compaction");
+let _ = (large, summarize, middleware);
 ```

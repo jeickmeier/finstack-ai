@@ -9,4 +9,6 @@ byte-identically, and the current user message remains last and protected, so
 compaction still lands. The component id is fixed
 (`finstack.middleware.instructions`), so register at most one instance per
 chain and use multiple entries for multiple policies.
+Validate configuration only through `InstructionsMiddleware::try_new`; there
+is no public `PolicyInstructionsConfig::validate`.
 Design: `docs/superpowers/specs/2026-08-20-policy-instructions-design.md`.

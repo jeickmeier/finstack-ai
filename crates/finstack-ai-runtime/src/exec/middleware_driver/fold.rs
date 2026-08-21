@@ -90,6 +90,11 @@ impl StageFold {
     /// `RequestInteraction`, and `RequestCompactionModel` unconditionally;
     /// `Retry` and `Replace` at any stage other than the ones the kernel
     /// admits them at; `CompactContext` outside `Stage::BeforeModel`.
+    /// Also returns that code when a `BeforeModel` aggregate carries both a
+    /// `Replace` and a `CompactContext`: each outcome is individually
+    /// landable, but landing both would silently discard one projection.
+    /// The fold does not merge leaves, wrap compactors, or rebase one
+    /// projection onto the other.
     ///
     /// Returns [`MIDDLEWARE_STAGE_BOUNDS_EXCEEDED`] when the accumulated
     /// `instructions` and `context` (plus, at `Stage::BeforeModel`, any
@@ -168,6 +173,11 @@ impl StageFold {
                     break;
                 }
             }
+        }
+        if fold.replacement.is_some() && fold.compaction.is_some() {
+            return Err(unlandable(
+                "BeforeModel Replace and CompactContext cannot both claim the model projection",
+            ));
         }
         fold.check_bounds(stage)?;
         Ok(fold)

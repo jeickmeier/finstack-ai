@@ -29,6 +29,18 @@ let middleware = DocumentIngestMiddleware::try_new(store, index)
 | Order | `OrderTier::ContextMutation`, priority `0` |
 | Outcome | `StageOutcome::Continue` (no supported attachments) or `StageOutcome::Replace` (rewritten draft) |
 
+## Configuration identity
+
+`configuration_digest` is `Digest::raw_json` over RFC 8785 canonical JSON of
+a crate-private versioned limits shape: `max_input_bytes`, `max_output_bytes`,
+`max_pages`, and an explicit version tag (`document-ingest-limits-v1`).
+Distinct limits produce distinct identities. `try_new` hashes the
+store-derived input ceiling together with the default output and page
+limits.
+
+This is an intentional descriptor-identity change from the previous constant
+`document-ingest-v1` digest.
+
 ## The `AttachmentIndex` mechanism (spec decision 19)
 
 A `ContentBlock::File` only ever carries a bare `BlobRef` on the wire. The

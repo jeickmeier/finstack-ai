@@ -13,11 +13,11 @@ date: "2026-08-09"
 |---|---|
 | Product | finstack-ai |
 | Document | Security and Threat Model |
-| Version | 0.6 |
-| Status | Pre-implementation security baseline |
-| Date | 2026-08-09 |
+| Version | 0.7 |
+| Status | Implementation baseline |
+| Date | 2026-08-20 |
 | Primary audience | Maintainers, security reviewers, runtime/binding/plugin implementers, deployers, and extension authors |
-| Related documents | Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.16; Implementation Plan v0.16; Engineering Standards v0.5 |
+| Related documents | Product Requirements Document v0.8; Architecture Specification v0.11; Technical Design v0.21; Implementation Plan v0.26; Engineering Standards v0.5 |
 
 # 1. Purpose and authority
 
@@ -155,7 +155,7 @@ A malicious host application, OS administrator, or fully trusted native extensio
 | SEC-INV-010 | Journal corruption, version mismatch, or impossible state produces an explicit error rather than guessed state. |
 | SEC-INV-011 | Permission grants, policy outcomes, plugin identity/digest, and privileged actions are observable without exposing their secrets. |
 | SEC-INV-012 | Minimal/default builds do not silently include privileged batteries, providers, telemetry exporters, plugin engines, or network services. |
-| SEC-INV-013 | Compaction preserves mandatory policy/safety content, provenance, and sensitivity; derived summaries/checkpoints never replace or weaken canonical audit history. |
+| SEC-INV-013 | Compaction preserves mandatory policy/safety content, provenance, and sensitivity; derived summaries/checkpoints never replace or weaken canonical audit history; model-assisted compaction is denied unless the accepted run durably authorizes the exact secondary model, source sensitivity, and residency/egress policy. |
 
 # 7. Threat and control register
 
@@ -164,7 +164,7 @@ A malicious host application, OS administrator, or fully trusted native extensio
 | TM-01 | Prompt injection or poisoned retrieval causes unauthorized action. | Treat content as data; provenance; explicit tool/resource policy; schema validation; optional interaction/verification before sensitive effects. | Adversarial context/tool-policy fixtures; PR-016, PR-018, PR-056. |
 | TM-02 | Model fabricates, mutates, duplicates, re-associates, or floods tool calls/results. | Require unique preallocated source call IDs; freeze name/arguments through the validated plan; exact output-contract and result-call association; persist batch/effect identities before dispatch; deterministic unknown-tool/error closure; source-order history/events; bounded call/settlement indexes; policy before dispatch. PR-011/PR-015 add cancellation and configured call/concurrency limits. | PR-010 plan/result mutation, duplicate/conflict, reverse-completion, capacity, replay, and unknown-tool fixtures; PR-011 cancellation closure; PR-015/PR-018 schema, limit, and policy tests. |
 | TM-03 | Filesystem or shell tool escapes intended scope. | Handle-relative no-follow/capability-style filesystem access; symlink/rename race tests; allow/deny command policy; minimal environment; bounded output/time; optional external sandbox. | Traversal, symlink, environment, injection, timeout, and flood tests; PR-025, PR-056. |
-| TM-04 | Secrets leak through prompts, errors, journals, events, artifacts, or telemetry. | Secret references; explicit reveal boundaries; structured redaction and metadata-only observer/diagnostic/export views; secure references in authoritative records; deny secret fields in bundles; safe error display. | Canary-secret and redaction tests; PR-003, PR-014, PR-022, PR-024, PR-034, PR-039, PR-057, PR-060. |
+| TM-04 | Secrets leak through prompts, errors, journals, events, artifacts, or telemetry. | Secret references; explicit reveal boundaries; structured redaction and metadata-only observer/diagnostic/export views; secure references in authoritative records; deny secret fields in bundles; safe error display; redaction construction or error-reporting failure must fail closed rather than continue with unredacted content. | Canary-secret, oversized-error, malformed-output, and redaction tests; PR-003, PR-014, PR-022, PR-024, PR-034, PR-039, PR-057, PR-060, PR-107, PR-110. |
 | TM-05 | Browser bundle exposes provider credentials or sensitive persistent data. | Same-origin proxy pattern; no embedded provider key; documented CSP/CORS/storage policy; explicit IndexedDB sensitivity and deletion behavior. | Static bundle/example scanning and browser security fixtures; PR-034, PR-037, PR-038. |
 | TM-06 | Malicious native/Python/JS extension is mistaken for isolated code. | Explicit trust labels; opt-in registration; documentation that in-process extensions inherit host authority; isolate untrusted code through T3 path. | API docs, starter review, trust-boundary tests; PR-021, PR-030, PR-034, PR-060. |
 | TM-07 | WIT/plugin escapes sandbox or exhausts host. | Deny-by-default WASI; explicit linked capabilities; no ambient preopens/network; fuel/epoch deadlines; memory/table/instance limits; trap containment. | Hostile component suite; PR-049 through PR-054. |
@@ -181,7 +181,7 @@ A malicious host application, OS administrator, or fully trusted native extensio
 | TM-18 | Dependency or release compromise ships malicious code. | Reviewed dependencies; source/license/advisory policy; immutable CI actions/tools; least-privilege release credentials; SBOM, checksums, signatures/provenance, reproducible release. | Supply-chain CI and release rehearsal; PR-003, PR-060, PR-061, PR-065/066. |
 | TM-19 | Tenant/session identifiers are swapped at an application or workflow boundary. | Bind authenticated principal and tenant scope to acquired session/run handles; authorize every resume/inspect/cancel/resolve action; avoid user-selected ownership fields. | Cross-tenant negative tests in server/workflow adapters; PR-045, PR-058, PR-059. |
 | TM-20 | Artifact/blob reference grants unintended data access. | Opaque scoped references; authorization on dereference; content type/size/digest metadata; separate read/write grants; malware/content scanning hook for deployments that require it. | Reference-confusion, cross-scope, digest, and size tests in artifact adapters; PR-022, PR-037, PR-056, PR-058. |
-| TM-21 | Compaction removes safety/policy context, distorts provenance, or leaks sensitive history through summaries/checkpoints. | Unique late-tier `before_model` middleware ownership; protected/non-compactable item set; tool-pair atomicity; inherited sensitivity/provenance; version/config/model-profile/source/protected-set/projection digests; canonical history immutability; redacted diagnostics; safe failure when budget cannot be met. | Adversarial compaction, checkpoint invalidation, secret-canary, replay, and cross-binding tests; PR-018, PR-023, PR-048, PR-056/057. |
+| TM-21 | Compaction removes safety/policy context, distorts provenance, leaks sensitive history through summaries/checkpoints, or dispatches that history to an unauthorized secondary model. | Unique late-tier `before_model` middleware ownership; protected/non-compactable item set; tool-pair atomicity; inherited sensitivity/provenance; version/config/model-profile/source/protected-set/projection digests; canonical history immutability; fail-closed conflict when replacement and compaction both claim the projection; durable exact-model/sensitivity/residency authorization checked before commit, dispatch, and resume; redacted diagnostics; safe failure when budget cannot be met. | Adversarial compaction, aggregate-conflict, unauthorized model/digest/sensitivity, checkpoint invalidation, secret-canary, replay, crash-recovery, and cross-binding tests; PR-018, PR-023, PR-048, PR-056/057, PR-111, PR-112. |
 
 # 8. Surface-specific control requirements
 
@@ -395,7 +395,7 @@ These are owned deployment inputs with fixed fail-closed framework behavior; the
 | Durability integrity | NFR-REL; FR-DUR | Architecture sections 10 and 20; TDD sections 18 and 23 | PR-039 through PR-048 |
 | Remote protocol | UC-06; FR-RT-008; FR-DUR; NFR-COMP | Architecture sections 16-17 and 20; TDD section 28 | PR-058 |
 | Binding safety | FR-PY; FR-WASM; NFR-PORT | Architecture sections 13-14; TDD sections 25-26 | PR-027 through PR-038 |
-| Context compaction integrity | FR-CTX-003; FR-MW-007; NFR-SEC-003/005 | Architecture section 11.5; TDD section 17.6 | PR-018, PR-023, PR-048, PR-056/057 |
+| Context compaction integrity | FR-CTX-003; FR-MW-007; NFR-SEC-003/005 | Architecture section 11.5; TDD sections 11.5 and 17.6 | PR-018, PR-023, PR-048, PR-056/057, PR-111/112 |
 | Supply chain | PRD release criteria and risk register | Architecture section 22; TDD CI/release design | PR-003, PR-060/061, PR-065/066 |
 
 # 18. Review triggers
@@ -407,6 +407,7 @@ This threat model must be reviewed when a change:
 - adds a protocol, parser, dynamic code-loading mechanism, network listener, browser persistence surface, or secret-bearing adapter;
 - changes plugin permissions, signing, trust roots, sandboxing, or resource limits;
 - changes telemetry payloads, retention, deletion, or artifact access;
+- changes model-assisted compaction authorization or how multiple model-visible projection outcomes compose;
 - adds a high-privilege battery such as shell, computer use, filesystem write, or credential access;
 - changes build/release identities, registries, signing, or provenance; or
 - follows a security incident, significant vulnerability, or material deployment architecture change.

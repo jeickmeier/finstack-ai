@@ -325,3 +325,200 @@ fn request_compaction_model_folds_to_unlandable_rather_than_being_dropped() {
         "expected the stable unlandable code, got {error:?}"
     );
 }
+
+fn request_shaping_descriptor(component: &str) -> MiddlewareDescriptor {
+    MiddlewareDescriptor {
+        order: MiddlewareOrder {
+            tier: OrderTier::RequestShaping,
+            priority: 0,
+            before: Arc::from([]),
+            after: Arc::from([]),
+        },
+        ..descriptor(component, Stage::BeforeModel)
+    }
+}
+
+fn context_mutation_descriptor(component: &str) -> MiddlewareDescriptor {
+    MiddlewareDescriptor {
+        order: MiddlewareOrder {
+            tier: OrderTier::ContextMutation,
+            priority: 0,
+            before: Arc::from([]),
+            after: Arc::from([]),
+        },
+        ..descriptor(component, Stage::BeforeModel)
+    }
+}
+
+fn driver_from_pair(
+    first: (MiddlewareDescriptor, StageOutcome),
+    second: (MiddlewareDescriptor, StageOutcome),
+) -> StageDriver {
+    let middleware: Vec<MiddlewareRegistration> = [first, second]
+        .into_iter()
+        .map(|(descriptor, outcome)| {
+            let middleware: Arc<dyn crate::middleware::Middleware> =
+                Arc::new(Fixed { descriptor, outcome });
+            MiddlewareRegistration { middleware }
+        })
+        .collect();
+    StageDriver::new(
+        Arc::new(ResolvedMiddlewareChain::try_new(middleware).expect("chain")),
+        CancellationSignal::new(),
+    )
+}
+
+/// Redaction-shaped `Replace` (request-shaping) plus compaction must fail
+/// before settlement rather than silently overwrite either projection.
+#[test]
+fn redaction_replace_plus_compaction_is_unlandable_before_settlement() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_before_model(&mut coordinator);
+    let sources = test_sources();
+    let retained = user_message(4, "hi");
+    let draft = request_draft(vec![retained.clone()], Vec::new());
+    let substitute = request_draft(vec![user_message(11, "redacted")], Vec::new());
+    let input = assembled_before_model_input(&draft);
+    let driver = driver_from_pair(
+        (
+            request_shaping_descriptor("fixture.redaction"),
+            StageOutcome::Replace(canonical_draft(&substitute).expect("replacement")),
+        ),
+        (
+            compactor_descriptor("fixture.compactor"),
+            StageOutcome::CompactContext(Box::new(evidence_correct_compaction(
+                &input,
+                std::slice::from_ref(&retained),
+            ))),
+        ),
+    );
+
+    let error = block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&driver),
+        &sources,
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+    ))
+    .expect_err("Replace + CompactContext must fail closed before settlement");
+
+    assert!(
+        matches!(&error, RunHandleError::Middleware { code }
+            if code.as_ref() == MIDDLEWARE_STAGE_UNLANDABLE),
+        "expected middleware_stage_unlandable, got {error:?}"
+    );
+    assert!(
+        coordinator.state().pending_model_effect.is_none(),
+        "a conflict must not open a model effect"
+    );
+}
+
+/// Document-ingest-shaped `Replace` (context mutation) plus compaction must
+/// likewise fail closed before settlement.
+#[test]
+fn document_ingest_replace_plus_compaction_is_unlandable_before_settlement() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_before_model(&mut coordinator);
+    let sources = test_sources();
+    let retained = user_message(4, "hi");
+    let draft = request_draft(vec![retained.clone()], Vec::new());
+    let substitute = request_draft(vec![user_message(11, "ingested")], Vec::new());
+    let input = assembled_before_model_input(&draft);
+    let driver = driver_from_pair(
+        (
+            context_mutation_descriptor("fixture.document-ingest"),
+            StageOutcome::Replace(canonical_draft(&substitute).expect("replacement")),
+        ),
+        (
+            compactor_descriptor("fixture.compactor"),
+            StageOutcome::CompactContext(Box::new(evidence_correct_compaction(
+                &input,
+                std::slice::from_ref(&retained),
+            ))),
+        ),
+    );
+
+    let error = block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&driver),
+        &sources,
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+    ))
+    .expect_err("document-ingest Replace + CompactContext must fail closed");
+
+    assert!(
+        matches!(&error, RunHandleError::Middleware { code }
+            if code.as_ref() == MIDDLEWARE_STAGE_UNLANDABLE),
+        "expected middleware_stage_unlandable, got {error:?}"
+    );
+    assert!(coordinator.state().pending_model_effect.is_none());
+}
+
+#[test]
+fn redaction_replace_alone_still_lands() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_before_model(&mut coordinator);
+    let sources = test_sources();
+    let draft = request_draft(vec![user_message(4, "hi")], Vec::new());
+    let substitute = request_draft(vec![user_message(11, "redacted")], Vec::new());
+    let driver = driver_from(
+        request_shaping_descriptor("fixture.redaction"),
+        StageOutcome::Replace(canonical_draft(&substitute).expect("replacement")),
+    );
+
+    block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&driver),
+        &sources,
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+    ))
+    .expect("redaction Replace alone must still land");
+
+    assert_eq!(
+        committed_model_request(&coordinator)
+            .messages
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>(),
+        vec!["redacted".to_owned()],
+    );
+    assert!(coordinator.state().pending_model_effect.is_some());
+}
+
+#[test]
+fn document_ingest_replace_alone_still_lands() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_before_model(&mut coordinator);
+    let sources = test_sources();
+    let draft = request_draft(vec![user_message(4, "hi")], Vec::new());
+    let substitute = request_draft(vec![user_message(11, "ingested-note")], Vec::new());
+    let driver = driver_from(
+        context_mutation_descriptor("fixture.document-ingest"),
+        StageOutcome::Replace(canonical_draft(&substitute).expect("replacement")),
+    );
+
+    block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&driver),
+        &sources,
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+    ))
+    .expect("document-ingest Replace alone must still land");
+
+    assert_eq!(
+        committed_model_request(&coordinator)
+            .messages
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>(),
+        vec!["ingested-note".to_owned()],
+    );
+    assert!(coordinator.state().pending_model_effect.is_some());
+}

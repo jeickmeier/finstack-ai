@@ -20,7 +20,9 @@ use finstack_ai_kernel::{
 };
 
 use crate::coordinator::CommitCoordinator;
-use crate::middleware::{CompactionModelRequest, CompactionModelResume, StageOutcome};
+use crate::middleware::{
+    CompactionModelRequest, CompactionModelResume, StageOutcome, authorize_compaction_model_request,
+};
 use crate::middleware_driver::derived_stage_effect_id;
 use crate::model::{
     Model, ModelCallContext, ModelRequest, ModelResponse, ModelStreamAssembler, ModelStreamLimits,
@@ -49,6 +51,14 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
     cycle: u64,
     cancellation: &CancellationSignal,
 ) -> Result<CompactionModelResume, RunHandleError> {
+    let seed = coordinator
+        .stage_dispatch_seed()
+        .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
+    authorize_compaction_model_request(seed.compaction_authorization.as_ref(), request).map_err(
+        |error| RunHandleError::Middleware {
+            code: Arc::from(error.code()),
+        },
+    )?;
     if coordinator
         .state()
         .pending_model_effect
@@ -60,9 +70,6 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
     }
     validate_model_request(model, &request.request, profile)
         .map_err(|error| compaction_model_error(&error))?;
-    let seed = coordinator
-        .stage_dispatch_seed()
-        .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
     let parent_effect_id = derived_stage_effect_id(&seed.locator, cycle, Stage::BeforeModel);
     let request_json = request
         .request
@@ -135,29 +142,47 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
     };
     let draft: crate::ModelRequestDraft = serde_json::from_slice(raw.as_bytes())
         .map_err(|_| stage_error(crate::MODEL_REQUEST_INVALID))?;
-    let model_ref = match pending.requested.component() {
-        Some(invocation) => finstack_ai_kernel::ComponentRef::new(
+    let seed = coordinator
+        .stage_dispatch_seed()
+        .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
+    let authorization =
+        seed.compaction_authorization
+            .as_ref()
+            .ok_or_else(|| RunHandleError::Middleware {
+                code: Arc::from(crate::COMPACTION_MODEL_NOT_AUTHORIZED),
+            })?;
+    // Recheck the accepted lock. Never fabricate resume model/digest/sensitivity:
+    // prefer the committed component when present; otherwise the lock binds the
+    // exact unversioned model that was authorized at commit time.
+    let model_ref = if let Some(invocation) = pending.requested.component() {
+        let model_ref = finstack_ai_kernel::ComponentRef::new(
             invocation.component.clone(),
             Some(invocation.version),
-        ),
-        None => finstack_ai_kernel::ComponentRef::new(
-            finstack_ai_kernel::ComponentId::parse("finstack.model.compaction")
-                .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?,
-            None,
-        ),
+        );
+        if authorization.allowed_model() != &model_ref {
+            return Err(RunHandleError::Middleware {
+                code: Arc::from(crate::COMPACTION_MODEL_NOT_AUTHORIZED),
+            });
+        }
+        model_ref
+    } else {
+        let model_ref = authorization.allowed_model().clone();
+        if model_ref.version().is_some() {
+            return Err(RunHandleError::Middleware {
+                code: Arc::from(crate::COMPACTION_MODEL_NOT_AUTHORIZED),
+            });
+        }
+        model_ref
     };
-    let budget_scope_id = coordinator
-        .stage_dispatch_seed()
-        .and_then(|seed| seed.budget_scope_id)
-        .unwrap_or_else(|| {
-            finstack_ai_kernel::BudgetScopeId::from_bytes(*pending.requested.effect_id().as_bytes())
-        });
+    let budget_scope_id = seed.budget_scope_id.unwrap_or_else(|| {
+        finstack_ai_kernel::BudgetScopeId::from_bytes(*pending.requested.effect_id().as_bytes())
+    });
     let request = CompactionModelRequest {
         model: model_ref,
         request: draft,
         budget_scope_id,
-        source_sensitivity: finstack_ai_kernel::Sensitivity::Internal,
-        residency_policy_digest: finstack_ai_kernel::Digest::raw_json(b"compaction-resume"),
+        source_sensitivity: authorization.maximum_sensitivity(),
+        residency_policy_digest: *authorization.residency_policy_digest(),
         resume_state: finstack_ai_kernel::RawJson::parse(b"{}")
             .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?,
     };

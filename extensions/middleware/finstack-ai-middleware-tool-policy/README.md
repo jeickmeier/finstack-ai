@@ -54,6 +54,11 @@ now has a concrete universe (`input.tools`) to narrow, the same shape
 
 ## Configuration example
 
+Construct via `ToolPolicyConfig::new().with_*()`. Do not inspect rule structs:
+`RoleAllowlist`, `WriteBudget`, `JailbreakTriggers`, and `ChildDepthGate` (and
+the `ToolPolicyConfig` inspection accessors) are crate-private. `Default` is
+not implemented.
+
 ```rust
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

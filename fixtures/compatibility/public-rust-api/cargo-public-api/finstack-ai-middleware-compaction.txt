@@ -29,16 +29,10 @@ impl core::marker::StructuralPartialEq for finstack_ai_middleware_compaction::Co
 impl serde_core::ser::Serialize for finstack_ai_middleware_compaction::CompactionStrategy
 pub fn finstack_ai_middleware_compaction::CompactionStrategy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub struct finstack_ai_middleware_compaction::CompactionConfig
-pub finstack_ai_middleware_compaction::CompactionConfig::budget_scope_id: core::option::Option<finstack_ai_kernel::primitives::ids::BudgetScopeId>
-pub finstack_ai_middleware_compaction::CompactionConfig::hysteresis_tokens: u64
-pub finstack_ai_middleware_compaction::CompactionConfig::large_tool_output_bytes: usize
-pub finstack_ai_middleware_compaction::CompactionConfig::residency_policy_digest: finstack_ai_kernel::primitives::digest::Digest
-pub finstack_ai_middleware_compaction::CompactionConfig::secondary_model_authorized: bool
-pub finstack_ai_middleware_compaction::CompactionConfig::strategy: finstack_ai_middleware_compaction::CompactionStrategy
-pub finstack_ai_middleware_compaction::CompactionConfig::summarize_model: core::option::Option<finstack_ai_kernel::primitives::identity::ComponentRef>
-pub finstack_ai_middleware_compaction::CompactionConfig::threshold_tokens: u64
 impl finstack_ai_middleware_compaction::CompactionConfig
+pub fn finstack_ai_middleware_compaction::CompactionConfig::large_tool_output(u64, u64, usize) -> Self
 pub fn finstack_ai_middleware_compaction::CompactionConfig::sliding_window(u64, u64) -> Self
+pub fn finstack_ai_middleware_compaction::CompactionConfig::summarize(u64, u64, finstack_ai_kernel::primitives::identity::ComponentRef, finstack_ai_kernel::primitives::ids::BudgetScopeId, finstack_ai_kernel::primitives::digest::Digest) -> Self
 impl core::clone::Clone for finstack_ai_middleware_compaction::CompactionConfig
 pub fn finstack_ai_middleware_compaction::CompactionConfig::clone(&self) -> finstack_ai_middleware_compaction::CompactionConfig
 impl core::fmt::Debug for finstack_ai_middleware_compaction::CompactionConfig

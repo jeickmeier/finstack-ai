@@ -46,4 +46,6 @@ pub use types::{
 };
 #[cfg(test)]
 pub(crate) use validate::validate_compaction_model_effect;
-pub use validate::{validate_compaction_result, validate_stage_outcome};
+pub use validate::{
+    authorize_compaction_model_request, validate_compaction_result, validate_stage_outcome,
+};

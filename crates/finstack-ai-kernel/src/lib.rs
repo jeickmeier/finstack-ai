@@ -201,11 +201,11 @@ pub use records::policy::{
 pub use records::run::{
     BudgetPropagation, CancellationInitiator, CancellationPropagation, CancellationReconciled,
     CancellationRequest, CancellationRequested, ChildPlacement, ChildRunLocator, ChildRunPrepared,
-    DeadlinePropagation, ExternalCommandError, ExternalCommandKind, ExternalCommandRejected,
-    ExternalCommandTarget, ExternalEffectCompletionCommand, InteractionResolutionCommand,
-    MAX_RUN_RELATION_DEPTH, OperationLocator, PrincipalPropagation, RecordExternalCommandRejected,
-    RemoteRouteRef, RunAccepted, RunError, RunPropagationPolicy, RunRelation, RunRelationKind,
-    RunSecurityContext,
+    CompactionAuthorization, DeadlinePropagation, ExternalCommandError, ExternalCommandKind,
+    ExternalCommandRejected, ExternalCommandTarget, ExternalEffectCompletionCommand,
+    InteractionResolutionCommand, MAX_RUN_RELATION_DEPTH, OperationLocator, PrincipalPropagation,
+    RecordExternalCommandRejected, RemoteRouteRef, RunAccepted, RunError, RunPropagationPolicy,
+    RunRelation, RunRelationKind, RunSecurityContext,
 };
 pub use records::tools::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, SyntheticToolClosure,

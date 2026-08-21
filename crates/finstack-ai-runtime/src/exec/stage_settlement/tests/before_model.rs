@@ -355,6 +355,46 @@ fn a_before_model_replace_that_is_not_a_model_draft_is_a_stable_payload_error() 
         if code.as_ref() == "middleware_stage_payload_invalid"));
 }
 
+#[test]
+fn apply_model_draft_rejects_replacement_plus_compaction() {
+    let sources = test_sources();
+    let base = request_draft(vec![user_message(4, "base")], Vec::new());
+    let substitute = request_draft(vec![user_message(11, "replaced")], Vec::new());
+    let fold = StageFold {
+        replacement: Some(canonical_draft(&substitute).expect("replacement")),
+        compaction: Some(Box::new(crate::middleware::CompactionResult {
+            evidence: crate::middleware::CompactionEvidence {
+                strategy_id: Arc::from("fixture.strategy"),
+                strategy_version: 1,
+                configuration_digest: Digest::raw_json(b"{}"),
+                model_context_profile_digest: Digest::raw_json(b"profile"),
+                source_digest: Digest::raw_json(b"source"),
+                protected_item_set_digest: Digest::raw_json(b"protected"),
+                covered_entry_ids: Arc::from([]),
+                retained_entry_ids: Arc::from([]),
+                projection_digest: Digest::raw_json(b"projection"),
+                estimated_tokens_before: 10,
+                estimated_tokens_after: 5,
+                summary_digest: None,
+                cache_impact: crate::middleware::PromptCacheImpact::CacheInvalidated,
+            },
+            replacement_messages: Arc::from([user_message(4, "compacted")]),
+            derived_summaries: Arc::from([]),
+            checkpoint: None,
+        })),
+        ..StageFold::default()
+    };
+
+    let error = apply_model_draft(&fold, base, &sources)
+        .expect_err("compaction must not silently overwrite a replacement");
+
+    assert!(
+        matches!(&error, RunHandleError::Middleware { code }
+            if code.as_ref() == MIDDLEWARE_STAGE_UNLANDABLE),
+        "expected middleware_stage_unlandable, got {error:?}"
+    );
+}
+
 // ---- folded-allocation rejection is a run failure, not a worker fault --
 
 /// `stage_allocation` speaks [`RunHandleError::ToolSettlement`], which

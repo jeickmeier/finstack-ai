@@ -44,7 +44,7 @@ pub enum JailbreakAction {
 /// Per-role tool allowlist, plus a default for unmapped roles.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct RoleAllowlist {
+pub(crate) struct RoleAllowlist {
     roles: BTreeMap<Arc<str>, BTreeSet<ToolId>>,
     default_allowed: BTreeSet<ToolId>,
 }
@@ -52,13 +52,13 @@ pub struct RoleAllowlist {
 impl RoleAllowlist {
     /// Per-role allowed tool sets.
     #[must_use]
-    pub fn roles(&self) -> &BTreeMap<Arc<str>, BTreeSet<ToolId>> {
+    pub(crate) fn roles(&self) -> &BTreeMap<Arc<str>, BTreeSet<ToolId>> {
         &self.roles
     }
 
     /// Tools allowed for roles absent from [`Self::roles`].
     #[must_use]
-    pub fn default_allowed(&self) -> &BTreeSet<ToolId> {
+    pub(crate) fn default_allowed(&self) -> &BTreeSet<ToolId> {
         &self.default_allowed
     }
 }
@@ -69,14 +69,14 @@ impl RoleAllowlist {
 /// are never made visible.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct WriteBudget {
+pub(crate) struct WriteBudget {
     max_write_calls: u32,
 }
 
 impl WriteBudget {
     /// Maximum number of write-classified tool calls allowed.
     #[must_use]
-    pub fn max_write_calls(&self) -> u32 {
+    pub(crate) fn max_write_calls(&self) -> u32 {
         self.max_write_calls
     }
 }
@@ -84,7 +84,7 @@ impl WriteBudget {
 /// Jailbreak-trigger patterns and the action taken when one matches.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct JailbreakTriggers {
+pub(crate) struct JailbreakTriggers {
     patterns: Vec<Arc<str>>,
     action: JailbreakAction,
 }
@@ -92,13 +92,13 @@ pub struct JailbreakTriggers {
 impl JailbreakTriggers {
     /// Trigger patterns.
     #[must_use]
-    pub fn patterns(&self) -> &[Arc<str>] {
+    pub(crate) fn patterns(&self) -> &[Arc<str>] {
         &self.patterns
     }
 
     /// Action taken when a pattern matches.
     #[must_use]
-    pub fn action(&self) -> &JailbreakAction {
+    pub(crate) fn action(&self) -> &JailbreakAction {
         &self.action
     }
 }
@@ -106,7 +106,7 @@ impl JailbreakTriggers {
 /// Restricts a tool set once the run's child-agent depth reaches a threshold.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct ChildDepthGate {
+pub(crate) struct ChildDepthGate {
     max_depth: u16,
     restricted: BTreeSet<ToolId>,
 }
@@ -114,18 +114,21 @@ pub struct ChildDepthGate {
 impl ChildDepthGate {
     /// Depth at or beyond which `restricted` applies.
     #[must_use]
-    pub fn max_depth(&self) -> u16 {
+    pub(crate) fn max_depth(&self) -> u16 {
         self.max_depth
     }
 
     /// Tools removed once `max_depth` is reached.
     #[must_use]
-    pub fn restricted(&self) -> &BTreeSet<ToolId> {
+    pub(crate) fn restricted(&self) -> &BTreeSet<ToolId> {
         &self.restricted
     }
 }
 
 /// Validated tool-policy configuration, built incrementally via `with_*` methods.
+///
+/// Construct with [`Self::new`] and the `with_*` builders. Rule structs and
+/// inspection accessors are crate-private.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ToolPolicyConfig {
@@ -135,15 +138,13 @@ pub struct ToolPolicyConfig {
     child_depth: Option<ChildDepthGate>,
 }
 
-impl Default for ToolPolicyConfig {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ToolPolicyConfig {
     /// Start an empty configuration. Add at least one rule before use.
+    ///
+    /// `Default` is intentionally not implemented: construct via this constructor
+    /// and the `with_*` builders.
     #[must_use]
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             role_allowlist: None,
@@ -317,31 +318,31 @@ impl ToolPolicyConfig {
 
     /// The configured role allowlist, if any.
     #[must_use]
-    pub fn role_allowlist(&self) -> Option<&RoleAllowlist> {
+    pub(crate) fn role_allowlist(&self) -> Option<&RoleAllowlist> {
         self.role_allowlist.as_ref()
     }
 
     /// The configured write budget, if any.
     #[must_use]
-    pub fn write_budget(&self) -> Option<&WriteBudget> {
+    pub(crate) fn write_budget(&self) -> Option<&WriteBudget> {
         self.write_budget.as_ref()
     }
 
     /// The configured jailbreak triggers, if any.
     #[must_use]
-    pub fn jailbreak(&self) -> Option<&JailbreakTriggers> {
+    pub(crate) fn jailbreak(&self) -> Option<&JailbreakTriggers> {
         self.jailbreak.as_ref()
     }
 
     /// The configured child-depth gate, if any.
     #[must_use]
-    pub fn child_depth(&self) -> Option<&ChildDepthGate> {
+    pub(crate) fn child_depth(&self) -> Option<&ChildDepthGate> {
         self.child_depth.as_ref()
     }
 
     /// True when no rule has been configured.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.role_allowlist.is_none()
             && self.write_budget.is_none()
             && self.jailbreak.is_none()

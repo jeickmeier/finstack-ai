@@ -1,8 +1,11 @@
 use super::*;
+use crate::primitives::ComponentId;
+use crate::primitives::ComponentRef;
 use crate::primitives::Digest;
 use crate::primitives::EffectId;
 use crate::primitives::PrincipalRef;
 use crate::primitives::RunId;
+use crate::primitives::Sensitivity;
 use crate::primitives::Timestamp;
 use crate::records::policy::RunLimits;
 
@@ -282,4 +285,97 @@ fn child_run_cannot_reuse_parent_run_identity() {
         .validate_against_parent(&parent)
         .expect_err("revalidation must reject identity reuse");
     assert_eq!(err.code(), "child_run_identity_reuse");
+}
+
+fn sample_compaction_auth(sensitivity: Sensitivity) -> CompactionAuthorization {
+    CompactionAuthorization::new(
+        ComponentRef::new(
+            ComponentId::parse("fixture.child-model").expect("component"),
+            None,
+        ),
+        sensitivity,
+        Digest::raw_json(b"residency"),
+    )
+}
+
+#[test]
+fn historical_security_deserializes_missing_compaction_authorization_as_deny() {
+    let json = serde_json::json!({
+        "tenant_scope": "tenant-a",
+        "principal": {
+            "issuer": "iss",
+            "subject": "sub",
+            "tenant_scope": "tenant-a"
+        },
+        "authentication_method": "oidc",
+        "assurance_level": "high",
+        "authorization_policy_version": "policy-1",
+        "authorization_decision_id": "decision-1"
+    });
+    let security: RunSecurityContext = serde_json::from_value(json).expect("decode");
+    assert!(security.compaction_authorization().is_none());
+}
+
+#[test]
+fn child_may_omit_or_attenuate_compaction_authorization_but_not_broaden() {
+    let parent = sample_security()
+        .with_compaction_authorization(sample_compaction_auth(Sensitivity::Confidential));
+    let omitted = sample_security();
+    assert!(parent.allows_child_attenuation(&omitted, PrincipalPropagation::Inherit));
+
+    let attenuated = sample_security()
+        .with_compaction_authorization(sample_compaction_auth(Sensitivity::Internal));
+    assert!(parent.allows_child_attenuation(&attenuated, PrincipalPropagation::Inherit));
+
+    let same = sample_security()
+        .with_compaction_authorization(sample_compaction_auth(Sensitivity::Confidential));
+    assert!(parent.allows_child_attenuation(&same, PrincipalPropagation::Inherit));
+
+    let raised = sample_security()
+        .with_compaction_authorization(sample_compaction_auth(Sensitivity::Secret));
+    assert!(!parent.allows_child_attenuation(&raised, PrincipalPropagation::Inherit));
+
+    let invented = sample_security()
+        .with_compaction_authorization(sample_compaction_auth(Sensitivity::Internal));
+    assert!(!sample_security().allows_child_attenuation(&invented, PrincipalPropagation::Inherit));
+
+    let different_model =
+        sample_security().with_compaction_authorization(CompactionAuthorization::new(
+            ComponentRef::new(
+                ComponentId::parse("fixture.other-model").expect("component"),
+                None,
+            ),
+            Sensitivity::Internal,
+            Digest::raw_json(b"residency"),
+        ));
+    assert!(!parent.allows_child_attenuation(&different_model, PrincipalPropagation::Inherit));
+}
+
+#[test]
+fn compaction_authorization_requires_exact_model_digest_and_sensitivity_ceiling() {
+    let auth = sample_compaction_auth(Sensitivity::Internal);
+    let model = ComponentRef::new(
+        ComponentId::parse("fixture.child-model").expect("component"),
+        None,
+    );
+    assert!(auth.authorizes(&model, Sensitivity::Public, &Digest::raw_json(b"residency")));
+    assert!(auth.authorizes(
+        &model,
+        Sensitivity::Internal,
+        &Digest::raw_json(b"residency")
+    ));
+    assert!(!auth.authorizes(
+        &model,
+        Sensitivity::Confidential,
+        &Digest::raw_json(b"residency")
+    ));
+    assert!(!auth.authorizes(&model, Sensitivity::Internal, &Digest::raw_json(b"other")));
+    assert!(!auth.authorizes(
+        &ComponentRef::new(
+            ComponentId::parse("fixture.other-model").expect("component"),
+            None,
+        ),
+        Sensitivity::Internal,
+        &Digest::raw_json(b"residency"),
+    ));
 }

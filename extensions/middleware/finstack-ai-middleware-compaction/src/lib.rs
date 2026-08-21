@@ -24,19 +24,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use finstack_ai_kernel::{
     BudgetScopeId, ComponentId, ComponentInvocation, ComponentRef, ContentBlock, Digest,
-    ErrorCategory, InvocationRecovery, Message, Metadata, RawJson, Sensitivity, Stage, TextBlock,
+    ErrorCategory, InvocationRecovery, Message, Metadata, Sensitivity, Stage, TextBlock,
     ToolResultBlock, Version,
 };
 use finstack_ai_runtime::{
     BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,
-    CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionModelRequest,
-    CompactionResult, CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind,
-    ContextProvenance, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
-    MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, PromptCacheImpact, StageInput,
-    StageMask, StageOutcome, compaction_projection_digest, compaction_protected_set_digest,
-    compaction_source_digest, compaction_summary_digest, validate_compaction_result,
+    CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionResult,
+    CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, PortFuture, PromptCacheImpact, StageInput, StageMask, StageOutcome,
+    compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
+    compaction_summary_digest, validate_compaction_result,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -71,40 +74,145 @@ impl CompactionStrategy {
 }
 
 /// Locked compaction configuration hashed into the descriptor digest.
+///
+/// Fields are private. Build a strategy with [`Self::sliding_window`],
+/// [`Self::large_tool_output`], or [`Self::summarize`]. Configuration
+/// cannot authorize a secondary model; runtime authority is owned by
+/// PR-112.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompactionConfig {
-    /// Selected strategy.
-    pub strategy: CompactionStrategy,
-    /// Trigger threshold in estimated tokens.
-    pub threshold_tokens: u64,
-    /// Extra tokens dropped after a trigger.
-    pub hysteresis_tokens: u64,
-    /// Tool-result body bytes that remain inline.
-    pub large_tool_output_bytes: usize,
-    /// Explicit summarize model. Required for [`CompactionStrategy::Summarize`].
-    pub summarize_model: Option<ComponentRef>,
-    /// Explicit summarize budget scope.
-    pub budget_scope_id: Option<BudgetScopeId>,
-    /// Authorized residency/egress digest for the child model.
-    pub residency_policy_digest: Digest,
-    /// Whether the secondary model is authorized for the full source sensitivity.
-    pub secondary_model_authorized: bool,
+    strategy: CompactionStrategy,
+    threshold_tokens: u64,
+    hysteresis_tokens: u64,
+    large_tool_output_bytes: usize,
+    summarize_model: Option<ComponentRef>,
+    budget_scope_id: Option<BudgetScopeId>,
+    residency_policy_digest: Digest,
+    /// Always serialized as `false`. No constructor can set this true.
+    secondary_model_authorized: bool,
 }
 
 impl CompactionConfig {
-    /// Sliding-window defaults with summarize off.
-    #[must_use]
-    pub fn sliding_window(threshold_tokens: u64, hysteresis_tokens: u64) -> Self {
+    fn locked(
+        strategy: CompactionStrategy,
+        threshold_tokens: u64,
+        hysteresis_tokens: u64,
+        large_tool_output_bytes: usize,
+        summarize_model: Option<ComponentRef>,
+        budget_scope_id: Option<BudgetScopeId>,
+        residency_policy_digest: Digest,
+    ) -> Self {
         Self {
-            strategy: CompactionStrategy::SlidingWindow,
+            strategy,
             threshold_tokens,
             hysteresis_tokens,
-            large_tool_output_bytes: 2_048,
-            summarize_model: None,
-            budget_scope_id: None,
-            residency_policy_digest: Digest::raw_json(b"residency-denied"),
+            large_tool_output_bytes,
+            summarize_model,
+            budget_scope_id,
+            residency_policy_digest,
             secondary_model_authorized: false,
         }
+    }
+
+    /// Sliding-window defaults with summarize off.
+    ///
+    /// Unused strategy fields keep the previous constructor defaults so
+    /// serialized keys and configuration-digest bytes stay identical.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_middleware_compaction::CompactionConfig;
+    ///
+    /// let _config = CompactionConfig::sliding_window(1_024, 256);
+    /// ```
+    #[must_use]
+    pub fn sliding_window(threshold_tokens: u64, hysteresis_tokens: u64) -> Self {
+        Self::locked(
+            CompactionStrategy::SlidingWindow,
+            threshold_tokens,
+            hysteresis_tokens,
+            2_048,
+            None,
+            None,
+            Digest::raw_json(b"residency-denied"),
+        )
+    }
+
+    /// Truncate large tool-result bodies while keeping call/result pairs.
+    ///
+    /// Other fields keep the [`Self::sliding_window`] defaults so a
+    /// configuration that previously mutated only `strategy` and
+    /// `large_tool_output_bytes` produces the same serialized bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_middleware_compaction::CompactionConfig;
+    ///
+    /// let _config = CompactionConfig::large_tool_output(1_024, 256, 16);
+    /// ```
+    #[must_use]
+    pub fn large_tool_output(
+        threshold_tokens: u64,
+        hysteresis_tokens: u64,
+        byte_limit: usize,
+    ) -> Self {
+        Self::locked(
+            CompactionStrategy::LargeToolOutput,
+            threshold_tokens,
+            hysteresis_tokens,
+            byte_limit,
+            None,
+            None,
+            Digest::raw_json(b"residency-denied"),
+        )
+    }
+
+    /// Model-assisted summarize identity. Does not grant secondary-model
+    /// authority; a first invoke without resume fails closed until the
+    /// PR-112 runtime lock is present.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{BudgetScopeId, ComponentId, ComponentRef, Digest, Version};
+    /// use finstack_ai_middleware_compaction::CompactionConfig;
+    ///
+    /// let model = ComponentRef::new(
+    ///     ComponentId::parse("finstack.model.summarize").expect("id"),
+    ///     Some(Version {
+    ///         major: 0,
+    ///         minor: 0,
+    ///         patch: 4,
+    ///     }),
+    /// );
+    /// let budget = BudgetScopeId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("budget");
+    /// let _config = CompactionConfig::summarize(
+    ///     1_024,
+    ///     256,
+    ///     model,
+    ///     budget,
+    ///     Digest::raw_json(b"residency-policy"),
+    /// );
+    /// ```
+    #[must_use]
+    pub fn summarize(
+        threshold_tokens: u64,
+        hysteresis_tokens: u64,
+        model: ComponentRef,
+        budget_scope: BudgetScopeId,
+        residency_policy_digest: Digest,
+    ) -> Self {
+        Self::locked(
+            CompactionStrategy::Summarize,
+            threshold_tokens,
+            hysteresis_tokens,
+            2_048,
+            Some(model),
+            Some(budget_scope),
+            residency_policy_digest,
+        )
     }
 }
 
@@ -231,7 +339,8 @@ fn sliding_window(
         .threshold_tokens
         .saturating_sub(config.hysteresis_tokens)
         .max(1);
-    let required = required_indices(&input.source_entries);
+    let pairs = collect_pairs(&input.source_entries);
+    let required = required_indices(&input.source_entries, &pairs);
     let mut retained: BTreeSet<usize> = (0..input.source_entries.len()).collect();
     let mut current = before;
     for index in 0..input.source_entries.len() {
@@ -241,8 +350,12 @@ fn sliding_window(
         if required.contains(&index) || !retained.contains(&index) {
             continue;
         }
-        current =
-            current.saturating_sub(drop_with_pair(index, &input.source_entries, &mut retained));
+        current = current.saturating_sub(drop_with_pair(
+            index,
+            &input.source_entries,
+            &pairs,
+            &mut retained,
+        ));
     }
     let after = current;
     if after > input.hard_input_tokens {
@@ -306,44 +419,11 @@ fn summarize(
     if let Some(resume) = &ctx.compaction_resume {
         return summarize_resume(descriptor, config, input, resume);
     }
-    if !config.secondary_model_authorized {
-        return Err(middleware_error(
-            COMPACTION_MODEL_NOT_AUTHORIZED,
-            ErrorCategory::Middleware,
-            "compaction secondary model is not authorized",
-        ));
-    }
-    let Some(model) = config.summarize_model.clone() else {
-        return Err(middleware_error(
-            COMPACTION_MODEL_NOT_AUTHORIZED,
-            ErrorCategory::Middleware,
-            "compaction summarize model is missing",
-        ));
-    };
-    let Some(budget_scope_id) = config.budget_scope_id else {
-        return Err(middleware_error(
-            COMPACTION_MODEL_NOT_AUTHORIZED,
-            ErrorCategory::Middleware,
-            "compaction summarize budget scope is missing",
-        ));
-    };
-    let source_sensitivity = max_sensitivity(&input.source_entries);
-    Ok(StageOutcome::RequestCompactionModel(Box::new(
-        CompactionModelRequest {
-            model,
-            request: input.request.clone(),
-            budget_scope_id,
-            source_sensitivity,
-            residency_policy_digest: config.residency_policy_digest,
-            resume_state: RawJson::parse(b"{}").map_err(|_| {
-                middleware_error(
-                    COMPACTION_MODEL_NOT_AUTHORIZED,
-                    ErrorCategory::Internal,
-                    "compaction resume state is invalid",
-                )
-            })?,
-        },
-    )))
+    Err(middleware_error(
+        COMPACTION_MODEL_NOT_AUTHORIZED,
+        ErrorCategory::Middleware,
+        "compaction secondary model is not authorized",
+    ))
 }
 
 fn summarize_resume(
@@ -353,7 +433,8 @@ fn summarize_resume(
     resume: &finstack_ai_runtime::CompactionModelResume,
 ) -> Result<StageOutcome, MiddlewareError> {
     let before = estimate_entries(&input.source_entries);
-    let required = required_indices(&input.source_entries);
+    let pairs = collect_pairs(&input.source_entries);
+    let required = required_indices(&input.source_entries, &pairs);
     let messages = retained_messages(&input.source_entries, &required);
     let after = messages.iter().map(estimate_message).sum::<u64>();
     if after > input.hard_input_tokens {
@@ -495,8 +576,10 @@ fn finish(
     Ok(StageOutcome::CompactContext(Box::new(result)))
 }
 
-fn required_indices(entries: &[CompactionSourceEntry]) -> BTreeSet<usize> {
-    let pairs = collect_pairs(entries);
+fn required_indices(
+    entries: &[CompactionSourceEntry],
+    pairs: &BTreeMap<usize, Option<usize>>,
+) -> BTreeSet<usize> {
     let mut required = BTreeSet::new();
     for (index, entry) in entries.iter().enumerate() {
         if entry.protected {
@@ -505,13 +588,15 @@ fn required_indices(entries: &[CompactionSourceEntry]) -> BTreeSet<usize> {
     }
     for (call, result) in pairs {
         if result.is_none() {
-            required.insert(call);
+            required.insert(*call);
         }
     }
     required
 }
 
 fn collect_pairs(entries: &[CompactionSourceEntry]) -> BTreeMap<usize, Option<usize>> {
+    #[cfg(test)]
+    PAIR_ANALYSIS_COUNT.with(|count| count.set(count.get().saturating_add(1)));
     let mut calls = BTreeMap::new();
     let mut results = BTreeMap::new();
     for (index, entry) in entries.iter().enumerate() {
@@ -536,24 +621,41 @@ fn collect_pairs(entries: &[CompactionSourceEntry]) -> BTreeMap<usize, Option<us
 fn drop_with_pair(
     index: usize,
     entries: &[CompactionSourceEntry],
+    pairs: &BTreeMap<usize, Option<usize>>,
     retained: &mut BTreeSet<usize>,
 ) -> u64 {
     let mut subtracted = 0_u64;
     if retained.remove(&index) {
         subtracted = subtracted.saturating_add(estimate_message(&entries[index].message));
     }
-    for (call, result) in collect_pairs(entries) {
-        if call == index
-            && let Some(result) = result
+    for (call, result) in pairs {
+        if *call == index
+            && let Some(result) = *result
             && retained.remove(&result)
         {
             subtracted = subtracted.saturating_add(estimate_message(&entries[result].message));
         }
-        if result == Some(index) && retained.remove(&call) {
-            subtracted = subtracted.saturating_add(estimate_message(&entries[call].message));
+        if *result == Some(index) && retained.remove(call) {
+            subtracted = subtracted.saturating_add(estimate_message(&entries[*call].message));
         }
     }
     subtracted
+}
+
+#[cfg(test)]
+thread_local! {
+    static PAIR_ANALYSIS_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_pair_analysis_count() {
+    PAIR_ANALYSIS_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+#[must_use]
+fn pair_analysis_count() -> usize {
+    PAIR_ANALYSIS_COUNT.with(Cell::get)
 }
 
 fn retained_messages(

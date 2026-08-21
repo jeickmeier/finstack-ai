@@ -175,7 +175,8 @@ pub use middleware::{
     CompactionResult, CompactionSourceEntry, MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware,
     MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
     MiddlewareRegistration, MiddlewareRole, OrderTier, PromptCacheImpact, ResolvedMiddleware,
-    ResolvedMiddlewareChain, StageInput, StageMask, StageOutcome, compaction_checkpoint_compatible,
+    ResolvedMiddlewareChain, StageInput, StageMask, StageOutcome,
+    authorize_compaction_model_request, compaction_checkpoint_compatible,
     compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
     compaction_summary_digest, validate_compaction_result, validate_stage_outcome,
 };

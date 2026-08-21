@@ -139,6 +139,18 @@ unpublished.
 
 ### Changed
 
+- `finstack-ai-middleware-compaction` `CompactionConfig` fields are private.
+  Construct with `sliding_window`, `large_tool_output`, or `summarize`.
+  Leaf configuration cannot self-authorize a secondary model (PR-106 / F5;
+  runtime lock is PR-112). Serialized keys and equivalent digest bytes are
+  unchanged.
+- `finstack-ai-middleware-document-ingest` `configuration_digest` now hashes
+  RFC 8785 canonical JSON of a private versioned limits shape
+  (`document-ingest-limits-v1`) instead of a constant digest (PR-109 / H1).
+  Distinct limits produce distinct identities.
+- `finstack-ai-kernel` `RunSecurityContext` gains optional, default-deny
+  `CompactionAuthorization` (exact model, maximum sensitivity, residency
+  policy digest) for model-assisted compaction (PR-112 / H5).
 - `finstack-ai` linked construction finishes on
   `NativeAgentBuilder::build_linked` with shared `LinkedCommon`.
   `ComposeAgentSpec` / `Agent::compose` are gone. Registry factory and
@@ -197,6 +209,14 @@ unpublished.
 
 ### Removed
 
+- `finstack-ai-middleware-tool-policy`: public `RoleAllowlist`,
+  `WriteBudget`, `JailbreakTriggers`, `ChildDepthGate`, their inspection
+  accessors, and `ToolPolicyConfig::default`. Construct with
+  `ToolPolicyConfig::new().with_*()` (PR-104 / F1; owner-approved
+  pre-publication source break). Serialized identity is unchanged.
+- `finstack-ai-middleware-instructions`: public
+  `PolicyInstructionsConfig::validate`. Validate through
+  `InstructionsMiddleware::try_new` (PR-105 / F7).
 - Unused maintainer helpers: `scripts/loc/find_long_files.py`,
   `scripts/docs/license_sweep.py`, `scripts/docs/rehearse_release.py`,
   and `scripts/perf/test_python_fast_path.py`.

@@ -38,8 +38,6 @@ impl serde_core::ser::Serialize for finstack_ai_middleware_instructions::PolicyE
 pub fn finstack_ai_middleware_instructions::PolicyEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub struct finstack_ai_middleware_instructions::PolicyInstructionsConfig
 pub finstack_ai_middleware_instructions::PolicyInstructionsConfig::entries: alloc::vec::Vec<finstack_ai_middleware_instructions::PolicyEntry>
-impl finstack_ai_middleware_instructions::PolicyInstructionsConfig
-pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::validate(&self) -> core::result::Result<(), finstack_ai_middleware_instructions::InstructionsError>
 impl core::clone::Clone for finstack_ai_middleware_instructions::PolicyInstructionsConfig
 pub fn finstack_ai_middleware_instructions::PolicyInstructionsConfig::clone(&self) -> finstack_ai_middleware_instructions::PolicyInstructionsConfig
 impl core::cmp::Eq for finstack_ai_middleware_instructions::PolicyInstructionsConfig

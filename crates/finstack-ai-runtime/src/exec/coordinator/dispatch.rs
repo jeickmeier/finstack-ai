@@ -93,6 +93,12 @@ impl CommitCoordinator {
     pub(crate) fn stage_dispatch_seed(&self) -> Option<StageDispatchSeed> {
         let state = self.kernel.state();
         let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
+        let compaction_authorization = state
+            .accepted
+            .as_ref()?
+            .security()
+            .compaction_authorization()
+            .cloned();
         Some(StageDispatchSeed {
             locator,
             authorization,
@@ -100,6 +106,7 @@ impl CommitCoordinator {
             attempt: state.retry.attempts.checked_add(1)?,
             deadline: state.accepted.as_ref()?.effective_deadline(),
             relation_depth: state.accepted.as_ref()?.relation().depth(),
+            compaction_authorization,
         })
     }
 
@@ -259,6 +266,8 @@ pub(crate) struct StageDispatchSeed {
     pub(crate) attempt: u32,
     pub(crate) deadline: Option<Timestamp>,
     pub(crate) relation_depth: u16,
+    /// Accepted durable compaction lock; absence denies model-assisted compaction.
+    pub(crate) compaction_authorization: Option<finstack_ai_kernel::CompactionAuthorization>,
 }
 
 #[derive(Debug, Clone)]

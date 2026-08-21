@@ -19,7 +19,27 @@
 //! read".
 
 #![warn(missing_docs)]
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -51,6 +71,9 @@ const ATTACHMENT_INDEX_CAPACITY: usize = 1024;
 /// attachment at every `BeforeModel` cycle of a multi-cycle run.
 const PARSE_CACHE_CAPACITY: usize = 32;
 
+/// Static skip-note used when a generated note cannot be constructed.
+const FALLBACK_NOTE_TEXT: &str = "[attached document note unavailable]";
+
 /// Key identifying one pure parse-to-note computation.
 ///
 /// `digest` is the digest of the *fetched* bytes (verified against the wire
@@ -75,34 +98,75 @@ struct ParseCacheKey {
 /// note is a deterministic function of the key (the configured
 /// [`DocumentLimits`] are fixed per instance). Plain `std::sync::Mutex`, no
 /// tokio, so this stays usable on `wasm32` hosts.
-#[derive(Debug, Default)]
-struct ParseCache {
-    state: Mutex<ParseCacheState>,
+type ParseCache = BoundedFifoMap<ParseCacheKey, String, PARSE_CACHE_CAPACITY>;
+
+/// Bounded FIFO map: new keys append, reinsertion refreshes the value
+/// without changing eviction order, and a poisoned lock is recovered.
+///
+/// Capacity is a type-level constant so parse-cache and attachment-index
+/// uses share one implementation while keeping their distinct bounds.
+#[derive(Debug)]
+struct BoundedFifoMap<K, V, const CAP: usize> {
+    state: Mutex<BoundedFifoMapState<K, V>>,
 }
 
-#[derive(Debug, Default)]
-struct ParseCacheState {
-    entries: BTreeMap<ParseCacheKey, String>,
-    insertion_order: VecDeque<ParseCacheKey>,
+#[derive(Debug)]
+struct BoundedFifoMapState<K, V> {
+    entries: BTreeMap<K, V>,
+    insertion_order: VecDeque<K>,
 }
 
-impl ParseCache {
-    fn lookup(&self, key: &ParseCacheKey) -> Option<String> {
+impl<K, V> Default for BoundedFifoMapState<K, V> {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            insertion_order: VecDeque::new(),
+        }
+    }
+}
+
+impl<K, V, const CAP: usize> Default for BoundedFifoMap<K, V, CAP> {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(BoundedFifoMapState::default()),
+        }
+    }
+}
+
+impl<K, V, const CAP: usize> BoundedFifoMap<K, V, CAP> {
+    #[must_use]
+    fn lookup<Q>(&self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q> + Ord,
+        Q: Ord + ?Sized,
+        V: Clone,
+    {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.entries.get(key).cloned()
     }
 
-    fn insert(&self, key: ParseCacheKey, note: String) {
+    fn insert(&self, key: K, value: V)
+    where
+        K: Clone + Ord,
+    {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if !state.entries.contains_key(&key) {
             state.insertion_order.push_back(key.clone());
         }
-        state.entries.insert(key, note);
-        while state.insertion_order.len() > PARSE_CACHE_CAPACITY {
+        state.entries.insert(key, value);
+        while state.insertion_order.len() > CAP {
             if let Some(oldest) = state.insertion_order.pop_front() {
                 state.entries.remove(&oldest);
             }
         }
+    }
+
+    #[cfg(test)]
+    fn poison(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            panic!("bounded-fifo-map test poison");
+        }));
     }
 }
 
@@ -123,13 +187,7 @@ impl ParseCache {
 /// so this type stays usable on `wasm32` hosts.
 #[derive(Debug, Default)]
 pub struct AttachmentIndex {
-    state: Mutex<AttachmentIndexState>,
-}
-
-#[derive(Debug, Default)]
-struct AttachmentIndexState {
-    entries: BTreeMap<String, ArtifactRef>,
-    insertion_order: VecDeque<String>,
+    map: BoundedFifoMap<String, ArtifactRef, ATTACHMENT_INDEX_CAPACITY>,
 }
 
 impl AttachmentIndex {
@@ -141,16 +199,7 @@ impl AttachmentIndex {
     /// evicted first.
     pub fn insert(&self, artifact: ArtifactRef) {
         let key = artifact.blob().id().to_owned();
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if !state.entries.contains_key(&key) {
-            state.insertion_order.push_back(key.clone());
-        }
-        state.entries.insert(key, artifact);
-        while state.insertion_order.len() > ATTACHMENT_INDEX_CAPACITY {
-            if let Some(oldest) = state.insertion_order.pop_front() {
-                state.entries.remove(&oldest);
-            }
-        }
+        self.map.insert(key, artifact);
     }
 
     /// Look up the staged `ArtifactRef` for a `BlobRef`, keyed by
@@ -160,20 +209,48 @@ impl AttachmentIndex {
     /// [`AttachmentIndex::insert`], or has since been evicted.
     #[must_use]
     pub fn lookup(&self, blob: &BlobRef) -> Option<ArtifactRef> {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.entries.get(blob.id()).cloned()
+        self.map.lookup(blob.id())
     }
 }
 
 /// Construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DocumentIngestError {
-    /// A checked-in identity constant is invalid.
+    /// Descriptor identity could not be constructed.
     #[error("document_ingest_configuration_invalid: {reason}")]
     Configuration {
         /// Stable non-secret reason.
         reason: &'static str,
     },
+}
+
+/// Explicit version tag hashed with the three parse limits.
+const LIMITS_IDENTITY_VERSION: &str = "document-ingest-limits-v1";
+
+/// Private identity hashed into `configuration_digest`. Field names are the
+/// digest's JSON keys. `DocumentLimits` is not serialized for this purpose.
+#[derive(serde::Serialize)]
+struct DocumentIngestLimitsIdentity {
+    max_input_bytes: u64,
+    max_output_bytes: u64,
+    max_pages: u32,
+    version: &'static str,
+}
+
+fn limits_identity_bytes(limits: &DocumentLimits) -> Result<Vec<u8>, DocumentIngestError> {
+    let identity = DocumentIngestLimitsIdentity {
+        max_input_bytes: limits.max_input_bytes,
+        max_output_bytes: limits.max_output_bytes,
+        max_pages: limits.max_pages,
+        version: LIMITS_IDENTITY_VERSION,
+    };
+    serde_json_canonicalizer::to_vec(&identity).map_err(|_| DocumentIngestError::Configuration {
+        reason: "invalid_configuration_encoding",
+    })
+}
+
+fn limits_configuration_digest(limits: &DocumentLimits) -> Result<Digest, DocumentIngestError> {
+    Ok(Digest::raw_json(&limits_identity_bytes(limits)?))
 }
 
 /// Fail-soft document ingest middleware.
@@ -199,7 +276,8 @@ impl DocumentIngestMiddleware {
     ///
     /// # Errors
     ///
-    /// Rejects an invalid checked-in identity.
+    /// Rejects an invalid checked-in identity or limits that cannot be
+    /// encoded into the descriptor configuration digest.
     pub fn try_new(
         store: Arc<dyn ArtifactStore>,
         index: Arc<AttachmentIndex>,
@@ -215,12 +293,14 @@ impl DocumentIngestMiddleware {
     ///
     /// # Errors
     ///
-    /// Rejects an invalid checked-in identity.
+    /// Rejects an invalid checked-in identity or limits that cannot be
+    /// encoded into the descriptor configuration digest.
     pub fn try_with_limits(
         store: Arc<dyn ArtifactStore>,
         index: Arc<AttachmentIndex>,
         limits: DocumentLimits,
     ) -> Result<Self, DocumentIngestError> {
+        let configuration_digest = limits_configuration_digest(&limits)?;
         Ok(Self {
             descriptor: MiddlewareDescriptor {
                 invocation: ComponentInvocation {
@@ -230,7 +310,7 @@ impl DocumentIngestMiddleware {
                         }
                     })?,
                     version: INGEST_VERSION,
-                    configuration_digest: Digest::raw_json(b"document-ingest-v1"),
+                    configuration_digest,
                     recovery: InvocationRecovery::RecomputeSafe,
                 },
                 stages: StageMask::from_stages([Stage::BeforeModel]),
@@ -278,7 +358,7 @@ impl Middleware for DocumentIngestMiddleware {
                 Vec::with_capacity(before_model.request.messages.len());
             for message in before_model.request.messages.iter() {
                 let (rewritten, message_changed) =
-                    middleware.rewrite_message(message, &scope).await;
+                    middleware.rewrite_message(message, &scope).await?;
                 changed |= message_changed;
                 messages.push(rewritten);
             }
@@ -289,7 +369,9 @@ impl Middleware for DocumentIngestMiddleware {
                 messages: messages.into(),
                 ..before_model.request.clone()
             };
-            let bytes = serde_json_canonicalizer_bytes(&draft)?;
+            let bytes = serde_json_canonicalizer::to_vec(&draft).map_err(|_| {
+                stable_error("document ingest replacement could not be canonicalized")
+            })?;
             Ok(StageOutcome::Replace(RawJson::parse(bytes).map_err(
                 |_| stable_error("document ingest replacement could not be normalized"),
             )?))
@@ -305,9 +387,22 @@ impl DocumentIngestMiddleware {
     /// [`finstack_ai_kernel`]'s role/block rules, and only the `User` role
     /// is the attachment ingestion surface); other roles are returned
     /// unchanged without inspecting their content.
-    async fn rewrite_message(&self, message: &Message, scope: &ArtifactScope) -> (Message, bool) {
+    ///
+    /// Once a supported `File` block is in scope for rewrite, this never
+    /// returns the original message. Construction failures become a stable
+    /// [`MiddlewareError`] instead of restoring `File` blocks.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`MiddlewareError`] when a rewritten note or message
+    /// cannot be constructed.
+    async fn rewrite_message(
+        &self,
+        message: &Message,
+        scope: &ArtifactScope,
+    ) -> Result<(Message, bool), MiddlewareError> {
         if message.role() != MessageRole::User {
-            return (message.clone(), false);
+            return Ok((message.clone(), false));
         }
         let mut changed = false;
         let mut blocks: Vec<ContentBlock> = Vec::with_capacity(message.content().len());
@@ -316,23 +411,27 @@ impl DocumentIngestMiddleware {
                 ContentBlock::File(media)
                     if DocumentFormat::is_supported_media_type(media.blob().media_type()) =>
                 {
-                    blocks.push(self.ingest_block(media, scope).await);
+                    blocks.push(self.ingest_block(media, scope).await?);
                     changed = true;
                 }
                 other => blocks.push(other.clone()),
             }
         }
         if !changed {
-            return (message.clone(), false);
+            return Ok((message.clone(), false));
         }
-        (rebuild_message(message, blocks), true)
+        Ok((rebuild_message(message, blocks)?, true))
     }
 
+    /// # Errors
+    ///
+    /// Returns a stable [`MiddlewareError`] when a fail-soft note cannot be
+    /// constructed. Index, store, and parser failures remain fail-soft notes.
     async fn ingest_block(
         &self,
         media: &finstack_ai_kernel::MediaRef,
         scope: &ArtifactScope,
-    ) -> ContentBlock {
+    ) -> Result<ContentBlock, MiddlewareError> {
         let blob = media.blob();
         let name = blob.name().unwrap_or("attachment").to_owned();
         let Ok((bytes, digest)) = self.fetch_blob(scope, blob).await else {
@@ -423,21 +522,29 @@ impl DocumentIngestMiddleware {
 /// rejects that rewritten set, falling back to `message.clone()` would
 /// silently reintroduce the original `File` blocks this middleware exists
 /// to strip — so the fallback below never does that. It instead builds a
-/// message carrying a single fixed, always-valid skip note, dropping every
-/// other content block rather than risk leaking a `File` block through.
+/// message carrying a single fixed skip note, dropping every other content
+/// block rather than risk leaking a `File` block through. If that skip
+/// note also cannot be constructed, this returns a stable
+/// [`MiddlewareError`] instead of restoring `File` blocks.
 ///
-/// In practice this fallback should be unreachable: after restricting
-/// rewriting to `User`-role messages (spec decision 14), `blocks` has the
-/// same length and role as the original (already-valid) message, and every
-/// substituted block is `TextBlock`, which is always allowed for `User`
-/// (see `validate_role_blocks`) and always within `Message`'s per-item
-/// content-count limit. The only other rejection modes
+/// In practice the skip-note fallback should be unreachable for the
+/// production `User`-role rewrite path (spec decision 14): `blocks` has
+/// the same length and role as the original (already-valid) message, and
+/// every substituted block is `TextBlock`, which is always allowed for
+/// `User` (see `validate_role_blocks`) and always within `Message`'s
+/// per-item content-count limit. The only other rejection modes
 /// (`RoleBlockMismatch`, tool-association checks) do not apply to a
-/// `User`-role, non-`Tool` message. No test exercises this branch because
-/// there is no constructible input that reaches it without directly
-/// violating `Message`'s own validated invariants.
-fn rebuild_message(message: &Message, blocks: Vec<ContentBlock>) -> Message {
-    Message::try_new(
+/// `User`-role, non-`Tool` message.
+///
+/// # Errors
+///
+/// Returns a stable [`MiddlewareError`] when neither the rewritten blocks
+/// nor the skip-note fallback can be constructed.
+fn rebuild_message(
+    message: &Message,
+    blocks: Vec<ContentBlock>,
+) -> Result<Message, MiddlewareError> {
+    match Message::try_new(
         *message.id(),
         message.role(),
         blocks,
@@ -445,17 +552,24 @@ fn rebuild_message(message: &Message, blocks: Vec<ContentBlock>) -> Message {
         message.model().cloned(),
         message.provider_ids().clone(),
         message.metadata().clone(),
-    )
-    .unwrap_or_else(|_| skip_note_message(message))
+    ) {
+        Ok(rebuilt) => Ok(rebuilt),
+        Err(_) => skip_note_message(message),
+    }
 }
 
 /// Last-resort fallback for [`rebuild_message`]: a message that keeps the
 /// original identity/role/model/provider-ids/metadata but replaces all
-/// content with a single fixed skip note. The note is a short static
-/// literal (see [`fallback_text_block`]), so this construction cannot fail
-/// for any `User`-role `message` — the only role this middleware rewrites.
-fn skip_note_message(message: &Message) -> Message {
-    let blocks = vec![ContentBlock::Text(fallback_text_block())];
+/// content with a single fixed skip note. Construction failure is
+/// propagated as a stable [`MiddlewareError`]; callers must not restore
+/// the original message.
+///
+/// # Errors
+///
+/// Returns a stable [`MiddlewareError`] when the skip note or rebuilt
+/// message cannot be constructed.
+fn skip_note_message(message: &Message) -> Result<Message, MiddlewareError> {
+    let blocks = vec![ContentBlock::Text(fallback_text_block()?)];
     Message::try_new(
         *message.id(),
         message.role(),
@@ -465,11 +579,7 @@ fn skip_note_message(message: &Message) -> Message {
         message.provider_ids().clone(),
         message.metadata().clone(),
     )
-    .expect(
-        "a single bounded static TextBlock note is always valid for a User-role message: \
-         TextBlock is within size limits, User allows Text blocks, and non-Tool messages \
-         have no tool-association constraints",
-    )
+    .map_err(|_| stable_error("document ingest message could not be constructed"))
 }
 
 /// Map the committed run context to the exact `ArtifactScope` used to stage
@@ -483,24 +593,30 @@ fn run_scope(ctx: &MiddlewareContext) -> ArtifactScope {
     }
 }
 
-fn note_block(text: &str) -> ContentBlock {
-    TextBlock::try_new(text).map_or_else(
-        |_| ContentBlock::Text(fallback_text_block()),
-        ContentBlock::Text,
-    )
+/// Build a model-visible note block. Oversized caller text falls back to
+/// [`fallback_text_block`]; if that static note cannot be constructed, the
+/// failure is a stable [`MiddlewareError`] rather than a `File` restore.
+///
+/// # Errors
+///
+/// Returns a stable [`MiddlewareError`] when the fallback note cannot be
+/// constructed.
+fn note_block(text: &str) -> Result<ContentBlock, MiddlewareError> {
+    match TextBlock::try_new(text) {
+        Ok(block) => Ok(ContentBlock::Text(block)),
+        Err(_) => fallback_text_block().map(ContentBlock::Text),
+    }
 }
 
-/// A short static literal is always within `TextBlock`'s validation limits,
-/// so this only exists to give `note_block` an infallible fallback rather
-/// than panicking on a pathological (e.g. oversized) input.
-fn fallback_text_block() -> TextBlock {
-    TextBlock::try_new("[attached document note unavailable]")
-        .expect("static literal note is always valid")
-}
-
-fn serde_json_canonicalizer_bytes(draft: &ModelRequestDraft) -> Result<Vec<u8>, MiddlewareError> {
-    serde_json_canonicalizer::to_vec(draft)
-        .map_err(|_| stable_error("document ingest replacement could not be canonicalized"))
+/// A short static literal is within `TextBlock`'s validation limits. The
+/// `Result` exists so production code never panics if that invariant moves.
+///
+/// # Errors
+///
+/// Returns a stable [`MiddlewareError`] when the static literal is rejected.
+fn fallback_text_block() -> Result<TextBlock, MiddlewareError> {
+    TextBlock::try_new(FALLBACK_NOTE_TEXT)
+        .map_err(|_| stable_error("document ingest note could not be constructed"))
 }
 
 fn stable_error(message: &'static str) -> MiddlewareError {

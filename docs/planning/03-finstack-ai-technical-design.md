@@ -13,11 +13,11 @@ date: "2026-08-10"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.20 |
+| Version | 0.21 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.8; Architecture Specification v0.11; Implementation Plan v0.24; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.8; Architecture Specification v0.11; Implementation Plan v0.26; Security and Threat Model v0.7 |
 
 # 1. Technical objective
 
@@ -1901,6 +1901,13 @@ pub struct RunSecurityContext {
     pub authorization_policy_version: Arc<str>,
     pub authorization_decision_id: Arc<str>,
     pub delegated_from: Option<PrincipalRef>,
+    pub compaction_authorization: Option<CompactionAuthorization>,
+}
+
+pub struct CompactionAuthorization {
+    pub allowed_model: ComponentRef,
+    pub maximum_sensitivity: Sensitivity,
+    pub residency_policy_digest: Digest,
 }
 
 pub struct RunPropagationPolicy {
@@ -1939,7 +1946,9 @@ pub struct ChildRunPrepared {
 }
 ```
 
-`RunAccepted` always stores relation, security, effective deadline/limits, propagation policy, and resolved-agent lock evidence; root runs use `RunRelationKind::Root`. The kernel validates relation shape, depth, deadline/budget monotonicity, and declared propagation but does not invoke child agents or aggregate budgets. A child inherits the tenant scope, cannot exceed the parent deadline or reserved budget, and either retains the parent principal or uses an explicitly authorized delegated principal whose scopes/roles are attenuated and whose decision ID is persisted. Tenant changes require a separately authenticated boundary. `AgentCatalog`, `AgentInvoker`, and runtime/application policy own invocation services.
+`RunAccepted` always stores relation, security, effective deadline/limits, propagation policy, and resolved-agent lock evidence; root runs use `RunRelationKind::Root`. The optional compaction authorization is a durable fail-closed lock: absence denies model-assisted compaction. It binds one exact secondary model, the maximum source sensitivity that model may receive, and the accepted residency/egress-policy digest. Historical records deserialize absence as `None`. A child may omit the lock or inherit/attenuate it; it cannot change the model or policy digest or raise the maximum sensitivity without a separately authenticated authorization decision.
+
+The kernel validates relation shape, depth, deadline/budget monotonicity, and declared propagation but does not invoke child agents or aggregate budgets. A child inherits the tenant scope, cannot exceed the parent deadline or reserved budget, and either retains the parent principal or uses an explicitly authorized delegated principal whose scopes/roles are attenuated and whose decision ID is persisted. Tenant changes require a separately authenticated boundary. `AgentCatalog`, `AgentInvoker`, and runtime/application policy own invocation services.
 
 The v1 maximum `RunRelation.depth` is **16** (`0` for a root). Depth greater than 16 is rejected before commit. Child depth must equal `parent.depth + 1` when a parent relation is present; root relations require `parent_run_id` and `parent_effect_id` both absent; non-root relations require both present and a `root_run_id` that remains stable across the lineage.
 
@@ -3176,7 +3185,7 @@ The stage/outcome matrix is fixed (`yes` means permitted before any narrower des
 | `Retry` | no | no | no | yes | no | yes | yes |
 | `Complete` | yes | no | no | yes | no | yes | yes |
 
-An invalid combination returns stable `middleware_outcome_not_allowed` and is never coerced. Post-compaction validators are narrower: only `Continue`, `Fail`, `Suspend`, or `RequestInteraction`. `BeforeFinalize` follows the table and cannot replace the candidate result or mutate context.
+An outcome that is invalid for its stage returns stable `middleware_outcome_not_allowed` and is never coerced. A `BeforeModel` aggregate containing both a `Replace` result and `CompactContext` is individually valid but cannot be landed without silently discarding one projection, so the fold fails closed with stable `middleware_stage_unlandable`. It does not merge leaves, wrap compactors, or sequentially rebase one projection onto the other. Post-compaction validators are narrower: only `Continue`, `Fail`, `Suspend`, or `RequestInteraction`. `BeforeFinalize` follows the table and cannot replace the candidate result or mutate context.
 
 ## 17.4 Ordering resolution
 
@@ -3275,13 +3284,13 @@ The ordinary `StageOutcomeRecorded` path persists behavior-changing evidence and
 
 Deterministic windowing can complete inside the middleware invocation. Model-assisted middleware must return `RequestCompactionModel`; it cannot call a provider directly. The runtime then:
 
-1. validates that the secondary model is authorized for the full source sensitivity, tenant, residency, and egress scope;
+1. reads the accepted run's durable `CompactionAuthorization` and requires an exact model and residency/egress-policy-digest match plus `source_sensitivity <= maximum_sensitivity`; absence or mismatch fails before the child effect is committed;
 2. allocates a child `ModelRequestId`/`EffectId` related to the committed middleware effect with `EffectPurpose::CompactionSummary`;
 3. commits that `EffectRequested(Model)` before dispatch;
 4. settles or reconciles the child through the ordinary model-effect lifecycle and records its usage against the explicit budget scope; and
 5. resumes the same middleware invocation identity with the normalized child result and opaque bounded `resume_state`, then commits the final parent outcome.
 
-A crash at any step reuses/reconciles the child effect and resume cursor; no provider call is unrecorded. The child inherits cancellation/deadline/principal context. It must not recursively invoke the same agent or compaction chain, and maximum compaction-effect depth is one.
+A crash at any step reuses/reconciles the child effect and resume cursor; no provider call is unrecorded. The runtime rechecks the same accepted authorization lock immediately before dispatch and again when resuming the middleware cursor; recovery never fabricates replacement authorization data. The child inherits cancellation/deadline/principal context. It must not recursively invoke the same agent or compaction chain, and maximum compaction-effect depth is one.
 
 Threshold and hysteresis settings prevent compaction on every turn. Prompt-cache-aware strategies preserve the stable instruction prefix and compact only eligible mutable history. If compaction fails or cannot meet the hard budget without protected-content loss, the normalized outcome is a stable context-budget failure unless the application configured a tested deterministic fallback.
 

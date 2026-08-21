@@ -77,35 +77,31 @@ pub(super) fn apply_fold<C: Clock, R: RandomSource>(
 
 /// Rebuild a `BeforeModel` model draft from an aggregate fold.
 ///
-/// # Precedence: replacement re-bases, then compaction, then additions, then
-/// narrowing
+/// # Precedence: replacement **or** compaction re-bases messages, then
+/// additions, then narrowing
 ///
 /// The same field-level rule [`apply_context_prepared`] documents, extended to
 /// the draft's two independent axes. [`StageFold`] keeps no ordering *between*
 /// outcome kinds, so a positional "last writer wins" is not representable; this
-/// applier therefore fixes a stable, documented order:
+/// applier therefore fixes a stable, documented order for *compatible*
+/// aggregates:
 ///
 /// 1. `Replace` substitutes the **whole draft** — at `BeforeModel` the stage's
 ///    payload is the request, so a `Replace` there re-bases model, tools,
 ///    output, settings and limits together, not just the messages.
-/// 2. `CompactContext` replaces the **message projection** of whatever base
-///    survived, and nothing else. At most one component can produce one (the
-///    single-compactor rule, `middleware.rs:650-655`).
+/// 2. `CompactContext` replaces the **message projection** of the base draft
+///    (and nothing else) when there is no `Replace`. At most one component can
+///    produce one (the single-compactor rule). `derived_summaries` append as
+///    user messages after the compacted projection so a landed summarize
+///    result can carry the summary. `checkpoint` still has no landing and is
+///    dropped. Sliding-window `CompactContext` does not use those fields.
 ///
-///    `derived_summaries` append as user messages after the replacement
-///    projection so a landed summarize result can carry the summary.
-///    `checkpoint` still has no landing and is dropped. Sliding-window
-///    `CompactContext` does not use those fields.
-///    - A fold carrying **both** a `Replace` and a `CompactContext` applies a
-///      projection that was validated against the *base* draft's
-///      `source_entries` — assembled by [`before_model_input`], checked at
-///      `middleware.rs:1069-1083` — on top of the *replaced* draft, which step 1
-///      has already substituted. The
-///      compactor's guarantees — protected-entry preservation, tool-pair
-///      atomicity, source-digest integrity — are all stated against the array it
-///      was shown, and the array it lands on is a different one. Two components
-///      are required for this (the single compactor cannot also `Replace`), so a
-///      chain with a compactor plus any `BeforeModel` `Replace` reaches it.
+///    A fold carrying **both** a `Replace` and a `CompactContext` is rejected
+///    by [`StageFold::accumulate`] as [`MIDDLEWARE_STAGE_UNLANDABLE`] before
+///    settlement. This applier also refuses that combination so compaction
+///    cannot silently overwrite a replacement if a caller bypasses the fold.
+///    The runtime does not merge leaves, wrap compactors, or rebase one
+///    projection onto the other.
 /// 3. `AddInstructions` (as [`MessageRole::System`]) then `AddContext` (as
 ///    [`MessageRole::User`]) append, each group in chain order.
 /// 4. `FilterTools` intersects the surviving tool set.
@@ -117,16 +113,20 @@ pub(super) fn apply_fold<C: Clock, R: RandomSource>(
 ///
 /// # Errors
 ///
-/// Returns [`MIDDLEWARE_STAGE_BOUNDS_EXCEEDED`] when the rebuilt message array
-/// would exceed [`ModelRequestDraft::MAX_MESSAGES`], and
-/// `middleware_stage_payload_invalid` when a `Replace` payload is not a model
-/// draft, an added item cannot become a valid message, or the rebuilt draft
-/// fails its own `validate` (duplicate tool name, oversized collection).
+/// Returns [`MIDDLEWARE_STAGE_UNLANDABLE`] when both a replacement and a
+/// compaction are present. Returns [`MIDDLEWARE_STAGE_BOUNDS_EXCEEDED`] when
+/// the rebuilt message array would exceed [`ModelRequestDraft::MAX_MESSAGES`],
+/// and `middleware_stage_payload_invalid` when a `Replace` payload is not a
+/// model draft, an added item cannot become a valid message, or the rebuilt
+/// draft fails its own `validate` (duplicate tool name, oversized collection).
 pub(super) fn apply_model_draft<C: Clock, R: RandomSource>(
     fold: &StageFold,
     base: ModelRequestDraft,
     sources: &SettlementSources<C, R>,
 ) -> Result<ModelRequestDraft, RunHandleError> {
+    if fold.replacement.is_some() && fold.compaction.is_some() {
+        return Err(stage_error(MIDDLEWARE_STAGE_UNLANDABLE));
+    }
     let mut draft = match fold.replacement.as_ref() {
         Some(replacement) => parse_draft(replacement)?,
         None => base,

@@ -396,6 +396,50 @@ fn compact_context_lands_only_at_before_model() {
 }
 
 #[test]
+fn before_model_replace_plus_compact_context_is_unlandable() {
+    let error = StageFold::accumulate(
+        Stage::BeforeModel,
+        &[
+            StageOutcome::Replace(RawJson::parse(b"{}").expect("replacement")),
+            StageOutcome::CompactContext(Box::new(compaction_result(1))),
+        ],
+    )
+    .expect_err("Replace and CompactContext cannot both claim the projection");
+    assert_eq!(error.code(), MIDDLEWARE_STAGE_UNLANDABLE);
+
+    let error = StageFold::accumulate(
+        Stage::BeforeModel,
+        &[
+            StageOutcome::CompactContext(Box::new(compaction_result(1))),
+            StageOutcome::Replace(RawJson::parse(b"{}").expect("replacement")),
+        ],
+    )
+    .expect_err("order must not matter for the conflict");
+    assert_eq!(error.code(), MIDDLEWARE_STAGE_UNLANDABLE);
+}
+
+#[test]
+fn before_model_replace_or_compact_context_alone_still_lands() {
+    let replaced = StageFold::accumulate(
+        Stage::BeforeModel,
+        &[StageOutcome::Replace(
+            RawJson::parse(b"{}").expect("replacement"),
+        )],
+    )
+    .expect("Replace alone remains landable");
+    assert!(replaced.replacement.is_some());
+    assert!(replaced.compaction.is_none());
+
+    let compacted = StageFold::accumulate(
+        Stage::BeforeModel,
+        &[StageOutcome::CompactContext(Box::new(compaction_result(1)))],
+    )
+    .expect("CompactContext alone remains landable");
+    assert!(compacted.compaction.is_some());
+    assert!(compacted.replacement.is_none());
+}
+
+#[test]
 fn suspend_complete_request_interaction_and_request_compaction_model_are_always_unlandable() {
     let cases: Vec<(Stage, StageOutcome)> = vec![
         (

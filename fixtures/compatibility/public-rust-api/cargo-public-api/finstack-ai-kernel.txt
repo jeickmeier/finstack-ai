@@ -2868,6 +2868,26 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::CommittedBatch
 pub fn finstack_ai_kernel::CommittedBatch::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::CommittedBatch
 pub fn finstack_ai_kernel::CommittedBatch::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_kernel::CompactionAuthorization
+impl finstack_ai_kernel::CompactionAuthorization
+pub fn finstack_ai_kernel::CompactionAuthorization::allowed_model(&self) -> &finstack_ai_kernel::ComponentRef
+pub fn finstack_ai_kernel::CompactionAuthorization::allows_child_attenuation(&self, &Self) -> bool
+pub fn finstack_ai_kernel::CompactionAuthorization::authorizes(&self, &finstack_ai_kernel::ComponentRef, finstack_ai_kernel::Sensitivity, &finstack_ai_kernel::Digest) -> bool
+pub const fn finstack_ai_kernel::CompactionAuthorization::maximum_sensitivity(&self) -> finstack_ai_kernel::Sensitivity
+pub fn finstack_ai_kernel::CompactionAuthorization::new(finstack_ai_kernel::ComponentRef, finstack_ai_kernel::Sensitivity, finstack_ai_kernel::Digest) -> Self
+pub fn finstack_ai_kernel::CompactionAuthorization::residency_policy_digest(&self) -> &finstack_ai_kernel::Digest
+impl core::clone::Clone for finstack_ai_kernel::CompactionAuthorization
+pub fn finstack_ai_kernel::CompactionAuthorization::clone(&self) -> finstack_ai_kernel::CompactionAuthorization
+impl core::cmp::Eq for finstack_ai_kernel::CompactionAuthorization
+impl core::cmp::PartialEq for finstack_ai_kernel::CompactionAuthorization
+pub fn finstack_ai_kernel::CompactionAuthorization::eq(&self, &finstack_ai_kernel::CompactionAuthorization) -> bool
+impl core::fmt::Debug for finstack_ai_kernel::CompactionAuthorization
+pub fn finstack_ai_kernel::CompactionAuthorization::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_kernel::CompactionAuthorization
+impl serde_core::ser::Serialize for finstack_ai_kernel::CompactionAuthorization
+pub fn finstack_ai_kernel::CompactionAuthorization::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::CompactionAuthorization
+pub fn finstack_ai_kernel::CompactionAuthorization::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::CompletionIdentity
 pub finstack_ai_kernel::CompletionIdentity::effect_id: finstack_ai_kernel::EffectId
 pub finstack_ai_kernel::CompletionIdentity::settlement_digest: finstack_ai_kernel::Digest
@@ -4701,10 +4721,12 @@ pub fn finstack_ai_kernel::RunSecurityContext::assurance_level(&self) -> &str
 pub fn finstack_ai_kernel::RunSecurityContext::authentication_method(&self) -> &str
 pub fn finstack_ai_kernel::RunSecurityContext::authorization_decision_id(&self) -> &str
 pub fn finstack_ai_kernel::RunSecurityContext::authorization_policy_version(&self) -> &str
+pub fn finstack_ai_kernel::RunSecurityContext::compaction_authorization(&self) -> core::option::Option<&finstack_ai_kernel::CompactionAuthorization>
 pub fn finstack_ai_kernel::RunSecurityContext::delegated_from(&self) -> core::option::Option<&finstack_ai_kernel::PrincipalRef>
 pub fn finstack_ai_kernel::RunSecurityContext::principal(&self) -> &finstack_ai_kernel::PrincipalRef
 pub fn finstack_ai_kernel::RunSecurityContext::tenant_scope(&self) -> &str
 pub fn finstack_ai_kernel::RunSecurityContext::try_new(impl core::convert::AsRef<str>, finstack_ai_kernel::PrincipalRef, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, core::option::Option<finstack_ai_kernel::PrincipalRef>) -> core::result::Result<Self, finstack_ai_kernel::RunError>
+pub fn finstack_ai_kernel::RunSecurityContext::with_compaction_authorization(self, finstack_ai_kernel::CompactionAuthorization) -> Self
 impl core::clone::Clone for finstack_ai_kernel::RunSecurityContext
 pub fn finstack_ai_kernel::RunSecurityContext::clone(&self) -> finstack_ai_kernel::RunSecurityContext
 impl core::cmp::Eq for finstack_ai_kernel::RunSecurityContext

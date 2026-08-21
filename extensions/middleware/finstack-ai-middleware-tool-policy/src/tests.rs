@@ -2,12 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ContentBlock, Digest, Id, IdTag, Message, MessageRole, Metadata, OutputSpec, ProviderIds,
-    RawJson, RetrySafety, TextBlock, Timestamp, ToolCallBlock, ToolExecutionMode, ToolId,
+    ContentBlock, Digest, EffectId, Id, IdTag, LaneId, Message, MessageRole, Metadata,
+    OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RetrySafety, RunId,
+    SessionId, TextBlock, Timestamp, ToolCallBlock, ToolExecutionMode, ToolId,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, BeforeModelInput, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelSettings, SideEffectClass, ToolDeferralSupport, ToolSpec,
+    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, BeforeModelInput,
+    CancellationSignal, MiddlewareContext, ModelName, ModelRequestDraft, ModelRequestLimits,
+    ModelSettings, RunCallContext, SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
 
 use crate::{JailbreakAction, ToolPolicyConfig, ToolPolicyError};
@@ -23,6 +25,11 @@ fn id<T: IdTag>(value: u64) -> Id<T> {
     bytes[8] = 0x80;
     bytes[9..].copy_from_slice(&value.to_be_bytes()[1..]);
     Id::from_bytes(bytes)
+}
+
+/// Hyphenated form of the same UUIDv7-shaped bytes as [`id`].
+fn uuid_str(value: u64) -> String {
+    format!("00000000-0000-7000-8000-{value:012x}")
 }
 
 fn message(ordinal: u64, role: MessageRole, content: Vec<ContentBlock>) -> Message {
@@ -119,6 +126,42 @@ fn draft(tools: Vec<ToolSpec>, messages: Vec<Message>) -> BeforeModelInput {
     }
 }
 
+/// Invoke fixture: tenant-a principal, fixed locator/effect ids, granted roles.
+fn middleware_context(roles: &[&str]) -> MiddlewareContext {
+    let principal =
+        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
+    MiddlewareContext {
+        run: RunCallContext {
+            locator: OperationLocator::try_new(
+                "tenant-a",
+                SessionId::parse(&uuid_str(1)).expect("session"),
+                LaneId::parse(&uuid_str(2)).expect("lane"),
+                RunId::parse(&uuid_str(3)).expect("run"),
+            )
+            .expect("locator"),
+            authorization: AuthorizationContext {
+                principal,
+                authentication_method: Arc::from("test"),
+                assurance_level: Arc::from("test"),
+                roles: roles.iter().copied().map(Arc::<str>::from).collect(),
+                permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+                safe_claims: Metadata::empty(),
+                policy_version: Arc::from("policy-v1"),
+                decision_id: Arc::from("decision-v1"),
+            },
+            effect_id: EffectId::parse(&uuid_str(4)).expect("effect"),
+            attempt: 1,
+            deadline: None,
+            budget_scope_id: None,
+            cancellation: CancellationSignal::new(),
+            relation_depth: 0,
+        },
+        chain_digest: Digest::raw_json(b"chain"),
+        chain_index: 0,
+        compaction_resume: None,
+    }
+}
+
 #[test]
 fn role_allowlist_rejects_oversized_role_set() {
     let roles: BTreeMap<Arc<str>, BTreeSet<ToolId>> = (0..129)
@@ -174,16 +217,41 @@ fn child_depth_gate_rejects_depth_over_kernel_cap() {
     ));
 }
 
+/// Representative builder-built config used to pin serialized identity.
+fn representative_builder_config() -> ToolPolicyConfig {
+    ToolPolicyConfig::new()
+        .with_role_allowlist(
+            BTreeMap::from([(
+                Arc::from("reader"),
+                BTreeSet::from([tid("finstack.tools.read")]),
+            )]),
+            BTreeSet::from([tid("finstack.tools.info")]),
+        )
+        .expect("roles")
+        .with_write_budget(3)
+        .expect("budget")
+        .with_jailbreak_triggers(
+            vec![Arc::from("ignore previous instructions")],
+            JailbreakAction::Fail,
+        )
+        .expect("jailbreak")
+        .with_child_depth_gate(2, BTreeSet::from([tid("finstack.tools.spawn-agent")]))
+        .expect("gate")
+}
+
 #[test]
 fn config_serialization_is_deterministic_for_digest() {
-    let build = || {
-        ToolPolicyConfig::new()
-            .with_write_budget(3)
-            .expect("budget")
-    };
-    let a = serde_json::to_vec(&build()).expect("serialize a");
-    let b = serde_json::to_vec(&build()).expect("serialize b");
+    let a = serde_json::to_vec(&representative_builder_config()).expect("serialize a");
+    let b = serde_json::to_vec(&representative_builder_config()).expect("serialize b");
     assert_eq!(a, b);
+    assert_eq!(
+        a.as_slice(),
+        br#"{"role_allowlist":{"roles":{"reader":["finstack.tools.read"]},"default_allowed":["finstack.tools.info"]},"write_budget":{"max_write_calls":3},"jailbreak":{"patterns":["ignore previous instructions"],"action":"fail"},"child_depth":{"max_depth":2,"restricted":["finstack.tools.spawn-agent"]}}"#
+    );
+    assert_eq!(
+        Digest::raw_json(&a).to_hex(),
+        "6c8267ff6d5b84b1ec2d33aacb1b3275a25f4ab194711a46e07c31a44738c1b6"
+    );
 }
 
 mod middleware_tests {
@@ -230,19 +298,9 @@ mod middleware_tests {
         use std::collections::{BTreeMap, BTreeSet};
         use std::sync::Arc;
 
-        use finstack_ai_kernel::{
-            Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId, SessionId,
-        };
-        use finstack_ai_runtime::{
-            AuthorizationContext, CancellationSignal, MiddlewareContext, RunCallContext,
-            StageInput, StageOutcome,
-        };
+        use finstack_ai_runtime::{StageInput, StageOutcome};
 
-        use super::{draft, read_tool, tid, write_tool};
-
-        fn uuid_str(value: u64) -> String {
-            format!("00000000-0000-7000-8000-{value:012x}")
-        }
+        use super::{draft, middleware_context, read_tool, tid, write_tool};
 
         let cfg = crate::ToolPolicyConfig::new()
             .with_role_allowlist(
@@ -255,42 +313,12 @@ mod middleware_tests {
             .expect("roles");
         let mw = ToolPolicyMiddleware::try_new(cfg).expect("leaf");
 
-        let principal =
-            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
-        let ctx = MiddlewareContext {
-            run: RunCallContext {
-                locator: OperationLocator::try_new(
-                    "tenant-a",
-                    SessionId::parse(&uuid_str(1)).expect("session"),
-                    LaneId::parse(&uuid_str(2)).expect("lane"),
-                    RunId::parse(&uuid_str(3)).expect("run"),
-                )
-                .expect("locator"),
-                authorization: AuthorizationContext {
-                    principal,
-                    authentication_method: Arc::from("test"),
-                    assurance_level: Arc::from("test"),
-                    roles: Arc::from([Arc::<str>::from("reader")]),
-                    permitted_scopes: Arc::from([Arc::from("tenant-a")]),
-                    safe_claims: Metadata::empty(),
-                    policy_version: Arc::from("policy-v1"),
-                    decision_id: Arc::from("decision-v1"),
-                },
-                effect_id: EffectId::parse(&uuid_str(4)).expect("effect"),
-                attempt: 1,
-                deadline: None,
-                budget_scope_id: None,
-                cancellation: CancellationSignal::new(),
-                relation_depth: 0,
-            },
-            chain_digest: Digest::raw_json(b"chain"),
-            chain_index: 0,
-            compaction_resume: None,
-        };
-
         let input =
             StageInput::BeforeModel(Box::new(draft(vec![read_tool(), write_tool()], vec![])));
-        let outcome = mw.invoke(ctx, input).await.expect("invoke");
+        let outcome = mw
+            .invoke(middleware_context(&["reader"]), input)
+            .await
+            .expect("invoke");
         assert_eq!(
             outcome,
             StageOutcome::FilterTools(Arc::from([tid("finstack.tools.read")]))
@@ -302,20 +330,10 @@ mod middleware_tests {
         use std::collections::{BTreeMap, BTreeSet};
         use std::sync::Arc;
 
-        use finstack_ai_kernel::{
-            Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId,
-            SessionId, ToolCallBlock, ToolCallId,
-        };
-        use finstack_ai_runtime::{
-            AuthorizationContext, BeforeToolBatchInput, CancellationSignal, MiddlewareContext,
-            RunCallContext, StageInput, StageOutcome,
-        };
+        use finstack_ai_kernel::{RawJson, ToolCallBlock, ToolCallId};
+        use finstack_ai_runtime::{BeforeToolBatchInput, StageInput, StageOutcome};
 
-        use super::{read_tool, tid, write_tool};
-
-        fn uuid_str(value: u64) -> String {
-            format!("00000000-0000-7000-8000-{value:012x}")
-        }
+        use super::{middleware_context, read_tool, tid, uuid_str, write_tool};
 
         let cfg = crate::ToolPolicyConfig::new()
             .with_role_allowlist(
@@ -328,39 +346,6 @@ mod middleware_tests {
             .expect("roles");
         let mw = ToolPolicyMiddleware::try_new(cfg).expect("leaf");
 
-        let principal =
-            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
-        let ctx = || MiddlewareContext {
-            run: RunCallContext {
-                locator: OperationLocator::try_new(
-                    "tenant-a",
-                    SessionId::parse(&uuid_str(1)).expect("session"),
-                    LaneId::parse(&uuid_str(2)).expect("lane"),
-                    RunId::parse(&uuid_str(3)).expect("run"),
-                )
-                .expect("locator"),
-                authorization: AuthorizationContext {
-                    principal: principal.clone(),
-                    authentication_method: Arc::from("test"),
-                    assurance_level: Arc::from("test"),
-                    roles: Arc::from([Arc::<str>::from("reader")]),
-                    permitted_scopes: Arc::from([Arc::from("tenant-a")]),
-                    safe_claims: Metadata::empty(),
-                    policy_version: Arc::from("policy-v1"),
-                    decision_id: Arc::from("decision-v1"),
-                },
-                effect_id: EffectId::parse(&uuid_str(4)).expect("effect"),
-                attempt: 1,
-                deadline: None,
-                budget_scope_id: None,
-                cancellation: CancellationSignal::new(),
-                relation_depth: 0,
-            },
-            chain_digest: Digest::raw_json(b"chain"),
-            chain_index: 0,
-            compaction_resume: None,
-        };
-
         let call = ToolCallBlock::try_new(
             ToolCallId::parse(&uuid_str(5)).expect("call id"),
             "read",
@@ -371,7 +356,10 @@ mod middleware_tests {
             calls: Arc::from([call]),
             tools: Arc::from([read_tool(), write_tool()]),
         }));
-        let outcome = mw.invoke(ctx(), input).await.expect("invoke");
+        let outcome = mw
+            .invoke(middleware_context(&["reader"]), input)
+            .await
+            .expect("invoke");
         assert_eq!(
             outcome,
             StageOutcome::FilterTools(Arc::from([tid("finstack.tools.read")]))

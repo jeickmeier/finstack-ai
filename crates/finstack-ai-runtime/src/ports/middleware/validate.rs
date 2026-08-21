@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
+use finstack_ai_kernel::{CompactionAuthorization, Message, ToolCallId};
 #[cfg(test)]
 use finstack_ai_kernel::{
     EffectInput, EffectKind, EffectOutputKind, EffectPurpose, EffectRequested, RawJson, RecordBody,
     RecordEnvelope,
 };
-use finstack_ai_kernel::{Message, ToolCallId};
 
 use super::digest::{
     compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
@@ -297,6 +297,38 @@ fn validate_compaction_model_request(
             "compaction model request is invalid",
         )
     })?;
+    Ok(())
+}
+
+/// Require the accepted durable compaction lock before commit, dispatch, or resume.
+///
+/// Absence, model mismatch, residency-digest mismatch, or `source_sensitivity`
+/// above the lock ceiling fails closed with `compaction_model_not_authorized`.
+///
+/// # Errors
+///
+/// Returns [`MiddlewareError`] when the request is not authorized by `authorization`.
+pub fn authorize_compaction_model_request(
+    authorization: Option<&CompactionAuthorization>,
+    request: &CompactionModelRequest,
+) -> Result<(), MiddlewareError> {
+    validate_compaction_model_request(request)?;
+    let Some(authorization) = authorization else {
+        return Err(MiddlewareError::stable(
+            COMPACTION_MODEL_NOT_AUTHORIZED,
+            "compaction model request lacks durable run authorization",
+        ));
+    };
+    if !authorization.authorizes(
+        &request.model,
+        request.source_sensitivity,
+        &request.residency_policy_digest,
+    ) {
+        return Err(MiddlewareError::stable(
+            COMPACTION_MODEL_NOT_AUTHORIZED,
+            "compaction model request does not match the accepted authorization lock",
+        ));
+    }
     Ok(())
 }
 

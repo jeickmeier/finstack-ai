@@ -2,6 +2,7 @@ pub mod finstack_ai
 pub use finstack_ai::ActiveCapability
 pub use finstack_ai::ApprovalGrantMode
 pub use finstack_ai::CapabilityActivationSource
+pub use finstack_ai::CompactionAuthorization
 pub use finstack_ai::ExternalIdentityKey
 pub use finstack_ai::ExternalIdentityMap
 pub use finstack_ai::IdentityMapError

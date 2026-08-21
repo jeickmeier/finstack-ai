@@ -8,8 +8,9 @@ use finstack_ai_kernel::{
     ToolResultBlock,
 };
 use finstack_ai_runtime::{
-    AuthorizationContext, BeforeModelInput, CancellationSignal, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelSettings, OrderTier, RunCallContext, StageInput, StageOutcome,
+    AuthorizationContext, BeforeModelInput, CancellationSignal, MiddlewareError, ModelName,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, OrderTier, RunCallContext, StageInput,
+    StageOutcome,
 };
 
 use crate::detect::Detectors;
@@ -114,7 +115,25 @@ fn before_model_input(messages: Vec<Message>) -> StageInput {
 }
 
 fn invoke(middleware: &RedactionMiddleware, input: StageInput) -> StageOutcome {
-    block_on(middleware.invoke(middleware_context(), input)).expect("invoke")
+    invoke_result(middleware, input).expect("invoke")
+}
+
+fn invoke_result(
+    middleware: &RedactionMiddleware,
+    input: StageInput,
+) -> Result<StageOutcome, MiddlewareError> {
+    block_on(middleware.invoke(middleware_context(), input))
+}
+
+/// H2: a Fail-policy construction path may `Fail` or `Err`, never `Continue`.
+fn assert_never_continues(result: &Result<StageOutcome, MiddlewareError>) {
+    match result {
+        Ok(StageOutcome::Continue) => {
+            panic!("fail-closed redaction must not Continue")
+        }
+        Ok(StageOutcome::Fail(_)) | Err(_) => {}
+        Ok(other) => panic!("unexpected fail-closed outcome {other:?}"),
+    }
 }
 
 fn replaced_draft(outcome: &StageOutcome) -> ModelRequestDraft {
@@ -528,16 +547,60 @@ fn fail_policy_continues_on_clean_output() {
 
 #[test]
 fn fail_policy_fails_closed_on_undecodable_payload() {
-    let outcome = invoke(
+    let result = invoke_result(
         &fail_policy_middleware(),
         StageInput::AfterModel {
             value: RawJson::parse(b"{\"not\":\"a message\"}").expect("raw"),
         },
     );
-    let StageOutcome::Fail(descriptor) = outcome else {
-        panic!("expected Fail, got {outcome:?}");
+    match result {
+        Ok(StageOutcome::Fail(descriptor)) => {
+            assert_eq!(descriptor.code.as_str(), "redaction_output_undecodable");
+        }
+        Ok(StageOutcome::Continue) => {
+            panic!("undecodable Fail-policy output must not Continue")
+        }
+        Ok(other) => panic!("expected Fail, got {other:?}"),
+        Err(error) => {
+            assert!(!error.to_string().contains("not"));
+        }
+    }
+}
+
+#[test]
+fn fail_outcome_fails_closed_on_oversized_message() {
+    let oversized = "x".repeat(finstack_ai_kernel::TEXT_MAX_BYTES + 1);
+    let result = super::fail_outcome("redaction_output_detected", oversized);
+    assert_never_continues(&result);
+    match result {
+        Ok(StageOutcome::Fail(descriptor)) => {
+            assert_eq!(descriptor.code.as_str(), "redaction_output_detected");
+            assert_eq!(
+                descriptor.message.as_ref(),
+                super::FAIL_OUTCOME_FALLBACK_MESSAGE
+            );
+        }
+        Err(error) => {
+            assert!(!error.to_string().contains("xxxx"));
+        }
+        Ok(other) => panic!("expected Fail or Err, got {other:?}"),
+    }
+}
+
+#[test]
+fn fail_outcome_returns_err_when_descriptor_is_unconstructable() {
+    let secret = "sk-proj-abcdefghij0123456789";
+    let result = super::fail_outcome("Not_A_Valid_Code", format!("leak {secret}"));
+    let error = match result {
+        Err(error) => error,
+        Ok(StageOutcome::Continue) => {
+            panic!("unconstructable descriptor must not Continue")
+        }
+        Ok(other) => panic!("expected Err, got {other:?}"),
     };
-    assert_eq!(descriptor.code.as_str(), "redaction_output_undecodable");
+    assert!(!error.to_string().contains(secret));
+    assert!(!error.code().contains(secret));
+    assert_eq!(error.code(), super::FAIL_CONSTRUCTION_CODE);
 }
 
 #[test]
@@ -558,8 +621,7 @@ fn off_policy_ignores_after_model() {
 
 use finstack_ai_kernel::{ComponentId, ComponentInvocation, InvocationRecovery, Version};
 use finstack_ai_runtime::{
-    Middleware, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole, PortFuture,
-    StageMask,
+    Middleware, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, PortFuture, StageMask,
 };
 
 /// Stub Replace-emitting inner middleware standing in for document-ingest.
@@ -759,6 +821,149 @@ fn wrapper_descriptor_adopts_inner_order() {
     assert_ne!(
         descriptor.invocation.configuration_digest,
         standalone.descriptor().invocation.configuration_digest,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PR-102: constructor assembly identity
+// ---------------------------------------------------------------------------
+
+const STANDALONE_DEFAULT_DIGEST_HEX: &str =
+    "8399ab7e4cf363b4663fc1a5450c3c5db1031fe3d9feeadc5fee4cf371de0522";
+const STANDALONE_FAIL_DIGEST_HEX: &str =
+    "302f9002bc942153f2ce5182eac2ae46058a632002ac95509939cf3b21097e99";
+const WRAPPING_DEFAULT_STUB_DIGEST_HEX: &str =
+    "fa4386b15dd87d3a2ad1c0e4d5f849a5ae533fa04a4c47f4fa01313b4f01decf";
+
+fn expected_configuration_digest(
+    config: RedactionConfig,
+    inner: Option<&ComponentInvocation>,
+) -> Digest {
+    let value = serde_json::json!({
+        "config": config,
+        "wraps": inner.map(|invocation| serde_json::json!({
+            "component": invocation.component,
+            "version": invocation.version,
+            "configuration_digest": invocation.configuration_digest,
+        })),
+    });
+    let bytes = serde_json_canonicalizer::to_vec(&value).expect("canonical");
+    Digest::raw_json(&bytes)
+}
+
+#[test]
+fn try_new_matches_try_with_config_default_identity() {
+    let via_new = RedactionMiddleware::try_new().expect("try_new");
+    let via_config =
+        RedactionMiddleware::try_with_config(RedactionConfig::default()).expect("try_with_config");
+    let new_descriptor = via_new.descriptor();
+    let config_descriptor = via_config.descriptor();
+    assert_eq!(new_descriptor.order, config_descriptor.order);
+    assert_eq!(new_descriptor.stages, config_descriptor.stages);
+    assert_eq!(
+        new_descriptor.invocation.configuration_digest.as_bytes(),
+        config_descriptor.invocation.configuration_digest.as_bytes(),
+    );
+    assert_eq!(
+        new_descriptor.invocation.configuration_digest.to_hex(),
+        STANDALONE_DEFAULT_DIGEST_HEX,
+    );
+    assert_eq!(
+        new_descriptor.invocation.configuration_digest.as_bytes(),
+        expected_configuration_digest(RedactionConfig::default(), None).as_bytes(),
+    );
+}
+
+#[test]
+fn standalone_constructors_pin_order_and_stage_masks() {
+    let off = RedactionMiddleware::try_new().expect("try_new");
+    assert_eq!(off.descriptor().order.tier, OrderTier::RequestShaping);
+    assert_eq!(off.descriptor().order.priority, 0);
+    assert!(off.descriptor().order.before.is_empty());
+    assert!(off.descriptor().order.after.is_empty());
+    assert_eq!(
+        off.descriptor().stages,
+        StageMask::from_stages([Stage::BeforeModel]),
+    );
+
+    let fail = RedactionMiddleware::try_with_config(RedactionConfig {
+        output_policy: OutputPolicy::Fail,
+        ..RedactionConfig::default()
+    })
+    .expect("fail config");
+    assert_eq!(fail.descriptor().order.tier, OrderTier::RequestShaping);
+    assert_eq!(
+        fail.descriptor().stages,
+        StageMask::from_stages([Stage::BeforeModel, Stage::AfterModel]),
+    );
+    assert_eq!(
+        fail.descriptor().invocation.configuration_digest.to_hex(),
+        STANDALONE_FAIL_DIGEST_HEX,
+    );
+}
+
+#[test]
+fn wrapping_constructor_pins_order_mask_validation_and_digest_bytes() {
+    let inner = StubInner::before_model(StageOutcome::Continue);
+    let default_config = RedactionConfig::default();
+    let wrapper = RedactionMiddleware::try_wrapping(inner.clone(), default_config).expect("wrap");
+    let descriptor = wrapper.descriptor();
+    let inner_invocation = inner.descriptor().invocation;
+    assert_eq!(descriptor.order.tier, OrderTier::ContextMutation);
+    assert_eq!(descriptor.order.priority, 7);
+    assert_eq!(
+        descriptor.stages,
+        StageMask::from_stages([Stage::BeforeModel]),
+    );
+    assert_eq!(descriptor.role, MiddlewareRole::Standard);
+    assert_eq!(
+        descriptor.invocation.configuration_digest.to_hex(),
+        WRAPPING_DEFAULT_STUB_DIGEST_HEX,
+    );
+    assert_eq!(
+        descriptor.invocation.configuration_digest.as_bytes(),
+        expected_configuration_digest(default_config, Some(&inner_invocation)).as_bytes(),
+    );
+
+    let fail_wrapper = RedactionMiddleware::try_wrapping(
+        StubInner::before_model(StageOutcome::Continue),
+        RedactionConfig {
+            output_policy: OutputPolicy::Fail,
+            ..RedactionConfig::default()
+        },
+    )
+    .expect("wrap fail");
+    assert_eq!(
+        fail_wrapper.descriptor().order.tier,
+        OrderTier::ContextMutation
+    );
+    assert_eq!(
+        fail_wrapper.descriptor().stages,
+        StageMask::from_stages([Stage::BeforeModel, Stage::AfterModel]),
+    );
+
+    let invalid_stages: Arc<dyn Middleware> = Arc::new(StubInner::new(
+        StageMask::from_stages([Stage::BeforeModel, Stage::AfterModel]),
+        MiddlewareRole::Standard,
+        StageOutcome::Continue,
+    ));
+    assert_eq!(
+        RedactionMiddleware::try_wrapping(invalid_stages, RedactionConfig::default()).err(),
+        Some(RedactionError::Configuration {
+            reason: "wrapped_middleware_not_before_model_only",
+        })
+    );
+
+    let invalid_role: Arc<dyn Middleware> = Arc::new(StubInner::new(
+        StageMask::from_stages([Stage::BeforeModel]),
+        MiddlewareRole::PostCompactionValidator,
+        StageOutcome::Continue,
+    ));
+    assert_eq!(
+        RedactionMiddleware::try_wrapping(invalid_role, RedactionConfig::default()).err(),
+        Some(RedactionError::Configuration {
+            reason: "wrapped_middleware_not_standard_role",
+        })
     );
 }
 

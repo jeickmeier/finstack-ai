@@ -262,6 +262,14 @@ async fn before_model_bounce_adds_feedback_context() {
             );
             assert!(text.contains("[citation]"));
             assert!(text.contains("missing citation"));
+            assert_eq!(
+                items[0].estimated_tokens,
+                estimated_feedback_tokens(text.len())
+            );
+            assert!(
+                items[0].estimated_tokens >= 1,
+                "emitted feedback must never report a zero token estimate"
+            );
         }
         other => panic!("expected add_context, got {other:?}"),
     }
@@ -282,6 +290,14 @@ async fn before_model_reject_adds_feedback_context() {
             let text = block.text();
             assert!(text.contains("[test]"));
             assert!(text.contains("failing test"));
+            assert_eq!(
+                items[0].estimated_tokens,
+                estimated_feedback_tokens(text.len())
+            );
+            assert!(
+                items[0].estimated_tokens >= 1,
+                "emitted feedback must never report a zero token estimate"
+            );
         }
         other => panic!("expected add_context, got {other:?}"),
     }
@@ -339,6 +355,47 @@ async fn before_model_verifier_receives_canonical_message_json_identical_to_befo
     assert_eq!(
         observed_bytes, expected,
         "before_model must hand the verifier byte-identical JCS-canonical Message JSON"
+    );
+}
+
+#[test]
+fn feedback_token_estimates_pin_truncated_byte_boundaries() {
+    // Estimate from the post-truncate length, not the source length. Zero
+    // plus 1/3/4/5 cover empty, small, exact-multiple, and remainder cases.
+    const SOURCE: &str = "abcdefghij";
+    let cases = [(0_usize, 1_u64), (1, 1), (3, 1), (4, 1), (5, 2)];
+    for (max_bytes, expected) in cases {
+        let bounded = truncate_to_bytes(SOURCE, max_bytes);
+        assert_eq!(bounded.len(), max_bytes, "truncate to {max_bytes} bytes");
+        assert_eq!(
+            estimated_feedback_tokens(bounded.len()),
+            expected,
+            "estimate after truncate to {max_bytes} bytes"
+        );
+    }
+}
+
+#[test]
+fn emitted_feedback_token_estimate_is_never_zero() {
+    let finding =
+        EvidenceFinding::try_new(EvidenceKind::Citation, "missing citation").expect("finding");
+    let item = feedback_item(&[finding]).expect("feedback");
+    let ContentBlock::Text(block) = &item.content[0] else {
+        panic!("expected text");
+    };
+    assert_eq!(
+        item.estimated_tokens,
+        estimated_feedback_tokens(block.text().len())
+    );
+    assert!(
+        item.estimated_tokens >= 1,
+        "emitted feedback must never report a zero token estimate"
+    );
+
+    let empty = feedback_item(&[]).expect("intro-only feedback");
+    assert!(
+        empty.estimated_tokens >= 1,
+        "intro-only feedback must never report a zero token estimate"
     );
 }
 

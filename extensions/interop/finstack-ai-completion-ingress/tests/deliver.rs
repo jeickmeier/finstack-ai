@@ -360,8 +360,7 @@ async fn delivery_commits_then_replays_idempotently_then_conflicts() {
         .expect("mint");
     let body = helpers::failed_outcome_body();
 
-    let first = ingress
-        .deliver(token.as_str(), &body, ts(base))
+    let first = Box::pin(ingress.deliver(token.as_str(), &body, ts(base)))
         .await
         .expect("first");
     assert!(
@@ -370,8 +369,7 @@ async fn delivery_commits_then_replays_idempotently_then_conflicts() {
         String::from_utf8_lossy(&body)
     );
 
-    let replay = ingress
-        .deliver(token.as_str(), &body, ts(base + 1))
+    let replay = Box::pin(ingress.deliver(token.as_str(), &body, ts(base + 1)))
         .await
         .expect("replay");
     assert!(
@@ -380,8 +378,7 @@ async fn delivery_commits_then_replays_idempotently_then_conflicts() {
     );
 
     let conflicting = helpers::failed_outcome_body_with_message("different failure");
-    let conflict = ingress
-        .deliver(token.as_str(), &conflicting, ts(base + 2))
+    let conflict = Box::pin(ingress.deliver(token.as_str(), &conflicting, ts(base + 2)))
         .await
         .expect("conflict routes");
     assert!(
@@ -403,12 +400,10 @@ async fn token_for_unknown_session_is_indistinguishable_from_garbage() {
         .mint(&phantom_grant(ts(base + 60_000)))
         .expect("mint");
     let body = helpers::failed_outcome_body();
-    let unknown = ingress
-        .deliver(token.as_str(), &body, ts(base))
+    let unknown = Box::pin(ingress.deliver(token.as_str(), &body, ts(base)))
         .await
         .expect_err("unknown session");
-    let garbage = ingress
-        .deliver("fcit1.AAAA.BBBB", &body, ts(base))
+    let garbage = Box::pin(ingress.deliver("fcit1.AAAA.BBBB", &body, ts(base)))
         .await
         .expect_err("garbage");
     assert_eq!(unknown, garbage);
@@ -432,8 +427,7 @@ async fn horizon_expires_deliveries_regardless_of_token_expiry() {
         expire_at: ts(base - 500),
     });
     let body = helpers::failed_outcome_body();
-    let error = ingress
-        .deliver(token.as_str(), &body, ts(base))
+    let error = Box::pin(ingress.deliver(token.as_str(), &body, ts(base)))
         .await
         .expect_err("past horizon");
     assert_eq!(error, IngressError::Rejected);

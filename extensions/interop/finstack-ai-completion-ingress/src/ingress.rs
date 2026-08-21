@@ -234,8 +234,7 @@ impl CompletionIngress {
         if let Some(horizon) = self.horizon {
             router = router.with_horizon(horizon);
         }
-        router
-            .route(command, submitted_at)
+        Box::pin(router.route(command, submitted_at))
             .await
             .map_err(|error| match error {
                 finstack_ai_runtime::ExternalRouteError::IngressRejected
@@ -376,8 +375,7 @@ mod tests {
     #[tokio::test]
     async fn garbage_token_audits_malformed_and_rejects_opaquely() {
         let (ingress, sink) = recording_ingress().await; // helper: like ingress() but real gate + RecordingSink
-        let error = ingress
-            .deliver("not-a-token", b"{}", ts(50))
+        let error = Box::pin(ingress.deliver("not-a-token", b"{}", ts(50)))
             .await
             .expect_err("garbage");
         assert_eq!(error, IngressError::Rejected);
@@ -390,7 +388,7 @@ mod tests {
     async fn identical_garbage_replay_is_one_audit_event() {
         let (ingress, sink) = recording_ingress().await;
         for _ in 0..2 {
-            let _ = ingress.deliver("not-a-token", b"{}", ts(50)).await;
+            let _ = Box::pin(ingress.deliver("not-a-token", b"{}", ts(50))).await;
         }
         let events = sink.events.lock().expect("lock");
         // Two records with the same event_id; the gate/sink contract is
@@ -409,8 +407,7 @@ mod tests {
         let mut expiring = grant();
         expiring.expires_at = ts(100);
         let token = ingress.mint(&expiring).expect("mint");
-        let error = ingress
-            .deliver(token.as_str(), b"{}", ts(100))
+        let error = Box::pin(ingress.deliver(token.as_str(), b"{}", ts(100)))
             .await
             .expect_err("expired");
         assert_eq!(error, IngressError::Rejected);
@@ -424,15 +421,13 @@ mod tests {
         let token = ingress.mint(&grant()).expect("mint");
         let oversize = vec![b'x'; MAX_BODY_BYTES + 1];
         assert_eq!(
-            ingress
-                .deliver(token.as_str(), &oversize, ts(50))
+            Box::pin(ingress.deliver(token.as_str(), &oversize, ts(50)))
                 .await
                 .expect_err("oversize"),
             IngressError::Rejected
         );
         assert_eq!(
-            ingress
-                .deliver(token.as_str(), br#"{"unexpected":true}"#, ts(50))
+            Box::pin(ingress.deliver(token.as_str(), br#"{"unexpected":true}"#, ts(50)))
                 .await
                 .expect_err("bad body"),
             IngressError::Rejected

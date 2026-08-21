@@ -340,7 +340,7 @@ fn feedback_item(findings: &[EvidenceFinding]) -> Result<ContextItem, Middleware
             "verify feedback text is invalid",
         )
     })?;
-    let estimated_tokens = u64::try_from(bounded.len()).unwrap_or(u64::MAX);
+    let estimated_tokens = estimated_feedback_tokens(bounded.len());
     ContextItem::try_new(
         ContextItemKind::Instruction,
         vec![ContentBlock::Text(block)],
@@ -388,6 +388,17 @@ fn findings_lines(findings: &[EvidenceFinding]) -> String {
         .map(|finding| format!("- [{}] {}", finding.kind.tag(), finding.note))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Conservative token estimate for already-bounded feedback text.
+///
+/// Rounds up by four bytes per token and never reports zero, so emitted
+/// feedback always consumes budget. Not a tokenizer.
+fn estimated_feedback_tokens(bounded_len: usize) -> u64 {
+    u64::try_from(bounded_len)
+        .unwrap_or(u64::MAX)
+        .div_ceil(4)
+        .max(1)
 }
 
 /// Truncate `text` to at most `max_bytes` bytes on a UTF-8 boundary.

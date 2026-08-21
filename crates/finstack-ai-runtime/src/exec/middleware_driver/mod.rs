@@ -114,12 +114,14 @@
 //!   re-enters with `compaction_resume`. If the outcome still reaches
 //!   this fold, it stays [`MIDDLEWARE_STAGE_UNLANDABLE`].
 //!
-//! Two residual gaps sit behind a landed `CompactContext` and are documented at
-//! `stage_settlement::apply_model_draft`: a landed `CompactionResult` drops its
-//! `derived_summaries` and `checkpoint`, and a fold carrying both a `Replace`
-//! and a `CompactContext` would apply a projection validated against the base
-//! draft on top of the replacement draft. Sliding-window compaction does not
-//! use those fields.
+//! One residual gap sits behind a landed `CompactContext` and is documented at
+//! `stage_settlement::apply_model_draft`: a landed `CompactionResult` still
+//! drops its `checkpoint` field at settlement (summarize `derived_summaries`
+//! append as user messages). A `BeforeModel` aggregate that carries both a
+//! `Replace` and a `CompactContext` is rejected by [`StageFold::accumulate`]
+//! as [`MIDDLEWARE_STAGE_UNLANDABLE`] rather than silently overwriting one
+//! projection with the other. Sliding-window compaction does not use
+//! `derived_summaries` or `checkpoint`.
 //!
 //! # Crate-private surface
 //!

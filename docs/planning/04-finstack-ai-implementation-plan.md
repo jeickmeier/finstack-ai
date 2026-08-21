@@ -13,11 +13,11 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.25 |
+| Version | 0.26 |
 | Status | Implementation baseline |
-| Date | 2026-08-18 |
+| Date | 2026-08-20 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.8; Architecture Specification v0.11; Technical Design v0.19; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.8; Architecture Specification v0.11; Technical Design v0.21; Security and Threat Model v0.7 |
 
 # Executive implementation decision
 
@@ -48,7 +48,7 @@ Python bindings       Browser WASM       Durability/recovery
             1.0.x reliability / 1.0 production drivers
 ```
 
-The plan contains **98 logical pull requests** across fourteen phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
+The plan contains **112 logical pull requests** across fifteen phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
 
 # 1. Purpose and use of this plan
 
@@ -93,6 +93,7 @@ A PR should not be combined with the next logical PR when the combination would 
 | 1.0 production drivers | Phase 12 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | SemVer additive or new-package; freeze gate must see additions |
 | 1.0.x kernel remediation | Phase 13 | Decide/apply/cost/validator/wire fixes from the checked-in kernel reviews | 1.0.0 pre-publication source-breaking or patch; freeze gate sees added and removed names only; signatures stay named review |
 | Extensions remediation | Phase 14 | cargo-public-api gate, ADR-047/048, then audit waves; gateway deleted not centralized | Pre-1.0 extensions source-breaking allowed; freeze gate sees signatures |
+| Middleware remediation | Phase 15 | Middleware simplification, fail-closed correctness, projection conflict handling, and durable compaction authorization | Owner-approved pre-publication Rust breaks; journal addition is backward-readable and fail-closed |
 
 ## 2.1 MVP and preview boundary
 
@@ -136,6 +137,7 @@ The following ranges are elapsed workstream estimates, not engineer-weeks or del
 | 12. 1.0 production drivers | 2-4 weeks | E1 parallel with E3 after authorization; E4 sequential on E3 |
 | 13. Kernel remediation | 2-3 weeks | Authorization first; PR-081 may start beside PR-082; PR-083 after PR-082; PR-084 last |
 | 14. Extensions remediation | 3-5 weeks | Authorization first; PR-086–PR-093 after PR-085; PR-089 after PR-088; PR-095 after PR-094; PR-098 last |
+| 15. Middleware remediation | 2-4 weeks | PR-099 authorization; four internal slices, then three public breaks, four local hazards, H6, and H5 |
 
 ## 3.1 Staffing scenarios
 
@@ -214,6 +216,8 @@ Phase 4: Python     Phase 5: WASM      Phase 6: durability
                    Phase 11: 2.0 providers   Phase 12: 1.0 drivers   Phase 13: kernel remediation
                                                                         |
                                                               Phase 14: extensions remediation
+                                                                        |
+                                                              Phase 15: middleware remediation
 ```
 
 Durability store work may begin after Phase 2. WIT design may begin after the six port traits are candidate-stable, and Phase 7 implementation may overlap the tail of Phase 6 once PR-039 provides the required record/effect context. Phase 8 still waits for the Phase 4-7 gates. Neither workstream should force changes into the Phase 1 kernel without an ADR.
@@ -3733,6 +3737,371 @@ A separate ADR is required before merging a change that:
 
 **Explicitly excluded.** Inventing evidence ids. Folding this work into open PR-067. Marking PR-068–073 `Done` without candidates.
 
+# 17F. Phase 15: middleware full remediation
+
+**Outcome.** Close middleware audit findings F1–F9 and hazards H1–H6 as small review units. Behavior-preserving internal simplifications land before the owner-approved public Rust API reductions; middleware-local correctness follows; the two runtime security changes land last. Canonical history, seven stages, six ports, commit-before-effect ordering, and unique late-tier compaction ownership remain unchanged.
+
+**Planning range.** 2-4 weeks
+
+**Compatibility policy.** The owner explicitly approves the F1, F5, and F7 Rust source breaks before public registry publication. Remove the named inspection-only/rule/configuration surfaces without deprecation shims, compatibility wrappers, or parallel APIs. Preserve serialized configuration keys and equivalent configuration-digest bytes where each PR requires it. Update `cargo-public-api`, public-item fixtures, changelog/migration notes, examples, and binding-facing documentation in the same review unit. No other public removal is authorized.
+
+**Design classification.** The optional durable `CompactionAuthorization` is a backward-readable additive security lock with default absence meaning deny. It does not change journal compatibility policy, add a record kind, add a port/stage, or change commit-before-effect ordering, so no new ADR is required by section 6.3. If implementation requires an incompatible journal migration, changes compatibility policy, or changes the composition model beyond fail-closed conflict rejection, stop and complete the applicable ADR/change-control amendment first.
+
+**Traceability.** FR-MW, FR-CTX, FR-SEC; NFR-COMP, NFR-REL, NFR-SEC; TDD sections 11.5 and 17; TM-04, TM-21; SEC-INV-013; 1.0 compatibility policy.
+
+## Entrance criteria
+
+- Documentation pack v0.28 / Implementation Plan 0.26 / Technical Design 0.21 / Security and Threat Model 0.7 authorizes this section and PR-099–PR-112. Phase 14 may remain in progress; no earlier logical PR or envelope is reused.
+- PR-099 records the F1–F9/H1–H6 mapping, compatibility approval, ADR classification, dependency barriers, and one implementation-envelope stub per successor.
+
+## Exit criteria
+
+- F1–F9 are closed by PR-100–PR-106 and PR-110 with focused parity, compatibility, and binding evidence.
+- H1–H4 are closed by PR-107–PR-110 without weakening fail-closed behavior or document-ingest must-strip semantics.
+- H6 rejects `Replace` plus `CompactContext` before settlement while either outcome alone remains landable.
+- H5 uses the accepted durable lock before child-effect commit, dispatch, and resume; unauthorized model, policy digest, or sensitivity produces no provider dispatch.
+- Focused middleware/runtime, public API, Python/WASM, recovery, conformance, and TM-04/TM-21 evidence is recorded under the owning PR envelopes; no unrun or manufactured evidence is claimed.
+
+## Pull request sequence
+
+### PR-099 - Authorize middleware full remediation
+
+**Purpose.** Complete planning-pack change control for F1–F9 and H1–H6 without implementing middleware or runtime code.
+
+**Principal changes.**
+
+- Add Phase 15 / PR-099–PR-112; update the executive count, release table, schedule, dependency graph, and traceability.
+- Bump Plan 0.25→0.26, TDD 0.20→0.21, Threat Model 0.6→0.7, and pack v0.27→v0.28.
+- Freeze the H5 durable lock and H6 fail-closed aggregate rule; record the no-ADR classification and the owner-approved F1/F5/F7 public-break policy.
+- Create separate implementation-envelope stubs and reconcile implementation-control baseline/count rows without assigning successor work or inventing evidence.
+
+**Acceptance evidence.**
+
+- Plan 0.26 contains PR-099–PR-112 with purpose, principal changes, acceptance evidence, dependencies, traceability, exclusions, and required threat-model review.
+- TDD 0.21 defines durable exact-model/sensitivity/policy compaction authorization and fail-closed `Replace` plus `CompactContext`; Threat Model 0.7 maps TM-04/TM-21 and SEC-INV-013.
+- Pack README is v0.28 and lists Plan 0.26, TDD 0.21, and Threat Model 0.7.
+- Envelopes exist at `docs/implementation/artifacts/pr-099/plan.md` through `pr-112/plan.md`; successor stubs remain unadmitted.
+- Delivery/evidence control surfaces reconcile the new plan baseline and criterion inventory without claiming implementation completion.
+
+**Dependencies.** Phase 9 / G8. Pack v0.27 and Plan 0.25 are landed. Phase 14 may remain in progress.
+
+**Threat-model review.** Planning review confirms TM-04/TM-21 coverage and the section 6.3 ADR classification; it is not implementation security approval.
+
+**Traceability.** F1–F9; H1–H6; TDD sections 11.5 and 17; TM-04, TM-21; SEC-INV-013.
+
+**Explicitly excluded.** Middleware/runtime implementation. Editing PR-063 evidence artifacts. Committing, merging, pushing, publishing, or approving any gate/review. Reusing PR-067, PR-093, or PR-097.
+
+### PR-100 - Simplify document-ingest internals
+
+**Purpose.** Close F2, F4-ingest, and F8 without changing document-ingest behavior or its public `AttachmentIndex` API.
+
+**Principal changes.**
+
+- Replace duplicate `ParseCache`/`AttachmentIndex` FIFO implementations with one private bounded map preserving capacity, reinsertion order, eviction, and poison recovery.
+- Inline the one-use canonicalization wrapper; move test-only `serde_json` to dev-dependencies.
+- Share `CaptureArtifactStore` and request fixtures through crate-local test support used by tests and the benchmark.
+
+**Acceptance evidence.**
+
+- FIFO reinsertion/eviction and poison-recovery parity tests pass for both cache uses.
+- Public `AttachmentIndex`, configuration behavior, output, and supported-block stripping are unchanged.
+- Focused document-ingest tests/benchmark compile and `mise run check-all && mise run test-all` pass.
+- Binding-wired coverage passes through release WASM build/check and document-attachment Python tests.
+
+**Dependencies.** PR-099. Independent of PR-101–PR-103 after authorization.
+
+**Threat-model review.** No new trigger; preserve existing TM-04/TM-16 behavior and include must-strip parity in review.
+
+**Traceability.** F2; F4-ingest; F8; FR-MW; TM-04, TM-16.
+
+**Explicitly excluded.** H1 digest identity. F9/H3 panic/lint changes. Public API removal. New shared workspace crate.
+
+### PR-101 - Deduplicate tool-policy test fixtures
+
+**Purpose.** Close F4-tool-policy as a test-only simplification.
+
+**Principal changes.**
+
+- Extract shared UUID and `MiddlewareContext` builders inside tool-policy tests.
+- Keep production code, serialized configuration, and digest bytes unchanged.
+
+**Acceptance evidence.**
+
+- Tool-policy tests use the shared builders and pass with no production diff.
+- `mise run check-all && mise run test-all` pass.
+
+**Dependencies.** PR-099. Independent of PR-100, PR-102, and PR-103.
+
+**Threat-model review.** No trigger; test-only refactor.
+
+**Traceability.** F4-tool-policy; FR-MW.
+
+**Explicitly excluded.** Workspace helper crate. F1 public API reduction. Production behavior changes.
+
+### PR-102 - Consolidate redaction construction
+
+**Purpose.** Close F3 by routing redaction constructors through one private assembly path with byte-for-byte configuration identity.
+
+**Principal changes.**
+
+- Route `try_with_config` and `try_wrapping` through one private assembly function.
+- Preserve all three public constructors, wrapped-middleware validation, adopted ordering, and stage masks.
+
+**Acceptance evidence.**
+
+- Constructor-equivalence tests pin ordering, stage masks, wrapped validation, and configuration-digest bytes.
+- Existing redaction behavior and public constructors remain unchanged.
+- Focused redaction tests plus `mise run check-all && mise run test-all` pass.
+
+**Dependencies.** PR-099. Independent of PR-100, PR-101, and PR-103.
+
+**Threat-model review.** No new trigger; review preserves TM-04 fail-closed construction and digest identity.
+
+**Traceability.** F3; FR-MW; TM-04.
+
+**Explicitly excluded.** H2 fail-open remediation. Public constructor removal. Redaction policy changes.
+
+### PR-103 - Reuse compaction pair analysis
+
+**Purpose.** Close F6 by computing tool-call/result pair analysis once per sliding-window invocation.
+
+**Principal changes.**
+
+- Compute `collect_pairs` once and pass the map to required/drop helpers.
+- Preserve protected entries, incomplete calls, source order, and existing compaction evidence.
+
+**Acceptance evidence.**
+
+- Focused tests prove complete and incomplete pair handling, protected entries, and source-order parity.
+- The unpaired-call regression demonstrates one pair analysis per invocation.
+- Focused compaction tests plus `mise run check-all && mise run test-all` pass.
+
+**Dependencies.** PR-099. Independent of PR-100–PR-102.
+
+**Threat-model review.** TM-21 review confirms tool-pair atomicity and protected-content behavior are unchanged.
+
+**Traceability.** F6; FR-CTX; FR-MW; TM-21; SEC-INV-013.
+
+**Explicitly excluded.** F5 public configuration changes. H5 authorization. H6 aggregate composition.
+
+### PR-104 - Reduce tool-policy public surface
+
+**Purpose.** Close F1 under the approved breaking-public-API policy while preserving builder behavior and serialized identity.
+
+**Principal changes.**
+
+- Make the four rule structs and inspection-only accessors crate-private; remove the duplicate `Default` path.
+- Replace glob export with explicit exports while keeping `ToolPolicyConfig::new().with_*`, `JailbreakAction`, errors, middleware, and stable code public.
+- Update public API fixtures and changelog/migration notes atomically.
+
+**Acceptance evidence.**
+
+- Removed names disappear from cargo-public-api/public-item fixtures; retained builders and error surfaces compile.
+- Serialized configuration shape and equivalent configuration-digest bytes remain unchanged.
+- `mise run check-public-api`, `uv run --no-project python scripts/compat/public_items.py --check`, and middleware conformance pass.
+- Changelog/migration notes identify the owner-approved break and replacement construction path.
+
+**Dependencies.** PR-100, PR-101, PR-102, and PR-103.
+
+**Threat-model review.** No new trigger; tool-policy enforcement behavior remains unchanged.
+
+**Traceability.** F1; FR-MW; NFR-COMP; 1.0 compatibility policy.
+
+**Explicitly excluded.** Serialized-key or digest changes. New public wrappers. Tool-policy semantic changes.
+
+### PR-105 - Privatize instructions validation
+
+**Purpose.** Close F7 by making middleware construction the sole public validation path.
+
+**Principal changes.**
+
+- Make `PolicyInstructionsConfig::validate` private.
+- Retarget validation tests through `InstructionsMiddleware::try_new`; update the Rust API fixture and migration notes.
+
+**Acceptance evidence.**
+
+- Invalid configurations still return the same construction errors and stable codes.
+- Public API checks prove `validate` is removed while construction remains available.
+- Public-item, middleware conformance, and full repository checks pass.
+
+**Dependencies.** PR-100, PR-101, PR-102, and PR-103. Independent of PR-104 and PR-106 after the internal barrier.
+
+**Threat-model review.** No new trigger; validation remains mandatory at construction.
+
+**Traceability.** F7; FR-MW; NFR-COMP.
+
+**Explicitly excluded.** Validation weakening. New convenience API. Serialization changes.
+
+### PR-106 - Reduce compaction configuration API
+
+**Purpose.** Close F5 with exactly three public strategy constructors and no leaf-owned authorization assertion.
+
+**Principal changes.**
+
+- Make `CompactionConfig` fields private and expose only `sliding_window`, `large_tool_output`, and `summarize` with the accepted signatures.
+- Remove `secondary_model_authorized`; durable runtime authorization belongs to PR-112.
+- Update tests, README, `examples/rust-minimal`, public API fixtures, and migration notes while preserving serialization keys and equivalent digest bytes.
+
+**Acceptance evidence.**
+
+- Public API fixtures expose exactly the three constructors and no public fields or `secondary_model_authorized`.
+- Equivalent old/new strategy configurations serialize identically and produce the same configuration digest.
+- Summarization remains fail closed under the existing runtime until PR-112's durable lock is present; no configuration boolean grants authority.
+- Public-item, middleware conformance, example, and full repository checks pass.
+- Migration notes document constructor replacements and the PR-112 runtime-authorization dependency.
+
+**Dependencies.** PR-100, PR-101, PR-102, and PR-103. Independent of PR-104 and PR-105 after the internal barrier.
+
+**Threat-model review.** TM-21 review verifies that configuration cannot self-authorize secondary-model dispatch.
+
+**Traceability.** F5; FR-CTX; FR-MW; NFR-COMP; TM-21; SEC-INV-013.
+
+**Explicitly excluded.** H5 runtime lock/dispatch. Serialization-key or digest changes. Additional constructors or compatibility shims.
+
+### PR-107 - Make redaction failure fail closed
+
+**Purpose.** Close H2 so redaction never returns `Continue` when it cannot construct a safe failure outcome.
+
+**Principal changes.**
+
+- Return `Result<StageOutcome, MiddlewareError>` from the after-model check/failure path.
+- Convert `ErrorDescriptor` construction failure into a stable middleware error.
+
+**Acceptance evidence.**
+
+- Oversized-message and undecodable-output tests fail closed and never return `Continue`.
+- Existing successful redaction and wrapped-middleware paths remain green.
+- Focused redaction, TM-04 adversarial, and full repository checks pass.
+
+**Dependencies.** PR-104, PR-105, and PR-106.
+
+**Threat-model review.** TM-04 security review is required before merge.
+
+**Traceability.** H2; FR-MW; TM-04; NFR-SEC.
+
+**Explicitly excluded.** Constructor refactor (PR-102). Policy expansion. Error-message secret disclosure.
+
+### PR-108 - Correct verify token estimates
+
+**Purpose.** Close H4 by using conservative rounded-up byte-based feedback token accounting.
+
+**Principal changes.**
+
+- Compute feedback `estimated_tokens` as `bytes.div_ceil(4).max(1)`.
+- Pin exact estimates at zero/small and non-multiple-of-four boundaries.
+
+**Acceptance evidence.**
+
+- Focused verify tests prove exact estimates and never report zero for emitted feedback.
+- Middleware conformance and full repository checks pass.
+
+**Dependencies.** PR-104, PR-105, and PR-106. Independent of PR-107, PR-109, and PR-110.
+
+**Threat-model review.** No new trigger; preserve existing bounded-feedback controls.
+
+**Traceability.** H4; FR-MW; NFR-REL.
+
+**Explicitly excluded.** Tokenizer integration. Verify publication status. Interaction identity changes.
+
+### PR-109 - Bind document-ingest configuration identity
+
+**Purpose.** Close H1 by deriving descriptor identity from explicit versioned document limits.
+
+**Principal changes.**
+
+- Replace the constant digest with canonical JSON over a private versioned shape containing `max_input_bytes`, `max_output_bytes`, and `max_pages`.
+- Keep `DocumentLimits` free of serialization solely for digest construction.
+- Record the intentional descriptor-identity change.
+
+**Acceptance evidence.**
+
+- Different limits produce different digests; store defaults equal equivalent explicit limits.
+- Canonical bytes and version tag are pinned; prior constant identity is rejected as current.
+- Focused document-ingest, Python/WASM integration, compatibility, and full repository checks pass.
+
+**Dependencies.** PR-104, PR-105, and PR-106. Independent of PR-107, PR-108, and PR-110.
+
+**Threat-model review.** No new trigger; review confirms identity is tenant/configuration stable and contains no secret values.
+
+**Traceability.** H1; FR-MW; NFR-COMP; NFR-REL.
+
+**Explicitly excluded.** Public `DocumentLimits` serialization. Cache implementation (PR-100). Limits-policy changes.
+
+### PR-110 - Enforce document-ingest panic policy
+
+**Purpose.** Close F9 and H3 by applying sibling lint gates and propagating impossible construction failures without weakening fail-soft ingestion or must-strip behavior.
+
+**Principal changes.**
+
+- Add the sibling unsafe/unwrap/expect/panic lint gates.
+- Make note creation and message rebuilding fallible; propagate construction failures as middleware errors.
+- Retain fail-soft notes for index/store/parser failures and never restore a supported `File` block after ingestion begins.
+
+**Acceptance evidence.**
+
+- Production code passes the lint gates with no ignore-based bypass.
+- Must-strip regressions cover parser/store/index and message/note construction failures.
+- Focused document-ingest, TM-04 review, binding integration, and full repository checks pass.
+
+**Dependencies.** PR-104, PR-105, and PR-106. Independent of PR-107–PR-109.
+
+**Threat-model review.** TM-04 security review is required before merge and covers fail-soft notes, error text, and must-strip paths.
+
+**Traceability.** F9; H3; FR-MW; TM-04; NFR-SEC.
+
+**Explicitly excluded.** Changing supported block types. Converting recoverable parser/store/index failures to hard failures. Ignore attributes for production panic paths.
+
+### PR-111 - Reject replacement-compaction conflicts
+
+**Purpose.** Close H6 by failing closed when a `BeforeModel` aggregate contains both `Replace` and `CompactContext`.
+
+**Principal changes.**
+
+- Reject the aggregate in middleware folding as `middleware_stage_unlandable`.
+- Update settlement documentation so compaction cannot overwrite replacement.
+- Add fold, settlement, and runtime integration coverage for redaction+compaction and document-ingest+compaction.
+
+**Acceptance evidence.**
+
+- Both outcomes together fail before settlement with the stable code; neither projection silently wins.
+- Either outcome alone still lands with unchanged evidence.
+- Focused runtime/middleware, conformance, TM-04/TM-21, and full repository checks pass.
+
+**Dependencies.** PR-107, PR-108, PR-109, and PR-110.
+
+**Threat-model review.** TM-04/TM-21 security review is required before merge.
+
+**Traceability.** H6; FR-MW; TDD section 17.3; TM-04, TM-21; SEC-INV-013.
+
+**Explicitly excluded.** Merging leaves. Wrapping compactors. Sequential rebasing. New stage/outcome or alternate composition model.
+
+### PR-112 - Enforce durable compaction authorization
+
+**Purpose.** Close H5 by binding model-assisted compaction to an accepted durable authorization lock before commit, dispatch, and resume.
+
+**Principal changes.**
+
+- Add optional `CompactionAuthorization` to `RunSecurityContext`: exact allowed model, maximum sensitivity, and residency/egress-policy digest; `#[serde(default)]` absence denies and child propagation attenuates.
+- Thread the accepted lock through SDK preparation and runtime dispatch seeds, updating protocol/bindings only where the durable security shape is exposed.
+- Before committing `RequestCompactionModel`, require exact tenant-bound model/policy matches and permitted sensitivity; recheck before dispatch and resume; remove fabricated resume authorization.
+- Update public/schema/binding fixtures, conformance, recovery, and security documentation.
+
+**Acceptance evidence.**
+
+- Missing lock and model/digest/sensitivity mismatches fail before child-effect commit and provider dispatch.
+- Authorized requests preserve commit-before-effect and use the exact accepted lock at dispatch.
+- Crash recovery/resume reuses the same lock and cannot fabricate or broaden authorization.
+- Child-run tests prove absence/inheritance/attenuation; historical records deserialize missing authorization as deny.
+- Kernel/runtime public fixtures, protocol/binding fixtures where exposed, middleware/conformance, crash-recovery, native/WASM, and security suites pass.
+
+**Dependencies.** PR-111. PR-106 owns removal of leaf self-authorization.
+
+**Threat-model review.** TM-21 / SEC-INV-013 security review is required before merge. Stop for an ADR if implementation changes journal compatibility policy, needs an incompatible migration, or changes commit-before-effect ordering.
+
+**Traceability.** H5; FR-CTX; FR-MW; FR-SEC; TDD sections 11.5 and 17.6; TM-21; SEC-INV-013.
+
+**Explicitly excluded.** A new port/stage/record kind. Secondary-model routing policy beyond the exact lock. Recursive compaction. Compatibility-policy change. Fabricated resume authorization.
+
 # 18. Cross-phase quality plan
 
 ## 18.1 Test layers by phase
@@ -3862,6 +4231,7 @@ PRD lettered phases are capability groupings; the numbered phases and logical PR
 | 1.0 production drivers | Phase 12, PR-074–PR-079 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | — |
 | 1.0.x kernel remediation | Phase 13, PR-080–PR-084 | Decide/apply/cost/validator/wire review closeout | — |
 | Extensions remediation | Phase 14, PR-085–PR-098 | cargo-public-api gate; ADR-047/048; gateway deleted | — |
+| Middleware remediation | Phase 15, PR-099–PR-112 | Middleware simplification, controlled API reduction, fail-closed compaction/redaction | — |
 
 A family traceability reference such as `NFR-PERF` expands to every numbered requirement in that family unless the entry names a narrower range. This convention avoids duplicating requirement prose while preserving ownership.
 
@@ -3882,6 +4252,7 @@ A family traceability reference such as `NFR-PERF` expands to every numbered req
 | 1.0 production drivers | PR-074 to PR-079 | FR-CTX, FR-DUR, FR-PY; UC-05/08/09 | Context driver, workflow-local cron, Lane verbs, Python SQLite, child-runs |
 | Kernel remediation | PR-080 to PR-084 | FR-KRN; NFR-COMP; NFR-REL | Limit/redelivery, capacity preflight, validators, hash/wire surfaces |
 | Extensions remediation | PR-085 to PR-098 | FR-EXT, FR-TLS, FR-MDL; ADR-047, ADR-048 | Public-api gate, shared authority/secret, leaf audit waves |
+| Middleware remediation | PR-099 to PR-112 | FR-MW, FR-CTX, FR-SEC; NFR-COMP, NFR-REL, NFR-SEC | Middleware batteries, projection settlement, durable compaction authorization |
 
 # 23. First 30 days
 

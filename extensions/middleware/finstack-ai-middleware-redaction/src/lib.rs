@@ -82,6 +82,8 @@ const REDACTION_VERSION: Version = Version {
     minor: 0,
     patch: 0,
 };
+const FAIL_OUTCOME_FALLBACK_MESSAGE: &str = "model output failed redaction checking";
+const FAIL_CONSTRUCTION_CODE: &str = "redaction_output_fail_unconstructable";
 
 /// What to do when the model's own output contains a detectable secret.
 ///
@@ -173,33 +175,7 @@ impl RedactionMiddleware {
     /// Rejects an all-disabled detector set or an invalid checked-in
     /// identity.
     pub fn try_with_config(config: RedactionConfig) -> Result<Self, RedactionError> {
-        let detectors = Arc::new(Detectors::try_new(config)?);
-        let stages = match config.output_policy {
-            OutputPolicy::Off => StageMask::from_stages([Stage::BeforeModel]),
-            OutputPolicy::Fail => StageMask::from_stages([Stage::BeforeModel, Stage::AfterModel]),
-        };
-        Ok(Self {
-            descriptor: MiddlewareDescriptor {
-                invocation: ComponentInvocation {
-                    component: parse_component_id()?,
-                    version: REDACTION_VERSION,
-                    configuration_digest: configuration_digest(config, None)?,
-                    recovery: InvocationRecovery::RecomputeSafe,
-                },
-                stages,
-                order: MiddlewareOrder {
-                    tier: OrderTier::RequestShaping,
-                    priority: 0,
-                    before: Arc::from([]),
-                    after: Arc::from([]),
-                },
-                role: MiddlewareRole::Standard,
-                metadata: Metadata::empty(),
-            },
-            detectors,
-            config,
-            inner: None,
-        })
+        Self::try_assemble(config, None)
     }
 
     /// Compose redaction around another `BeforeModel` middleware.
@@ -223,18 +199,44 @@ impl RedactionMiddleware {
         inner: Arc<dyn Middleware>,
         config: RedactionConfig,
     ) -> Result<Self, RedactionError> {
+        Self::try_assemble(config, Some(inner))
+    }
+
+    /// Shared standalone/wrapping constructor.
+    ///
+    /// Detector validation runs before wrapped-middleware checks so the
+    /// error order matches the previous dual constructors. Wrapping adopts
+    /// `inner`'s order; the stage mask still follows `config.output_policy`.
+    fn try_assemble(
+        config: RedactionConfig,
+        inner: Option<Arc<dyn Middleware>>,
+    ) -> Result<Self, RedactionError> {
         let detectors = Arc::new(Detectors::try_new(config)?);
-        let inner_descriptor = inner.descriptor();
-        if inner_descriptor.stages != StageMask::from_stages([Stage::BeforeModel]) {
-            return Err(RedactionError::Configuration {
-                reason: "wrapped_middleware_not_before_model_only",
-            });
-        }
-        if inner_descriptor.role != MiddlewareRole::Standard {
-            return Err(RedactionError::Configuration {
-                reason: "wrapped_middleware_not_standard_role",
-            });
-        }
+        let (order, wrap_invocation) = match inner.as_ref() {
+            Some(inner) => {
+                let inner_descriptor = inner.descriptor();
+                if inner_descriptor.stages != StageMask::from_stages([Stage::BeforeModel]) {
+                    return Err(RedactionError::Configuration {
+                        reason: "wrapped_middleware_not_before_model_only",
+                    });
+                }
+                if inner_descriptor.role != MiddlewareRole::Standard {
+                    return Err(RedactionError::Configuration {
+                        reason: "wrapped_middleware_not_standard_role",
+                    });
+                }
+                (inner_descriptor.order, Some(inner_descriptor.invocation))
+            }
+            None => (
+                MiddlewareOrder {
+                    tier: OrderTier::RequestShaping,
+                    priority: 0,
+                    before: Arc::from([]),
+                    after: Arc::from([]),
+                },
+                None,
+            ),
+        };
         let stages = match config.output_policy {
             OutputPolicy::Off => StageMask::from_stages([Stage::BeforeModel]),
             OutputPolicy::Fail => StageMask::from_stages([Stage::BeforeModel, Stage::AfterModel]),
@@ -244,20 +246,17 @@ impl RedactionMiddleware {
                 invocation: ComponentInvocation {
                     component: parse_component_id()?,
                     version: REDACTION_VERSION,
-                    configuration_digest: configuration_digest(
-                        config,
-                        Some(&inner_descriptor.invocation),
-                    )?,
+                    configuration_digest: configuration_digest(config, wrap_invocation.as_ref())?,
                     recovery: InvocationRecovery::RecomputeSafe,
                 },
                 stages,
-                order: inner_descriptor.order,
+                order,
                 role: MiddlewareRole::Standard,
                 metadata: Metadata::empty(),
             },
             detectors,
             config,
-            inner: Some(inner),
+            inner,
         })
     }
 }
@@ -312,7 +311,7 @@ impl Middleware for RedactionMiddleware {
                         .await?;
                     Ok(middleware.redact_inner_outcome(&before_model, outcome))
                 }
-                StageInput::AfterModel { value } => Ok(middleware.check_after_model(&value)),
+                StageInput::AfterModel { value } => Ok(middleware.check_after_model(&value)?),
                 _ => Ok(StageOutcome::Continue),
             }
         })
@@ -404,9 +403,11 @@ impl RedactionMiddleware {
     /// an undecodable payload means the output cannot be checked, and a
     /// strict mode that silently stops checking (e.g. after a drift in
     /// [`Message`]'s wire shape) would be a security control turned no-op.
-    fn check_after_model(&self, value: &RawJson) -> StageOutcome {
+    /// When a `Fail` descriptor cannot be constructed, this returns a
+    /// stable [`MiddlewareError`] rather than [`StageOutcome::Continue`].
+    fn check_after_model(&self, value: &RawJson) -> Result<StageOutcome, MiddlewareError> {
         if self.config.output_policy != OutputPolicy::Fail {
-            return StageOutcome::Continue;
+            return Ok(StageOutcome::Continue);
         }
         let Ok(message) = serde_json::from_slice::<Message>(value.as_bytes()) else {
             return fail_outcome(
@@ -420,7 +421,7 @@ impl RedactionMiddleware {
             collect_findings(&self.detectors, block, &mut kinds, &mut count);
         }
         if count == 0 {
-            return StageOutcome::Continue;
+            return Ok(StageOutcome::Continue);
         }
         let kinds = kinds.into_iter().collect::<Vec<_>>().join(", ");
         fail_outcome(
@@ -480,22 +481,33 @@ fn redact_slice<T: Clone>(items: &[T], mut redact: impl FnMut(&T) -> Option<T>) 
 }
 
 /// A `Fail` outcome with a stable code and a safe message (never matched
-/// text). The static fallback descriptor cannot fail to construct, so this
-/// path never degrades to `Continue`.
-fn fail_outcome(code: &'static str, message: String) -> StageOutcome {
-    let descriptor = ErrorDescriptor::new(code, message, ErrorCategory::Middleware, false)
+/// text). If the primary descriptor and the static fallback both fail to
+/// construct, this returns a stable [`MiddlewareError`] — never
+/// [`StageOutcome::Continue`].
+fn fail_outcome(code: &'static str, message: String) -> Result<StageOutcome, MiddlewareError> {
+    ErrorDescriptor::new(code, message, ErrorCategory::Middleware, false)
         .or_else(|_| {
             ErrorDescriptor::new(
                 code,
-                "model output failed redaction checking",
+                FAIL_OUTCOME_FALLBACK_MESSAGE,
                 ErrorCategory::Middleware,
                 false,
             )
         })
-        .ok();
-    descriptor.map_or(StageOutcome::Continue, |descriptor| {
-        StageOutcome::Fail(Box::new(descriptor))
-    })
+        .map(|descriptor| StageOutcome::Fail(Box::new(descriptor)))
+        .map_err(|_| fail_construction_error())
+}
+
+/// Last-resort middleware error when no safe `Fail` descriptor can be
+/// built. The text is a static literal and never includes caller input.
+fn fail_construction_error() -> MiddlewareError {
+    MiddlewareError::try_new(
+        FAIL_CONSTRUCTION_CODE,
+        ErrorCategory::Middleware,
+        FAIL_OUTCOME_FALLBACK_MESSAGE,
+        Metadata::empty(),
+    )
+    .unwrap_or_else(Into::into)
 }
 
 /// Accumulate detector findings over one block's text surface (the same

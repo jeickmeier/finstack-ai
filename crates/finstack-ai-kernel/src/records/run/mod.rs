@@ -32,4 +32,4 @@ pub use propagation::{
     RunPropagationPolicy,
 };
 pub use relation::{RunRelation, RunRelationKind};
-pub use security::RunSecurityContext;
+pub use security::{CompactionAuthorization, RunSecurityContext};

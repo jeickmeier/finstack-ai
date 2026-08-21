@@ -6,11 +6,12 @@ use std::task::{Context, Poll, Waker};
 
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AppendBatchId, AppendRequest, BudgetPropagation,
-    CancellationPropagation, CommittedBatch, ContentBlock, DeadlinePropagation, Digest, Id, IdTag,
-    KernelInput, LaneTag, Message, MessageRole, Metadata, PrincipalPropagation, PrincipalRef,
-    ProviderIds, RawJson, RecordBody, RecordEnvelope, ReducerStageOutcome, RunAccepted, RunLimits,
-    RunPropagationPolicy, RunRelation, RunSecurityContext, Sensitivity, SessionTag, Stage,
-    StageCursor, StageSettled, TextBlock, Timestamp, TransitionEnv, Version,
+    CancellationPropagation, CommittedBatch, CompactionAuthorization, ContentBlock,
+    DeadlinePropagation, Digest, Id, IdTag, KernelInput, LaneTag, Message, MessageRole, Metadata,
+    PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordBody, RecordEnvelope,
+    ReducerStageOutcome, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
+    RunSecurityContext, Sensitivity, SessionTag, Stage, StageCursor, StageSettled, TextBlock,
+    Timestamp, TransitionEnv, Version,
 };
 use futures_core::Stream;
 
@@ -101,6 +102,43 @@ fn acceptance(limits: RunLimits) -> RunAccepted {
             "decision-v1",
             None,
         )
+        .expect("security")
+        .with_compaction_authorization(CompactionAuthorization::new(
+            finstack_ai_kernel::ComponentRef::new(
+                finstack_ai_kernel::ComponentId::parse("fixture.child-model").expect("component"),
+                None,
+            ),
+            Sensitivity::Internal,
+            Digest::raw_json(b"residency"),
+        )),
+        None,
+        limits,
+        RunPropagationPolicy {
+            cancellation: CancellationPropagation::Cascade,
+            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+            budget: BudgetPropagation::SharedScope,
+            principal: PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(br#"{"agent":"fixture"}"#),
+        None,
+    )
+    .expect("acceptance")
+}
+
+fn acceptance_without_compaction_auth(limits: RunLimits) -> RunAccepted {
+    let run_id = id(3);
+    RunAccepted::try_new(
+        run_id,
+        RunRelation::root(run_id).expect("relation"),
+        RunSecurityContext::try_new(
+            "tenant-a",
+            PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a")).expect("principal"),
+            "oidc",
+            "high",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
         .expect("security"),
         None,
         limits,
@@ -121,6 +159,14 @@ fn accept_input(limits: RunLimits) -> KernelInput {
         session_id: id::<SessionTag>(1),
         lane_id: id::<LaneTag>(2),
         accepted: acceptance(limits),
+    })
+}
+
+fn accept_input_without_compaction_auth(limits: RunLimits) -> KernelInput {
+    KernelInput::AcceptRun(AcceptRun {
+        session_id: id::<SessionTag>(1),
+        lane_id: id::<LaneTag>(2),
+        accepted: acceptance_without_compaction_auth(limits),
     })
 }
 
@@ -398,12 +444,20 @@ impl JournalStore for MemoryStore {
 }
 
 fn accepted_on(store: Arc<MemoryStore>) -> CommitCoordinator {
+    accepted_with(store, accept_input(RunLimits::empty()))
+}
+
+fn accepted_without_compaction_auth(store: Arc<MemoryStore>) -> CommitCoordinator {
+    accepted_with(
+        store,
+        accept_input_without_compaction_auth(RunLimits::empty()),
+    )
+}
+
+fn accepted_with(store: Arc<MemoryStore>, accept: KernelInput) -> CommitCoordinator {
     let mut coordinator = CommitCoordinator::new(store);
-    block_on(coordinator.submit(
-        env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
-        accept_input(RunLimits::empty()),
-    ))
-    .expect("accept");
+    block_on(coordinator.submit(env(1_000, &[1], &[1], &[], &[], &[], &[], 101), accept))
+        .expect("accept");
     block_on(coordinator.submit(
         env(1_100, &[2], &[], &[], &[], &[], &[], 102),
         KernelInput::StageSettled(StageSettled {
@@ -892,4 +946,139 @@ fn host_task_resume_settles_pending_compaction_without_a_new_user_turn() {
             .contains_key(&compaction_requests(&recovered)[0].effect_id()),
         "summary settles once without a new user turn"
     );
+}
+
+#[test]
+fn missing_compaction_authorization_fails_before_commit() {
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = accepted_without_compaction_auth(Arc::clone(&store) as Arc<MemoryStore>);
+    let draft = request_draft(vec![user_message(4, "hi")]);
+    let error = block_on(settle_facade_stage_with_model(
+        &mut coordinator,
+        Some(&summarize_driver()),
+        &test_sources(),
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+        Some(&ScriptedModel::new(false)),
+    ))
+    .expect_err("missing lock must deny");
+    assert!(
+        matches!(
+            &error,
+            crate::RunHandleError::Middleware { code }
+                if code.as_ref() == crate::COMPACTION_MODEL_NOT_AUTHORIZED
+        ),
+        "expected compaction_model_not_authorized, got {error:?}"
+    );
+    assert!(
+        compaction_requests(&coordinator).is_empty(),
+        "unauthorized request must not commit a child effect"
+    );
+    assert!(
+        coordinator.state().pending_model_effect.is_none(),
+        "no pending model effect before commit"
+    );
+}
+
+#[test]
+fn mismatched_compaction_authorization_fails_before_commit() {
+    let run_id = id(3);
+    let accept = KernelInput::AcceptRun(AcceptRun {
+        session_id: id::<SessionTag>(1),
+        lane_id: id::<LaneTag>(2),
+        accepted: RunAccepted::try_new(
+            run_id,
+            RunRelation::root(run_id).expect("relation"),
+            RunSecurityContext::try_new(
+                "tenant-a",
+                PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a"))
+                    .expect("principal"),
+                "oidc",
+                "high",
+                "policy-v1",
+                "decision-v1",
+                None,
+            )
+            .expect("security")
+            .with_compaction_authorization(CompactionAuthorization::new(
+                finstack_ai_kernel::ComponentRef::new(
+                    finstack_ai_kernel::ComponentId::parse("fixture.other-model")
+                        .expect("component"),
+                    None,
+                ),
+                Sensitivity::Internal,
+                Digest::raw_json(b"residency"),
+            )),
+            None,
+            RunLimits::empty(),
+            RunPropagationPolicy {
+                cancellation: CancellationPropagation::Cascade,
+                deadline: DeadlinePropagation::MinimumOfParentAndChild,
+                budget: BudgetPropagation::SharedScope,
+                principal: PrincipalPropagation::Inherit,
+            },
+            Digest::raw_json(br#"{"agent":"fixture"}"#),
+            None,
+        )
+        .expect("acceptance"),
+    });
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = accepted_with(Arc::clone(&store) as Arc<MemoryStore>, accept);
+    let draft = request_draft(vec![user_message(4, "hi")]);
+    let error = block_on(settle_facade_stage_with_model(
+        &mut coordinator,
+        Some(&summarize_driver()),
+        &test_sources(),
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+        Some(&ScriptedModel::new(false)),
+    ))
+    .expect_err("mismatched lock must deny");
+    assert!(
+        matches!(
+            &error,
+            crate::RunHandleError::Middleware { code }
+                if code.as_ref() == crate::COMPACTION_MODEL_NOT_AUTHORIZED
+        ),
+        "expected compaction_model_not_authorized, got {error:?}"
+    );
+    assert!(compaction_requests(&coordinator).is_empty());
+}
+
+#[test]
+fn authorize_compaction_model_request_rejects_sensitivity_and_digest_mismatches() {
+    let model = finstack_ai_kernel::ComponentRef::new(
+        finstack_ai_kernel::ComponentId::parse("fixture.child-model").expect("component"),
+        None,
+    );
+    let auth = CompactionAuthorization::new(
+        model.clone(),
+        Sensitivity::Internal,
+        Digest::raw_json(b"residency"),
+    );
+    let ok = crate::middleware::CompactionModelRequest {
+        model: model.clone(),
+        request: request_draft(vec![user_message(4, "hi")]),
+        budget_scope_id: id(9),
+        source_sensitivity: Sensitivity::Internal,
+        residency_policy_digest: Digest::raw_json(b"residency"),
+        resume_state: RawJson::parse(b"{}").expect("resume"),
+    };
+    crate::authorize_compaction_model_request(Some(&auth), &ok).expect("authorized");
+    assert!(
+        crate::authorize_compaction_model_request(None, &ok).is_err(),
+        "absence denies"
+    );
+    let too_sensitive = crate::middleware::CompactionModelRequest {
+        source_sensitivity: Sensitivity::Confidential,
+        ..ok.clone()
+    };
+    assert!(crate::authorize_compaction_model_request(Some(&auth), &too_sensitive).is_err());
+    let wrong_digest = crate::middleware::CompactionModelRequest {
+        residency_policy_digest: Digest::raw_json(b"other"),
+        ..ok
+    };
+    assert!(crate::authorize_compaction_model_request(Some(&auth), &wrong_digest).is_err());
 }

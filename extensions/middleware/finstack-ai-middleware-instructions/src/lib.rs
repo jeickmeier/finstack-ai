@@ -83,10 +83,13 @@ pub struct PolicyInstructionsConfig {
 impl PolicyInstructionsConfig {
     /// Validate entry count and per-entry label/text.
     ///
+    /// Construction ([`InstructionsMiddleware::try_new`]) is the sole public
+    /// validation path; this helper is crate-private.
+    ///
     /// # Errors
     ///
     /// Returns a stable configuration reason for empty, oversized, or blank input.
-    pub fn validate(&self) -> Result<(), InstructionsError> {
+    fn validate(&self) -> Result<(), InstructionsError> {
         if self.entries.is_empty() {
             return Err(InstructionsError::Configuration {
                 reason: "entries_empty",
@@ -135,6 +138,9 @@ pub struct InstructionsMiddleware {
 
 impl InstructionsMiddleware {
     /// Construct the middleware, freezing one protected item per entry.
+    ///
+    /// This is the sole public validation path for
+    /// [`PolicyInstructionsConfig`].
     ///
     /// # Errors
     ///
