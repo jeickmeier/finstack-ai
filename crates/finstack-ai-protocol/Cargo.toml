@@ -12,12 +12,18 @@ description = "Envelope, framing, journal, and remote protocol codecs for finsta
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
+half = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 ciborium = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "protocol"
+harness = false
 
 [lints]
 workspace = true

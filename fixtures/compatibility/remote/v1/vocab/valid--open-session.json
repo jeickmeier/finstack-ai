@@ -1,9 +1,8 @@
 {
-  "case": "remote-open-session",
-  "family": "remote",
   "kind": "open_session",
   "last_known_durable_sequence": 3,
-  "locator": { "session_id": "sess" },
-  "tenant_scope": "tenant-a",
-  "expect": { "ok": true }
+  "locator": {
+    "session_id": "01234567-89ab-7cde-89ab-0123456789ab"
+  },
+  "tenant_scope": "tenant-a"
 }

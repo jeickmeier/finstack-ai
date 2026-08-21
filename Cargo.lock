@@ -1475,7 +1475,9 @@ name = "finstack-ai-protocol"
 version = "1.0.0"
 dependencies = [
  "ciborium",
+ "criterion",
  "finstack-ai-kernel",
+ "half",
  "serde",
  "serde_json",
  "thiserror",
@@ -1603,6 +1605,7 @@ dependencies = [
  "finstack-ai-runtime",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

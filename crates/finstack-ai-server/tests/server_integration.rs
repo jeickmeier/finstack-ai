@@ -3,9 +3,15 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use finstack_ai_kernel::{
+    AcceptRun, BudgetPropagation, CancelRequested, CancellationInitiator, CancellationPropagation,
+    DeadlinePropagation, Digest, EventId, LaneId, Metadata, PrincipalPropagation, PrincipalRef,
+    QueueDepthWarning, RunAccepted, RunEvent, RunEventBody, RunId, RunLimits, RunPropagationPolicy,
+    RunRelation, RunSecurityContext, Sensitivity, SessionId, UNIX_EPOCH,
+};
 use finstack_ai_protocol::{
-    PROTOCOL_VERSION_V1, RemoteAuthMethod, RemoteCommand, RemoteCommandOp, RemoteEventView,
-    RemoteLocator, VersionOffer,
+    PROTOCOL_VERSION_V1, RemoteAgentRef, RemoteAuthMethod, RemoteCommand, RemoteCommandPayload,
+    RemoteEventView, RemoteLocator, RemoteStartRequest, VersionOffer,
 };
 use finstack_ai_runtime::{
     PortFuture, SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
@@ -16,6 +22,76 @@ use finstack_ai_server::{
     CreditLimits, ListenAddr, RemoteClient, Server, ServerError, SessionReplica,
     StaticAuthVerifier, TransportKind,
 };
+
+const SESSION_ID: &str = "01234567-89ab-7cde-89ab-0123456789ab";
+const MISSING_SESSION_ID: &str = "01234567-89ab-7cde-89ab-0123456789ac";
+const LANE_ID: &str = "11234567-89ab-7cde-89ab-0123456789ab";
+const RUN_ID: &str = "21234567-89ab-7cde-89ab-0123456789ab";
+
+fn locator(value: &str) -> RemoteLocator {
+    RemoteLocator::try_new(
+        value.parse().expect("session id"),
+        Some(LANE_ID.parse().expect("lane id")),
+        Some(RUN_ID.parse().expect("run id")),
+    )
+    .expect("locator")
+}
+
+fn start_payload() -> RemoteCommandPayload {
+    let locator = locator(SESSION_ID);
+    let run_id = locator.run_id().expect("run id");
+    let spec_digest = Digest::raw_json(br#"{"agent":"fixture"}"#);
+    let accepted = RunAccepted::try_new(
+        run_id,
+        RunRelation::root(run_id).expect("root"),
+        RunSecurityContext::try_new(
+            "tenant-a",
+            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+            "loopback",
+            "high",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .expect("security"),
+        None,
+        RunLimits::empty(),
+        RunPropagationPolicy {
+            cancellation: CancellationPropagation::Cascade,
+            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+            budget: BudgetPropagation::SharedScope,
+            principal: PrincipalPropagation::Inherit,
+        },
+        spec_digest,
+        None,
+    )
+    .expect("accepted");
+    RemoteCommandPayload::Start(Box::new(
+        RemoteStartRequest::try_new(
+            AcceptRun {
+                session_id: locator.session_id(),
+                lane_id: locator.lane_id().expect("lane id"),
+                accepted,
+            },
+            RemoteAgentRef {
+                agent_id: finstack_ai_kernel::AgentId::parse("agent.fixture").expect("agent"),
+                bundle_id: None,
+                spec_digest,
+            },
+            Vec::new(),
+            Metadata::empty(),
+            None,
+        )
+        .expect("start"),
+    ))
+}
+
+fn cancel_payload() -> RemoteCommandPayload {
+    RemoteCommandPayload::Cancel(Box::new(CancelRequested {
+        initiator: CancellationInitiator::RuntimeShutdown,
+        reason: None,
+    }))
+}
 
 #[derive(Clone)]
 struct RecordingSink {
@@ -91,7 +167,58 @@ fn offer() -> VersionOffer {
 }
 
 fn durable(sequence: u64, kind: &str) -> RemoteEventView {
-    RemoteEventView::new(format!("evt-{sequence}"), kind, Some(sequence), sequence)
+    let _ = kind;
+    let body = RunEventBody::RunSuspended { reason_code: None };
+    let mut event_bytes = [0_u8; 16];
+    event_bytes[8..].copy_from_slice(&sequence.to_be_bytes());
+    RemoteEventView::try_new(
+        RunEvent::try_durable(
+            1,
+            1,
+            EventId::from_bytes(event_bytes),
+            SESSION_ID.parse::<SessionId>().expect("session id"),
+            LANE_ID.parse::<LaneId>().expect("lane id"),
+            RUN_ID.parse::<RunId>().expect("run id"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            sequence,
+            sequence,
+            UNIX_EPOCH,
+            Sensitivity::Public,
+            body,
+        )
+        .expect("durable event"),
+    )
+    .expect("remote event")
+}
+
+fn live_event(sequence: u64) -> RemoteEventView {
+    let mut event_bytes = [1_u8; 16];
+    event_bytes[8..].copy_from_slice(&sequence.to_be_bytes());
+    RemoteEventView::try_new(
+        RunEvent::try_transient(
+            1,
+            1,
+            EventId::from_bytes(event_bytes),
+            SESSION_ID.parse::<SessionId>().expect("session id"),
+            LANE_ID.parse::<LaneId>().expect("lane id"),
+            RUN_ID.parse::<RunId>().expect("run id"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            sequence,
+            UNIX_EPOCH,
+            Sensitivity::Public,
+            RunEventBody::QueueDepthWarning(QueueDepthWarning { depth: 1, limit: 1 }),
+        )
+        .expect("transient event"),
+    )
+    .expect("remote event")
 }
 
 async fn ready_server(sink: RecordingSink) -> Server {
@@ -134,7 +261,7 @@ async fn missing_sink_is_not_ready() {
 #[tokio::test]
 async fn reconnect_snapshot_tail_barrier_then_live() {
     let server = ready_server(RecordingSink::ready()).await;
-    let mut replica = SessionReplica::new("sess-1", "tenant-a");
+    let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
     replica.append_durable(durable(1, "run_accepted"));
     replica.append_durable(durable(2, "run_completed"));
     server.hub().insert(replica);
@@ -153,31 +280,27 @@ async fn reconnect_snapshot_tail_barrier_then_live() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             Some(0),
         )
         .await
         .expect("reconnect");
-    assert!(view.snapshot.is_some());
+    assert!(view.snapshot.is_none());
     assert_eq!(view.barrier, 2);
-    assert_eq!(view.tail.len(), 1);
-    assert_eq!(view.tail[0].kind(), "run_completed");
+    assert_eq!(view.tail.len(), 2);
+    assert_eq!(view.tail[1].events()[0].kind().kind_name(), "run_suspended");
 
     serve.abort();
 }
 
 #[tokio::test]
 async fn live_event_before_barrier_fails_replica() {
-    let mut replica = SessionReplica::new("sess-1", "tenant-a");
-    let err = replica
-        .queue_live(RemoteEventView::new("live", "model_text_delta", None, 1))
-        .expect_err("early live");
+    let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
+    let err = replica.queue_live(live_event(1)).expect_err("early live");
     assert!(matches!(err, ServerError::LiveBeforeBarrier));
     replica.release_barrier();
-    replica
-        .queue_live(RemoteEventView::new("live", "model_text_delta", None, 1))
-        .expect("after barrier");
+    replica.queue_live(live_event(1)).expect("after barrier");
 }
 
 #[tokio::test]
@@ -185,7 +308,7 @@ async fn unknown_version_fails_before_session() {
     let server = ready_server(RecordingSink::ready()).await;
     server
         .hub()
-        .insert(SessionReplica::new("sess-1", "tenant-a"));
+        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
     let (client_end, server_end) = tokio::io::duplex(16 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -198,7 +321,7 @@ async fn unknown_version_fails_before_session() {
         .reconnect(
             &bad,
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             None,
         )
@@ -217,7 +340,7 @@ async fn bearer_over_plaintext_is_rejected_and_audited() {
     let server = ready_server(sink.clone()).await;
     server
         .hub()
-        .insert(SessionReplica::new("sess-1", "tenant-a"));
+        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
     let (client_end, server_end) = tokio::io::duplex(16 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -231,7 +354,7 @@ async fn bearer_over_plaintext_is_rejected_and_audited() {
             RemoteAuthMethod::Bearer {
                 token: "CANARY_SECRET_VALUE".into(),
             },
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             None,
         )
@@ -243,7 +366,7 @@ async fn bearer_over_plaintext_is_rejected_and_audited() {
             .contains(&SecurityAuditCategory::AuthenticationFailure)
     );
     assert!(!sink.leak_canary("CANARY_SECRET_VALUE"));
-    assert!(!sink.leak_canary("sess-1"));
+    assert!(!sink.leak_canary(SESSION_ID));
     serve.abort();
 }
 
@@ -262,7 +385,7 @@ async fn unknown_locator_does_not_reveal_existence() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("missing-session", None, None),
+            locator(MISSING_SESSION_ID),
             "tenant-a",
             None,
         )
@@ -276,7 +399,7 @@ async fn unknown_locator_does_not_reveal_existence() {
         sink.categories()
             .contains(&SecurityAuditCategory::UnknownLocator)
     );
-    assert!(!sink.leak_canary("missing-session"));
+    assert!(!sink.leak_canary(MISSING_SESSION_ID));
     serve.abort();
 }
 
@@ -286,7 +409,7 @@ async fn second_writer_is_busy_without_confirming_session() {
     let server = Arc::new(ready_server(sink.clone()).await);
     server
         .hub()
-        .insert(SessionReplica::new("sess-1", "tenant-a"));
+        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
     let (first_client, first_server) = tokio::io::duplex(16 * 1024);
     let serve_first = tokio::spawn({
         let server = Arc::clone(&server);
@@ -301,7 +424,7 @@ async fn second_writer_is_busy_without_confirming_session() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             None,
         )
@@ -322,7 +445,7 @@ async fn second_writer_is_busy_without_confirming_session() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             None,
         )
@@ -341,7 +464,7 @@ async fn command_idempotency_replays_and_conflicts() {
     let server = ready_server(RecordingSink::ready()).await;
     server
         .hub()
-        .insert(SessionReplica::new("sess-1", "tenant-a"));
+        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
     let (client_end, server_end) = tokio::io::duplex(32 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -353,7 +476,7 @@ async fn command_idempotency_replays_and_conflicts() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             None,
         )
@@ -361,9 +484,10 @@ async fn command_idempotency_replays_and_conflicts() {
         .expect("open");
     let command = RemoteCommand::try_new(
         "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a11",
-        RemoteLocator::new("sess-1", None, None),
+        locator(SESSION_ID),
         "tenant-a",
-        RemoteCommandOp::Start,
+        0,
+        start_payload(),
     )
     .expect("command");
     let first = client.command(command.clone()).await.expect("first");
@@ -373,9 +497,10 @@ async fn command_idempotency_replays_and_conflicts() {
     assert!(replay.accepted());
     let conflict = RemoteCommand::try_new(
         "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a11",
-        RemoteLocator::new("sess-1", None, None),
+        locator(SESSION_ID),
         "tenant-a",
-        RemoteCommandOp::Cancel,
+        0,
+        cancel_payload(),
     )
     .expect("conflict");
     let err = client.command(conflict).await.expect_err("conflict");
@@ -387,11 +512,11 @@ async fn command_idempotency_replays_and_conflicts() {
 }
 
 #[tokio::test]
-async fn command_start_then_complete_accepts() {
+async fn command_start_then_cancel_accepts() {
     let server = ready_server(RecordingSink::ready()).await;
     server
         .hub()
-        .insert(SessionReplica::new("sess-1", "tenant-a"));
+        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
     let (client_end, server_end) = tokio::io::duplex(32 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -403,7 +528,7 @@ async fn command_start_then_complete_accepts() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             None,
         )
@@ -411,21 +536,23 @@ async fn command_start_then_complete_accepts() {
         .expect("open");
     let start = RemoteCommand::try_new(
         "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a21",
-        RemoteLocator::new("sess-1", None, None),
+        locator(SESSION_ID),
         "tenant-a",
-        RemoteCommandOp::Start,
+        0,
+        start_payload(),
     )
     .expect("start");
     let first = client.command(start).await.expect("start");
     assert!(first.accepted());
-    let complete = RemoteCommand::try_new(
+    let cancel = RemoteCommand::try_new(
         "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a22",
-        RemoteLocator::new("sess-1", None, None),
+        locator(SESSION_ID),
         "tenant-a",
-        RemoteCommandOp::Complete,
+        1,
+        cancel_payload(),
     )
-    .expect("complete");
-    let second = client.command(complete).await.expect("complete");
+    .expect("cancel");
+    let second = client.command(cancel).await.expect("cancel");
     assert!(second.accepted());
     serve.abort();
 }
@@ -435,7 +562,7 @@ async fn receipt_cap_fails_closed_on_new_command() {
     let server = ready_server(RecordingSink::ready()).await;
     server
         .hub()
-        .insert(SessionReplica::new("sess-1", "tenant-a").with_receipt_cap(1));
+        .insert(SessionReplica::new(SESSION_ID, "tenant-a").with_receipt_cap(1));
     let (client_end, server_end) = tokio::io::duplex(32 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -447,7 +574,7 @@ async fn receipt_cap_fails_closed_on_new_command() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             None,
         )
@@ -455,17 +582,19 @@ async fn receipt_cap_fails_closed_on_new_command() {
         .expect("open");
     let first = RemoteCommand::try_new(
         "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a31",
-        RemoteLocator::new("sess-1", None, None),
+        locator(SESSION_ID),
         "tenant-a",
-        RemoteCommandOp::Start,
+        0,
+        start_payload(),
     )
     .expect("first");
     client.command(first).await.expect("accepted");
     let second = RemoteCommand::try_new(
         "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a32",
-        RemoteLocator::new("sess-1", None, None),
+        locator(SESSION_ID),
         "tenant-a",
-        RemoteCommandOp::Complete,
+        1,
+        cancel_payload(),
     )
     .expect("second");
     let err = client.command(second).await.expect_err("cap");
@@ -484,7 +613,7 @@ async fn slow_client_disconnects_and_keeps_terminal() {
         bytes: 64,
         ack_deadline: Duration::from_millis(20),
     });
-    let mut replica = SessionReplica::new("sess-1", "tenant-a");
+    let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
     replica.append_durable(durable(1, "run_completed"));
     server.hub().insert(replica);
     let (client_end, server_end) = tokio::io::duplex(16 * 1024);
@@ -498,7 +627,7 @@ async fn slow_client_disconnects_and_keeps_terminal() {
         .reconnect(
             &offer(),
             RemoteAuthMethod::Loopback,
-            RemoteLocator::new("sess-1", None, None),
+            locator(SESSION_ID),
             "tenant-a",
             Some(0),
         )

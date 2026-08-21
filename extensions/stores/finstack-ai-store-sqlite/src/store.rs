@@ -464,6 +464,26 @@ impl WorkerCtx {
             let retained_outstanding = outstanding_count(&accelerated);
             let retained_tombstones = tombstone_count(&accelerated);
             let pruned_through = i64_from_u64(snapshot.sequence(), "snapshot_sequence")?;
+            let anchor_checksum = transaction
+                .query_row(
+                    "SELECT previous_checksum FROM records
+                     WHERE session_id = ?1 AND sequence = ?2",
+                    params![request.session_id.as_bytes().as_slice(), pruned_through],
+                    |row| row.get::<_, Option<Vec<u8>>>(0),
+                )
+                .map_err(map_sqlite_error)?;
+            transaction
+                .execute(
+                    "UPDATE sessions
+                     SET chain_anchor_sequence = ?1, chain_anchor_checksum = ?2
+                     WHERE session_id = ?3",
+                    params![
+                        pruned_through,
+                        anchor_checksum,
+                        request.session_id.as_bytes().as_slice(),
+                    ],
+                )
+                .map_err(map_sqlite_error)?;
             transaction
                 .execute(
                     "DELETE FROM records WHERE session_id = ?1 AND sequence < ?2",

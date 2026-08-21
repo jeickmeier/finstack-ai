@@ -13,6 +13,8 @@ CREATE TABLE sessions (
   session_id BLOB PRIMARY KEY,
   current_sequence INTEGER NOT NULL,
   head_checksum BLOB,
+  chain_anchor_sequence INTEGER NOT NULL DEFAULT 1,
+  chain_anchor_checksum BLOB,
   snapshot_sequence INTEGER,
   metadata BLOB NOT NULL
 );

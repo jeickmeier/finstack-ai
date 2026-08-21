@@ -11,17 +11,6 @@ Install from this repository until those registries publish.
 
 ## Quick start
 
-| Language | Guide | Offline starter |
-| --- | --- | --- |
-| Rust | [docs/site/rust.md](docs/site/rust.md) | `cargo run -p finstack-ai-native-examples --bin minimal --offline --locked` |
-| Python | [docs/site/python.md](docs/site/python.md) | `uv run --isolated --no-project --with-editable bindings/finstack-ai-python python examples/python-minimal/python-callback/main.py` |
-| JavaScript / WASM | [docs/site/wasm.md](docs/site/wasm.md) | `mise run build-wasm -- release` then [examples/browser-minimal](examples/browser-minimal/README.md) |
-
-Public guides: [docs/site/README.md](docs/site/README.md).
-Concept: [docs/site/concept.md](docs/site/concept.md).
-FAQ: [docs/site/faq.md](docs/site/faq.md).
-Troubleshooting: [docs/site/troubleshooting.md](docs/site/troubleshooting.md).
-
 ## Developer bootstrap
 
 This repository uses [mise](https://mise.jdx.dev/) for pinned tools and
@@ -56,14 +45,10 @@ Build it from the root with `uv build --package finstack-ai` or
 
 ## Workspace layout
 
-See [Technical Design §2](docs/planning/03-finstack-ai-technical-design.md)
-for the permanent repository shape. Core crates live under `crates/`,
+Core crates live under `crates/`,
 bindings under `bindings/`, trusted native leaves under `extensions/`,
 isolated WIT/Wasmtime packages under `plugins/`, and starters under
 `examples/`.
-
-Planning baseline: [docs/planning/README.md](docs/planning/README.md).
-Delivery records: [docs/implementation/README.md](docs/implementation/README.md).
 
 ## License and governance
 
@@ -73,6 +58,3 @@ Delivery records: [docs/implementation/README.md](docs/implementation/README.md)
 - Maintainers: [GOVERNANCE.md](GOVERNANCE.md)
 - Vulnerability reports: [SECURITY.md](SECURITY.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Architecture decisions: [docs/implementation/adr-register.md](docs/implementation/adr-register.md)
-- Public RFCs: [docs/rfcs/README.md](docs/rfcs/README.md)
-- Trust levels: [docs/site/security-trust-levels.md](docs/site/security-trust-levels.md)

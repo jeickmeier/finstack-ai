@@ -8,7 +8,10 @@ use serde::{Serialize, Serializer};
 
 use super::value::{CanonicalValue, sort_map};
 use crate::error::ProtocolError;
-use crate::{CANONICAL_ARRAY_MAX_ITEMS, CANONICAL_MAP_MAX_ENTRIES, CANONICAL_STRING_MAX_BYTES};
+use crate::{
+    CANONICAL_ARRAY_MAX_ITEMS, CANONICAL_MAP_MAX_ENTRIES, CANONICAL_NESTING_DEPTH,
+    CANONICAL_STRING_MAX_BYTES,
+};
 
 /// Serialize `value` into a validated canonical tree.
 ///
@@ -16,10 +19,27 @@ use crate::{CANONICAL_ARRAY_MAX_ITEMS, CANONICAL_MAP_MAX_ENTRIES, CANONICAL_STRI
 ///
 /// Returns limit or profile failures.
 pub fn to_canonical<T: Serialize + ?Sized>(value: &T) -> Result<CanonicalValue, ProtocolError> {
-    value.serialize(CanonicalSerializer)
+    value.serialize(CanonicalSerializer { depth: 0 })
 }
 
-struct CanonicalSerializer;
+#[derive(Clone, Copy)]
+struct CanonicalSerializer {
+    depth: usize,
+}
+
+impl CanonicalSerializer {
+    fn nested(self) -> Result<Self, ProtocolError> {
+        if self.depth >= CANONICAL_NESTING_DEPTH {
+            return Err(ProtocolError::limit(
+                "nesting_depth",
+                CANONICAL_NESTING_DEPTH,
+            ));
+        }
+        Ok(Self {
+            depth: self.depth + 1,
+        })
+    }
+}
 
 impl Serializer for CanonicalSerializer {
     type Ok = CanonicalValue;
@@ -159,15 +179,20 @@ impl Serializer for CanonicalSerializer {
         variant: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error> {
+        let nested = self.nested()?;
         Ok(CanonicalValue::Map(vec![(
             CanonicalValue::Text(variant.to_owned()),
-            value.serialize(CanonicalSerializer)?,
+            value.serialize(nested)?,
         )]))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         check_array_len(len)?;
-        Ok(SerializeVec { items: Vec::new() })
+        Ok(SerializeVec {
+            serializer: self.nested()?,
+            expected_len: len,
+            items: Vec::new(),
+        })
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
@@ -192,6 +217,8 @@ impl Serializer for CanonicalSerializer {
         check_array_len(Some(len))?;
         Ok(SerializeNamedVec {
             name: variant,
+            serializer: self.nested()?.nested()?,
+            expected_len: len,
             items: Vec::new(),
         })
     }
@@ -199,6 +226,8 @@ impl Serializer for CanonicalSerializer {
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         check_map_len(len)?;
         Ok(SerializeEntries {
+            serializer: self.nested()?,
+            expected_len: len,
             entries: Vec::new(),
             pending_key: None,
         })
@@ -222,6 +251,8 @@ impl Serializer for CanonicalSerializer {
         check_map_len(Some(len))?;
         Ok(SerializeNamedEntries {
             name: variant,
+            serializer: self.nested()?.nested()?,
+            expected_len: len,
             entries: Vec::new(),
         })
     }
@@ -248,6 +279,8 @@ fn check_map_len(len: Option<usize>) -> Result<(), ProtocolError> {
 }
 
 pub struct SerializeVec {
+    serializer: CanonicalSerializer,
+    expected_len: Option<usize>,
     items: Vec<CanonicalValue>,
 }
 
@@ -262,11 +295,12 @@ impl SerializeSeq for SerializeVec {
                 CANONICAL_ARRAY_MAX_ITEMS,
             ));
         }
-        self.items.push(value.serialize(CanonicalSerializer)?);
+        self.items.push(value.serialize(self.serializer)?);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
+        check_actual_len(self.expected_len, self.items.len())?;
         Ok(CanonicalValue::Array(self.items))
     }
 }
@@ -299,6 +333,8 @@ impl SerializeTupleStruct for SerializeVec {
 
 pub struct SerializeNamedVec {
     name: &'static str,
+    serializer: CanonicalSerializer,
+    expected_len: usize,
     items: Vec<CanonicalValue>,
 }
 
@@ -307,11 +343,18 @@ impl SerializeTupleVariant for SerializeNamedVec {
     type Error = ProtocolError;
 
     fn serialize_field<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
-        self.items.push(value.serialize(CanonicalSerializer)?);
+        if self.items.len() >= CANONICAL_ARRAY_MAX_ITEMS {
+            return Err(ProtocolError::limit(
+                "array_items",
+                CANONICAL_ARRAY_MAX_ITEMS,
+            ));
+        }
+        self.items.push(value.serialize(self.serializer)?);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
+        check_actual_len(Some(self.expected_len), self.items.len())?;
         Ok(CanonicalValue::Map(vec![(
             CanonicalValue::Text(self.name.to_owned()),
             CanonicalValue::Array(self.items),
@@ -320,6 +363,8 @@ impl SerializeTupleVariant for SerializeNamedVec {
 }
 
 pub struct SerializeEntries {
+    serializer: CanonicalSerializer,
+    expected_len: Option<usize>,
     entries: Vec<(CanonicalValue, CanonicalValue)>,
     pending_key: Option<CanonicalValue>,
 }
@@ -329,7 +374,10 @@ impl SerializeMap for SerializeEntries {
     type Error = ProtocolError;
 
     fn serialize_key<T: Serialize + ?Sized>(&mut self, key: &T) -> Result<(), Self::Error> {
-        self.pending_key = Some(key.serialize(CanonicalSerializer)?);
+        if self.pending_key.is_some() {
+            return Err(ProtocolError::codec("map key without value"));
+        }
+        self.pending_key = Some(key.serialize(self.serializer)?);
         Ok(())
     }
 
@@ -344,12 +392,15 @@ impl SerializeMap for SerializeEntries {
                 CANONICAL_MAP_MAX_ENTRIES,
             ));
         }
-        self.entries
-            .push((key, value.serialize(CanonicalSerializer)?));
+        self.entries.push((key, value.serialize(self.serializer)?));
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
+        if self.pending_key.is_some() {
+            return Err(ProtocolError::codec("map key without value"));
+        }
+        check_actual_len(self.expected_len, self.entries.len())?;
         Ok(CanonicalValue::Map(sort_map(self.entries)?))
     }
 }
@@ -373,6 +424,8 @@ impl SerializeStruct for SerializeEntries {
 
 pub struct SerializeNamedEntries {
     name: &'static str,
+    serializer: CanonicalSerializer,
+    expected_len: usize,
     entries: Vec<(CanonicalValue, CanonicalValue)>,
 }
 
@@ -385,17 +438,31 @@ impl SerializeStructVariant for SerializeNamedEntries {
         key: &'static str,
         value: &T,
     ) -> Result<(), Self::Error> {
+        if self.entries.len() >= CANONICAL_MAP_MAX_ENTRIES {
+            return Err(ProtocolError::limit(
+                "map_entries",
+                CANONICAL_MAP_MAX_ENTRIES,
+            ));
+        }
         self.entries.push((
             CanonicalValue::Text(key.to_owned()),
-            value.serialize(CanonicalSerializer)?,
+            value.serialize(self.serializer)?,
         ));
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
+        check_actual_len(Some(self.expected_len), self.entries.len())?;
         Ok(CanonicalValue::Map(vec![(
             CanonicalValue::Text(self.name.to_owned()),
             CanonicalValue::Map(sort_map(self.entries)?),
         )]))
     }
+}
+
+fn check_actual_len(expected: Option<usize>, actual: usize) -> Result<(), ProtocolError> {
+    if expected.is_some_and(|expected| expected != actual) {
+        return Err(ProtocolError::codec("collection length hint mismatch"));
+    }
+    Ok(())
 }

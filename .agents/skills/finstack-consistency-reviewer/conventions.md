@@ -97,4 +97,3 @@ Document any places where divergence from the dominant pattern is intentional:
 - `bindings/finstack-ai-wasm/js/generated/` is produced by `mise run build-wasm -- release`. Hand edits are never a consistency fix.
 
 ### Documentation
-- Planning docs under `docs/planning/` are the implementation contract and stay read-only during normal coding.

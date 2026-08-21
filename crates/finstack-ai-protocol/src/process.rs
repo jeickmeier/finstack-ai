@@ -57,8 +57,9 @@ mod tests {
         assert!(decode::<RemotePostAuth>(&body).is_err());
         assert!(decode::<RemotePostAuth>(&body).is_err());
         let env = encode_envelope(PayloadFamily::Process, 1, &hello).expect("env");
-        assert!(decode_envelope::<RemotePostAuth>(&env, PayloadFamily::Remote).is_err());
-        let decoded = decode_envelope::<ProcessPreAuth>(&env, PayloadFamily::Process).expect("ok");
+        assert!(decode_envelope::<RemotePostAuth>(&env, PayloadFamily::Remote, 1).is_err());
+        let decoded =
+            decode_envelope::<ProcessPreAuth>(&env, PayloadFamily::Process, 1).expect("ok");
         assert_eq!(decoded.body(), &hello);
     }
 
@@ -66,7 +67,14 @@ mod tests {
     fn remote_open_session_is_not_a_process_hello() {
         let open = RemotePostAuth::OpenSession {
             last_known_durable_sequence: Some(3),
-            locator: crate::remote::RemoteLocator::new("sess", None, None),
+            locator: crate::remote::RemoteLocator::try_new(
+                "01234567-89ab-7cde-89ab-0123456789ab"
+                    .parse()
+                    .expect("session id"),
+                None,
+                None,
+            )
+            .expect("locator"),
             tenant_scope: "tenant-a".into(),
         };
         let body = encode(&open).expect("body");

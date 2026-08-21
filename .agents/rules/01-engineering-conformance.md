@@ -12,10 +12,6 @@ Language-specific coding and docstring rules live in `03-rust-coding.md`, `04-py
 
 ## Establish the coding slice
 
-- Select one primary logical `PR-NNN` from `docs/planning/04-finstack-ai-implementation-plan.md` and read its complete entry.
-- Read the referenced requirements, ADRs, design sections, security controls, acceptance evidence, and exclusions before editing.
-- Respect prior gates, phase entrances, dependencies, and explicitly permitted parallel work. The active phase produces evidence for its own exit gate; that gate is not a prerequisite for work within the phase.
-- Do not combine unrelated logical PRs or implement deferred scope.
 - Prefer the smallest implementation that completes the selected behavior. New abstractions require a current requirement and a concrete use; placeholder frameworks and unused extension seams are prohibited.
 
 ## Execute an explicitly authorized PR range
@@ -80,7 +76,5 @@ New kernel, runtime, or SDK behavior goes in a sibling module when the natural h
 Stop the affected implementation when it lacks an eligible logical PR, requires a program gate not recorded `Passed`, conflicts with an authoritative document, or depends on an unresolved required decision. Work expressly permitted to begin in parallel by the Implementation Plan may proceed before a later gate only when that PR's own dependencies and stated entrance criteria are evidenced. Before coding, check Implementation Plan section 6.3 ADR triggers and Security and Threat Model section 18 review triggers. Reviewer unavailability blocks review or merge, not coding, unless pre-implementation approval is explicit or that reviewer must resolve an open decision.
 
 In range mode, a hard stop suspends the current PR and every remaining PR; it does not authorize skipping the blocked member. A gate-closing PR may reach reviewable implementation and phase-exit evidence, but range authorization is not a gate decision and the range may cross the gate only after a separate named passing decision exists. Resume stopped work only after the authoritative decision is accepted, affected documents are reconciled, the active slice is reread, and affected validation is rerun.
-
-`docs/planning/` is read-only during normal coding. Do not edit planning documents to match implementation preference, paper over conflicts, or “fix” requirements in place. If implementation exposes a genuine conflict or ADR trigger, stop the affected work and use change control. Implementation registers under `docs/implementation/` remain the place for delivery evidence updates.
 
 An ADR trigger stops the design-changing work until the decision and primary-document reconciliation are accepted. A governed compatibility change also requires its migration or compatibility plan. A security review trigger does not itself require an ADR or stop implementation when the design is resolved, but it blocks merge until the applicable threat-model, control, fixture, test, and security-review updates are complete; add an ADR only when a separate ADR trigger applies.

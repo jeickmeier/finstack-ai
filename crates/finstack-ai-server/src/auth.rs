@@ -1,7 +1,7 @@
 //! Application-supplied authentication and transport restrictions.
 
 use finstack_ai_kernel::Digest;
-use finstack_ai_protocol::RemoteAuthMethod;
+use finstack_ai_protocol::{PROTOCOL_VERSION_V1, RemoteAuthMethod};
 
 use crate::ServerError;
 
@@ -29,6 +29,7 @@ impl TransportKind {
 pub struct AuthContext {
     tenant_scope: String,
     principal: String,
+    protocol_version: u16,
 }
 
 impl AuthContext {
@@ -38,6 +39,7 @@ impl AuthContext {
         Self {
             tenant_scope: tenant_scope.into(),
             principal: principal.into(),
+            protocol_version: PROTOCOL_VERSION_V1,
         }
     }
 
@@ -51,6 +53,17 @@ impl AuthContext {
     #[must_use]
     pub fn principal(&self) -> &str {
         &self.principal
+    }
+
+    /// Negotiated envelope version for this connection.
+    #[must_use]
+    pub const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(crate) const fn with_protocol_version(mut self, protocol_version: u16) -> Self {
+        self.protocol_version = protocol_version;
+        self
     }
 }
 

@@ -3,7 +3,7 @@
 use finstack_ai_kernel::{
     APPEND_BATCH_MAX_RECORDS, DOMAIN_RECORD_ENVELOPE, DOMAIN_RECORD_PAYLOAD, Digest,
     RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION, RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION, RecordBody,
-    RecordDraft, RecordEnvelope, RecordId, Timestamp,
+    RecordDraft, RecordEnvelope, RecordId, SessionId, Timestamp,
 };
 use serde::Serialize;
 
@@ -79,6 +79,16 @@ pub fn commit_record(
     previous_checksum: Option<Digest>,
     committed_at: Option<Timestamp>,
 ) -> Result<RecordEnvelope, ProtocolError> {
+    commit_record_with_len(draft, sequence, previous_checksum, committed_at)
+        .map(|(envelope, _)| envelope)
+}
+
+fn commit_record_with_len(
+    draft: &RecordDraft,
+    sequence: u64,
+    previous_checksum: Option<Digest>,
+    committed_at: Option<Timestamp>,
+) -> Result<(RecordEnvelope, usize), ProtocolError> {
     let payload_digest = payload_digest(draft.body())?;
     let checksum = checksum_of(&EnvelopeChecksumView {
         format_version: draft.format_version(),
@@ -94,7 +104,7 @@ pub fn commit_record(
         derived_event_ids: draft.derived_event_ids(),
         body: draft.body(),
     })?;
-    RecordEnvelope::try_new(
+    let envelope = RecordEnvelope::try_new(
         draft.format_version(),
         draft.kind_version(),
         draft.record_id(),
@@ -110,7 +120,9 @@ pub fn commit_record(
         draft.derived_event_ids().to_vec(),
         draft.body().clone(),
     )
-    .map_err(|error| ProtocolError::codec(error.to_string()))
+    .map_err(|error| ProtocolError::codec(error.to_string()))?;
+    let canonical_len = encode(&envelope)?.len();
+    Ok((envelope, canonical_len))
 }
 
 /// Commit a contiguous sequence of drafts, chaining `previous_checksum`.
@@ -131,17 +143,24 @@ pub fn commit_records(
         ));
     }
     let mut records = Vec::with_capacity(drafts.len());
+    let mut canonical_bytes = 0_usize;
     for (offset, draft) in drafts.iter().enumerate() {
         let offset =
             u64::try_from(offset).map_err(|_| ProtocolError::integrity("sequence_overflow"))?;
         let sequence = first_sequence
             .checked_add(offset)
             .ok_or_else(|| ProtocolError::integrity("sequence_exhausted"))?;
-        let envelope = commit_record(draft, sequence, previous_checksum, committed_at)?;
+        let (envelope, canonical_len) =
+            commit_record_with_len(draft, sequence, previous_checksum, committed_at)?;
+        canonical_bytes = canonical_bytes
+            .checked_add(canonical_len)
+            .ok_or_else(|| ProtocolError::limit("append_batch", APPEND_BATCH_MAX_BYTES))?;
+        if canonical_bytes > APPEND_BATCH_MAX_BYTES {
+            return Err(ProtocolError::limit("append_batch", APPEND_BATCH_MAX_BYTES));
+        }
         previous_checksum = Some(envelope.checksum());
         records.push(envelope);
     }
-    let _ = batch_canonical_len(&records)?;
     Ok(records)
 }
 
@@ -171,67 +190,87 @@ pub fn verify_envelope(envelope: &RecordEnvelope) -> Result<(), ProtocolError> {
 ///
 /// Returns integrity failures before any caller `apply`.
 pub fn verify_chain(records: &[RecordEnvelope]) -> Result<Option<Digest>, ProtocolError> {
-    verify_chain_from(records, None, None)
+    let Some(first) = records.first() else {
+        return Ok(None);
+    };
+    verify_chain_from(records, ChainAnchor::root(first.session_id()))
 }
 
-/// Verify a contiguous record chain that may start after a deleted prefix.
+/// Trusted starting point for verification of a complete or truncated chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChainAnchor {
+    /// Session whose records may appear in the chain.
+    pub session_id: SessionId,
+    /// Exact sequence expected on the first record.
+    pub next_sequence: u64,
+    /// Trusted checksum the first record must cite.
+    pub previous_checksum: Option<Digest>,
+}
+
+impl ChainAnchor {
+    /// Anchor an unpruned journal at its canonical root.
+    #[must_use]
+    pub const fn root(session_id: SessionId) -> Self {
+        Self {
+            session_id,
+            next_sequence: 1,
+            previous_checksum: None,
+        }
+    }
+
+    /// Construct a trusted anchor for a chain whose prefix is unavailable.
+    ///
+    /// # Errors
+    ///
+    /// Sequence zero, a checksum at sequence one, or a missing checksum after
+    /// sequence one are rejected as invalid anchors.
+    pub fn try_new(
+        session_id: SessionId,
+        next_sequence: u64,
+        previous_checksum: Option<Digest>,
+    ) -> Result<Self, ProtocolError> {
+        if next_sequence == 0 || (next_sequence == 1) != previous_checksum.is_none() {
+            return Err(ProtocolError::integrity("invalid_chain_anchor"));
+        }
+        Ok(Self {
+            session_id,
+            next_sequence,
+            previous_checksum,
+        })
+    }
+}
+
+/// Verify a contiguous record chain from a trusted root or prune checkpoint.
 ///
-/// `previous` is the checksum the first record must cite. `expected_sequence`
-/// is that record's sequence when the chain does not start at 1. An empty
-/// slice returns `previous`.
+/// An empty slice returns the trusted previous checksum.
 ///
 /// # Errors
 ///
 /// Returns integrity failures before any caller `apply`.
 pub fn verify_chain_from(
     records: &[RecordEnvelope],
-    mut previous: Option<Digest>,
-    mut expected_sequence: Option<u64>,
+    anchor: ChainAnchor,
 ) -> Result<Option<Digest>, ProtocolError> {
+    let mut previous = anchor.previous_checksum;
+    let mut expected_sequence = anchor.next_sequence;
     for record in records {
         verify_envelope(record)?;
+        if record.session_id() != anchor.session_id {
+            return Err(ProtocolError::integrity("session_chain_mismatch"));
+        }
         if record.previous_checksum() != previous {
             return Err(ProtocolError::integrity("checksum_chain_break"));
         }
-        if let Some(expected) = expected_sequence
-            && record.sequence() != expected
-        {
+        if record.sequence() != expected_sequence {
             return Err(ProtocolError::integrity("sequence_gap"));
         }
-        expected_sequence = Some(
-            record
-                .sequence()
-                .checked_add(1)
-                .ok_or_else(|| ProtocolError::integrity("sequence_exhausted"))?,
-        );
+        expected_sequence = record
+            .sequence()
+            .checked_add(1)
+            .ok_or_else(|| ProtocolError::integrity("sequence_exhausted"))?;
         previous = Some(record.checksum());
     }
     Ok(previous)
-}
-
-/// Checked sum of canonical envelope lengths (TDD §6.5).
-///
-/// # Errors
-///
-/// Returns a limit failure when the record count or byte sum exceeds v1 ceilings.
-fn batch_canonical_len(envelopes: &[RecordEnvelope]) -> Result<usize, ProtocolError> {
-    if envelopes.len() > APPEND_BATCH_MAX_RECORDS {
-        return Err(ProtocolError::limit(
-            "batch_records",
-            APPEND_BATCH_MAX_RECORDS,
-        ));
-    }
-    let mut total = 0_usize;
-    for envelope in envelopes {
-        let len = encode(envelope)?.len();
-        total = total
-            .checked_add(len)
-            .ok_or_else(|| ProtocolError::limit("append_batch", APPEND_BATCH_MAX_BYTES))?;
-        if total > APPEND_BATCH_MAX_BYTES {
-            return Err(ProtocolError::limit("append_batch", APPEND_BATCH_MAX_BYTES));
-        }
-    }
-    Ok(total)
 }
 
 fn checksum_of(view: &EnvelopeChecksumView<'_>) -> Result<Digest, ProtocolError> {

@@ -49,7 +49,7 @@ use finstack_ai_kernel::{
     AppendBatchId, CommittedBatch, Digest, EventId, Id, IdTag, Metadata, RecordBody,
     RecordEnvelope, SessionId, Timestamp,
 };
-use finstack_ai_protocol::decode;
+use finstack_ai_protocol::{ChainAnchor, decode};
 use finstack_ai_runtime::{LoadWindow, LoadedSession, OpaqueSnapshot, StoreError};
 pub(crate) use finstack_ai_store_common::VerifiedHead;
 use finstack_ai_store_common::{
@@ -63,7 +63,8 @@ use crate::pool::PooledClient;
 
 /// Read the session row.
 pub(crate) const SELECT_SESSION_ROW: &str = "SELECT current_sequence, head_checksum, \
-     snapshot_sequence, metadata FROM sessions WHERE session_id = $1";
+     snapshot_sequence, metadata, chain_anchor_sequence, chain_anchor_checksum \
+     FROM sessions WHERE session_id = $1";
 
 /// Read every record of a session at or after a sequence, with its batch id.
 const SELECT_RECORDS_FROM: &str = concat!(
@@ -161,6 +162,10 @@ pub(crate) struct SessionRow {
     /// [`crate::snapshot::scan`], which is the only reader that needs the
     /// distinction.
     pub(crate) snapshot_sequence: Option<u64>,
+    /// Next retained sequence anchored by trusted prune metadata.
+    pub(crate) chain_anchor_sequence: u64,
+    /// Trusted checksum immediately before `chain_anchor_sequence`.
+    pub(crate) chain_anchor_checksum: Option<Digest>,
     /// Session metadata. Never grants authority.
     metadata: Metadata,
 }
@@ -316,6 +321,12 @@ async fn load_session(
     let head_checksum = {
         let records = envelopes(&stored);
         verify_head_against_cache(
+            ChainAnchor::try_new(
+                session_id,
+                session.chain_anchor_sequence,
+                session.chain_anchor_checksum,
+            )
+            .map_err(protocol_error)?,
             &records,
             session.current_sequence,
             session.head_checksum,
@@ -454,6 +465,7 @@ async fn loaded_tail(
     {
         let records = envelopes(&stored);
         verify_tail_records(
+            session_id,
             &records,
             start,
             prior_checksum,
@@ -574,6 +586,7 @@ pub(crate) async fn load_session_row(
     let head_checksum: Option<Vec<u8>> = row.get(1);
     let snapshot_sequence: Option<i64> = row.get(2);
     let metadata: Vec<u8> = row.get(3);
+    let chain_anchor_checksum: Option<Vec<u8>> = row.get(5);
     Ok(Some(SessionRow {
         current_sequence: u64_from_i64(row.get(0), "current_sequence")?,
         head_checksum: head_checksum
@@ -582,6 +595,11 @@ pub(crate) async fn load_session_row(
             .transpose()?,
         snapshot_sequence: snapshot_sequence
             .map(|value| u64_from_i64(value, "snapshot_sequence"))
+            .transpose()?,
+        chain_anchor_sequence: u64_from_i64(row.get(4), "chain_anchor_sequence")?,
+        chain_anchor_checksum: chain_anchor_checksum
+            .as_deref()
+            .map(digest_from_bytes)
             .transpose()?,
         metadata: Metadata::parse(metadata).map_err(|_| StoreError::Integrity {
             reason_code: "postgres_metadata",

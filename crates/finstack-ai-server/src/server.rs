@@ -141,7 +141,7 @@ impl Server {
                 let bind = addr.to_string();
                 let listener = TcpListener::bind(&bind).await?;
                 let (stream, _) = listener.accept().await?;
-                self.serve(stream, TransportKind::LoopbackPlaintext).await
+                Box::pin(self.serve(stream, TransportKind::LoopbackPlaintext)).await
             }
             ListenAddr::Tcp {
                 addr,
@@ -151,14 +151,14 @@ impl Server {
                 let (stream, _) = listener.accept().await?;
                 let connector = tokio_rustls::TlsAcceptor::from(Arc::clone(tls));
                 let stream = connector.accept(stream).await?;
-                self.serve(stream, TransportKind::Tls).await
+                Box::pin(self.serve(stream, TransportKind::Tls)).await
             }
             #[cfg(unix)]
             ListenAddr::Unix { path } => {
                 let _ = std::fs::remove_file(path);
                 let listener = UnixListener::bind(path)?;
                 let (stream, _) = listener.accept().await?;
-                self.serve(stream, TransportKind::Unix).await
+                Box::pin(self.serve(stream, TransportKind::Unix)).await
             }
             #[cfg(not(unix))]
             ListenAddr::Unix { .. } => Err(ServerError::ListenInvalid),

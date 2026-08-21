@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 
 use crate::error::ProtocolError;
 
+pub(crate) use de::from_canonical;
 pub use diagnostic::{from_diagnostic_json, to_diagnostic_json, to_diagnostic_jsonl};
 pub use value::{CanonicalValue, decode_value, encode_value};
 
@@ -117,6 +118,86 @@ mod tests {
         assert_eq!(neg_zero, [0xf9, 0x80, 0x00]);
         let decoded: f64 = decode(&neg_zero).expect("decode -0");
         assert_eq!(decoded.to_bits(), (-0.0_f64).to_bits());
+    }
+
+    #[test]
+    fn every_finite_binary16_value_round_trips_at_binary16_width() {
+        for bits in 0_u16..=u16::MAX {
+            let half = half::f16::from_bits(bits);
+            let [high, low] = bits.to_be_bytes();
+            let bytes = [0xf9, high, low];
+            if half.is_finite() {
+                let decoded: f64 = decode(&bytes).expect("finite binary16");
+                assert_eq!(decoded.to_bits(), half.to_f64().to_bits());
+                assert_eq!(encode(&decoded).expect("re-encode"), bytes);
+            } else {
+                assert_eq!(
+                    decode::<f64>(&bytes)
+                        .expect_err("non-finite binary16")
+                        .code(),
+                    "non_finite_float"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn non_minimal_integer_length_and_float_encodings_are_rejected() {
+        for bytes in [
+            &[0x18, 0x17][..],
+            &[0x19, 0x00, 0xff],
+            &[0x1a, 0x00, 0x00, 0xff, 0xff],
+            &[0x1b, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff],
+            &[0x58, 0x00],
+        ] {
+            assert_eq!(
+                decode_value(bytes).expect_err("non-minimal width").code(),
+                "non_minimal_integer_or_length"
+            );
+        }
+
+        assert_eq!(
+            decode_value(&[0xfa, 0x3f, 0x80, 0x00, 0x00])
+                .expect_err("f32 value is exactly binary16")
+                .code(),
+            "non_minimal_float"
+        );
+        assert_eq!(
+            decode_value(&[0xfb, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+                .expect_err("f64 value is exactly binary16")
+                .code(),
+            "non_minimal_float"
+        );
+    }
+
+    #[test]
+    fn encode_value_enforces_nesting_and_envelope_limits() {
+        let mut value = CanonicalValue::Null;
+        for _ in 0..CANONICAL_NESTING_DEPTH {
+            value = CanonicalValue::Array(vec![value]);
+        }
+        encode_value(&value).expect("exact depth");
+        let over = CanonicalValue::Array(vec![value]);
+        assert!(matches!(
+            encode_value(&over),
+            Err(ProtocolError::LimitExceeded {
+                resource: "nesting_depth",
+                limit: CANONICAL_NESTING_DEPTH
+            })
+        ));
+
+        let oversized = CanonicalValue::Array(
+            (0..CANONICAL_ARRAY_MAX_ITEMS)
+                .map(|_| CanonicalValue::Bytes(vec![0; 4096]))
+                .collect(),
+        );
+        assert!(matches!(
+            encode_value(&oversized),
+            Err(ProtocolError::LimitExceeded {
+                resource: "canonical_envelope",
+                limit: CANONICAL_ENVELOPE_MAX_BYTES
+            })
+        ));
     }
 
     #[test]

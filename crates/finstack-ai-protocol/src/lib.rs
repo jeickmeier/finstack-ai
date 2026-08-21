@@ -44,13 +44,14 @@ pub use cbor::{
 };
 pub use error::ProtocolError;
 pub use journal::{
-    JournalKnownAnswer, commit_record, commit_records, envelope_checksum, journal_known_answer,
-    payload_digest, verify_chain, verify_chain_from, verify_envelope,
+    ChainAnchor, JournalKnownAnswer, commit_record, commit_records, envelope_checksum,
+    journal_known_answer, payload_digest, verify_chain, verify_chain_from, verify_envelope,
 };
 pub use process::ProcessPreAuth;
 pub use remote::{
-    RemoteAuthMethod, RemoteCommand, RemoteCommandOp, RemoteCommandResult, RemoteEventView,
-    RemoteLocator, RemotePostAuth, RemotePreAuth, RemoteSnapshot,
+    RemoteAgentRef, RemoteAuthMethod, RemoteCommand, RemoteCommandId, RemoteCommandPayload,
+    RemoteCommandResult, RemoteDurableStep, RemoteEventView, RemoteLocator, RemotePostAuth,
+    RemotePreAuth, RemoteSnapshot, RemoteStartRequest,
 };
 pub use snapshot::{
     DecodedSnapshot, SNAPSHOT_ENVELOPE_FORMAT_VERSION, decode_opaque_snapshot, decode_snapshot,

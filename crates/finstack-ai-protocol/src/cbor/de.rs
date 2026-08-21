@@ -43,7 +43,9 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
             }
             CanonicalValue::Bytes(bytes) => visitor.visit_byte_buf(bytes),
             CanonicalValue::Text(text) => visitor.visit_string(text),
-            CanonicalValue::Array(items) => visitor.visit_seq(SeqDeserializer { items, index: 0 }),
+            CanonicalValue::Array(items) => visitor.visit_seq(SeqDeserializer {
+                items: items.into_iter(),
+            }),
             CanonicalValue::Map(entries) => visitor.visit_map(MapDeserializer {
                 entries: entries.into_iter(),
                 value: None,
@@ -208,8 +210,7 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 }
 
 struct SeqDeserializer {
-    items: Vec<CanonicalValue>,
-    index: usize,
+    items: std::vec::IntoIter<CanonicalValue>,
 }
 
 impl<'de> SeqAccess<'de> for SeqDeserializer {
@@ -219,12 +220,10 @@ impl<'de> SeqAccess<'de> for SeqDeserializer {
         &mut self,
         seed: T,
     ) -> Result<Option<T::Value>, Self::Error> {
-        if self.index >= self.items.len() {
-            return Ok(None);
-        }
-        let value = self.items[self.index].clone();
-        self.index += 1;
-        seed.deserialize(ValueDeserializer { value }).map(Some)
+        self.items
+            .next()
+            .map(|value| seed.deserialize(ValueDeserializer { value }))
+            .transpose()
     }
 }
 

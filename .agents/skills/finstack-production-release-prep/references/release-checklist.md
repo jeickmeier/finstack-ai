@@ -19,7 +19,6 @@ Use this as the repo-specific release checklist.
 
 ## Examples
 
-- Quickstarts: `uv run --no-project python scripts/docs/quickstarts.py`
 - Rust examples: use repo-specific example tasks if present in `mise.toml`
 
 ## Release Notes

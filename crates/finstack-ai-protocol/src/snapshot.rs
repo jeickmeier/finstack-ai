@@ -4,7 +4,7 @@ use finstack_ai_kernel::{Digest, KernelState, RawJson, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ProtocolError;
-use crate::{decode, encode};
+use crate::{CanonicalValue, decode_value, encode};
 
 /// Envelope format version accepted by this crate.
 pub const SNAPSHOT_ENVELOPE_FORMAT_VERSION: u32 = 2;
@@ -28,15 +28,38 @@ pub struct DecodedSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SnapshotEnvelope {
+struct SnapshotEnvelopeV1 {
     format_version: u32,
     sequence: u64,
     head_checksum: Digest,
     state_hash: Digest,
     pending_timer_scheduled_at: Option<Timestamp>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state: KernelState,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotEnvelopeV2 {
+    format_version: u32,
+    sequence: u64,
+    head_checksum: Digest,
+    state_hash: Digest,
+    pending_timer_scheduled_at: Option<Timestamp>,
+    #[serde(default)]
     last_model_continuation: Option<RawJson>,
     state: KernelState,
+}
+
+#[derive(Serialize)]
+struct SnapshotEnvelopeV2Ref<'a> {
+    format_version: u32,
+    sequence: u64,
+    head_checksum: Digest,
+    state_hash: Digest,
+    pending_timer_scheduled_at: Option<Timestamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_model_continuation: Option<&'a RawJson>,
+    state: &'a KernelState,
 }
 
 /// Encode one disposable snapshot envelope as canonical CBOR.
@@ -49,7 +72,7 @@ pub fn encode_snapshot(
     sequence: u64,
     head_checksum: Digest,
     pending_timer_scheduled_at: Option<Timestamp>,
-    last_model_continuation: Option<RawJson>,
+    last_model_continuation: Option<&RawJson>,
 ) -> Result<(Vec<u8>, Digest), ProtocolError> {
     if sequence != state.last_applied_sequence {
         return Err(ProtocolError::integrity("snapshot_sequence_mismatch"));
@@ -57,14 +80,14 @@ pub fn encode_snapshot(
     let state_hash = state
         .state_hash()
         .map_err(|error| ProtocolError::codec(error.to_string()))?;
-    let bytes = encode(&SnapshotEnvelope {
+    let bytes = encode(&SnapshotEnvelopeV2Ref {
         format_version: SNAPSHOT_ENVELOPE_FORMAT_VERSION,
         sequence,
         head_checksum,
         state_hash,
         pending_timer_scheduled_at,
         last_model_continuation,
-        state: state.clone(),
+        state,
     })?;
     let digest = Digest::snapshot_state(&bytes);
     Ok((bytes, digest))
@@ -76,12 +99,26 @@ pub fn encode_snapshot(
 ///
 /// Returns codec, limit, version, digest, or state-hash failures.
 pub fn decode_snapshot(bytes: &[u8]) -> Result<DecodedSnapshot, ProtocolError> {
-    let envelope: SnapshotEnvelope = decode(bytes)?;
-    if !matches!(
-        envelope.format_version,
-        1 | SNAPSHOT_ENVELOPE_FORMAT_VERSION
-    ) {
-        return Err(ProtocolError::integrity("snapshot_format_unsupported"));
+    let value = decode_value(bytes)?;
+    let format_version = snapshot_format_version(&value)?;
+    let envelope = match format_version {
+        1 => {
+            let v1: SnapshotEnvelopeV1 = crate::cbor::from_canonical(value)?;
+            SnapshotEnvelopeV2 {
+                format_version: v1.format_version,
+                sequence: v1.sequence,
+                head_checksum: v1.head_checksum,
+                state_hash: v1.state_hash,
+                pending_timer_scheduled_at: v1.pending_timer_scheduled_at,
+                last_model_continuation: None,
+                state: v1.state,
+            }
+        }
+        SNAPSHOT_ENVELOPE_FORMAT_VERSION => crate::cbor::from_canonical(value)?,
+        _ => return Err(ProtocolError::integrity("snapshot_format_unsupported")),
+    };
+    if envelope.format_version != format_version {
+        return Err(ProtocolError::integrity("snapshot_format_mismatch"));
     }
     if envelope.sequence != envelope.state.last_applied_sequence {
         return Err(ProtocolError::integrity("snapshot_sequence_mismatch"));
@@ -101,6 +138,23 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<DecodedSnapshot, ProtocolError> {
         last_model_continuation: envelope.last_model_continuation,
         state: envelope.state,
     })
+}
+
+fn snapshot_format_version(value: &CanonicalValue) -> Result<u32, ProtocolError> {
+    let CanonicalValue::Map(entries) = value else {
+        return Err(ProtocolError::codec("snapshot envelope must be a map"));
+    };
+    let version = entries.iter().find_map(|(key, value)| {
+        (*key == CanonicalValue::Text("format_version".into())).then_some(value)
+    });
+    match version {
+        Some(CanonicalValue::Unsigned(version)) => u32::try_from(*version)
+            .map_err(|_| ProtocolError::integrity("snapshot_format_unsupported")),
+        Some(_) => Err(ProtocolError::codec(
+            "snapshot format_version must be unsigned",
+        )),
+        None => Err(ProtocolError::codec("snapshot format_version missing")),
+    }
 }
 
 /// Decode opaque snapshot cache bytes and verify the stored digest and sequence.
@@ -125,7 +179,8 @@ pub fn decode_opaque_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_kernel::KernelState;
+    use finstack_ai_kernel::{Digest, KernelState, RawJson, Timestamp};
+    use serde::Serialize;
 
     use super::{
         SNAPSHOT_ENVELOPE_FORMAT_VERSION, decode_opaque_snapshot, decode_snapshot, encode_snapshot,
@@ -148,6 +203,63 @@ mod tests {
     }
 
     #[test]
+    fn borrowed_v2_encoder_preserves_the_owned_v2_wire_bytes() {
+        #[derive(Serialize)]
+        struct OwnedV2 {
+            format_version: u32,
+            sequence: u64,
+            head_checksum: Digest,
+            state_hash: Digest,
+            pending_timer_scheduled_at: Option<Timestamp>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            last_model_continuation: Option<RawJson>,
+            state: KernelState,
+        }
+
+        let state = KernelState::default();
+        let head_checksum = Digest::raw_json(b"head");
+        let state_hash = state.state_hash().expect("hash");
+        let expected = crate::encode(&OwnedV2 {
+            format_version: SNAPSHOT_ENVELOPE_FORMAT_VERSION,
+            sequence: 0,
+            head_checksum,
+            state_hash,
+            pending_timer_scheduled_at: None,
+            last_model_continuation: None,
+            state: state.clone(),
+        })
+        .expect("owned v2");
+        let actual = encode_snapshot(&state, 0, head_checksum, None, None)
+            .expect("borrowed v2")
+            .0;
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn v1_rejects_v2_only_continuation_field() {
+        let state = KernelState::default();
+        let checksum = Digest::raw_json(b"head");
+        let v1 = super::SnapshotEnvelopeV1 {
+            format_version: 1,
+            sequence: 0,
+            head_checksum: checksum,
+            state_hash: state.state_hash().expect("hash"),
+            pending_timer_scheduled_at: None,
+            state,
+        };
+        let mut value = crate::decode_value(&crate::encode(&v1).expect("v1")).expect("tree");
+        let crate::CanonicalValue::Map(entries) = &mut value else {
+            panic!("map");
+        };
+        entries.push((
+            crate::CanonicalValue::Text("last_model_continuation".into()),
+            crate::CanonicalValue::Null,
+        ));
+        let bytes = crate::encode_value(&value).expect("canonical tamper");
+        assert!(decode_snapshot(&bytes).is_err());
+    }
+
+    #[test]
     fn model_continuation_sidecar_round_trips() {
         let state = KernelState::default();
         let checksum = finstack_ai_kernel::Digest::raw_json(b"head");
@@ -156,7 +268,7 @@ mod tests {
         )
         .expect("continuation");
         let (bytes, digest) =
-            encode_snapshot(&state, 0, checksum, None, Some(continuation.clone())).expect("encode");
+            encode_snapshot(&state, 0, checksum, None, Some(&continuation)).expect("encode");
         let decoded = decode_opaque_snapshot(0, digest, &bytes).expect("decode");
         assert_eq!(decoded.last_model_continuation, Some(continuation));
     }

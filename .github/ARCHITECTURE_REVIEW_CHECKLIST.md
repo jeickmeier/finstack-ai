@@ -1,8 +1,6 @@
 # Architecture review checklist
 
-Use this checklist with the pull request template. A change is consistent with the
-[Architecture Specification](../docs/planning/02-finstack-ai-architecture-specification.md)
-only when the following questions are answered satisfactorily.
+Use this checklist with the pull request template. 
 
 Source: Architecture Specification §27.
 

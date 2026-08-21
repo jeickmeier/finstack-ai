@@ -1,7 +1,7 @@
 //! Tail-window and full-journal chain verification shared by all backends.
 
-use finstack_ai_kernel::{AppendBatchId, CommittedBatch, Digest, RecordEnvelope};
-use finstack_ai_protocol::{verify_chain, verify_chain_from};
+use finstack_ai_kernel::{AppendBatchId, CommittedBatch, Digest, RecordEnvelope, SessionId};
+use finstack_ai_protocol::{ChainAnchor, verify_chain_from};
 use finstack_ai_runtime::StoreError;
 
 use crate::error::protocol_error;
@@ -118,6 +118,7 @@ pub fn check_batch_alignment(
 /// `codes.checksum` for a broken prior link, and `head_checksum_mismatch`
 /// when the verified chain does not land on `stored_head`.
 pub fn verify_tail_records(
+    session_id: SessionId,
     records: &[RecordEnvelope],
     start: u64,
     prior_checksum: Digest,
@@ -153,8 +154,9 @@ pub fn verify_tail_records(
             reason_code: codes.checksum,
         });
     }
-    let head =
-        verify_chain_from(records, Some(prior_checksum), Some(start)).map_err(protocol_error)?;
+    let anchor =
+        ChainAnchor::try_new(session_id, start, Some(prior_checksum)).map_err(protocol_error)?;
+    let head = verify_chain_from(records, anchor).map_err(protocol_error)?;
     if head != stored_head {
         return Err(StoreError::Integrity {
             reason_code: "head_checksum_mismatch",
@@ -170,15 +172,14 @@ pub fn verify_tail_records(
 /// Returns [`StoreError::Integrity`] when the chain is broken or the verified
 /// head differs from `stored_head` (`head_checksum_mismatch`).
 pub fn verify_full_head(
+    anchor: ChainAnchor,
     records: &[RecordEnvelope],
     stored_head: Option<Digest>,
 ) -> Result<Option<Digest>, StoreError> {
-    let head = match records.first() {
-        Some(first) if first.sequence() > 1 => {
-            verify_chain_from(records, first.previous_checksum(), Some(first.sequence()))
-                .map_err(protocol_error)?
-        }
-        _ => verify_chain(records).map_err(protocol_error)?,
+    let head = if records.is_empty() {
+        anchor.previous_checksum
+    } else {
+        verify_chain_from(records, anchor).map_err(protocol_error)?
     };
     if head != stored_head {
         return Err(StoreError::Integrity {
@@ -242,41 +243,90 @@ mod tests {
         let head = batches[1].records[1].checksum();
         let prior = batches[0].records[1].checksum();
         let tail: Vec<RecordEnvelope> = batches[1].records.iter().cloned().collect();
-        verify_tail_records(&tail, 3, prior, 4, Some(head), FROM_SEQUENCE_WINDOW)
-            .expect("verified tail");
+        let session_id = tail[0].session_id();
+        verify_tail_records(
+            session_id,
+            &tail,
+            3,
+            prior,
+            4,
+            Some(head),
+            FROM_SEQUENCE_WINDOW,
+        )
+        .expect("verified tail");
         // Empty tail at head+1 needs the stored head to equal the prior checksum.
-        verify_tail_records(&[], 5, head, 4, Some(head), FROM_SEQUENCE_WINDOW)
-            .expect("empty tail at head");
+        verify_tail_records(
+            session_id,
+            &[],
+            5,
+            head,
+            4,
+            Some(head),
+            FROM_SEQUENCE_WINDOW,
+        )
+        .expect("empty tail at head");
         assert!(matches!(
-            verify_tail_records(&[], 5, prior, 4, Some(head), FROM_SEQUENCE_WINDOW),
+            verify_tail_records(
+                session_id,
+                &[],
+                5,
+                prior,
+                4,
+                Some(head),
+                FROM_SEQUENCE_WINDOW
+            ),
             Err(StoreError::Integrity {
                 reason_code: "load_from_prior_checksum_mismatch"
             })
         ));
         // Start beyond head+1 is a gap.
         assert!(matches!(
-            verify_tail_records(&[], 6, head, 4, Some(head), SNAPSHOT_WINDOW),
+            verify_tail_records(session_id, &[], 6, head, 4, Some(head), SNAPSHOT_WINDOW),
             Err(StoreError::Integrity {
                 reason_code: "snapshot_missing_record"
             })
         ));
         // First record after a hole is a gap.
         assert!(matches!(
-            verify_tail_records(&tail, 2, prior, 4, Some(head), FROM_SEQUENCE_WINDOW),
+            verify_tail_records(
+                session_id,
+                &tail,
+                2,
+                prior,
+                4,
+                Some(head),
+                FROM_SEQUENCE_WINDOW
+            ),
             Err(StoreError::Integrity {
                 reason_code: "load_from_sequence_gap"
             })
         ));
         // Wrong prior checksum is a checksum mismatch.
         assert!(matches!(
-            verify_tail_records(&tail, 3, head, 4, Some(head), FROM_SEQUENCE_WINDOW),
+            verify_tail_records(
+                session_id,
+                &tail,
+                3,
+                head,
+                4,
+                Some(head),
+                FROM_SEQUENCE_WINDOW
+            ),
             Err(StoreError::Integrity {
                 reason_code: "load_from_prior_checksum_mismatch"
             })
         ));
         // Verified chain must land on the stored head.
         assert!(matches!(
-            verify_tail_records(&tail, 3, prior, 4, Some(prior), FROM_SEQUENCE_WINDOW),
+            verify_tail_records(
+                session_id,
+                &tail,
+                3,
+                prior,
+                4,
+                Some(prior),
+                FROM_SEQUENCE_WINDOW
+            ),
             Err(StoreError::Integrity {
                 reason_code: "head_checksum_mismatch"
             })
@@ -299,25 +349,36 @@ mod tests {
     }
 
     #[test]
-    fn full_head_verification_accepts_prefixless_journals() {
+    fn full_head_verification_requires_a_trusted_prefix_anchor() {
         let batches = chained_batches();
         let head = batches[1].records[1].checksum();
         let all: Vec<RecordEnvelope> = batches
             .iter()
             .flat_map(|batch| batch.records.iter().cloned())
             .collect();
+        let session_id = all[0].session_id();
         assert_eq!(
-            verify_full_head(&all, Some(head)).expect("full"),
+            verify_full_head(ChainAnchor::root(session_id), &all, Some(head)).expect("full"),
             Some(head)
         );
         // Pruned journal: records start past sequence 1.
         let tail: Vec<RecordEnvelope> = batches[1].records.iter().cloned().collect();
         assert_eq!(
-            verify_full_head(&tail, Some(head)).expect("tail"),
+            verify_full_head(
+                ChainAnchor::try_new(
+                    session_id,
+                    tail[0].sequence(),
+                    Some(batches[0].records[1].checksum()),
+                )
+                .expect("anchor"),
+                &tail,
+                Some(head),
+            )
+            .expect("tail"),
             Some(head)
         );
         assert!(matches!(
-            verify_full_head(&all, None),
+            verify_full_head(ChainAnchor::root(session_id), &all, None),
             Err(StoreError::Integrity {
                 reason_code: "head_checksum_mismatch"
             })

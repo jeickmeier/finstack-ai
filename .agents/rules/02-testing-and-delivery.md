@@ -47,8 +47,6 @@ Do not repair unrelated failures as part of the range. Continue only when an iso
 
 ## Complete the PR boundary and final handoff
 
-Use `docs/implementation/README.md` for the update transaction. At minimum:
-
 - At coding start, assign the logical PR and record a real owner plus issue, branch, or pull-request reference before moving it to `Ready` or `In progress`; create task rows only for actual decomposition. If required metadata is unavailable, report the tracking gap instead of fabricating it.
 
 1. Keep the logical PR, real issue/branch/actual PR references, task, blocker, acceptance coverage, snapshot totals, and derived phase state current in `delivery-ledger.md`; do not invent external metadata to satisfy a field.

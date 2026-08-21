@@ -22,6 +22,7 @@ BASELINE_DIR = (
 NIGHTLY = "nightly-2025-08-02"
 CORE_CRATES = (
     REPO_ROOT / "crates" / "finstack-ai-kernel",
+    REPO_ROOT / "crates" / "finstack-ai-protocol",
     REPO_ROOT / "crates" / "finstack-ai-runtime",
     REPO_ROOT / "crates" / "finstack-ai",
 )

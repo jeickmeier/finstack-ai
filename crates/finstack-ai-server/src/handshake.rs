@@ -96,7 +96,7 @@ where
                             },
                         )
                         .await?;
-                        return Ok(ctx);
+                        return Ok(ctx.with_protocol_version(selected));
                     }
                     Err(err) => {
                         audit_only(

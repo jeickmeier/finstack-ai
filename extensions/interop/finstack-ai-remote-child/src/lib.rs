@@ -154,10 +154,7 @@ mod tests {
             for _ in 0..10_000 {
                 write_post(
                     &mut stream,
-                    &RemotePostAuth::EventBatch {
-                        live: false,
-                        events: Vec::new(),
-                    },
+                    &RemotePostAuth::EventBatch { events: Vec::new() },
                 )
                 .await;
             }
@@ -290,12 +287,14 @@ mod tests {
         write_post(
             &mut stream,
             &RemotePostAuth::CommandResult {
-                result: RemoteCommandResult::new(
+                result: RemoteCommandResult::try_new(
                     command.command_id(),
                     command.digest(),
+                    command.expected_durable_sequence().saturating_add(1),
                     true,
                     None,
-                ),
+                )
+                .expect("result"),
             },
         )
         .await;
@@ -304,7 +303,7 @@ mod tests {
     async fn read_pre(stream: &mut tokio::net::TcpStream) -> RemotePreAuth {
         let payload = read_frame(stream, PRE_AUTH_FRAME_MAX_BYTES).await;
         let envelope: ProtocolEnvelope<RemotePreAuth> =
-            decode_envelope(&payload, PayloadFamily::Remote).expect("pre");
+            decode_envelope(&payload, PayloadFamily::Remote, PROTOCOL_VERSION_V1).expect("pre");
         envelope.into_body()
     }
 
@@ -317,7 +316,7 @@ mod tests {
     async fn read_post(stream: &mut tokio::net::TcpStream) -> RemotePostAuth {
         let payload = read_frame(stream, POST_AUTH_FRAME_MAX_BYTES).await;
         let envelope: ProtocolEnvelope<RemotePostAuth> =
-            decode_envelope(&payload, PayloadFamily::Remote).expect("post");
+            decode_envelope(&payload, PayloadFamily::Remote, PROTOCOL_VERSION_V1).expect("post");
         envelope.into_body()
     }
 

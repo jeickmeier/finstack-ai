@@ -2,9 +2,9 @@
 
 ## Project Structure and Module Organization
 
-Implement the workspace defined by `docs/planning/03-finstack-ai-technical-design.md` sections 2–4; do not invent a competing layout. The kernel owns deterministic semantic state, records, events, and effects. The runtime owns ports and effect execution. The SDK owns composition. Protocol codecs and bindings remain outward-facing. Trusted native stores, providers, tools, and observers live under `extensions/`; isolated WIT/Wasmtime hosts live under `plugins/`.
+The kernel owns deterministic semantic state, records, events, and effects. The runtime owns ports and effect execution. The SDK owns composition. Protocol codecs and bindings remain outward-facing. Trusted native stores, providers, tools, and observers live under `extensions/`; isolated WIT/Wasmtime hosts live under `plugins/`.
 
-`docs/planning/` is the implementation contract and is read-only during normal coding. `docs/implementation/` tracks current work and proof. Agent rules:
+Agent rules:
 
 - `.agents/rules/01-engineering-conformance.md` — architecture, naming, generated artifacts, lifecycle, security, hard stops (always on)
 - `.agents/rules/02-testing-and-delivery.md` — verification and handoff (always on)
@@ -32,6 +32,6 @@ Follow the language rules in `.agents/rules/03-rust-coding.md`, `04-python-codin
 
 ## Build, Test, and Review
 
-Use checked-in mise tasks and CI commands (`mise run <task>`). Root `mise.toml` owns tool pins and repository tasks; do not add `rust-toolchain.toml` or a Cargo `xtask`. During PR-001–PR-003, standard tool commands needed to validate newly created artifacts are allowed; add the canonical mise task with that tooling. Never assume a planned task exists. Run focused checks while coding, then every affected crate, feature, target, architecture, compatibility, and security check required before handoff.
+Use checked-in mise tasks and CI commands (`mise run <task>`). Root `mise.toml` owns tool pins and repository tasks; do not add `rust-toolchain.toml` or a Cargo `xtask`. Run focused checks while coding, then every affected crate, feature, target, architecture, compatibility, and security check required before handoff.
 
-Use short imperative commit subjects. Pull requests follow Implementation Plan sections 6.1–6.2. Update implementation registers only for facts created or changed by the work. Never manufacture ownership, links, evidence, review, approval, or completion.
+Use short imperative commit subjects. 

@@ -242,8 +242,16 @@ unpublished.
 - `finstack-ai-server` hashes reference bearer secrets and compares the
   32-byte digests instead of short-circuiting string inequality. Command
   receipts are indexed by `command_id`, fail closed at a retention cap
-  (`receipt_cap`), and apply `RemoteCommandOp` as a reference phase machine
-  instead of always returning `accepted = true`.
+  (`receipt_cap`), and apply the complete data-bearing `RemoteCommandPayload`
+  as a reference phase machine instead of always returning `accepted = true`.
+- `finstack-ai-protocol` now enforces the canonical-CBOR depth, collection,
+  output-size, shortest-number, and exact-binary16 rules on both encode and
+  decode while preserving the journal-v1 known-answer bytes. Journal recovery
+  requires a trusted `ChainAnchor`; prune anchors are persisted separately by
+  the memory, SQLite, and PostgreSQL stores. Remote candidate-v1 now uses typed
+  locators, full validated kernel events and snapshots, UUIDv7 command ids,
+  payload-bound command digests, negotiated envelope versions, exact receipt
+  replay, and redacted authentication debug output.
 - The Anthropic provider no longer reports zero-valued cache counters in
   `Usage.extension_counters`. Anthropic sends them on every completion, and a
   run that never registered those keys in `RunLimits` faulted with

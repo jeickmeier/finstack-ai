@@ -36,6 +36,8 @@ CREATE TABLE {schema}.sessions (
   session_id BYTEA PRIMARY KEY,
   current_sequence BIGINT NOT NULL,
   head_checksum BYTEA,
+  chain_anchor_sequence BIGINT NOT NULL DEFAULT 1,
+  chain_anchor_checksum BYTEA,
   snapshot_sequence BIGINT,
   metadata BYTEA NOT NULL,
   batch_count BIGINT NOT NULL DEFAULT 0,

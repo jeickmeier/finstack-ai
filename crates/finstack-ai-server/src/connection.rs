@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_protocol::{
-    POST_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteCommand, RemoteEventView, RemotePostAuth,
-    VersionOffer,
+    POST_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteCommand, RemoteDurableStep,
+    RemotePostAuth, VersionOffer, encode,
 };
 use finstack_ai_runtime::{SecurityAuditCategory, SecurityAuditGate};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -86,7 +86,7 @@ where
     .await
     .map_err(|_| ServerError::HandshakeTimeout)??;
 
-    post_auth(
+    Box::pin(post_auth(
         &mut stream,
         &ctx,
         audit.as_ref(),
@@ -94,7 +94,7 @@ where
         &limits,
         credit,
         connection_id,
-    )
+    ))
     .await
 }
 
@@ -110,7 +110,7 @@ async fn post_auth<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let open = read_post_auth(stream, limits.post_auth_ceiling).await?;
+    let open = read_post_auth(stream, limits.post_auth_ceiling, auth.protocol_version()).await?;
     let RemotePostAuth::OpenSession {
         last_known_durable_sequence,
         locator,
@@ -126,19 +126,20 @@ where
         .await?;
         return Err(ServerError::UnknownLocator);
     };
+    let session_id = locator.session_id().to_string();
     if tenant_scope != auth.tenant_scope() {
         audit_digest(
             audit,
             SecurityAuditCategory::ScopeMismatch,
             "scope_mismatch",
-            Some(locator.session_id()),
+            Some(&session_id),
             None,
         )
         .await?;
         return Err(ServerError::UnknownLocator);
     }
 
-    let plan = match hub.with(locator.session_id(), |replica| {
+    let plan = match hub.with(&session_id, |replica| {
         replica.claim_writer(connection_id)?;
         replica.plan_reconnect(auth, &locator, last_known_durable_sequence)
     }) {
@@ -150,20 +151,21 @@ where
                 }
                 _ => SecurityAuditCategory::UnknownLocator,
             };
-            audit_digest(
-                audit,
-                category,
-                err.code(),
-                Some(locator.session_id()),
-                None,
-            )
-            .await?;
+            audit_digest(audit, category, err.code(), Some(&session_id), None).await?;
             return Err(ServerError::UnknownLocator);
         }
     };
 
-    let session_id = locator.session_id().to_owned();
-    emit_reconnect_plan(stream, hub, limits, &credit, &session_id, plan).await?;
+    Box::pin(emit_reconnect_plan(
+        stream,
+        hub,
+        limits,
+        &credit,
+        auth.protocol_version(),
+        &session_id,
+        plan,
+    ))
+    .await?;
     serve_post_barrier(
         stream,
         auth,
@@ -182,6 +184,7 @@ async fn emit_reconnect_plan<S>(
     hub: &SessionHub,
     limits: &ConnectionLimits,
     credit: &CreditWindow,
+    protocol_version: u16,
     session_id: &str,
     plan: ReconnectView,
 ) -> Result<(), ServerError>
@@ -192,9 +195,10 @@ where
         write_post_auth(
             stream,
             limits.post_auth_ceiling,
+            protocol_version,
             &RemotePostAuth::Snapshot {
                 sequence: snapshot.sequence(),
-                snapshot,
+                snapshot: Box::new(snapshot),
             },
         )
         .await?;
@@ -202,6 +206,7 @@ where
         write_post_auth(
             stream,
             limits.post_auth_ceiling,
+            protocol_version,
             &RemotePostAuth::NoSnapshot {
                 sequence: plan.snapshot_sequence,
             },
@@ -212,15 +217,15 @@ where
         let from_sequence = plan
             .tail
             .first()
-            .and_then(RemoteEventView::durable_sequence)
-            .unwrap_or(plan.snapshot_sequence + 1);
+            .map_or(plan.snapshot_sequence + 1, RemoteDurableStep::sequence);
         write_post_auth(
             stream,
             limits.post_auth_ceiling,
+            protocol_version,
             &RemotePostAuth::DurableTail {
                 from_sequence,
                 to_sequence: plan.barrier,
-                events: plan.tail,
+                steps: plan.tail,
             },
         )
         .await?;
@@ -228,6 +233,7 @@ where
     write_post_auth(
         stream,
         limits.post_auth_ceiling,
+        protocol_version,
         &RemotePostAuth::SyncBarrier {
             sequence: plan.barrier,
         },
@@ -240,6 +246,7 @@ where
     write_post_auth(
         stream,
         limits.post_auth_ceiling,
+        protocol_version,
         &RemotePostAuth::Grant {
             items: credit.items(),
             bytes: credit.bytes(),
@@ -266,7 +273,7 @@ where
         if credit.items() == 0 {
             match tokio::time::timeout(
                 credit.limits().ack_deadline,
-                read_post_auth(stream, limits.post_auth_ceiling),
+                read_post_auth(stream, limits.post_auth_ceiling, auth.protocol_version()),
             )
             .await
             {
@@ -289,12 +296,8 @@ where
         })?;
         if !live.is_empty() {
             let items = u32::try_from(live.len()).unwrap_or(u32::MAX);
-            let bytes = u32::try_from(
-                live.iter()
-                    .map(|event| event.event_id().len() + event.kind().len())
-                    .sum::<usize>(),
-            )
-            .unwrap_or(u32::MAX);
+            let message = RemotePostAuth::EventBatch { events: live };
+            let bytes = u32::try_from(encode(&message)?.len()).unwrap_or(u32::MAX);
             if let Err(err) = credit.consume(items, bytes) {
                 release_writer(hub, session_id, connection_id);
                 return Err(err);
@@ -302,25 +305,24 @@ where
             write_post_auth(
                 stream,
                 limits.post_auth_ceiling,
-                &RemotePostAuth::EventBatch {
-                    live: true,
-                    events: live,
-                },
+                auth.protocol_version(),
+                &message,
             )
             .await?;
         }
 
-        let incoming = match read_post_auth(stream, limits.post_auth_ceiling).await {
-            Ok(message) => message,
-            Err(ServerError::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-                release_writer(hub, session_id, connection_id);
-                return Ok(());
-            }
-            Err(err) => {
-                release_writer(hub, session_id, connection_id);
-                return Err(err);
-            }
-        };
+        let incoming =
+            match read_post_auth(stream, limits.post_auth_ceiling, auth.protocol_version()).await {
+                Ok(message) => message,
+                Err(ServerError::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    release_writer(hub, session_id, connection_id);
+                    return Ok(());
+                }
+                Err(err) => {
+                    release_writer(hub, session_id, connection_id);
+                    return Err(err);
+                }
+            };
         match incoming {
             RemotePostAuth::Ack { items, bytes, .. } => credit.ack(items, bytes),
             RemotePostAuth::Command { command } => {
@@ -329,6 +331,7 @@ where
                         write_post_auth(
                             stream,
                             limits.post_auth_ceiling,
+                            auth.protocol_version(),
                             &RemotePostAuth::CommandResult { result },
                         )
                         .await?;
@@ -372,9 +375,8 @@ async fn apply_command(
     audit: &SecurityAuditGate,
     command: &RemoteCommand,
 ) -> Result<finstack_ai_protocol::RemoteCommandResult, ServerError> {
-    match hub.with(command.locator().session_id(), |replica| {
-        replica.apply_command(auth, command)
-    }) {
+    let session_id = command.locator().session_id().to_string();
+    match hub.with(&session_id, |replica| replica.apply_command(auth, command)) {
         Ok(result) => Ok(result),
         Err(err) => {
             let category = match err {
@@ -387,7 +389,7 @@ async fn apply_command(
                 audit,
                 category,
                 err.code(),
-                Some(command.locator().session_id()),
+                Some(&session_id),
                 Some(command.digest()),
             )
             .await?;

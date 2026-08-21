@@ -37,6 +37,11 @@ fn remote_and_process_share_frame_limits() {
 
 #[test]
 fn unknown_handshake_fields_fail_closed() {
+    let valid = fs::read_to_string(
+        repo_root().join("fixtures/compatibility/remote/v1/handshake/valid--client-hello.json"),
+    )
+    .expect("remote valid handshake");
+    assert!(serde_json::from_str::<RemotePreAuth>(&valid).is_ok());
     let remote = fs::read_to_string(
         repo_root().join("fixtures/compatibility/remote/v1/handshake/invalid--unknown-field.json"),
     )
@@ -61,13 +66,14 @@ fn fixture_vocabularies_stay_family_separate() {
     )
     .expect("process fixture");
     assert!(remote.contains("open_session"));
+    assert!(serde_json::from_str::<RemotePostAuth>(&remote).is_ok());
     assert!(process.contains("process_client_hello"));
     assert!(!process.contains("open_session"));
 
     let offer = VersionOffer::try_new(vec![1], 1, vec!["auth".into()]).expect("offer");
     let process_hello = ProcessPreAuth::ProcessClientHello { offer };
     let env = encode_envelope(PayloadFamily::Process, 1, &process_hello).expect("env");
-    assert!(decode_envelope::<RemotePostAuth>(&env, PayloadFamily::Remote).is_err());
+    assert!(decode_envelope::<RemotePostAuth>(&env, PayloadFamily::Remote, 1).is_err());
     assert!(decode::<RemotePostAuth>(&encode(&process_hello).expect("body")).is_err());
 }
 

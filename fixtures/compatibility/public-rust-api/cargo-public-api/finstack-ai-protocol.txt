@@ -1,0 +1,491 @@
+pub mod finstack_ai_protocol
+pub enum finstack_ai_protocol::CanonicalValue
+pub finstack_ai_protocol::CanonicalValue::Array(alloc::vec::Vec<finstack_ai_protocol::CanonicalValue>)
+pub finstack_ai_protocol::CanonicalValue::Bool(bool)
+pub finstack_ai_protocol::CanonicalValue::Bytes(alloc::vec::Vec<u8>)
+pub finstack_ai_protocol::CanonicalValue::Float(u64)
+pub finstack_ai_protocol::CanonicalValue::Map(alloc::vec::Vec<(finstack_ai_protocol::CanonicalValue, finstack_ai_protocol::CanonicalValue)>)
+pub finstack_ai_protocol::CanonicalValue::Negative(u64)
+pub finstack_ai_protocol::CanonicalValue::Null
+pub finstack_ai_protocol::CanonicalValue::Text(alloc::string::String)
+pub finstack_ai_protocol::CanonicalValue::Unsigned(u64)
+impl core::clone::Clone for finstack_ai_protocol::CanonicalValue
+pub fn finstack_ai_protocol::CanonicalValue::clone(&self) -> finstack_ai_protocol::CanonicalValue
+impl core::cmp::Eq for finstack_ai_protocol::CanonicalValue
+impl core::cmp::PartialEq for finstack_ai_protocol::CanonicalValue
+pub fn finstack_ai_protocol::CanonicalValue::eq(&self, &finstack_ai_protocol::CanonicalValue) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::CanonicalValue
+pub fn finstack_ai_protocol::CanonicalValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::CanonicalValue
+pub enum finstack_ai_protocol::PayloadFamily
+pub finstack_ai_protocol::PayloadFamily::Process
+pub finstack_ai_protocol::PayloadFamily::Remote
+impl core::clone::Clone for finstack_ai_protocol::PayloadFamily
+pub fn finstack_ai_protocol::PayloadFamily::clone(&self) -> finstack_ai_protocol::PayloadFamily
+impl core::cmp::Eq for finstack_ai_protocol::PayloadFamily
+impl core::cmp::PartialEq for finstack_ai_protocol::PayloadFamily
+pub fn finstack_ai_protocol::PayloadFamily::eq(&self, &finstack_ai_protocol::PayloadFamily) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::PayloadFamily
+pub fn finstack_ai_protocol::PayloadFamily::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_protocol::PayloadFamily
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::PayloadFamily
+impl serde_core::ser::Serialize for finstack_ai_protocol::PayloadFamily
+pub fn finstack_ai_protocol::PayloadFamily::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::PayloadFamily
+pub fn finstack_ai_protocol::PayloadFamily::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_protocol::ProcessPreAuth
+pub finstack_ai_protocol::ProcessPreAuth::ProcessAuthResult
+pub finstack_ai_protocol::ProcessPreAuth::ProcessAuthResult::accepted: bool
+pub finstack_ai_protocol::ProcessPreAuth::ProcessAuthResult::reason_code: core::option::Option<alloc::string::String>
+pub finstack_ai_protocol::ProcessPreAuth::ProcessAuthenticate
+pub finstack_ai_protocol::ProcessPreAuth::ProcessAuthenticate::method: alloc::string::String
+pub finstack_ai_protocol::ProcessPreAuth::ProcessClientHello
+pub finstack_ai_protocol::ProcessPreAuth::ProcessClientHello::offer: finstack_ai_protocol::VersionOffer
+pub finstack_ai_protocol::ProcessPreAuth::ProcessClose
+pub finstack_ai_protocol::ProcessPreAuth::ProcessClose::reason_code: alloc::string::String
+pub finstack_ai_protocol::ProcessPreAuth::ProcessServerHello
+pub finstack_ai_protocol::ProcessPreAuth::ProcessServerHello::offer: finstack_ai_protocol::VersionOffer
+pub finstack_ai_protocol::ProcessPreAuth::ProcessServerHello::selected_version: u16
+impl core::clone::Clone for finstack_ai_protocol::ProcessPreAuth
+pub fn finstack_ai_protocol::ProcessPreAuth::clone(&self) -> finstack_ai_protocol::ProcessPreAuth
+impl core::cmp::Eq for finstack_ai_protocol::ProcessPreAuth
+impl core::cmp::PartialEq for finstack_ai_protocol::ProcessPreAuth
+pub fn finstack_ai_protocol::ProcessPreAuth::eq(&self, &finstack_ai_protocol::ProcessPreAuth) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::ProcessPreAuth
+pub fn finstack_ai_protocol::ProcessPreAuth::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::ProcessPreAuth
+impl serde_core::ser::Serialize for finstack_ai_protocol::ProcessPreAuth
+pub fn finstack_ai_protocol::ProcessPreAuth::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::ProcessPreAuth
+pub fn finstack_ai_protocol::ProcessPreAuth::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_protocol::ProtocolError
+pub finstack_ai_protocol::ProtocolError::Codec
+pub finstack_ai_protocol::ProtocolError::Codec::message: alloc::string::String
+pub finstack_ai_protocol::ProtocolError::Integrity
+pub finstack_ai_protocol::ProtocolError::Integrity::reason_code: &'static str
+pub finstack_ai_protocol::ProtocolError::InvalidCbor
+pub finstack_ai_protocol::ProtocolError::InvalidCbor::reason_code: &'static str
+pub finstack_ai_protocol::ProtocolError::InvalidEnvelope
+pub finstack_ai_protocol::ProtocolError::InvalidEnvelope::reason_code: &'static str
+pub finstack_ai_protocol::ProtocolError::InvalidFrame
+pub finstack_ai_protocol::ProtocolError::InvalidFrame::reason_code: &'static str
+pub finstack_ai_protocol::ProtocolError::InvalidMessage
+pub finstack_ai_protocol::ProtocolError::InvalidMessage::reason_code: &'static str
+pub finstack_ai_protocol::ProtocolError::LimitExceeded
+pub finstack_ai_protocol::ProtocolError::LimitExceeded::limit: usize
+pub finstack_ai_protocol::ProtocolError::LimitExceeded::resource: &'static str
+pub finstack_ai_protocol::ProtocolError::UnsupportedVersion
+pub finstack_ai_protocol::ProtocolError::UnsupportedVersion::reason_code: &'static str
+impl finstack_ai_protocol::ProtocolError
+pub const fn finstack_ai_protocol::ProtocolError::code(&self) -> &'static str
+pub fn finstack_ai_protocol::ProtocolError::codec(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for finstack_ai_protocol::ProtocolError
+pub fn finstack_ai_protocol::ProtocolError::clone(&self) -> finstack_ai_protocol::ProtocolError
+impl core::cmp::Eq for finstack_ai_protocol::ProtocolError
+impl core::cmp::PartialEq for finstack_ai_protocol::ProtocolError
+pub fn finstack_ai_protocol::ProtocolError::eq(&self, &finstack_ai_protocol::ProtocolError) -> bool
+impl core::error::Error for finstack_ai_protocol::ProtocolError
+impl core::fmt::Debug for finstack_ai_protocol::ProtocolError
+pub fn finstack_ai_protocol::ProtocolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_protocol::ProtocolError
+pub fn finstack_ai_protocol::ProtocolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::ProtocolError
+impl serde_core::de::Error for finstack_ai_protocol::ProtocolError
+pub fn finstack_ai_protocol::ProtocolError::custom<T: core::fmt::Display>(T) -> Self
+impl serde_core::ser::Error for finstack_ai_protocol::ProtocolError
+pub fn finstack_ai_protocol::ProtocolError::custom<T: core::fmt::Display>(T) -> Self
+pub enum finstack_ai_protocol::RemoteAuthMethod
+pub finstack_ai_protocol::RemoteAuthMethod::Bearer
+pub finstack_ai_protocol::RemoteAuthMethod::Bearer::token: alloc::string::String
+pub finstack_ai_protocol::RemoteAuthMethod::Loopback
+impl core::clone::Clone for finstack_ai_protocol::RemoteAuthMethod
+pub fn finstack_ai_protocol::RemoteAuthMethod::clone(&self) -> finstack_ai_protocol::RemoteAuthMethod
+impl core::cmp::Eq for finstack_ai_protocol::RemoteAuthMethod
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteAuthMethod
+pub fn finstack_ai_protocol::RemoteAuthMethod::eq(&self, &finstack_ai_protocol::RemoteAuthMethod) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteAuthMethod
+pub fn finstack_ai_protocol::RemoteAuthMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteAuthMethod
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteAuthMethod
+pub fn finstack_ai_protocol::RemoteAuthMethod::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteAuthMethod
+pub fn finstack_ai_protocol::RemoteAuthMethod::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_protocol::RemoteCommandPayload
+pub finstack_ai_protocol::RemoteCommandPayload::Cancel(alloc::boxed::Box<finstack_ai_kernel::reducer::input::CancelRequested>)
+pub finstack_ai_protocol::RemoteCommandPayload::Complete(alloc::boxed::Box<finstack_ai_kernel::records::run::external::ExternalEffectCompletionCommand>)
+pub finstack_ai_protocol::RemoteCommandPayload::Resolve(alloc::boxed::Box<finstack_ai_kernel::records::run::external::InteractionResolutionCommand>)
+pub finstack_ai_protocol::RemoteCommandPayload::Start(alloc::boxed::Box<finstack_ai_protocol::RemoteStartRequest>)
+impl core::clone::Clone for finstack_ai_protocol::RemoteCommandPayload
+pub fn finstack_ai_protocol::RemoteCommandPayload::clone(&self) -> finstack_ai_protocol::RemoteCommandPayload
+impl core::cmp::Eq for finstack_ai_protocol::RemoteCommandPayload
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteCommandPayload
+pub fn finstack_ai_protocol::RemoteCommandPayload::eq(&self, &finstack_ai_protocol::RemoteCommandPayload) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteCommandPayload
+pub fn finstack_ai_protocol::RemoteCommandPayload::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteCommandPayload
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteCommandPayload
+pub fn finstack_ai_protocol::RemoteCommandPayload::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteCommandPayload
+pub fn finstack_ai_protocol::RemoteCommandPayload::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_protocol::RemotePostAuth
+pub finstack_ai_protocol::RemotePostAuth::Ack
+pub finstack_ai_protocol::RemotePostAuth::Ack::bytes: u32
+pub finstack_ai_protocol::RemotePostAuth::Ack::cursor: u64
+pub finstack_ai_protocol::RemotePostAuth::Ack::items: u32
+pub finstack_ai_protocol::RemotePostAuth::Close
+pub finstack_ai_protocol::RemotePostAuth::Close::reason_code: alloc::string::String
+pub finstack_ai_protocol::RemotePostAuth::Command
+pub finstack_ai_protocol::RemotePostAuth::Command::command: finstack_ai_protocol::RemoteCommand
+pub finstack_ai_protocol::RemotePostAuth::CommandResult
+pub finstack_ai_protocol::RemotePostAuth::CommandResult::result: finstack_ai_protocol::RemoteCommandResult
+pub finstack_ai_protocol::RemotePostAuth::DurableTail
+pub finstack_ai_protocol::RemotePostAuth::DurableTail::from_sequence: u64
+pub finstack_ai_protocol::RemotePostAuth::DurableTail::steps: alloc::vec::Vec<finstack_ai_protocol::RemoteDurableStep>
+pub finstack_ai_protocol::RemotePostAuth::DurableTail::to_sequence: u64
+pub finstack_ai_protocol::RemotePostAuth::EventBatch
+pub finstack_ai_protocol::RemotePostAuth::EventBatch::events: alloc::vec::Vec<finstack_ai_protocol::RemoteEventView>
+pub finstack_ai_protocol::RemotePostAuth::Grant
+pub finstack_ai_protocol::RemotePostAuth::Grant::bytes: u32
+pub finstack_ai_protocol::RemotePostAuth::Grant::items: u32
+pub finstack_ai_protocol::RemotePostAuth::NoSnapshot
+pub finstack_ai_protocol::RemotePostAuth::NoSnapshot::sequence: u64
+pub finstack_ai_protocol::RemotePostAuth::OpenSession
+pub finstack_ai_protocol::RemotePostAuth::OpenSession::last_known_durable_sequence: core::option::Option<u64>
+pub finstack_ai_protocol::RemotePostAuth::OpenSession::locator: finstack_ai_protocol::RemoteLocator
+pub finstack_ai_protocol::RemotePostAuth::OpenSession::tenant_scope: alloc::string::String
+pub finstack_ai_protocol::RemotePostAuth::Snapshot
+pub finstack_ai_protocol::RemotePostAuth::Snapshot::sequence: u64
+pub finstack_ai_protocol::RemotePostAuth::Snapshot::snapshot: alloc::boxed::Box<finstack_ai_protocol::RemoteSnapshot>
+pub finstack_ai_protocol::RemotePostAuth::SyncBarrier
+pub finstack_ai_protocol::RemotePostAuth::SyncBarrier::sequence: u64
+impl finstack_ai_protocol::RemotePostAuth
+pub const fn finstack_ai_protocol::RemotePostAuth::kind(&self) -> &'static str
+impl core::clone::Clone for finstack_ai_protocol::RemotePostAuth
+pub fn finstack_ai_protocol::RemotePostAuth::clone(&self) -> finstack_ai_protocol::RemotePostAuth
+impl core::cmp::Eq for finstack_ai_protocol::RemotePostAuth
+impl core::cmp::PartialEq for finstack_ai_protocol::RemotePostAuth
+pub fn finstack_ai_protocol::RemotePostAuth::eq(&self, &finstack_ai_protocol::RemotePostAuth) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemotePostAuth
+pub fn finstack_ai_protocol::RemotePostAuth::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemotePostAuth
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemotePostAuth
+pub fn finstack_ai_protocol::RemotePostAuth::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemotePostAuth
+pub fn finstack_ai_protocol::RemotePostAuth::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub enum finstack_ai_protocol::RemotePreAuth
+pub finstack_ai_protocol::RemotePreAuth::AuthResult
+pub finstack_ai_protocol::RemotePreAuth::AuthResult::accepted: bool
+pub finstack_ai_protocol::RemotePreAuth::AuthResult::reason_code: core::option::Option<alloc::string::String>
+pub finstack_ai_protocol::RemotePreAuth::Authenticate
+pub finstack_ai_protocol::RemotePreAuth::Authenticate::method: finstack_ai_protocol::RemoteAuthMethod
+pub finstack_ai_protocol::RemotePreAuth::ClientHello
+pub finstack_ai_protocol::RemotePreAuth::ClientHello::offer: finstack_ai_protocol::VersionOffer
+pub finstack_ai_protocol::RemotePreAuth::Close
+pub finstack_ai_protocol::RemotePreAuth::Close::reason_code: alloc::string::String
+pub finstack_ai_protocol::RemotePreAuth::ServerHello
+pub finstack_ai_protocol::RemotePreAuth::ServerHello::offer: finstack_ai_protocol::VersionOffer
+pub finstack_ai_protocol::RemotePreAuth::ServerHello::selected_version: u16
+impl core::clone::Clone for finstack_ai_protocol::RemotePreAuth
+pub fn finstack_ai_protocol::RemotePreAuth::clone(&self) -> finstack_ai_protocol::RemotePreAuth
+impl core::cmp::Eq for finstack_ai_protocol::RemotePreAuth
+impl core::cmp::PartialEq for finstack_ai_protocol::RemotePreAuth
+pub fn finstack_ai_protocol::RemotePreAuth::eq(&self, &finstack_ai_protocol::RemotePreAuth) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemotePreAuth
+pub fn finstack_ai_protocol::RemotePreAuth::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemotePreAuth
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemotePreAuth
+pub fn finstack_ai_protocol::RemotePreAuth::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemotePreAuth
+pub fn finstack_ai_protocol::RemotePreAuth::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_protocol::ChainAnchor
+pub finstack_ai_protocol::ChainAnchor::next_sequence: u64
+pub finstack_ai_protocol::ChainAnchor::previous_checksum: core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
+pub finstack_ai_protocol::ChainAnchor::session_id: finstack_ai_kernel::primitives::ids::SessionId
+impl finstack_ai_protocol::ChainAnchor
+pub const fn finstack_ai_protocol::ChainAnchor::root(finstack_ai_kernel::primitives::ids::SessionId) -> Self
+pub fn finstack_ai_protocol::ChainAnchor::try_new(finstack_ai_kernel::primitives::ids::SessionId, u64, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::ChainAnchor
+pub fn finstack_ai_protocol::ChainAnchor::clone(&self) -> finstack_ai_protocol::ChainAnchor
+impl core::cmp::Eq for finstack_ai_protocol::ChainAnchor
+impl core::cmp::PartialEq for finstack_ai_protocol::ChainAnchor
+pub fn finstack_ai_protocol::ChainAnchor::eq(&self, &finstack_ai_protocol::ChainAnchor) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::ChainAnchor
+pub fn finstack_ai_protocol::ChainAnchor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_protocol::ChainAnchor
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::ChainAnchor
+pub struct finstack_ai_protocol::DecodedSnapshot
+pub finstack_ai_protocol::DecodedSnapshot::head_checksum: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_protocol::DecodedSnapshot::last_model_continuation: core::option::Option<finstack_ai_kernel::primitives::raw_json::RawJson>
+pub finstack_ai_protocol::DecodedSnapshot::pending_timer_scheduled_at: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai_protocol::DecodedSnapshot::sequence: u64
+pub finstack_ai_protocol::DecodedSnapshot::state: finstack_ai_kernel::state::KernelState
+pub finstack_ai_protocol::DecodedSnapshot::state_hash: finstack_ai_kernel::primitives::digest::Digest
+impl core::clone::Clone for finstack_ai_protocol::DecodedSnapshot
+pub fn finstack_ai_protocol::DecodedSnapshot::clone(&self) -> finstack_ai_protocol::DecodedSnapshot
+impl core::cmp::Eq for finstack_ai_protocol::DecodedSnapshot
+impl core::cmp::PartialEq for finstack_ai_protocol::DecodedSnapshot
+pub fn finstack_ai_protocol::DecodedSnapshot::eq(&self, &finstack_ai_protocol::DecodedSnapshot) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::DecodedSnapshot
+pub fn finstack_ai_protocol::DecodedSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::DecodedSnapshot
+pub struct finstack_ai_protocol::JournalKnownAnswer
+pub finstack_ai_protocol::JournalKnownAnswer::cbor_hex: alloc::string::String
+pub finstack_ai_protocol::JournalKnownAnswer::checksum: core::option::Option<alloc::string::String>
+pub finstack_ai_protocol::JournalKnownAnswer::payload_digest: alloc::string::String
+impl core::clone::Clone for finstack_ai_protocol::JournalKnownAnswer
+pub fn finstack_ai_protocol::JournalKnownAnswer::clone(&self) -> finstack_ai_protocol::JournalKnownAnswer
+impl core::cmp::Eq for finstack_ai_protocol::JournalKnownAnswer
+impl core::cmp::PartialEq for finstack_ai_protocol::JournalKnownAnswer
+pub fn finstack_ai_protocol::JournalKnownAnswer::eq(&self, &finstack_ai_protocol::JournalKnownAnswer) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::JournalKnownAnswer
+pub fn finstack_ai_protocol::JournalKnownAnswer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::JournalKnownAnswer
+impl serde_core::ser::Serialize for finstack_ai_protocol::JournalKnownAnswer
+pub fn finstack_ai_protocol::JournalKnownAnswer::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_protocol::ProtocolEnvelope<T>
+impl<T> finstack_ai_protocol::ProtocolEnvelope<T>
+pub const fn finstack_ai_protocol::ProtocolEnvelope<T>::body(&self) -> &T
+pub fn finstack_ai_protocol::ProtocolEnvelope<T>::into_body(self) -> T
+pub const fn finstack_ai_protocol::ProtocolEnvelope<T>::new(finstack_ai_protocol::PayloadFamily, u16, T) -> Self
+pub const fn finstack_ai_protocol::ProtocolEnvelope<T>::payload_family(&self) -> finstack_ai_protocol::PayloadFamily
+pub const fn finstack_ai_protocol::ProtocolEnvelope<T>::protocol_version(&self) -> u16
+impl<'de, T> serde_core::de::Deserialize<'de> for finstack_ai_protocol::ProtocolEnvelope<T> where T: serde_core::de::Deserialize<'de>
+pub fn finstack_ai_protocol::ProtocolEnvelope<T>::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl<T: core::clone::Clone> core::clone::Clone for finstack_ai_protocol::ProtocolEnvelope<T>
+pub fn finstack_ai_protocol::ProtocolEnvelope<T>::clone(&self) -> finstack_ai_protocol::ProtocolEnvelope<T>
+impl<T: core::cmp::Eq> core::cmp::Eq for finstack_ai_protocol::ProtocolEnvelope<T>
+impl<T: core::cmp::PartialEq> core::cmp::PartialEq for finstack_ai_protocol::ProtocolEnvelope<T>
+pub fn finstack_ai_protocol::ProtocolEnvelope<T>::eq(&self, &finstack_ai_protocol::ProtocolEnvelope<T>) -> bool
+impl<T: core::cmp::PartialEq> core::marker::StructuralPartialEq for finstack_ai_protocol::ProtocolEnvelope<T>
+impl<T: core::fmt::Debug> core::fmt::Debug for finstack_ai_protocol::ProtocolEnvelope<T>
+pub fn finstack_ai_protocol::ProtocolEnvelope<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> serde_core::ser::Serialize for finstack_ai_protocol::ProtocolEnvelope<T> where T: serde_core::ser::Serialize
+pub fn finstack_ai_protocol::ProtocolEnvelope<T>::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_protocol::RemoteAgentRef
+pub finstack_ai_protocol::RemoteAgentRef::agent_id: finstack_ai_kernel::primitives::ids::AgentId
+pub finstack_ai_protocol::RemoteAgentRef::bundle_id: core::option::Option<finstack_ai_kernel::primitives::ids::BundleId>
+pub finstack_ai_protocol::RemoteAgentRef::spec_digest: finstack_ai_kernel::primitives::digest::Digest
+impl core::clone::Clone for finstack_ai_protocol::RemoteAgentRef
+pub fn finstack_ai_protocol::RemoteAgentRef::clone(&self) -> finstack_ai_protocol::RemoteAgentRef
+impl core::cmp::Eq for finstack_ai_protocol::RemoteAgentRef
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteAgentRef
+pub fn finstack_ai_protocol::RemoteAgentRef::eq(&self, &finstack_ai_protocol::RemoteAgentRef) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteAgentRef
+pub fn finstack_ai_protocol::RemoteAgentRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteAgentRef
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteAgentRef
+pub fn finstack_ai_protocol::RemoteAgentRef::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteAgentRef
+pub fn finstack_ai_protocol::RemoteAgentRef::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_protocol::RemoteCommand
+impl finstack_ai_protocol::RemoteCommand
+pub const fn finstack_ai_protocol::RemoteCommand::command_id(&self) -> finstack_ai_protocol::RemoteCommandId
+pub const fn finstack_ai_protocol::RemoteCommand::digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+pub const fn finstack_ai_protocol::RemoteCommand::expected_durable_sequence(&self) -> u64
+pub const fn finstack_ai_protocol::RemoteCommand::locator(&self) -> &finstack_ai_protocol::RemoteLocator
+pub const fn finstack_ai_protocol::RemoteCommand::payload(&self) -> &finstack_ai_protocol::RemoteCommandPayload
+pub fn finstack_ai_protocol::RemoteCommand::tenant_scope(&self) -> &str
+pub fn finstack_ai_protocol::RemoteCommand::try_new(impl core::convert::AsRef<str>, finstack_ai_protocol::RemoteLocator, impl core::convert::Into<alloc::string::String>, u64, finstack_ai_protocol::RemoteCommandPayload) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::RemoteCommand
+pub fn finstack_ai_protocol::RemoteCommand::clone(&self) -> finstack_ai_protocol::RemoteCommand
+impl core::cmp::Eq for finstack_ai_protocol::RemoteCommand
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteCommand
+pub fn finstack_ai_protocol::RemoteCommand::eq(&self, &finstack_ai_protocol::RemoteCommand) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteCommand
+pub fn finstack_ai_protocol::RemoteCommand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteCommand
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteCommand
+pub fn finstack_ai_protocol::RemoteCommand::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteCommand
+pub fn finstack_ai_protocol::RemoteCommand::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+#[repr(transparent)] pub struct finstack_ai_protocol::RemoteCommandId(_)
+impl finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::parse(&str) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::RemoteCommandId::to_canonical_string(self) -> alloc::string::String
+impl core::clone::Clone for finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::clone(&self) -> finstack_ai_protocol::RemoteCommandId
+impl core::cmp::Eq for finstack_ai_protocol::RemoteCommandId
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::eq(&self, &finstack_ai_protocol::RemoteCommandId) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for finstack_ai_protocol::RemoteCommandId
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteCommandId
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteCommandId
+pub fn finstack_ai_protocol::RemoteCommandId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct finstack_ai_protocol::RemoteCommandResult
+impl finstack_ai_protocol::RemoteCommandResult
+pub const fn finstack_ai_protocol::RemoteCommandResult::accepted(&self) -> bool
+pub const fn finstack_ai_protocol::RemoteCommandResult::command_id(&self) -> finstack_ai_protocol::RemoteCommandId
+pub const fn finstack_ai_protocol::RemoteCommandResult::digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+pub const fn finstack_ai_protocol::RemoteCommandResult::durable_sequence(&self) -> u64
+pub fn finstack_ai_protocol::RemoteCommandResult::reason_code(&self) -> core::option::Option<&str>
+pub fn finstack_ai_protocol::RemoteCommandResult::try_new(finstack_ai_protocol::RemoteCommandId, finstack_ai_kernel::primitives::digest::Digest, u64, bool, core::option::Option<alloc::string::String>) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::RemoteCommandResult
+pub fn finstack_ai_protocol::RemoteCommandResult::clone(&self) -> finstack_ai_protocol::RemoteCommandResult
+impl core::cmp::Eq for finstack_ai_protocol::RemoteCommandResult
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteCommandResult
+pub fn finstack_ai_protocol::RemoteCommandResult::eq(&self, &finstack_ai_protocol::RemoteCommandResult) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteCommandResult
+pub fn finstack_ai_protocol::RemoteCommandResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteCommandResult
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteCommandResult
+pub fn finstack_ai_protocol::RemoteCommandResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteCommandResult
+pub fn finstack_ai_protocol::RemoteCommandResult::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct finstack_ai_protocol::RemoteDurableStep
+impl finstack_ai_protocol::RemoteDurableStep
+pub fn finstack_ai_protocol::RemoteDurableStep::events(&self) -> &[finstack_ai_protocol::RemoteEventView]
+pub fn finstack_ai_protocol::RemoteDurableStep::into_events(self) -> alloc::vec::Vec<finstack_ai_protocol::RemoteEventView>
+pub const fn finstack_ai_protocol::RemoteDurableStep::sequence(&self) -> u64
+pub fn finstack_ai_protocol::RemoteDurableStep::try_new(u64, alloc::vec::Vec<finstack_ai_protocol::RemoteEventView>) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::RemoteDurableStep
+pub fn finstack_ai_protocol::RemoteDurableStep::clone(&self) -> finstack_ai_protocol::RemoteDurableStep
+impl core::cmp::Eq for finstack_ai_protocol::RemoteDurableStep
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteDurableStep
+pub fn finstack_ai_protocol::RemoteDurableStep::eq(&self, &finstack_ai_protocol::RemoteDurableStep) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteDurableStep
+pub fn finstack_ai_protocol::RemoteDurableStep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteDurableStep
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteDurableStep
+pub fn finstack_ai_protocol::RemoteDurableStep::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteDurableStep
+pub fn finstack_ai_protocol::RemoteDurableStep::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+#[repr(transparent)] pub struct finstack_ai_protocol::RemoteEventView(_)
+impl finstack_ai_protocol::RemoteEventView
+pub fn finstack_ai_protocol::RemoteEventView::durable_sequence(&self) -> core::option::Option<u64>
+pub const fn finstack_ai_protocol::RemoteEventView::event(&self) -> &finstack_ai_kernel::events::envelope::RunEvent
+pub fn finstack_ai_protocol::RemoteEventView::event_id(&self) -> finstack_ai_kernel::primitives::ids::EventId
+pub fn finstack_ai_protocol::RemoteEventView::kind(&self) -> finstack_ai_kernel::events::RunEventKind
+pub fn finstack_ai_protocol::RemoteEventView::transient_sequence(&self) -> u64
+pub fn finstack_ai_protocol::RemoteEventView::try_new(finstack_ai_kernel::events::envelope::RunEvent) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::RemoteEventView
+pub fn finstack_ai_protocol::RemoteEventView::clone(&self) -> finstack_ai_protocol::RemoteEventView
+impl core::cmp::Eq for finstack_ai_protocol::RemoteEventView
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteEventView
+pub fn finstack_ai_protocol::RemoteEventView::eq(&self, &finstack_ai_protocol::RemoteEventView) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteEventView
+pub fn finstack_ai_protocol::RemoteEventView::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteEventView
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteEventView
+pub fn finstack_ai_protocol::RemoteEventView::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteEventView
+pub fn finstack_ai_protocol::RemoteEventView::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct finstack_ai_protocol::RemoteLocator
+impl finstack_ai_protocol::RemoteLocator
+pub const fn finstack_ai_protocol::RemoteLocator::lane_id(&self) -> core::option::Option<finstack_ai_kernel::primitives::ids::LaneId>
+pub const fn finstack_ai_protocol::RemoteLocator::run_id(&self) -> core::option::Option<finstack_ai_kernel::primitives::ids::RunId>
+pub const fn finstack_ai_protocol::RemoteLocator::session_id(&self) -> finstack_ai_kernel::primitives::ids::SessionId
+pub fn finstack_ai_protocol::RemoteLocator::try_new(finstack_ai_kernel::primitives::ids::SessionId, core::option::Option<finstack_ai_kernel::primitives::ids::LaneId>, core::option::Option<finstack_ai_kernel::primitives::ids::RunId>) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::RemoteLocator
+pub fn finstack_ai_protocol::RemoteLocator::clone(&self) -> finstack_ai_protocol::RemoteLocator
+impl core::cmp::Eq for finstack_ai_protocol::RemoteLocator
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteLocator
+pub fn finstack_ai_protocol::RemoteLocator::eq(&self, &finstack_ai_protocol::RemoteLocator) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteLocator
+pub fn finstack_ai_protocol::RemoteLocator::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteLocator
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteLocator
+pub fn finstack_ai_protocol::RemoteLocator::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteLocator
+pub fn finstack_ai_protocol::RemoteLocator::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct finstack_ai_protocol::RemoteSnapshot
+impl finstack_ai_protocol::RemoteSnapshot
+pub const fn finstack_ai_protocol::RemoteSnapshot::head_checksum(&self) -> core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
+pub const fn finstack_ai_protocol::RemoteSnapshot::locator(&self) -> &finstack_ai_protocol::RemoteLocator
+pub const fn finstack_ai_protocol::RemoteSnapshot::sequence(&self) -> u64
+pub const fn finstack_ai_protocol::RemoteSnapshot::state(&self) -> &finstack_ai_kernel::state::KernelState
+pub const fn finstack_ai_protocol::RemoteSnapshot::state_hash(&self) -> finstack_ai_kernel::primitives::digest::Digest
+pub fn finstack_ai_protocol::RemoteSnapshot::try_new(finstack_ai_protocol::RemoteLocator, u64, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_kernel::primitives::digest::Digest, finstack_ai_kernel::state::KernelState) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::RemoteSnapshot
+pub fn finstack_ai_protocol::RemoteSnapshot::clone(&self) -> finstack_ai_protocol::RemoteSnapshot
+impl core::cmp::Eq for finstack_ai_protocol::RemoteSnapshot
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteSnapshot
+pub fn finstack_ai_protocol::RemoteSnapshot::eq(&self, &finstack_ai_protocol::RemoteSnapshot) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteSnapshot
+pub fn finstack_ai_protocol::RemoteSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteSnapshot
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteSnapshot
+pub fn finstack_ai_protocol::RemoteSnapshot::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteSnapshot
+pub fn finstack_ai_protocol::RemoteSnapshot::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct finstack_ai_protocol::RemoteStartRequest
+pub finstack_ai_protocol::RemoteStartRequest::accept: finstack_ai_kernel::reducer::input::AcceptRun
+pub finstack_ai_protocol::RemoteStartRequest::agent: finstack_ai_protocol::RemoteAgentRef
+pub finstack_ai_protocol::RemoteStartRequest::delegation_id: core::option::Option<alloc::string::String>
+pub finstack_ai_protocol::RemoteStartRequest::input: alloc::vec::Vec<finstack_ai_kernel::content::content_block::ContentBlock>
+pub finstack_ai_protocol::RemoteStartRequest::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
+impl finstack_ai_protocol::RemoteStartRequest
+pub fn finstack_ai_protocol::RemoteStartRequest::try_new(finstack_ai_kernel::reducer::input::AcceptRun, finstack_ai_protocol::RemoteAgentRef, alloc::vec::Vec<finstack_ai_kernel::content::content_block::ContentBlock>, finstack_ai_kernel::primitives::raw_json::Metadata, core::option::Option<alloc::string::String>) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::RemoteStartRequest
+pub fn finstack_ai_protocol::RemoteStartRequest::clone(&self) -> finstack_ai_protocol::RemoteStartRequest
+impl core::cmp::Eq for finstack_ai_protocol::RemoteStartRequest
+impl core::cmp::PartialEq for finstack_ai_protocol::RemoteStartRequest
+pub fn finstack_ai_protocol::RemoteStartRequest::eq(&self, &finstack_ai_protocol::RemoteStartRequest) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::RemoteStartRequest
+pub fn finstack_ai_protocol::RemoteStartRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::RemoteStartRequest
+impl serde_core::ser::Serialize for finstack_ai_protocol::RemoteStartRequest
+pub fn finstack_ai_protocol::RemoteStartRequest::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::RemoteStartRequest
+pub fn finstack_ai_protocol::RemoteStartRequest::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct finstack_ai_protocol::VersionOffer
+impl finstack_ai_protocol::VersionOffer
+pub const fn finstack_ai_protocol::VersionOffer::downgrade_floor(&self) -> u16
+pub fn finstack_ai_protocol::VersionOffer::features(&self) -> &[alloc::string::String]
+pub fn finstack_ai_protocol::VersionOffer::supported_versions(&self) -> &[u16]
+pub fn finstack_ai_protocol::VersionOffer::try_new(alloc::vec::Vec<u16>, u16, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<Self, finstack_ai_protocol::ProtocolError>
+impl core::clone::Clone for finstack_ai_protocol::VersionOffer
+pub fn finstack_ai_protocol::VersionOffer::clone(&self) -> finstack_ai_protocol::VersionOffer
+impl core::cmp::Eq for finstack_ai_protocol::VersionOffer
+impl core::cmp::PartialEq for finstack_ai_protocol::VersionOffer
+pub fn finstack_ai_protocol::VersionOffer::eq(&self, &finstack_ai_protocol::VersionOffer) -> bool
+impl core::fmt::Debug for finstack_ai_protocol::VersionOffer
+pub fn finstack_ai_protocol::VersionOffer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::VersionOffer
+impl serde_core::ser::Serialize for finstack_ai_protocol::VersionOffer
+pub fn finstack_ai_protocol::VersionOffer::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::VersionOffer
+pub fn finstack_ai_protocol::VersionOffer::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub const finstack_ai_protocol::APPEND_BATCH_MAX_BYTES: usize
+pub const finstack_ai_protocol::CANONICAL_ARRAY_MAX_ITEMS: usize
+pub const finstack_ai_protocol::CANONICAL_ENVELOPE_MAX_BYTES: usize
+pub const finstack_ai_protocol::CANONICAL_MAP_MAX_ENTRIES: usize
+pub const finstack_ai_protocol::CANONICAL_NESTING_DEPTH: usize
+pub const finstack_ai_protocol::CANONICAL_STRING_MAX_BYTES: usize
+pub const finstack_ai_protocol::FRAME_LENGTH_BYTES: usize
+pub const finstack_ai_protocol::POST_AUTH_FRAME_MAX_BYTES: usize
+pub const finstack_ai_protocol::PRE_AUTH_FRAME_MAX_BYTES: usize
+pub const finstack_ai_protocol::PROTOCOL_VERSION_V1: u16
+pub const finstack_ai_protocol::SNAPSHOT_ENVELOPE_FORMAT_VERSION: u32
+pub fn finstack_ai_protocol::commit_record(&finstack_ai_kernel::records::draft::RecordDraft, u64, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>) -> core::result::Result<finstack_ai_kernel::records::envelope::RecordEnvelope, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::commit_records(&[finstack_ai_kernel::records::draft::RecordDraft], u64, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::records::envelope::RecordEnvelope>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::decode<T: serde_core::de::DeserializeOwned>(&[u8]) -> core::result::Result<T, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::decode_envelope<T: serde_core::de::DeserializeOwned>(&[u8], finstack_ai_protocol::PayloadFamily, u16) -> core::result::Result<finstack_ai_protocol::ProtocolEnvelope<T>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::decode_frame(&[u8], usize) -> core::result::Result<&[u8], finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::decode_frame_len([u8; 4], usize) -> core::result::Result<usize, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::decode_opaque_snapshot(u64, finstack_ai_kernel::primitives::digest::Digest, &[u8]) -> core::result::Result<finstack_ai_protocol::DecodedSnapshot, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::decode_snapshot(&[u8]) -> core::result::Result<finstack_ai_protocol::DecodedSnapshot, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::decode_value(&[u8]) -> core::result::Result<finstack_ai_protocol::CanonicalValue, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::encode<T: serde_core::ser::Serialize + ?core::marker::Sized>(&T) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::encode_envelope<T: serde_core::ser::Serialize>(finstack_ai_protocol::PayloadFamily, u16, &T) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::encode_frame(&[u8], usize) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::encode_snapshot(&finstack_ai_kernel::state::KernelState, u64, finstack_ai_kernel::primitives::digest::Digest, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>, core::option::Option<&finstack_ai_kernel::primitives::raw_json::RawJson>) -> core::result::Result<(alloc::vec::Vec<u8>, finstack_ai_kernel::primitives::digest::Digest), finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::encode_value(&finstack_ai_protocol::CanonicalValue) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::envelope_checksum(&finstack_ai_kernel::records::envelope::RecordEnvelope) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::from_diagnostic_json<T: serde_core::de::DeserializeOwned>(&str) -> core::result::Result<T, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::journal_known_answer(&str, &str) -> core::result::Result<finstack_ai_protocol::JournalKnownAnswer, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::payload_digest(&finstack_ai_kernel::records::body::RecordBody) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::require_features(&finstack_ai_protocol::VersionOffer, &[&str]) -> core::result::Result<(), finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::select_version(&finstack_ai_protocol::VersionOffer, &finstack_ai_protocol::VersionOffer) -> core::result::Result<u16, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::to_diagnostic_json<T: serde_core::ser::Serialize + ?core::marker::Sized>(&T) -> core::result::Result<alloc::string::String, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::to_diagnostic_jsonl<T: serde_core::ser::Serialize>(&[T]) -> core::result::Result<alloc::string::String, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::verify_chain(&[finstack_ai_kernel::records::envelope::RecordEnvelope]) -> core::result::Result<core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::verify_chain_from(&[finstack_ai_kernel::records::envelope::RecordEnvelope], finstack_ai_protocol::ChainAnchor) -> core::result::Result<core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::verify_envelope(&finstack_ai_kernel::records::envelope::RecordEnvelope) -> core::result::Result<(), finstack_ai_protocol::ProtocolError>

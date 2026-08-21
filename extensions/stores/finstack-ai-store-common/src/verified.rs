@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use finstack_ai_kernel::{Digest, RecordEnvelope, SessionId};
+use finstack_ai_protocol::ChainAnchor;
 use finstack_ai_runtime::StoreError;
 
 use crate::window::{FROM_SEQUENCE_WINDOW, verify_full_head, verify_tail_records};
@@ -53,6 +54,7 @@ pub struct VerifiedHead {
 /// uncached load of the same journal: [`StoreError::Integrity`] when the
 /// chain is broken or does not land on `stored_head`.
 pub fn verify_head_against_cache(
+    anchor: ChainAnchor,
     records: &[RecordEnvelope],
     head_sequence: u64,
     stored_head: Option<Digest>,
@@ -62,11 +64,18 @@ pub fn verify_head_against_cache(
         && cached.sequence >= 1
         && cached.sequence <= head_sequence
         && let Some(prior) = cached.checksum
-        && suffix_verifies(records, cached.sequence, prior, head_sequence, stored_head)
+        && suffix_verifies(
+            anchor.session_id,
+            records,
+            cached.sequence,
+            prior,
+            head_sequence,
+            stored_head,
+        )
     {
         return Ok(stored_head);
     }
-    verify_full_head(records, stored_head)
+    verify_full_head(anchor, records, stored_head)
 }
 
 /// Verify the records after `verified_sequence` against the stored head.
@@ -76,6 +85,7 @@ pub fn verify_head_against_cache(
 /// only "this shortcut is not usable"; the caller re-verifies in full, so no
 /// internal sentinel can ever reach a caller as a reason code.
 fn suffix_verifies(
+    session_id: SessionId,
     records: &[RecordEnvelope],
     verified_sequence: u64,
     verified_checksum: Digest,
@@ -99,6 +109,7 @@ fn suffix_verifies(
     }
     let tail = records.get(split..).unwrap_or(&[]);
     verify_tail_records(
+        session_id,
         tail,
         verified_sequence.saturating_add(1),
         verified_checksum,
@@ -276,8 +287,14 @@ mod tests {
             checksum: Some(records[1].checksum()),
         };
         assert_eq!(
-            verify_head_against_cache(&records, head_sequence, stored_head, Some(cached))
-                .expect("cached load"),
+            verify_head_against_cache(
+                ChainAnchor::root(records[0].session_id()),
+                &records,
+                head_sequence,
+                stored_head,
+                Some(cached),
+            )
+            .expect("cached load"),
             stored_head
         );
     }
@@ -295,6 +312,7 @@ mod tests {
         // pin the predicate rather than the outcome.)
         assert!(
             !suffix_verifies(
+                records[0].session_id(),
                 &records,
                 2,
                 Digest::raw_json(b"{}"),
@@ -305,6 +323,7 @@ mod tests {
         );
         assert!(
             suffix_verifies(
+                records[0].session_id(),
                 &records,
                 2,
                 records[1].checksum(),
@@ -314,8 +333,14 @@ mod tests {
             "the real record-2 checksum must anchor"
         );
         assert_eq!(
-            verify_head_against_cache(&records, head_sequence, stored_head, Some(stale))
-                .expect("full fallback"),
+            verify_head_against_cache(
+                ChainAnchor::root(records[0].session_id()),
+                &records,
+                head_sequence,
+                stored_head,
+                Some(stale),
+            )
+            .expect("full fallback"),
             stored_head
         );
     }
@@ -349,6 +374,7 @@ mod tests {
         // The suffix on its own is intact: records 3-4 chain from the cached
         // checksum and land on the stored head.
         verify_tail_records(
+            divergent[0].session_id(),
             &divergent[1..],
             3,
             anchor,
@@ -359,12 +385,20 @@ mod tests {
         .expect("the suffix alone verifies");
         // The anchor check is the only thing that rejects it…
         assert!(
-            !suffix_verifies(&divergent, 2, anchor, head_sequence, stored_head),
+            !suffix_verifies(
+                divergent[0].session_id(),
+                &divergent,
+                2,
+                anchor,
+                head_sequence,
+                stored_head,
+            ),
             "a proof about a record that is no longer stored must be rejected"
         );
         // …and the load then fails closed on the full verification.
         assert!(matches!(
             verify_head_against_cache(
+                ChainAnchor::root(divergent[0].session_id()),
                 &divergent,
                 head_sequence,
                 stored_head,
@@ -387,8 +421,14 @@ mod tests {
             checksum: records.last().map(RecordEnvelope::checksum),
         };
         assert_eq!(
-            verify_head_against_cache(&truncated, head_sequence, stored_head, Some(cached))
-                .expect("full re-verify"),
+            verify_head_against_cache(
+                ChainAnchor::root(truncated[0].session_id()),
+                &truncated,
+                head_sequence,
+                stored_head,
+                Some(cached),
+            )
+            .expect("full re-verify"),
             stored_head
         );
     }
@@ -403,7 +443,13 @@ mod tests {
             checksum: Some(records[1].checksum()),
         };
         assert!(matches!(
-            verify_head_against_cache(&records, head_sequence, broken, Some(cached)),
+            verify_head_against_cache(
+                ChainAnchor::root(records[0].session_id()),
+                &records,
+                head_sequence,
+                broken,
+                Some(cached),
+            ),
             Err(StoreError::Integrity {
                 reason_code: "head_checksum_mismatch"
             })

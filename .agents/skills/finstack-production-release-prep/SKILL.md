@@ -150,7 +150,6 @@ Verify these files are current and accurate:
 |------|-------|
 | `README.md` | Badges, install instructions, quick start example, feature list |
 | `CHANGELOG.md` | All changes since last release documented; `[Unreleased]` section populated |
-| `docs/` | No stale/orphaned docs referencing removed APIs |
 | Crate-level `README.md` | Each crate's README reflects current API |
 
 ### 3c. Examples
@@ -158,9 +157,7 @@ Verify these files are current and accurate:
 All examples must compile and produce correct output:
 
 ```bash
-uv run --no-project python scripts/docs/quickstarts.py
-# Check for examples referencing deprecated/removed APIs
-rg -l 'deprecated_function_name' examples/ docs/
+
 ```
 
 ### 3d. Migration guides

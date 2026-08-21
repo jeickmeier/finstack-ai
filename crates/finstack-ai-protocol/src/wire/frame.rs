@@ -64,15 +64,15 @@ pub fn decode_frame_len(
 /// Returns a limit or truncated-frame failure.
 pub fn decode_frame(bytes: &[u8], ceiling: usize) -> Result<&[u8], ProtocolError> {
     if bytes.len() < FRAME_LENGTH_BYTES {
-        return Err(ProtocolError::invalid("truncated_frame"));
+        return Err(ProtocolError::invalid_frame("truncated_frame"));
     }
     let header: [u8; FRAME_LENGTH_BYTES] = bytes[..FRAME_LENGTH_BYTES]
         .try_into()
-        .map_err(|_| ProtocolError::invalid("truncated_frame"))?;
+        .map_err(|_| ProtocolError::invalid_frame("truncated_frame"))?;
     let declared = decode_frame_len(header, ceiling)?;
     let rest = &bytes[FRAME_LENGTH_BYTES..];
     if rest.len() != declared {
-        return Err(ProtocolError::invalid("frame_length_mismatch"));
+        return Err(ProtocolError::invalid_frame("frame_length_mismatch"));
     }
     Ok(rest)
 }
@@ -120,7 +120,7 @@ mod tests {
     fn truncated_header_fails_closed() {
         assert!(matches!(
             decode_frame(&[0, 0, 0], PRE_AUTH_FRAME_MAX_BYTES),
-            Err(ProtocolError::InvalidCbor {
+            Err(ProtocolError::InvalidFrame {
                 reason_code: "truncated_frame"
             })
         ));

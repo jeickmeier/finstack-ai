@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use finstack_ai_protocol::{
-    RemoteCommand, RemoteCommandOp, RemoteCommandResult, RemoteEventView, RemoteLocator,
-    RemoteSnapshot,
+    RemoteCommand, RemoteCommandId, RemoteCommandPayload, RemoteCommandResult, RemoteDurableStep,
+    RemoteEventView, RemoteLocator, RemoteSnapshot,
 };
 
 use crate::ServerError;
@@ -33,7 +33,7 @@ pub struct ReconnectView {
     /// Sequence used for `NoSnapshot` when `snapshot` is `None`.
     pub snapshot_sequence: u64,
     /// Durable tail `S+1..=B`.
-    pub tail: Vec<RemoteEventView>,
+    pub tail: Vec<RemoteDurableStep>,
     /// Barrier sequence `B`.
     pub barrier: u64,
 }
@@ -43,12 +43,13 @@ pub struct ReconnectView {
 pub struct SessionReplica {
     session_id: String,
     tenant_scope: String,
-    durable: Vec<RemoteEventView>,
+    durable: Vec<RemoteDurableStep>,
     live: Vec<RemoteEventView>,
+    last_transient_sequence: Option<u64>,
     writer: Option<u64>,
     barrier_released: bool,
     phase: ReplicaPhase,
-    receipts: HashMap<String, RemoteCommandResult>,
+    receipts: HashMap<RemoteCommandId, RemoteCommandResult>,
     receipt_cap: usize,
 }
 
@@ -61,6 +62,7 @@ impl SessionReplica {
             tenant_scope: tenant_scope.into(),
             durable: Vec::new(),
             live: Vec::new(),
+            last_transient_sequence: None,
             writer: None,
             barrier_released: false,
             phase: ReplicaPhase::Idle,
@@ -78,7 +80,27 @@ impl SessionReplica {
 
     /// Append a durable event. Transient previous-connection progress is omitted.
     pub fn append_durable(&mut self, event: RemoteEventView) {
-        self.durable.push(event);
+        let Some(sequence) = event.durable_sequence() else {
+            return;
+        };
+        if self
+            .durable
+            .last_mut()
+            .is_some_and(|step| step.sequence() == sequence)
+        {
+            let mut events = self
+                .durable
+                .pop()
+                .map_or_else(Vec::new, RemoteDurableStep::into_events);
+            events.push(event);
+            if let Ok(step) = RemoteDurableStep::try_new(sequence, events) {
+                self.durable.push(step);
+            }
+            return;
+        }
+        if let Ok(step) = RemoteDurableStep::try_new(sequence, vec![event]) {
+            self.durable.push(step);
+        }
     }
 
     /// Queue a live event. Fails if the sync barrier has not been sent.
@@ -90,6 +112,17 @@ impl SessionReplica {
         if !self.barrier_released {
             return Err(ServerError::LiveBeforeBarrier);
         }
+        if event.durable_sequence().is_some()
+            || event.event().session_id().to_string() != self.session_id
+            || self
+                .last_transient_sequence
+                .is_some_and(|value| event.transient_sequence() <= value)
+        {
+            return Err(ServerError::Protocol(
+                finstack_ai_protocol::ProtocolError::codec("invalid_live_event"),
+            ));
+        }
+        self.last_transient_sequence = Some(event.transient_sequence());
         self.live.push(event);
         Ok(())
     }
@@ -108,10 +141,7 @@ impl SessionReplica {
     /// Current durable head sequence (`0` when empty).
     #[must_use]
     pub(crate) fn head_sequence(&self) -> u64 {
-        self.durable
-            .last()
-            .and_then(RemoteEventView::durable_sequence)
-            .unwrap_or(0)
+        self.durable.last().map_or(0, RemoteDurableStep::sequence)
     }
 
     /// Build authenticate → open → snapshot → tail → barrier. No live events.
@@ -125,7 +155,7 @@ impl SessionReplica {
         locator: &RemoteLocator,
         last_known: Option<u64>,
     ) -> Result<ReconnectView, ServerError> {
-        if locator.session_id() != self.session_id {
+        if locator.session_id().to_string() != self.session_id {
             return Err(ServerError::UnknownLocator);
         }
         if auth.tenant_scope() != self.tenant_scope {
@@ -133,36 +163,19 @@ impl SessionReplica {
         }
         let head = self.head_sequence();
         let last_known = last_known.unwrap_or(0);
-        let snapshot = if last_known == 0 && head > 0 {
-            Some(RemoteSnapshot::new(
-                self.session_id.clone(),
-                last_known.max(1).min(head),
-            ))
-        } else if last_known == 0 {
-            None
-        } else {
-            Some(RemoteSnapshot::new(
-                self.session_id.clone(),
-                last_known.min(head),
-            ))
-        };
-        let snapshot_sequence = snapshot
-            .as_ref()
-            .map_or(last_known, RemoteSnapshot::sequence);
+        // This reference replica has no authoritative kernel snapshot source.
+        // It must never synthesize a projection that looks authoritative.
+        let snapshot = None;
+        let snapshot_sequence = last_known.min(head);
         let tail = self
             .durable
             .iter()
-            .filter(|event| {
-                event
-                    .durable_sequence()
-                    .is_some_and(|sequence| sequence > snapshot_sequence)
-            })
+            .filter(|step| step.sequence() > snapshot_sequence)
             .cloned()
             .collect::<Vec<_>>();
         let barrier = tail
             .last()
-            .and_then(RemoteEventView::durable_sequence)
-            .unwrap_or(snapshot_sequence);
+            .map_or(snapshot_sequence, RemoteDurableStep::sequence);
         Ok(ReconnectView {
             snapshot,
             snapshot_sequence,
@@ -199,10 +212,10 @@ impl SessionReplica {
     /// that would exceed [`DEFAULT_RECEIPT_CAP`] (or the cap set by
     /// [`SessionReplica::with_receipt_cap`]) fails closed without eviction.
     ///
-    /// The replica is not a kernel execution authority. It records `op` as
-    /// durable public events (`run_accepted`, `run_cancelled`,
-    /// `interaction_resolved`, `run_completed`) and rejects invalid
-    /// transitions with `accepted = false`.
+    /// The replica is not a kernel execution authority. It validates the
+    /// typed command payload and advances only its reference lifecycle; an
+    /// authoritative kernel integration is responsible for publishing full
+    /// durable events. Invalid transitions return `accepted = false`.
     ///
     /// # Errors
     ///
@@ -217,10 +230,10 @@ impl SessionReplica {
         {
             return Err(ServerError::ScopeMismatch);
         }
-        if command.locator().session_id() != self.session_id {
+        if command.locator().session_id().to_string() != self.session_id {
             return Err(ServerError::UnknownLocator);
         }
-        if let Some(existing) = self.receipts.get(command.command_id()) {
+        if let Some(existing) = self.receipts.get(&command.command_id()) {
             if existing.digest() == command.digest() {
                 return Ok(existing.clone());
             }
@@ -229,21 +242,32 @@ impl SessionReplica {
         if self.receipts.len() >= self.receipt_cap {
             return Err(ServerError::ReceiptCap);
         }
-        let (accepted, reason_code) = self.apply_op(command.op());
-        let result = RemoteCommandResult::new(
+        if command.expected_durable_sequence() != self.head_sequence() {
+            let result = RemoteCommandResult::try_new(
+                command.command_id(),
+                command.digest(),
+                self.head_sequence(),
+                false,
+                Some("stale_durable_cursor".into()),
+            )?;
+            self.receipts.insert(command.command_id(), result.clone());
+            return Ok(result);
+        }
+        let (accepted, reason_code) = self.apply_payload(command.payload());
+        let result = RemoteCommandResult::try_new(
             command.command_id(),
             command.digest(),
+            self.head_sequence(),
             accepted,
             reason_code.map(str::to_owned),
-        );
-        self.receipts
-            .insert(command.command_id().to_owned(), result.clone());
+        )?;
+        self.receipts.insert(command.command_id(), result.clone());
         Ok(result)
     }
 
-    fn apply_op(&mut self, op: RemoteCommandOp) -> (bool, Option<&'static str>) {
-        match op {
-            RemoteCommandOp::Start => match self.phase {
+    fn apply_payload(&mut self, payload: &RemoteCommandPayload) -> (bool, Option<&'static str>) {
+        match payload {
+            RemoteCommandPayload::Start(_) => match self.phase {
                 ReplicaPhase::Idle => {
                     self.phase = ReplicaPhase::Running;
                     self.append_command_event("run_accepted");
@@ -252,7 +276,7 @@ impl SessionReplica {
                 ReplicaPhase::Running => (false, Some("already_started")),
                 ReplicaPhase::Terminal => (false, Some("run_terminal")),
             },
-            RemoteCommandOp::Cancel => match self.phase {
+            RemoteCommandPayload::Cancel(_) => match self.phase {
                 ReplicaPhase::Running => {
                     self.phase = ReplicaPhase::Terminal;
                     self.append_command_event("run_cancelled");
@@ -261,7 +285,7 @@ impl SessionReplica {
                 ReplicaPhase::Idle => (false, Some("not_running")),
                 ReplicaPhase::Terminal => (false, Some("run_terminal")),
             },
-            RemoteCommandOp::Resolve => match self.phase {
+            RemoteCommandPayload::Resolve(_) => match self.phase {
                 ReplicaPhase::Running => {
                     self.append_command_event("interaction_resolved");
                     (true, None)
@@ -269,7 +293,7 @@ impl SessionReplica {
                 ReplicaPhase::Idle => (false, Some("not_running")),
                 ReplicaPhase::Terminal => (false, Some("run_terminal")),
             },
-            RemoteCommandOp::Complete => match self.phase {
+            RemoteCommandPayload::Complete(_) => match self.phase {
                 ReplicaPhase::Running => {
                     self.phase = ReplicaPhase::Terminal;
                     self.append_command_event("run_completed");
@@ -283,12 +307,10 @@ impl SessionReplica {
 
     fn append_command_event(&mut self, kind: &str) {
         let sequence = self.head_sequence().saturating_add(1);
-        self.durable.push(RemoteEventView::new(
-            format!("cmd-{sequence}"),
-            kind,
-            Some(sequence),
-            sequence,
-        ));
+        let _ = kind;
+        if let Ok(step) = RemoteDurableStep::try_new(sequence, Vec::new()) {
+            self.durable.push(step);
+        }
     }
 }
 
@@ -335,91 +357,166 @@ impl SessionHub {
 mod tests {
     use super::{AuthContext, DEFAULT_RECEIPT_CAP, ReplicaPhase, SessionReplica};
     use crate::ServerError;
-    use finstack_ai_protocol::{RemoteCommand, RemoteCommandOp, RemoteLocator};
+    use finstack_ai_kernel::{
+        AcceptRun, BudgetPropagation, CancelRequested, CancellationInitiator,
+        CancellationPropagation, DeadlinePropagation, Digest, Metadata, PrincipalPropagation,
+        PrincipalRef, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
+        RunSecurityContext,
+    };
+    use finstack_ai_protocol::{
+        RemoteAgentRef, RemoteCommand, RemoteCommandPayload, RemoteLocator, RemoteStartRequest,
+    };
+
+    const SESSION_ID: &str = "01234567-89ab-7cde-89ab-0123456789ab";
+    const LANE_ID: &str = "11234567-89ab-7cde-89ab-0123456789ab";
+    const RUN_ID: &str = "21234567-89ab-7cde-89ab-0123456789ab";
+
+    fn locator() -> RemoteLocator {
+        RemoteLocator::try_new(
+            SESSION_ID.parse().expect("session id"),
+            Some(LANE_ID.parse().expect("lane id")),
+            Some(RUN_ID.parse().expect("run id")),
+        )
+        .expect("locator")
+    }
 
     fn auth() -> AuthContext {
         AuthContext::new("tenant-a", "loopback")
     }
 
-    fn command(id: &str, op: RemoteCommandOp) -> RemoteCommand {
-        RemoteCommand::try_new(id, RemoteLocator::new("sess-1", None, None), "tenant-a", op)
-            .expect("command")
+    fn start_payload() -> RemoteCommandPayload {
+        let locator = locator();
+        let run_id = locator.run_id().expect("run id");
+        let spec_digest = Digest::raw_json(br#"{"agent":"fixture"}"#);
+        let accepted = RunAccepted::try_new(
+            run_id,
+            RunRelation::root(run_id).expect("root"),
+            RunSecurityContext::try_new(
+                "tenant-a",
+                PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+                "loopback",
+                "high",
+                "policy-v1",
+                "decision-v1",
+                None,
+            )
+            .expect("security"),
+            None,
+            RunLimits::empty(),
+            RunPropagationPolicy {
+                cancellation: CancellationPropagation::Cascade,
+                deadline: DeadlinePropagation::MinimumOfParentAndChild,
+                budget: BudgetPropagation::SharedScope,
+                principal: PrincipalPropagation::Inherit,
+            },
+            spec_digest,
+            None,
+        )
+        .expect("accepted");
+        RemoteCommandPayload::Start(Box::new(
+            RemoteStartRequest::try_new(
+                AcceptRun {
+                    session_id: locator.session_id(),
+                    lane_id: locator.lane_id().expect("lane id"),
+                    accepted,
+                },
+                RemoteAgentRef {
+                    agent_id: finstack_ai_kernel::AgentId::parse("agent.fixture").expect("agent"),
+                    bundle_id: None,
+                    spec_digest,
+                },
+                Vec::new(),
+                Metadata::empty(),
+                None,
+            )
+            .expect("start"),
+        ))
+    }
+
+    fn cancel_payload() -> RemoteCommandPayload {
+        RemoteCommandPayload::Cancel(Box::new(CancelRequested {
+            initiator: CancellationInitiator::RuntimeShutdown,
+            reason: None,
+        }))
+    }
+
+    fn command(id: &str, expected: u64, payload: RemoteCommandPayload) -> RemoteCommand {
+        let ordinal = id.bytes().fold(0_u64, |value, byte| {
+            value.wrapping_mul(31) + u64::from(byte)
+        });
+        let id = format!("0192e0f6-7c3a-7c11-8a4d-{ordinal:012x}");
+        RemoteCommand::try_new(id, locator(), "tenant-a", expected, payload).expect("command")
     }
 
     #[test]
     fn receipt_map_fails_closed_at_cap() {
-        let mut replica = SessionReplica::new("sess-1", "tenant-a").with_receipt_cap(1);
+        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a").with_receipt_cap(1);
         replica
-            .apply_command(&auth(), &command("cmd-1", RemoteCommandOp::Start))
+            .apply_command(&auth(), &command("cmd-1", 0, start_payload()))
             .expect("first");
         let err = replica
-            .apply_command(&auth(), &command("cmd-2", RemoteCommandOp::Complete))
+            .apply_command(&auth(), &command("cmd-2", 1, cancel_payload()))
             .expect_err("cap");
         assert!(matches!(err, ServerError::ReceiptCap));
         assert_eq!(err.code(), "receipt_cap");
         let replay = replica
-            .apply_command(&auth(), &command("cmd-1", RemoteCommandOp::Start))
+            .apply_command(&auth(), &command("cmd-1", 0, start_payload()))
             .expect("replay still works at cap");
         assert!(replay.accepted());
     }
 
     #[test]
     fn receipt_conflict_is_constant_time_lookup() {
-        let mut replica = SessionReplica::new("sess-1", "tenant-a");
+        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
         replica
-            .apply_command(&auth(), &command("cmd-1", RemoteCommandOp::Start))
+            .apply_command(&auth(), &command("cmd-1", 0, start_payload()))
             .expect("start");
         let err = replica
-            .apply_command(&auth(), &command("cmd-1", RemoteCommandOp::Cancel))
+            .apply_command(&auth(), &command("cmd-1", 1, cancel_payload()))
             .expect_err("conflict");
         assert!(matches!(err, ServerError::IdempotencyConflict));
         let replay = replica
-            .apply_command(&auth(), &command("cmd-1", RemoteCommandOp::Start))
+            .apply_command(&auth(), &command("cmd-1", 0, start_payload()))
             .expect("replay");
         assert!(replay.accepted());
         assert_eq!(DEFAULT_RECEIPT_CAP, 1024);
     }
 
     #[test]
-    fn apply_command_honors_op_transitions() {
-        let mut replica = SessionReplica::new("sess-1", "tenant-a");
+    fn apply_command_honors_payload_transitions() {
+        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
         assert_eq!(replica.phase, ReplicaPhase::Idle);
         let start = replica
-            .apply_command(&auth(), &command("c1", RemoteCommandOp::Start))
+            .apply_command(&auth(), &command("c1", 0, start_payload()))
             .expect("start");
         assert!(start.accepted());
         assert_eq!(replica.phase, ReplicaPhase::Running);
         assert_eq!(replica.head_sequence(), 1);
         let start_again = replica
-            .apply_command(&auth(), &command("c2", RemoteCommandOp::Start))
+            .apply_command(&auth(), &command("c2", 1, start_payload()))
             .expect("already started");
         assert!(!start_again.accepted());
         assert_eq!(start_again.reason_code(), Some("already_started"));
         assert_eq!(replica.head_sequence(), 1);
-        let resolved = replica
-            .apply_command(&auth(), &command("c3", RemoteCommandOp::Resolve))
-            .expect("resolve");
-        assert!(resolved.accepted());
-        assert_eq!(replica.phase, ReplicaPhase::Running);
-        let complete = replica
-            .apply_command(&auth(), &command("c4", RemoteCommandOp::Complete))
-            .expect("complete");
-        assert!(complete.accepted());
-        assert_eq!(replica.phase, ReplicaPhase::Terminal);
-        assert_eq!(replica.head_sequence(), 3);
         let cancel = replica
-            .apply_command(&auth(), &command("c5", RemoteCommandOp::Cancel))
+            .apply_command(&auth(), &command("c3", 1, cancel_payload()))
+            .expect("cancel");
+        assert!(cancel.accepted());
+        assert_eq!(replica.phase, ReplicaPhase::Terminal);
+        assert_eq!(replica.head_sequence(), 2);
+        let cancel_again = replica
+            .apply_command(&auth(), &command("c4", 2, cancel_payload()))
             .expect("terminal");
-        assert!(!cancel.accepted());
-        assert_eq!(cancel.reason_code(), Some("run_terminal"));
-        assert_eq!(replica.head_sequence(), 3);
+        assert!(!cancel_again.accepted());
+        assert_eq!(cancel_again.reason_code(), Some("run_terminal"));
+        assert_eq!(replica.head_sequence(), 2);
     }
 
     #[test]
     fn cancel_from_idle_is_rejected() {
-        let mut replica = SessionReplica::new("sess-1", "tenant-a");
+        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
         let result = replica
-            .apply_command(&auth(), &command("c1", RemoteCommandOp::Cancel))
+            .apply_command(&auth(), &command("c1", 0, cancel_payload()))
             .expect("receipt");
         assert!(!result.accepted());
         assert_eq!(result.reason_code(), Some("not_running"));

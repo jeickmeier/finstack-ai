@@ -407,6 +407,10 @@ export PATH="$(mise where cargo:cargo-public-api)/bin:${PATH}"
 uv run --no-project python scripts/compat/public_items.py --check
 """
 
+[tasks.release-tag-preflight]
+description = "Fail when an intended release tag already names another commit"
+run = "uv run --no-project python scripts/compat/release_tag_preflight.py {{arg(name='tag')}}"
+
 [tasks.pg-test-db]
 description = "Run a disposable Postgres container for finstack-ai-store-postgres's server-gated tests"
 run = """

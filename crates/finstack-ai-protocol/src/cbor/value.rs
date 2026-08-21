@@ -2,8 +2,8 @@
 
 use crate::error::ProtocolError;
 use crate::{
-    CANONICAL_ARRAY_MAX_ITEMS, CANONICAL_MAP_MAX_ENTRIES, CANONICAL_NESTING_DEPTH,
-    CANONICAL_STRING_MAX_BYTES,
+    CANONICAL_ARRAY_MAX_ITEMS, CANONICAL_ENVELOPE_MAX_BYTES, CANONICAL_MAP_MAX_ENTRIES,
+    CANONICAL_NESTING_DEPTH, CANONICAL_STRING_MAX_BYTES,
 };
 
 /// Validated canonical-CBOR value tree.
@@ -37,9 +37,9 @@ impl Eq for CanonicalValue {}
 ///
 /// Returns [`ProtocolError::InvalidCbor`] for non-finite floats.
 pub fn encode_value(value: &CanonicalValue) -> Result<Vec<u8>, ProtocolError> {
-    let mut out = Vec::new();
-    write_value(value, &mut out)?;
-    Ok(out)
+    let mut writer = Writer::new(CANONICAL_ENVELOPE_MAX_BYTES);
+    writer.value(value, 0)?;
+    Ok(writer.out)
 }
 
 /// Decode one canonical value with v1 ceilings enforced before allocation.
@@ -86,110 +86,162 @@ pub(crate) fn sort_map(
         .collect())
 }
 
-fn write_value(value: &CanonicalValue, out: &mut Vec<u8>) -> Result<(), ProtocolError> {
-    match value {
-        CanonicalValue::Null => out.push(0xf6),
-        CanonicalValue::Bool(false) => out.push(0xf4),
-        CanonicalValue::Bool(true) => out.push(0xf5),
-        CanonicalValue::Unsigned(n) => write_uint(0, *n, out),
-        CanonicalValue::Negative(n) => write_uint(1, *n, out),
-        CanonicalValue::Bytes(bytes) => {
-            if bytes.len() > CANONICAL_STRING_MAX_BYTES {
-                return Err(ProtocolError::limit(
-                    "byte_string",
-                    CANONICAL_STRING_MAX_BYTES,
-                ));
-            }
-            write_uint(2, usize_to_u64(bytes.len(), "byte_string")?, out);
-            out.extend_from_slice(bytes);
+struct Writer {
+    out: Vec<u8>,
+    limit: usize,
+}
+
+impl Writer {
+    fn new(limit: usize) -> Self {
+        Self {
+            out: Vec::new(),
+            limit,
         }
-        CanonicalValue::Text(text) => {
-            if text.len() > CANONICAL_STRING_MAX_BYTES {
-                return Err(ProtocolError::limit(
-                    "text_string",
-                    CANONICAL_STRING_MAX_BYTES,
-                ));
-            }
-            write_uint(3, usize_to_u64(text.len(), "text_string")?, out);
-            out.extend_from_slice(text.as_bytes());
-        }
-        CanonicalValue::Array(items) => {
-            if items.len() > CANONICAL_ARRAY_MAX_ITEMS {
-                return Err(ProtocolError::limit(
-                    "array_items",
-                    CANONICAL_ARRAY_MAX_ITEMS,
-                ));
-            }
-            write_uint(4, usize_to_u64(items.len(), "array_items")?, out);
-            for item in items {
-                write_value(item, out)?;
-            }
-        }
-        CanonicalValue::Map(entries) => {
-            let entries = sort_map(entries.clone())?;
-            write_uint(5, usize_to_u64(entries.len(), "map_entries")?, out);
-            for (key, value) in entries {
-                write_value(&key, out)?;
-                write_value(&value, out)?;
-            }
-        }
-        CanonicalValue::Float(bits) => write_float(*bits, out)?,
     }
-    Ok(())
+
+    fn push(&mut self, byte: u8) -> Result<(), ProtocolError> {
+        self.extend(&[byte])
+    }
+
+    fn extend(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
+        let next = self
+            .out
+            .len()
+            .checked_add(bytes.len())
+            .ok_or_else(|| ProtocolError::limit("canonical_envelope", self.limit))?;
+        if next > self.limit {
+            return Err(ProtocolError::limit("canonical_envelope", self.limit));
+        }
+        self.out.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn value(&mut self, value: &CanonicalValue, depth: usize) -> Result<(), ProtocolError> {
+        match value {
+            CanonicalValue::Null => self.push(0xf6)?,
+            CanonicalValue::Bool(false) => self.push(0xf4)?,
+            CanonicalValue::Bool(true) => self.push(0xf5)?,
+            CanonicalValue::Unsigned(n) => self.uint(0, *n)?,
+            CanonicalValue::Negative(n) => self.uint(1, *n)?,
+            CanonicalValue::Bytes(bytes) => {
+                if bytes.len() > CANONICAL_STRING_MAX_BYTES {
+                    return Err(ProtocolError::limit(
+                        "byte_string",
+                        CANONICAL_STRING_MAX_BYTES,
+                    ));
+                }
+                self.uint(2, usize_to_u64(bytes.len(), "byte_string")?)?;
+                self.extend(bytes)?;
+            }
+            CanonicalValue::Text(text) => {
+                if text.len() > CANONICAL_STRING_MAX_BYTES {
+                    return Err(ProtocolError::limit(
+                        "text_string",
+                        CANONICAL_STRING_MAX_BYTES,
+                    ));
+                }
+                self.uint(3, usize_to_u64(text.len(), "text_string")?)?;
+                self.extend(text.as_bytes())?;
+            }
+            CanonicalValue::Array(items) => {
+                let nested = enter_depth(depth)?;
+                if items.len() > CANONICAL_ARRAY_MAX_ITEMS {
+                    return Err(ProtocolError::limit(
+                        "array_items",
+                        CANONICAL_ARRAY_MAX_ITEMS,
+                    ));
+                }
+                self.uint(4, usize_to_u64(items.len(), "array_items")?)?;
+                for item in items {
+                    self.value(item, nested)?;
+                }
+            }
+            CanonicalValue::Map(entries) => {
+                let nested = enter_depth(depth)?;
+                if entries.len() > CANONICAL_MAP_MAX_ENTRIES {
+                    return Err(ProtocolError::limit(
+                        "map_entries",
+                        CANONICAL_MAP_MAX_ENTRIES,
+                    ));
+                }
+                let mut keys = Vec::with_capacity(entries.len());
+                for (index, (key, _)) in entries.iter().enumerate() {
+                    let mut key_writer = Writer::new(CANONICAL_ENVELOPE_MAX_BYTES);
+                    key_writer.value(key, nested)?;
+                    keys.push((key_writer.out, index));
+                }
+                keys.sort_by(|left, right| left.0.cmp(&right.0));
+                for window in keys.windows(2) {
+                    if window[0].0 == window[1].0 {
+                        return Err(ProtocolError::invalid("duplicate_map_key"));
+                    }
+                }
+                self.uint(5, usize_to_u64(entries.len(), "map_entries")?)?;
+                for (key_bytes, index) in keys {
+                    self.extend(&key_bytes)?;
+                    let (_, value) = &entries[index];
+                    self.value(value, nested)?;
+                }
+            }
+            CanonicalValue::Float(bits) => self.float(*bits)?,
+        }
+        Ok(())
+    }
+
+    fn uint(&mut self, major: u8, n: u64) -> Result<(), ProtocolError> {
+        let major = major << 5;
+        if let Ok(byte) = u8::try_from(n) {
+            if byte < 24 {
+                self.push(major | byte)?;
+            } else {
+                self.extend(&[major | 0x18, byte])?;
+            }
+        } else if let Ok(short) = u16::try_from(n) {
+            self.push(major | 0x19)?;
+            self.extend(&short.to_be_bytes())?;
+        } else if let Ok(word) = u32::try_from(n) {
+            self.push(major | 0x1a)?;
+            self.extend(&word.to_be_bytes())?;
+        } else {
+            self.push(major | 0x1b)?;
+            self.extend(&n.to_be_bytes())?;
+        }
+        Ok(())
+    }
+
+    fn float(&mut self, bits: u64) -> Result<(), ProtocolError> {
+        let value = f64::from_bits(bits);
+        if !value.is_finite() {
+            return Err(ProtocolError::invalid("non_finite_float"));
+        }
+        if let Some(half) = f64_to_f16_exact(value) {
+            self.push(0xf9)?;
+            self.extend(&half.to_be_bytes())?;
+            return Ok(());
+        }
+        let single = f64_to_f32_lossy(value);
+        if f64::from(single).to_bits() == bits {
+            self.push(0xfa)?;
+            self.extend(&single.to_bits().to_be_bytes())?;
+            return Ok(());
+        }
+        self.push(0xfb)?;
+        self.extend(&bits.to_be_bytes())
+    }
+}
+
+fn enter_depth(depth: usize) -> Result<usize, ProtocolError> {
+    if depth >= CANONICAL_NESTING_DEPTH {
+        return Err(ProtocolError::limit(
+            "nesting_depth",
+            CANONICAL_NESTING_DEPTH,
+        ));
+    }
+    Ok(depth + 1)
 }
 
 fn usize_to_u64(len: usize, resource: &'static str) -> Result<u64, ProtocolError> {
     u64::try_from(len).map_err(|_| ProtocolError::limit(resource, usize::MAX))
-}
-
-fn write_uint(major: u8, n: u64, out: &mut Vec<u8>) {
-    let major = major << 5;
-    if let Ok(byte) = u8::try_from(n) {
-        if byte < 24 {
-            out.push(major | byte);
-        } else {
-            out.push(major | 0x18);
-            out.push(byte);
-        }
-    } else if let Ok(short) = u16::try_from(n) {
-        out.push(major | 0x19);
-        out.extend_from_slice(&short.to_be_bytes());
-    } else if let Ok(word) = u32::try_from(n) {
-        out.push(major | 0x1a);
-        out.extend_from_slice(&word.to_be_bytes());
-    } else {
-        out.push(major | 0x1b);
-        out.extend_from_slice(&n.to_be_bytes());
-    }
-}
-
-fn write_float(bits: u64, out: &mut Vec<u8>) -> Result<(), ProtocolError> {
-    let value = f64::from_bits(bits);
-    if !value.is_finite() {
-        return Err(ProtocolError::invalid("non_finite_float"));
-    }
-    if value == 0.0 {
-        if bits >> 63 == 1 {
-            out.extend_from_slice(&[0xf9, 0x80, 0x00]);
-        } else {
-            out.extend_from_slice(&[0xf9, 0x00, 0x00]);
-        }
-        return Ok(());
-    }
-    if let Some(half) = f64_to_f16_exact(value) {
-        out.push(0xf9);
-        out.extend_from_slice(&half.to_be_bytes());
-        return Ok(());
-    }
-    let single = f64_to_f32_lossy(value);
-    if f64::from(single).to_bits() == bits {
-        out.push(0xfa);
-        out.extend_from_slice(&single.to_bits().to_be_bytes());
-        return Ok(());
-    }
-    out.push(0xfb);
-    out.extend_from_slice(&bits.to_be_bytes());
-    Ok(())
 }
 
 #[allow(
@@ -202,23 +254,8 @@ fn f64_to_f32_lossy(value: f64) -> f32 {
 }
 
 fn f64_to_f16_exact(value: f64) -> Option<u16> {
-    let bits = value.to_bits();
-    let sign = u16::try_from(bits >> 63).ok()? << 15;
-    let exp = i32::try_from((bits >> 52) & 0x7ff).ok()?;
-    let frac = bits & ((1_u64 << 52) - 1);
-    if exp == 0 || exp == 0x7ff {
-        return None;
-    }
-    let unbiased = exp - 1023;
-    if !(0..=15).contains(&(unbiased + 14)) {
-        return None;
-    }
-    if frac & ((1_u64 << 42) - 1) != 0 {
-        return None;
-    }
-    let mantissa = u16::try_from(frac >> 42).ok()?;
-    let exp16 = u16::try_from(unbiased + 15).ok()?;
-    Some(sign | (exp16 << 10) | mantissa)
+    let half = half::f16::from_f64(value);
+    (half.to_f64().to_bits() == value.to_bits()).then_some(half.to_bits())
 }
 
 struct Decoder<'a> {
@@ -262,17 +299,18 @@ impl Decoder<'_> {
                 self.enter_container()?;
                 let len = self.bounded_len(additional, CANONICAL_MAP_MAX_ENTRIES, "map_entries")?;
                 let mut entries = Vec::with_capacity(len);
-                let mut previous_key = None;
+                let mut previous_key: Option<(usize, usize)> = None;
                 for _ in 0..len {
+                    let key_start = self.offset;
                     let key = self.item()?;
-                    let encoded_key = encode_value(&key)?;
-                    if previous_key
-                        .as_ref()
-                        .is_some_and(|previous: &Vec<u8>| encoded_key <= *previous)
+                    let key_end = self.offset;
+                    if let Some((previous_start, previous_end)) = previous_key
+                        && self.input[key_start..key_end]
+                            <= self.input[previous_start..previous_end]
                     {
                         return Err(ProtocolError::invalid("unsorted_or_duplicate_map_key"));
                     }
-                    previous_key = Some(encoded_key);
+                    previous_key = Some((key_start, key_end));
                     let value = self.item()?;
                     entries.push((key, value));
                 }
@@ -317,12 +355,22 @@ impl Decoder<'_> {
                 if !value.is_finite() {
                     return Err(ProtocolError::invalid("non_finite_float"));
                 }
-                Ok(CanonicalValue::Float(f64::from(value).to_bits()))
+                let widened = f64::from(value);
+                if f64_to_f16_exact(widened).is_some() {
+                    return Err(ProtocolError::invalid("non_minimal_float"));
+                }
+                Ok(CanonicalValue::Float(widened.to_bits()))
             }
             27 => {
                 let bits = u64::from_be_bytes(self.read_array()?);
-                if !f64::from_bits(bits).is_finite() {
+                let value = f64::from_bits(bits);
+                if !value.is_finite() {
                     return Err(ProtocolError::invalid("non_finite_float"));
+                }
+                if f64_to_f16_exact(value).is_some()
+                    || f64::from(f64_to_f32_lossy(value)).to_bits() == bits
+                {
+                    return Err(ProtocolError::invalid("non_minimal_float"));
                 }
                 Ok(CanonicalValue::Float(bits))
             }
@@ -352,7 +400,7 @@ impl Decoder<'_> {
     }
 
     fn read_uint(&mut self, additional: u8) -> Result<u64, ProtocolError> {
-        match additional {
+        let value = match additional {
             0..=23 => Ok(u64::from(additional)),
             24 => Ok(u64::from(self.read_u8()?)),
             25 => Ok(u64::from(u16::from_be_bytes(self.read_array()?))),
@@ -360,7 +408,18 @@ impl Decoder<'_> {
             27 => Ok(u64::from_be_bytes(self.read_array()?)),
             31 => Err(ProtocolError::invalid("indefinite_length")),
             _ => Err(ProtocolError::invalid("reserved_additional_info")),
+        }?;
+        let minimal = match additional {
+            24 => value >= 24,
+            25 => value > u64::from(u8::MAX),
+            26 => value > u64::from(u16::MAX),
+            27 => value > u64::from(u32::MAX),
+            _ => true,
+        };
+        if !minimal {
+            return Err(ProtocolError::invalid("non_minimal_integer_or_length"));
         }
+        Ok(value)
     }
 
     fn read_u8(&mut self) -> Result<u8, ProtocolError> {
@@ -394,25 +453,11 @@ impl Decoder<'_> {
 }
 
 fn f16_to_f64_bits(half: u16) -> Result<u64, ProtocolError> {
-    let sign = u64::from(half >> 15);
-    let exp = (half >> 10) & 0x1f;
-    let frac = half & 0x3ff;
-    if exp == 0x1f {
+    let value = half::f16::from_bits(half);
+    if !value.is_finite() {
         return Err(ProtocolError::invalid("non_finite_float"));
     }
-    if exp == 0 {
-        if frac == 0 {
-            return Ok(sign << 63);
-        }
-        let value = f64::from(frac) * 2_f64.powi(-24);
-        let bits = if sign == 1 {
-            (-value).to_bits()
-        } else {
-            value.to_bits()
-        };
-        return Ok(bits);
-    }
-    Ok((sign << 63) | ((u64::from(exp) + 1023 - 15) << 52) | (u64::from(frac) << 42))
+    Ok(value.to_f64().to_bits())
 }
 
 #[cfg(test)]

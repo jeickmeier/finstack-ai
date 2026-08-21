@@ -31,6 +31,7 @@ use finstack_ai_kernel::{
     AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordDraft, RecordEnvelope,
     RecordId, SessionId,
 };
+use finstack_ai_protocol::ChainAnchor;
 use finstack_ai_runtime::{
     JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
     OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
@@ -211,6 +212,11 @@ impl MemoryJournalStore {
             CacheUse::Windowed => None,
         };
         match verify_head_against_cache(
+            ChainAnchor {
+                session_id,
+                next_sequence: session.anchor_next_sequence,
+                previous_checksum: session.anchor_previous_checksum,
+            },
             &records,
             session.head_sequence,
             session.head_checksum,
@@ -475,6 +481,14 @@ impl MemoryJournalStore {
             .iter()
             .map(|batch| batch.records.len())
             .sum();
+        if let Some(first) = session
+            .batches
+            .first()
+            .and_then(|batch| batch.records.first())
+        {
+            session.anchor_next_sequence = first.sequence();
+            session.anchor_previous_checksum = first.previous_checksum();
+        }
         // The retained journal is a different chain prefix than the one the
         // cached proof described, so the proof is dropped and the pruned
         // journal re-verified in full before a new one is recorded.
@@ -485,13 +499,18 @@ impl MemoryJournalStore {
         };
         let records = flatten_records(session);
         let stored_head = session.head_checksum;
+        let anchor = ChainAnchor {
+            session_id: request.session_id,
+            next_sequence: session.anchor_next_sequence,
+            previous_checksum: session.anchor_previous_checksum,
+        };
         // `inner` is one mutex over *every* session, so nothing expensive may
         // run under it. `records` is already an owned clone and `stored_head`
         // a `Copy` digest, so the chain walk needs no lock at all: release it
         // first, and every unrelated append/load/scan keeps running while this
         // prune re-verifies.
         drop(inner);
-        verify_full_head(&records, stored_head)?;
+        verify_full_head(anchor, &records, stored_head)?;
         // The cache write does go back under `inner`, briefly, for
         // `append_sync`'s reason: a concurrent writer's newer head must not be
         // overwritten by this older-but-valid one. The generation guard alone
@@ -620,7 +639,6 @@ struct Inner {
     records_by_id: BTreeMap<RecordId, RecordIndexEntry>,
 }
 
-#[derive(Default)]
 struct SessionData {
     head_sequence: u64,
     head_checksum: Option<Digest>,
@@ -628,6 +646,23 @@ struct SessionData {
     records: usize,
     batches: Vec<CommittedBatch>,
     snapshot: Option<OpaqueSnapshot>,
+    anchor_next_sequence: u64,
+    anchor_previous_checksum: Option<Digest>,
+}
+
+impl Default for SessionData {
+    fn default() -> Self {
+        Self {
+            head_sequence: 0,
+            head_checksum: None,
+            metadata: Metadata::empty(),
+            records: 0,
+            batches: Vec::new(),
+            snapshot: None,
+            anchor_next_sequence: 1,
+            anchor_previous_checksum: None,
+        }
+    }
 }
 
 struct BatchIndexEntry {
@@ -654,6 +689,7 @@ fn loaded_from_batches(
         .flat_map(|batch| batch.records.iter().cloned())
         .collect::<Vec<_>>();
     verify_tail_records(
+        session_id,
         &records,
         start,
         prior_checksum,

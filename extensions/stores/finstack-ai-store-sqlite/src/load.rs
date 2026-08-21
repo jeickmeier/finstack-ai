@@ -4,7 +4,7 @@ use finstack_ai_kernel::{
     AppendBatchId, CommittedBatch, Digest, EventId, Id, IdTag, Metadata, RecordBody,
     RecordEnvelope, RecordId, SessionId, Timestamp,
 };
-use finstack_ai_protocol::{decode, verify_chain_from};
+use finstack_ai_protocol::{ChainAnchor, decode, verify_chain_from};
 use finstack_ai_runtime::{
     LoadWindow, LoadedSession, OpaqueSnapshot, ScanPage, ScanRequest, StoreError,
 };
@@ -33,6 +33,8 @@ pub(crate) struct SessionRow {
     pub(crate) current_sequence: u64,
     pub(crate) head_checksum: Option<Digest>,
     pub(crate) snapshot_sequence: Option<u64>,
+    pub(crate) chain_anchor_sequence: u64,
+    pub(crate) chain_anchor_checksum: Option<Digest>,
     pub(crate) batches: usize,
     pub(crate) records: usize,
 }
@@ -314,7 +316,21 @@ pub(crate) fn load_session(
             .iter()
             .map(|row| row.envelope.clone())
             .collect::<Vec<_>>();
-        verify_head_against_cache(&records, head_sequence, stored_head, cached)?
+        let session = load_session_row(connection, session_id)?.ok_or(StoreError::Integrity {
+            reason_code: "sqlite_session_row_missing",
+        })?;
+        verify_head_against_cache(
+            ChainAnchor::try_new(
+                session_id,
+                session.chain_anchor_sequence,
+                session.chain_anchor_checksum,
+            )
+            .map_err(protocol_error)?,
+            &records,
+            head_sequence,
+            stored_head,
+            cached,
+        )?
     };
     let committed_batches = group_batches(&stored)?;
     Ok(LoadedSession {
@@ -430,6 +446,7 @@ fn loaded_tail(
         .collect::<Vec<_>>();
     let stored_head = session_head_checksum(connection, session_id)?;
     verify_tail_records(
+        session_id,
         &records,
         start,
         prior_checksum,
@@ -628,7 +645,9 @@ fn verify_scan_page(
             None => first.previous_checksum(),
         }
     };
-    let head = verify_chain_from(records, prior, Some(first.sequence())).map_err(protocol_error)?;
+    let anchor =
+        ChainAnchor::try_new(session_id, first.sequence(), prior).map_err(protocol_error)?;
+    let head = verify_chain_from(records, anchor).map_err(protocol_error)?;
     if records
         .last()
         .is_some_and(|record| record.sequence() == session.current_sequence)
@@ -684,9 +703,16 @@ pub(crate) fn load_session_row(
     connection: &Connection,
     session_id: SessionId,
 ) -> Result<Option<SessionRow>, StoreError> {
-    let Some((current_sequence, head_checksum, snapshot_sequence)) = connection
+    let Some((
+        current_sequence,
+        head_checksum,
+        snapshot_sequence,
+        chain_anchor_sequence,
+        chain_anchor_checksum,
+    )) = connection
         .query_row(
-            "SELECT current_sequence, head_checksum, snapshot_sequence
+            "SELECT current_sequence, head_checksum, snapshot_sequence,
+                    chain_anchor_sequence, chain_anchor_checksum
              FROM sessions WHERE session_id = ?1",
             params![session_id.as_bytes().as_slice()],
             |row| {
@@ -694,6 +720,8 @@ pub(crate) fn load_session_row(
                     row.get::<_, i64>(0)?,
                     row.get::<_, Option<Vec<u8>>>(1)?,
                     row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<Vec<u8>>>(4)?,
                 ))
             },
         )
@@ -717,6 +745,11 @@ pub(crate) fn load_session_row(
         head_checksum: head_checksum.as_deref().map(digest_from_blob).transpose()?,
         snapshot_sequence: snapshot_sequence
             .map(|value| u64_from_i64(value, "snapshot_sequence"))
+            .transpose()?,
+        chain_anchor_sequence: u64_from_i64(chain_anchor_sequence, "chain_anchor_sequence")?,
+        chain_anchor_checksum: chain_anchor_checksum
+            .as_deref()
+            .map(digest_from_blob)
             .transpose()?,
         batches,
         records,

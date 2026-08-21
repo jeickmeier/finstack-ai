@@ -68,3 +68,10 @@ path = "fuzz_targets/recovery_sequence.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "canonical_cbor"
+path = "fuzz_targets/canonical_cbor.rs"
+test = false
+doc = false
+bench = false

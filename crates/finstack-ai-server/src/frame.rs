@@ -54,7 +54,7 @@ pub(crate) async fn read_pre_auth<S: AsyncRead + Unpin>(
 ) -> Result<RemotePreAuth, ServerError> {
     let payload = read_frame(stream, PRE_AUTH_FRAME_MAX_BYTES).await?;
     let envelope: ProtocolEnvelope<RemotePreAuth> =
-        decode_envelope(&payload, PayloadFamily::Remote)?;
+        decode_envelope(&payload, PayloadFamily::Remote, PROTOCOL_VERSION_V1)?;
     Ok(envelope.into_body())
 }
 
@@ -79,10 +79,11 @@ pub(crate) async fn write_pre_auth<S: AsyncWrite + Unpin>(
 pub(crate) async fn read_post_auth<S: AsyncRead + Unpin>(
     stream: &mut S,
     ceiling: usize,
+    protocol_version: u16,
 ) -> Result<RemotePostAuth, ServerError> {
     let payload = read_frame(stream, ceiling).await?;
     let envelope: ProtocolEnvelope<RemotePostAuth> =
-        decode_envelope(&payload, PayloadFamily::Remote)?;
+        decode_envelope(&payload, PayloadFamily::Remote, protocol_version)?;
     Ok(envelope.into_body())
 }
 
@@ -94,8 +95,9 @@ pub(crate) async fn read_post_auth<S: AsyncRead + Unpin>(
 pub(crate) async fn write_post_auth<S: AsyncWrite + Unpin>(
     stream: &mut S,
     ceiling: usize,
+    protocol_version: u16,
     body: &RemotePostAuth,
 ) -> Result<(), ServerError> {
-    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)?;
+    let payload = encode_envelope(PayloadFamily::Remote, protocol_version, body)?;
     write_frame(stream, &payload, ceiling).await
 }

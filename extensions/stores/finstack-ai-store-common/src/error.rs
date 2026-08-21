@@ -14,9 +14,12 @@ pub fn protocol_error(error: ProtocolError) -> StoreError {
         ProtocolError::LimitExceeded { resource, limit } => {
             StoreError::LimitExceeded { resource, limit }
         }
-        ProtocolError::Integrity { reason_code } | ProtocolError::InvalidCbor { reason_code } => {
-            StoreError::Integrity { reason_code }
-        }
+        ProtocolError::Integrity { reason_code }
+        | ProtocolError::InvalidCbor { reason_code }
+        | ProtocolError::InvalidFrame { reason_code }
+        | ProtocolError::InvalidEnvelope { reason_code }
+        | ProtocolError::UnsupportedVersion { reason_code }
+        | ProtocolError::InvalidMessage { reason_code } => StoreError::Integrity { reason_code },
         ProtocolError::Codec { .. } => StoreError::Integrity {
             reason_code: "canonical_codec",
         },

@@ -79,6 +79,10 @@ const DELETE_BATCHES: &str = "DELETE FROM batches WHERE session_id = $1 AND last
 /// Subtract the deleted rows from the session's committed footprint.
 const UPDATE_FOOTPRINT: &str = "UPDATE sessions SET batch_count = batch_count - $1, record_count = record_count - $2 \
      WHERE session_id = $3";
+const SELECT_ANCHOR_CHECKSUM: &str = "SELECT previous_checksum FROM records \
+     WHERE session_id = $1 AND sequence = $2";
+const UPDATE_CHAIN_ANCHOR: &str = "UPDATE sessions SET chain_anchor_sequence = $1, \
+     chain_anchor_checksum = $2 WHERE session_id = $3";
 
 /// Statements one prune prepares before opening its transaction (see
 /// [`crate::pool::PooledClient::prepared`] for why that ordering is forced).
@@ -95,6 +99,8 @@ struct PruneStatements {
     delete_batches: Statement,
     /// [`UPDATE_FOOTPRINT`].
     update_footprint: Statement,
+    anchor_checksum: Statement,
+    update_chain_anchor: Statement,
 }
 
 impl PruneStatements {
@@ -107,6 +113,8 @@ impl PruneStatements {
             delete_records: prepare(client, DELETE_RECORDS).await?,
             delete_batches: prepare(client, DELETE_BATCHES).await?,
             update_footprint: prepare(client, UPDATE_FOOTPRINT).await?,
+            anchor_checksum: prepare(client, SELECT_ANCHOR_CHECKSUM).await?,
+            update_chain_anchor: prepare(client, UPDATE_CHAIN_ANCHOR).await?,
         })
     }
 }
@@ -214,6 +222,26 @@ async fn prune_in_transaction(
     })?;
     let retained_outstanding = outstanding_count(&accelerated);
     let retained_tombstones = tombstone_count(&accelerated);
+
+    let anchor_row = transaction
+        .query_one(
+            &statements.anchor_checksum,
+            &[&request.session_id.as_bytes().as_slice(), &pruned_through],
+        )
+        .await
+        .map_err(|error| Failure::from_driver(&error))?;
+    let anchor_checksum: Option<Vec<u8>> = anchor_row.get(0);
+    transaction
+        .execute(
+            &statements.update_chain_anchor,
+            &[
+                &pruned_through,
+                &anchor_checksum,
+                &request.session_id.as_bytes().as_slice(),
+            ],
+        )
+        .await
+        .map_err(|error| Failure::from_driver(&error))?;
 
     let deleted_records = transaction
         .execute(

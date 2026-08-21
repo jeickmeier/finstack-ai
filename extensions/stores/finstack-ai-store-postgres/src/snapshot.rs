@@ -44,7 +44,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, RecordEnvelope, SessionId};
-use finstack_ai_protocol::verify_chain_from;
+use finstack_ai_protocol::{ChainAnchor, verify_chain_from};
 use finstack_ai_runtime::{
     MetadataReceipt, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
     StoreError, StoreLimits, WriteMetadataRequest,
@@ -510,7 +510,9 @@ async fn verify_scan_page(
             }
         }
     };
-    let head = verify_chain_from(records, prior, Some(first.sequence())).map_err(protocol_error)?;
+    let anchor =
+        ChainAnchor::try_new(session_id, first.sequence(), prior).map_err(protocol_error)?;
+    let head = verify_chain_from(records, anchor).map_err(protocol_error)?;
     if records
         .last()
         .is_some_and(|record| record.sequence() == session.current_sequence)
