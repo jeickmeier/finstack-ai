@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://finstack.ai/schemas/golden-trace/v1/scripted-input.schema.json",
   "title": "ScriptedInput",
-  "description": "Deterministic scripted outcomes for golden traces, including PR-009 model-only reducer progress and settlement (TDD \u00a732).",
+  "description": "Deterministic scripted outcomes for golden traces, including  model-only reducer progress and settlement (TDD \u00a732).",
   "type": "object",
   "additionalProperties": false,
   "required": [

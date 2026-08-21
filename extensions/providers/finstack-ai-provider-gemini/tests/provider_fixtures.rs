@@ -9,10 +9,12 @@ use finstack_ai_kernel::{
     TextBlock, Timestamp, ToolExecutionMode, ToolId,
 };
 use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
+use finstack_ai_provider_wire::{
+    GEMINI_CACHED_TOKENS_KEY, GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY,
+};
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, Authentication, AuthorizationContext,
-    CancellationSignal, GEMINI_CACHED_TOKENS_KEY, GEMINI_GROUNDING_MEDIA_TYPE,
-    GEMINI_THOUGHTS_TOKENS_KEY, Model, ModelCallContext, ModelRequest, ModelRequestDraft,
+    CancellationSignal, Model, ModelCallContext, ModelRequest, ModelRequestDraft,
     ModelRequestLimits, ModelSettings, ModelStreamItem, RunCallContext, SecretString,
     SideEffectClass, ToolSpec,
 };

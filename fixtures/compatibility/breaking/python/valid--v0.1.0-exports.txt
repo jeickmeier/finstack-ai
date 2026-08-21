@@ -7,6 +7,7 @@ CancelledError
 Capability
 ChildRunPolicy
 ConfigurationError
+E2bSandboxToolset
 ElicitationToolset
 Event
 EventBatch

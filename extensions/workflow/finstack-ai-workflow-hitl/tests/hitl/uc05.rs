@@ -455,6 +455,12 @@ async fn park_on_approval(paths: &Paths, deadline: Option<Timestamp>) -> Arc<str
     let (toolset, catalog) = echo_catalog(&tools);
     let model = tool_calling_model();
     let clock = ExternalClock::new(timestamp(2_500));
+    let model_port: Arc<dyn Model> = model.clone();
+    let ready_model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(model_port)
+            .await
+            .expect("model readiness"),
+    );
 
     let owner = RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(Arc::clone(&journal)),
@@ -471,8 +477,6 @@ async fn park_on_approval(paths: &Paths, deadline: Option<Timestamp>) -> Arc<str
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -481,7 +485,7 @@ async fn park_on_approval(paths: &Paths, deadline: Option<Timestamp>) -> Arc<str
             global_max_concurrency: 2,
             stream_limits: ToolStreamLimits::default(),
         },
-        Arc::clone(&model),
+        ready_model,
         locked_profile(),
         Arc::clone(&catalog),
         clock.clone(),
@@ -740,6 +744,11 @@ async fn drive_past_missing_facade_decisions(host: &Reopened) {
         "the facade only needs to unblock AfterToolBatch"
     );
     let cycle = recovered.state().cycle;
+    let ready_model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(Arc::clone(&host.model))
+            .await
+            .expect("model readiness"),
+    );
 
     let facade = RunTaskOwner::spawn_with_model_and_tools(
         recovered,
@@ -756,8 +765,6 @@ async fn drive_past_missing_facade_decisions(host: &Reopened) {
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -766,7 +773,7 @@ async fn drive_past_missing_facade_decisions(host: &Reopened) {
             global_max_concurrency: 2,
             stream_limits: ToolStreamLimits::default(),
         },
-        Arc::clone(&host.model),
+        ready_model,
         locked_profile(),
         Arc::clone(&host.catalog),
         host.clock.clone(),

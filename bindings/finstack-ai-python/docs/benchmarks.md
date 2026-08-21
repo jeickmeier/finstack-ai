@@ -11,9 +11,6 @@ pre-resolved handles. Focused conformance proves inactive and activated
 paths; the aggregate benchmark smoke remains the machine-readable
 performance report.
 
-Idle-session RSS is a warning signal, not a release budget, until the
-published 1.0 workload in [docs/site/performance.md](../../../docs/site/performance.md)
-and [docs/implementation/perf-budgets.md](../../../docs/implementation/perf-budgets.md)
-says otherwise.
+Idle-session RSS is a diagnostic warning signal, not a release budget.
 
 No external-provider latency is included in framework performance claims.

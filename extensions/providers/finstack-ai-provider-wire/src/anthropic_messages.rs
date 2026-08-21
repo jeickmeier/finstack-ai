@@ -6,10 +6,13 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{
-    ContentBlock, JsonBlock, LimitKey, ModelResponse, ModelStreamItem, ModelToolCall, OpaqueBlock,
-    OpaquePayload, ProviderIds, RawJson, ReasoningDelta, TextBlock, TextDelta, ToolCallDelta,
-    Usage, UsageDelta,
+use finstack_ai_kernel::{
+    ContentBlock, JsonBlock, LimitKey, OpaqueBlock, OpaquePayload, ProviderIds, RawJson, TextBlock,
+    Usage,
+};
+use finstack_ai_runtime::{
+    ModelResponse, ModelStreamItem, ModelToolCall, ReasoningDelta, TextDelta, ToolCallDelta,
+    UsageDelta,
 };
 
 use super::StreamNormError;

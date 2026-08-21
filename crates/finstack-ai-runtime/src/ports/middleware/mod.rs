@@ -38,11 +38,13 @@ pub use error::MiddlewareError;
 pub use port::Middleware;
 #[cfg(test)]
 pub(crate) use types::parse_stage;
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use types::stage_name;
 pub use types::{
     BeforeModelInput, BeforeToolBatchInput, CompactedSummary, CompactionCheckpoint,
     CompactionEvidence, CompactionModelRequest, CompactionModelResume, CompactionResult,
     CompactionSourceEntry, MiddlewareContext, MiddlewareDescriptor, MiddlewareOrder,
-    MiddlewareRole, OrderTier, PromptCacheImpact, StageInput, StageMask, StageOutcome, stage_name,
+    MiddlewareRole, OrderTier, PromptCacheImpact, StageInput, StageMask, StageOutcome,
 };
 #[cfg(test)]
 pub(crate) use validate::validate_compaction_model_effect;

@@ -24,11 +24,11 @@ pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::key_prefix(&sel
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::max_object_bytes(&self) -> u64
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::presign_expiry_max(&self) -> core::time::Duration
 pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::region(&self) -> &str
-pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::secret_access_key(&self) -> core::option::Option<&finstack_ai_runtime::ports::model::provider_util::secret::SecretString>
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::secret_access_key(&self) -> core::option::Option<&finstack_ai_runtime::ports::model::support::secret::SecretString>
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::timeout(&self) -> core::time::Duration
 pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::try_new(impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_addressing(self, finstack_ai_store_object_s3::config::Addressing) -> Self
-pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_credentials(self, impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_credentials(self, impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::support::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
 pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_key_prefix(self, impl core::convert::AsRef<str>) -> Self
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_max_object_bytes(self, u64) -> Self
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_presign_expiry_max(self, core::time::Duration) -> Self
@@ -146,11 +146,11 @@ pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::key_prefix(&sel
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::max_object_bytes(&self) -> u64
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::presign_expiry_max(&self) -> core::time::Duration
 pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::region(&self) -> &str
-pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::secret_access_key(&self) -> core::option::Option<&finstack_ai_runtime::ports::model::provider_util::secret::SecretString>
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::secret_access_key(&self) -> core::option::Option<&finstack_ai_runtime::ports::model::support::secret::SecretString>
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::timeout(&self) -> core::time::Duration
 pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::try_new(impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_addressing(self, finstack_ai_store_object_s3::config::Addressing) -> Self
-pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_credentials(self, impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
+pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_credentials(self, impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::support::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::services::object::ObjectError>
 pub fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_key_prefix(self, impl core::convert::AsRef<str>) -> Self
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_max_object_bytes(self, u64) -> Self
 pub const fn finstack_ai_store_object_s3::config::S3ObjectStoreConfig::with_presign_expiry_max(self, core::time::Duration) -> Self

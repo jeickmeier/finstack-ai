@@ -1,7 +1,7 @@
 #[test]
 #[expect(
     clippy::too_many_lines,
-    reason = "one compatibility test keeps all PR-010 strict wire and state-v2 invariants together"
+    reason = "one compatibility test keeps all tool-batch wire baseline strict wire and state-v2 invariants together"
 )]
 fn tool_wire_contracts_state_v2_and_event_ordinals_are_strict() {
     let calls = [call(CALL_A, "alpha")];

@@ -22,9 +22,9 @@ use crate::{
     ApprovalGrantMode, CommitCoordinator, ContextProvider, EventHubConfig, ExternalClock,
     ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, IdGenerationError,
     InteractionRouter, JournalStore, LockedModelContextProfile, Model, ModelCapabilities,
-    ModelTaskConfig, RandomSource, ResolvedMiddlewareChain, ResolvedToolCatalog, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditGate, ToolSpec, ToolStreamLimits,
-    ToolTaskConfig, model_retry_allowed, tool_retry_allowed,
+    ModelTaskConfig, ModelWarmupContext, RandomSource, ReadyModel, ResolvedMiddlewareChain,
+    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditGate,
+    ToolSpec, ToolStreamLimits, ToolTaskConfig, model_retry_allowed, tool_retry_allowed,
 };
 
 /// Stable deny codes for [`retry_decision`].
@@ -370,9 +370,9 @@ pub struct WorkflowSession {
     clock: ExternalClock,
     random: SeededRandom,
     audit: Arc<SecurityAuditGate>,
-    model: Option<Arc<dyn Model>>,
+    model: Option<WorkflowModel>,
     catalog: Option<Arc<ResolvedToolCatalog>>,
-    capability_owners: Option<Arc<BTreeMap<ComponentId, CapabilityId>>>,
+    capability_owners: Option<Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>>,
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
     context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
     profile: Option<LockedModelContextProfile>,
@@ -380,6 +380,11 @@ pub struct WorkflowSession {
     owner: Option<RunTaskOwner>,
     last_state: KernelState,
     drive_timeout: Duration,
+}
+
+enum WorkflowModel {
+    Unprepared(Arc<dyn Model>),
+    Ready(Arc<ReadyModel>),
 }
 
 impl WorkflowSession {
@@ -460,7 +465,21 @@ impl WorkflowSession {
         profile: LockedModelContextProfile,
         catalog: Option<Arc<ResolvedToolCatalog>>,
     ) -> Self {
-        self.model = Some(model);
+        self.model = Some(WorkflowModel::Unprepared(model));
+        self.profile = Some(profile);
+        self.catalog = catalog;
+        self
+    }
+
+    /// Bind a model that already completed construction warmup.
+    #[must_use]
+    pub fn with_ready_ports(
+        mut self,
+        model: Arc<ReadyModel>,
+        profile: LockedModelContextProfile,
+        catalog: Option<Arc<ResolvedToolCatalog>>,
+    ) -> Self {
+        self.model = Some(WorkflowModel::Ready(model));
         self.profile = Some(profile);
         self.catalog = catalog;
         self
@@ -477,7 +496,7 @@ impl WorkflowSession {
     #[must_use]
     pub fn with_capability_owners(
         mut self,
-        owners: Arc<BTreeMap<ComponentId, CapabilityId>>,
+        owners: Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>,
     ) -> Self {
         self.capability_owners = Some(owners);
         self
@@ -601,8 +620,7 @@ impl WorkflowSession {
         self.require_locator(&command.locator)?;
         let router =
             ExternalCompletionRouter::new(Arc::clone(&self.store), Arc::clone(&self.audit));
-        router
-            .route(command, submitted_at)
+        Box::pin(router.route(command, submitted_at))
             .await
             .map_err(WorkflowDriverError::Ingress)
     }
@@ -740,10 +758,27 @@ impl WorkflowSession {
     }
 
     async fn spawn_owner(&mut self) -> Result<(), WorkflowDriverError> {
-        let model = self
-            .model
-            .clone()
-            .ok_or(WorkflowDriverError::PortsRequired)?;
+        let model = match self.model.as_ref() {
+            Some(WorkflowModel::Ready(model)) => Arc::clone(model),
+            Some(WorkflowModel::Unprepared(model)) => {
+                let ready = ReadyModel::prepare_with_context(
+                    Arc::clone(model),
+                    ModelWarmupContext {
+                        cancellation: crate::CancellationSignal::new(),
+                        deadline: None,
+                        metadata: crate::Metadata::empty(),
+                    },
+                )
+                .await
+                .map_err(|_| WorkflowDriverError::Spawn {
+                    code: "model_warmup_failed",
+                })?;
+                let ready = Arc::new(ready);
+                self.model = Some(WorkflowModel::Ready(Arc::clone(&ready)));
+                ready
+            }
+            None => return Err(WorkflowDriverError::PortsRequired),
+        };
         let profile = self
             .profile
             .clone()
@@ -779,8 +814,6 @@ impl WorkflowSession {
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: crate::ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: crate::Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         };
         let owner = if let Some(catalog) = self.catalog.clone() {
@@ -829,7 +862,7 @@ fn recover_error(error: &crate::CommitCoordinatorError) -> WorkflowDriverError {
 
 fn reinstall_runtime_ports(
     coordinator: &mut CommitCoordinator,
-    capability_owners: Option<Arc<BTreeMap<ComponentId, CapabilityId>>>,
+    capability_owners: Option<Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>>,
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
     context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
 ) {

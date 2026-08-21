@@ -1,8 +1,8 @@
-"""PR-048 Python durable-restart subset (N1–N2, I1 inspect, A1, completed open).
+"""Python durable-restart subset (N1–N2, I1 inspect, A1, completed open).
 
 ``Agent.open_session`` still inspects only. ``Lane.resume`` respawns the
 parked owner after E3/E4a. Child-run and ``complete_external`` routing
-live on ``Run`` (PR-079).
+live on ``Run``.
 """
 
 from __future__ import annotations

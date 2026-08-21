@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    KernelInput, ReducerStageOutcome, Stage, StageCursor, StageSettled, TransitionEnv,
+    AllocatedIds, AppendBatchTag, EffectCompleted, EffectFailed, EffectInput, EffectKind,
+    EffectOutputContract, EffectOutputKind, EffectRequested, EffectTag, EventTag,
+    ExtensionEffectSettled, ExtensionSettlement, KernelInput, PipelinePosition, ProviderIds,
+    RECORD_KIND_VERSION, RecordBody, RecordTag, ReducerStageOutcome, RequestExtensionEffect,
+    RetrySafety, Stage, StageCursor, StageSettled, TransitionEnv,
 };
 
 use crate::compaction_driver::{
@@ -9,10 +13,11 @@ use crate::compaction_driver::{
 };
 use crate::context_driver::{ContextDriver, collect_context_stage};
 use crate::coordinator::CommitCoordinator;
-use crate::middleware::{CompactionModelResume, StageInput};
-use crate::middleware_driver::{
-    MiddlewareStageContext, StageDriver, StageFold, derived_stage_effect_id,
+use crate::middleware::{
+    CompactionModelResume, MIDDLEWARE_RESOLUTION_INVALID, MiddlewareRole, ResolvedMiddleware,
+    StageInput, StageOutcome, stage_name, validate_stage_outcome,
 };
+use crate::middleware_driver::{StageDriver, StageFold};
 use crate::model::{LockedModelContextProfile, Model};
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
@@ -190,8 +195,15 @@ pub(crate) async fn settle_facade_stage_with_model<C: Clock, R: RandomSource>(
     } else {
         None
     };
-    let mut outcomes =
-        invoke_stage_chain(coordinator, driver, cursor, input.clone(), resume.clone()).await?;
+    let mut outcomes = invoke_stage_chain(
+        coordinator,
+        driver,
+        sources,
+        cursor,
+        input.clone(),
+        resume.clone(),
+    )
+    .await?;
     if cursor.stage == Stage::BeforeModel
         && let Some(request) = first_compaction_request(&outcomes)
         && let Some(model) = model
@@ -208,7 +220,7 @@ pub(crate) async fn settle_facade_stage_with_model<C: Clock, R: RandomSource>(
             )
             .await?,
         );
-        outcomes = invoke_stage_chain(coordinator, driver, cursor, input, resume).await?;
+        outcomes = invoke_stage_chain(coordinator, driver, sources, cursor, input, resume).await?;
     }
     let fold =
         StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))?;
@@ -247,7 +259,7 @@ async fn apply_context_providers<C: Clock, R: RandomSource>(
         &driver,
         sources,
         profile,
-        settled.cursor.cycle,
+        settled.cursor,
         &base_messages,
     )
     .await?;
@@ -332,22 +344,24 @@ fn foldable_base(stage: Stage, outcome: &ReducerStageOutcome) -> bool {
 /// code, the fold's `middleware_stage_unlandable` /
 /// `middleware_stage_bounds_exceeded`, or
 /// `middleware_stage_identity_missing` when the run has no dispatch identity.
-pub(crate) async fn run_stage_chain(
-    coordinator: &CommitCoordinator,
+pub(crate) async fn run_stage_chain<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
     driver: Option<&StageDriver>,
+    sources: &SettlementSources<C, R>,
     cursor: StageCursor,
     input: StageInput,
 ) -> Result<StageFold, RunHandleError> {
     let Some(driver) = driver.filter(|driver| driver.is_active(cursor.stage)) else {
         return Ok(StageFold::default());
     };
-    let outcomes = invoke_stage_chain(coordinator, driver, cursor, input, None).await?;
+    let outcomes = invoke_stage_chain(coordinator, driver, sources, cursor, input, None).await?;
     StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))
 }
 
-async fn invoke_stage_chain(
-    coordinator: &CommitCoordinator,
+async fn invoke_stage_chain<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
     driver: &StageDriver,
+    sources: &SettlementSources<C, R>,
     cursor: StageCursor,
     input: StageInput,
     resume: Option<CompactionModelResume>,
@@ -360,24 +374,365 @@ async fn invoke_stage_chain(
     let seed = coordinator
         .stage_dispatch_seed()
         .ok_or_else(|| stage_error(MIDDLEWARE_STAGE_IDENTITY_MISSING))?;
-    let run = RunCallContext {
-        effect_id: derived_stage_effect_id(&seed.locator, cursor.cycle, cursor.stage),
-        locator: seed.locator,
-        authorization: seed.authorization,
-        attempt: seed.attempt,
-        deadline: seed.deadline,
-        budget_scope_id: seed.budget_scope_id,
-        cancellation: driver.cancellation().child(),
-        relation_depth: seed.relation_depth,
-    };
-    let mut ctx = MiddlewareStageContext::new(run, driver.chain().digest(), cursor);
-    if let Some(resume) = resume {
-        ctx = ctx.with_compaction_resume(resume);
+    if driver.cancellation().is_cancelled() {
+        return Ok(Vec::new());
     }
-    driver
-        .run_stage_masked(&ctx, input, |component| {
-            coordinator.component_is_active(component)
-        })
+    let resume_json = resume
+        .as_ref()
+        .map(serde_json_canonicalizer::to_vec)
+        .transpose()
+        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?
+        .map(finstack_ai_kernel::RawJson::parse)
+        .transpose()
+        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
+    let durable_input = strip_disposable_input_checkpoint(input.clone());
+    let input_json = durable_input
+        .to_raw_json()
+        .map_err(|error| middleware_error(&error))?;
+    let invocation = StageInvocation {
+        driver,
+        sources,
+        cursor,
+        input: &input,
+        resume: &resume,
+        resume_json: &resume_json,
+        input_json: &input_json,
+        seed: &seed,
+    };
+    let mut outcomes = Vec::new();
+    for (index, resolved) in driver.chain().stage(cursor.stage).iter().enumerate() {
+        if !coordinator.component_is_active(&resolved.descriptor.invocation.component) {
+            continue;
+        }
+        outcomes
+            .push(invoke_middleware_component(coordinator, &invocation, index, resolved).await?);
+    }
+    Ok(outcomes)
+}
+
+/// Remove any caller-supplied checkpoint before constructing durable effect
+/// input. Only the coordinator's validated process-local cache may populate a
+/// direct compactor call.
+fn strip_disposable_input_checkpoint(mut input: StageInput) -> StageInput {
+    if let StageInput::BeforeModel(before_model) = &mut input {
+        before_model.checkpoint = None;
+    }
+    input
+}
+
+struct StageInvocation<'a, C, R> {
+    driver: &'a StageDriver,
+    sources: &'a SettlementSources<C, R>,
+    cursor: StageCursor,
+    input: &'a StageInput,
+    resume: &'a Option<CompactionModelResume>,
+    resume_json: &'a Option<finstack_ai_kernel::RawJson>,
+    input_json: &'a finstack_ai_kernel::RawJson,
+    seed: &'a crate::coordinator::StageDispatchSeed,
+}
+
+async fn invoke_middleware_component<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    invocation: &StageInvocation<'_, C, R>,
+    index: usize,
+    resolved: &ResolvedMiddleware,
+) -> Result<StageOutcome, RunHandleError> {
+    let pipeline_index =
+        u32::try_from(index).map_err(|_| stage_error(MIDDLEWARE_RESOLUTION_INVALID))?;
+    let recovery = MiddlewareRecovery {
+        cursor: invocation.cursor,
+        component: &resolved.descriptor.invocation,
+        chain_digest: invocation.driver.chain().digest(),
+        run_id: invocation.seed.locator.run_id,
+        pipeline_index,
+        input: invocation.input_json,
+        resume: invocation.resume_json.as_ref(),
+    };
+    if let Some((effect_id, outcome)) = recovered_middleware_outcome(coordinator, &recovery)? {
+        if matches!(outcome, StageOutcome::RequestCompactionModel(_)) {
+            coordinator.note_middleware_effect(effect_id);
+        }
+        return Ok(outcome);
+    }
+    let pending = coordinator
+        .state()
+        .pending_extension_effect
+        .as_ref()
+        .filter(|pending| {
+            pending.cursor == invocation.cursor
+                && pending.requested.component() == Some(&resolved.descriptor.invocation)
+                && pending.requested.pipeline().is_some_and(|pipeline| {
+                    pipeline.index() == pipeline_index
+                        && pipeline.chain_digest() == invocation.driver.chain().digest()
+                })
+                && matches!(pending.requested.input(), EffectInput::Middleware { .. })
+        });
+    let effect_id = pending.map_or_else(
+        || invocation.sources.generate::<EffectTag>(),
+        |pending| Ok(pending.requested.effect_id()),
+    )?;
+    let requested = if let Some(pending) = pending {
+        pending.requested.clone()
+    } else {
+        commit_middleware_request(coordinator, invocation, resolved, pipeline_index, effect_id)
+            .await?
+    };
+    let context = crate::MiddlewareContext {
+        run: RunCallContext {
+            effect_id,
+            locator: invocation.seed.locator.clone(),
+            authorization: invocation.seed.authorization.clone(),
+            attempt: invocation.seed.attempt,
+            deadline: invocation.seed.deadline,
+            budget_scope_id: invocation.seed.budget_scope_id,
+            cancellation: invocation.driver.cancellation().child(),
+            relation_depth: invocation.seed.relation_depth,
+        },
+        chain_digest: invocation.driver.chain().digest(),
+        chain_index: pipeline_index,
+        compaction_resume: invocation.resume.clone(),
+    };
+    let component_input = component_input(coordinator, resolved, invocation.input);
+    let result = match resolved
+        .middleware
+        .invoke(context, component_input.clone())
         .await
-        .map_err(|error| middleware_error(&error))
+    {
+        Ok(outcome) => validate_stage_outcome(&resolved.descriptor, &component_input, &outcome)
+            .map(|()| outcome),
+        Err(error) => Err(error),
+    };
+    let retained_checkpoint = match &result {
+        Ok(StageOutcome::CompactContext(result)) => Some(result.checkpoint.clone()),
+        _ => None,
+    };
+    let durable_result = result.clone().map(strip_disposable_checkpoint);
+    let settlement = middleware_settlement(&requested, &durable_result)?;
+    coordinator
+        .submit(
+            extension_settlement_env(invocation.sources, &settlement)?,
+            KernelInput::ExtensionEffectSettled(ExtensionEffectSettled {
+                cursor: invocation.cursor,
+                outcome: settlement,
+            }),
+        )
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(checkpoint) = retained_checkpoint {
+        coordinator.retain_compaction_checkpoint(checkpoint);
+    }
+    let outcome = result.map_err(|error| middleware_error(&error))?;
+    if matches!(outcome, StageOutcome::RequestCompactionModel(_)) {
+        coordinator.note_middleware_effect(requested.effect_id());
+    }
+    Ok(outcome)
+}
+
+/// Build the direct-call input for one component without changing the durable
+/// effect input. A compatible checkpoint is process-local acceleration only:
+/// it is never serialized into `EffectRequested`.
+pub(super) fn component_input(
+    coordinator: &mut CommitCoordinator,
+    resolved: &ResolvedMiddleware,
+    input: &StageInput,
+) -> StageInput {
+    let StageInput::BeforeModel(before_model) = input else {
+        return input.clone();
+    };
+    if !matches!(
+        resolved.descriptor.role,
+        MiddlewareRole::ContextCompactor { .. }
+    ) {
+        return input.clone();
+    }
+    let mut before_model = before_model.as_ref().clone();
+    before_model.checkpoint =
+        coordinator.compatible_compaction_checkpoint(&resolved.descriptor, &before_model);
+    StageInput::BeforeModel(Box::new(before_model))
+}
+
+/// Remove the disposable checkpoint before a middleware outcome crosses the
+/// durable effect-settlement boundary. The validated live outcome still flows
+/// into the current fold and its checkpoint is retained only in memory.
+fn strip_disposable_checkpoint(mut outcome: StageOutcome) -> StageOutcome {
+    if let StageOutcome::CompactContext(result) = &mut outcome {
+        result.checkpoint = None;
+    }
+    outcome
+}
+
+async fn commit_middleware_request<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    invocation: &StageInvocation<'_, C, R>,
+    resolved: &ResolvedMiddleware,
+    pipeline_index: u32,
+    effect_id: finstack_ai_kernel::EffectId,
+) -> Result<EffectRequested, RunHandleError> {
+    let requested = EffectRequested::try_new(
+        effect_id,
+        EffectKind::Middleware,
+        None,
+        Some(resolved.descriptor.invocation.clone()),
+        Some(
+            PipelinePosition::try_new(
+                invocation.driver.chain().digest(),
+                stage_name(invocation.cursor.stage),
+                pipeline_index,
+            )
+            .map_err(|_| stage_error(MIDDLEWARE_RESOLUTION_INVALID))?,
+        ),
+        EffectOutputContract {
+            kind: EffectOutputKind::MiddlewareOutcome,
+            schema_version: 1,
+            schema_digest: finstack_ai_kernel::Digest::raw_json(b"middleware-outcome-v1"),
+        },
+        EffectInput::Middleware {
+            cursor: invocation.cursor,
+            stage: Arc::from(stage_name(invocation.cursor.stage)),
+            input: invocation.input_json.clone(),
+            resume: invocation.resume_json.clone(),
+        },
+        RetrySafety::SafeToRetry,
+        invocation.seed.deadline,
+    )
+    .map_err(|_| stage_error(MIDDLEWARE_RESOLUTION_INVALID))?;
+    coordinator
+        .submit(
+            extension_request_env(invocation.sources, &requested)?,
+            KernelInput::RequestExtensionEffect(RequestExtensionEffect {
+                requested: requested.clone(),
+            }),
+        )
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    Ok(requested)
+}
+
+struct MiddlewareRecovery<'a> {
+    cursor: StageCursor,
+    component: &'a finstack_ai_kernel::ComponentInvocation,
+    chain_digest: finstack_ai_kernel::Digest,
+    run_id: finstack_ai_kernel::RunId,
+    pipeline_index: u32,
+    input: &'a finstack_ai_kernel::RawJson,
+    resume: Option<&'a finstack_ai_kernel::RawJson>,
+}
+
+fn recovered_middleware_outcome(
+    coordinator: &CommitCoordinator,
+    recovery: &MiddlewareRecovery<'_>,
+) -> Result<Option<(finstack_ai_kernel::EffectId, StageOutcome)>, RunHandleError> {
+    coordinator
+        .replayed_completed_effects()
+        .values()
+        .find(|(requested, _)| {
+            requested.component() == Some(recovery.component)
+                && coordinator
+                    .replayed_extension_envelope(requested.effect_id())
+                    .is_some_and(|envelope| envelope.run_id() == Some(recovery.run_id))
+                && requested.pipeline().is_some_and(|pipeline| {
+                    pipeline.chain_digest() == recovery.chain_digest
+                        && pipeline.index() == recovery.pipeline_index
+                })
+                && matches!(
+                    requested.input(),
+                    EffectInput::Middleware {
+                        cursor: requested_cursor,
+                        input,
+                        resume,
+                        ..
+                    } if *requested_cursor == recovery.cursor
+                        && input == recovery.input
+                        && resume.as_ref() == recovery.resume
+                )
+        })
+        .map(|(requested, completed)| {
+            serde_json::from_slice(completed.output().as_bytes())
+                .map(|outcome| (requested.effect_id(), outcome))
+                .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))
+        })
+        .transpose()
+}
+
+fn middleware_settlement(
+    requested: &EffectRequested,
+    result: &Result<StageOutcome, crate::MiddlewareError>,
+) -> Result<ExtensionSettlement, RunHandleError> {
+    match result {
+        Ok(outcome) => {
+            let bytes = serde_json_canonicalizer::to_vec(outcome)
+                .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
+            let output = finstack_ai_kernel::RawJson::parse(bytes)
+                .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
+            EffectCompleted::try_new(
+                requested.effect_id(),
+                requested.output_contract().clone(),
+                output,
+                None,
+                Vec::new(),
+                ProviderIds::empty(),
+                None::<&str>,
+                None,
+            )
+            .map(ExtensionSettlement::Completed)
+            .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))
+        }
+        Err(error) => EffectFailed::try_new(
+            requested.effect_id(),
+            requested.output_contract().clone(),
+            error.descriptor(),
+            None,
+            None::<&str>,
+        )
+        .map(ExtensionSettlement::Failed)
+        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED)),
+    }
+}
+
+fn extension_request_env<C: Clock, R: RandomSource>(
+    sources: &SettlementSources<C, R>,
+    requested: &EffectRequested,
+) -> Result<TransitionEnv, RunHandleError> {
+    let body = RecordBody::EffectRequested(requested.clone());
+    extension_env(sources, &body, vec![requested.effect_id()])
+}
+
+fn extension_settlement_env<C: Clock, R: RandomSource>(
+    sources: &SettlementSources<C, R>,
+    settlement: &ExtensionSettlement,
+) -> Result<TransitionEnv, RunHandleError> {
+    let body = match settlement {
+        ExtensionSettlement::Completed(value) => RecordBody::EffectCompleted(value.clone()),
+        ExtensionSettlement::Failed(value) => RecordBody::EffectFailed(value.clone()),
+    };
+    extension_env(sources, &body, Vec::new())
+}
+
+fn extension_env<C: Clock, R: RandomSource>(
+    sources: &SettlementSources<C, R>,
+    body: &RecordBody,
+    effect_ids: Vec<finstack_ai_kernel::EffectId>,
+) -> Result<TransitionEnv, RunHandleError> {
+    let event_count = body
+        .derived_event_count(RECORD_KIND_VERSION)
+        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
+    Ok(TransitionEnv {
+        now: sources.now()?,
+        ids: AllocatedIds::try_new(
+            vec![sources.generate::<RecordTag>()?],
+            (0..event_count)
+                .map(|_| sources.generate::<EventTag>())
+                .collect::<Result<Vec<_>, _>>()?,
+            effect_ids,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![sources.generate::<AppendBatchTag>()?],
+            Vec::new(),
+        )
+        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?,
+    })
 }

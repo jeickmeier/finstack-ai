@@ -1,4 +1,4 @@
-"""PR-044 Python list/resolve and approval-envelope proofs."""
+"""Python list/resolve and approval-envelope proofs."""
 
 from __future__ import annotations
 

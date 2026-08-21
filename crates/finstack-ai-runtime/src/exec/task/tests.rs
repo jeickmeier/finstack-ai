@@ -3,17 +3,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AcceptRun, AllocatedIds, BudgetPropagation, CancellationPropagation, Digest, Id, IdTag,
-    KernelInput, PrincipalPropagation, PrincipalRef, RunAccepted, RunLimits, RunPropagationPolicy,
-    RunRelation, RunSecurityContext, Timestamp, TransitionEnv,
+    AcceptRun, AllocatedIds, BudgetPropagation, CancellationPropagation, ComponentId, ComponentRef,
+    Digest, Id, IdTag, KernelInput, Metadata, PrincipalPropagation, PrincipalRef, RunAccepted,
+    RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, Sensitivity, Timestamp,
+    TransitionEnv, Version,
 };
 use tokio::sync::Notify;
 
 use super::*;
 use crate::{
-    ApprovalGrantMode, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, LoadedSession,
-    PortFuture, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, SnapshotReceipt,
-    SnapshotRequest, StoreError, StoreHealth,
+    ApprovalGrantMode, CommitCoordinator, EventBatchConfig, EventFilter, EventHubConfig,
+    EventLagPolicy, EventSubscriptionConfig, JournalStore, LoadRequest, LoadedSession,
+    NoopObserver, ObserverDescriptor, ObserverPayloadMode, PortFuture, ProgressCoalescing,
+    RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, SnapshotReceipt, SnapshotRequest,
+    StoreError, StoreHealth,
 };
 
 struct BlockingStore {
@@ -148,6 +151,42 @@ fn runtime() -> tokio::runtime::Runtime {
         .enable_time()
         .build()
         .expect("runtime")
+}
+
+fn observer_subscription() -> EventSubscriptionConfig {
+    EventSubscriptionConfig {
+        queue_capacity: 4,
+        filter: EventFilter {
+            include_durable: true,
+            include_transient: true,
+            kinds: Arc::from([]),
+            max_sensitivity: Sensitivity::Credential,
+        },
+        batching: EventBatchConfig {
+            flush_count: 4,
+            flush_bytes: 4_096,
+            flush_interval: Duration::from_millis(10),
+        },
+        progress_coalescing: ProgressCoalescing::Enabled,
+        lag_policy: EventLagPolicy::DropProgress {
+            durable_timeout: Duration::from_millis(20),
+        },
+    }
+}
+
+fn observer() -> Arc<NoopObserver> {
+    Arc::new(NoopObserver::new(ObserverDescriptor {
+        component: ComponentRef::new(
+            ComponentId::parse("fixture.observer").expect("component"),
+            Some(Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            }),
+        ),
+        payload_mode: ObserverPayloadMode::MetadataOnly,
+        metadata: Metadata::empty(),
+    }))
 }
 
 #[test]
@@ -293,5 +332,34 @@ fn repeated_idle_owners_join_every_owned_task_without_abort() {
             assert_eq!(report.aborted_tasks, 0);
             assert_eq!(handle.status(), RunStatus::Stopped);
         }
+    });
+}
+
+#[test]
+fn attached_observer_pump_is_joined_by_graceful_shutdown() {
+    runtime().block_on(async {
+        let store = Arc::new(BlockingStore::new(false));
+        let mut owner = RunTaskOwner::spawn(
+            CommitCoordinator::new(store),
+            RunTaskConfig {
+                command_capacity: 1,
+                event_hub: EventHubConfig {
+                    source_capacity: 4,
+                    max_subscribers: 1,
+                },
+                shutdown_deadline: Duration::from_millis(100),
+                approval_grant: ApprovalGrantMode::PerCall,
+            },
+        )
+        .expect("owner");
+        owner
+            .attach_observer(observer(), observer_subscription())
+            .await
+            .expect("attach observer");
+
+        let report = owner.shutdown().await;
+
+        assert_eq!(report.outcome, ShutdownOutcome::Graceful);
+        assert_eq!(report.aborted_tasks, 0);
     });
 }

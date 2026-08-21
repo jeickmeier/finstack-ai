@@ -22,7 +22,7 @@ pub const PORT_CONFORMANCE_SUITE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// One precise extension-contract failure.
 ///
 /// Display names the port, stable contract id, and suite version so a
-/// failed run is enough to identify the violated contract (PR-065-A03).
+/// failed run is enough to identify the violated contract (port-conformance failure case).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortConformanceFailure {
     /// Stable primary-port name.

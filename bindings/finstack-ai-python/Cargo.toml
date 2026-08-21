@@ -27,7 +27,7 @@ callback-fixture = ["dep:finstack-ai-test"]
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai = { workspace = true, default-features = false, features = ["native-tokio", "linked-all", "vendored-tls"] }
 finstack-ai-memory = { workspace = true, features = ["sqlite"] }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-middleware-document-ingest = { workspace = true }
@@ -42,6 +42,7 @@ finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-tools-document = { workspace = true }
 finstack-ai-tools-elicitation = { workspace = true }
 finstack-ai-tools-fetch = { workspace = true, features = ["vendored-tls"] }
+finstack-ai-sandbox-e2b = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-test = { workspace = true, optional = true }
 futures-util = { workspace = true }
 pyo3 = { workspace = true }

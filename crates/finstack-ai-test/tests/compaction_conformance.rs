@@ -1,4 +1,4 @@
-//! PR-023 public adversarial compaction conformance proof.
+//! compaction contract public adversarial compaction conformance proof.
 
 use std::sync::Arc;
 
@@ -51,7 +51,7 @@ fn descriptor() -> MiddlewareDescriptor {
                 patch: 0,
             },
             configuration_digest: Digest::raw_json(br#"{"window":2}"#),
-            recovery: InvocationRecovery::Reconcile,
+            recovery: InvocationRecovery::RecomputeSafe,
         },
         stages: StageMask::from_stages([Stage::BeforeModel]),
         order: MiddlewareOrder {

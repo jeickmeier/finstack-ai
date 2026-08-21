@@ -246,7 +246,7 @@ def stage(
     rustc = run(["rustc", "--version"]).stdout.strip()
     statement = {
         "format_version": 1,
-        "kind": "pr-066 recreate",
+        "kind": "release recreate",
         "version": "1.0.0",
         "label": label,
         "staged_not_published": True,
@@ -254,7 +254,7 @@ def stage(
         "rustc": rustc,
         "mise_pins": MISE_PINS,
         "source_date_epoch": "0",
-        "ga_tag_procedure": "documented in docs/implementation/release-engineering.md; not executed",
+        "ga_tag_procedure": "not executed by staging tooling",
     }
     (work / "provenance.json").write_text(
         json.dumps(statement, indent=2, sort_keys=True) + "\n",

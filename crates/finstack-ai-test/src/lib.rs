@@ -1,10 +1,10 @@
 //! Scripted models, fakes, and conformance utilities for `finstack-ai`.
 //!
-//! Phase 0 (PR-005) provides the golden-trace fixture language, a target-neutral
-//! conformance runner, and Criterion benchmark helpers. PR-006 adds deterministic
-//! clock/random fakes and the `public-rust-api` fixture runner. PR-007 extends that
-//! runner with content-block, blob-ref, and message subjects. PR-008 adds
-//! run/effect/record/event subjects. PR-009 adds a real reducer-backed adapter.
+//! Phase 0 (golden-trace baseline) provides the golden-trace fixture language, a target-neutral
+//! conformance runner, and Criterion benchmark helpers. public-API fixture baseline adds deterministic
+//! clock/random fakes and the `public-rust-api` fixture runner. content fixture baseline extends that
+//! runner with content-block, blob-ref, and message subjects. record-and-event fixture baseline adds
+//! run/effect/record/event subjects. model-only reducer baseline adds a real reducer-backed adapter.
 //!
 //! # Module map
 //!

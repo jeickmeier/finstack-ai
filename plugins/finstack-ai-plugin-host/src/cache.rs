@@ -113,7 +113,7 @@ fn artifact_path(dir: &Path, key: &str) -> PathBuf {
 }
 
 /// SHA-256 hex of the component bytes. This is the cache identity, not the
-/// PR-050 manifest digest.
+/// plugin-manifest contract manifest digest.
 #[must_use]
 pub fn component_digest(bytes: &[u8]) -> String {
     hex_sha256(bytes)

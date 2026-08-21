@@ -99,6 +99,36 @@ pub struct PendingModelEffect {
     pub deferred: Option<EffectDeferred>,
 }
 
+/// Outstanding context-provider or middleware effect reconstructed from the journal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingExtensionEffect {
+    /// Exact stage invocation held while the extension executes.
+    pub cursor: StageCursor,
+    /// Original committed effect request.
+    pub requested: EffectRequested,
+}
+
+/// Terminal kind retained for a context-provider or middleware settlement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionSettlementKind {
+    /// Successful completion.
+    Completed,
+    /// Failed completion.
+    Failed,
+}
+
+/// Replay-derived terminal identity for an extension effect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionSettlementFingerprint {
+    /// Terminal settlement kind.
+    pub kind: ExtensionSettlementKind,
+    /// Domain-separated canonical settlement digest.
+    pub digest: Digest,
+}
+
 /// Candidate that must pass `before_finalize` before terminal commitment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -302,6 +332,18 @@ pub(crate) struct ModelSettlementHashEntryV1 {
     pub effect_id: EffectId,
     /// Settlement kind.
     pub kind: ModelSettlementKind,
+    /// Settlement digest.
+    pub settlement_digest: Digest,
+}
+
+/// Sorted state-hash projection entry for an extension settlement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExtensionSettlementHashEntryV7 {
+    /// Settled effect identity.
+    pub effect_id: EffectId,
+    /// Settlement kind.
+    pub kind: ExtensionSettlementKind,
     /// Settlement digest.
     pub settlement_digest: Digest,
 }

@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
-    EntryId, IdTag, LaneId, Message, MessageRole, ProviderIds, SessionId, TextBlock, Timestamp,
+    AuthorizationEvidence, EntryId, IdTag, LaneId, Message, MessageRole, PrincipalRef, ProviderIds,
+    SessionId, TextBlock, Timestamp,
 };
 use finstack_ai_runtime::{
     ExternalIdentityKey, ExternalIdentityMap, JournalStore, LaneAppendIds, LaneCreateIds,
@@ -101,7 +102,10 @@ impl Session {
         tenant_scope: impl Into<Arc<str>>,
     ) -> Self {
         let tenant_scope = tenant_scope.into();
-        let runtime = SessionRuntime::existing(&store, session_id).ok().flatten();
+        let runtime = SessionRuntime::existing(&store, session_id)
+            .ok()
+            .flatten()
+            .filter(|runtime| runtime.tenant_scope() == tenant_scope.as_ref());
         Self {
             store,
             session_id,
@@ -318,21 +322,37 @@ impl Lane {
 
     /// Cancel the active run on this lane and fan out through child mappings.
     ///
+    /// # Arguments
+    ///
+    /// * `principal` - Authenticated principal requesting cancellation.
+    /// * `authorization` - Exact authorization decision for that principal.
+    ///
     /// # Errors
     ///
     /// Returns a recover or commit failure.
-    pub async fn cancel(&self) -> Result<(), SessionError> {
+    pub async fn cancel(
+        &self,
+        principal: PrincipalRef,
+        authorization: AuthorizationEvidence,
+    ) -> Result<(), SessionError> {
         let runtime = self.session.ensure().await?;
         let projection = runtime.refresh().await?;
         let Some(run_id) = projection.active_on_lane(self.lane_id) else {
             return Ok(());
         };
+        let initiator = finstack_ai_kernel::CancellationInitiator::Principal {
+            principal,
+            authorization,
+        };
+        #[cfg(feature = "native-tokio")]
+        if let Some(run) = crate::agent::live_run(self)? {
+            return run
+                .cancel_with_initiator(initiator)
+                .await
+                .map_err(|error| SessionError::Commit { code: error.code() });
+        }
         runtime
-            .cancel_run(
-                run_id,
-                finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
-                &mut generated_env,
-            )
+            .cancel_run(run_id, initiator, &mut generated_env)
             .await
     }
 
@@ -347,7 +367,7 @@ impl Lane {
             generate()?,
             MessageRole::User,
             vec![finstack_ai_kernel::ContentBlock::Text(
-                TextBlock::try_new(text).map_err(|_| SessionError::InvalidLaneName)?,
+                TextBlock::try_new(text).map_err(|_| SessionError::InvalidMessageText)?,
             )],
             now,
             None,

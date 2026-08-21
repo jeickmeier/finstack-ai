@@ -1,7 +1,9 @@
 use finstack_ai_kernel::{AppendBatchId, AppendRequest, CommittedBatch, Metadata, RecordEnvelope};
 use finstack_ai_protocol::encode;
 use finstack_ai_runtime::StoreError;
-pub(crate) use finstack_ai_store_common::{AppendIdentity, request_cbor};
+pub(crate) use finstack_ai_store_common::AppendIdentity;
+#[cfg(test)]
+pub(crate) use finstack_ai_store_common::request_cbor;
 use finstack_ai_store_common::{
     SessionUsage, admit_append_limits, build_committed_batch, check_append_sequence,
     classify_record_reuse, request_identity,
@@ -17,9 +19,9 @@ pub(crate) fn append_in_transaction(
     request: &AppendRequest,
     limits: &SqliteStoreLimits,
 ) -> Result<CommittedBatch, StoreError> {
-    let request_cbor = request_cbor(request)?;
+    let incoming_identity = request_identity(request)?;
     if let Some(existing) = load_batch(transaction, request.batch_id())? {
-        return if existing.request_cbor == request_cbor {
+        return if existing.identity == incoming_identity {
             Ok(existing.committed)
         } else {
             Err(StoreError::Corruption {
@@ -27,6 +29,7 @@ pub(crate) fn append_in_transaction(
             })
         };
     }
+    let request_cbor = encode(&incoming_identity).map_err(protocol_error)?;
 
     if request.records().is_empty() {
         return Err(StoreError::InvalidRequest {
@@ -45,10 +48,9 @@ pub(crate) fn append_in_transaction(
             load_batch(transaction, original_batch_id)?.ok_or(StoreError::Integrity {
                 reason_code: "missing_record_batch_index",
             })?;
-        let incoming = request_identity(request)?;
-        if existing.identity.session_id == incoming.session_id
-            && existing.identity.expected_sequence == incoming.expected_sequence
-            && existing.identity.draft_cbor == incoming.draft_cbor
+        if existing.identity.session_id == incoming_identity.session_id
+            && existing.identity.expected_sequence == incoming_identity.expected_sequence
+            && existing.identity.draft_cbor == incoming_identity.draft_cbor
         {
             return Ok(existing.committed);
         }

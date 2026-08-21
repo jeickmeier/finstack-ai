@@ -180,17 +180,6 @@ impl PyLane {
         })
     }
 
-    /// Cancel the active run on this lane and fan out through child mappings.
-    fn cancel<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let lane = self.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match lane.cancel().await {
-                Ok(()) => Ok(()),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
-        })
-    }
-
     /// Append one user text message on this idle lane. Does not start a run.
     fn append_text<'py>(&self, py: Python<'py>, text: String) -> PyResult<Bound<'py, PyAny>> {
         let lane = self.inner.clone();

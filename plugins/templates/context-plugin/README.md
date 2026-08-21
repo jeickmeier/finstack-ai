@@ -3,7 +3,7 @@
 Copy this directory and keep the path dependency on
 `finstack-ai-guest-sdk`. The default template requests `logging` only.
 
-Trust class: [T3](../../../docs/site/security-trust-levels.md) when loaded
+Trust class: T3 when loaded
 by the isolated host.
 
 ## Quick start

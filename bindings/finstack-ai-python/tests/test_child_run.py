@@ -1,4 +1,4 @@
-"""PR-079 child-run accept and external-completion routing."""
+"""Child-run accept and external-completion routing."""
 
 from __future__ import annotations
 

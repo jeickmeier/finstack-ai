@@ -44,9 +44,11 @@ type Spawner = Arc<dyn Fn(PortFuture<()>) + Send + Sync>;
 #[cfg(target_arch = "wasm32")]
 type Spawner = Arc<dyn Fn(PortFuture<()>)>;
 #[cfg(not(target_arch = "wasm32"))]
-type SleepCallback = Box<dyn FnOnce() + Send + 'static>;
+/// One-shot callback fired by the installed host timer.
+pub type SleepCallback = Box<dyn FnOnce() + Send + 'static>;
 #[cfg(target_arch = "wasm32")]
-type SleepCallback = Box<dyn FnOnce() + 'static>;
+/// One-shot callback fired by the installed host timer.
+pub type SleepCallback = Box<dyn FnOnce() + 'static>;
 #[cfg(not(target_arch = "wasm32"))]
 type Sleeper = Arc<dyn Fn(Duration, SleepCallback) + Send + Sync>;
 #[cfg(target_arch = "wasm32")]
@@ -55,55 +57,222 @@ type Sleeper = Arc<dyn Fn(Duration, SleepCallback)>;
 type LocalSleep = (Instant, SleepCallback);
 
 thread_local! {
-    static SPAWNER: RefCell<Option<Spawner>> = const { RefCell::new(None) };
-    static SLEEPER: RefCell<Option<Sleeper>> = const { RefCell::new(None) };
-    static CLOCK: RefCell<Option<Arc<dyn Clock>>> = const { RefCell::new(None) };
-    static RANDOM: RefCell<Option<Arc<dyn RandomSource>>> = const { RefCell::new(None) };
+    static DRIVER: RefCell<Option<HostDriverHooks>> = const { RefCell::new(None) };
     #[cfg(not(target_arch = "wasm32"))]
     static LOCAL_TASKS: RefCell<Vec<PortFuture<()>>> = const { RefCell::new(Vec::new()) };
     #[cfg(not(target_arch = "wasm32"))]
     static LOCAL_SLEEPS: RefCell<Vec<LocalSleep>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Install the host spawn function used by [`spawn`].
-pub fn install_spawner(spawner: impl Fn(PortFuture<()>) + PortObject) {
-    SPAWNER.with(|slot| *slot.borrow_mut() = Some(Arc::new(spawner)));
+/// One coherent set of browser-host executor, time, clock, and entropy hooks.
+///
+/// Keeping the hooks in one value prevents a run from observing a mixture of
+/// old and new host capabilities while a binding is being initialized.
+#[derive(Clone)]
+pub struct HostDriverHooks {
+    spawner: Spawner,
+    sleeper: Sleeper,
+    clock: Arc<dyn Clock>,
+    random: Arc<dyn RandomSource>,
 }
 
-/// Install the host sleep function used by [`timeout`].
-pub fn install_sleeper(sleeper: impl Fn(Duration, SleepCallback) + PortObject) {
-    SLEEPER.with(|slot| *slot.borrow_mut() = Some(Arc::new(sleeper)));
+impl HostDriverHooks {
+    /// Construct a complete host-driver snapshot.
+    #[must_use]
+    pub fn new(
+        spawner: impl Fn(PortFuture<()>) + PortObject,
+        sleeper: impl Fn(Duration, SleepCallback) + PortObject,
+        clock: Arc<dyn Clock>,
+        random: Arc<dyn RandomSource>,
+    ) -> Self {
+        Self {
+            spawner: Arc::new(spawner),
+            sleeper: Arc::new(sleeper),
+            clock,
+            random,
+        }
+    }
+
+    /// Construct hooks backed by the native cooperative test executor.
+    ///
+    /// This is available only for non-WASM `wasm-host` builds and keeps tests
+    /// on the same atomic installation path as browser bindings.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    #[must_use]
+    pub(crate) fn local(clock: Arc<dyn Clock>, random: Arc<dyn RandomSource>) -> Self {
+        Self::new(
+            |future| LOCAL_TASKS.with(|tasks| tasks.borrow_mut().push(future)),
+            |duration, callback| {
+                LOCAL_SLEEPS.with(|sleeps| {
+                    sleeps
+                        .borrow_mut()
+                        .push((Instant::now() + duration, callback));
+                });
+            },
+            clock,
+            random,
+        )
+    }
 }
 
-/// Install the clock used by [`InstalledClock`].
-pub fn install_clock(clock: Arc<dyn Clock>) {
-    CLOCK.with(|slot| *slot.borrow_mut() = Some(clock));
+/// Atomically replace every host-driver hook for the current host thread.
+pub fn install_driver(driver: HostDriverHooks) {
+    DRIVER.with(|slot| *slot.borrow_mut() = Some(driver));
 }
 
-/// Install the entropy source used by [`InstalledRandom`].
-pub fn install_random(random: Arc<dyn RandomSource>) {
-    RANDOM.with(|slot| *slot.borrow_mut() = Some(random));
+/// Abort and completion handle for one host-driver task.
+#[derive(Clone)]
+pub struct HostTaskHandle {
+    state: Arc<HostTaskState>,
 }
 
-/// Spawn one detached host-driver future.
+impl HostTaskHandle {
+    /// Request cooperative abortion of the task wrapper.
+    pub fn abort(&self) {
+        self.state
+            .aborted
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.state.wake();
+    }
+
+    /// Wait until the wrapped future has completed or has been dropped.
+    pub async fn completed(&self) {
+        poll_fn(|cx| {
+            if self.is_completed() {
+                return Poll::Ready(());
+            }
+            if let Ok(mut wakers) = self.state.completion_wakers.lock()
+                && !wakers.iter().any(|waker| waker.will_wake(cx.waker()))
+            {
+                wakers.push(cx.waker().clone());
+            }
+            if self.is_completed() {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await;
+    }
+
+    /// Whether the wrapped task has completed or been dropped.
+    #[must_use]
+    pub fn is_completed(&self) -> bool {
+        self.state
+            .completed
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
+struct HostTaskState {
+    aborted: std::sync::atomic::AtomicBool,
+    completed: std::sync::atomic::AtomicBool,
+    task_waker: std::sync::Mutex<Option<Waker>>,
+    completion_wakers: std::sync::Mutex<Vec<Waker>>,
+}
+
+impl HostTaskState {
+    fn wake(&self) {
+        if let Ok(mut waker) = self.task_waker.lock()
+            && let Some(waker) = waker.take()
+        {
+            waker.wake();
+        }
+    }
+
+    fn complete(&self) {
+        if !self
+            .completed
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            let wakers = self
+                .completion_wakers
+                .lock()
+                .map(|mut wakers| std::mem::take(&mut *wakers))
+                .unwrap_or_default();
+            for waker in wakers {
+                waker.wake();
+            }
+        }
+    }
+}
+
+struct HostTask {
+    future: Option<PortFuture<()>>,
+    state: Arc<HostTaskState>,
+}
+
+impl Future for HostTask {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self
+            .state
+            .aborted
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            self.future.take();
+            self.state.complete();
+            return Poll::Ready(());
+        }
+        if let Ok(mut waker) = self.state.task_waker.lock() {
+            *waker = Some(cx.waker().clone());
+        }
+        let ready = self
+            .future
+            .as_mut()
+            .is_none_or(|future| future.as_mut().poll(cx).is_ready());
+        if ready {
+            self.future.take();
+            self.state.complete();
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+impl Drop for HostTask {
+    fn drop(&mut self) {
+        self.future.take();
+        self.state.complete();
+    }
+}
+
+/// Spawn one owned host-driver future.
 ///
 /// # Errors
 ///
 /// Returns [`DriverUnavailable`] only when a required installed spawner is
 /// missing on `wasm32`. Native `wasm-host` tests queue the future locally.
-pub fn spawn(future: PortFuture<()>) -> Result<(), DriverUnavailable> {
-    if let Some(spawner) = SPAWNER.with(|slot| slot.borrow().clone()) {
+pub fn spawn(future: PortFuture<()>) -> Result<HostTaskHandle, DriverUnavailable> {
+    let state = Arc::new(HostTaskState {
+        aborted: std::sync::atomic::AtomicBool::new(false),
+        completed: std::sync::atomic::AtomicBool::new(false),
+        task_waker: std::sync::Mutex::new(None),
+        completion_wakers: std::sync::Mutex::new(Vec::new()),
+    });
+    let handle = HostTaskHandle {
+        state: Arc::clone(&state),
+    };
+    let future: PortFuture<()> = Box::pin(HostTask {
+        future: Some(future),
+        state,
+    });
+    if let Some(spawner) =
+        DRIVER.with(|slot| slot.borrow().as_ref().map(|hooks| hooks.spawner.clone()))
+    {
         spawner(future);
-        return Ok(());
+        return Ok(handle);
     }
     #[cfg(target_arch = "wasm32")]
     {
-        return Err(DriverUnavailable);
+        Err(DriverUnavailable)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         LOCAL_TASKS.with(|tasks| tasks.borrow_mut().push(future));
-        Ok(())
+        Ok(handle)
     }
 }
 
@@ -156,9 +325,11 @@ where
     .await
 }
 
-async fn sleep(duration: Duration) {
+pub(crate) async fn sleep(duration: Duration) {
     let (signal, done) = oneshot();
-    if let Some(sleeper) = SLEEPER.with(|slot| slot.borrow().clone()) {
+    if let Some(sleeper) =
+        DRIVER.with(|slot| slot.borrow().as_ref().map(|hooks| hooks.sleeper.clone()))
+    {
         sleeper(duration, Box::new(move || signal.send()));
         done.await;
         return;
@@ -209,18 +380,21 @@ fn pump_local() {
         for callback in due {
             callback();
         }
+        let mut ready = LOCAL_TASKS.with(|tasks| std::mem::take(&mut *tasks.borrow_mut()));
+        let mut pending = Vec::with_capacity(ready.len());
+        for mut task in ready.drain(..) {
+            let waker = noop_waker();
+            let mut cx = Context::from_waker(&waker);
+            if task.as_mut().poll(&mut cx).is_pending() {
+                pending.push(task);
+            }
+        }
+        // Poll without retaining the RefCell borrow: a running host task may
+        // legitimately spawn bounded child work. New children stay ahead of
+        // their still-pending parent for the next cooperative turn.
         LOCAL_TASKS.with(|tasks| {
             let mut tasks = tasks.borrow_mut();
-            let mut idx = 0;
-            while idx < tasks.len() {
-                let waker = noop_waker();
-                let mut cx = Context::from_waker(&waker);
-                if tasks[idx].as_mut().poll(&mut cx).is_ready() {
-                    drop(tasks.remove(idx));
-                } else {
-                    idx += 1;
-                }
-            }
+            tasks.extend(pending);
         });
     }
 }
@@ -371,10 +545,11 @@ pub struct InstalledClock;
 
 impl Clock for InstalledClock {
     fn now(&self) -> Result<Timestamp, IdGenerationError> {
-        CLOCK.with(|slot| {
-            let clock = slot.borrow();
-            let clock = clock
+        DRIVER.with(|slot| {
+            let driver = slot.borrow();
+            let clock = driver
                 .as_ref()
+                .map(|hooks| &hooks.clock)
                 .ok_or_else(|| IdGenerationError::Source("host clock is not installed".into()))?;
             (**clock).now()
         })
@@ -387,12 +562,83 @@ pub struct InstalledRandom;
 
 impl RandomSource for InstalledRandom {
     fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), IdGenerationError> {
-        RANDOM.with(|slot| {
-            let random = slot.borrow();
-            let random = random
+        DRIVER.with(|slot| {
+            let driver = slot.borrow();
+            let random = driver
                 .as_ref()
+                .map(|hooks| &hooks.random)
                 .ok_or_else(|| IdGenerationError::Source("host random is not installed".into()))?;
             (**random).fill_bytes(buf)
         })
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    struct TestClock;
+
+    impl Clock for TestClock {
+        fn now(&self) -> Result<Timestamp, IdGenerationError> {
+            Timestamp::from_unix_ms(1_000).map_err(Into::into)
+        }
+    }
+
+    struct TestRandom;
+
+    impl RandomSource for TestRandom {
+        fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), IdGenerationError> {
+            buf.fill(7);
+            Ok(())
+        }
+    }
+
+    struct PendingUntilDropped(Arc<AtomicBool>);
+
+    impl Future for PendingUntilDropped {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for PendingUntilDropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn abort_drops_the_future_before_reporting_completion() {
+        install_driver(HostDriverHooks::local(
+            Arc::new(TestClock),
+            Arc::new(TestRandom),
+        ));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handle = spawn(Box::pin(PendingUntilDropped(Arc::clone(&dropped)))).expect("spawn");
+
+        drive_local();
+        assert!(!handle.is_completed());
+        handle.abort();
+        drive_local();
+
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(handle.is_completed());
+    }
+
+    #[test]
+    fn one_install_replaces_clock_and_random_together() {
+        install_driver(HostDriverHooks::local(
+            Arc::new(TestClock),
+            Arc::new(TestRandom),
+        ));
+        assert_eq!(InstalledClock.now().expect("clock").as_unix_ms(), 1_000);
+        let mut bytes = [0_u8; 4];
+        InstalledRandom.fill_bytes(&mut bytes).expect("random");
+        assert_eq!(bytes, [7; 4]);
     }
 }

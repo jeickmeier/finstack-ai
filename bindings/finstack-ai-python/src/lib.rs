@@ -31,6 +31,7 @@ mod callbacks;
 mod capability;
 mod child_policy;
 mod document;
+mod e2b;
 mod elicitation;
 mod errors;
 mod events;
@@ -136,6 +137,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyMemoryToolset>()?;
     module.add_class::<PyMemoryObserver>()?;
     module.add_class::<fetch::PyHttpFetchToolset>()?;
+    module.add_class::<e2b::PyE2bSandboxToolset>()?;
     module.add_class::<PyPythonContextProvider>()?;
     module.add_class::<PyPythonMiddleware>()?;
     module.add_class::<PyPythonObserver>()?;

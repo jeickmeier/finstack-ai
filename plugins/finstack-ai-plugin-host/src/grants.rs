@@ -17,7 +17,7 @@ pub const CATALOG: [&str; 8] = [
     "random",
 ];
 
-/// Default host application grants so PR-051 echo fixtures keep working.
+/// Default host application grants so plugin-grant contract echo fixtures keep working.
 #[must_use]
 pub fn default_application_grants() -> BTreeSet<String> {
     ["logging", "blobs"]

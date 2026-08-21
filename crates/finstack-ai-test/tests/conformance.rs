@@ -1,4 +1,4 @@
-//! Conformance runner and adapter tests (PR-005).
+//! Conformance runner and adapter tests (golden-trace baseline).
 
 use finstack_ai_test::{
     AdapterCapability, ConformanceAdapter, ConformanceRunner, DeferredBindingAdapter,

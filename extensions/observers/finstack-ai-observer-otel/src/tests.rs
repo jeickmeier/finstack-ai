@@ -1,12 +1,11 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use finstack_ai_kernel::{
     EventTag, Id, IdTag, LaneTag, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag, Timestamp,
 };
 use finstack_ai_kernel::{RunEvent, Sensitivity};
-use finstack_ai_runtime::{Observer, ObserverBackpressure};
+use finstack_ai_runtime::Observer;
 use finstack_ai_test::check_observer_conformance;
 
 use super::OtelObserver;
@@ -44,7 +43,7 @@ fn event(sensitivity: Sensitivity) -> RunEvent {
 
 #[tokio::test]
 async fn conformance_accepts_an_empty_batch() {
-    let observer = OtelObserver::try_redacted(8, ObserverBackpressure::DropProgress).expect("otel");
+    let observer = OtelObserver::try_redacted(8).expect("otel");
     check_observer_conformance(&observer, Arc::from([]))
         .await
         .expect("conformance");
@@ -52,7 +51,7 @@ async fn conformance_accepts_an_empty_batch() {
 
 #[tokio::test]
 async fn redacted_spans_keep_ids_and_omit_secret_bodies() {
-    let observer = OtelObserver::try_redacted(8, ObserverBackpressure::DropProgress).expect("otel");
+    let observer = OtelObserver::try_redacted(8).expect("otel");
     observer
         .observe(Arc::from([
             event(Sensitivity::Public),
@@ -78,7 +77,7 @@ async fn redacted_spans_keep_ids_and_omit_secret_bodies() {
 
 #[tokio::test]
 async fn drop_progress_overflow_is_diagnosed() {
-    let observer = OtelObserver::try_redacted(1, ObserverBackpressure::DropProgress).expect("otel");
+    let observer = OtelObserver::try_redacted(1).expect("otel");
     observer
         .observe(Arc::from([
             event(Sensitivity::Public),
@@ -89,32 +88,13 @@ async fn drop_progress_overflow_is_diagnosed() {
     assert!(observer.dropped() >= 1);
     assert_eq!(
         observer.last_diagnostic().expect("diagnostic").code,
-        "observer_queue_overflow"
+        "otel_capture_saturated"
     );
 }
 
 #[tokio::test]
-async fn block_bounded_timeout_does_not_hang() {
-    let observer = OtelObserver::try_redacted(
-        1,
-        ObserverBackpressure::BlockBounded {
-            timeout: Duration::from_millis(1),
-        },
-    )
-    .expect("otel");
-    observer
-        .observe(Arc::from([
-            event(Sensitivity::Public),
-            event(Sensitivity::Public),
-        ]))
-        .await
-        .expect("observe");
-    assert!(observer.dropped() >= 1);
-}
-
-#[tokio::test]
 async fn captured_spans_stay_within_the_queue_capacity() {
-    let observer = OtelObserver::try_redacted(2, ObserverBackpressure::DropProgress).expect("otel");
+    let observer = OtelObserver::try_redacted(2).expect("otel");
     for _ in 0..8 {
         observer
             .observe(Arc::from([event(Sensitivity::Public)]))

@@ -736,7 +736,10 @@ fn observer_descriptor(id: &str) -> ObserverDescriptor {
     }
 }
 
-async fn run_with_observer(observer_id: &str, observer: Arc<dyn Observer>) -> AgentRunOutput {
+async fn run_with_observer(
+    observer_id: &str,
+    observer: Arc<dyn Observer>,
+) -> (AgentRunOutput, finstack_ai_runtime::ObserverDiagnostics) {
     let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
         profile(),
         vec![completed("observer-ok")],
@@ -750,7 +753,7 @@ async fn run_with_observer(observer_id: &str, observer: Arc<dyn Observer>) -> Ag
         })
         .expect("store"),
     );
-    Agent::builder(
+    let agent = Agent::builder(
         AgentId::parse("test.agent.observer").expect("agent"),
         BundleId::parse("test.bundle.observer").expect("bundle"),
         (
@@ -777,10 +780,11 @@ async fn run_with_observer(observer_id: &str, observer: Arc<dyn Observer>) -> Ag
     )
     .build()
     .await
-    .expect("build")
-    .run(request("observe me"))
-    .await
-    .expect("run")
+    .expect("build");
+    let run = agent.start(request("observe me")).expect("start");
+    let output = run.result().await.expect("run");
+    let diagnostics = run.observer_diagnostics().await.expect("diagnostics");
+    (output, diagnostics)
 }
 
 #[tokio::test]
@@ -809,14 +813,26 @@ async fn failing_or_stalled_observer_does_not_change_journal_prefix() {
         )
         .expect("stalled"),
     );
-    let noop_out = run_with_observer("test.observer.noop", noop).await;
-    let fail_out = run_with_observer("test.observer.fail", failing).await;
-    let stall_out = run_with_observer("test.observer.stall", stalled).await;
+    let (noop_out, noop_diagnostics) = run_with_observer("test.observer.noop", noop).await;
+    let (fail_out, fail_diagnostics) = run_with_observer("test.observer.fail", failing).await;
+    let (stall_out, stall_diagnostics) = run_with_observer("test.observer.stall", stalled).await;
     assert_eq!(noop_out.text(), "observer-ok");
     assert_eq!(fail_out.text(), noop_out.text());
     assert_eq!(stall_out.text(), noop_out.text());
     assert_eq!(fail_out.record_kinds(), noop_out.record_kinds());
     assert_eq!(stall_out.record_kinds(), noop_out.record_kinds());
+    assert_eq!(noop_diagnostics.total, 0);
+    assert_eq!(fail_diagnostics.total, 1);
+    assert_eq!(fail_diagnostics.dropped, 0);
+    assert_eq!(
+        fail_diagnostics.recent[0].code,
+        finstack_ai_runtime::OBSERVER_DELIVERY_FAILED
+    );
+    assert_eq!(stall_diagnostics.total, 1);
+    assert_eq!(
+        stall_diagnostics.recent[0].code,
+        finstack_ai_runtime::OBSERVER_SHUTDOWN_TIMEOUT
+    );
 }
 
 async fn wait_active_run(lane: &crate::Lane) -> finstack_ai_kernel::RunId {
@@ -836,10 +852,12 @@ async fn wait_active_run(lane: &crate::Lane) -> finstack_ai_kernel::RunId {
 
 #[tokio::test]
 async fn idle_lane_run_returns_a_live_run() {
-    let model = Arc::new(ScriptedModel::from_plans(
-        profile(),
-        vec![completed("lane ready")],
-    ));
+    let gate = Arc::<str>::from("lane-live-handle");
+    let mut plan = completed("lane ready");
+    plan.actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&gate)));
+    let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+    let control = model.control();
     let (agent, store) = model_only_agent(Arc::clone(&model)).await;
     let session = Session::create(store, "tenant-preview")
         .await
@@ -850,6 +868,7 @@ async fn idle_lane_run_returns_a_live_run() {
     assert_eq!(run.locator().lane_id, lane.lane_id());
     let accepted = wait_active_run(&lane).await;
     assert_eq!(accepted, run.locator().run_id);
+    control.release(&gate);
     let output = tokio::time::timeout(Duration::from_secs(3), run.result())
         .await
         .expect("result timeout")
@@ -936,7 +955,13 @@ async fn resume_respawns_run_task_owner() {
     let run_id = wait_active_run(&lane).await;
     lane.suspend().await.expect("suspend");
     assert!(!lane.workflow_owner_is_live());
+    let warmups_before_resume = model.warmup_count();
     lane.resume(&agent).await.expect("resume");
+    assert_eq!(
+        model.warmup_count(),
+        warmups_before_resume,
+        "resume must reuse the already-warmed model"
+    );
     assert!(
         lane.workflow_owner_is_live(),
         "resume must respawn RunTaskOwner"
@@ -961,6 +986,117 @@ async fn append_text_does_not_start_a_run() {
     assert!(inspect.active_run_id.is_none());
     assert_eq!(inspect.leaf_id, Some(entry));
     assert_eq!(inspect.history.len(), 1);
+}
+
+#[tokio::test]
+async fn sequential_lane_run_replays_prior_history_once_and_stays_run_scoped() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("first answer"), completed("second answer")],
+    ));
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let session = Session::create(store, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("main");
+
+    lane.run(&agent, request("first question"))
+        .expect("first start")
+        .result()
+        .await
+        .expect("first result");
+    lane.run(&agent, request("second question"))
+        .expect("second start")
+        .result()
+        .await
+        .expect("second result");
+
+    let sent = model.last_request().expect("second request");
+    let transcript = sent
+        .draft
+        .messages
+        .iter()
+        .filter(|message| message.role() != finstack_ai_kernel::MessageRole::System)
+        .flat_map(|message| {
+            message
+                .content()
+                .iter()
+                .filter_map(move |block| match block {
+                    ContentBlock::Text(text) => Some((message.role(), text.text().to_owned())),
+                    _ => None,
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transcript,
+        vec![
+            (
+                finstack_ai_kernel::MessageRole::User,
+                "first question".into()
+            ),
+            (
+                finstack_ai_kernel::MessageRole::Assistant,
+                "first answer".into(),
+            ),
+            (
+                finstack_ai_kernel::MessageRole::User,
+                "second question".into(),
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn append_text_reports_invalid_message_text() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("unused")],
+    ));
+    let (_agent, store) = model_only_agent(model).await;
+    let session = Session::create(store, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("main");
+    let oversized = "x".repeat(finstack_ai_kernel::TEXT_MAX_BYTES + 1);
+    let error = lane
+        .append_text(&oversized)
+        .await
+        .expect_err("oversized text must fail");
+    assert_eq!(error.code(), "invalid_message_text");
+}
+
+#[tokio::test]
+async fn lane_cancel_uses_explicit_principal_authorization() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![ScriptedModelPlan {
+            actions: vec![ScriptedModelAction::AwaitCancellation],
+        }],
+    ));
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let session = Session::create(store, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("main");
+    let run = lane.run(&agent, request("cancel me")).expect("run starts");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while model.request_count() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("model reached gate");
+    let security = security();
+    let authorization = AuthorizationEvidence::try_new(
+        security.authorization_policy_version(),
+        security.authorization_decision_id(),
+    )
+    .expect("authorization");
+    lane.cancel(security.principal().clone(), authorization)
+        .await
+        .expect("authenticated cancellation");
+    let error = run.result().await.expect_err("run must cancel");
+    assert_eq!(error.code(), AGENT_RUN_CANCELLED);
 }
 
 async fn journal_kinds(
@@ -1563,10 +1699,12 @@ async fn wait_deferred_tool_effect(store: &Arc<dyn JournalStore>, parent: &Agent
 
 #[tokio::test]
 async fn start_or_attach_child_is_idempotent_for_an_equal_request() {
-    let model = Arc::new(ScriptedModel::from_plans(
-        profile(),
-        vec![completed("parent")],
-    ));
+    let gate = Arc::<str>::from("child-idempotency-parent");
+    let mut plan = completed("parent");
+    plan.actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&gate)));
+    let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+    let control = model.control();
     let (agent, store) = child_capable_agent(model).await;
     let store: Arc<dyn JournalStore> = store;
     let parent = agent.start(request("parent work")).expect("parent start");
@@ -1594,14 +1732,18 @@ async fn start_or_attach_child_is_idempotent_for_an_equal_request() {
         .expect("equal retry");
     assert_eq!(first, attached);
     assert_eq!(invoker.starts.load(Ordering::SeqCst), 2);
+    control.release(&gate);
+    parent.result().await.expect("parent completes");
 }
 
 #[tokio::test]
 async fn start_or_attach_child_rejects_a_conflicting_digest() {
-    let model = Arc::new(ScriptedModel::from_plans(
-        profile(),
-        vec![completed("parent")],
-    ));
+    let gate = Arc::<str>::from("child-conflict-parent");
+    let mut plan = completed("parent");
+    plan.actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&gate)));
+    let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+    let control = model.control();
     let (agent, store) = child_capable_agent(model).await;
     let store: Arc<dyn JournalStore> = store;
     let parent = agent.start(request("parent work")).expect("parent start");
@@ -1630,6 +1772,8 @@ async fn start_or_attach_child_rejects_a_conflicting_digest() {
         error.to_string().contains("sidecar conflicts"),
         "conflicting digest must fail closed: {error}"
     );
+    control.release(&gate);
+    parent.result().await.expect("parent completes");
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@
 Four offline, secret-free binaries over the public Rust surface.
 Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`). `publish = false`.
 
-Trust class: [T1](../../docs/site/security-trust-levels.md). Native
+Trust class: T1. Native
 in-process providers and tools are not isolated.
 
 - `minimal` completes a model-only run through the native Ollama provider.
@@ -11,7 +11,7 @@ in-process providers and tools are not isolated.
   sliding-window compaction, and a before_finalize verifier over a keyless
   loopback model. Sliding-window `CompactContext` lands. Summarize compaction
   completes via the runtime-owned phase; see
-  [how summarize compaction completes](../../docs/site/middleware.md#how-summarize-compaction-completes).
+  how summarize compaction completes.
 - `service` resolves once, checks component health, and handles one request.
 - `diagnostic` prints credential-free `AgentSpec` and lock fingerprints.
 
@@ -20,5 +20,3 @@ in-process providers and tools are not isolated.
 ```bash
 cargo run -p finstack-ai-native-examples --bin minimal --offline --locked
 ```
-
-See [docs/site/rust.md](../../docs/site/rust.md).

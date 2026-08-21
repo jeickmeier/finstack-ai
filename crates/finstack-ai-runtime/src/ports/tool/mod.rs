@@ -17,6 +17,10 @@ pub use catalog::{
     ApprovalState, ResolvedTool, ResolvedToolCatalog, ToolCatalogPlan, ToolExecutionPolicy,
     ToolPolicyDecision, ToolsetRegistration,
 };
+#[cfg(feature = "native-tokio")]
+pub(crate) use error::TOOL_PANICKED;
+#[cfg(any(test, feature = "native-tokio"))]
+pub(crate) use error::TOOL_STREAM_INVALID;
 pub use error::{
     MCP_SAMPLING_REQUIRED, MCP_SAMPLING_UNAVAILABLE, TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED,
     TOOL_DEFERRAL_EXPIRED, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID,
@@ -27,8 +31,6 @@ pub(crate) use error::{
     TOOL_DEFERRAL_INVALID, TOOL_DEFERRAL_NOT_DECLARED, TOOL_POLICY_DENIED,
     TOOL_REGISTRATION_INVALID,
 };
-#[cfg(any(test, feature = "native-tokio"))]
-pub(crate) use error::{TOOL_PANICKED, TOOL_STREAM_INVALID};
 pub use port::Toolset;
 pub use resume::{map_tool_reconcile_result, tool_resume_action, tool_retry_allowed};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

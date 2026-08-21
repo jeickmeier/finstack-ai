@@ -302,7 +302,7 @@ documented_wire_variants! {
 #[test]
 fn top_level_vocabularies_remain_compiler_exhaustive() {
     assert_eq!(PHASE_NAMES.len(), 18);
-    assert_eq!(INPUT_NAMES.len(), 15);
+    assert_eq!(INPUT_NAMES.len(), 17);
     assert_eq!(RECORD_NAMES.len(), 40);
     assert_eq!(EVENT_NAMES.len(), 22);
     assert_eq!(EFFECT_NAMES.len(), 6);
@@ -378,6 +378,8 @@ named_variants! {
     KernelInput::RequestInteraction(_) => "RequestInteraction",
     KernelInput::InteractionSettled(_) => "InteractionSettled",
     KernelInput::RequestCompactionModel(_) => "RequestCompactionModel",
+    KernelInput::RequestExtensionEffect(_) => "RequestExtensionEffect",
+    KernelInput::ExtensionEffectSettled(_) => "ExtensionEffectSettled",
 }
 
 named_variants! {

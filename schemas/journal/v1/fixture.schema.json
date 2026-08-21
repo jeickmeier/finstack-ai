@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://finstack.ai/schemas/journal/v1/fixture.schema.json",
   "title": "JournalV1Fixture",
-  "description": "Diagnostic sidecar for journal v1 canonical-CBOR known-answers (PR-039). JSON is not the journal encoding.",
+  "description": "Diagnostic sidecar for journal v1 canonical-CBOR known-answers. JSON is not the journal encoding.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format_version", "subject", "case", "expect"],

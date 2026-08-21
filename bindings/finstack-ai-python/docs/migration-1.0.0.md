@@ -29,4 +29,3 @@ to `@1.0.0` with
 ## Historical notes
 
 Pre-0.1.0 Python shape changes remain in [migration-0.0.2.md](migration-0.0.2.md).
-Repository-wide paths are in [docs/site/migration.md](../../../docs/site/migration.md).

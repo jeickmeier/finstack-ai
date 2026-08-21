@@ -24,11 +24,10 @@ Additional maintainers may be added by the release owner and recorded in this ta
 
 ## Architecture and process decisions
 
-- Architecture decisions are recorded as ADRs under [`docs/implementation/adrs/`](docs/implementation/adrs/) and indexed in [`docs/implementation/adr-register.md`](docs/implementation/adr-register.md).
-- The planning baseline in [`docs/planning/`](docs/planning/) is the implementation contract during normal coding.
-- Delivery status, evidence, and exceptions are tracked in [`docs/implementation/`](docs/implementation/).
-- Ecosystem-facing contract changes (journal schemas, event order, WIT worlds, remote protocols) require a public RFC process in addition to an ADR. Start from [`docs/rfcs/README.md`](docs/rfcs/README.md) and [`docs/rfcs/0000-template.md`](docs/rfcs/0000-template.md).
+- Current public contracts, schemas, compatibility fixtures, and package boundaries are authoritative for implementation.
+- Architecture decisions must be explicit, reviewable, and linked from the change that implements them.
+- Ecosystem-facing changes to journal schemas, event order, WIT worlds, or remote protocols require an explicit compatibility and migration decision before implementation.
 
 ## Exceptions and waivers
 
-Deviations from Engineering Standards **must** / **must not** rules require an accepted ADR or a documented, time-bounded waiver per Engineering Standards section 14 and the [`exceptions-register`](docs/implementation/exceptions-register.md).
+Deviations from mandatory repository rules require an accepted architecture decision or a documented, owned, and time-bounded waiver.

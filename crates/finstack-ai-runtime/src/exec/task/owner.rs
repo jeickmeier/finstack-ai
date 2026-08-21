@@ -14,19 +14,23 @@ use crate::native::timer::{TimerDispatcher, run_timer_jobs};
 use crate::native::tool::{
     RuntimeDispatcher, ToolDispatcher, ToolExecutionContext, ToolTaskConfig, run_tool_jobs,
 };
+use crate::observer::{
+    OBSERVER_DELIVERY_FAILED, OBSERVER_SHUTDOWN_TIMEOUT, OBSERVER_SUBSCRIPTION_FAILED,
+};
 use crate::run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
-    drive_due_polls, model_handle_error, model_resume_retry_seed, next_due_poll_or_expiry,
-    prepare_tool_batch_if_ready, resume_pending_model_effect, resume_pending_tool_effects,
-    tool_resume_retry_seeds, validate_model_binding,
+    drive_due_polls, model_resume_retry_seed, next_due_poll_or_expiry, prepare_tool_batch_if_ready,
+    resume_pending_model_effect, resume_pending_tool_effects, tool_resume_retry_seeds,
+    validate_model_binding,
 };
 use crate::{
-    CancellationSignal, Clock, CommitCoordinator, LockedModelContextProfile, Model,
-    ModelWarmupContext, MonotonicDeadline, RandomSource, ResolvedToolCatalog,
-    TOOL_RECONCILIATION_UNSUPPORTED, ToolStreamAssembler,
+    CancellationSignal, Clock, CommitCoordinator, EventSubscriptionConfig, EventSubscriptionError,
+    LockedModelContextProfile, Model, MonotonicDeadline, Observer, ObserverDiagnostic,
+    RandomSource, ReadyModel, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED,
+    ToolStreamAssembler,
 };
 
 use super::handle::RunHandle;
@@ -186,6 +190,7 @@ fn due_poll_wait(clock: &impl Clock, deadline: Timestamp) -> Result<DuePollWait,
 pub struct RunTaskOwner {
     handle: RunHandle,
     tasks: JoinSet<()>,
+    observer_tasks: JoinSet<()>,
     active_effects: Vec<Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>>,
     run_cancellation: CancellationSignal,
     shutdown_deadline: Duration,
@@ -216,6 +221,7 @@ impl RunTaskOwner {
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
             timer_backward_clock_clamped: AtomicU64::new(0),
+            observer_diagnostics: Mutex::new(crate::observer::ObserverDiagnosticBuffer::default()),
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -227,6 +233,7 @@ impl RunTaskOwner {
         Ok(Self {
             handle,
             tasks,
+            observer_tasks: JoinSet::new(),
             active_effects: Vec::new(),
             run_cancellation: CancellationSignal::new(),
             shutdown_deadline: config.shutdown_deadline,
@@ -234,20 +241,20 @@ impl RunTaskOwner {
         })
     }
 
-    /// Warm one retained model and spawn the bounded commit/model workers.
+    /// Spawn the bounded commit/model workers with a prepared model.
     ///
     /// The ready handle is not returned until the default-no-op or provider
-    /// warmup completes exactly once. Model jobs can only be enqueued by the
-    /// coordinator after the request and effect records are committed/applied.
+    /// Model jobs can only be enqueued by the coordinator after the request
+    /// and effect records are committed/applied.
     ///
     /// # Errors
     ///
-    /// Returns configuration or warmup errors before publishing a run handle.
+    /// Returns configuration errors before publishing a run handle.
     pub async fn spawn_with_model<C, R>(
         coordinator: CommitCoordinator,
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
-        model: Arc<dyn Model>,
+        ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         clock: C,
         random: R,
@@ -260,7 +267,7 @@ impl RunTaskOwner {
             coordinator,
             run_config,
             model_config,
-            model,
+            ready_model,
             profile,
             clock,
             random,
@@ -270,13 +277,13 @@ impl RunTaskOwner {
 
     #[expect(
         clippy::too_many_lines,
-        reason = "warmup, timer resume, model resume, and worker spawn stay contiguous"
+        reason = "timer resume, model resume, and worker spawn stay contiguous"
     )]
     async fn spawn_with_model_inner<C, R>(
         mut coordinator: CommitCoordinator,
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
-        model: Arc<dyn Model>,
+        ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         clock: C,
         random: R,
@@ -291,6 +298,7 @@ impl RunTaskOwner {
         coordinator.install_event_publisher(Arc::new(event_handle.clone()));
         let retry_policy = model_config.same_identity_retry;
         let assembler = model_config.validate()?;
+        let model = ready_model.shared_model();
         validate_model_binding(model.as_ref(), &profile)?;
         let sources = SettlementSources::try_new(clock, random)?;
         sources.set_approval_grant(run_config.approval_grant);
@@ -298,15 +306,6 @@ impl RunTaskOwner {
         let run_cancellation = CancellationSignal::new();
         let model_cancellation = run_cancellation.child();
         let timer_cancellation = run_cancellation.child();
-        model
-            .warmup(ModelWarmupContext {
-                cancellation: model_cancellation.child(),
-                deadline: model_config.warmup_deadline,
-                metadata: model_config.warmup_metadata.clone(),
-            })
-            .await
-            .map_err(|error| model_handle_error(&error))?;
-
         let (sender, receiver) = mpsc::channel(run_config.command_capacity);
         let (job_sender, job_receiver) = mpsc::channel(model_config.job_capacity);
         let (result_sender, result_receiver) = mpsc::channel(model_config.result_capacity);
@@ -374,6 +373,7 @@ impl RunTaskOwner {
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
             timer_backward_clock_clamped: AtomicU64::new(0),
+            observer_diagnostics: Mutex::new(crate::observer::ObserverDiagnosticBuffer::default()),
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -410,6 +410,7 @@ impl RunTaskOwner {
         Ok(Self {
             handle,
             tasks,
+            observer_tasks: JoinSet::new(),
             active_effects: vec![model_active, timer_active],
             run_cancellation,
             shutdown_deadline: run_config.shutdown_deadline,
@@ -417,7 +418,7 @@ impl RunTaskOwner {
         })
     }
 
-    /// Warm one retained model and spawn the combined bounded model/tool runtime.
+    /// Spawn the combined bounded model/tool runtime with a prepared model.
     ///
     /// Tool effects are routed only after their request records commit and the
     /// coordinator repeats its authorization/deadline check. The kernel remains
@@ -425,8 +426,7 @@ impl RunTaskOwner {
     ///
     /// # Errors
     ///
-    /// Returns configuration, model warmup, or binding errors before publishing
-    /// a run handle.
+    /// Returns configuration or binding errors before publishing a run handle.
     #[expect(
         clippy::too_many_arguments,
         reason = "the public constructor receives the two explicit port configurations and injected identity sources"
@@ -436,7 +436,7 @@ impl RunTaskOwner {
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
         tool_config: ToolTaskConfig,
-        model: Arc<dyn Model>,
+        ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Arc<ResolvedToolCatalog>,
         clock: C,
@@ -451,7 +451,7 @@ impl RunTaskOwner {
             run_config,
             model_config,
             tool_config,
-            model,
+            ready_model,
             profile,
             catalog,
             clock,
@@ -470,7 +470,7 @@ impl RunTaskOwner {
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
         tool_config: ToolTaskConfig,
-        model: Arc<dyn Model>,
+        ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Arc<ResolvedToolCatalog>,
         clock: C,
@@ -489,6 +489,7 @@ impl RunTaskOwner {
         let tool_config = tool_config
             .validate()
             .map_err(|_| RunHandleError::InvalidConfiguration)?;
+        let model = ready_model.shared_model();
         validate_model_binding(model.as_ref(), &profile)?;
         let mut sources = SettlementSources::try_new(clock, random)?;
         sources.set_approval_grant(run_config.approval_grant);
@@ -503,15 +504,6 @@ impl RunTaskOwner {
             catalog: Arc::clone(&catalog),
             cancellation: run_cancellation.child(),
         });
-        model
-            .warmup(ModelWarmupContext {
-                cancellation: model_cancellation.child(),
-                deadline: model_config.warmup_deadline,
-                metadata: model_config.warmup_metadata.clone(),
-            })
-            .await
-            .map_err(|error| model_handle_error(&error))?;
-
         let (sender, receiver) = mpsc::channel(run_config.command_capacity);
         let (model_job_sender, model_job_receiver) = mpsc::channel(model_config.job_capacity);
         let (model_result_sender, model_result_receiver) =
@@ -621,6 +613,7 @@ impl RunTaskOwner {
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
             timer_backward_clock_clamped: AtomicU64::new(0),
+            observer_diagnostics: Mutex::new(crate::observer::ObserverDiagnosticBuffer::default()),
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -681,6 +674,7 @@ impl RunTaskOwner {
         Ok(Self {
             handle,
             tasks,
+            observer_tasks: JoinSet::new(),
             active_effects: vec![model_active, tool_active, timer_active],
             run_cancellation,
             shutdown_deadline: run_config.shutdown_deadline,
@@ -692,6 +686,43 @@ impl RunTaskOwner {
     #[must_use]
     pub fn handle(&self) -> RunHandle {
         self.handle.clone()
+    }
+
+    /// Attach one observer pump to this owner's shutdown and abort lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns a subscription error when the event hub is closed, full, or
+    /// the supplied delivery configuration is invalid.
+    pub async fn attach_observer(
+        &mut self,
+        observer: Arc<dyn Observer>,
+        config: EventSubscriptionConfig,
+    ) -> Result<(), EventSubscriptionError> {
+        let mut subscription = match self.handle.subscribe_observer(config).await {
+            Ok(subscription) => subscription,
+            Err(error) => {
+                self.handle.record_observer_diagnostic(ObserverDiagnostic {
+                    code: OBSERVER_SUBSCRIPTION_FAILED,
+                    detail: "observer subscription failed",
+                });
+                return Err(error);
+            }
+        };
+        let handle = self.handle.clone();
+        self.observer_tasks.spawn(async move {
+            while let Some(batch) = subscription.next_batch().await {
+                if observer.observe(Arc::from(batch.events())).await.is_err() {
+                    handle.record_observer_diagnostic(ObserverDiagnostic {
+                        code: OBSERVER_DELIVERY_FAILED,
+                        detail: "observer delivery failed",
+                    });
+                    break;
+                }
+            }
+            subscription.close();
+        });
+        Ok(())
     }
 
     /// Close intake, join normally, and abort on deadline expiry.
@@ -720,8 +751,23 @@ impl RunTaskOwner {
                 self.handle.shared.status.send_replace(RunStatus::Stopped);
             }
         }
+        let observers_joined = timeout(self.shutdown_deadline, async {
+            while self.observer_tasks.join_next().await.is_some() {}
+        })
+        .await
+        .is_ok();
+        if !observers_joined {
+            self.handle.record_observer_diagnostic(ObserverDiagnostic {
+                code: OBSERVER_SHUTDOWN_TIMEOUT,
+                detail: "observer shutdown timed out",
+            });
+            aborted_tasks = aborted_tasks.saturating_add(self.observer_tasks.len());
+            self.observer_tasks.abort_all();
+            while self.observer_tasks.join_next().await.is_some() {}
+        }
+        let graceful = joined && observers_joined;
         let report = ShutdownReport {
-            outcome: if joined {
+            outcome: if graceful {
                 ShutdownOutcome::Graceful
             } else {
                 ShutdownOutcome::Forced
@@ -750,8 +796,9 @@ impl Drop for RunTaskOwner {
             self.handle.shutdown();
             let signalled_effects = self.active_effect_count();
             self.run_cancellation.cancel();
-            let aborted_tasks = self.tasks.len();
+            let aborted_tasks = self.tasks.len().saturating_add(self.observer_tasks.len());
             self.tasks.abort_all();
+            self.observer_tasks.abort_all();
             if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
                 self.handle.shared.status.send_replace(RunStatus::Stopped);
             }

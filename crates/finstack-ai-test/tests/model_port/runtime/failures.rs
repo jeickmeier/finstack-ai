@@ -1,4 +1,8 @@
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the append-failure fixture keeps the complete commit-before-effect proof visible"
+)]
 async fn failed_model_request_append_never_executes_the_model() {
     let store = Arc::new(FailFourthAppendStore::new());
     let model = Arc::new(ScriptedModel::from_inputs(
@@ -21,11 +25,13 @@ async fn failed_model_request_append_never_executes_the_model() {
             job_capacity: 1,
             result_capacity: 1,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
-        model_port,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(model_port)
+                .await
+                .expect("model readiness"),
+        ),
         locked_profile(),
         FixedClock::new(timestamp(2_000)),
         CounterRandom(AtomicU64::new(200)),
@@ -140,11 +146,13 @@ async fn malformed_stream_settles_as_failure_without_partial_durable_success() {
             job_capacity: 1,
             result_capacity: 1,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
-        model_port,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(model_port)
+                .await
+                .expect("model readiness"),
+        ),
         locked_profile(),
         FixedClock::new(timestamp(2_000)),
         CounterRandom(AtomicU64::new(250)),
@@ -203,11 +211,13 @@ async fn an_expired_committed_deadline_prevents_provider_execution() {
             job_capacity: 1,
             result_capacity: 1,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
-        model_port,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(model_port)
+                .await
+                .expect("model readiness"),
+        ),
         locked_profile(),
         FixedClock::new(timestamp(6_000)),
         CounterRandom(AtomicU64::new(275)),

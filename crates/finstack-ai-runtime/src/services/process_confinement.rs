@@ -6,7 +6,8 @@
 //! `std::process` runner stays in the shell crate as a separate path.
 
 use std::path::{Path, PathBuf};
-use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
+use std::process::{Command, ExitStatus};
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -21,10 +22,52 @@ pub const CONFINEMENT_IO: &str = "process_confinement_io";
 ///
 /// `root` is the same authorized directory the filesystem toolset already
 /// holds. The service does not invent a second root.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ConfinementProfile {
     root: PathBuf,
     cwd: Option<PathBuf>,
+    #[cfg(unix)]
+    _root_handle: Arc<std::os::fd::OwnedFd>,
+    #[cfg(unix)]
+    cwd_handle: Option<Arc<std::os::fd::OwnedFd>>,
+    windows_lpac: Option<WindowsLpacProfile>,
+}
+
+impl PartialEq for ConfinementProfile {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root && self.cwd == other.cwd && self.windows_lpac == other.windows_lpac
+    }
+}
+
+impl Eq for ConfinementProfile {}
+
+/// Host-provisioned Windows Less Privileged `AppContainer` identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsLpacProfile {
+    moniker: Arc<str>,
+}
+
+impl WindowsLpacProfile {
+    /// Bind a pre-existing `AppContainer` moniker without provisioning it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a denial when the moniker is empty or contains a NUL.
+    pub fn try_new(moniker: impl Into<Arc<str>>) -> Result<Self, ConfinementError> {
+        let moniker = moniker.into();
+        if moniker.is_empty() || moniker.contains('\0') {
+            return Err(ConfinementError::denied(
+                "windows AppContainer moniker is invalid",
+            ));
+        }
+        Ok(Self { moniker })
+    }
+
+    /// Provisioned `AppContainer` moniker.
+    #[must_use]
+    pub fn moniker(&self) -> &str {
+        &self.moniker
+    }
 }
 
 impl ConfinementProfile {
@@ -50,7 +93,19 @@ impl ConfinementProfile {
         let root = root
             .canonicalize()
             .map_err(|_| ConfinementError::denied("confinement root could not be canonicalized"))?;
-        Ok(Self { root, cwd: None })
+        #[cfg(unix)]
+        let root_handle = Arc::new(open_directory(&root).map_err(|_| {
+            ConfinementError::denied("confinement root could not be opened without symlinks")
+        })?);
+        Ok(Self {
+            root,
+            cwd: None,
+            #[cfg(unix)]
+            _root_handle: root_handle,
+            #[cfg(unix)]
+            cwd_handle: None,
+            windows_lpac: None,
+        })
     }
 
     /// Set an already-authorized working directory under [`Self::root`].
@@ -60,13 +115,29 @@ impl ConfinementProfile {
     /// Returns [`ConfinementError::denied`] when `cwd` is not under `root`.
     pub fn with_authorized_cwd(mut self, cwd: impl AsRef<Path>) -> Result<Self, ConfinementError> {
         let cwd = cwd.as_ref();
+        let cwd = cwd
+            .canonicalize()
+            .map_err(|_| ConfinementError::denied("confinement cwd could not be canonicalized"))?;
         if !cwd.starts_with(&self.root) || !cwd.is_dir() {
             return Err(ConfinementError::denied(
                 "confinement cwd must be a directory under the authorized root",
             ));
         }
-        self.cwd = Some(cwd.to_path_buf());
+        #[cfg(unix)]
+        {
+            self.cwd_handle = Some(Arc::new(open_directory(&cwd).map_err(|_| {
+                ConfinementError::denied("confinement cwd could not be opened without symlinks")
+            })?));
+        }
+        self.cwd = Some(cwd);
         Ok(self)
+    }
+
+    /// Attach a host-provisioned Windows LPAC identity.
+    #[must_use]
+    pub fn with_windows_lpac(mut self, profile: WindowsLpacProfile) -> Self {
+        self.windows_lpac = Some(profile);
+        self
     }
 
     /// Borrow the capability-scoped root.
@@ -79,6 +150,12 @@ impl ConfinementProfile {
     #[must_use]
     pub fn cwd(&self) -> Option<&Path> {
         self.cwd.as_deref()
+    }
+
+    /// Host-provisioned Windows LPAC identity, when configured.
+    #[must_use]
+    pub const fn windows_lpac(&self) -> Option<&WindowsLpacProfile> {
+        self.windows_lpac.as_ref()
     }
 }
 
@@ -138,8 +215,8 @@ pub enum ConfinementBackend {
     LinuxLandlock,
     /// macOS Seatbelt (`sandbox_init`). Apple documents this API as deprecated.
     MacosSeatbelt,
-    /// Windows restricted token plus Job Object.
-    WindowsRestrictedJob,
+    /// Windows Less Privileged `AppContainer` plus Job Object.
+    WindowsLpacJob,
     /// Forced or native-unsupported path. Spawn is refused.
     Unavailable,
 }
@@ -201,7 +278,7 @@ impl ProcessConfinement {
             )),
             ConfinementBackend::LinuxLandlock => linux::configure(command, profile),
             ConfinementBackend::MacosSeatbelt => macos::configure(command, profile),
-            ConfinementBackend::WindowsRestrictedJob => Err(ConfinementError::unavailable(
+            ConfinementBackend::WindowsLpacJob => Err(ConfinementError::unavailable(
                 "windows confined children must use ProcessConfinement::spawn",
             )),
         }
@@ -209,8 +286,8 @@ impl ProcessConfinement {
 
     /// Spawn `command` under `profile`. Refuses when the backend is missing.
     ///
-    /// Windows applies the restricted token with `CreateProcessAsUser` and
-    /// assigns the child to a Job Object. Either primitive missing fails
+    /// Windows applies a host-provisioned LPAC identity with `STARTUPINFOEX`
+    /// and assigns the child to a Job Object. Either primitive missing fails
     /// closed. Unix backends keep `pre_exec` confinement.
     ///
     /// # Errors
@@ -228,7 +305,7 @@ impl ProcessConfinement {
             )),
             ConfinementBackend::LinuxLandlock => linux::spawn(command, profile),
             ConfinementBackend::MacosSeatbelt => macos::spawn(command, profile),
-            ConfinementBackend::WindowsRestrictedJob => windows::spawn(command, profile),
+            ConfinementBackend::WindowsLpacJob => windows::spawn(command, profile),
         }
     }
 }
@@ -246,20 +323,29 @@ pub struct ConfinedChild {
     #[cfg(windows)]
     _job: std::os::windows::io::OwnedHandle,
     /// Optional stdin pipe.
-    pub stdin: Option<ChildStdin>,
+    pub stdin: Option<std::fs::File>,
     /// Optional stdout pipe.
-    pub stdout: Option<ChildStdout>,
+    pub stdout: Option<std::fs::File>,
     /// Optional stderr pipe.
-    pub stderr: Option<ChildStderr>,
+    pub stderr: Option<std::fs::File>,
 }
 
 impl ConfinedChild {
     #[cfg(not(windows))]
     fn from_std(mut inner: std::process::Child) -> Self {
         Self {
-            stdin: inner.stdin.take(),
-            stdout: inner.stdout.take(),
-            stderr: inner.stderr.take(),
+            stdin: inner
+                .stdin
+                .take()
+                .map(|pipe| std::fs::File::from(std::os::fd::OwnedFd::from(pipe))),
+            stdout: inner
+                .stdout
+                .take()
+                .map(|pipe| std::fs::File::from(std::os::fd::OwnedFd::from(pipe))),
+            stderr: inner
+                .stderr
+                .take()
+                .map(|pipe| std::fs::File::from(std::os::fd::OwnedFd::from(pipe))),
             inner,
         }
     }
@@ -314,17 +400,22 @@ impl ConfinedChild {
 }
 
 #[cfg(unix)]
-fn apply_authorized_cwd(cwd: &Path) -> std::io::Result<()> {
+fn open_directory(path: &Path) -> std::io::Result<std::os::fd::OwnedFd> {
     use rustix::fs::{Mode, OFlags, open};
-    let fd = open(
-        cwd,
+    open(
+        path,
         OFlags::RDONLY
             .union(OFlags::DIRECTORY)
             .union(OFlags::NOFOLLOW)
             .union(OFlags::CLOEXEC),
         Mode::empty(),
-    )?;
-    rustix::process::fchdir(&fd).map_err(std::io::Error::from)
+    )
+    .map_err(std::io::Error::from)
+}
+
+#[cfg(unix)]
+fn apply_authorized_cwd(cwd: &std::os::fd::OwnedFd) -> std::io::Result<()> {
+    rustix::process::fchdir(cwd).map_err(std::io::Error::from)
 }
 
 const fn current_backend() -> ConfinementBackend {
@@ -333,7 +424,7 @@ const fn current_backend() -> ConfinementBackend {
     } else if cfg!(target_os = "macos") {
         ConfinementBackend::MacosSeatbelt
     } else if cfg!(target_os = "windows") {
-        ConfinementBackend::WindowsRestrictedJob
+        ConfinementBackend::WindowsLpacJob
     } else {
         ConfinementBackend::Unavailable
     }
@@ -348,6 +439,7 @@ mod linux {
     use std::os::fd::AsRawFd;
     use std::path::Path;
     use std::process::Command;
+    use std::sync::Arc;
 
     use std::os::fd::{FromRawFd, OwnedFd};
 
@@ -362,9 +454,35 @@ mod linux {
     const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
     const LANDLOCK_RULE_PATH_BENEATH: u32 = 1;
     const ACCESS_EXECUTE: u64 = 1 << 0;
+    const ACCESS_WRITE_FILE: u64 = 1 << 1;
     const ACCESS_READ_FILE: u64 = 1 << 2;
     const ACCESS_READ_DIR: u64 = 1 << 3;
-    const HANDLED_ACCESS: u64 = ACCESS_EXECUTE | ACCESS_READ_FILE | ACCESS_READ_DIR;
+    const ACCESS_REMOVE_DIR: u64 = 1 << 4;
+    const ACCESS_REMOVE_FILE: u64 = 1 << 5;
+    const ACCESS_MAKE_CHAR: u64 = 1 << 6;
+    const ACCESS_MAKE_DIR: u64 = 1 << 7;
+    const ACCESS_MAKE_REG: u64 = 1 << 8;
+    const ACCESS_MAKE_SOCK: u64 = 1 << 9;
+    const ACCESS_MAKE_FIFO: u64 = 1 << 10;
+    const ACCESS_MAKE_BLOCK: u64 = 1 << 11;
+    const ACCESS_MAKE_SYM: u64 = 1 << 12;
+    const ACCESS_REFER: u64 = 1 << 13;
+    const ACCESS_TRUNCATE: u64 = 1 << 14;
+    const READ_EXECUTE_ACCESS: u64 = ACCESS_EXECUTE | ACCESS_READ_FILE | ACCESS_READ_DIR;
+    const ROOT_ACCESS: u64 = READ_EXECUTE_ACCESS
+        | ACCESS_WRITE_FILE
+        | ACCESS_REMOVE_DIR
+        | ACCESS_REMOVE_FILE
+        | ACCESS_MAKE_CHAR
+        | ACCESS_MAKE_DIR
+        | ACCESS_MAKE_REG
+        | ACCESS_MAKE_SOCK
+        | ACCESS_MAKE_FIFO
+        | ACCESS_MAKE_BLOCK
+        | ACCESS_MAKE_SYM
+        | ACCESS_REFER
+        | ACCESS_TRUNCATE;
+    const HANDLED_ACCESS: u64 = ROOT_ACCESS;
 
     #[repr(C)]
     struct LandlockRulesetAttr {
@@ -386,24 +504,32 @@ mod linux {
         profile: &ConfinementProfile,
     ) -> Result<(), ConfinementError> {
         probe_landlock()?;
-        let root = profile.root().to_path_buf();
         let program = command
             .get_program()
             .to_owned()
             .into_os_string()
             .into_string()
             .map_err(|_| ConfinementError::denied("confined program path is not UTF-8"))?;
-        let cwd = profile.cwd().map(Path::to_path_buf);
+        let program_handle = Arc::new(
+            open(
+                Path::new(&program),
+                OFlags::PATH.union(OFlags::CLOEXEC),
+                Mode::empty(),
+            )
+            .map_err(|_| ConfinementError::denied("confined program could not be opened"))?,
+        );
+        let root_handle = Arc::clone(&profile._root_handle);
+        let cwd_handle = profile.cwd_handle.as_ref().map(Arc::clone);
         // SAFETY: `pre_exec` runs only in the forked child before `exec`.
         // Landlock and `no_new_privs` apply to that child only.
         #[allow(unsafe_code)]
         unsafe {
             use std::os::unix::process::CommandExt;
             command.pre_exec(move || {
-                if let Some(cwd) = &cwd {
+                if let Some(cwd) = &cwd_handle {
                     super::apply_authorized_cwd(cwd)?;
                 }
-                apply_landlock(&root, Path::new(&program))
+                apply_landlock(root_handle.as_ref(), program_handle.as_ref())
             });
         }
         Ok(())
@@ -429,15 +555,15 @@ mod linux {
                 LANDLOCK_CREATE_RULESET_VERSION,
             )
         };
-        if abi < 1 {
+        if abi < 3 {
             return Err(ConfinementError::unavailable(
-                "landlock is unavailable on this kernel",
+                "landlock ABI 3 is unavailable on this kernel",
             ));
         }
         Ok(())
     }
 
-    fn apply_landlock(root: &Path, program: &Path) -> std::io::Result<()> {
+    fn apply_landlock(root: &OwnedFd, program: &OwnedFd) -> std::io::Result<()> {
         set_no_new_privs(true).map_err(std::io::Error::from)?;
         let attr = LandlockRulesetAttr {
             handled_access_fs: HANDLED_ACCESS,
@@ -457,8 +583,8 @@ mod linux {
             .map_err(|_| std::io::Error::other("landlock ruleset fd overflow"))?;
         // SAFETY: `landlock_create_ruleset` returns a new owned fd.
         let ruleset = unsafe { OwnedFd::from_raw_fd(ruleset_fd) };
-        add_path_rule(&ruleset, root, ACCESS_READ_FILE | ACCESS_READ_DIR)?;
-        add_path_rule(&ruleset, program, ACCESS_EXECUTE | ACCESS_READ_FILE)?;
+        add_fd_rule(&ruleset, root, ROOT_ACCESS)?;
+        add_fd_rule(&ruleset, program, ACCESS_EXECUTE | ACCESS_READ_FILE)?;
         for helper in [
             "/lib",
             "/lib64",
@@ -470,7 +596,7 @@ mod linux {
             let path = Path::new(helper);
             if path.is_dir() || path.is_file() {
                 let access = if path.is_dir() {
-                    HANDLED_ACCESS
+                    READ_EXECUTE_ACCESS
                 } else {
                     ACCESS_EXECUTE | ACCESS_READ_FILE
                 };
@@ -493,6 +619,26 @@ mod linux {
                 OFlags::PATH
             });
         let fd = open(path, flags, Mode::empty()).map_err(std::io::Error::from)?;
+        let attr = LandlockPathBeneathAttr {
+            allowed_access: access,
+            parent_fd: fd.as_raw_fd(),
+        };
+        let added = unsafe {
+            syscall(
+                SYS_LANDLOCK_ADD_RULE,
+                ruleset.as_raw_fd(),
+                LANDLOCK_RULE_PATH_BENEATH,
+                std::ptr::from_ref(&attr),
+                0_u32,
+            )
+        };
+        if added != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    fn add_fd_rule(ruleset: &OwnedFd, fd: &OwnedFd, access: u64) -> std::io::Result<()> {
         let attr = LandlockPathBeneathAttr {
             allowed_access: access,
             parent_fd: fd.as_raw_fd(),
@@ -548,6 +694,7 @@ mod macos {
     use std::os::raw::{c_char, c_int};
     use std::path::Path;
     use std::process::Command;
+    use std::sync::Arc;
 
     use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
@@ -562,7 +709,7 @@ mod macos {
     ) -> Result<(), ConfinementError> {
         let program = Path::new(command.get_program());
         let seatbelt = seatbelt_profile(profile.root(), program)?;
-        let cwd = profile.cwd().map(Path::to_path_buf);
+        let cwd = profile.cwd_handle.as_ref().map(Arc::clone);
         // SAFETY: `pre_exec` runs only in the forked child before `exec`.
         // `sandbox_init` confines that child; the parent stays unsandboxed.
         #[allow(unsafe_code)]
@@ -676,7 +823,7 @@ mod windows {
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::{FromRawHandle, OwnedHandle, RawHandle};
     use std::os::windows::process::ExitStatusExt;
-    use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
+    use std::process::{Command, ExitStatus};
     use std::ptr;
 
     use super::{ConfinedChild, ConfinementError, ConfinementProfile};
@@ -693,10 +840,17 @@ mod windows {
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
     const CREATE_SUSPENDED: u32 = 0x0000_0004;
+    const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
     const STARTF_USESTDHANDLES: u32 = 0x0000_0100;
     const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
-    const TOKEN_ALL_ACCESS: u32 = 0x000F_01FF;
-    const DISABLE_MAX_PRIVILEGE: u32 = 0x01;
+    const PROC_THREAD_ATTRIBUTE_HANDLE_LIST: usize = 0x0002_0002;
+    const PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: usize = 0x0002_0009;
+    const PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY: usize = 0x0002_000F;
+    const SE_FILE_OBJECT: u32 = 1;
+    const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
+    const FILE_GENERIC_READ: u32 = 0x0012_0089;
+    const FILE_GENERIC_WRITE: u32 = 0x0012_0116;
+    const FILE_GENERIC_EXECUTE: u32 = 0x0012_00A0;
     const WAIT_OBJECT_0: u32 = 0;
     const WAIT_TIMEOUT: u32 = 0x0000_0102;
     const INFINITE: u32 = 0xFFFF_FFFF;
@@ -764,6 +918,29 @@ mod windows {
     }
 
     #[repr(C)]
+    struct StartupInfoExW {
+        startup_info: StartupInfoW,
+        attribute_list: *mut core::ffi::c_void,
+    }
+
+    #[repr(C)]
+    struct SecurityCapabilities {
+        app_container_sid: *mut core::ffi::c_void,
+        capabilities: *mut core::ffi::c_void,
+        capability_count: u32,
+        reserved: u32,
+    }
+
+    #[repr(C)]
+    struct TrusteeW {
+        multiple_trustee: *mut core::ffi::c_void,
+        multiple_trustee_operation: i32,
+        trustee_form: i32,
+        trustee_type: i32,
+        name: *mut u16,
+    }
+
+    #[repr(C)]
     struct ProcessInformation {
         process: *mut core::ffi::c_void,
         thread: *mut core::ffi::c_void,
@@ -787,25 +964,7 @@ mod windows {
             process: *mut core::ffi::c_void,
         ) -> i32;
         fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
-        fn GetCurrentProcess() -> *mut core::ffi::c_void;
-        fn OpenProcessToken(
-            process: *mut core::ffi::c_void,
-            access: u32,
-            token: *mut *mut core::ffi::c_void,
-        ) -> i32;
-        fn CreateRestrictedToken(
-            existing: *mut core::ffi::c_void,
-            flags: u32,
-            disable_sid_count: u32,
-            sids_to_disable: *const core::ffi::c_void,
-            delete_privilege_count: u32,
-            privileges_to_delete: *const core::ffi::c_void,
-            restricted_sid_count: u32,
-            sids_to_restrict: *const core::ffi::c_void,
-            new_token: *mut *mut core::ffi::c_void,
-        ) -> i32;
-        fn CreateProcessAsUserW(
-            token: *mut core::ffi::c_void,
+        fn CreateProcessW(
             application: *const u16,
             command_line: *mut u16,
             process_attributes: *const core::ffi::c_void,
@@ -817,6 +976,43 @@ mod windows {
             startup: *const StartupInfoW,
             process_information: *mut ProcessInformation,
         ) -> i32;
+        fn InitializeProcThreadAttributeList(
+            list: *mut core::ffi::c_void,
+            attribute_count: u32,
+            flags: u32,
+            size: *mut usize,
+        ) -> i32;
+        fn UpdateProcThreadAttribute(
+            list: *mut core::ffi::c_void,
+            flags: u32,
+            attribute: usize,
+            value: *mut core::ffi::c_void,
+            size: usize,
+            previous_value: *mut core::ffi::c_void,
+            return_size: *mut usize,
+        ) -> i32;
+        fn DeleteProcThreadAttributeList(list: *mut core::ffi::c_void);
+        fn DeriveAppContainerSidFromAppContainerName(
+            name: *const u16,
+            sid: *mut *mut core::ffi::c_void,
+        ) -> i32;
+        fn FreeSid(sid: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+        fn GetNamedSecurityInfoW(
+            object_name: *mut u16,
+            object_type: u32,
+            security_info: u32,
+            owner: *mut *mut core::ffi::c_void,
+            group: *mut *mut core::ffi::c_void,
+            dacl: *mut *mut core::ffi::c_void,
+            sacl: *mut *mut core::ffi::c_void,
+            descriptor: *mut *mut core::ffi::c_void,
+        ) -> u32;
+        fn GetEffectiveRightsFromAclW(
+            acl: *mut core::ffi::c_void,
+            trustee: *mut TrusteeW,
+            rights: *mut u32,
+        ) -> u32;
+        fn LocalFree(memory: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
         fn CreatePipe(
             read: *mut *mut core::ffi::c_void,
             write: *mut *mut core::ffi::c_void,
@@ -834,8 +1030,12 @@ mod windows {
         command: Command,
         profile: &ConfinementProfile,
     ) -> Result<ConfinedChild, ConfinementError> {
+        let lpac = profile.windows_lpac().ok_or_else(|| {
+            ConfinementError::denied("windows LPAC profile must be provisioned by the host")
+        })?;
+        let sid = AppContainerSid::derive(lpac.moniker())?;
+        verify_root_acl(profile.root(), sid.raw())?;
         let job = create_job()?;
-        let restricted = create_restricted_token().inspect_err(|_| close(job))?;
         let pipes = match create_stdio_pipes() {
             Ok(pipes) => pipes,
             Err(error) => {
@@ -850,25 +1050,52 @@ mod windows {
             .or_else(|| command.get_current_dir())
             .map(wide_os);
         let environment = environment_block(&command);
-        let mut startup = StartupInfoW {
-            cb: dword_size_of::<StartupInfoW>()?,
-            reserved: ptr::null_mut(),
-            desktop: ptr::null_mut(),
-            title: ptr::null_mut(),
-            x: 0,
-            y: 0,
-            x_size: 0,
-            y_size: 0,
-            x_count_chars: 0,
-            y_count_chars: 0,
-            fill_attribute: 0,
-            flags: STARTF_USESTDHANDLES,
-            show_window: 0,
-            cb_reserved2: 0,
-            lp_reserved2: ptr::null_mut(),
-            std_input: pipes.child_stdin,
-            std_output: pipes.child_stdout,
-            std_error: pipes.child_stderr,
+        let mut security_capabilities = SecurityCapabilities {
+            app_container_sid: sid.raw(),
+            capabilities: ptr::null_mut(),
+            capability_count: 0,
+            reserved: 0,
+        };
+        let mut all_packages_policy = 1_u32;
+        let mut inherited_handles = [pipes.child_stdin, pipes.child_stdout, pipes.child_stderr];
+        let mut attributes = ProcThreadAttributes::new(3)?;
+        attributes.update(
+            PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+            std::ptr::from_mut(&mut security_capabilities).cast(),
+            std::mem::size_of::<SecurityCapabilities>(),
+        )?;
+        attributes.update(
+            PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY,
+            std::ptr::from_mut(&mut all_packages_policy).cast(),
+            std::mem::size_of::<u32>(),
+        )?;
+        attributes.update(
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            inherited_handles.as_mut_ptr().cast(),
+            std::mem::size_of_val(&inherited_handles),
+        )?;
+        let startup = StartupInfoExW {
+            startup_info: StartupInfoW {
+                cb: dword_size_of::<StartupInfoExW>()?,
+                reserved: ptr::null_mut(),
+                desktop: ptr::null_mut(),
+                title: ptr::null_mut(),
+                x: 0,
+                y: 0,
+                x_size: 0,
+                y_size: 0,
+                x_count_chars: 0,
+                y_count_chars: 0,
+                fill_attribute: 0,
+                flags: STARTF_USESTDHANDLES,
+                show_window: 0,
+                cb_reserved2: 0,
+                lp_reserved2: ptr::null_mut(),
+                std_input: pipes.child_stdin,
+                std_output: pipes.child_stdout,
+                std_error: pipes.child_stderr,
+            },
+            attribute_list: attributes.raw(),
         };
         let mut info = ProcessInformation {
             process: ptr::null_mut(),
@@ -877,17 +1104,19 @@ mod windows {
             thread_id: 0,
         };
         let created = unsafe {
-            CreateProcessAsUserW(
-                raw_handle(&restricted),
+            CreateProcessW(
                 application.as_ptr(),
                 command_line.as_mut_ptr(),
                 ptr::null(),
                 ptr::null(),
                 1,
-                CREATE_BREAKAWAY_FROM_JOB | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+                CREATE_BREAKAWAY_FROM_JOB
+                    | CREATE_UNICODE_ENVIRONMENT
+                    | CREATE_SUSPENDED
+                    | EXTENDED_STARTUPINFO_PRESENT,
                 environment.as_ptr(),
                 cwd.as_ref().map_or(ptr::null(), Vec::as_ptr),
-                &raw const startup,
+                std::ptr::from_ref(&startup.startup_info),
                 &raw mut info,
             )
         };
@@ -902,7 +1131,7 @@ mod windows {
             close(info.thread);
             close(info.process);
             return Err(ConfinementError::unavailable(
-                "windows CreateProcessAsUser is unavailable",
+                "windows LPAC process creation is unavailable",
             ));
         }
         let assigned = unsafe { AssignProcessToJobObject(job, info.process) };
@@ -932,14 +1161,14 @@ mod windows {
         }
         close(info.thread);
         // SAFETY: `CreateProcessAsUser` returns a new process handle we own.
-        // Pipe parent ends are new handles; `ChildStd*` take them via FromRawHandle.
+        // Pipe parent ends are new handles transferred into owned files.
         Ok(unsafe {
             ConfinedChild {
                 process: OwnedHandle::from_raw_handle(info.process),
                 _job: OwnedHandle::from_raw_handle(job),
-                stdin: Some(ChildStdin::from_raw_handle(pipes.parent_stdin)),
-                stdout: Some(ChildStdout::from_raw_handle(pipes.parent_stdout)),
-                stderr: Some(ChildStderr::from_raw_handle(pipes.parent_stderr)),
+                stdin: Some(std::fs::File::from_raw_handle(pipes.parent_stdin)),
+                stdout: Some(std::fs::File::from_raw_handle(pipes.parent_stdout)),
+                stderr: Some(std::fs::File::from_raw_handle(pipes.parent_stderr)),
             }
         })
     }
@@ -1100,6 +1329,159 @@ mod windows {
         handle.as_raw_handle()
     }
 
+    struct AppContainerSid(*mut core::ffi::c_void);
+
+    impl AppContainerSid {
+        fn derive(moniker: &str) -> Result<Self, ConfinementError> {
+            let moniker = wide_os(moniker);
+            let mut sid = ptr::null_mut();
+            let status = unsafe {
+                DeriveAppContainerSidFromAppContainerName(moniker.as_ptr(), &raw mut sid)
+            };
+            if status != 0 || sid.is_null() {
+                return Err(ConfinementError::unavailable(
+                    "provisioned AppContainer identity could not be resolved",
+                ));
+            }
+            Ok(Self(sid))
+        }
+
+        fn raw(&self) -> *mut core::ffi::c_void {
+            self.0
+        }
+    }
+
+    impl Drop for AppContainerSid {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    FreeSid(self.0);
+                }
+            }
+        }
+    }
+
+    struct ProcThreadAttributes {
+        storage: Vec<usize>,
+    }
+
+    impl ProcThreadAttributes {
+        fn new(count: u32) -> Result<Self, ConfinementError> {
+            let mut bytes = 0_usize;
+            unsafe {
+                InitializeProcThreadAttributeList(ptr::null_mut(), count, 0, &raw mut bytes);
+            }
+            if bytes == 0 {
+                return Err(ConfinementError::unavailable(
+                    "windows process attribute list is unavailable",
+                ));
+            }
+            let words = bytes
+                .checked_add(std::mem::size_of::<usize>() - 1)
+                .and_then(|value| value.checked_div(std::mem::size_of::<usize>()))
+                .ok_or_else(|| {
+                    ConfinementError::unavailable("windows process attribute size overflow")
+                })?;
+            let mut attributes = Self {
+                storage: vec![0; words],
+            };
+            if unsafe {
+                InitializeProcThreadAttributeList(attributes.raw(), count, 0, &raw mut bytes)
+            } == 0
+            {
+                return Err(ConfinementError::unavailable(
+                    "windows process attribute list initialization failed",
+                ));
+            }
+            Ok(attributes)
+        }
+
+        fn raw(&mut self) -> *mut core::ffi::c_void {
+            self.storage.as_mut_ptr().cast()
+        }
+
+        fn update(
+            &mut self,
+            attribute: usize,
+            value: *mut core::ffi::c_void,
+            size: usize,
+        ) -> Result<(), ConfinementError> {
+            if unsafe {
+                UpdateProcThreadAttribute(
+                    self.raw(),
+                    0,
+                    attribute,
+                    value,
+                    size,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                )
+            } == 0
+            {
+                return Err(ConfinementError::unavailable(
+                    "windows process security attribute installation failed",
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    impl Drop for ProcThreadAttributes {
+        fn drop(&mut self) {
+            if !self.storage.is_empty() {
+                unsafe {
+                    DeleteProcThreadAttributeList(self.raw());
+                }
+            }
+        }
+    }
+
+    fn verify_root_acl(
+        root: &std::path::Path,
+        sid: *mut core::ffi::c_void,
+    ) -> Result<(), ConfinementError> {
+        let mut root = wide_os(root);
+        let mut dacl = ptr::null_mut();
+        let mut descriptor = ptr::null_mut();
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                root.as_mut_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &raw mut dacl,
+                ptr::null_mut(),
+                &raw mut descriptor,
+            )
+        };
+        if status != 0 || dacl.is_null() || descriptor.is_null() {
+            return Err(ConfinementError::denied(
+                "windows confinement root ACL could not be inspected",
+            ));
+        }
+        let mut trustee = TrusteeW {
+            multiple_trustee: ptr::null_mut(),
+            multiple_trustee_operation: 0,
+            trustee_form: 0,
+            trustee_type: 0,
+            name: sid.cast(),
+        };
+        let mut rights = 0_u32;
+        let rights_status =
+            unsafe { GetEffectiveRightsFromAclW(dacl, &raw mut trustee, &raw mut rights) };
+        unsafe {
+            LocalFree(descriptor);
+        }
+        let required = FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE;
+        if rights_status != 0 || rights & required != required {
+            return Err(ConfinementError::denied(
+                "windows confinement root lacks the provisioned AppContainer ACL",
+            ));
+        }
+        Ok(())
+    }
+
     fn create_job() -> Result<*mut core::ffi::c_void, ConfinementError> {
         let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
         if job.is_null() {
@@ -1107,7 +1489,7 @@ mod windows {
                 "windows job object is unavailable",
             ));
         }
-        let mut info = JobObjectExtendedLimitInformation {
+        let info = JobObjectExtendedLimitInformation {
             basic_limit_information: JobObjectBasicLimitInformation {
                 per_process_user_time_limit: 0,
                 per_job_user_time_limit: 0,
@@ -1151,54 +1533,11 @@ mod windows {
         Ok(job)
     }
 
-    fn create_restricted_token() -> Result<OwnedHandle, ConfinementError> {
-        let mut existing = ptr::null_mut();
-        let opened =
-            unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &raw mut existing) };
-        if opened == 0 || existing.is_null() {
-            return Err(ConfinementError::unavailable(
-                "windows process token is unavailable",
-            ));
-        }
-        let mut restricted = ptr::null_mut();
-        let created = unsafe {
-            CreateRestrictedToken(
-                existing,
-                DISABLE_MAX_PRIVILEGE,
-                0,
-                ptr::null(),
-                0,
-                ptr::null(),
-                0,
-                ptr::null(),
-                &raw mut restricted,
-            )
-        };
-        close(existing);
-        if created == 0 || restricted.is_null() {
-            return Err(ConfinementError::unavailable(
-                "windows restricted token is unavailable",
-            ));
-        }
-        Ok(unsafe { OwnedHandle::from_raw_handle(restricted) })
-    }
-
     fn close(handle: *mut core::ffi::c_void) {
         if !handle.is_null() {
             unsafe {
                 CloseHandle(handle);
             }
-        }
-    }
-
-    trait RawChildHandle {
-        fn as_raw_handle_mut(&mut self) -> *mut core::ffi::c_void;
-    }
-
-    impl RawChildHandle for Child {
-        fn as_raw_handle_mut(&mut self) -> *mut core::ffi::c_void {
-            use std::os::windows::io::AsRawHandle;
-            self.as_raw_handle()
         }
     }
 }
@@ -1283,16 +1622,22 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_confined_echo_starts() {
+    fn macos_confined_echo_starts_or_fails_closed() {
         let root = std::env::temp_dir();
         let profile = ConfinementProfile::try_new(&root).expect("temp root");
         let mut command = Command::new("/bin/echo");
         command.arg("confined");
-        let mut child = ProcessConfinement::for_current_platform()
-            .spawn(command, &profile)
-            .expect("confined echo");
-        let status = child.wait().expect("wait");
-        assert!(status.success(), "confined echo must exit 0: {status:?}");
+        match ProcessConfinement::for_current_platform().spawn(command, &profile) {
+            Ok(mut child) => {
+                let status = child.wait().expect("wait");
+                assert!(status.success(), "confined echo must exit 0: {status:?}");
+            }
+            Err(error) => assert_eq!(
+                error.code(),
+                CONFINEMENT_IO,
+                "a host that refuses nested Seatbelt must fail closed"
+            ),
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -1311,7 +1656,10 @@ mod tests {
                 );
             }
             Err(error) => {
-                assert_eq!(error.code(), CONFINEMENT_UNAVAILABLE);
+                assert!(matches!(
+                    error.code(),
+                    CONFINEMENT_UNAVAILABLE | CONFINEMENT_DENIED
+                ));
             }
         }
     }

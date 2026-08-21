@@ -8,8 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Semantic core crates, Python/JavaScript binding distributions, and
 bundled first-party leaf crates share one lockstep workspace version.
 Local tag `v1.0.0` exists at `6e9ec39fae89a70f696ee740de2d2094670cba3e`.
-G8 passed via `G8-D-general-availability-a889a29a3f54`. The last
-pushed GitHub tag remains `v0.1.0`. crates.io / PyPI / npm stay
+The last pushed GitHub tag remains `v0.1.0`. crates.io / PyPI / npm stay
 unpublished.
 
 ## [Unreleased]
@@ -40,7 +39,7 @@ unpublished.
 - `mise run check-public-api` compares `cargo-public-api` dumps for kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Python/JS name lists stay in `scripts/compat/public_items.py`.
 - `finstack-ai-store-postgres`: a full `JournalStore` implementation backed by `PostgreSQL`. Multi-writer append via per-session row locks; chain-verified loads with a generation-guarded process-local cache; sqlite-parity reason codes and the same append-ambiguity contract; schema v1 with advisory-locked, fail-closed migrations (`SchemaPolicy::Manage` vs `Require`); an env-gated (`FINSTACK_PG_TEST_URL`) server test battery. CI now runs a pinned `postgres:16` service alongside `ci-rust`.
 - Tools may defer a first-pass call: `ToolStreamItem::Deferred` suspends under the original effect id. `ToolSpec` gains `deferral`; stream item enums are `#[non_exhaustive]`.
-- `AgentRun` child-run and `complete_external` facades plus `ChildRunBridge` for binding a deferred effect to a child run (PR-079 Rust half).
+- `AgentRun` child-run and `complete_external` facades plus `ChildRunBridge` for binding a deferred effect to a child run.
 - Derived poll scheduling from committed `EffectDeferred` (`due_polls` / `drive_due_polls`); expiry uses `tool_deferral_expired`.
 - Internal `ProcessConfinement` service (not a port) for fail-closed
   local process confinement. `finstack-ai-tools-shell` can consume it;
@@ -70,7 +69,7 @@ unpublished.
   `Toolset::call`; `resources/list` snapshot + untrusted collect).
   Sampling and elicitation stay unimplemented. The default `finstack-ai`
   crate does not depend on this leaf.
-- `Lane::run` / `suspend` / `resume` complete the PR-047 minimum verbs:
+- `Lane::run` / `suspend` / `resume` complete the minimum workflow verbs:
   idle `run` uses the existing `Agent::start_on_lane` / `AcceptRun` path,
   `suspend` parks the driver without dropping the journal, and `resume`
   respawns `RunTaskOwner` through `WorkflowSession::with_ports`.
@@ -145,16 +144,15 @@ unpublished.
 
 - `finstack-ai-middleware-compaction` `CompactionConfig` fields are private.
   Construct with `sliding_window`, `large_tool_output`, or `summarize`.
-  Leaf configuration cannot self-authorize a secondary model (PR-106 / F5;
-  runtime lock is PR-112). Serialized keys and equivalent digest bytes are
-  unchanged.
+  Leaf configuration cannot self-authorize a secondary model. Serialized keys
+  and equivalent digest bytes are unchanged.
 - `finstack-ai-middleware-document-ingest` `configuration_digest` now hashes
   RFC 8785 canonical JSON of a private versioned limits shape
-  (`document-ingest-limits-v1`) instead of a constant digest (PR-109 / H1).
+  (`document-ingest-limits-v1`) instead of a constant digest.
   Distinct limits produce distinct identities.
 - `finstack-ai-kernel` `RunSecurityContext` gains optional, default-deny
   `CompactionAuthorization` (exact model, maximum sensitivity, residency
-  policy digest) for model-assisted compaction (PR-112 / H5).
+  policy digest) for model-assisted compaction.
 - `finstack-ai` linked construction finishes on
   `NativeAgentBuilder::build_linked` with shared `LinkedCommon`.
   `ComposeAgentSpec` / `Agent::compose` are gone. Registry factory and
@@ -216,14 +214,13 @@ unpublished.
 - `finstack-ai-middleware-tool-policy`: public `RoleAllowlist`,
   `WriteBudget`, `JailbreakTriggers`, `ChildDepthGate`, their inspection
   accessors, and `ToolPolicyConfig::default`. Construct with
-  `ToolPolicyConfig::new().with_*()` (PR-104 / F1; owner-approved
-  pre-publication source break). Serialized identity is unchanged.
+  `ToolPolicyConfig::new().with_*()` (an approved pre-publication source
+  break). Serialized identity is unchanged.
 - `finstack-ai-middleware-instructions`: public
   `PolicyInstructionsConfig::validate`. Validate through
-  `InstructionsMiddleware::try_new` (PR-105 / F7).
-- Unused maintainer helpers: `scripts/loc/find_long_files.py`,
-  `scripts/docs/license_sweep.py`, `scripts/docs/rehearse_release.py`,
-  and `scripts/perf/test_python_fast_path.py`.
+  `InstructionsMiddleware::try_new`.
+- Unused maintainer helpers for long-file inspection, documentation sweeps,
+  release rehearsal, and Python fast-path testing.
 
 - Removed unused `FrameworkError` and `diagnostic_contains` from
   `finstack-ai-runtime`.
@@ -284,9 +281,8 @@ unpublished.
 ## [1.0.0] - 2026-08-15
 
 Tagged lockstep general-availability cut `v1.0.0` (local; not pushed).
-G8 passed via `G8-D-general-availability-a889a29a3f54`. The §21.12
-external-soak gap is an accepted G8 residual. This section is not a
-crates.io, PyPI, or npm publication, GitHub Release, or announce.
+This section is not a crates.io, PyPI, or npm publication, GitHub Release, or
+announcement.
 
 ### Added
 
@@ -297,59 +293,57 @@ crates.io, PyPI, or npm publication, GitHub Release, or announce.
 
 - Lockstep crate, Python wheel, and `@finstack/ai` version fields move
   from unpublished `0.1.0` to unpublished `1.0.0`.
-- WIT permanent worlds remain `finstack:ai-*@1.0.0` (PR-062).
+- WIT permanent worlds remain `finstack:ai-*@1.0.0`.
   Experimental `@0.0.4` stays loadable and labeled.
 - Plugin-crate `1.0.0` reservation in the WIT generator is lifted.
 
 ## [0.1.0] - 2026-08-15
 
-Tagged lockstep public-preview cut `v0.1.0`. G7 passed via
-`G7-D-public-preview-f7c7e70b9e04`. This section is not a crates.io,
+Tagged lockstep public-preview cut `v0.1.0`. This section is not a crates.io,
 PyPI, or npm publication.
 
 ### Added
 
-- Adopter-facing preview compatibility policy and in-repo public-preview
-  roadmap.
-- Phase 8 exit review and G7 readiness pack language
-  `READY FOR NAMED DECISION` (PR-061 local A05 step 1).
+- Adopter-facing preview compatibility policy.
 
 ### Changed
 
 - Lockstep crate, Python wheel, and `@finstack/ai` version fields move
   from unpublished `0.0.4` to unpublished `0.1.0`. Experimental WIT
   package names stay `finstack:ai-*@0.0.4`.
-- Stage unpublished lockstep `0.0.4` artifacts for plugin alpha. G6 passed
-  via `G6-D-plugin-alpha-018aaea9aa00`. Checkpoint cut, publish, and tag
-  remain owner decisions.
-- Stage unpublished lockstep `0.0.3` artifacts for the Phase 6 / G5 readiness
-  pack. Named G5, checkpoint cut, publish, and tag remain owner decisions.
+- Stage unpublished lockstep `0.0.4` artifacts for plugin alpha. Publication
+  and tagging remain owner decisions.
+- Stage unpublished lockstep `0.0.3` artifacts for compatibility testing.
 - Stage the lockstep `0.0.2` alpha candidate with Python conformance,
   declarative capability activation, complete typing/examples, deterministic
-  checksums/SBOM references, and verified hosted keyless signatures. The exact
-  cross-binding checkpoint remains gated on PR-038 and G4.
+  checksums/SBOM references, and verified hosted keyless signatures.
 
 ### Added
 
-- Local plugin lockfile discovery (`PluginHost::load_enabled`), published
-  hostile conformance rows, and the plugin-lock schema family (PR-054).
-- JournalStore v1 canonical-CBOR codec, payload/envelope checksums, remaining session/lane/snapshot record variants, memory-store scan/metadata CAS, and Python/JS known-answer helpers (PR-039). SQLite, snapshot acceleration, crash durability, and G5 remain later work.
-- Trusted JavaScript host adapters, AbortSignal/stream normalization, `normalizePrebetaShape`, and a tree-shakeable same-origin OpenAI-compatible fetch/SSE battery (PR-034). Agent/Run handles, workers, IndexedDB, npm publish, and G4 remain later work.
-- wasm-bindgen `@finstack/ai` preview package, host-driven local executor, six-port JS promise compile fixtures, and a headless Chromium no-op trace (PR-033). Agent/Run handles, JS host adapters, workers, IndexedDB, npm publish, and G4 remain later work.
+- Local plugin lockfile discovery (`PluginHost::load_enabled`), hostile
+  conformance rows, and the plugin-lock schema family.
+- JournalStore v1 canonical-CBOR codec, payload/envelope checksums, session,
+  lane, and snapshot records, memory-store scan/metadata CAS, and Python/JS
+  known-answer helpers.
+- Trusted JavaScript host adapters, AbortSignal/stream normalization,
+  `normalizePrebetaShape`, and a tree-shakeable same-origin OpenAI-compatible
+  fetch/SSE battery.
+- wasm-bindgen `@finstack/ai` preview package, host-driven local executor,
+  six-port JS promise compile fixtures, and a headless Chromium no-op trace.
 - Cargo workspace skeleton (`finstack-ai-kernel`, `finstack-ai-runtime`, `finstack-ai`, `finstack-ai-protocol`, `finstack-ai-test`)
 - Placeholder Python and browser WASM binding packages
 - Leaf directories under `extensions/` (providers, toolsets, stores, observers), plus `plugins/`, `examples/`, and `fixtures/`
 - Canonical dual-license texts under `licenses/`, plus DCO, governance, security, and contribution documentation
 - Root `mise.toml` toolchain pin with bootstrap and check tasks
-- Architecture and dependency enforcement via `mise run architecture` (PR-002)
-- Cross-platform CI workflows, supply-chain/secret checks, and private release-smoke binary (PR-003)
-- Standalone ADR-001 through ADR-037 records with Threat Model cross-links (PR-004)
-- Schema/API compatibility governance: contract registry, reserved schema/fixture roots, change-classification template, and per-family Rust fixture coupling (`crates/finstack-ai-test/tests/public_rust_api.rs`, `journal_v1.rs`, `crates/finstack-ai-protocol/tests/compat_fixtures.rs`) (PR-004)
-- Pull request template API/schema/performance/security impact sections (PR-004)
-- Golden-trace and scripted-input schemas, fixtures, and Rust conformance harness (PR-005)
-- Criterion benchmark groups with machine-readable metadata and non-blocking `benchmark.yml` (PR-005)
-- `mise run conformance`, `benchmark`, and `benchmark-smoke` tasks (PR-005)
-- Native `Agent` execution facade and strict direct-handle builder, offline OpenAI-compatible model/tool-loop examples, calculator and capability-scoped filesystem batteries, and reproducible `0.0.1-dev` staging (PR-026)
+- Architecture and dependency enforcement.
+- Cross-platform CI workflows, supply-chain and secret checks, and a private release-smoke binary.
+- Schema/API compatibility registry, versioned fixture roots, and Rust fixture coupling.
+- Pull request template API/schema/performance/security impact sections.
+- Golden-trace and scripted-input schemas, fixtures, and Rust conformance harness.
+- Criterion benchmark groups with machine-readable metadata.
+- Native `Agent` execution facade and strict direct-handle builder, offline
+  model/tool-loop examples, calculator and capability-scoped filesystem
+  batteries, and reproducible `0.0.1-dev` staging.
 
 ### Changed
 

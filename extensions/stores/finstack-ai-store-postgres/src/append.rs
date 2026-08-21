@@ -10,7 +10,7 @@
 //! sqlite store calls them in
 //! `extensions/stores/finstack-ai-store-sqlite/src/append.rs`:
 //!
-//! 1. batch-id replay (equal `request_cbor` → replay, otherwise
+//! 1. batch-id replay (equal decoded request identity → replay, otherwise
 //!    `Corruption{append_batch_id_reuse}`),
 //! 2. empty batch (`InvalidRequest{empty_append_batch}`),
 //! 3. record-id reuse (replay when the whole batch matches, otherwise
@@ -73,7 +73,7 @@ use finstack_ai_protocol::encode;
 use finstack_ai_runtime::{StoreError, StoreLimits};
 use finstack_ai_store_common::{
     SessionUsage, admit_append_limits, build_committed_batch, check_append_sequence,
-    classify_record_reuse, protocol_error, request_cbor, request_identity,
+    classify_record_reuse, protocol_error, request_identity,
 };
 use tokio_postgres::{Client, Statement, Transaction};
 
@@ -242,7 +242,8 @@ async fn append_in_transaction(
     request: &AppendRequest,
     limits: &StoreLimits,
 ) -> Result<CommittedBatch, Failure> {
-    let request_cbor = request_cbor(request)?;
+    let incoming_identity = request_identity(request)?;
+    let request_cbor = encode(&incoming_identity).map_err(protocol_error)?;
     let mut session =
         lock_session(transaction, &statements.lock_session, request.session_id()).await?;
     let mut session_created = false;
@@ -259,7 +260,7 @@ async fn append_in_transaction(
         )
         .await?
         {
-            return if existing.request_cbor == request_cbor {
+            return if existing.identity == incoming_identity {
                 Ok(existing.committed)
             } else {
                 Err(StoreError::Corruption {

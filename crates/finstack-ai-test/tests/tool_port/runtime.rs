@@ -186,8 +186,6 @@ async fn failed_tool_batch_append_never_executes_a_tool() {
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -196,7 +194,11 @@ async fn failed_tool_batch_append_never_executes_a_tool() {
             global_max_concurrency: 1,
             stream_limits: ToolStreamLimits::default(),
         },
-        model,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(model)
+                .await
+                .expect("model readiness"),
+        ),
         locked_profile(),
         catalog,
         FixedClock::new(timestamp(2_000)),

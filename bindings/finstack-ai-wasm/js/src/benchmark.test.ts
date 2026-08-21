@@ -2,7 +2,7 @@
 
 import { expect, test } from "@playwright/test";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { release } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,7 @@ const REPO_ROOT = resolve(HERE, "../../../../");
 const WASM_PATH = resolve(HERE, "../generated/finstack_ai_wasm_bg.wasm");
 const REPORT_PATH = resolve(
   REPO_ROOT,
-  "docs/implementation/artifacts/pr-063/wasm-js-crossing.json",
+  "target/performance/wasm-js-crossing.json",
 );
 const WASM_OVERHEAD_TARGET_PERCENT = 15;
 const PAIRED_SAMPLES = 7;
@@ -144,7 +144,7 @@ test("records isolated WASM/JS crossing warning measurements", async ({
   const wasmDriveMs = Math.max(measured.runMs - measured.jsHostMs, 0);
   expect(wasmDriveMs).toBeGreaterThan(0);
   // Crossing cost is (run - wasm_drive) / wasm_drive. A 0 ms JS host is below
-  // timer resolution and matches the recorded PR-063 warning artifact (0%).
+  // timer resolution and matches the recorded warning artifact (0%).
   const overhead = (measured.runMs / wasmDriveMs - 1) * 100;
   expect(overhead).toBeLessThanOrEqual(WASM_OVERHEAD_TARGET_PERCENT);
   const wasm = readFileSync(WASM_PATH);
@@ -199,5 +199,6 @@ test("records isolated WASM/JS crossing warning measurements", async ({
       scope: "No network, provider, filesystem, or external store I/O",
     },
   };
+  mkdirSync(dirname(REPORT_PATH), { recursive: true });
   writeFileSync(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
 });

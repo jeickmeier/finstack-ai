@@ -9,7 +9,7 @@ use finstack_ai_kernel::{
     RetrySafety, RunEvent, RunEventBody, RunTag, Sensitivity, SessionTag, Timestamp, ToolBatchTag,
     ToolCallTag, TurnTag, Usage, Version,
 };
-use finstack_ai_runtime::{Observer, ObserverBackpressure};
+use finstack_ai_runtime::Observer;
 use finstack_ai_test::check_observer_conformance;
 
 use super::BillingObserver;
@@ -170,8 +170,7 @@ fn tool_event(sequence: u64, effect: u64, body: RunEventBody) -> RunEvent {
 
 #[tokio::test]
 async fn conformance_accepts_an_empty_batch() {
-    let billing =
-        BillingObserver::try_new(8, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     check_observer_conformance(&billing, Arc::from([]))
         .await
         .expect("conformance");
@@ -179,15 +178,13 @@ async fn conformance_accepts_an_empty_batch() {
 
 #[tokio::test]
 async fn invalid_bounds_are_rejected() {
-    assert!(BillingObserver::try_new(0, ObserverBackpressure::DropProgress, 64).is_err());
-    assert!(BillingObserver::try_new(8, ObserverBackpressure::DropProgress, 0).is_err());
-    assert!(BillingObserver::try_new(8, ObserverBackpressure::DropProgress, 1_000_001).is_err());
+    assert!(BillingObserver::try_new(0).is_err());
+    assert!(BillingObserver::try_new(1_000_001).is_err());
 }
 
 #[tokio::test]
 async fn costed_completions_aggregate_by_unit_and_policy() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     billing
         .observe(Arc::from([
             model_event(
@@ -235,8 +232,7 @@ async fn costed_completions_aggregate_by_unit_and_policy() {
 
 #[tokio::test]
 async fn uncosted_completions_are_counted_never_priced() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     billing
         .observe(Arc::from([
             model_event(1, 7, completed(7, Some(usage(10, 20, None)))),
@@ -254,8 +250,7 @@ async fn uncosted_completions_are_counted_never_priced() {
 
 #[tokio::test]
 async fn model_and_provider_are_attributed_from_the_request() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     billing
         .observe(Arc::from([
             model_event(
@@ -281,8 +276,7 @@ async fn model_and_provider_are_attributed_from_the_request() {
 
 #[tokio::test]
 async fn untracked_completions_count_as_unattributed() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     billing
         .observe(Arc::from([model_event(
             1,
@@ -300,8 +294,7 @@ async fn untracked_completions_count_as_unattributed() {
 
 #[tokio::test]
 async fn oversized_or_missing_model_names_fall_back_to_none() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     let long_model = "m".repeat(300);
     let request = format!(r#"{{"model":"{long_model}"}}"#);
     billing
@@ -348,8 +341,7 @@ fn session_event(session: u64, sequence: u64, effect: u64, body: RunEventBody) -
 
 #[tokio::test]
 async fn ledger_saturation_is_counted_and_diagnosed() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 1).expect("billing");
+    let billing = BillingObserver::try_new(1).expect("billing");
     billing
         .observe(Arc::from([
             session_event(
@@ -388,28 +380,11 @@ async fn ledger_saturation_is_counted_and_diagnosed() {
     assert_eq!(snapshot.spend[0].micros, 5);
 }
 
-#[tokio::test]
-async fn drop_progress_overflow_is_diagnosed() {
-    let billing =
-        BillingObserver::try_new(1, ObserverBackpressure::DropProgress, 64).expect("billing");
-    billing
-        .observe(Arc::from([
-            model_event(1, 7, completed(7, None)),
-            model_event(2, 8, completed(8, None)),
-        ]))
-        .await
-        .expect("observe");
-    // Capacity-1 queue, 2 events in one batch: exactly one drop, not two.
-    assert_eq!(billing.dropped(), 1);
-    assert_eq!(billing.snapshot().dropped_events, billing.dropped());
-}
-
 const CANARY: &str = "CANARY_SECRET_VALUE";
 
 #[tokio::test]
 async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     let request = format!(r#"{{"model":"demo-model-1","system":"{CANARY}"}}"#);
     billing
         .observe(Arc::from([
@@ -446,8 +421,7 @@ async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
 
 #[tokio::test]
 async fn pending_map_saturation_evicts_oldest_and_new_origins_still_attribute() {
-    let billing = BillingObserver::try_new(16_384, ObserverBackpressure::DropProgress, 1_000_000)
-        .expect("billing");
+    let billing = BillingObserver::try_new(1_000_000).expect("billing");
     // Fill the pending-attribution bound (4096) with distinct model-effect
     // requests that never settle, then request one more to trip eviction.
     let mut events = Vec::with_capacity(4_100);
@@ -513,8 +487,7 @@ async fn pending_map_saturation_evicts_oldest_and_new_origins_still_attribute() 
 
 #[tokio::test]
 async fn deferred_model_effect_keeps_attribution() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     billing
         .observe(Arc::from([
             model_event(1, 7, requested(7, r#"{"model":"demo-model-1"}"#)),
@@ -531,8 +504,7 @@ async fn deferred_model_effect_keeps_attribution() {
 
 #[tokio::test]
 async fn tool_effect_settlement_aggregates_as_non_model_and_is_never_unattributed() {
-    let billing =
-        BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
+    let billing = BillingObserver::try_new(64).expect("billing");
     billing
         .observe(Arc::from([tool_event(
             1,

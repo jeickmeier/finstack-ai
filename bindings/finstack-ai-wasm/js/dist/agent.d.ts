@@ -41,6 +41,22 @@ export interface ActiveCapability {
     /** Selecting source. */
     source: "always" | "application" | "model";
 }
+/** One stable, redacted observer-delivery diagnostic. */
+export interface ObserverDiagnostic {
+    /** Stable diagnostic code. */
+    readonly code: string;
+    /** Static non-secret operator detail. */
+    readonly detail: string;
+}
+/** Bounded process-local observer diagnostic snapshot. */
+export interface ObserverDiagnostics {
+    /** Total diagnostics observed, including entries evicted from `recent`. */
+    readonly total: bigint;
+    /** Number of older diagnostics evicted from the fixed-size recent list. */
+    readonly dropped: bigint;
+    /** Most recent redacted diagnostics in source order. */
+    readonly recent: readonly ObserverDiagnostic[];
+}
 /**
  * How a run parks and releases paid-tool approvals.
  *
@@ -86,7 +102,7 @@ export interface AgentOptions {
     instruction?: string;
     /**
      * Optional host journal. When omitted, the Rust in-memory store is used.
-     * Persistence remains experimental after PR-048; it does not meet NFR-REL-001.
+     * Persistence remains experimental and does not claim crash durability.
      */
     store?: JsJournalStore;
     /**
@@ -115,7 +131,7 @@ export interface AgentOptions {
  * Provisional inspect phase for a stored session.
  *
  * `in_progress` and `cancelled` are valid after interrupt or reload. This is
- * not the PR-048 durable-beta crash-prefix matrix.
+ * not a crash-recovery continuation API.
  */
 export type SessionInspectPhase = "empty" | "in_progress" | "completed" | "failed" | "cancelled";
 /**
@@ -314,6 +330,17 @@ export declare class Run {
      * ```
      */
     result(): Promise<RunResult>;
+    /**
+     * Snapshot bounded, redacted observer-delivery diagnostics.
+     *
+     * The snapshot is process-local and non-semantic. Reading it does not affect
+     * the journal, kernel state, run result, or best-effort observer delivery.
+     *
+     * @returns Exact totals and the bounded recent diagnostic list.
+     * @throws {FinstackError} When run startup failed before a runtime handle was
+     * published.
+     */
+    observerDiagnostics(): Promise<ObserverDiagnostics>;
     /**
      * Submit idempotent durable cancellation.
      *

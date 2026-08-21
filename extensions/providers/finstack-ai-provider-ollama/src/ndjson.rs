@@ -1,6 +1,7 @@
 //! Incremental, bounded Ollama NDJSON line framing.
 
-use finstack_ai_runtime::{ModelError, NdjsonError, NdjsonParser as SharedNdjsonParser};
+use finstack_ai_provider_wire::{NdjsonError, NdjsonParser as SharedNdjsonParser};
+use finstack_ai_runtime::ModelError;
 
 use crate::error::{stream_error, stream_limit_error};
 

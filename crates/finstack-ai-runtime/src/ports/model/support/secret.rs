@@ -1,4 +1,4 @@
-//! Shared provider secret type. Leaf crates map [`SecretRejected`] to their
+//! Shared model-adapter secret type. Leaf crates map [`SecretRejected`] to their
 //! own stable error codes; this module does not own those codes.
 
 use core::fmt;

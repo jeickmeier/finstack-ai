@@ -42,11 +42,13 @@ async fn run_runtime_chunks(count: usize, response_text: &str) -> RuntimeProject
             job_capacity: 1,
             result_capacity: 1,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
-        model_port,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(model_port)
+                .await
+                .expect("model readiness"),
+        ),
         locked_profile(),
         FixedClock::new(timestamp(2_000)),
         CounterRandom(AtomicU64::new(1)),

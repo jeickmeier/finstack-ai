@@ -201,7 +201,7 @@ pub(super) fn build_lock(
         effective_config_digest,
         middleware_chain_digest: run_plan.middleware_chain().digest(),
         schema_digests: schema_digests.into(),
-        required_services: required_services(&recipe.bundle),
+        required_services: recipe.required_services,
     })
 }
 

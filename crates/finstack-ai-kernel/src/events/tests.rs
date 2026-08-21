@@ -352,6 +352,10 @@ fn non_model_effect_record_derives_without_model_correlations() {
             schema_digest: Digest::raw_json(b"schema"),
         },
         EffectInput::Context {
+            cursor: crate::StageCursor {
+                cycle: 0,
+                stage: crate::Stage::PrepareContext,
+            },
             request: RawJson::parse("{}").expect("request"),
         },
         RetrySafety::SafeToRetry,

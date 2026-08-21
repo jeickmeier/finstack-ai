@@ -19,9 +19,8 @@ the next future tick. Missed ticks are not backfilled.
 all tenants, for a leased worker to discover work without a per-tenant
 scan; third-party stores fail closed unless they override it.
 
-This crate is a T1 native mapping. It is not isolated. See
-[Technical Design §2](../../../docs/planning/03-finstack-ai-technical-design.md)
-for ownership boundaries.
+This crate is a trusted native mapping and is not isolated. The kernel retains
+semantic state while this adapter owns scheduling and I/O.
 
 ```rust
 use finstack_ai_runtime::WorkflowSession;

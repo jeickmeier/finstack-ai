@@ -24,13 +24,11 @@
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Version};
 use finstack_ai_runtime::{
-    OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
-    ObserverDiagnostic, ObserverError, ObserverPayloadMode, ObserverQueue, ObserverQueuePush,
-    PortFuture, journal_export_jsonl, observer_events_jsonl, support_bundle_versions,
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode, PortFuture,
+    journal_export_jsonl, observer_events_jsonl, support_bundle_versions,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -49,12 +47,10 @@ pub enum LogObserverError {
     BundleUnavailable,
 }
 
-/// Structured JSON observer with a bounded export queue.
+/// Structured JSON observer over a caller-owned writer.
 pub struct LogObserver {
     descriptor: ObserverDescriptor,
     writer: Arc<Mutex<dyn Write + Send>>,
-    queue: ObserverQueue<String>,
-    diagnostic: Mutex<Option<ObserverDiagnostic>>,
 }
 
 impl LogObserver {
@@ -62,30 +58,19 @@ impl LogObserver {
     ///
     /// # Errors
     ///
-    /// Rejects an invalid identity or a zero/excessive queue bound.
-    pub fn try_redacted(
-        writer: Arc<Mutex<dyn Write + Send>>,
-        queue_capacity: usize,
-        backpressure: ObserverBackpressure,
-    ) -> Result<Self, LogObserverError> {
-        Self::try_new(
-            ObserverPayloadMode::Redacted,
-            writer,
-            queue_capacity,
-            backpressure,
-        )
+    /// Rejects an invalid observer identity.
+    pub fn try_redacted(writer: Arc<Mutex<dyn Write + Send>>) -> Result<Self, LogObserverError> {
+        Self::try_new(ObserverPayloadMode::Redacted, writer)
     }
 
     /// Construct a JSON observer with an explicit payload mode.
     ///
     /// # Errors
     ///
-    /// Rejects an invalid identity or a zero/excessive queue bound.
+    /// Rejects an invalid observer identity.
     pub fn try_new(
         payload_mode: ObserverPayloadMode,
         writer: Arc<Mutex<dyn Write + Send>>,
-        queue_capacity: usize,
-        backpressure: ObserverBackpressure,
     ) -> Result<Self, LogObserverError> {
         Ok(Self {
             descriptor: ObserverDescriptor {
@@ -105,31 +90,7 @@ impl LogObserver {
                 metadata: Metadata::empty(),
             },
             writer,
-            queue: ObserverQueue::try_new(queue_capacity, backpressure).map_err(|_| {
-                LogObserverError::Configuration {
-                    reason: "invalid_queue_capacity",
-                }
-            })?,
-            diagnostic: Mutex::new(None),
         })
-    }
-
-    /// Cumulative dropped export lines.
-    #[must_use]
-    pub fn dropped(&self) -> u64 {
-        self.queue.dropped()
-    }
-
-    /// Last overflow or disconnect diagnostic.
-    #[must_use]
-    pub fn last_diagnostic(&self) -> Option<ObserverDiagnostic> {
-        self.diagnostic.lock().ok().and_then(|slot| *slot)
-    }
-
-    fn record_overflow(&self) {
-        if let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
-        }
     }
 }
 
@@ -143,32 +104,14 @@ impl Observer for LogObserver {
             Ok(value) => value,
             Err(error) => return Box::pin(async move { Err(error) }),
         };
-        for line in jsonl.lines() {
-            match self.queue.push(line.to_owned()) {
-                Ok(ObserverQueuePush::Accepted) => {}
-                Ok(ObserverQueuePush::Dropped) => self.record_overflow(),
-                Err(error) => {
-                    self.record_overflow();
-                    return Box::pin(async move { Err(error) });
-                }
-            }
-        }
         let writer = Arc::clone(&self.writer);
-        let drained = match self.queue.drain() {
-            Ok(value) => value,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
                 let Ok(mut sink) = writer.lock() else {
                     return Err(ObserverError::Unavailable);
                 };
-                for line in drained {
-                    sink.write_all(line.as_bytes())
-                        .map_err(|_| ObserverError::Unavailable)?;
-                    sink.write_all(b"\n")
-                        .map_err(|_| ObserverError::Unavailable)?;
-                }
+                sink.write_all(jsonl.as_bytes())
+                    .map_err(|_| ObserverError::Unavailable)?;
                 Ok(())
             })
             .await
@@ -210,12 +153,6 @@ pub fn write_support_bundle(
             .map_err(|_| LogObserverError::BundleUnavailable)?;
     }
     Ok(())
-}
-
-/// Default bounded-block timeout used by examples.
-#[must_use]
-pub const fn default_block_timeout() -> Duration {
-    Duration::from_millis(20)
 }
 
 #[cfg(test)]

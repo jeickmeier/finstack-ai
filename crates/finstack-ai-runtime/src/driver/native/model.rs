@@ -12,7 +12,7 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use crate::coordinator::{DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch};
-use crate::run_types::SameIdentityRetryPolicy;
+use crate::run_types::{SameIdentityRetryPolicy, provider_retry_after, same_identity_retryable};
 use crate::settlement::ModelDriverResult;
 use crate::{
     CancellationSignal, Clock, LockedModelContextProfile, Metadata, Model, ModelCallContext,
@@ -386,51 +386,6 @@ fn progress_delivery_error() -> ModelError {
     )
 }
 
-fn same_identity_retryable(error: &ModelError) -> bool {
-    error.retryable()
-        && !matches!(
-            error.category(),
-            finstack_ai_kernel::ErrorCategory::Validation
-                | finstack_ai_kernel::ErrorCategory::Limit
-        )
-}
-
-fn retry_after_wait(error: &ModelError) -> Duration {
-    parse_retry_after_seconds(error.metadata()).map_or(Duration::ZERO, Duration::from_secs)
-}
-
-fn finite_seconds_to_u64(seconds: f64) -> Option<u64> {
-    if !seconds.is_finite() || seconds.is_sign_negative() {
-        return None;
-    }
-    let ceiled = seconds.ceil();
-    // 2^53 is the largest integer f64 can represent exactly.
-    if ceiled >= 9_007_199_254_740_992.0 {
-        return None;
-    }
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "retry-after is clamped to a non-negative finite second count"
-    )]
-    Some(ceiled as u64)
-}
-
-fn parse_retry_after_seconds(metadata: &Metadata) -> Option<u64> {
-    let value: serde_json::Value = serde_json::from_str(metadata.as_str()).ok()?;
-    let object = value.as_object()?;
-    let raw = object
-        .get("retry_after")
-        .or_else(|| object.get("Retry-After"))?;
-    match raw {
-        serde_json::Value::Number(number) => number
-            .as_u64()
-            .or_else(|| number.as_f64().and_then(finite_seconds_to_u64)),
-        serde_json::Value::String(text) => text.parse().ok(),
-        _ => None,
-    }
-}
-
 fn deadline_due(clock: &impl Clock, deadline: Option<&MonotonicDeadline>) -> bool {
     let Some(deadline) = deadline else {
         return false;
@@ -547,7 +502,11 @@ where
         match outcome {
             Ok(terminal) => return Ok(terminal),
             Err(error) if attempt < max_attempts && same_identity_retryable(&error) => {
-                let delay = retry_after_wait(&error);
+                let retry_ordinal = attempt;
+                let delay = provider_retry_after(&error).map_or_else(
+                    || policy.backoff.delay(effect_id, retry_ordinal),
+                    |retry_after| retry_after.max(policy.backoff.delay(effect_id, retry_ordinal)),
+                );
                 let Some(wait) = cap_retry_after(delay, clock.as_ref(), deadline.as_ref()) else {
                     return Err(error);
                 };
@@ -797,7 +756,14 @@ mod tests {
             model.clone(),
             test_request(effect_id),
             assembler,
-            SameIdentityRetryPolicy { max_retries: 1 },
+            SameIdentityRetryPolicy {
+                max_retries: 1,
+                backoff: crate::RetryBackoffPolicy {
+                    initial_delay: Duration::ZERO,
+                    maximum_delay: Duration::ZERO,
+                    maximum_jitter: Duration::ZERO,
+                },
+            },
             Arc::new(FixedClock(Timestamp::from_unix_ms(1_000).expect("now"))),
             effect_id,
             sender,

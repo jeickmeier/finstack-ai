@@ -1,4 +1,4 @@
-//! Shared crash-prefix restore classes for PR-048.
+//! Shared crash-prefix restore classes for crash-recovery contract.
 
 use finstack_ai_kernel::RunPhase;
 

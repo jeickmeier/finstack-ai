@@ -142,7 +142,7 @@ fn a_tool_batch_fold_with_no_policy_expression_is_rejected_not_dropped() {
 
 #[test]
 fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
-    let coordinator = accepted_coordinator(RunLimits::empty());
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
     let driver = driver_for(
         "fixture.prepare-only",
         Stage::PrepareContext,
@@ -159,12 +159,14 @@ fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
         &crate::JsonSchemaToolValidatorCompiler,
     )
     .expect("empty catalog");
+    let sources = test_sources();
 
     for driver in [None, Some(&driver)] {
         let policy = block_on(run_tool_batch_chain(
-            &coordinator,
+            &mut coordinator,
             &catalog,
             driver,
+            &sources,
             cursor,
             &[],
         ))

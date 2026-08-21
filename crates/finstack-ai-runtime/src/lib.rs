@@ -105,6 +105,7 @@ pub(crate) use services::{id_generation, interaction, session};
 pub use driver::host_driver;
 #[cfg(feature = "native-tokio")]
 pub use driver::sdk as native_driver;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use exec::middleware_driver;
 
 pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};
@@ -139,21 +140,21 @@ pub use services::object::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::process_confinement::{
     CONFINEMENT_UNAVAILABLE, ConfinedChild, ConfinementBackend, ConfinementError,
-    ConfinementProfile, ProcessConfinement,
+    ConfinementProfile, ProcessConfinement, WindowsLpacProfile,
 };
 pub use session::{
     LaneAppendIds, LaneCreateIds, LaneInspect, SessionCreateIds, SessionError, SessionRuntime,
 };
 
 pub use context::{
-    AssembledContext, CONTEXT_BUDGET_EXCEEDED, CONTEXT_CONTRIBUTION_INVALID, CommittedContextCall,
+    AssembledContext, CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED,
+    CONTEXT_CONFIGURATION_INVALID, CONTEXT_CONTRIBUTION_INVALID, CommittedContextCall,
     ContextAuthority, ContextBudget, ContextCallContext, ContextContribution, ContextError,
     ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
     ContextProviderDescriptor, ContextReconcileResult, ContextRequest, ContextTruncationDiagnostic,
     InvocationResumeAction, PendingContextEffect, RecordedContextContribution, assemble_context,
 };
 
-pub(crate) use context::{CONTEXT_COMMIT_REQUIRED, CONTEXT_CONFIGURATION_INVALID};
 pub use error::PortErrorInvalid;
 pub use event_hub::{
     EventBatch, EventBatchConfig, EventDeliveryStats, EventFilter, EventHubConfig, EventLagPolicy,
@@ -180,65 +181,57 @@ pub use middleware::{
     compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
     compaction_summary_digest, validate_compaction_result, validate_stage_outcome,
 };
-pub use model::{
-    AnthropicMessagesAssembly, ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement,
-    AssembledModelStream, Authentication, AuthorizationContext, CancellationSignal,
-    CredentialReference, CredentialRejected, CredentialStore, GEMINI_CACHED_TOKENS_KEY,
-    GEMINI_CODE_RESULT_MEDIA_TYPE, GEMINI_CONTINUATION_PROVIDER, GEMINI_EXECUTABLE_CODE_MEDIA_TYPE,
-    GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly,
-    InputCapabilities, LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED,
-    MODEL_REQUEST_INVALID, MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
-    MODEL_STREAM_ERROR_AFTER_COMPLETION, MODEL_STREAM_ITEM_AFTER_COMPLETION,
-    MODEL_STREAM_LIMIT_EXCEEDED, MODEL_STREAM_MISSING_COMPLETION,
-    MODEL_TOOL_CALL_ARGUMENTS_INVALID, MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE,
-    MODEL_USAGE_INVALID, MediaResolveError, MediaResolveKind, MediaResolver, Model,
-    ModelCallContext, ModelCapabilities, ModelContextProfile, ModelContextProfileOverride,
-    ModelDeferral, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelProgress,
-    ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelResponse,
-    ModelResumeAction, ModelSettings, ModelStreamAssembler, ModelStreamItem, ModelStreamLimits,
-    ModelTerminal, ModelTokenEstimate, ModelToolCall, ModelWarmupContext, NdjsonError,
-    NdjsonParser, OllamaChatAssembly, OllamaReplayEntry, OpaqueProviderEvent,
-    OpenAiResponsesAssembly, ReasoningDelta, ReconcileContext, ResolveDraftMediaError,
-    ResolvedMedia, RunCallContext, SECRET_MAX_BYTES, SecretRejected, SecretString, SideEffectClass,
-    SseEvent, SseEventParser, SseParseError, StreamNormError, StreamNormKind,
-    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    ToolDeferralSupport, ToolSpec, UsageDelta, model_resume_action, resolve_draft_media,
-    resolve_model_context_profile, secret_is_valid, thinking_level_budget,
-};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-pub(crate) use model::{MODEL_PROFILE_INVALID, map_model_reconcile_result, model_retry_allowed};
+pub(crate) use model::MODEL_PROFILE_INVALID;
+pub use model::{
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, AssembledModelStream, Authentication,
+    AuthorizationContext, CancellationSignal, CredentialReference, CredentialRejected,
+    CredentialStore, InputCapabilities, LockedModelContextProfile,
+    MODEL_RECONCILIATION_UNSUPPORTED, MODEL_REQUEST_INVALID, MODEL_RESPONSE_MISMATCH,
+    MODEL_STREAM_DUPLICATE_COMPLETION, MODEL_STREAM_ERROR_AFTER_COMPLETION,
+    MODEL_STREAM_ITEM_AFTER_COMPLETION, MODEL_STREAM_LIMIT_EXCEEDED,
+    MODEL_STREAM_MISSING_COMPLETION, MODEL_TOOL_CALL_ARGUMENTS_INVALID,
+    MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE, MODEL_USAGE_INVALID,
+    MediaResolveError, MediaResolveKind, MediaResolver, Model, ModelCallContext, ModelCapabilities,
+    ModelContextProfile, ModelContextProfileOverride, ModelDeferral, ModelDescriptor, ModelError,
+    ModelEventStream, ModelName, ModelProgress, ModelReconcileResult, ModelRequest,
+    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelResumeAction, ModelSettings,
+    ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTerminal, ModelTokenEstimate,
+    ModelToolCall, ModelWarmupContext, OpaqueProviderEvent, ReadyModel, ReasoningDelta,
+    ReconcileContext, ResolveDraftMediaError, ResolvedMedia, RunCallContext, SECRET_MAX_BYTES,
+    SecretRejected, SecretString, SideEffectClass, StructuredOutputCapability, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolSpec,
+    UsageDelta, map_model_reconcile_result, model_resume_action, model_retry_allowed,
+    resolve_draft_media, resolve_model_context_profile, secret_is_valid, thinking_level_budget,
+};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use model::{parse_committed_model_request, stable_model_dispatch_code};
 pub use observer::export::{journal_export_jsonl, observer_events_jsonl, support_bundle_versions};
-pub use observer::queue::{
-    OBSERVER_QUEUE_OVERFLOW, ObserverBackpressure, ObserverDiagnostic, ObserverQueue,
-    ObserverQueuePush,
-};
 pub use observer::{
-    NoopObserver, Observer, ObserverDescriptor, ObserverError, ObserverEventView,
-    ObserverPayloadMode,
+    NoopObserver, OBSERVER_DELIVERY_FAILED, OBSERVER_SHUTDOWN_TIMEOUT,
+    OBSERVER_SUBSCRIPTION_FAILED, Observer, ObserverDescriptor, ObserverDiagnostic,
+    ObserverDiagnostics, ObserverError, ObserverEventView, ObserverPayloadMode,
 };
 pub use ports::{PortFuture, PortObject, PortStream};
 pub use tool::{
     ApprovalState, AssembledToolStream, JsonSchemaToolValidatorCompiler, MCP_SAMPLING_REQUIRED,
-    NestedSample, PendingToolEffect, ResolvedTool, ResolvedToolCatalog, TOOL_CANCELLED,
-    TOOL_DEADLINE_EXCEEDED, TOOL_DEFERRAL_EXPIRED, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID,
-    TOOL_RECONCILIATION_UNSUPPORTED, ToolCallContext, ToolCatalogPlan, ToolDeferral, ToolError,
-    ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult,
-    ToolResumeAction, ToolStreamAssembler, ToolStreamItem, ToolStreamLimits, ToolTerminal,
-    ToolValidator, ToolValidatorCompiler, Toolset, ToolsetDescriptor, ToolsetRegistration,
-    tool_resume_action, verify_authority,
+    MCP_SAMPLING_UNAVAILABLE, NestedSample, PendingToolEffect, ResolvedTool, ResolvedToolCatalog,
+    TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED, TOOL_DEFERRAL_EXPIRED, TOOL_INTERACTION_REQUIRED,
+    TOOL_OUTPUT_INVALID, TOOL_RECONCILIATION_UNSUPPORTED, ToolCallContext, ToolCatalogPlan,
+    ToolDeferral, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamItem,
+    ToolStreamLimits, ToolTerminal, ToolValidator, ToolValidatorCompiler, Toolset,
+    ToolsetDescriptor, ToolsetRegistration, map_tool_reconcile_result, normalize_tool_result,
+    tool_resume_action, tool_retry_allowed, verify_authority,
 };
-pub(crate) use tool::{
-    MCP_SAMPLING_UNAVAILABLE, map_tool_reconcile_result, normalize_tool_result, tool_retry_allowed,
-};
+#[cfg(feature = "native-tokio")]
 #[cfg(feature = "native-tokio")]
 pub(crate) use tool::{TOOL_PANICKED, TOOL_STREAM_INVALID};
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use run_types::{
-    ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, SameIdentityRetryPolicy,
-    ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,
+    ModelTaskConfig, RetryBackoffPolicy, RunHandleError, RunStatus, RunTaskConfig,
+    SameIdentityRetryPolicy, ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,
 };
 
 #[cfg(feature = "native-tokio")]

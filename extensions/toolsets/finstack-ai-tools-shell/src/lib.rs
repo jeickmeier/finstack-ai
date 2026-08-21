@@ -31,7 +31,7 @@
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::thread::JoinHandle;
@@ -43,11 +43,13 @@ use finstack_ai_kernel::{
 };
 #[cfg(unix)]
 use finstack_ai_runtime::ToolStreamItem;
+#[cfg(unix)]
+use finstack_ai_runtime::verify_authority;
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
     ConfinedChild, ConfinementError, ConfinementProfile, PortFuture, ProcessConfinement,
     SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult,
-    ToolSpec, Toolset, ToolsetDescriptor, stage_required_artifact, verify_authority,
+    ToolSpec, Toolset, ToolsetDescriptor, stage_required_artifact,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -498,6 +500,7 @@ impl ShellToolset {
     /// Fails closed when no authorized root was configured or the host
     /// confinement backend is unavailable. Does not fall back to the labeled
     /// unconfined runner.
+    #[allow(unused_mut, reason = "only Unix targets can install confinement")]
     pub fn try_with_confinement(mut self) -> Result<Self, ShellError> {
         #[cfg(not(unix))]
         {
@@ -599,6 +602,7 @@ struct ExecArguments {
     cwd: Option<String>,
 }
 
+#[cfg(unix)]
 fn authorize_command(
     policy: &ShellPolicy,
     arguments: &ExecArguments,
@@ -747,7 +751,7 @@ struct PipePumps {
 }
 
 impl PipePumps {
-    fn start(stdout: Option<ChildStdout>, stderr: Option<ChildStderr>) -> Self {
+    fn start(stdout: Option<Box<dyn Read + Send>>, stderr: Option<Box<dyn Read + Send>>) -> Self {
         let (stdout_rx, stdout_thread) = spawn_pipe_pump(stdout);
         let (stderr_rx, stderr_thread) = spawn_pipe_pump(stderr);
         Self {
@@ -858,17 +862,29 @@ impl RunningChild {
         }
     }
 
-    fn stdout(&mut self) -> Option<ChildStdout> {
+    fn stdout(&mut self) -> Option<Box<dyn Read + Send>> {
         match self {
-            Self::Confined(child) => child.stdout.take(),
-            Self::Plain(child) => child.stdout.take(),
+            Self::Confined(child) => child
+                .stdout
+                .take()
+                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
+            Self::Plain(child) => child
+                .stdout
+                .take()
+                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
         }
     }
 
-    fn stderr(&mut self) -> Option<ChildStderr> {
+    fn stderr(&mut self) -> Option<Box<dyn Read + Send>> {
         match self {
-            Self::Confined(child) => child.stderr.take(),
-            Self::Plain(child) => child.stderr.take(),
+            Self::Confined(child) => child
+                .stderr
+                .take()
+                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
+            Self::Plain(child) => child
+                .stderr
+                .take()
+                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
         }
     }
 }

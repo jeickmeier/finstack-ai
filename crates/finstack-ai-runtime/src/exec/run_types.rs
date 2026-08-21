@@ -3,13 +3,55 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use finstack_ai_kernel::EffectId;
 use thiserror::Error;
 
 use crate::coordinator::{CommitCoordinatorError, CommitOutcome};
 use crate::{
-    ApprovalGrantMode, EventHubConfig, Metadata, ModelStreamAssembler, ModelStreamLimits,
+    ApprovalGrantMode, EventHubConfig, ModelError, ModelStreamAssembler, ModelStreamLimits,
     ToolStreamLimits,
 };
+
+pub(crate) fn same_identity_retryable(error: &ModelError) -> bool {
+    error.retryable()
+        && !matches!(
+            error.category(),
+            finstack_ai_kernel::ErrorCategory::Validation
+                | finstack_ai_kernel::ErrorCategory::Limit
+        )
+}
+
+pub(crate) fn provider_retry_after(error: &ModelError) -> Option<Duration> {
+    let value: serde_json::Value = serde_json::from_str(error.metadata().as_str()).ok()?;
+    let raw = value
+        .as_object()?
+        .get("retry_after")
+        .or_else(|| value.as_object()?.get("Retry-After"))?;
+    let seconds = match raw {
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .or_else(|| number.as_f64().and_then(finite_seconds_to_u64)),
+        serde_json::Value::String(text) => text.parse().ok(),
+        _ => None,
+    }?;
+    Some(Duration::from_secs(seconds))
+}
+
+fn finite_seconds_to_u64(seconds: f64) -> Option<u64> {
+    if !seconds.is_finite() || seconds.is_sign_negative() {
+        return None;
+    }
+    let ceiled = seconds.ceil();
+    if ceiled >= 9_007_199_254_740_992.0 {
+        return None;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "retry-after is clamped to a non-negative finite second count"
+    )]
+    Some(ceiled as u64)
+}
 
 /// Observable lifecycle of one owned runtime task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +140,72 @@ impl RunTaskConfig {
 pub struct SameIdentityRetryPolicy {
     /// Extra attempts after the first. Zero disables retry.
     pub max_retries: u32,
+    /// Portable deterministic delay policy between attempts.
+    pub backoff: RetryBackoffPolicy,
+}
+
+/// Target-neutral same-identity retry delay policy.
+///
+/// Jitter is derived from the committed effect identity and retry ordinal. It
+/// is therefore stable across restart and browser/native targets and never
+/// depends on ambient OS entropy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryBackoffPolicy {
+    /// Delay before the first retry.
+    pub initial_delay: Duration,
+    /// Inclusive ceiling for exponential delay plus jitter.
+    pub maximum_delay: Duration,
+    /// Inclusive deterministic jitter ceiling.
+    pub maximum_jitter: Duration,
+}
+
+impl Default for RetryBackoffPolicy {
+    fn default() -> Self {
+        Self {
+            initial_delay: Duration::from_millis(250),
+            maximum_delay: Duration::from_secs(5),
+            maximum_jitter: Duration::from_millis(100),
+        }
+    }
+}
+
+impl RetryBackoffPolicy {
+    fn validate(self) -> Result<(), RunHandleError> {
+        if self.initial_delay > self.maximum_delay || self.maximum_jitter > self.maximum_delay {
+            return Err(RunHandleError::InvalidConfiguration);
+        }
+        Ok(())
+    }
+
+    /// Derive the bounded delay for a one-based retry ordinal.
+    #[must_use]
+    pub fn delay(self, effect_id: EffectId, retry_ordinal: u32) -> Duration {
+        let shift = retry_ordinal.saturating_sub(1).min(31);
+        let multiplier = 1_u32 << shift;
+        let base = self
+            .initial_delay
+            .checked_mul(multiplier)
+            .unwrap_or(self.maximum_delay)
+            .min(self.maximum_delay);
+        let jitter_ceiling_ms = u64::try_from(self.maximum_jitter.as_millis()).unwrap_or(u64::MAX);
+        if jitter_ceiling_ms == 0 {
+            return base;
+        }
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        for byte in effect_id
+            .as_bytes()
+            .iter()
+            .copied()
+            .chain(retry_ordinal.to_le_bytes())
+        {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        let jitter_ms = hash % jitter_ceiling_ms.saturating_add(1);
+        base.checked_add(Duration::from_millis(jitter_ms))
+            .unwrap_or(self.maximum_delay)
+            .min(self.maximum_delay)
+    }
 }
 
 /// Configuration for the private bounded model job/result path.
@@ -109,10 +217,6 @@ pub struct ModelTaskConfig {
     pub result_capacity: usize,
     /// Pure stream-assembler bounds.
     pub stream_limits: ModelStreamLimits,
-    /// Optional construction warmup deadline.
-    pub warmup_deadline: Option<finstack_ai_kernel::Timestamp>,
-    /// Bounded non-secret warmup metadata.
-    pub warmup_metadata: Metadata,
     /// Same-identity provider retry. Default is no retry.
     pub same_identity_retry: SameIdentityRetryPolicy,
 }
@@ -122,6 +226,7 @@ impl ModelTaskConfig {
         if self.job_capacity == 0 || self.result_capacity == 0 {
             return Err(RunHandleError::InvalidConfiguration);
         }
+        self.same_identity_retry.backoff.validate()?;
         ModelStreamAssembler::new(self.stream_limits)
             .map_err(|_| RunHandleError::InvalidConfiguration)
     }
@@ -164,7 +269,7 @@ impl ToolTaskConfig {
 /// as is, for three reasons:
 ///
 /// - The 1.0 promise for public Rust
-///   (`docs/implementation/1.0-compatibility-policy.md`) defines the breaking
+///   (`GOVERNANCE.md`) defines the breaking
 ///   set as semantic renames and removals; variant addition is outside it, and
 ///   the checked-in public-item list implements exactly that policy.
 /// - `#[non_exhaustive]` appears on no type in this workspace. Applying it to
@@ -293,8 +398,33 @@ pub(crate) fn result_fault_code(
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
-    use super::{RunHandleError, result_fault_code};
+    use finstack_ai_kernel::{EffectTag, Id};
+
+    use super::{RetryBackoffPolicy, RunHandleError, result_fault_code};
+
+    fn effect(ordinal: u64) -> Id<EffectTag> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        Id::from_bytes(bytes)
+    }
+
+    #[test]
+    fn retry_backoff_is_deterministic_bounded_and_effect_scoped() {
+        let policy = RetryBackoffPolicy {
+            initial_delay: Duration::from_millis(100),
+            maximum_delay: Duration::from_millis(450),
+            maximum_jitter: Duration::from_millis(50),
+        };
+        let first = policy.delay(effect(1), 1);
+        assert_eq!(first, policy.delay(effect(1), 1));
+        assert!((Duration::from_millis(100)..=Duration::from_millis(150)).contains(&first));
+        assert_ne!(first, policy.delay(effect(2), 1));
+        assert!(policy.delay(effect(1), 32) <= policy.maximum_delay);
+    }
 
     /// The other half of the folded-allocation fix
     /// (`stage_settlement`'s `folded_allocation_error`):

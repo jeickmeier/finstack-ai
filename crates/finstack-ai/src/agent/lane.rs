@@ -1,4 +1,4 @@
-//! PR-047 minimum `Lane` verbs: `run`, `suspend`, and `resume`.
+//! Stateful `Lane` run, suspend, and resume orchestration.
 
 use super::handle::Agent;
 use super::run::AgentRun;
@@ -7,63 +7,222 @@ use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunReque
 #[cfg(feature = "native-tokio")]
 mod native {
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use finstack_ai_kernel::OperationLocator;
     use finstack_ai_runtime::{
-        ContextProvider, ExternalClock, LockedModelContextProfile, Model,
-        ModelContextProfileOverride, ResolvedToolCatalog, SessionError, WorkflowSession,
-        resolve_model_context_profile,
+        ContextProvider, ExternalClock, LockedModelContextProfile, ModelContextProfileOverride,
+        ResolvedToolCatalog, SessionError, WorkflowSession, resolve_model_context_profile,
     };
 
     use super::{AGENT_RUN_INVALID_CONFIGURATION, Agent, AgentRun, AgentRunError};
     use crate::agent::prepare::NativeIds;
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub(super) enum LaneState {
+        Running,
+        Suspending,
+        Suspended,
+        Resuming,
+    }
+
     pub(crate) struct LaneLive {
+        pub(super) generation: u64,
+        pub(super) state: LaneState,
         pub(super) run: Option<AgentRun>,
         pub(super) workflow: Option<WorkflowSession>,
     }
 
-    pub(super) fn remember_run(lane: &crate::Lane, run: AgentRun) -> Result<(), AgentRunError> {
-        lane.session()
-            .live_lanes()
-            .lock()
-            .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?
-            .insert(
-                lane.lane_id(),
-                LaneLive {
-                    run: Some(run),
-                    workflow: None,
-                },
-            );
-        Ok(())
+    fn next_generation() -> u64 {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub(super) fn take_live(lane: &crate::Lane) -> Result<Option<LaneLive>, SessionError> {
-        Ok(lane
+    fn run_is_settled(run: &AgentRun) -> bool {
+        run.inner.result.lock().is_ok_and(|result| result.is_some())
+    }
+
+    fn live_is_releasable(live: &LaneLive) -> bool {
+        live.state == LaneState::Running
+            && live.run.as_ref().is_some_and(run_is_settled)
+            && live
+                .workflow
+                .as_ref()
+                .is_none_or(|workflow| !workflow.owner_is_live())
+    }
+
+    pub(super) fn reserve_run(lane: &crate::Lane) -> Result<u64, AgentRunError> {
+        let mut lanes = lane
             .session()
             .live_lanes()
             .lock()
-            .map_err(|_| SessionError::Poisoned)?
-            .remove(&lane.lane_id()))
+            .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?;
+        if lanes.get(&lane.lane_id()).is_some_and(live_is_releasable) {
+            lanes.remove(&lane.lane_id());
+        }
+        if lanes.contains_key(&lane.lane_id()) {
+            return Err(session_error(&SessionError::LaneBusy));
+        }
+        let generation = next_generation();
+        lanes.insert(
+            lane.lane_id(),
+            LaneLive {
+                generation,
+                state: LaneState::Running,
+                run: None,
+                workflow: None,
+            },
+        );
+        Ok(generation)
     }
 
-    pub(super) fn put_live(lane: &crate::Lane, live: LaneLive) -> Result<(), AgentRunError> {
-        lane.session()
+    pub(super) fn attach_run(
+        lane: &crate::Lane,
+        generation: u64,
+        run: AgentRun,
+    ) -> Result<(), AgentRunError> {
+        let mut lanes = lane
+            .session()
             .live_lanes()
             .lock()
-            .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?
-            .insert(lane.lane_id(), live);
+            .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?;
+        let live = lanes
+            .get_mut(&lane.lane_id())
+            .filter(|live| live.generation == generation)
+            .ok_or_else(|| AgentRunError::runtime_message("lane reservation was superseded"))?;
+        live.run = Some(run);
         Ok(())
     }
 
+    pub(super) fn live_run(lane: &crate::Lane) -> Result<Option<AgentRun>, SessionError> {
+        let lanes = lane
+            .session()
+            .live_lanes()
+            .lock()
+            .map_err(|_| SessionError::Poisoned)?;
+        Ok(lanes
+            .get(&lane.lane_id())
+            .filter(|live| live.state == LaneState::Running)
+            .and_then(|live| live.run.clone()))
+    }
+
+    pub(super) fn abandon(lane: &crate::Lane, generation: u64) {
+        if let Ok(mut lanes) = lane.session().live_lanes().lock()
+            && lanes
+                .get(&lane.lane_id())
+                .is_some_and(|live| live.generation == generation)
+        {
+            lanes.remove(&lane.lane_id());
+        }
+    }
+
+    pub(super) fn begin_suspend(
+        lane: &crate::Lane,
+    ) -> Result<Option<(u64, Option<AgentRun>)>, SessionError> {
+        let mut lanes = lane
+            .session()
+            .live_lanes()
+            .lock()
+            .map_err(|_| SessionError::Poisoned)?;
+        let Some(live) = lanes.get_mut(&lane.lane_id()) else {
+            return Ok(None);
+        };
+        match live.state {
+            LaneState::Suspended => return Ok(None),
+            LaneState::Running => {}
+            LaneState::Suspending | LaneState::Resuming => return Err(SessionError::LaneBusy),
+        }
+        if live.run.is_none() {
+            return Err(SessionError::LaneBusy);
+        }
+        live.state = LaneState::Suspending;
+        if let Some(workflow) = live.workflow.as_mut() {
+            workflow.abort_owner();
+        }
+        Ok(Some((live.generation, live.run.clone())))
+    }
+
+    pub(super) fn finish_suspend(lane: &crate::Lane, generation: u64) -> Result<(), SessionError> {
+        let mut lanes = lane
+            .session()
+            .live_lanes()
+            .lock()
+            .map_err(|_| SessionError::Poisoned)?;
+        if let Some(live) = lanes
+            .get_mut(&lane.lane_id())
+            .filter(|live| live.generation == generation)
+        {
+            live.state = LaneState::Suspended;
+        }
+        Ok(())
+    }
+
+    pub(super) fn begin_resume(
+        lane: &crate::Lane,
+    ) -> Result<(u64, Option<AgentRun>), AgentRunError> {
+        let mut lanes = lane
+            .session()
+            .live_lanes()
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?;
+        if let Some(live) = lanes.get_mut(&lane.lane_id()) {
+            if live.state != LaneState::Suspended {
+                return Err(session_error(&SessionError::LaneBusy));
+            }
+            live.state = LaneState::Resuming;
+            return Ok((live.generation, live.run.clone()));
+        }
+        let generation = next_generation();
+        lanes.insert(
+            lane.lane_id(),
+            LaneLive {
+                generation,
+                state: LaneState::Resuming,
+                run: None,
+                workflow: None,
+            },
+        );
+        Ok((generation, None))
+    }
+
+    pub(super) fn finish_resume(
+        lane: &crate::Lane,
+        generation: u64,
+        workflow: WorkflowSession,
+    ) -> Result<(), AgentRunError> {
+        let mut lanes = lane
+            .session()
+            .live_lanes()
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?;
+        let live = lanes
+            .get_mut(&lane.lane_id())
+            .filter(|live| live.generation == generation)
+            .ok_or_else(|| AgentRunError::runtime_message("lane resume was superseded"))?;
+        live.workflow = Some(workflow);
+        live.state = LaneState::Running;
+        Ok(())
+    }
+
+    pub(super) fn rollback_resume(lane: &crate::Lane, generation: u64) {
+        if let Ok(mut lanes) = lane.session().live_lanes().lock()
+            && let Some(live) = lanes
+                .get_mut(&lane.lane_id())
+                .filter(|live| live.generation == generation)
+        {
+            live.state = LaneState::Suspended;
+        }
+    }
+
     type WorkflowPorts = (
-        Arc<dyn Model>,
+        Arc<finstack_ai_runtime::ReadyModel>,
         LockedModelContextProfile,
         Option<Arc<ResolvedToolCatalog>>,
     );
 
     pub(super) fn workflow_ports(agent: &Agent) -> Result<WorkflowPorts, AgentRunError> {
-        let model = Arc::clone(agent.resolved.run_plan().model().handle());
+        let ready_model = Arc::clone(agent.resolved.run_plan().model().handle());
+        let model = ready_model.shared_model();
         let descriptor = model.descriptor();
         descriptor.validate().map_err(AgentRunError::model)?;
         let name = descriptor.models.first().ok_or_else(|| {
@@ -81,7 +240,7 @@ mod native {
         )
         .map_err(AgentRunError::model)?;
         let catalog = (!agent.tools.is_empty()).then(|| Arc::clone(&agent.tools));
-        Ok((model, profile, catalog))
+        Ok((ready_model, profile, catalog))
     }
 
     pub(super) fn session_error(error: &SessionError) -> AgentRunError {
@@ -120,7 +279,7 @@ mod native {
                 .collect::<Vec<_>>()
                 .into();
             Ok(session
-                .with_ports(model, profile, catalog)
+                .with_ready_ports(model, profile, catalog)
                 .with_capability_owners(agent.capability_index().as_arc_owners())
                 .with_middleware_chain(Arc::clone(agent.resolved.run_plan().middleware_chain()))
                 .with_context_providers(providers)
@@ -149,6 +308,13 @@ mod native {
 #[cfg(feature = "native-tokio")]
 pub(crate) use native::LaneLive;
 
+#[cfg(feature = "native-tokio")]
+pub(crate) fn live_run(
+    lane: &crate::Lane,
+) -> Result<Option<AgentRun>, finstack_ai_runtime::SessionError> {
+    native::live_run(lane)
+}
+
 impl crate::Lane {
     /// Start a new root run on this idle lane.
     ///
@@ -166,10 +332,26 @@ impl crate::Lane {
                 "run security tenant does not match the session tenant",
             ));
         }
-        let run = agent.start_on_lane(self, request)?;
         #[cfg(feature = "native-tokio")]
-        native::remember_run(self, run.clone())?;
-        Ok(run)
+        {
+            let generation = native::reserve_run(self)?;
+            match agent.start_on_lane(self, request) {
+                Ok(run) => {
+                    if let Err(error) = native::attach_run(self, generation, run.clone()) {
+                        native::abandon(self, generation);
+                        Err(error)
+                    } else {
+                        Ok(run)
+                    }
+                }
+                Err(error) => {
+                    native::abandon(self, generation);
+                    Err(error)
+                }
+            }
+        }
+        #[cfg(not(feature = "native-tokio"))]
+        agent.start_on_lane(self, request)
     }
 
     /// Park the in-process driver without dropping the journal.
@@ -182,18 +364,15 @@ impl crate::Lane {
     /// Returns a recover or lock failure.
     #[cfg(feature = "native-tokio")]
     pub async fn suspend(&self) -> Result<(), finstack_ai_runtime::SessionError> {
-        let Some(mut live) = native::take_live(self)? else {
+        let Some((generation, run)) = native::begin_suspend(self)? else {
             return Ok(());
         };
-        if let Some(workflow) = live.workflow.as_mut() {
-            workflow.abort_owner();
-        }
-        if let Some(run) = live.run.clone()
+        if let Some(run) = run
             && let Ok(handle) = run.runtime_handle().await
         {
             handle.shutdown();
         }
-        native::put_live(self, live).map_err(|_| finstack_ai_runtime::SessionError::Poisoned)
+        native::finish_suspend(self, generation)
     }
 
     /// Recover the parked run and respawn [`finstack_ai_runtime::RunTaskOwner`].
@@ -216,41 +395,42 @@ impl crate::Lane {
     async fn resume_inner(&self, agent: &Agent) -> Result<(), AgentRunError> {
         use finstack_ai_kernel::OperationLocator;
 
-        let inspect = self
-            .inspect()
-            .await
-            .map_err(|error| native::session_error(&error))?;
-        let run_id = inspect.active_run_id.ok_or_else(|| {
-            AgentRunError::configuration(
-                AGENT_RUN_INVALID_CONFIGURATION,
-                "lane has no suspended run to resume",
+        let (generation, run) = native::begin_resume(self)?;
+        let result = Box::pin(async {
+            let inspect = self
+                .inspect()
+                .await
+                .map_err(|error| native::session_error(&error))?;
+            let run_id = inspect.active_run_id.ok_or_else(|| {
+                AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "lane has no suspended run to resume",
+                )
+            })?;
+            let locator = OperationLocator::try_new(
+                self.session().tenant_scope(),
+                self.session().session_id(),
+                self.lane_id(),
+                run_id,
             )
-        })?;
-        let locator = OperationLocator::try_new(
-            self.session().tenant_scope(),
-            self.session().session_id(),
-            self.lane_id(),
-            run_id,
-        )
-        .map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
-        let mut workflow = native::attach_workflow(self, agent, locator).await?;
-        workflow
-            .respawn_owner()
-            .await
-            .map_err(|error| native::workflow_error(&error))?;
-        let mut live = native::take_live(self)
-            .map_err(|error| native::session_error(&error))?
-            .unwrap_or(native::LaneLive {
-                run: None,
-                workflow: None,
-            });
-        live.workflow = Some(workflow);
-        if let Some(run) = live.run.as_ref() {
-            run.recover_children().await?;
+            .map_err(|error| {
+                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+            })?;
+            let mut workflow = native::attach_workflow(self, agent, locator).await?;
+            workflow
+                .respawn_owner()
+                .await
+                .map_err(|error| native::workflow_error(&error))?;
+            if let Some(run) = run.as_ref() {
+                run.recover_children().await?;
+            }
+            native::finish_resume(self, generation, workflow)
+        })
+        .await;
+        if result.is_err() {
+            native::rollback_resume(self, generation);
         }
-        native::put_live(self, live)
+        result
     }
 }
 

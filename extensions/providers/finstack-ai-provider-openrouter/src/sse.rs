@@ -1,6 +1,7 @@
 //! Incremental, bounded `OpenRouter` Responses Server-Sent Events framing.
 
-use finstack_ai_runtime::{ModelError, SseEvent, SseEventParser, SseParseError};
+use finstack_ai_provider_wire::{SseEvent, SseEventParser, SseParseError};
+use finstack_ai_runtime::ModelError;
 
 use crate::error::{stream_error, stream_limit_error};
 

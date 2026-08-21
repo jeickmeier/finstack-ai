@@ -21,18 +21,19 @@ use crate::records::tools::{
 };
 
 use super::hash_entries::{
-    completion_hash_entries, model_hash_entries, resolution_hash_entries, stage_hash_entries,
-    tool_call_hash_entries, tool_settlement_hash_entries,
+    completion_hash_entries, extension_hash_entries, model_hash_entries, resolution_hash_entries,
+    stage_hash_entries, tool_call_hash_entries, tool_settlement_hash_entries,
 };
 use super::types::{
-    CompletionIdentityHashEntryV1, ModelSettlementHashEntryV1, ResolutionIdentityHashEntryV6,
-    StageSettlementHashEntryV1, ToolCallIdentityHashEntryV2, ToolCallIdentityHashRef,
-    ToolSettlementHashEntryV2,
+    CompletionIdentityHashEntryV1, ExtensionSettlementHashEntryV7, ModelSettlementHashEntryV1,
+    ResolutionIdentityHashEntryV6, StageSettlementHashEntryV1, ToolCallIdentityHashEntryV2,
+    ToolCallIdentityHashRef, ToolSettlementHashEntryV2,
 };
 use super::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn,
-    InteractionTerminal, KernelState, ModelSettlementFingerprint, PendingInteraction,
-    PendingModelEffect, ResolutionIdentity, RetryState, RunPhase, TerminalCandidate, TerminalState,
+    ExtensionSettlementFingerprint, InteractionTerminal, KernelState, ModelSettlementFingerprint,
+    PendingExtensionEffect, PendingInteraction, PendingModelEffect, ResolutionIdentity, RetryState,
+    RunPhase, TerminalCandidate, TerminalState,
 };
 
 #[derive(Serialize)]
@@ -202,6 +203,14 @@ struct KernelStateWireV6<'a> {
     last_interaction_terminal: Option<&'a InteractionTerminal>,
 }
 
+#[derive(Serialize)]
+struct KernelStateWireV7<'a> {
+    #[serde(flatten)]
+    base: KernelStateWireV6<'a>,
+    pending_extension_effect: Option<&'a PendingExtensionEffect>,
+    extension_settlements: Vec<ExtensionSettlementHashEntryV7>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KernelStateWireOwned {
@@ -271,6 +280,11 @@ struct KernelStateWireOwned {
         RequiredField<BoundedVec<ResolutionIdentityHashEntryV6, SEMANTIC_MAP_MAX_ENTRIES>>,
     #[serde(default)]
     last_interaction_terminal: NullableField<InteractionTerminal>,
+    #[serde(default)]
+    pending_extension_effect: NullableField<PendingExtensionEffect>,
+    #[serde(default)]
+    extension_settlements:
+        RequiredField<BoundedVec<ExtensionSettlementHashEntryV7, SEMANTIC_MAP_MAX_ENTRIES>>,
     #[serde(default)]
     terminal: Option<TerminalState>,
     #[serde(default)]
@@ -476,13 +490,22 @@ impl Serialize for KernelState {
             if self.state_version == 5 {
                 base.serialize(serializer)
             } else {
-                KernelStateWireV6 {
+                let v6 = KernelStateWireV6 {
                     base,
                     pending_interaction: self.pending_interaction.as_ref(),
                     resolution_identities: resolution_hash_entries(&self.resolution_identities),
                     last_interaction_terminal: self.last_interaction_terminal.as_ref(),
+                };
+                if self.state_version == 6 {
+                    v6.serialize(serializer)
+                } else {
+                    KernelStateWireV7 {
+                        base: v6,
+                        pending_extension_effect: self.pending_extension_effect.as_ref(),
+                        extension_settlements: extension_hash_entries(&self.extension_settlements),
+                    }
+                    .serialize(serializer)
                 }
-                .serialize(serializer)
             }
         }
     }
@@ -498,7 +521,7 @@ impl<'de> Deserialize<'de> for KernelState {
         D: Deserializer<'de>,
     {
         let wire = KernelStateWireOwned::deserialize(deserializer)?;
-        if !matches!(wire.state_version, 1..=6) {
+        if !matches!(wire.state_version, 1..=7) {
             return Err(de::Error::custom("unsupported kernel state_version"));
         }
         let tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
@@ -518,7 +541,7 @@ impl<'de> Deserialize<'de> for KernelState {
             && matches!(&wire.tool_calls, RequiredField::Present(_))
             && matches!(&wire.tool_settlements, RequiredField::Present(_))
             && matches!(&wire.last_tool_batch, NullableField::Present(_));
-        if matches!(wire.state_version, 2..=6) && !all_tool_fields_present {
+        if matches!(wire.state_version, 2..=7) && !all_tool_fields_present {
             return Err(de::Error::custom("v2 kernel state is missing tool indexes"));
         }
         let all_control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
@@ -590,9 +613,25 @@ impl<'de> Deserialize<'de> for KernelState {
                 "v1-v5 kernel state contains interaction fields",
             ));
         }
-        if wire.state_version == 6 && !all_interaction_fields_present {
+        if wire.state_version >= 6 && !all_interaction_fields_present {
             return Err(de::Error::custom(
                 "v6 kernel state is missing interaction fields",
+            ));
+        }
+        let extension_fields_present =
+            matches!(&wire.pending_extension_effect, NullableField::Present(_))
+                || matches!(&wire.extension_settlements, RequiredField::Present(_));
+        let all_extension_fields_present =
+            matches!(&wire.pending_extension_effect, NullableField::Present(_))
+                && matches!(&wire.extension_settlements, RequiredField::Present(_));
+        if wire.state_version < 7 && extension_fields_present {
+            return Err(de::Error::custom(
+                "v1-v6 kernel state contains extension fields",
+            ));
+        }
+        if wire.state_version == 7 && !all_extension_fields_present {
+            return Err(de::Error::custom(
+                "v7 kernel state is missing extension fields",
             ));
         }
         let mut stage_settlements = BTreeMap::new();
@@ -737,6 +776,25 @@ impl<'de> Deserialize<'de> for KernelState {
                 return Err(de::Error::custom("duplicate resolution identity"));
             }
         }
+        let mut extension_settlements = BTreeMap::new();
+        let extension_entries = match wire.extension_settlements {
+            RequiredField::Missing => Vec::new(),
+            RequiredField::Present(entries) => entries.into_inner(),
+        };
+        for entry in extension_entries {
+            if extension_settlements
+                .insert(
+                    entry.effect_id,
+                    ExtensionSettlementFingerprint {
+                        kind: entry.kind,
+                        digest: entry.settlement_digest,
+                    },
+                )
+                .is_some()
+            {
+                return Err(de::Error::custom("duplicate extension settlement identity"));
+            }
+        }
         let accepted_at = if wire.state_version >= 3 {
             match wire.accepted_at {
                 NullableField::Missing => None,
@@ -765,9 +823,14 @@ impl<'de> Deserialize<'de> for KernelState {
             current_turn: wire.current_turn,
             messages: wire.messages.into_inner().into(),
             pending_model_effect: wire.pending_model_effect,
+            pending_extension_effect: match wire.pending_extension_effect {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
             terminal_candidate: wire.terminal_candidate,
             stage_settlements,
             model_settlements,
+            extension_settlements,
             completion_identities,
             pending_interaction: match wire.pending_interaction {
                 NullableField::Missing => None,

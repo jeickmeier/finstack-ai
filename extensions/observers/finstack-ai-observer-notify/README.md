@@ -28,19 +28,15 @@ Sink URLs (a Slack webhook URL is a bearer credential) are held as
 
 ## Best-effort delivery
 
-Notifications are a convenience projection, not a record: the queue is
-bounded (`ObserverQueue`, overflow counted via `dropped()` with the
-`observer_queue_overflow` diagnostic), delivery uses a bounded
-timeout-and-retry `DeliveryPolicy` (default 5 s timeout, 3 attempts, 500 ms
+Notifications are a convenience projection, not a record. EventHub owns
+bounded delivery. The sink uses a bounded timeout-and-retry `DeliveryPolicy`
+(default 5 s timeout, 3 attempts, 500 ms
 backoff; the policy is the single owner of the request timeout, and a
 timed-out attempt is never retried since the endpoint may already have
 received it), and a notification that exhausts its attempts is dropped with
-the `notify_delivery_failed` diagnostic. Delivery runs in a spawned,
-FIFO-ordered background task so a slow sink never stalls the observer's
-event subscription. `ObserverBackpressure::BlockBounded` is rejected at
-construction — the queue's only consumer is this observer's own drain, so
-blocking for capacity cannot succeed; use `DropProgress` or `Disconnect`.
-Authoritative interaction state lives in journal records; a missed
+the `notify_delivery_failed` diagnostic. Delivery is FIFO-ordered and awaited
+by the owner-tracked observer pump, so shutdown can join or abort all remaining
+sink work. Authoritative interaction state lives in journal records; a missed
 notification never gates a run.
 
 ## Pairing with `finstack-ai-middleware-verify`
@@ -57,19 +53,14 @@ network sends live here, never in verify.
 use std::sync::Arc;
 
 use finstack_ai_observer_notify::{DeliveryPolicy, NotifyObserver, SlackSink};
-use finstack_ai_runtime::{ObserverBackpressure, SecretString};
+use finstack_ai_runtime::SecretString;
 
 let sink = SlackSink::try_new(
     SecretString::try_new("https://hooks.slack.com/services/T0/B0/example").expect("url"),
 )
 .expect("sink");
-let observer = NotifyObserver::try_new(
-    Arc::new(sink),
-    DeliveryPolicy::default(),
-    256,
-    ObserverBackpressure::DropProgress,
-)
-.expect("observer");
+let observer = NotifyObserver::try_new(Arc::new(sink), DeliveryPolicy::default())
+    .expect("observer");
 let _ = observer.delivered();
 ```
 

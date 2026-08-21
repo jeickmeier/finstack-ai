@@ -10,8 +10,9 @@ use crate::records::policy::LimitReached;
 use crate::state::projection::MessageSeq;
 
 use super::super::types::{
-    CompletionIdentityHashEntryV1, ModelSettlementHashEntryV1, ResolutionIdentityHashEntryV6,
-    StageSettlementHashEntryV1, ToolCallIdentityHashRef, ToolSettlementHashEntryV2,
+    CompletionIdentityHashEntryV1, ExtensionSettlementHashEntryV7, ModelSettlementHashEntryV1,
+    ResolutionIdentityHashEntryV6, StageSettlementHashEntryV1, ToolCallIdentityHashRef,
+    ToolSettlementHashEntryV2,
 };
 use super::super::{KernelState, RunPhase};
 
@@ -20,9 +21,9 @@ use super::projections::{
     CancellationStateProjection, ChildRunPreparedProjection, CurrentTurnProjection,
     FinalResultRecordedProjection, InteractionTerminalProjection, LimitReachedProjection,
     LimitUsageProjection, OutputConfigurationProjection, OutputValidationFailedProjection,
-    PendingInteractionProjection, PendingModelEffectProjection, RetryStateProjection,
-    RunAcceptedProjection, RunSuspendedProjection, TerminalCandidateProjection,
-    TerminalStateProjection, ToolBatchClosedProjection,
+    PendingExtensionEffectProjection, PendingInteractionProjection, PendingModelEffectProjection,
+    RetryStateProjection, RunAcceptedProjection, RunSuspendedProjection,
+    TerminalCandidateProjection, TerminalStateProjection, ToolBatchClosedProjection,
 };
 
 #[derive(Serialize)]
@@ -413,6 +414,45 @@ impl<'a> KernelStateHashV6<'a> {
                 .last_interaction_terminal
                 .as_ref()
                 .map(InteractionTerminalProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct KernelStateHashV7<'a> {
+    #[serde(flatten)]
+    base: KernelStateHashV6<'a>,
+    pending_extension_effect: Option<PendingExtensionEffectProjection<'a>>,
+    extension_settlements: Vec<ExtensionSettlementHashEntryV7>,
+}
+
+impl<'a> KernelStateHashV7<'a> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_state(
+        state: &'a KernelState,
+        stage_settlements: Vec<StageSettlementHashEntryV1>,
+        model_settlements: Vec<ModelSettlementHashEntryV1>,
+        completion_identities: Vec<CompletionIdentityHashEntryV1>,
+        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
+        tool_settlements: Vec<ToolSettlementHashEntryV2>,
+        resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
+        extension_settlements: Vec<ExtensionSettlementHashEntryV7>,
+    ) -> Self {
+        Self {
+            base: KernelStateHashV6::from_state(
+                state,
+                stage_settlements,
+                model_settlements,
+                completion_identities,
+                tool_calls,
+                tool_settlements,
+                resolution_identities,
+            ),
+            pending_extension_effect: state
+                .pending_extension_effect
+                .as_ref()
+                .map(PendingExtensionEffectProjection::from),
+            extension_settlements,
         }
     }
 }

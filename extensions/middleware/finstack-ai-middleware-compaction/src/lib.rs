@@ -78,7 +78,7 @@ impl CompactionStrategy {
 /// Fields are private. Build a strategy with [`Self::sliding_window`],
 /// [`Self::large_tool_output`], or [`Self::summarize`]. Configuration
 /// cannot authorize a secondary model; runtime authority is owned by
-/// PR-112.
+/// compaction runtime-lock contract.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompactionConfig {
     strategy: CompactionStrategy,
@@ -171,7 +171,7 @@ impl CompactionConfig {
 
     /// Model-assisted summarize identity. Does not grant secondary-model
     /// authority; a first invoke without resume fails closed until the
-    /// PR-112 runtime lock is present.
+    /// compaction runtime-lock contract runtime lock is present.
     ///
     /// # Examples
     ///
@@ -266,7 +266,7 @@ impl CompactionMiddleware {
                         patch: 4,
                     },
                     configuration_digest,
-                    recovery: InvocationRecovery::Reconcile,
+                    recovery: InvocationRecovery::RecomputeSafe,
                 },
                 stages: StageMask::from_stages([Stage::BeforeModel]),
                 order: MiddlewareOrder {

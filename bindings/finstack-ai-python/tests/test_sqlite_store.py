@@ -1,4 +1,4 @@
-"""PR-078 SQLite durability, migration, and settlement-idempotency fixtures."""
+"""SQLite durability, migration, and settlement-idempotency fixtures."""
 
 from __future__ import annotations
 

@@ -7,8 +7,8 @@ kernel remains authoritative for `InteractionId` and effect identity.
 This crate is `publish = false` and is not a default dependency of
 `finstack-ai-native-examples`.
 
-Trust class: driver is [T1](../../docs/site/security-trust-levels.md);
-journal payloads are [T5](../../docs/site/security-trust-levels.md).
+Trust class: driver is T1;
+journal payloads are T5.
 In-process code is not isolated.
 
 Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`).

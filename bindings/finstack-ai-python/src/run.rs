@@ -17,7 +17,7 @@ use finstack_ai_kernel::{
 use finstack_ai_middleware_document_ingest::AttachmentIndex;
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3::types::{PyBytes, PyDict, PyList};
 
 use crate::agent::PyAgent;
 use crate::callbacks::normalize_pydantic_schema;
@@ -67,6 +67,21 @@ impl PyRun {
             Python::attach(|py| {
                 result_to_python_with_locator(py, result, Some(&locator), output_adapter)
             })
+        })
+    }
+
+    /// Snapshot bounded, redacted observer-delivery diagnostics.
+    #[pyo3(text_signature = "($self)")]
+    fn observer_diagnostics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let run = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let locator = run.locator().clone();
+            match run.observer_diagnostics().await {
+                Ok(diagnostics) => {
+                    Python::attach(|py| observer_diagnostics_to_python(py, &diagnostics))
+                }
+                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
+            }
         })
     }
 
@@ -229,6 +244,25 @@ impl PyRun {
             Ok(())
         })
     }
+}
+
+fn observer_diagnostics_to_python(
+    py: Python<'_>,
+    diagnostics: &finstack_ai::runtime::ObserverDiagnostics,
+) -> PyResult<Py<PyAny>> {
+    let recent = PyList::empty(py);
+    for diagnostic in diagnostics.recent.iter() {
+        let item = PyDict::new(py);
+        item.set_item("code", diagnostic.code)?;
+        item.set_item("detail", diagnostic.detail)?;
+        recent.append(item)?;
+    }
+
+    let snapshot = PyDict::new(py);
+    snapshot.set_item("total", diagnostics.total)?;
+    snapshot.set_item("dropped", diagnostics.dropped)?;
+    snapshot.set_item("recent", recent)?;
+    Ok(snapshot.into_any().unbind())
 }
 
 /// One in-memory run attachment staged at submit time.

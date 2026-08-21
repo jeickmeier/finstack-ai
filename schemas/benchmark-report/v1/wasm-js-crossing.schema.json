@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://finstack.ai/schemas/benchmark-report/v1/wasm-js-crossing.schema.json",
   "title": "WasmJsCrossingBenchmarkReport",
-  "description": "Separated WASM init, Agent create, scripted reducer, event-throughput, and host-callback measurements (PR-038).",
+  "description": "Separated WASM init, Agent create, scripted reducer, event-throughput, and host-callback measurements.",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CapabilityActivation, ComponentKind};
 
+use super::types::MAX_ITEMS;
 use super::{BUNDLE_SCHEMA_VERSION, BundleResolutionError};
 
 /// Exact bundle identity captured in a resolution lock.
@@ -140,6 +141,17 @@ impl ResolvedAgentLock {
             return Err(BundleResolutionError::Invalid {
                 message: Arc::from("unsupported_lock_schema_version"),
             });
+        }
+        for (field, len) in [
+            ("components", self.components.len()),
+            ("capabilities", self.capabilities.len()),
+            ("schema_digests", self.schema_digests.len()),
+        ] {
+            if len > MAX_ITEMS {
+                return Err(BundleResolutionError::Invalid {
+                    message: Arc::from(format!("lock_{field}_too_many_items")),
+                });
+            }
         }
         let mut components = BTreeSet::new();
         for component in self.components.iter() {

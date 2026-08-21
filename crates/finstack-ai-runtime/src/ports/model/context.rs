@@ -138,20 +138,10 @@ pub struct RunCallContext {
     pub locator: OperationLocator,
     /// Authorized principal projection.
     pub authorization: AuthorizationContext,
-    /// Committed effect identity — **except at a middleware stage boundary**.
+    /// Committed effect identity.
     ///
-    /// For every port that runs under a committed effect (Model, Tool, Context,
-    /// Artifact, Budget) this is that effect's journaled `EffectId` and may be
-    /// used as a journal key.
-    ///
-    /// A middleware stage boundary has no committed effect: no `KernelInput`
-    /// commits an `EffectKind::Middleware` `EffectRequested`, and stage
-    /// settlement emits only `StageOutcomeRecorded`. The chain driver therefore
-    /// fills this field with a deterministic, domain-separated **correlation
-    /// id** (`derived_stage_effect_id`) that names nothing in the journal. The
-    /// value is projected verbatim to WIT guests by `sanitize_call_context`
-    /// (`plugins/finstack-ai-wit/src/mapping.rs`), so a host or plugin that
-    /// looks it up as a committed effect is wrong.
+    /// This is the port call's journaled `EffectId`, including context-provider
+    /// and middleware invocations, and may be used as a durable correlation key.
     pub effect_id: EffectId,
     /// One-based execution attempt.
     pub attempt: u32,
@@ -203,6 +193,16 @@ pub struct ModelWarmupContext {
     pub deadline: Option<Timestamp>,
     /// Bounded non-secret construction metadata.
     pub metadata: Metadata,
+}
+
+impl Default for ModelWarmupContext {
+    fn default() -> Self {
+        Self {
+            cancellation: CancellationSignal::new(),
+            deadline: None,
+            metadata: Metadata::empty(),
+        }
+    }
 }
 
 /// Reconciliation context for the original effect.

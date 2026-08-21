@@ -15,40 +15,62 @@ name = "finstack_ai"
 path = "src/lib.rs"
 
 [features]
-default = ["native-tokio"]
+default = ["native-tokio", "linked-all"]
 native-tokio = [
     "finstack-ai-runtime/native-tokio",
-    "dep:finstack-ai-provider-openai",
-    "dep:finstack-ai-provider-openrouter",
-    "dep:finstack-ai-provider-anthropic",
-    "dep:finstack-ai-provider-gemini",
-    "dep:finstack-ai-provider-ollama",
     "dep:finstack-ai-remote-child",
-    "dep:finstack-ai-sandbox-e2b",
     "dep:finstack-ai-store-memory",
-    "dep:finstack-ai-tools-openrouter-media",
-    "dep:finstack-ai-tools-openai-media",
 ]
+provider-openai = ["native-tokio", "dep:finstack-ai-provider-openai"]
+provider-openrouter = ["native-tokio", "dep:finstack-ai-provider-openrouter"]
+provider-anthropic = ["native-tokio", "dep:finstack-ai-provider-anthropic"]
+provider-gemini = ["native-tokio", "dep:finstack-ai-provider-gemini"]
+provider-ollama = ["native-tokio", "dep:finstack-ai-provider-ollama"]
+tool-openrouter-media = ["native-tokio", "dep:finstack-ai-tools-openrouter-media"]
+tool-openai-media = ["native-tokio", "dep:finstack-ai-tools-openai-media"]
+tool-e2b = ["native-tokio", "dep:finstack-ai-sandbox-e2b"]
+linked-providers = [
+    "provider-openai",
+    "provider-openrouter",
+    "provider-anthropic",
+    "provider-gemini",
+    "provider-ollama",
+]
+linked-tools = ["tool-openrouter-media", "tool-openai-media", "tool-e2b"]
+linked-all = ["linked-providers", "linked-tools"]
+vendored-tls = [
+    "finstack-ai-provider-openai?/vendored-tls",
+    "finstack-ai-provider-openrouter?/vendored-tls",
+    "finstack-ai-provider-anthropic?/vendored-tls",
+    "finstack-ai-provider-gemini?/vendored-tls",
+    "finstack-ai-provider-ollama?/vendored-tls",
+    "finstack-ai-sandbox-e2b?/vendored-tls",
+    "finstack-ai-tools-openrouter-media?/vendored-tls",
+    "finstack-ai-tools-openai-media?/vendored-tls",
+]
+# The linked provider aggregate is intentionally explicit. Native runtime
+# users can depend on the facade without compiling every HTTP provider.
 wasm-host = ["finstack-ai-runtime/wasm-host"]
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
-finstack-ai-provider-openai = { workspace = true, optional = true, features = ["vendored-tls"] }
-finstack-ai-provider-openrouter = { workspace = true, optional = true, features = ["vendored-tls"] }
-finstack-ai-provider-anthropic = { workspace = true, optional = true, features = ["vendored-tls"] }
-finstack-ai-provider-gemini = { workspace = true, optional = true, features = ["vendored-tls"] }
-finstack-ai-provider-ollama = { workspace = true, optional = true, features = ["vendored-tls"] }
+finstack-ai-provider-openai = { workspace = true, optional = true }
+finstack-ai-provider-openrouter = { workspace = true, optional = true }
+finstack-ai-provider-anthropic = { workspace = true, optional = true }
+finstack-ai-provider-gemini = { workspace = true, optional = true }
+finstack-ai-provider-ollama = { workspace = true, optional = true }
 finstack-ai-remote-child = { workspace = true, optional = true }
-finstack-ai-sandbox-e2b = { workspace = true, optional = true, features = ["vendored-tls"] }
+finstack-ai-sandbox-e2b = { workspace = true, optional = true }
 finstack-ai-store-memory = { workspace = true, optional = true }
-finstack-ai-tools-openrouter-media = { workspace = true, optional = true, features = ["vendored-tls"] }
-finstack-ai-tools-openai-media = { workspace = true, optional = true, features = ["vendored-tls"] }
+finstack-ai-tools-openrouter-media = { workspace = true, optional = true }
+finstack-ai-tools-openai-media = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_json_canonicalizer = { workspace = true }
 serde_path_to_error = { workspace = true }
 thiserror = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 finstack-ai-store-memory = { workspace = true }

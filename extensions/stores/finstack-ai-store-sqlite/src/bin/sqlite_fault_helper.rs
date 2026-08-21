@@ -1,4 +1,4 @@
-//! Process-kill helper for PR-040-A02. Not a public product surface.
+//! Process-kill helper for `SQLite` process-kill fault case. Not a public product surface.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::float_cmp)]

@@ -20,7 +20,7 @@ Please include:
 | --- | --- |
 | Security response owner | `me@jeickmeier.com` |
 
-This ownership is consistent with the [Security and Threat Model](docs/planning/06-finstack-ai-security-threat-model.md) section 14 vulnerability and incident response requirements.
+This owner is responsible for vulnerability triage, incident coordination, and disclosure.
 
 ## Severity rubric
 
@@ -42,8 +42,8 @@ Severity may be raised or lowered after triage when impact, exploitability, or d
 ## Supported versions
 
 Supported-version policy for tagged local `1.0.0` and the `0.1.0`
-preview line. G8 passed via `G8-D-general-availability-a889a29a3f54`.
-Local tag `v1.0.0` is `6e9ec39fae89a70f696ee740de2d2094670cba3e`.
+preview line. Local tag `v1.0.0` is
+`6e9ec39fae89a70f696ee740de2d2094670cba3e`.
 The last pushed GitHub tag remains `v0.1.0`. crates.io / PyPI / npm
 stay unpublished. This is not LTS.
 
@@ -54,15 +54,26 @@ stay unpublished. This is not LTS.
 | `0.1.x` preview (tag `v0.1.0`) | Security-only for 90 days after 2026-08-15 |
 | Historical unpublished snapshots (`0.0.4` and earlier) | Not supported |
 
+## Trust boundaries
+
+Trust labels used throughout the repository describe where authority executes:
+
+| Label | Boundary |
+| --- | --- |
+| T0 | Deterministic kernel semantics; no I/O or ambient authority |
+| T1 | Trusted native Rust running in-process with host-granted authority |
+| T2 | Trusted host-language callbacks or adapters running in the process/page |
+| T3 | Wasmtime component guest constrained by explicit host capabilities |
+| T4 | Authenticated remote principal, service, or sandbox boundary |
+| T5 | Untrusted content, model output, journal payload, or external data |
+
+T1 and T2 code is not sandboxed. Content and model output never grant
+authority. Privileged actions require an authenticated principal, tenant or
+scope, exact target, and action, and fail closed when a binding is absent or
+mismatched.
+
 ## Related documents
 
-- [Support windows](docs/site/support.md)
-- [Trust levels](docs/site/security-trust-levels.md)
-- [Security deployment gates](docs/site/security-deployment.md)
-- [Threat Model G7 review](docs/implementation/threat-model-g7-review.md)
-- [Threat Model G8 review](docs/implementation/threat-model-g8-review.md)
-- [Security advisories](docs/security/advisories/README.md)
-- [Security and Threat Model](docs/planning/06-finstack-ai-security-threat-model.md)
-- [GOVERNANCE.md](GOVERNANCE.md)
-- [Public RFCs](docs/rfcs/README.md)
+- [Repository governance](GOVERNANCE.md)
+- [Engineering rules](.agents/rules/01-engineering-conformance.md)
 - Dual-license: [MIT](licenses/LICENSE-MIT) OR [Apache-2.0](licenses/LICENSE-APACHE)

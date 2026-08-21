@@ -10,13 +10,13 @@ use finstack_ai_kernel::{
     ErrorCategory, ErrorDescriptor, Id, IdTag, KernelInput, LaneTag, Message, MessageRole,
     Metadata, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordEnvelope,
     ReducerStageOutcome, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
-    RunRelationKind, RunSecurityContext, Sensitivity, SessionTag, Stage, StageCursor, StageSettled,
-    TextBlock, Timestamp, ToolId, TransitionEnv, Version,
+    RunRelationKind, RunSecurityContext, RunTag, Sensitivity, SessionTag, Stage, StageCursor,
+    StageSettled, TextBlock, Timestamp, ToolId, TransitionEnv, Version,
 };
 
 use super::apply::{apply_context_prepared, apply_fold, apply_model_draft};
 use super::codec::{canonical_draft, canonical_message};
-use super::driver::{folds_at, settle_facade_stage};
+use super::driver::{component_input, folds_at, run_stage_chain, settle_facade_stage};
 use super::input::{stage_input, trailing_role_run};
 use super::submit::{folded_allocation_error, limit_crossing_allocation};
 use super::tool_batch::tool_batch_policy;

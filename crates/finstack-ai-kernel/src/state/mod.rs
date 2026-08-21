@@ -31,16 +31,17 @@ use crate::records::tools::{
 use crate::reducer::KernelError;
 
 use hash_entries::{
-    completion_hash_entries, model_hash_entries, resolution_hash_entries, stage_hash_entries,
-    tool_call_hash_entries, tool_settlement_hash_entries,
+    completion_hash_entries, extension_hash_entries, model_hash_entries, resolution_hash_entries,
+    stage_hash_entries, tool_call_hash_entries, tool_settlement_hash_entries,
 };
 use hash_projection::{KernelStateHashV1, KernelStateHashV2};
 
 pub use env::TransitionEnv;
 pub use types::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn,
-    InteractionTerminal, InteractionTerminalOutcome, ModelSettlementFingerprint,
-    ModelSettlementKind, PendingInteraction, PendingModelEffect, ResolutionIdentity, RetryState,
+    ExtensionSettlementFingerprint, ExtensionSettlementKind, InteractionTerminal,
+    InteractionTerminalOutcome, ModelSettlementFingerprint, ModelSettlementKind,
+    PendingExtensionEffect, PendingInteraction, PendingModelEffect, ResolutionIdentity, RetryState,
     RunPhase, TerminalCandidate, TerminalState,
 };
 
@@ -74,12 +75,16 @@ pub struct KernelState {
     pub messages: Arc<Vec<Message>>,
     /// Outstanding model effect.
     pub pending_model_effect: Option<PendingModelEffect>,
+    /// Outstanding context-provider or middleware effect.
+    pub pending_extension_effect: Option<PendingExtensionEffect>,
     /// Candidate gated by `before_finalize`.
     pub terminal_candidate: Option<TerminalCandidate>,
     /// Replay-derived aggregate stage settlement index.
     pub stage_settlements: BTreeMap<StageCursor, Digest>,
     /// Replay-derived terminal model settlement index.
     pub model_settlements: BTreeMap<EffectId, ModelSettlementFingerprint>,
+    /// Replay-derived terminal extension settlement index.
+    pub extension_settlements: BTreeMap<EffectId, ExtensionSettlementFingerprint>,
     /// Replay-derived external completion identity index.
     pub completion_identities: BTreeMap<Arc<str>, CompletionIdentity>,
     /// Outstanding typed interaction.
@@ -161,9 +166,11 @@ impl Default for KernelState {
             current_turn: None,
             messages: Arc::new(Vec::new()),
             pending_model_effect: None,
+            pending_extension_effect: None,
             terminal_candidate: None,
             stage_settlements: BTreeMap::new(),
             model_settlements: BTreeMap::new(),
+            extension_settlements: BTreeMap::new(),
             completion_identities: BTreeMap::new(),
             pending_interaction: None,
             resolution_identities: BTreeMap::new(),
@@ -194,7 +201,7 @@ impl KernelState {
     /// Compute the versioned JCS state digest under domain `kernel-state`.
     ///
     /// The projection schema is selected by [`Self::state_version`] and spans
-    /// versions 1–6.
+    /// versions 1–7.
     ///
     /// # Errors
     ///
@@ -275,7 +282,7 @@ impl KernelState {
                 ),
                 &mut writer,
             )
-        } else {
+        } else if self.state_version == 6 {
             serde_json_canonicalizer::to_writer(
                 &hash_projection::KernelStateHashV6::from_state(
                     self,
@@ -285,6 +292,20 @@ impl KernelState {
                     tool_call_hash_entries(&self.tool_calls),
                     tool_settlement_hash_entries(&self.tool_settlements),
                     resolution_hash_entries(&self.resolution_identities),
+                ),
+                &mut writer,
+            )
+        } else {
+            serde_json_canonicalizer::to_writer(
+                &hash_projection::KernelStateHashV7::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                    resolution_hash_entries(&self.resolution_identities),
+                    extension_hash_entries(&self.extension_settlements),
                 ),
                 &mut writer,
             )

@@ -494,7 +494,7 @@ impl finstack_ai::ResolvedRunPlan
 pub fn finstack_ai::ResolvedRunPlan::context_providers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>]
 pub fn finstack_ai::ResolvedRunPlan::middleware(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>]
 pub fn finstack_ai::ResolvedRunPlan::middleware_chain(&self) -> &alloc::sync::Arc<finstack_ai_runtime::ports::middleware::chain::ResolvedMiddlewareChain>
-pub fn finstack_ai::ResolvedRunPlan::model(&self) -> &finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::model::port::Model>
+pub fn finstack_ai::ResolvedRunPlan::model(&self) -> &finstack_ai::ResolvedComponent<finstack_ai_runtime::ports::model::port::ReadyModel>
 pub fn finstack_ai::ResolvedRunPlan::observers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::observer::Observer>]
 pub fn finstack_ai::ResolvedRunPlan::store(&self) -> &finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>
 pub fn finstack_ai::ResolvedRunPlan::toolsets(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>]
@@ -1019,7 +1019,6 @@ pub fn finstack_ai::VersionRequirement::deserialize<__D>(__D) -> core::result::R
 pub struct finstack_ai::Agent
 impl finstack_ai::Agent
 pub async fn finstack_ai::Agent::anthropic(finstack_ai::AnthropicAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
-pub async fn finstack_ai::Agent::e2b_sandbox(finstack_ai::E2bSandboxAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::gateway(finstack_ai::GatewayAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::gemini(finstack_ai::GeminiAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::ollama(finstack_ai::OllamaAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
@@ -1098,6 +1097,7 @@ pub fn finstack_ai::AgentRun::close_events(&self)
 pub async fn finstack_ai::AgentRun::list_interactions(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::effects::interaction::InteractionRequest>, finstack_ai::AgentRunError>
 pub fn finstack_ai::AgentRun::locator(&self) -> &finstack_ai_kernel::records::run::external::OperationLocator
 pub async fn finstack_ai::AgentRun::next_event_batch(&self) -> core::result::Result<core::option::Option<finstack_ai_runtime::exec::event_hub::EventBatch>, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::observer_diagnostics(&self) -> core::result::Result<finstack_ai_runtime::ports::observer::ObserverDiagnostics, finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::resolve_interaction(&self, finstack_ai_kernel::effects::interaction::InteractionResolution) -> core::result::Result<(), finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::result(&self) -> core::result::Result<finstack_ai::AgentRunOutput, finstack_ai::AgentRunError>
 pub fn finstack_ai::AgentRun::session(&self) -> finstack_ai::Session
@@ -1358,12 +1358,6 @@ pub fn finstack_ai::ComponentAlias::fmt(&self, &mut core::fmt::Formatter<'_>) ->
 impl core::hash::Hash for finstack_ai::ComponentAlias
 pub fn finstack_ai::ComponentAlias::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::StructuralPartialEq for finstack_ai::ComponentAlias
-pub struct finstack_ai::E2bSandboxAgentSpec
-pub finstack_ai::E2bSandboxAgentSpec::api_key: alloc::string::String
-pub finstack_ai::E2bSandboxAgentSpec::common: finstack_ai::LinkedCommon
-pub finstack_ai::E2bSandboxAgentSpec::endpoint: core::option::Option<alloc::string::String>
-pub finstack_ai::E2bSandboxAgentSpec::model: alloc::string::String
-pub finstack_ai::E2bSandboxAgentSpec::template: core::option::Option<alloc::string::String>
 pub struct finstack_ai::ExtensionDescriptor
 pub finstack_ai::ExtensionDescriptor::id: finstack_ai_kernel::primitives::ids::ComponentId
 pub finstack_ai::ExtensionDescriptor::trust: finstack_ai::ExtensionTrust
@@ -1412,7 +1406,7 @@ pub fn finstack_ai::InstructionSpec::deserialize<D>(D) -> core::result::Result<S
 pub struct finstack_ai::Lane
 impl finstack_ai::Lane
 pub async fn finstack_ai::Lane::append_text(&self, &str) -> core::result::Result<finstack_ai_kernel::primitives::ids::EntryId, finstack_ai_runtime::services::session::SessionError>
-pub async fn finstack_ai::Lane::cancel(&self) -> core::result::Result<(), finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Lane::cancel(&self, finstack_ai_kernel::primitives::identity::PrincipalRef, finstack_ai_kernel::primitives::identity::AuthorizationEvidence) -> core::result::Result<(), finstack_ai_runtime::services::session::SessionError>
 pub async fn finstack_ai::Lane::inspect(&self) -> core::result::Result<finstack_ai_runtime::services::session::LaneInspect, finstack_ai_runtime::services::session::SessionError>
 pub const fn finstack_ai::Lane::lane_id(&self) -> finstack_ai_kernel::primitives::ids::LaneId
 pub async fn finstack_ai::Lane::navigate(&self, finstack_ai_kernel::primitives::ids::EntryId) -> core::result::Result<(), finstack_ai_runtime::services::session::SessionError>
@@ -1740,7 +1734,7 @@ impl finstack_ai::ResolvedRunPlan
 pub fn finstack_ai::ResolvedRunPlan::context_providers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>]
 pub fn finstack_ai::ResolvedRunPlan::middleware(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>]
 pub fn finstack_ai::ResolvedRunPlan::middleware_chain(&self) -> &alloc::sync::Arc<finstack_ai_runtime::ports::middleware::chain::ResolvedMiddlewareChain>
-pub fn finstack_ai::ResolvedRunPlan::model(&self) -> &finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::model::port::Model>
+pub fn finstack_ai::ResolvedRunPlan::model(&self) -> &finstack_ai::ResolvedComponent<finstack_ai_runtime::ports::model::port::ReadyModel>
 pub fn finstack_ai::ResolvedRunPlan::observers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::observer::Observer>]
 pub fn finstack_ai::ResolvedRunPlan::store(&self) -> &finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>
 pub fn finstack_ai::ResolvedRunPlan::toolsets(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>]

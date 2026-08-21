@@ -1,5 +1,5 @@
-//! Host-supplied media-blob resolution for provider leaves (see the
-//! media-resolver ADR). Not a registered port: hosts hand resolvers to
+//! Host-supplied media-blob resolution for model leaves. This is not a
+//! registered port: hosts hand resolvers to
 //! provider configs, mirroring [`super::credentials::CredentialStore`].
 
 use std::collections::BTreeMap;

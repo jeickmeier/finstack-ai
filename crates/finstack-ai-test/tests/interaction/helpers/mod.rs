@@ -1,4 +1,4 @@
-//! PR-044 typed-interaction crash, router, and envelope proofs.
+//! interaction contract typed-interaction crash, router, and envelope proofs.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -397,6 +397,13 @@ pub(crate) async fn spawn_owner(
     clock_ms: i64,
     random: u64,
 ) -> Result<RunTaskOwner, RunHandleError> {
+    let model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(model)
+            .await
+            .map_err(|error| RunHandleError::Model {
+                code: Arc::from(error.code()),
+            })?,
+    );
     Box::pin(RunTaskOwner::spawn_with_model_and_tools(
         coordinator,
         RunTaskConfig {
@@ -412,8 +419,6 @@ pub(crate) async fn spawn_owner(
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {

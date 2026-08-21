@@ -8,9 +8,9 @@ use finstack_ai_kernel::{
     ContentBlock, ErrorCategory, MediaRef, Message, MessageRole, OutputSpec, RawJson,
     SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId,
 };
+use finstack_ai_provider_wire::GEMINI_CONTINUATION_PROVIDER;
 use finstack_ai_runtime::{
-    GEMINI_CONTINUATION_PROVIDER, ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec,
-    thinking_level_budget,
+    ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec, thinking_level_budget,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

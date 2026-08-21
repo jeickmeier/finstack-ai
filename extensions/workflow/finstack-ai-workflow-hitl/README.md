@@ -15,10 +15,8 @@ this crate closes an interaction that the journal has not actually
 settled, and a row can always be reconciled against the worker's wake
 index if it drifts.
 
-This crate is a T1 native mapping over `finstack-ai-workflow-worker`. It
-is not isolated. See
-[Technical Design §2](../../../docs/planning/03-finstack-ai-technical-design.md)
-for ownership boundaries.
+This crate is a trusted native mapping over `finstack-ai-workflow-worker` and
+is not isolated. The kernel journal remains the semantic authority.
 
 ## Lifecycle
 

@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Explicit-route remote AgentInvoker over PR-058 framing"
+description = "Explicit-route remote AgentInvoker over  framing"
 readme = "README.md"
 
 [dependencies]

@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Digest, RawJson};
-use finstack_ai_runtime::{ContextProvider, JournalStore, Middleware, Model, Observer, Toolset};
+use finstack_ai_runtime::{
+    ContextProvider, JournalStore, Middleware, Model, Observer, ReadyModel, Toolset,
+};
 
 use super::errors::{RegisteredComponentDescriptor, RegistrationError, RegistrationEvent};
 use super::extension::{Extension, ExtensionDescriptor};
@@ -28,7 +30,7 @@ pub(super) enum RegistrationSlot<T: ?Sized> {
     Ready {
         component: ReadyComponent<T>,
         factory_configuration: Option<FactoryConfiguration>,
-        model_warmed: bool,
+        ready_model: Option<Arc<ReadyModel>>,
     },
     Factory(Arc<dyn ComponentFactory<T>>),
 }
@@ -39,11 +41,11 @@ impl<T: ?Sized> Clone for RegistrationSlot<T> {
             Self::Ready {
                 component,
                 factory_configuration,
-                model_warmed,
+                ready_model,
             } => Self::Ready {
                 component: component.clone(),
                 factory_configuration: *factory_configuration,
-                model_warmed: *model_warmed,
+                ready_model: ready_model.clone(),
             },
             Self::Factory(factory) => Self::Factory(Arc::clone(factory)),
         }
@@ -166,7 +168,7 @@ impl Registrar {
                 slot: RegistrationSlot::Ready {
                     component,
                     factory_configuration: None,
-                    model_warmed: false,
+                    ready_model: None,
                 },
             })
         })
@@ -211,7 +213,7 @@ impl Registrar {
                 slot: RegistrationSlot::Ready {
                     component,
                     factory_configuration: None,
-                    model_warmed: false,
+                    ready_model: None,
                 },
             })
         })
@@ -256,7 +258,7 @@ impl Registrar {
                 slot: RegistrationSlot::Ready {
                     component,
                     factory_configuration: None,
-                    model_warmed: false,
+                    ready_model: None,
                 },
             })
         })
@@ -301,7 +303,7 @@ impl Registrar {
                 slot: RegistrationSlot::Ready {
                     component,
                     factory_configuration: None,
-                    model_warmed: false,
+                    ready_model: None,
                 },
             })
         })
@@ -346,7 +348,7 @@ impl Registrar {
                 slot: RegistrationSlot::Ready {
                     component,
                     factory_configuration: None,
-                    model_warmed: false,
+                    ready_model: None,
                 },
             })
         })
@@ -391,7 +393,7 @@ impl Registrar {
                 slot: RegistrationSlot::Ready {
                     component,
                     factory_configuration: None,
-                    model_warmed: false,
+                    ready_model: None,
                 },
             })
         })

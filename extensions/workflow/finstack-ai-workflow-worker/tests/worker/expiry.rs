@@ -261,6 +261,12 @@ async fn park_on_approval(seed: u64) -> Parked {
     let (toolset, catalog) = approval_catalog(&tools);
     let journal = memory_store();
     let model = approval_model();
+    let model_port: Arc<dyn Model> = model.clone();
+    let ready_model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(model_port)
+            .await
+            .expect("model readiness"),
+    );
     let clock = ExternalClock::new(timestamp(2_500));
     let owner = RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(journal.clone()),
@@ -277,8 +283,6 @@ async fn park_on_approval(seed: u64) -> Parked {
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -287,7 +291,7 @@ async fn park_on_approval(seed: u64) -> Parked {
             global_max_concurrency: 2,
             stream_limits: ToolStreamLimits::default(),
         },
-        Arc::clone(&model),
+        ready_model,
         locked_profile(),
         Arc::clone(&catalog),
         clock.clone(),

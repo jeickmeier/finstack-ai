@@ -15,7 +15,7 @@ fn external_outcome_vocabulary_rejects_cancelled_and_future_variants() {
     ] {
         assert!(
             serde_json::from_value::<ExternalEffectOutcome>(value).is_err(),
-            "non-PR-009 external outcome was accepted"
+            "non-model-only reducer baseline external outcome was accepted"
         );
     }
 }

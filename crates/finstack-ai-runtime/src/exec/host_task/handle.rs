@@ -5,6 +5,7 @@ use finstack_ai_kernel::{KernelInput, TransitionEnv};
 
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport, TimerDiagnostics};
 use crate::{CommitOutcome, EventSubscription, EventSubscriptionConfig, EventSubscriptionError};
+use crate::{ObserverDiagnostic, ObserverDiagnostics};
 
 use super::oneshot::oneshot;
 use super::shared::{RunCommand, Shared};
@@ -127,6 +128,22 @@ impl RunHandle {
                 .shared
                 .timer_backward_clock_clamped
                 .load(Ordering::Acquire),
+        }
+    }
+
+    /// Snapshot bounded, redacted observer-delivery diagnostics.
+    #[must_use]
+    pub fn observer_diagnostics(&self) -> ObserverDiagnostics {
+        self.shared.observer_diagnostics.lock().map_or_else(
+            |_| ObserverDiagnostics::unavailable(),
+            |diagnostics| diagnostics.snapshot(),
+        )
+    }
+
+    /// Retain one non-semantic observer diagnostic.
+    pub(crate) fn record_observer_diagnostic(&self, diagnostic: ObserverDiagnostic) {
+        if let Ok(mut diagnostics) = self.shared.observer_diagnostics.lock() {
+            diagnostics.record(diagnostic);
         }
     }
 

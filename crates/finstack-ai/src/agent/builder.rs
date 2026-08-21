@@ -470,12 +470,20 @@ async fn resolve_model_variants(
             )
             .await
             .map_err(invalid_config)?;
+        let prepared = Agent::try_from_resolved(Arc::new(resolved)).and_then(|mut variant| {
+            variant.attach_capability_surface(
+                Arc::clone(&agent.capability_specs),
+                agent.capability_index.clone(),
+                agent.activation_host.clone(),
+            )?;
+            Ok(Arc::new(variant))
+        });
         variants.push(ModelCapabilityVariant {
             entry: CapabilityCatalogEntry {
                 id: capability.id.clone(),
                 description: Arc::clone(&capability.description),
             },
-            resolved: Arc::new(resolved),
+            prepared,
         });
     }
     Ok(variants)

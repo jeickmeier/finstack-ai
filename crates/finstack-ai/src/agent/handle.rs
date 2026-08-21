@@ -30,7 +30,8 @@ use finstack_ai_runtime::native_driver as driver;
 #[derive(Clone)]
 pub(super) struct ModelCapabilityVariant {
     pub(super) entry: CapabilityCatalogEntry,
-    pub(super) resolved: Arc<ResolvedAgent>,
+    // Cache both the immutable catalog and any deterministic preparation failure.
+    pub(super) prepared: Result<Arc<Agent>, AgentRunError>,
 }
 
 /// Immutable native facade over one fully resolved agent.
@@ -54,6 +55,93 @@ pub struct Agent {
 pub(super) struct StructuredOutputConfig {
     pub(super) schema_ref: SchemaRef,
     pub(super) validator: Arc<dyn ToolValidator>,
+}
+
+fn prepare_tool_catalog(resolved: &ResolvedAgent) -> Result<ResolvedToolCatalog, AgentRunError> {
+    let plan = resolved.run_plan();
+    let lock = resolved.lock().ok_or_else(|| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "native Agent requires an exact resolved lock",
+        )
+    })?;
+    let registrations = plan
+        .toolsets()
+        .iter()
+        .map(|component| {
+            let toolset = Arc::clone(component.handle());
+            let descriptor = component.descriptor();
+            let locked = lock
+                .components
+                .iter()
+                .filter(|entry| {
+                    entry.component.id() == descriptor.component.id()
+                        && entry.kind == crate::LockedComponentKind::Toolset
+                })
+                .collect::<Vec<_>>();
+            if locked.len() != 1 || locked[0].component.version() != descriptor.component.version()
+            {
+                return Err(AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "toolset invocation is missing an exact lock component",
+                ));
+            }
+            let invocation = ComponentInvocation {
+                component: descriptor.component.id().clone(),
+                version: descriptor.component.version().ok_or_else(|| {
+                    AgentRunError::configuration(
+                        AGENT_RUN_INVALID_CONFIGURATION,
+                        "toolset invocation component version is missing",
+                    )
+                })?,
+                configuration_digest: locked[0]
+                    .config_digest
+                    .unwrap_or_else(|| Digest::raw_json(b"{}")),
+                recovery: InvocationRecovery::RecomputeSafe,
+            };
+            let policies = toolset
+                .tools()
+                .iter()
+                .map(|tool| {
+                    let approval = match tool.approval.requirement {
+                        finstack_ai_runtime::ApprovalRequirement::NotRequired => {
+                            ToolPolicyDecision::Allow
+                        }
+                        finstack_ai_runtime::ApprovalRequirement::Required
+                        | finstack_ai_runtime::ApprovalRequirement::Policy => {
+                            ToolPolicyDecision::RequireApproval
+                        }
+                    };
+                    (
+                        tool.id.clone(),
+                        ToolExecutionPolicy {
+                            failure_policy: ToolFailurePolicy::ReturnToModel,
+                            approval,
+                            max_concurrency: 4,
+                        },
+                    )
+                })
+                .collect();
+            let components = toolset
+                .tools()
+                .iter()
+                .map(|tool| (tool.id.clone(), invocation.clone()))
+                .collect();
+            Ok(ToolsetRegistration {
+                toolset,
+                policies,
+                components,
+            })
+        })
+        .collect::<Result<Vec<_>, AgentRunError>>()?;
+    ResolvedToolCatalog::try_new(
+        registrations,
+        &BTreeMap::new(),
+        &JsonSchemaToolValidatorCompiler,
+    )
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })
 }
 
 impl Agent {
@@ -101,65 +189,7 @@ impl Agent {
                 "native Agent requires a bundle-resolved specification and lock",
             ));
         }
-        let plan = resolved.run_plan();
-        let registrations = plan
-            .toolsets()
-            .iter()
-            .map(|component| {
-                let toolset = Arc::clone(component.handle());
-                let invocation = ComponentInvocation {
-                    component: component.descriptor().component.id().clone(),
-                    version: component
-                        .descriptor()
-                        .component
-                        .version()
-                        .unwrap_or(super::PREVIEW_ENGINE_VERSION),
-                    configuration_digest: Digest::raw_json(b"{}"),
-                    recovery: InvocationRecovery::RecomputeSafe,
-                };
-                let policies = toolset
-                    .tools()
-                    .iter()
-                    .map(|tool| {
-                        let approval = match tool.approval.requirement {
-                            finstack_ai_runtime::ApprovalRequirement::NotRequired => {
-                                ToolPolicyDecision::Allow
-                            }
-                            finstack_ai_runtime::ApprovalRequirement::Required
-                            | finstack_ai_runtime::ApprovalRequirement::Policy => {
-                                ToolPolicyDecision::RequireApproval
-                            }
-                        };
-                        (
-                            tool.id.clone(),
-                            ToolExecutionPolicy {
-                                failure_policy: ToolFailurePolicy::ReturnToModel,
-                                approval,
-                                max_concurrency: 4,
-                            },
-                        )
-                    })
-                    .collect();
-                let components = toolset
-                    .tools()
-                    .iter()
-                    .map(|tool| (tool.id.clone(), invocation.clone()))
-                    .collect();
-                ToolsetRegistration {
-                    toolset,
-                    policies,
-                    components,
-                }
-            })
-            .collect::<Vec<_>>();
-        let tools = ResolvedToolCatalog::try_new(
-            registrations,
-            &BTreeMap::new(),
-            &JsonSchemaToolValidatorCompiler,
-        )
-        .map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
+        let tools = prepare_tool_catalog(&resolved)?;
         Ok(Self {
             resolved,
             tools: Arc::new(tools),
@@ -205,12 +235,12 @@ impl Agent {
     ) -> Result<(), AgentRunError> {
         for provider in self.resolved.run_plan().context_providers() {
             let component_id = provider.descriptor().component.id();
-            let Some(owner) = index.owners().get(component_id) else {
+            let Some(owners) = index.owners().get(component_id) else {
                 continue;
             };
-            let untrusted = specs
-                .iter()
-                .any(|spec| spec.id == *owner && spec.activation == CapabilityActivation::Model);
+            let untrusted = specs.iter().any(|spec| {
+                owners.contains(&spec.id) && spec.activation == CapabilityActivation::Model
+            });
             if untrusted
                 && provider
                     .handle()
@@ -473,12 +503,8 @@ impl Agent {
                     format!("unknown model capability {capability}"),
                 )
             })?;
-        let mut agent = Self::try_from_resolved(Arc::clone(&variant.resolved))?;
-        agent.attach_capability_surface(
-            Arc::clone(&self.capability_specs),
-            self.capability_index.clone(),
-            self.activation_host.clone(),
-        )?;
+        let prepared = variant.prepared.as_ref().map_err(AgentRunError::clone)?;
+        let mut agent = prepared.as_ref().clone();
         agent.structured_output.clone_from(&self.structured_output);
         Ok(agent)
     }
@@ -496,6 +522,11 @@ impl Agent {
     ///
     /// Returns a stable configuration, runtime, cancellation, or timeout error.
     pub async fn run(&self, request: AgentRunRequest) -> Result<AgentRunOutput, AgentRunError> {
-        self.start(request)?.result().await
+        let run = self.start(request)?;
+        // The convenience API returns only the terminal output, so no caller can
+        // consume its interactive event stream. Close that subscription before
+        // waiting to keep durable event delivery from backpressuring execution.
+        run.close_events();
+        run.result().await
     }
 }

@@ -186,6 +186,17 @@ pub(super) fn apply_record(
             {
                 state.pending_model_effect = None;
             }
+            if state
+                .pending_extension_effect
+                .as_ref()
+                .is_some_and(|pending| {
+                    reconciled
+                        .completed_effects
+                        .contains(&pending.requested.effect_id())
+                })
+            {
+                state.pending_extension_effect = None;
+            }
             if let Some(batch) = state.active_tool_batch.as_mut() {
                 super::super::tool::buffer_reconciled_tool_closures(
                     batch,
@@ -451,6 +462,16 @@ pub(super) fn apply_record(
             }
             if cancelled.output_contract().kind == EffectOutputKind::TimerFiring {
                 apply_timer_effect_cancelled(state, cancelled)?;
+                return Ok(());
+            }
+            if let Some(pending) = state.pending_extension_effect.as_ref()
+                && pending.requested.effect_id() == cancelled.effect_id()
+            {
+                cancelled
+                    .validate_against(&pending.requested)
+                    .map_err(|_| KernelError::InvalidRecordOrder)?;
+                state.pending_extension_effect = None;
+                state.state_version = state.state_version.max(7);
                 return Ok(());
             }
             if let Some(pending) = state.pending_model_effect.as_ref()

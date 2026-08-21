@@ -1,7 +1,7 @@
 # Python SQLite compatibility fixtures
 
-PR-078 binding fixtures for the PR-048 migration and settlement-idempotency
-subset. Rust remains the semantic owner. Python opens the store through
+Binding fixtures for migration and settlement-idempotency behavior. Rust
+remains the semantic owner. Python opens the store through
 `Agent.from_python(..., sqlite_path=..., sqlite_durability=...)`.
 
 - `v1/migration/valid--open-user-version-1.json` — empty `user_version` 0

@@ -1,6 +1,6 @@
 # public-rust-api fixtures
 
-Compatibility corpus for public Rust kernel and runtime value types (PR-006–PR-015).
+Compatibility corpus for public Rust kernel and runtime value types (–).
 
 Layout:
 

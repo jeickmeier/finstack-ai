@@ -23,7 +23,7 @@ const ALLOWED_PERMISSIONS: [&str; 8] = [
 ];
 const IDENTITY_PREFIX: &str = "finstack.plugin.";
 
-/// Optional signature metadata stored on the manifest. Host-side verify is PR-052.
+/// Optional signature metadata stored on the manifest. Host-side verify is signature-verification contract.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginSignature {

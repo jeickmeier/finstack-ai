@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Baseline vs patch-line checksum pair (PR-065-A04)."""
+"""Verify a baseline versus patch-line checksum pair without publishing."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_stage import REPO_ROOT, checksum_text, sha256, stage
 
-WORK = REPO_ROOT / "target" / "pr-065-hotfix"
-RECORD = REPO_ROOT / "docs" / "implementation" / "artifacts" / "pr-065"
+WORK = REPO_ROOT / "target" / "release-staging" / "hotfix"
+RECORD = WORK / "records"
 PINNED = "crate-package-lists/finstack-ai.list"
 
 
@@ -27,7 +27,7 @@ def main() -> int:
         label="1.0.0-hotfix",
         extra={
             "hotfix-line.txt": (
-                "PR-065 patch-line rehearsal. Consumers pin SHA256SUMS-B. "
+                "Patch-line rehearsal. Consumers pin SHA256SUMS-B. "
                 "Maintainers would publish H as the next patch. "
                 "Do not yank, publish, or tag from this rehearsal.\n"
             )

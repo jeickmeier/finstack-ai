@@ -825,7 +825,7 @@ fn wrapper_descriptor_adopts_inner_order() {
 }
 
 // ---------------------------------------------------------------------------
-// PR-102: constructor assembly identity
+// redaction constructor contract: constructor assembly identity
 // ---------------------------------------------------------------------------
 
 const STANDALONE_DEFAULT_DIGEST_HEX: &str =

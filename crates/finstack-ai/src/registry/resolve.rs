@@ -6,7 +6,7 @@ use std::sync::Arc;
 use finstack_ai_kernel::{ComponentId, ComponentRef, RawJson, Version};
 use finstack_ai_runtime::{
     CancellationSignal, ContextProvider, JournalStore, Middleware, MiddlewareRegistration, Model,
-    ModelWarmupContext, Observer, PortFuture, ResolvedMiddlewareChain, Toolset,
+    ModelWarmupContext, Observer, PortFuture, ReadyModel, ResolvedMiddlewareChain, Toolset,
 };
 
 use super::errors::{
@@ -390,7 +390,7 @@ impl Registry {
         source: &ComponentId,
         context: &AgentConstructionContext,
         diagnostics: &mut Vec<ResolutionDiagnostic>,
-    ) -> Result<ResolvedComponent<dyn Model>, AgentBuildError> {
+    ) -> Result<ResolvedComponent<ReadyModel>, AgentBuildError> {
         let Some(RegisteredEntry::Model(registration)) = self.entries.get_mut(id) else {
             return Err(typed_resolution_error(
                 &self.entries,
@@ -409,25 +409,32 @@ impl Registry {
         .await?;
         let RegistrationSlot::Ready {
             component,
-            model_warmed,
+            ready_model,
             ..
         } = &registration.slot
         else {
             return Err(factory_not_ready(source, id, &registration.descriptor));
         };
-        let (ready, warmed) = (component.clone(), *model_warmed);
-        validate_model_descriptor(&registration.descriptor, ready.handle(), source)?;
-        if !warmed {
-            let warmup = ready.handle().warmup(ModelWarmupContext {
-                cancellation: context.cancellation.child(),
-                deadline: context.deadline,
-                metadata: context.metadata.clone(),
-            });
-            match await_or_cancel(warmup, context.cancellation.clone()).await {
-                Ok(Ok(())) => {
-                    if let RegistrationSlot::Ready { model_warmed, .. } = &mut registration.slot {
-                        *model_warmed = true;
+        let (component, cached) = (component.clone(), ready_model.clone());
+        validate_model_descriptor(&registration.descriptor, component.handle(), source)?;
+        let ready = if let Some(ready) = cached {
+            ready
+        } else {
+            let warmup = ReadyModel::prepare_with_context(
+                Arc::clone(component.handle()),
+                ModelWarmupContext {
+                    cancellation: context.cancellation.child(),
+                    deadline: context.deadline,
+                    metadata: context.metadata.clone(),
+                },
+            );
+            match await_or_cancel(Box::pin(warmup), context.cancellation.clone()).await {
+                Ok(Ok(ready)) => {
+                    let ready = Arc::new(ready);
+                    if let RegistrationSlot::Ready { ready_model, .. } = &mut registration.slot {
+                        *ready_model = Some(Arc::clone(&ready));
                     }
+                    ready
                 }
                 Ok(Err(error)) => {
                     return Err(AgentBuildError::FactoryFailed {
@@ -445,9 +452,13 @@ impl Registry {
                     });
                 }
             }
-        }
+        };
         push_resolution_diagnostic(diagnostics, source, &registration.descriptor, outcome);
-        Ok(resolved(&registration.descriptor, ready))
+        Ok(ResolvedComponent {
+            descriptor: registration.descriptor.clone(),
+            handle: ready,
+            lifecycle: component.lifecycle,
+        })
     }
 }
 
@@ -632,7 +643,7 @@ async fn ensure_ready<T: ?Sized + 'static>(
             *slot = RegistrationSlot::Ready {
                 component: ready,
                 factory_configuration: Some(requested_configuration),
-                model_warmed: false,
+                ready_model: None,
             };
             Ok(ReadyOutcome::FactoryConstructed)
         }

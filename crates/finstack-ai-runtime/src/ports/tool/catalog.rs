@@ -95,7 +95,7 @@ impl fmt::Debug for ToolsetRegistration {
 /// Fully resolved executable tool retained by the catalog.
 #[derive(Clone)]
 pub struct ResolvedTool {
-    /// Unchanged PR-015 data-only specification.
+    /// Unchanged model-port contract data-only specification.
     pub spec: ToolSpec,
     /// Direct Toolset implementation.
     pub toolset: Arc<dyn Toolset>,
@@ -204,6 +204,9 @@ impl ResolvedToolCatalog {
                     .map(|schema| compiler.compile(schema, resources))
                     .transpose()?;
                 let output_contract = tool_output_contract(spec)?;
+                // `Toolset` futures are local on wasm; `Arc` keeps the
+                // resolved-catalog representation identical across hosts.
+                #[cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
                 let resolved = Arc::new(ResolvedTool {
                     spec: spec.clone(),
                     toolset: Arc::clone(&registration.toolset),

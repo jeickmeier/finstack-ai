@@ -196,14 +196,27 @@ impl CommitCoordinator {
         &mut self,
         loaded: &LoadedSession,
     ) -> Result<(), CommitCoordinatorError> {
+        let prior_next_transient_sequence = self.next_transient_sequence;
         let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
             replay_scoped(loaded, self.replay_scope).map_err(|code| self.boundary_fault(code))?;
         self.kernel = kernel;
-        self.next_transient_sequence = next_transient_sequence;
+        // A live event hub has already observed every event emitted before the
+        // conflict. Scoped replay can omit sibling-run records and therefore
+        // derive a smaller historical count; never move the process-local
+        // sequence cursor backwards across a reload.
+        self.next_transient_sequence = prior_next_transient_sequence.max(next_transient_sequence);
         self.pending_timer_scheduled_at = pending_timer_scheduled_at;
         self.last_model_continuation =
             continuation_after_replay(loaded, self.replay_scope, used_snapshot)
                 .map_err(|code| self.boundary_fault(code))?;
+        #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+        {
+            self.replayed_completed_effects = super::recover::completed_effect_pairs(loaded);
+            self.replayed_extension_envelopes = super::recover::extension_request_envelopes(loaded);
+            // A reload is a recovery boundary. Checkpoints are deliberately
+            // not reconstructed from journal or snapshot state.
+            self.discard_compaction_checkpoint();
+        }
         self.last_snapshot_sequence = used_snapshot
             .then(|| {
                 loaded
@@ -292,7 +305,7 @@ impl CommitCoordinator {
     /// Commit zero-event composition records through the same append/apply boundary.
     ///
     /// This is intentionally narrower than general effect dispatch: it accepts
-    /// only PR-022 child/budget sidecar records and never calls an external service.
+    /// only child-and-budget sidecar contract child/budget sidecar records and never calls an external service.
     /// A sequence race reloads only the known session; equal durable identities
     /// converge and different content fails closed.
     ///
@@ -307,6 +320,21 @@ impl CommitCoordinator {
     ) -> Result<(), &'static str> {
         if !action_is_authorized(self.kernel.state(), action, now, committed) {
             return Err("dispatch_precondition_failed");
+        }
+        if matches!(
+            action,
+            PostCommitAction::ExecuteEffect { effect_id }
+                if self
+                    .kernel
+                    .state()
+                    .pending_extension_effect
+                    .as_ref()
+                    .is_some_and(|pending| pending.requested.effect_id() == effect_id)
+        ) {
+            // Context and middleware are executed synchronously by the stage
+            // driver immediately after this durable request commits. They do
+            // not enter the detached model/tool dispatcher queues.
+            return Ok(());
         }
         let Some(dispatcher) = &self.dispatcher else {
             return Err("effect_driver_unavailable");

@@ -1,4 +1,4 @@
-//! PR-016 Toolset port, validation, scheduler, ordering, and panic proofs.
+//! tool-port contract Toolset port, validation, scheduler, ordering, and panic proofs.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -7,8 +7,8 @@ use std::time::Duration as StdDuration;
 
 use finstack_ai_kernel::{
     ActiveToolCallStatus, ComponentId, ContentBlock, EffectId, ExternalHandleRef, KernelState,
-    Metadata, RawJson, ReconciliationPolicy, RecordBody, RetrySafety, SessionTag, ToolCallId,
-    ToolCallPlan, ValidatedToolCall,
+    RawJson, ReconciliationPolicy, RecordBody, RetrySafety, SessionTag, ToolCallId, ToolCallPlan,
+    ValidatedToolCall,
 };
 use finstack_ai_runtime::testing::ManualDriveAction;
 use finstack_ai_runtime::{
@@ -51,8 +51,6 @@ pub(crate) fn owner_model_config() -> ModelTaskConfig {
         job_capacity: 2,
         result_capacity: 2,
         stream_limits: ModelStreamLimits::default(),
-        warmup_deadline: None,
-        warmup_metadata: Metadata::empty(),
         same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }
@@ -172,17 +170,24 @@ where
 ///
 /// Returns [`RunHandleError`] when the runtime configuration, port bindings, or
 /// startup reconciliation cannot initialize the owner.
-pub(crate) fn spawn_tool_owner_with_run_config<C>(
+pub(crate) async fn spawn_tool_owner_with_run_config<C>(
     coordinator: CommitCoordinator,
     model: Arc<dyn Model>,
     catalog: Arc<ResolvedToolCatalog>,
     clock: C,
     random: u64,
     run_config: RunTaskConfig,
-) -> impl Future<Output = Result<RunTaskOwner, RunHandleError>>
+) -> Result<RunTaskOwner, RunHandleError>
 where
     C: Clock + Send + Sync + 'static,
 {
+    let model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(model)
+            .await
+            .map_err(|error| RunHandleError::Model {
+                code: Arc::from(error.code()),
+            })?,
+    );
     Box::pin(RunTaskOwner::spawn_with_model_and_tools(
         coordinator,
         run_config,
@@ -194,6 +199,7 @@ where
         clock,
         CounterRandom(AtomicU64::new(random)),
     ))
+    .await
 }
 
 pub(crate) async fn recover_session(store: &Arc<MemoryJournalStore>) -> CommitCoordinator {

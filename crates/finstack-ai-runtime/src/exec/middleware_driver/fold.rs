@@ -46,7 +46,7 @@ pub enum StageTerminal {
 ///
 /// This fold assumes every outcome already passed
 /// [`validate_stage_outcome`] for its own component descriptor (as
-/// [`invoke_middleware_stage`] guarantees); it does not re-check
+/// the stage-settlement driver guarantees); it does not re-check
 /// per-component/role legality such as the single-compactor rule. What it
 /// does check, independently, is whether the *aggregate* stage/outcome
 /// combination has anywhere to land in the kernel, and whether the fold's own

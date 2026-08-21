@@ -7,8 +7,8 @@ use crate::primitives::Timestamp;
 use crate::primitives::{Id, IdTag, MessageId, ToolCallId, ToolCallTag};
 use crate::primitives::{Metadata, RawJson};
 use crate::records::{
-    LaneCreated, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordEnvelope,
-    SnapshotWritten,
+    LaneCreated, LaneMoved, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft,
+    RecordEnvelope, SnapshotWritten,
 };
 
 fn mid() -> MessageId {
@@ -402,7 +402,9 @@ fn extract_history_accepts_a_closed_tool_pair() {
 fn drop_snapshot_records_leaves_the_tree() {
     let mut projection = SessionProjection::new(id(1));
     let user = entry(10, None, 3, MessageRole::User, "hello");
-    projection.apply_lane_created(id(2), &LaneCreated::try_new("main").expect("lane"));
+    projection
+        .apply_lane_created(id(2), &LaneCreated::try_new("main").expect("lane"))
+        .expect("create lane");
     apply_conversation_entry(&mut projection.entries, user.clone()).expect("entry");
     projection.lanes.get_mut(&id(2)).expect("lane").leaf_id = Some(user.id());
     let without_snapshot = projection.clone();
@@ -441,4 +443,119 @@ fn drop_snapshot_records_leaves_the_tree() {
     );
     assert!(projection.lane("research").is_none());
     assert!(projection.lane_by_id(id(2)).is_some());
+}
+
+#[test]
+fn structural_preview_rejects_duplicate_lanes_and_unknown_targets() {
+    let session_id = id::<crate::SessionTag>(1);
+    let main_lane = id::<crate::LaneTag>(2);
+    let other_lane = id::<crate::LaneTag>(3);
+    let timestamp = Timestamp::from_unix_ms(0).expect("timestamp");
+    let draft = |ordinal, lane_id, body| {
+        RecordDraft::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            id::<crate::RecordTag>(ordinal),
+            session_id,
+            lane_id,
+            None,
+            timestamp,
+            vec![],
+            body,
+        )
+        .expect("draft")
+    };
+    let main = draft(
+        10,
+        main_lane,
+        RecordBody::LaneCreated(LaneCreated::try_new("main").expect("lane")),
+    );
+    let duplicate_id = draft(
+        11,
+        main_lane,
+        RecordBody::LaneCreated(LaneCreated::try_new("other").expect("lane")),
+    );
+    let duplicate_name = draft(
+        12,
+        other_lane,
+        RecordBody::LaneCreated(LaneCreated::try_new("main").expect("lane")),
+    );
+    let projection = SessionProjection::new(session_id)
+        .preview_structural_drafts([&main])
+        .expect("main preview");
+    assert_eq!(
+        projection
+            .preview_structural_drafts([&duplicate_id])
+            .expect_err("duplicate id"),
+        ConversationError::DuplicateLaneId
+    );
+    assert_eq!(
+        projection
+            .preview_structural_drafts([&duplicate_name])
+            .expect_err("duplicate name"),
+        ConversationError::DuplicateLaneName
+    );
+
+    let unknown_leaf = id::<crate::EntryTag>(99);
+    let moved = draft(
+        13,
+        main_lane,
+        RecordBody::LaneMoved(LaneMoved::new(unknown_leaf)),
+    );
+    assert_eq!(
+        projection
+            .preview_structural_drafts([&moved])
+            .expect_err("unknown move"),
+        ConversationError::UnknownLeaf
+    );
+    let fork = entry(20, Some(99), 4, MessageRole::User, "fork");
+    let fork = draft(14, main_lane, RecordBody::ConversationEntry(fork));
+    assert_eq!(
+        projection
+            .preview_structural_drafts([&fork])
+            .expect_err("unknown fork parent"),
+        ConversationError::MissingParent
+    );
+}
+
+#[test]
+fn committed_lane_creation_rejects_duplicate_id_and_name() {
+    let session_id = id::<crate::SessionTag>(1);
+    let timestamp = Timestamp::from_unix_ms(0).expect("timestamp");
+    let envelope = |sequence, lane_id, name: &str| {
+        let body = RecordBody::LaneCreated(LaneCreated::try_new(name).expect("lane"));
+        RecordEnvelope::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            id::<crate::RecordTag>(sequence + 20),
+            session_id,
+            lane_id,
+            None,
+            sequence,
+            timestamp,
+            None,
+            crate::Digest::raw_json(b"payload"),
+            None,
+            crate::Digest::raw_json(b"checksum"),
+            vec![],
+            body,
+        )
+        .expect("envelope")
+    };
+    let mut projection = SessionProjection::new(session_id);
+    projection
+        .apply_envelope(&envelope(1, id(2), "main"))
+        .expect("first lane");
+    assert_eq!(
+        projection
+            .apply_envelope(&envelope(2, id(2), "other"))
+            .expect_err("duplicate id"),
+        ConversationError::DuplicateLaneId
+    );
+    assert_eq!(
+        projection
+            .apply_envelope(&envelope(3, id(3), "main"))
+            .expect_err("duplicate name"),
+        ConversationError::DuplicateLaneName
+    );
 }

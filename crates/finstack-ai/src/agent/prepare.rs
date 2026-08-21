@@ -12,15 +12,12 @@ use finstack_ai_kernel::{
     Sensitivity, SessionCreated, SessionId, SessionTag, Stage, StageCursor, StageSettled,
     StructuredResultSource, TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag,
 };
-use finstack_ai_kernel::{PendingModelEffect, RunEvent};
 use finstack_ai_runtime::{
     ApprovalGrantMode, CommitCoordinator, ContextProvider, EventBatchConfig, EventFilter,
     EventHubConfig, EventLagPolicy, EventSubscriptionConfig, LaneAppendIds,
-    LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
-    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
-    ModelWarmupContext, Observer, PortFuture, ProgressCoalescing, ReconcileContext, RunHandle,
-    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SessionError, SessionRuntime,
+    LockedModelContextProfile, Model, ModelContextProfileOverride, ModelName, ModelRequestDraft,
+    ModelRequestLimits, ModelSettings, ModelTaskConfig, Observer, ProgressCoalescing, ReadyModel,
+    RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SessionError, SessionRuntime,
     StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig, UuidV7Generator,
     resolve_model_context_profile,
 };
@@ -45,7 +42,7 @@ use super::types::{
 };
 
 pub(super) struct PreparedAgentRun {
-    pub(super) model: Arc<dyn Model>,
+    pub(super) model: Arc<ReadyModel>,
     pub(super) profile: LockedModelContextProfile,
     pub(super) store: Arc<dyn finstack_ai_runtime::JournalStore>,
     pub(super) session_id: SessionId,
@@ -217,9 +214,9 @@ impl Agent {
         prepared: PreparedAgentRun,
         execution: &Weak<AgentRunInner>,
     ) -> Result<AgentRunOutput, AgentRunError> {
-        let ready_model: Arc<dyn Model> = Arc::new(ReadyModel(Arc::clone(&prepared.model)));
         let mut coordinator = CommitCoordinator::new(Arc::clone(&prepared.store));
         let mut acquired_lane = None;
+        let mut prior_history = Vec::new();
         if prepared.bootstrap {
             if let Err(error) = bootstrap_main_lane(
                 &mut coordinator,
@@ -254,32 +251,33 @@ impl Agent {
                     return Err(error);
                 }
             };
-            if let Err(error) = append_lane_input(
+            prior_history = match append_lane_input(
                 &runtime,
                 prepared.lane_id,
+                prepared.accepted.run_id(),
                 &prepared.request.input,
                 &prepared.request.attachments,
             )
             .await
             {
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-            if let Err(error) = runtime
-                .try_acquire_run(prepared.lane_id, prepared.accepted.run_id())
-                .map_err(|error| session_error(&error))
-            {
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-            acquired_lane = Some((Arc::clone(&runtime), prepared.lane_id));
+                Ok(history) => history,
+                Err(error) => {
+                    publish_start_failure(execution, &error);
+                    return Err(error);
+                }
+            };
+            acquired_lane = Some((
+                Arc::clone(&runtime),
+                prepared.lane_id,
+                prepared.accepted.run_id(),
+            ));
             coordinator = match runtime
                 .coordinator_for_run(Some(prepared.accepted.run_id()))
                 .await
             {
                 Ok(coordinator) => coordinator,
                 Err(error) => {
-                    runtime.release(prepared.lane_id);
+                    runtime.release_run(prepared.lane_id, prepared.accepted.run_id());
                     let error = session_error(&error);
                     publish_start_failure(execution, &error);
                     return Err(error);
@@ -309,7 +307,7 @@ impl Agent {
                 coordinator,
                 run_task_config(observer_count, approval_grant),
                 model_task_config(),
-                ready_model,
+                Arc::clone(&prepared.model),
                 prepared.profile.clone(),
                 AgentClock,
                 AgentRandom,
@@ -322,7 +320,7 @@ impl Agent {
                 run_task_config(observer_count, approval_grant),
                 model_task_config(),
                 tool_task_config(),
-                ready_model,
+                Arc::clone(&prepared.model),
                 prepared.profile.clone(),
                 Arc::clone(&self.tools),
                 AgentClock,
@@ -334,27 +332,36 @@ impl Agent {
         let mut owner = match owner {
             Ok(owner) => owner,
             Err(error) => {
-                if let Some((runtime, lane_id)) = &acquired_lane {
-                    runtime.release(*lane_id);
+                if let Some((runtime, lane_id, run_id)) = &acquired_lane {
+                    runtime.release_run(*lane_id, *run_id);
                 }
                 publish_start_failure(execution, &error);
                 return Err(error);
             }
         };
         let handle = owner.handle();
+        if let Some((runtime, lane_id, run_id)) = &acquired_lane
+            && let Err(error) = runtime.bind_run_handle(*lane_id, *run_id, handle.clone())
+        {
+            let _shutdown = owner.shutdown().await;
+            runtime.release_run(*lane_id, *run_id);
+            let error = session_error(&error);
+            publish_start_failure(execution, &error);
+            return Err(error);
+        }
         let subscription = match handle.subscribe_events(default_event_subscription()).await {
             Ok(subscription) => subscription,
             Err(error) => {
                 let error = AgentRunError::runtime_message(error.to_string());
                 let _shutdown = owner.shutdown().await;
-                if let Some((runtime, lane_id)) = &acquired_lane {
-                    runtime.release(*lane_id);
+                if let Some((runtime, lane_id, run_id)) = &acquired_lane {
+                    runtime.release_run(*lane_id, *run_id);
                 }
                 publish_start_failure(execution, &error);
                 return Err(error);
             }
         };
-        attach_plan_observers(&handle, self.resolved.run_plan().observers());
+        attach_plan_observers(&mut owner, self.resolved.run_plan().observers()).await;
         publish_started(execution, handle.clone(), subscription);
         let timeout = prepared.request.timeout;
         let result = driver::timeout(
@@ -368,12 +375,30 @@ impl Agent {
                 prepared.request,
                 prepared.profile,
                 prepared.locator,
+                prior_history.into(),
             )),
         )
         .await;
         let _shutdown = owner.shutdown().await;
-        if let Some((runtime, lane_id)) = acquired_lane {
-            runtime.release(lane_id);
+        if let Some((runtime, lane_id, run_id)) = acquired_lane {
+            if let Ok(Ok(output)) = &result
+                && let Err(error) = runtime
+                    .append_message_from_run(
+                        lane_id,
+                        run_id,
+                        &output.message,
+                        LaneAppendIds {
+                            entry_record_id: NativeIds::generate()?,
+                            lane_moved_record_id: NativeIds::generate()?,
+                            batch_id: NativeIds::generate()?,
+                        },
+                    )
+                    .await
+            {
+                runtime.release_run(lane_id, run_id);
+                return Err(session_error(&error));
+            }
+            runtime.release_run(lane_id, run_id);
         }
         match result {
             Ok(value) => value,
@@ -384,6 +409,7 @@ impl Agent {
         &self,
         input: &str,
         attachments: &[AttachmentInput],
+        prior_history: &[Message],
         committed: &[Message],
         extra_capability_instructions: &[crate::InstructionSpec],
     ) -> Result<Arc<[Message]>, AgentRunError> {
@@ -394,7 +420,8 @@ impl Agent {
                 "native Agent requires a bundle-resolved specification",
             )
         })?;
-        let mut messages = Vec::with_capacity(spec.instructions.len() + committed.len() + 1);
+        let mut messages =
+            Vec::with_capacity(spec.instructions.len() + prior_history.len() + committed.len() + 1);
         for instruction in spec.instructions.iter() {
             messages.push(text_message(
                 NativeIds::generate::<MessageTag>()?,
@@ -413,6 +440,7 @@ impl Agent {
                 &[],
             )?);
         }
+        messages.extend_from_slice(prior_history);
         messages.push(text_message(
             NativeIds::generate::<MessageTag>()?,
             MessageRole::User,
@@ -609,8 +637,9 @@ pub(super) async fn submit(
 pub(super) async fn recover_state(
     store: Arc<dyn finstack_ai_runtime::JournalStore>,
     session_id: SessionId,
+    run_id: finstack_ai_kernel::RunId,
 ) -> Result<finstack_ai_kernel::KernelState, AgentRunError> {
-    CommitCoordinator::recover(store, session_id)
+    CommitCoordinator::recover_run(store, session_id, Some(run_id))
         .await
         .map(|coordinator| coordinator.state().clone())
         .map_err(|error| AgentRunError::runtime_message(error.to_string()))
@@ -620,10 +649,15 @@ pub(super) async fn wait_for_phase(
     handle: &RunHandle,
     store: Arc<dyn finstack_ai_runtime::JournalStore>,
     session_id: SessionId,
+    run_id: finstack_ai_kernel::RunId,
     phases: &[RunPhase],
 ) -> Result<finstack_ai_kernel::KernelState, AgentRunError> {
+    let mut events = handle
+        .subscribe_observer(observer_event_subscription())
+        .await
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
     loop {
-        let state = recover_state(Arc::clone(&store), session_id).await?;
+        let state = recover_state(Arc::clone(&store), session_id, run_id).await?;
         if state.phase.is_some_and(|phase| phases.contains(&phase)) {
             return Ok(state);
         }
@@ -632,7 +666,43 @@ pub(super) async fn wait_for_phase(
                 "runtime task faulted: {code}"
             )));
         }
-        driver::yield_now().await;
+        wait_for_progress_hint(&mut events).await?;
+    }
+}
+
+pub(super) async fn wait_for_cycle(
+    handle: &RunHandle,
+    store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    session_id: SessionId,
+    run_id: finstack_ai_kernel::RunId,
+    prior_cycle: u64,
+) -> Result<finstack_ai_kernel::KernelState, AgentRunError> {
+    let mut events = handle
+        .subscribe_observer(observer_event_subscription())
+        .await
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+    loop {
+        let state = recover_state(Arc::clone(&store), session_id, run_id).await?;
+        if state.cycle > prior_cycle || state.terminal.is_some() {
+            return Ok(state);
+        }
+        if let finstack_ai_runtime::RunStatus::Faulted { code } = handle.status() {
+            return Err(AgentRunError::runtime_message(format!(
+                "runtime task faulted: {code}"
+            )));
+        }
+        wait_for_progress_hint(&mut events).await?;
+    }
+}
+
+async fn wait_for_progress_hint(
+    events: &mut finstack_ai_runtime::EventSubscription,
+) -> Result<(), AgentRunError> {
+    match driver::timeout(Duration::from_millis(100), events.next_batch()).await {
+        Ok(Some(_)) | Err(_) => Ok(()),
+        Ok(None) => Err(AgentRunError::runtime_message(
+            "runtime event stream closed while awaiting state progress",
+        )),
     }
 }
 
@@ -740,9 +810,10 @@ fn session_error(error: &SessionError) -> AgentRunError {
 async fn append_lane_input(
     runtime: &SessionRuntime,
     lane_id: LaneId,
+    run_id: finstack_ai_kernel::RunId,
     input: &str,
     attachments: &[AttachmentInput],
-) -> Result<(), AgentRunError> {
+) -> Result<Vec<Message>, AgentRunError> {
     let now = NativeIds::now()?;
     let message = text_message(
         NativeIds::generate::<MessageTag>()?,
@@ -752,8 +823,9 @@ async fn append_lane_input(
         attachments,
     )?;
     runtime
-        .append_message(
+        .append_message_for_run(
             lane_id,
+            run_id,
             &message,
             LaneAppendIds {
                 entry_record_id: NativeIds::generate()?,
@@ -762,8 +834,7 @@ async fn append_lane_input(
             },
         )
         .await
-        .map_err(|error| session_error(&error))?;
-    Ok(())
+        .map_err(|error| session_error(&error))
 }
 
 async fn bootstrap_main_lane(
@@ -881,7 +952,8 @@ fn run_task_config(observer_count: usize, approval_grant: ApprovalGrantMode) -> 
         command_capacity: DEFAULT_QUEUE_CAPACITY,
         event_hub: EventHubConfig {
             source_capacity: DEFAULT_QUEUE_CAPACITY,
-            max_subscribers: 4usize.saturating_add(observer_count),
+            // One interactive consumer plus one short-lived internal phase waiter.
+            max_subscribers: observer_count.checked_add(2).unwrap_or(0),
         },
         shutdown_deadline: Duration::from_secs(2),
         approval_grant,
@@ -909,22 +981,17 @@ fn observer_event_subscription() -> EventSubscriptionConfig {
     }
 }
 
-fn attach_plan_observers(handle: &RunHandle, observers: &[crate::ResolvedComponent<dyn Observer>]) {
+async fn attach_plan_observers(
+    owner: &mut RunTaskOwner,
+    observers: &[crate::ResolvedComponent<dyn Observer>],
+) {
     for component in observers {
-        let observer = Arc::clone(component.handle());
-        let handle = handle.clone();
-        let _ = driver::spawn(Box::pin(async move {
-            let Ok(mut subscription) = handle
-                .subscribe_observer(observer_event_subscription())
-                .await
-            else {
-                return;
-            };
-            while let Some(batch) = subscription.next_batch().await {
-                let events: Arc<[RunEvent]> = Arc::from(batch.events().to_vec());
-                let _ = observer.observe(events).await;
-            }
-        }));
+        let _ = owner
+            .attach_observer(
+                Arc::clone(component.handle()),
+                observer_event_subscription(),
+            )
+            .await;
     }
 }
 
@@ -954,8 +1021,6 @@ fn model_task_config() -> ModelTaskConfig {
         job_capacity: DEFAULT_QUEUE_CAPACITY,
         result_capacity: DEFAULT_QUEUE_CAPACITY,
         stream_limits: finstack_ai_runtime::ModelStreamLimits::default(),
-        warmup_deadline: None,
-        warmup_metadata: Metadata::empty(),
         same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }
@@ -966,41 +1031,5 @@ fn tool_task_config() -> ToolTaskConfig {
         result_capacity: DEFAULT_QUEUE_CAPACITY,
         global_max_concurrency: 8,
         stream_limits: ToolStreamLimits::default(),
-    }
-}
-
-struct ReadyModel(Arc<dyn Model>);
-
-impl Model for ReadyModel {
-    fn descriptor(&self) -> ModelDescriptor {
-        self.0.descriptor()
-    }
-
-    fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
-        self.0.capabilities(model)
-    }
-
-    fn warmup(&self, _ctx: ModelWarmupContext) -> PortFuture<Result<(), ModelError>> {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn estimate_input_tokens(
-        &self,
-        model: &ModelName,
-        canonical_request: &[u8],
-    ) -> Result<ModelTokenEstimate, ModelError> {
-        self.0.estimate_input_tokens(model, canonical_request)
-    }
-
-    fn request(&self, request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
-        self.0.request(request)
-    }
-
-    fn reconcile(
-        &self,
-        ctx: ReconcileContext,
-        effect: PendingModelEffect,
-    ) -> PortFuture<Result<ModelReconcileResult, ModelError>> {
-        self.0.reconcile(ctx, effect)
     }
 }

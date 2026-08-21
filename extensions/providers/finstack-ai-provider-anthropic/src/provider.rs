@@ -7,11 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_provider_wire::{AnthropicMessagesAssembly, StreamNormError, StreamNormKind};
 use finstack_ai_runtime::{
-    AnthropicMessagesAssembly, MediaResolveKind, Model, ModelCapabilities, ModelDescriptor,
-    ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem,
-    ModelTokenEstimate, ReconcileContext, ResolveDraftMediaError, StreamNormError, StreamNormKind,
-    resolve_draft_media,
+    MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
+    ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate,
+    ReconcileContext, ResolveDraftMediaError, resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;

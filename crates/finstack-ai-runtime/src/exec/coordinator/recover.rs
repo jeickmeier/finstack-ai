@@ -1,3 +1,5 @@
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -65,6 +67,14 @@ impl CommitCoordinator {
             context_projection: None,
             last_model_continuation,
             capability_owners: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            replayed_completed_effects: completed_effect_pairs(&loaded),
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            replayed_extension_envelopes: extension_request_envelopes(&loaded),
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            last_middleware_effect_id: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            compaction_checkpoint: None,
         })
     }
 
@@ -132,6 +142,14 @@ impl CommitCoordinator {
             context_projection: None,
             last_model_continuation,
             capability_owners: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            replayed_completed_effects: completed_effect_pairs(&loaded),
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            replayed_extension_envelopes: extension_request_envelopes(&loaded),
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            last_middleware_effect_id: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            compaction_checkpoint: None,
         })
     }
 
@@ -172,6 +190,66 @@ impl CommitCoordinator {
         self.head_checksum = head_checksum;
         Ok(())
     }
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(super) fn completed_effect_pairs(
+    loaded: &LoadedSession,
+) -> BTreeMap<
+    finstack_ai_kernel::EffectId,
+    (
+        finstack_ai_kernel::EffectRequested,
+        finstack_ai_kernel::EffectCompleted,
+    ),
+> {
+    let mut requested = BTreeMap::new();
+    let mut completed = BTreeMap::new();
+    for record in loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+    {
+        match record.body() {
+            RecordBody::EffectRequested(effect) => {
+                requested.insert(effect.effect_id(), effect.clone());
+            }
+            RecordBody::EffectCompleted(effect) => {
+                completed.insert(effect.effect_id(), effect.clone());
+            }
+            _ => {}
+        }
+    }
+    requested
+        .into_iter()
+        .filter_map(|(effect_id, request)| {
+            completed
+                .remove(&effect_id)
+                .map(|terminal| (effect_id, (request, terminal)))
+        })
+        .collect()
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(super) fn extension_request_envelopes(
+    loaded: &LoadedSession,
+) -> BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::RecordEnvelope> {
+    loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .filter_map(|record| match record.body() {
+            RecordBody::EffectRequested(requested)
+                if matches!(
+                    requested.kind(),
+                    finstack_ai_kernel::EffectKind::Context
+                        | finstack_ai_kernel::EffectKind::Middleware
+                ) =>
+            {
+                Some((requested.effect_id(), record.clone()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 pub(super) fn replay_scoped(
@@ -215,33 +293,27 @@ fn replay_filtered(
     let mut pending_timer_scheduled_at = None;
     for batch in loaded.committed_batches.iter() {
         last_batch_sequence = batch.last_sequence;
+        let mut segment = Vec::new();
         for record in batch.records.iter() {
             if !record_belongs_to_scope(record, target) {
+                apply_filtered_segment(
+                    &mut kernel,
+                    &mut next_transient_sequence,
+                    &mut pending_timer_scheduled_at,
+                    batch.batch_id,
+                    std::mem::take(&mut segment),
+                )?;
                 continue;
             }
-            let prior = record
-                .sequence()
-                .checked_sub(1)
-                .ok_or("filtered_sequence_invalid")?;
-            adopt_session_head(&mut kernel, prior)?;
-            let single = CommittedBatch::try_new(
-                batch.batch_id,
-                record.sequence(),
-                record.sequence(),
-                vec![record.clone()],
-            )
-            .map_err(|_| "filtered_batch_invalid")?;
-            let events = kernel
-                .apply(&single, next_transient_sequence)
-                .map_err(|_| "journal_replay_failed")?;
-            next_transient_sequence = next_transient_sequence
-                .checked_add(
-                    u64::try_from(events.len())
-                        .map_err(|_| "transient_event_sequence_exhausted")?,
-                )
-                .ok_or("transient_event_sequence_exhausted")?;
-            update_pending_timer_timestamp(&mut pending_timer_scheduled_at, &single);
+            segment.push(record.clone());
         }
+        apply_filtered_segment(
+            &mut kernel,
+            &mut next_transient_sequence,
+            &mut pending_timer_scheduled_at,
+            batch.batch_id,
+            segment,
+        )?;
     }
     if last_batch_sequence != loaded.head_sequence {
         return Err("loaded_head_mismatch");
@@ -251,6 +323,37 @@ fn replay_filtered(
         return Err("loaded_head_mismatch");
     }
     Ok((kernel, next_transient_sequence, pending_timer_scheduled_at))
+}
+
+fn apply_filtered_segment(
+    kernel: &mut Kernel,
+    next_transient_sequence: &mut u64,
+    pending_timer_scheduled_at: &mut Option<Timestamp>,
+    batch_id: finstack_ai_kernel::AppendBatchId,
+    records: Vec<RecordEnvelope>,
+) -> Result<(), &'static str> {
+    let Some(first) = records.first() else {
+        return Ok(());
+    };
+    let first_sequence = first.sequence();
+    let last_sequence = records
+        .last()
+        .map(RecordEnvelope::sequence)
+        .ok_or("filtered_batch_invalid")?;
+    let prior = first_sequence
+        .checked_sub(1)
+        .ok_or("filtered_sequence_invalid")?;
+    adopt_session_head(kernel, prior)?;
+    let filtered = CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records)
+        .map_err(|_| "filtered_batch_invalid")?;
+    let events = kernel
+        .apply(&filtered, *next_transient_sequence)
+        .map_err(|_| "journal_replay_failed")?;
+    *next_transient_sequence = next_transient_sequence
+        .checked_add(u64::try_from(events.len()).map_err(|_| "transient_event_sequence_exhausted")?)
+        .ok_or("transient_event_sequence_exhausted")?;
+    update_pending_timer_timestamp(pending_timer_scheduled_at, &filtered);
+    Ok(())
 }
 
 fn record_belongs_to_scope(record: &RecordEnvelope, target: Option<RunId>) -> bool {

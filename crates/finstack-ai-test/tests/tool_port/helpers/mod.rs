@@ -1,4 +1,4 @@
-//! PR-016 Toolset port, validation, scheduler, ordering, and panic proofs.
+//! tool-port contract Toolset port, validation, scheduler, ordering, and panic proofs.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
@@ -540,6 +540,11 @@ pub(crate) async fn setup_with_failure_policy(
         vec![model_plan(call_count, "echo")],
     ));
     let model_port: Arc<dyn Model> = model;
+    let model_port = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(model_port)
+            .await
+            .expect("model readiness"),
+    );
     let store = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
             sessions: 1,
@@ -564,8 +569,6 @@ pub(crate) async fn setup_with_failure_policy(
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {

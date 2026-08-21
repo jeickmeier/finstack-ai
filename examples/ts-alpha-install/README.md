@@ -3,7 +3,7 @@
 This example typechecks against a packed `@finstack/ai` tarball. It does not
 map repository `src/` or `js/dist` paths. Do not embed provider credentials.
 
-Trust class: [T2](../../docs/site/security-trust-levels.md) when host
+Trust class: T2 when host
 adapters are registered. Not isolated.
 
 Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`; not on npm).

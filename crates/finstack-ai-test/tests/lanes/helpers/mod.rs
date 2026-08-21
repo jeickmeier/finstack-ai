@@ -1,4 +1,4 @@
-//! PR-047 multi-lane session APIs, concurrency, and lineage fan-out.
+//! multi-lane session contract multi-lane session APIs, concurrency, and lineage fan-out.
 
 use std::path::PathBuf;
 use std::sync::Arc;

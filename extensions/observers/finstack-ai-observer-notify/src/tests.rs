@@ -7,7 +7,7 @@ use finstack_ai_kernel::{
     QueueDepthWarning, RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RawJson, RunEvent,
     RunEventBody, RunEventClass, RunTag, Sensitivity, SessionTag, TextBlock, Timestamp, Version,
 };
-use finstack_ai_runtime::{Observer, ObserverBackpressure, ObserverPayloadMode, SecretString};
+use finstack_ai_runtime::{Observer, ObserverPayloadMode, SecretString};
 use finstack_ai_test::check_observer_conformance;
 
 use super::{
@@ -345,13 +345,7 @@ mod tests_support {
 #[tokio::test]
 async fn observe_delivers_interaction_events_and_ignores_the_rest() {
     let (sink, seen) = tests_support::capturing_sink();
-    let observer = NotifyObserver::try_new(
-        sink,
-        DeliveryPolicy::default(),
-        8,
-        ObserverBackpressure::DropProgress,
-    )
-    .expect("observer");
+    let observer = NotifyObserver::try_new(sink, DeliveryPolicy::default()).expect("observer");
     observer
         .observe(Arc::from([
             event(requested_body()),
@@ -365,7 +359,6 @@ async fn observe_delivers_interaction_events_and_ignores_the_rest() {
     wait_for(|| observer.delivered() == 1).await;
     assert_eq!(seen.lock().expect("lock").len(), 1);
     assert_eq!(observer.failed(), 0);
-    assert_eq!(observer.dropped(), 0);
 }
 
 #[tokio::test]
@@ -380,8 +373,6 @@ async fn delivery_retries_then_records_failure_diagnostic() {
     let observer = NotifyObserver::try_new(
         Arc::clone(&sink) as Arc<dyn super::NotificationSink>,
         policy,
-        8,
-        ObserverBackpressure::DropProgress,
     )
     .expect("observer");
     observer
@@ -394,44 +385,6 @@ async fn delivery_retries_then_records_failure_diagnostic() {
     assert_eq!(
         observer.last_diagnostic().expect("diag").code,
         "notify_delivery_failed"
-    );
-}
-
-#[tokio::test]
-async fn queue_overflow_drops_and_stores_overflow_diagnostic() {
-    let (sink, _seen) = tests_support::capturing_sink();
-    let observer = NotifyObserver::try_new(
-        sink,
-        DeliveryPolicy::default(),
-        1,
-        ObserverBackpressure::DropProgress,
-    )
-    .expect("observer");
-    observer
-        .observe(Arc::from([
-            event(requested_body()),
-            event(requested_body()),
-            event(requested_body()),
-        ]))
-        .await
-        .expect("observe");
-    wait_for(|| observer.delivered() + observer.dropped() == 3).await;
-    assert!(observer.dropped() > 0);
-}
-
-#[test]
-fn block_bounded_backpressure_is_rejected() {
-    let (sink, _seen) = tests_support::capturing_sink();
-    assert!(
-        NotifyObserver::try_new(
-            sink,
-            DeliveryPolicy::default(),
-            8,
-            ObserverBackpressure::BlockBounded {
-                timeout: std::time::Duration::from_millis(20),
-            },
-        )
-        .is_err()
     );
 }
 
@@ -594,13 +547,7 @@ fn slack_sink_debug_never_leaks_the_url() {
 #[tokio::test]
 async fn conformance_accepts_an_empty_batch() {
     let (sink, _seen) = tests_support::capturing_sink();
-    let observer = NotifyObserver::try_new(
-        sink,
-        DeliveryPolicy::default(),
-        8,
-        ObserverBackpressure::DropProgress,
-    )
-    .expect("observer");
+    let observer = NotifyObserver::try_new(sink, DeliveryPolicy::default()).expect("observer");
     assert_eq!(
         observer.descriptor().payload_mode,
         ObserverPayloadMode::Full

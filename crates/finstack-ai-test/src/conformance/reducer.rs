@@ -1,4 +1,4 @@
-//! Real native Rust adapter for PR-009 model-only golden traces.
+//! Real native Rust adapter for model-only reducer baseline model-only golden traces.
 
 use std::sync::Arc;
 
@@ -31,7 +31,7 @@ const DEFAULT_SESSION_ID: &str = "01234567-89ab-7cde-89ab-012345678901";
 const DEFAULT_LANE_ID: &str = "01234567-89ab-7cde-89ab-012345678902";
 const DEFAULT_RUN_ID: &str = "01234567-89ab-7cde-89ab-012345678903";
 const DEFAULT_USER_MESSAGE_ID: &str = "01234567-89ab-7cde-89ab-012345678904";
-/// Native adapter that executes PR-009 fixtures through the real kernel reducer.
+/// Native adapter that executes model-only reducer baseline fixtures through the real kernel reducer.
 ///
 /// The adapter consumes only fixture inputs and deterministic transition values.
 /// It never reads `GoldenTrace::expected` while constructing observed output.
@@ -402,7 +402,7 @@ impl<'a> ReducerDriver<'a> {
             | ScriptedStepKind::Cancellation
             | ScriptedStepKind::Error
             | ScriptedStepKind::Timer => Err(adapter_error(format!(
-                "scripted step {:?} is outside PR-009 model-only scope",
+                "scripted step {:?} is outside model-only reducer baseline model-only scope",
                 step.kind
             ))),
         }
@@ -646,7 +646,7 @@ impl<'a> ReducerDriver<'a> {
     }
 }
 
-/// Execute a PR-009 trace and retain its ordered committed batches.
+/// Execute a model-only reducer baseline trace and retain its ordered committed batches.
 ///
 /// # Errors
 ///
@@ -710,7 +710,7 @@ fn initial_context(trace: &GoldenTrace) -> Result<InitialContext, TraceError> {
         }
         _ => {
             return Err(adapter_error(
-                "PR-009 fixtures accept at most one initial user_message",
+                "model-only reducer baseline fixtures accept at most one initial user_message",
             ));
         }
     };

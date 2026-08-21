@@ -6,7 +6,7 @@ globs:
 
 # Engineering conformance
 
-Apply this rule to code, schemas, build configuration, generated artifacts, and implementation review. Start with the active logical PR's traced requirements, ADRs, design sections, standards, and security controls, then follow directly affected contracts and cross-references. Do not audit unrelated documentation. Planning defines behavior; code cannot reinterpret it.
+Apply this rule to code, schemas, build configuration, generated artifacts, and implementation review. Start with the active Codex workstream's requested behavior, architecture decisions, public contracts, standards, and security controls, then follow directly affected cross-references. Do not audit unrelated documentation. Current contracts define behavior; code cannot reinterpret them silently.
 
 Language-specific coding and docstring rules live in `03-rust-coding.md`, `04-python-coding.md`, and `05-typescript-coding.md`. Verification and handoff rules live in `02-testing-and-delivery.md`.
 
@@ -14,17 +14,18 @@ Language-specific coding and docstring rules live in `03-rust-coding.md`, `04-py
 
 - Prefer the smallest implementation that completes the selected behavior. New abstractions require a current requirement and a concrete use; placeholder frameworks and unused extension seams are prohibited.
 
-## Execute an explicitly authorized PR range
+## Execute planned workstreams
 
-Range mode is active only for an explicit inclusive `PR-NNN` through `PR-MMM` instruction with `NNN <= MMM`, an execution mode, and the local or external actions it authorizes. Do not infer a range from `continue`, `next PRs`, a phase name, or several mentioned PRs. Before editing:
+Before editing:
 
-- Resolve every included ID against the current Implementation Plan and pin the plan baseline, starting branch and commit, execution mode, integration target when applicable, and authorized actions.
-- Read every included PR entry sufficiently to validate the dependency chain. Immediately before implementing each PR, read its complete entry and directly affected requirements, ADRs, design sections, security controls, acceptance evidence, and exclusions.
-- Confirm the first PR is eligible and that each successor can become eligible through the stated predecessor sequence. Range authorization does not satisfy a dependency, phase entrance, gate, review, ADR, security, waiver, or change-control condition.
-- Preserve every PR's principal changes, acceptance evidence, dependencies, traceability, and exclusions as authoritative scope. Keep exactly one logical PR active and do not place changes owned only by a later PR into the current candidate.
-- Snapshot the starting branch, commit, and existing worktree changes. Never stash, discard, reset, rebase, commit, or overwrite unrelated work. Use an isolated branch or worktree when unrelated changes can be cleanly separated. If existing or concurrent changes overlap the active PR, generated outputs, integration target, planning baseline, or implementation registers and ownership cannot be proved, stop and request direction.
+- Pin the active Codex plan, starting branch and commit, worktree state, authorized local actions, and any separately authorized external actions.
+- Read the complete active step and its directly affected contracts, architecture decisions, security controls, acceptance criteria, dependencies, and exclusions.
+- Keep each workstream a coherent review unit. Parallel work requires explicit, non-overlapping file or subsystem ownership.
+- Snapshot existing changes. Never stash, discard, reset, rebase, commit, or overwrite unrelated work. If concurrent changes overlap owned files, generated outputs, manifests, or public contracts and ownership cannot be proved, stop and request direction.
 
-At each transition, recheck the plan baseline, predecessor evidence, phase and gate state, ADR state, worktree, branch, integration base, and the successor's dependencies and exclusions. A blocked range member is not permission to skip ahead; revise the range only through explicit user direction.
+At each transition, recheck the plan, validation evidence, decision state,
+worktree, branch, dependencies, and exclusions. A blocked dependency is not
+permission to skip ahead or weaken a control.
 
 ## Preserve package and semantic boundaries
 
@@ -49,7 +50,7 @@ At each transition, recheck the plan baseline, predecessor evidence, phase and g
 
 - Keep generated output (PyO3 packaging artifacts, `.pyi` generation if used, wasm-bindgen/JS glue, WIT bindgen, schema codegen, lockstep package metadata) separate from hand-authored logic.
 - Every generated tree has a documented regeneration command and an owner surface in the producing package. Regenerate via that command only; do not hand-edit generated files.
-- CI or the logical PR's validation must fail on a dirty generated tree after regeneration. Treat uncommitted generator drift as a broken change, not as an acceptable local shortcut.
+- CI and the active workstream's validation must fail on a dirty generated tree after regeneration. Treat uncommitted generator drift as a broken change, not as an acceptable local shortcut.
 
 ## Preserve lifecycle invariants
 
@@ -73,8 +74,18 @@ New kernel, runtime, or SDK behavior goes in a sibling module when the natural h
 
 ## Hard stops
 
-Stop the affected implementation when it lacks an eligible logical PR, requires a program gate not recorded `Passed`, conflicts with an authoritative document, or depends on an unresolved required decision. Work expressly permitted to begin in parallel by the Implementation Plan may proceed before a later gate only when that PR's own dependencies and stated entrance criteria are evidenced. Before coding, check Implementation Plan section 6.3 ADR triggers and Security and Threat Model section 18 review triggers. Reviewer unavailability blocks review or merge, not coding, unless pre-implementation approval is explicit or that reviewer must resolve an open decision.
+Stop the affected implementation when it conflicts with a current public
+contract, requires an unresolved architecture or compatibility decision, lacks
+required authority, or cannot satisfy a security control. A blocked workstream
+does not authorize skipping its dependency or weakening the requirement.
 
-In range mode, a hard stop suspends the current PR and every remaining PR; it does not authorize skipping the blocked member. A gate-closing PR may reach reviewable implementation and phase-exit evidence, but range authorization is not a gate decision and the range may cross the gate only after a separate named passing decision exists. Resume stopped work only after the authoritative decision is accepted, affected documents are reconciled, the active slice is reread, and affected validation is rerun.
+Changes to journal meaning, event order, WIT worlds, remote protocols, primary
+port count, middleware stages, kernel I/O, or effect guarantees require an
+explicit architecture decision before implementation. A governed compatibility
+change also requires migration guidance. Security review does not itself stop
+coding when the design is resolved, but it blocks handoff until the applicable
+controls, fixtures, denial cases, redaction tests, and review are complete.
 
-An ADR trigger stops the design-changing work until the decision and primary-document reconciliation are accepted. A governed compatibility change also requires its migration or compatibility plan. A security review trigger does not itself require an ADR or stop implementation when the design is resolved, but it blocks merge until the applicable threat-model, control, fixture, test, and security-review updates are complete; add an ADR only when a separate ADR trigger applies.
+Resume stopped work only after the decision is accepted, affected durable
+contracts are reconciled, the active workstream is reread, and affected
+validation is rerun.

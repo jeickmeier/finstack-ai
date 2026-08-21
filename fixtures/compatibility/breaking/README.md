@@ -1,6 +1,6 @@
 # 1.0 breaking-change fixtures
 
-Negative corpora for PR-062-A01. These paths sit outside the
+Negative corpora for source and wire compatibility changes. These paths sit outside the
 `public-rust-api/v1` and `journal/v1` discoverers so historical counts
 stay stable.
 

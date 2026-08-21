@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::ComponentRef;
 use finstack_ai_runtime::{
-    ContextProvider, JournalStore, Middleware, Model, Observer, ResolvedMiddlewareChain, Toolset,
+    ContextProvider, JournalStore, Middleware, Observer, ReadyModel, ResolvedMiddlewareChain,
+    Toolset,
 };
 
 use super::errors::{RegisteredComponentDescriptor, ResolutionReport};
@@ -49,7 +50,7 @@ impl<T: ?Sized> Clone for ResolvedComponent<T> {
 }
 
 pub(super) struct ResolvedHandles {
-    pub(super) model: ResolvedComponent<dyn Model>,
+    pub(super) model: ResolvedComponent<ReadyModel>,
     pub(super) toolsets: Arc<[ResolvedComponent<dyn Toolset>]>,
     pub(super) context_providers: Arc<[ResolvedComponent<dyn ContextProvider>]>,
     pub(super) middleware: Arc<[ResolvedComponent<dyn Middleware>]>,
@@ -67,7 +68,7 @@ pub struct ResolvedRunPlan {
 impl ResolvedRunPlan {
     /// Resolved model.
     #[must_use]
-    pub fn model(&self) -> &ResolvedComponent<dyn Model> {
+    pub fn model(&self) -> &ResolvedComponent<ReadyModel> {
         &self.handles.model
     }
 

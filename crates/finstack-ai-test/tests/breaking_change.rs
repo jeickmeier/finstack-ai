@@ -1,4 +1,4 @@
-//! PR-062-A01: frozen-family negatives fail closed on incompatible mutations.
+//! breaking-change negative fixture: frozen-family negatives fail closed on incompatible mutations.
 
 use std::fs;
 use std::process::Command;

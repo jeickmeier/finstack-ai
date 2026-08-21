@@ -6,9 +6,7 @@ TypeScript surface is hand-authored; generated wasm-bindgen glue stays in
 
 ## Quick start
 
-Staged, not published. Trust class for host adapters:
-[T2](../../../docs/site/security-trust-levels.md). Not isolated.
-See [docs/site/wasm.md](../../../docs/site/wasm.md).
+Staged, not published. Host adapters are trusted page code and are not isolated.
 
 ```ts
 import { buildMetadata, health, init } from "@finstack/ai";
@@ -114,7 +112,7 @@ same Rust DTOs as the Python binding. It does not submit a live Agent.
 Default `Agent.create` stays memory-backed. Opt into a host journal with
 `Agent.create({ store })`. IndexedDB batteries live on
 `@finstack/ai/adapters/indexeddb` and report `health().detail =
-js_indexeddb_experimental`. Persistence remains experimental after PR-048;
+js_indexeddb_experimental`. Persistence remains experimental;
 it does not meet NFR-REL-001. `durable` stays false. Reload restore is
 `Agent.inspectSession` / `WorkerClient.inspectSession`, not continue-the-run.
 Call `deleteIndexedDbStores()` to drop origin-local data. This package does
@@ -160,7 +158,7 @@ Terminate secrets at a trusted same-origin proxy. Optional application
 
 Default journal is the Rust in-memory store. JS `createMemoryJournalStore()`
 remains a health stub, not a durable store. IndexedDB persistence is
-experimental after PR-048. npm artifacts may be staged; they are not
+experimental. npm artifacts may be staged; they are not
 published. Dropping a `Run` or `WorkerRun` detaches observation and does
 not cancel. Applicable goldens run in Chromium, Firefox, and WebKit.
 
@@ -181,5 +179,3 @@ cross-OS identical.
 `MIT OR Apache-2.0`. Canonical texts live under [`../../../licenses/`](../../../licenses/)
 and are copied next to this README.
 [DCO](../../../CONTRIBUTING.md). [Maintainers](../../../GOVERNANCE.md).
-[ADRs](../../../docs/implementation/adr-register.md).
-[RFCs](../../../docs/rfcs/README.md).

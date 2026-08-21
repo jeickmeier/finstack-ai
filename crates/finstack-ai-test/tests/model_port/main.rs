@@ -1,4 +1,4 @@
-//! PR-015 provider-neutral Model port and runtime acceptance proofs.
+//! model-port contract provider-neutral Model port and runtime acceptance proofs.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

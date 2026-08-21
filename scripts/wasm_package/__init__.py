@@ -1,1 +1,1 @@
-"""Thin wasm package graph, glue, and size checks for PR-033."""
+"""Thin WASM package graph, glue, and size checks."""

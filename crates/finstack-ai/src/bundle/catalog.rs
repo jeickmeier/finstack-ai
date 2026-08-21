@@ -96,4 +96,5 @@ pub(crate) struct CompositionRecipe {
     pub active_application: BTreeSet<CapabilityId>,
     pub active_model: BTreeSet<CapabilityId>,
     pub services: RuntimeServices,
+    pub required_services: RequiredServices,
 }

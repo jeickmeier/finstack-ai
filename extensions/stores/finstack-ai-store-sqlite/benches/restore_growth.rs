@@ -1,6 +1,6 @@
-//! Warning-only restore-time and storage-growth benches (PR-040-A04).
+//! Warning-only restore-time and storage-growth benches (`SQLite` restore-growth benchmark).
 //!
-//! Budgets remain unratified until PR-063.
+//! Budgets remain unratified until performance-budget calibration.
 
 use std::future::Future;
 use std::hint::black_box;
@@ -174,7 +174,7 @@ fn restore_and_growth(criterion: &mut Criterion) {
     let wal_bytes =
         std::fs::metadata(path.with_file_name("journal.sqlite-wal")).map_or(0, |meta| meta.len());
     eprintln!(
-        "sqlite_storage_growth records={RESTORE_RECORDS} db_bytes={db_bytes} wal_bytes={wal_bytes} (warning-only; PR-063 owns budgets)"
+        "sqlite_storage_growth records={RESTORE_RECORDS} db_bytes={db_bytes} wal_bytes={wal_bytes} (warning-only; performance-budget calibration owns budgets)"
     );
 
     criterion.bench_function("sqlite_restore_1024_records", |bencher| {
@@ -263,7 +263,7 @@ fn snapshot_versus_full_replay(criterion: &mut Criterion) {
         });
     });
     eprintln!(
-        "sqlite_snapshot_vs_full records={RESTORE_RECORDS} snapshot_at={SNAPSHOT_AT} (warning-only; PR-063 owns budgets)"
+        "sqlite_snapshot_vs_full records={RESTORE_RECORDS} snapshot_at={SNAPSHOT_AT} (warning-only; performance-budget calibration owns budgets)"
     );
 }
 

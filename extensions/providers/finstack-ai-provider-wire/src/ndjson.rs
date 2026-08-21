@@ -1,4 +1,4 @@
-//! Incremental, bounded NDJSON line framing.
+//! Target-neutral, bounded NDJSON line framing.
 
 use super::StreamNormError;
 

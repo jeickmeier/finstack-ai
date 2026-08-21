@@ -1,4 +1,4 @@
-//! Public-API compatibility fixtures for PR-009 through PR-014 reducer contracts.
+//! Public-API compatibility fixtures for model-only reducer baseline through reducer contract baseline reducer contracts.
 
 use finstack_ai_kernel::{
     APPEND_BATCH_MAX_RECORDS, CommittedBatch, ContentBlock, ExternalCommandRejected,
@@ -15,7 +15,7 @@ use crate::fixtures::public_api::{Expect, PublicApiFixture, PublicApiFixtureErro
 use crate::fixtures::trace::load_golden_trace;
 use crate::paths::try_compatibility_fixture;
 
-/// Execute a PR-009 public-rust-api fixture subject.
+/// Execute a model-only reducer baseline public-rust-api fixture subject.
 pub(crate) fn run_pr009_subject(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     match fixture.subject.as_str() {
         "run-phase" => run_phase(fixture),
@@ -33,7 +33,9 @@ pub(crate) fn run_pr009_subject(fixture: &PublicApiFixture) -> Result<(), Public
         "corrupt-replay" => run_corrupt_replay(fixture),
         "pr009-record" | "pr010-record" | "pr011-record" | "pr012-record" | "pr014-record"
         | "pr046-record" => run_record(fixture),
-        other => Err(fail(format!("unsupported PR-009 subject {other}"))),
+        other => Err(fail(format!(
+            "unsupported model-only reducer baseline subject {other}"
+        ))),
     }
 }
 
@@ -699,7 +701,9 @@ fn run_record(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     let input = require_input(fixture)?;
     let record: RecordEnvelope = from_json(&input)?;
     if !fixture.expect.ok {
-        return Err(fail("expected PR-009 record parse failure"));
+        return Err(fail(
+            "expected model-only reducer baseline record parse failure",
+        ));
     }
     let expected_kind = fixture
         .expect
@@ -727,7 +731,9 @@ fn run_record(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
         .derived_event_count(RECORD_KIND_VERSION)
         .map_err(|error| fail(error.to_string()))?;
     if actual_count != expected_count || record.derived_event_ids().len() != expected_count {
-        return Err(fail("PR-009 record derived-event count mismatch"));
+        return Err(fail(
+            "model-only reducer baseline record derived-event count mismatch",
+        ));
     }
     if expected_count == 0 {
         return Ok(());

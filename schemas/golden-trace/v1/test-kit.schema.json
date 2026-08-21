@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://finstack.ai/schemas/golden-trace/v1/test-kit.schema.json",
   "title": "TestKitGoldenScenarioSuite",
-  "description": "Language-neutral PR-023 public conformance scenarios.",
+  "description": "Language-neutral  public conformance scenarios.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format_version", "scenarios"],

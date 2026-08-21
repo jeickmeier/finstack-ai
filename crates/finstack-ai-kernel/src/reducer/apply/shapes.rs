@@ -33,6 +33,13 @@ pub(super) fn validate_batch_shape(
     {
         return Ok(());
     }
+    if state.pending_extension_effect.is_some() {
+        return if extension_settlement_shape(state, records) {
+            Ok(())
+        } else {
+            Err(KernelError::InvalidRecordOrder)
+        };
+    }
     let valid = match state.phase {
         None => matches!(
             records,
@@ -52,17 +59,20 @@ pub(super) fn validate_batch_shape(
                     StageDisposition::Continued | StageDisposition::Failed { .. }
                 )
             }) || interaction_request_shape(records)
+                || extension_request_shape(state, records)
         }
         Some(RunPhase::PreparingContext) => {
             prepare_context_shape(records, state.cycle)
                 || one_failed_stage(records, state.cycle, Stage::PrepareContext)
                 || interaction_request_shape(records)
+                || extension_request_shape(state, records)
         }
         Some(RunPhase::BeforeModel) => {
             request_model_shape(state, records)
                 || compaction_model_request_shape(records)
                 || one_failed_stage(records, state.cycle, Stage::BeforeModel)
                 || interaction_request_shape(records)
+                || extension_request_shape(state, records)
         }
         Some(RunPhase::AwaitingModel) => model_settlement_shape(state, records, true),
         Some(RunPhase::AwaitingExternal) => {
@@ -82,11 +92,13 @@ pub(super) fn validate_batch_shape(
                     StageDisposition::Continued | StageDisposition::Failed { .. }
                 )
             }) || interaction_request_shape(records)
+                || extension_request_shape(state, records)
         }
         Some(RunPhase::BeforeToolBatch) => {
             tool_batch_open_shape(state, records)
                 || one_failed_stage(records, state.cycle, Stage::BeforeToolBatch)
                 || interaction_request_shape(records)
+                || extension_request_shape(state, records)
         }
         Some(RunPhase::AwaitingTools) => {
             tool_settlement_shape(state, records)
@@ -100,6 +112,7 @@ pub(super) fn validate_batch_shape(
                     StageDisposition::Continued | StageDisposition::Failed { .. }
                 )
             }) || interaction_request_shape(records)
+                || extension_request_shape(state, records)
                 || matches!(
                     records,
                     [record] if matches!(record.body(), RecordBody::CapabilitiesActivated(_))
@@ -109,6 +122,7 @@ pub(super) fn validate_batch_shape(
             finalize_shape(state, records)
                 || retry_shape(state, records)
                 || interaction_request_shape(records)
+                || extension_request_shape(state, records)
         }
         Some(RunPhase::Sleeping) => timer_fired_shape(state, records),
         Some(RunPhase::Cancelling | RunPhase::Suspended) => reconciliation_shape(state, records),
@@ -138,6 +152,31 @@ pub(super) fn validate_batch_shape(
     } else {
         Err(KernelError::InvalidRecordOrder)
     }
+}
+
+fn extension_request_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    matches!(
+        records,
+        [record]
+            if matches!(record.body(), RecordBody::EffectRequested(requested)
+                if matches!(requested.kind(), EffectKind::Context | EffectKind::Middleware)
+                    && super::super::extension::request_cursor(requested).ok()
+                        == stage_cursor_for_phase(state))
+    )
+}
+
+fn extension_settlement_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    let Some(pending) = state.pending_extension_effect.as_ref() else {
+        return false;
+    };
+    matches!(
+        records,
+        [record]
+            if matches!(record.body(), RecordBody::EffectCompleted(completed)
+                if completed.validate_against(&pending.requested).is_ok())
+                || matches!(record.body(), RecordBody::EffectFailed(failed)
+                    if failed.validate_against(&pending.requested).is_ok())
+    )
 }
 
 pub(super) fn structural_record_shape(records: &[RecordEnvelope]) -> bool {

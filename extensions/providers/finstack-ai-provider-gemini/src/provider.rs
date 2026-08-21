@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_provider_wire::{GeminiGenerateContentAssembly, StreamNormError, StreamNormKind};
 use finstack_ai_runtime::{
-    CancellationSignal, GeminiGenerateContentAssembly, InputCapabilities, MediaResolveError,
-    MediaResolveKind, Model, ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError,
-    ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem,
-    ModelTokenEstimate, PortFuture, ReconcileContext, ResolveDraftMediaError, StreamNormError,
-    StreamNormKind, StructuredOutputCapability, resolve_draft_media,
+    CancellationSignal, InputCapabilities, MediaResolveError, MediaResolveKind, Model,
+    ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream,
+    ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, PortFuture,
+    ReconcileContext, ResolveDraftMediaError, StructuredOutputCapability, resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -464,9 +464,9 @@ mod tests {
         MessageRole, Metadata, ModelRequestId, OperationLocator, OutputSpec, PrincipalRef,
         ProviderIds, RawJson, RunId, SessionId, Timestamp,
     };
+    use finstack_ai_provider_wire::{GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly};
     use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, GEMINI_THOUGHTS_TOKENS_KEY,
-        GeminiGenerateContentAssembly, Model, ModelCallContext, ModelName, ModelRequest,
+        AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
         ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem, RunCallContext,
     };
 

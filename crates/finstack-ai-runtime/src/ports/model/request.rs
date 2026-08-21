@@ -296,6 +296,7 @@ pub struct ModelDeferral {
 }
 
 /// Successful pre-commit request validation result.
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModelRequestValidation {
     /// Exact canonical request bytes.

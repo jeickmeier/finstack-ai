@@ -5,13 +5,11 @@ Compatibility profile: pre-1.0 classified breakage
 Fixtures: `fixtures/compatibility/public-rust-api/`
 
 Notes root for the public Rust API family. Authoritative source is `crates/`
-(see `schemas/schema-families.toml` `source_root`). PR-006 activates the family
-with versioned compatibility fixtures for typed IDs, RawJson/Metadata, digests,
-timestamps/durations, and source-free error descriptors. PR-007 extends the
-family with blob-ref, content-block, and message fixtures. PR-008 adds
-run/effect/record/event surfaces. PR-009 adds strict reducer inputs and phases,
-committed-batch bounds, state-hash known answers, and reducer-owned record/event
-derivation fixtures.
+(see `schemas/schema-families.toml` `source_root`). Versioned compatibility
+fixtures cover typed IDs, raw JSON and metadata, digests, timestamps and
+durations, source-free errors, blob and message values, run/effect/record/event
+surfaces, strict reducer inputs, committed-batch bounds, and state-hash known
+answers.
 
 Public item and feature-name changes use the schema-change template and must
 update fixtures under `fixtures/compatibility/public-rust-api/` when behavior

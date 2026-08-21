@@ -9,10 +9,11 @@ use finstack_ai_kernel::{
     Timestamp,
 };
 use finstack_ai_provider_anthropic::{AnthropicConfig, AnthropicModelConfig, AnthropicProvider};
+use finstack_ai_provider_wire::AnthropicMessagesAssembly;
 use finstack_ai_runtime::{
-    AnthropicMessagesAssembly, AuthorizationContext, CancellationSignal, Model, ModelCallContext,
-    ModelName, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem,
-    ModelTerminal, RunCallContext,
+    AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem, ModelTerminal,
+    RunCallContext,
 };
 use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

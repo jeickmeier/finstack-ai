@@ -34,6 +34,12 @@ pub(super) fn apply_effect_requested(
     requested: &crate::EffectRequested,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    if matches!(
+        requested.kind(),
+        EffectKind::Context | EffectKind::Middleware
+    ) {
+        return apply_extension_requested(state, requested);
+    }
     if requested.kind() == EffectKind::Interaction {
         return apply_interaction_effect_requested(state, requested, next);
     }
@@ -118,6 +124,25 @@ pub(super) fn apply_effect_requested(
         deferred: None,
     });
     state.phase = Some(RunPhase::AwaitingModel);
+    Ok(())
+}
+
+fn apply_extension_requested(
+    state: &mut KernelState,
+    requested: &crate::EffectRequested,
+) -> Result<(), KernelError> {
+    super::super::extension::validate_request_shape(requested)?;
+    let cursor = super::super::extension::request_cursor(requested)?;
+    if state.pending_extension_effect.is_some()
+        || super::shapes::stage_cursor_for_phase(state) != Some(cursor)
+    {
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    state.pending_extension_effect = Some(crate::PendingExtensionEffect {
+        cursor,
+        requested: requested.clone(),
+    });
+    state.state_version = state.state_version.max(7);
     Ok(())
 }
 
@@ -247,6 +272,12 @@ pub(super) fn apply_effect_completed(
     completed: &crate::EffectCompleted,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    if matches!(
+        completed.output_contract().kind,
+        EffectOutputKind::ContextContribution | EffectOutputKind::MiddlewareOutcome
+    ) {
+        return apply_extension_completed(state, completed);
+    }
     if completed.output_contract().kind == EffectOutputKind::InteractionResolution {
         return apply_interaction_effect_terminal(
             state,
@@ -333,6 +364,12 @@ pub(super) fn apply_effect_failed(
     state: &mut KernelState,
     failed: &crate::EffectFailed,
 ) -> Result<(), KernelError> {
+    if matches!(
+        failed.output_contract().kind,
+        EffectOutputKind::ContextContribution | EffectOutputKind::MiddlewareOutcome
+    ) {
+        return apply_extension_failed(state, failed);
+    }
     if failed.output_contract().kind == EffectOutputKind::InteractionResolution {
         return apply_interaction_effect_terminal(
             state,
@@ -357,6 +394,74 @@ pub(super) fn apply_effect_failed(
         error: failed.error().clone(),
     });
     state.phase = Some(RunPhase::BeforeFinalize);
+    Ok(())
+}
+
+fn apply_extension_completed(
+    state: &mut KernelState,
+    completed: &crate::EffectCompleted,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_extension_effect
+        .as_ref()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    completed
+        .validate_against(&pending.requested)
+        .map_err(|_| KernelError::InvalidRecordOrder)?;
+    let input = crate::ExtensionEffectSettled {
+        cursor: pending.cursor,
+        outcome: crate::ExtensionSettlement::Completed(completed.clone()),
+    };
+    let fingerprint = super::super::extension::fingerprint(&input)?;
+    if state
+        .extension_settlements
+        .insert(completed.effect_id(), fingerprint.clone())
+        .is_some()
+    {
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    super::insert_completion_identity(
+        state,
+        completed.effect_id(),
+        fingerprint.digest,
+        completed.completion_id(),
+    )?;
+    state.pending_extension_effect = None;
+    state.state_version = state.state_version.max(7);
+    Ok(())
+}
+
+fn apply_extension_failed(
+    state: &mut KernelState,
+    failed: &crate::EffectFailed,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_extension_effect
+        .as_ref()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    failed
+        .validate_against(&pending.requested)
+        .map_err(|_| KernelError::InvalidRecordOrder)?;
+    let input = crate::ExtensionEffectSettled {
+        cursor: pending.cursor,
+        outcome: crate::ExtensionSettlement::Failed(failed.clone()),
+    };
+    let fingerprint = super::super::extension::fingerprint(&input)?;
+    if state
+        .extension_settlements
+        .insert(failed.effect_id(), fingerprint.clone())
+        .is_some()
+    {
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    super::insert_completion_identity(
+        state,
+        failed.effect_id(),
+        fingerprint.digest,
+        failed.completion_id(),
+    )?;
+    state.pending_extension_effect = None;
+    state.state_version = state.state_version.max(7);
     Ok(())
 }
 

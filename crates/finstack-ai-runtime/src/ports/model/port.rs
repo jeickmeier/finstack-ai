@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use finstack_ai_kernel::PendingModelEffect;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 use finstack_ai_kernel::RawJson;
@@ -7,10 +9,14 @@ use crate::{PortFuture, PortObject};
 use super::context::{ModelReconcileResult, ModelRequest, ModelWarmupContext, ReconcileContext};
 use super::error::ModelError;
 use super::identity::{ModelDescriptor, ModelName};
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
 use super::profile::LockedModelContextProfile;
 use super::profile::ModelCapabilities;
-use super::request::{ModelRequestDraft, ModelRequestValidation, ModelTokenEstimate};
+use super::request::ModelTokenEstimate;
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
+use super::request::{ModelRequestDraft, ModelRequestValidation};
 use super::stream::ModelEventStream;
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
 use super::{
     MODEL_CONTEXT_LIMIT_EXCEEDED, MODEL_ESTIMATOR_MISMATCH, MODEL_PROFILE_INVALID,
     MODEL_REQUEST_INVALID,
@@ -82,12 +88,94 @@ pub trait Model: PortObject {
     }
 }
 
+/// Proof that a retained model completed construction warmup successfully.
+///
+/// The SDK caches this value with the resolved component. Run-task owners
+/// accept the proof instead of calling [`Model::warmup`] themselves, so one
+/// retained model is prepared exactly once and the proof is shared by every
+/// run that uses it.
+#[derive(Clone)]
+pub struct ReadyModel {
+    model: Arc<dyn Model>,
+}
+
+impl ReadyModel {
+    /// Validate and warm one retained model.
+    ///
+    /// A failed or cancelled warmup does not produce a readiness proof, so the
+    /// caller may retry preparation with a fresh construction context.
+    ///
+    /// # Errors
+    ///
+    /// Returns the descriptor or adapter error produced before readiness.
+    pub async fn prepare(model: Arc<dyn Model>) -> Result<Self, ModelError> {
+        Self::prepare_with_context(model, ModelWarmupContext::default()).await
+    }
+
+    /// Validate and warm one retained model with an explicit construction context.
+    ///
+    /// # Errors
+    ///
+    /// Returns the descriptor or adapter error produced before readiness.
+    pub async fn prepare_with_context(
+        model: Arc<dyn Model>,
+        context: ModelWarmupContext,
+    ) -> Result<Self, ModelError> {
+        model.descriptor().validate()?;
+        model.warmup(context).await?;
+        Ok(Self { model })
+    }
+
+    /// Borrow the prepared model port.
+    #[must_use]
+    pub fn as_model(&self) -> &dyn Model {
+        self.model.as_ref()
+    }
+
+    /// Clone the prepared model port for an owned execution path.
+    #[must_use]
+    pub fn shared_model(&self) -> Arc<dyn Model> {
+        Arc::clone(&self.model)
+    }
+}
+
+impl Model for ReadyModel {
+    fn descriptor(&self) -> ModelDescriptor {
+        self.model.descriptor()
+    }
+
+    fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
+        self.model.capabilities(model)
+    }
+
+    fn estimate_input_tokens(
+        &self,
+        model: &ModelName,
+        canonical_request: &[u8],
+    ) -> Result<ModelTokenEstimate, ModelError> {
+        self.model.estimate_input_tokens(model, canonical_request)
+    }
+
+    fn request(&self, request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
+        self.model.request(request)
+    }
+
+    fn reconcile(
+        &self,
+        context: ReconcileContext,
+        effect: PendingModelEffect,
+    ) -> PortFuture<Result<ModelReconcileResult, ModelError>> {
+        self.model.reconcile(context, effect)
+    }
+}
+
 /// Validate canonical bytes, estimator binding, and effective token/output limits.
 ///
 /// # Errors
 ///
 /// Returns stable request/profile/estimator/context-limit errors.
-pub fn validate_model_request(
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) fn validate_model_request(
     model: &dyn Model,
     draft: &ModelRequestDraft,
     locked: &LockedModelContextProfile,

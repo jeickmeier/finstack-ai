@@ -36,11 +36,13 @@ async fn runtime_routes_cancel_effect_to_only_the_active_model_task() {
             job_capacity: 1,
             result_capacity: 1,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
-        model_port,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(model_port)
+                .await
+                .expect("model readiness"),
+        ),
         locked_profile(),
         FixedClock::new(timestamp(2_000)),
         CounterRandom(AtomicU64::new(100)),

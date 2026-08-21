@@ -6,7 +6,7 @@
     "id": "finstack.tools.lookup",
     "model_name": "lookup",
     "title": "Lookup",
-    "description": "Look up a value without executing during PR-015.",
+    "description": "Look up a value without executing during .",
     "input_schema": {
       "type": "object"
     },

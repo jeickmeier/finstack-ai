@@ -10,10 +10,11 @@ use finstack_ai_kernel::{
 use finstack_ai_provider_openrouter::{
     OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider,
 };
+use finstack_ai_provider_wire::OpenAiResponsesAssembly;
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
     ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem, ModelTerminal,
-    OpenAiResponsesAssembly, RunCallContext,
+    RunCallContext,
 };
 use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

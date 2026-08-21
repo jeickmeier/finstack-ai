@@ -54,18 +54,18 @@ fn strict_bundle_and_lock_round_trip_reject_unknown_fields() {
 }
 
 #[test]
-fn configuration_secret_canary_fails_closed_but_refs_are_allowed() {
+fn configuration_secret_canary_fails_closed_and_refs_fail_without_parser() {
     let component = ComponentId::parse("finstack.model.test").expect("component");
     let bad = BTreeMap::from([(
         component.clone(),
         RawJson::parse(br#"{"api_key":"secret-canary"}"#).expect("JSON"),
     )]);
     assert!(ensure_secret_free_config(&bad).is_err());
-    let good = BTreeMap::from([(
+    let reference = BTreeMap::from([(
         component,
         RawJson::parse(br#"{"api_key_ref":"vault://model"}"#).expect("JSON"),
     )]);
-    ensure_secret_free_config(&good).expect("secret reference");
+    assert!(ensure_secret_free_config(&reference).is_err());
     for key in [
         "apikey",
         "auth",
@@ -87,7 +87,10 @@ fn configuration_secret_canary_fails_closed_but_refs_are_allowed() {
             ComponentId::parse("finstack.model.test").expect("component"),
             RawJson::parse(ref_body.as_bytes()).expect("JSON"),
         )]);
-        ensure_secret_free_config(&allowed).unwrap_or_else(|_| panic!("{key}_ref must be allowed"));
+        assert!(
+            ensure_secret_free_config(&allowed).is_err(),
+            "{key}_ref requires a canonical parser"
+        );
     }
     for key in ["oauth_client_id", "author", "authority"] {
         let body = format!(r#"{{"{key}":"not-a-secret"}}"#);
@@ -102,6 +105,17 @@ fn configuration_secret_canary_fails_closed_but_refs_are_allowed() {
         RawJson::parse(br#"{"auth_token":"secret-canary"}"#).expect("JSON"),
     )]);
     assert!(ensure_secret_free_config(&auth_token).is_err());
+    for key in ["apiKey", "clientSecret", "authToken"] {
+        let body = format!(r#"{{"{key}":"literal"}}"#);
+        let config = BTreeMap::from([(
+            ComponentId::parse("finstack.model.test").expect("component"),
+            RawJson::parse(body.as_bytes()).expect("JSON"),
+        )]);
+        assert!(
+            ensure_secret_free_config(&config).is_err(),
+            "{key} must fail closed"
+        );
+    }
 }
 
 #[test]

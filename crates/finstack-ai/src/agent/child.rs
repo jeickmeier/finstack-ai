@@ -89,10 +89,13 @@ impl AgentRun {
         parent_effect_id: EffectId,
         request: ChildRunRequest,
     ) -> Result<ChildRunHandle, AgentRunError> {
-        let mut commit =
-            CommitCoordinator::recover(Arc::clone(self.journal_store()), self.locator().session_id)
-                .await
-                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        let mut commit = CommitCoordinator::recover_run(
+            Arc::clone(self.journal_store()),
+            self.locator().session_id,
+            Some(self.locator().run_id),
+        )
+        .await
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
         let accepted = commit
             .state()
             .accepted
@@ -198,10 +201,13 @@ impl AgentRun {
             reservation_request_record_id: None,
             reservation_settlement: None,
         };
-        let mut commit =
-            CommitCoordinator::recover(Arc::clone(&self.inner.store), parent.session_id)
-                .await
-                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        let mut commit = CommitCoordinator::recover_run(
+            Arc::clone(&self.inner.store),
+            parent.session_id,
+            Some(parent.run_id),
+        )
+        .await
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
         let invoker: Arc<dyn AgentInvoker> = match remote_invoker {
             Some(invoker) => {
                 let invoker = Arc::new(invoker);
@@ -262,9 +268,10 @@ impl AgentRun {
         }
         request.validate()?;
         let parent_accepted = self.wait_accepted().await?;
-        let commit = CommitCoordinator::recover(
+        let commit = CommitCoordinator::recover_run(
             Arc::clone(&self.inner.store),
             self.inner.locator.session_id,
+            Some(self.inner.locator.run_id),
         )
         .await
         .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
@@ -359,8 +366,7 @@ impl AgentRun {
         let router = ExternalCompletionRouter::trusted(Arc::clone(self.journal_store()))
             .await
             .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-        router
-            .route(command, submitted_at)
+        Box::pin(router.route(command, submitted_at))
             .await
             .map_err(|error| AgentRunError::runtime_message(error.to_string()))
     }
@@ -451,9 +457,10 @@ impl AgentRun {
     #[cfg(feature = "native-tokio")]
     async fn journaled_child_mappings(&self) -> Result<Vec<ChildRunPrepared>, AgentRunError> {
         let parent_run = self.inner.locator.run_id;
-        let Ok(commit) = CommitCoordinator::recover(
+        let Ok(commit) = CommitCoordinator::recover_run(
             Arc::clone(&self.inner.store),
             self.inner.locator.session_id,
+            Some(parent_run),
         )
         .await
         else {
@@ -595,9 +602,10 @@ impl AgentRun {
     async fn wait_accepted(&self) -> Result<RunAccepted, AgentRunError> {
         self.runtime_handle().await?;
         loop {
-            if let Ok(commit) = CommitCoordinator::recover(
+            if let Ok(commit) = CommitCoordinator::recover_run(
                 Arc::clone(&self.inner.store),
                 self.inner.locator.session_id,
+                Some(self.inner.locator.run_id),
             )
             .await
                 && let Some(accepted) = commit.state().accepted.clone()

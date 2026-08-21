@@ -15,7 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JS_PACKAGE = REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js"
 EXAMPLE = REPO_ROOT / "examples" / "ts-alpha-install"
-OUT_DIR = REPO_ROOT / "docs" / "implementation" / "artifacts" / "pr-038" / "npm-staging"
+OUT_DIR = REPO_ROOT / "target" / "release-staging" / "npm"
 
 
 def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -131,7 +131,7 @@ def main() -> int:
             "source_revision": git_revision(),
             "staged_not_published": True,
             "cross_binding_checkpoint_not_cut": True,
-            "python_half": "PR-032 staged 0.0.2 candidate",
+            "python_half": "staged 0.0.2 candidate",
             "tarball": staged.name,
             "tarball_sha256": sha256(staged),
             "sbom_sha256": sha256(sbom),

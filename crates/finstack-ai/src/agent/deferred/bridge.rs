@@ -223,9 +223,10 @@ impl ChildRunBridge {
         &self,
         parent: &AgentRun,
     ) -> Result<Vec<ChildSettleOutcome>, ChildRunBridgeError> {
-        let commit = CommitCoordinator::recover(
+        let commit = CommitCoordinator::recover_run(
             Arc::clone(parent.journal_store()),
             parent.locator().session_id,
+            Some(parent.locator().run_id),
         )
         .await
         .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
@@ -268,9 +269,10 @@ async fn completion_command(
     deferred: &EffectDeferred,
     outcome: ExternalEffectOutcome,
 ) -> Result<ExternalEffectCompletionCommand, ChildRunBridgeError> {
-    let commit = CommitCoordinator::recover(
+    let commit = CommitCoordinator::recover_run(
         Arc::clone(parent.journal_store()),
         parent.locator().session_id,
+        Some(parent.locator().run_id),
     )
     .await
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
@@ -306,9 +308,10 @@ async fn tool_result_output(
     text: &str,
     is_error: bool,
 ) -> Result<RawJson, ChildRunBridgeError> {
-    let commit = CommitCoordinator::recover(
+    let commit = CommitCoordinator::recover_run(
         Arc::clone(parent.journal_store()),
         parent.locator().session_id,
+        Some(parent.locator().run_id),
     )
     .await
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;

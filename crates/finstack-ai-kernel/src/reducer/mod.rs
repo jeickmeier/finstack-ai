@@ -5,6 +5,7 @@ mod apply;
 mod capacity;
 mod decide;
 mod decision;
+pub(crate) mod extension;
 mod fingerprint;
 mod input;
 mod interaction;
@@ -17,10 +18,11 @@ use serde::Serialize;
 
 pub use decision::{CommittedBatch, Decision, KernelError, PostCommitAction};
 pub use input::{
-    AcceptRun, CancelRequested, CancellationReconciledInput, ExternalEffectCompletedInput,
-    ExternalEffectCompletion, ExternalEffectOutcome, InteractionSettled, KernelInput, ModelSettled,
-    ModelSettlement, ReducerStageOutcome, RequestCompactionModel, RequestInteraction, StageSettled,
-    TimerFiredInput, ToolBatchSettled, ToolSettlement,
+    AcceptRun, CancelRequested, CancellationReconciledInput, ExtensionEffectSettled,
+    ExtensionSettlement, ExternalEffectCompletedInput, ExternalEffectCompletion,
+    ExternalEffectOutcome, InteractionSettled, KernelInput, ModelSettled, ModelSettlement,
+    ReducerStageOutcome, RequestCompactionModel, RequestExtensionEffect, RequestInteraction,
+    StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
 };
 
 use crate::events::RunEvent;

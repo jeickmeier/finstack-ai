@@ -45,11 +45,10 @@ pub use deferred::{
 };
 pub use handle::Agent;
 #[cfg(feature = "native-tokio")]
-pub(crate) use lane::LaneLive;
+pub(crate) use lane::{LaneLive, live_run};
 pub use linked::{
-    AnthropicAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent,
-    LinkedAgentPorts, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
-    OpenRouterMediaToolsSpec,
+    AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,
+    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
 };
 pub use run::AgentRun;
 pub use types::{

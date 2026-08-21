@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://finstack.ai/schemas/benchmark-report/v1/metadata.schema.json",
   "title": "BenchmarkMetadata",
-  "description": "Machine-readable Criterion benchmark metadata (PR-005; TDD \u00a733.4).",
+  "description": "Machine-readable Criterion benchmark metadata.",
   "type": "object",
   "additionalProperties": false,
   "required": [

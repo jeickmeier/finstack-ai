@@ -1,4 +1,4 @@
-"""PR-039 known-answer digest checks through the one Rust engine."""
+"""Known-answer digest checks through the one Rust engine."""
 
 from __future__ import annotations
 

@@ -9,10 +9,10 @@ use finstack_ai_kernel::{
     Timestamp,
 };
 use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
+use finstack_ai_provider_wire::OllamaChatAssembly;
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTerminal, OllamaChatAssembly,
-    RunCallContext,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTerminal, RunCallContext,
 };
 use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://finstack.ai/schemas/benchmark-report/v1/size-budgets.schema.json",
   "title": "SizeBudgets",
-  "description": "Machine-readable A03 size-budget table (PR-063).",
+  "description": "Machine-readable size-budget table.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format_version", "workload", "artifacts"],

@@ -10,12 +10,12 @@ use crate::{CapabilityActivation, CapabilitySpec};
 /// Maps contributed components to the capability that owns them.
 #[derive(Clone, Debug, Default)]
 pub(super) struct CapabilityContributionIndex {
-    owners: BTreeMap<ComponentId, CapabilityId>,
+    owners: BTreeMap<ComponentId, Arc<[CapabilityId]>>,
 }
 
 impl CapabilityContributionIndex {
     pub(super) fn from_specs(capabilities: &[CapabilitySpec]) -> Self {
-        let mut owners = BTreeMap::new();
+        let mut owners: BTreeMap<ComponentId, Vec<CapabilityId>> = BTreeMap::new();
         for capability in capabilities {
             if capability.activation == CapabilityActivation::Disabled {
                 continue;
@@ -26,24 +26,38 @@ impl CapabilityContributionIndex {
                 .chain(capability.context_providers.iter())
                 .chain(capability.middleware.iter())
             {
-                owners.insert(component.id().clone(), capability.id.clone());
+                owners
+                    .entry(component.id().clone())
+                    .or_default()
+                    .push(capability.id.clone());
             }
         }
-        Self { owners }
+        Self {
+            owners: owners
+                .into_iter()
+                .map(|(component, mut ids)| {
+                    ids.sort();
+                    ids.dedup();
+                    (component, ids.into())
+                })
+                .collect(),
+        }
     }
 
-    pub(super) fn owners(&self) -> &BTreeMap<ComponentId, CapabilityId> {
+    pub(super) fn owners(&self) -> &BTreeMap<ComponentId, Arc<[CapabilityId]>> {
         &self.owners
     }
 
     pub(super) fn allows(&self, component: &ComponentId, active: &[ActiveCapability]) -> bool {
         match self.owners.get(component) {
             None => true,
-            Some(owner) => active.iter().any(|item| &item.capability_id == owner),
+            Some(owners) => active
+                .iter()
+                .any(|item| owners.iter().any(|owner| &item.capability_id == owner)),
         }
     }
 
-    pub(super) fn as_arc_owners(&self) -> Arc<BTreeMap<ComponentId, CapabilityId>> {
+    pub(super) fn as_arc_owners(&self) -> Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>> {
         Arc::new(self.owners.clone())
     }
 }

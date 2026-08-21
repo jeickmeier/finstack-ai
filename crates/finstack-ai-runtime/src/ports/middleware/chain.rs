@@ -51,6 +51,14 @@ impl ResolvedMiddlewareChain {
         for (index, registration) in registrations.into_iter().enumerate() {
             let descriptor = registration.middleware.descriptor();
             descriptor.validate()?;
+            if descriptor.invocation.recovery
+                != finstack_ai_kernel::InvocationRecovery::RecomputeSafe
+            {
+                return Err(MiddlewareError::stable(
+                    MIDDLEWARE_RESOLUTION_INVALID,
+                    "middleware must be recompute-safe until a reconcile port exists",
+                ));
+            }
             if !ids.insert(descriptor.invocation.component.clone()) {
                 return Err(MiddlewareError::stable(
                     MIDDLEWARE_RESOLUTION_INVALID,

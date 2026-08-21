@@ -120,14 +120,15 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
             Vec::new()
         };
     sources.absorb_approval_terminal(terminal.as_ref(), cursor, &remaining_paid, &journaled);
-    let retained = match run_tool_batch_chain(coordinator, catalog, driver, cursor, &calls).await? {
-        ToolBatchPolicy::Unchanged => None,
-        ToolBatchPolicy::Retain(retained) => Some(retained),
-        ToolBatchPolicy::Fail(descriptor) => {
-            settle_tool_batch_failure(coordinator, sources, now, cursor, *descriptor).await?;
-            return Ok(false);
-        }
-    };
+    let retained =
+        match run_tool_batch_chain(coordinator, catalog, driver, sources, cursor, &calls).await? {
+            ToolBatchPolicy::Unchanged => None,
+            ToolBatchPolicy::Retain(retained) => Some(retained),
+            ToolBatchPolicy::Fail(descriptor) => {
+                settle_tool_batch_failure(coordinator, sources, now, cursor, *descriptor).await?;
+                return Ok(false);
+            }
+        };
     let plans = match plan_source_calls(catalog, calls, deadline, retained.as_ref(), sources)? {
         PlannedBatch::Ready(plans) => plans,
         PlannedBatch::ApprovalRequired(subjects) => {

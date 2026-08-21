@@ -1,4 +1,4 @@
-"""PR-027 import, metadata, typing, and lazy-provider smoke tests."""
+"""Import, metadata, typing, and lazy-provider smoke tests."""
 
 from __future__ import annotations
 

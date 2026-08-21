@@ -362,12 +362,15 @@ impl core::marker::Copy for finstack_ai_kernel::ContextPreparedError
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::ContextPreparedError
 pub enum finstack_ai_kernel::ConversationError
 pub finstack_ai_kernel::ConversationError::Cycle
+pub finstack_ai_kernel::ConversationError::DuplicateLaneId
+pub finstack_ai_kernel::ConversationError::DuplicateLaneName
 pub finstack_ai_kernel::ConversationError::EnvelopeMismatch
 pub finstack_ai_kernel::ConversationError::ImmutableConflict
 pub finstack_ai_kernel::ConversationError::InvalidToolPair
 pub finstack_ai_kernel::ConversationError::MissingLeaf
 pub finstack_ai_kernel::ConversationError::MissingParent
 pub finstack_ai_kernel::ConversationError::SelfParent
+pub finstack_ai_kernel::ConversationError::UnknownLane
 pub finstack_ai_kernel::ConversationError::UnknownLeaf
 impl finstack_ai_kernel::ConversationError
 pub const fn finstack_ai_kernel::ConversationError::code(&self) -> &'static str
@@ -468,12 +471,15 @@ pub fn finstack_ai_kernel::EffectError::fmt(&self, &mut core::fmt::Formatter<'_>
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::EffectError
 pub enum finstack_ai_kernel::EffectInput
 pub finstack_ai_kernel::EffectInput::Context
+pub finstack_ai_kernel::EffectInput::Context::cursor: finstack_ai_kernel::StageCursor
 pub finstack_ai_kernel::EffectInput::Context::request: finstack_ai_kernel::RawJson
 pub finstack_ai_kernel::EffectInput::Interaction
 pub finstack_ai_kernel::EffectInput::Interaction::interaction_id: finstack_ai_kernel::InteractionId
 pub finstack_ai_kernel::EffectInput::Interaction::request_digest: finstack_ai_kernel::Digest
 pub finstack_ai_kernel::EffectInput::Middleware
+pub finstack_ai_kernel::EffectInput::Middleware::cursor: finstack_ai_kernel::StageCursor
 pub finstack_ai_kernel::EffectInput::Middleware::input: finstack_ai_kernel::RawJson
+pub finstack_ai_kernel::EffectInput::Middleware::resume: core::option::Option<finstack_ai_kernel::RawJson>
 pub finstack_ai_kernel::EffectInput::Middleware::stage: alloc::sync::Arc<str>
 pub finstack_ai_kernel::EffectInput::Model
 pub finstack_ai_kernel::EffectInput::Model::request: finstack_ai_kernel::RawJson
@@ -732,6 +738,39 @@ impl core::marker::Copy for finstack_ai_kernel::EventTag
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::EventTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::EventTag
 pub const finstack_ai_kernel::EventTag::NAME: &'static str
+pub enum finstack_ai_kernel::ExtensionSettlement
+pub finstack_ai_kernel::ExtensionSettlement::Completed(finstack_ai_kernel::EffectCompleted)
+pub finstack_ai_kernel::ExtensionSettlement::Failed(finstack_ai_kernel::EffectFailed)
+impl finstack_ai_kernel::ExtensionSettlement
+pub fn finstack_ai_kernel::ExtensionSettlement::effect_id(&self) -> finstack_ai_kernel::EffectId
+impl core::clone::Clone for finstack_ai_kernel::ExtensionSettlement
+pub fn finstack_ai_kernel::ExtensionSettlement::clone(&self) -> finstack_ai_kernel::ExtensionSettlement
+impl core::cmp::Eq for finstack_ai_kernel::ExtensionSettlement
+impl core::cmp::PartialEq for finstack_ai_kernel::ExtensionSettlement
+pub fn finstack_ai_kernel::ExtensionSettlement::eq(&self, &finstack_ai_kernel::ExtensionSettlement) -> bool
+impl core::fmt::Debug for finstack_ai_kernel::ExtensionSettlement
+pub fn finstack_ai_kernel::ExtensionSettlement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_kernel::ExtensionSettlement
+impl serde_core::ser::Serialize for finstack_ai_kernel::ExtensionSettlement
+pub fn finstack_ai_kernel::ExtensionSettlement::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ExtensionSettlement
+pub fn finstack_ai_kernel::ExtensionSettlement::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_kernel::ExtensionSettlementKind
+pub finstack_ai_kernel::ExtensionSettlementKind::Completed
+pub finstack_ai_kernel::ExtensionSettlementKind::Failed
+impl core::clone::Clone for finstack_ai_kernel::ExtensionSettlementKind
+pub fn finstack_ai_kernel::ExtensionSettlementKind::clone(&self) -> finstack_ai_kernel::ExtensionSettlementKind
+impl core::cmp::Eq for finstack_ai_kernel::ExtensionSettlementKind
+impl core::cmp::PartialEq for finstack_ai_kernel::ExtensionSettlementKind
+pub fn finstack_ai_kernel::ExtensionSettlementKind::eq(&self, &finstack_ai_kernel::ExtensionSettlementKind) -> bool
+impl core::fmt::Debug for finstack_ai_kernel::ExtensionSettlementKind
+pub fn finstack_ai_kernel::ExtensionSettlementKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_kernel::ExtensionSettlementKind
+impl core::marker::StructuralPartialEq for finstack_ai_kernel::ExtensionSettlementKind
+impl serde_core::ser::Serialize for finstack_ai_kernel::ExtensionSettlementKind
+pub fn finstack_ai_kernel::ExtensionSettlementKind::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ExtensionSettlementKind
+pub fn finstack_ai_kernel::ExtensionSettlementKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::ExternalCommandError
 pub finstack_ai_kernel::ExternalCommandError::InvalidLabel
 pub finstack_ai_kernel::ExternalCommandError::InvalidLabel::field: &'static str
@@ -971,12 +1010,14 @@ pub finstack_ai_kernel::KernelInput::CancelRequested(finstack_ai_kernel::CancelR
 pub finstack_ai_kernel::KernelInput::CancellationReconciled(finstack_ai_kernel::CancellationReconciledInput)
 pub finstack_ai_kernel::KernelInput::CapabilitiesActivated(finstack_ai_kernel::CapabilitiesActivated)
 pub finstack_ai_kernel::KernelInput::ConfigureOutput(finstack_ai_kernel::OutputConfiguration)
+pub finstack_ai_kernel::KernelInput::ExtensionEffectSettled(finstack_ai_kernel::ExtensionEffectSettled)
 pub finstack_ai_kernel::KernelInput::ExternalEffectCompleted(finstack_ai_kernel::ExternalEffectCompletedInput)
 pub finstack_ai_kernel::KernelInput::InteractionSettled(finstack_ai_kernel::InteractionSettled)
 pub finstack_ai_kernel::KernelInput::ModelSettled(finstack_ai_kernel::ModelSettled)
 pub finstack_ai_kernel::KernelInput::OutputValidated(finstack_ai_kernel::OutputValidated)
 pub finstack_ai_kernel::KernelInput::RecordExternalCommandRejected(finstack_ai_kernel::RecordExternalCommandRejected)
 pub finstack_ai_kernel::KernelInput::RequestCompactionModel(finstack_ai_kernel::RequestCompactionModel)
+pub finstack_ai_kernel::KernelInput::RequestExtensionEffect(finstack_ai_kernel::RequestExtensionEffect)
 pub finstack_ai_kernel::KernelInput::RequestInteraction(finstack_ai_kernel::RequestInteraction)
 pub finstack_ai_kernel::KernelInput::StageSettled(finstack_ai_kernel::StageSettled)
 pub finstack_ai_kernel::KernelInput::TimerFired(finstack_ai_kernel::TimerFiredInput)
@@ -3406,6 +3447,36 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::ErrorIdentifiers
 pub fn finstack_ai_kernel::ErrorIdentifiers::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ErrorIdentifiers
 pub fn finstack_ai_kernel::ErrorIdentifiers::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_kernel::ExtensionEffectSettled
+pub finstack_ai_kernel::ExtensionEffectSettled::cursor: finstack_ai_kernel::StageCursor
+pub finstack_ai_kernel::ExtensionEffectSettled::outcome: finstack_ai_kernel::ExtensionSettlement
+impl core::clone::Clone for finstack_ai_kernel::ExtensionEffectSettled
+pub fn finstack_ai_kernel::ExtensionEffectSettled::clone(&self) -> finstack_ai_kernel::ExtensionEffectSettled
+impl core::cmp::Eq for finstack_ai_kernel::ExtensionEffectSettled
+impl core::cmp::PartialEq for finstack_ai_kernel::ExtensionEffectSettled
+pub fn finstack_ai_kernel::ExtensionEffectSettled::eq(&self, &finstack_ai_kernel::ExtensionEffectSettled) -> bool
+impl core::fmt::Debug for finstack_ai_kernel::ExtensionEffectSettled
+pub fn finstack_ai_kernel::ExtensionEffectSettled::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_kernel::ExtensionEffectSettled
+impl serde_core::ser::Serialize for finstack_ai_kernel::ExtensionEffectSettled
+pub fn finstack_ai_kernel::ExtensionEffectSettled::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ExtensionEffectSettled
+pub fn finstack_ai_kernel::ExtensionEffectSettled::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_kernel::ExtensionSettlementFingerprint
+pub finstack_ai_kernel::ExtensionSettlementFingerprint::digest: finstack_ai_kernel::Digest
+pub finstack_ai_kernel::ExtensionSettlementFingerprint::kind: finstack_ai_kernel::ExtensionSettlementKind
+impl core::clone::Clone for finstack_ai_kernel::ExtensionSettlementFingerprint
+pub fn finstack_ai_kernel::ExtensionSettlementFingerprint::clone(&self) -> finstack_ai_kernel::ExtensionSettlementFingerprint
+impl core::cmp::Eq for finstack_ai_kernel::ExtensionSettlementFingerprint
+impl core::cmp::PartialEq for finstack_ai_kernel::ExtensionSettlementFingerprint
+pub fn finstack_ai_kernel::ExtensionSettlementFingerprint::eq(&self, &finstack_ai_kernel::ExtensionSettlementFingerprint) -> bool
+impl core::fmt::Debug for finstack_ai_kernel::ExtensionSettlementFingerprint
+pub fn finstack_ai_kernel::ExtensionSettlementFingerprint::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_kernel::ExtensionSettlementFingerprint
+impl serde_core::ser::Serialize for finstack_ai_kernel::ExtensionSettlementFingerprint
+pub fn finstack_ai_kernel::ExtensionSettlementFingerprint::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ExtensionSettlementFingerprint
+pub fn finstack_ai_kernel::ExtensionSettlementFingerprint::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::ExternalCommandRejected
 pub finstack_ai_kernel::ExternalCommandRejected::accepted_digest: core::option::Option<finstack_ai_kernel::Digest>
 pub finstack_ai_kernel::ExternalCommandRejected::authorization: finstack_ai_kernel::AuthorizationEvidence
@@ -3728,6 +3799,7 @@ pub finstack_ai_kernel::KernelState::child_preparations: alloc::collections::btr
 pub finstack_ai_kernel::KernelState::completion_identities: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::CompletionIdentity>
 pub finstack_ai_kernel::KernelState::current_turn: core::option::Option<finstack_ai_kernel::CurrentTurn>
 pub finstack_ai_kernel::KernelState::cycle: u64
+pub finstack_ai_kernel::KernelState::extension_settlements: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ExtensionSettlementFingerprint>
 pub finstack_ai_kernel::KernelState::final_result: core::option::Option<finstack_ai_kernel::FinalResultRecorded>
 pub finstack_ai_kernel::KernelState::lane_id: core::option::Option<finstack_ai_kernel::LaneId>
 pub finstack_ai_kernel::KernelState::last_applied_sequence: u64
@@ -3738,6 +3810,7 @@ pub finstack_ai_kernel::KernelState::limit_usage: finstack_ai_kernel::LimitUsage
 pub finstack_ai_kernel::KernelState::messages: alloc::sync::Arc<alloc::vec::Vec<finstack_ai_kernel::Message>>
 pub finstack_ai_kernel::KernelState::model_settlements: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ModelSettlementFingerprint>
 pub finstack_ai_kernel::KernelState::output_configuration: core::option::Option<finstack_ai_kernel::OutputConfiguration>
+pub finstack_ai_kernel::KernelState::pending_extension_effect: core::option::Option<finstack_ai_kernel::PendingExtensionEffect>
 pub finstack_ai_kernel::KernelState::pending_interaction: core::option::Option<finstack_ai_kernel::PendingInteraction>
 pub finstack_ai_kernel::KernelState::pending_model_effect: core::option::Option<finstack_ai_kernel::PendingModelEffect>
 pub finstack_ai_kernel::KernelState::phase: core::option::Option<finstack_ai_kernel::RunPhase>
@@ -4177,6 +4250,21 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::OutputValidationFailed
 pub fn finstack_ai_kernel::OutputValidationFailed::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::OutputValidationFailed
 pub fn finstack_ai_kernel::OutputValidationFailed::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_kernel::PendingExtensionEffect
+pub finstack_ai_kernel::PendingExtensionEffect::cursor: finstack_ai_kernel::StageCursor
+pub finstack_ai_kernel::PendingExtensionEffect::requested: finstack_ai_kernel::EffectRequested
+impl core::clone::Clone for finstack_ai_kernel::PendingExtensionEffect
+pub fn finstack_ai_kernel::PendingExtensionEffect::clone(&self) -> finstack_ai_kernel::PendingExtensionEffect
+impl core::cmp::Eq for finstack_ai_kernel::PendingExtensionEffect
+impl core::cmp::PartialEq for finstack_ai_kernel::PendingExtensionEffect
+pub fn finstack_ai_kernel::PendingExtensionEffect::eq(&self, &finstack_ai_kernel::PendingExtensionEffect) -> bool
+impl core::fmt::Debug for finstack_ai_kernel::PendingExtensionEffect
+pub fn finstack_ai_kernel::PendingExtensionEffect::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_kernel::PendingExtensionEffect
+impl serde_core::ser::Serialize for finstack_ai_kernel::PendingExtensionEffect
+pub fn finstack_ai_kernel::PendingExtensionEffect::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::PendingExtensionEffect
+pub fn finstack_ai_kernel::PendingExtensionEffect::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::PendingInteraction
 pub finstack_ai_kernel::PendingInteraction::cursor: finstack_ai_kernel::StageCursor
 pub finstack_ai_kernel::PendingInteraction::prior_phase: finstack_ai_kernel::RunPhase
@@ -4446,6 +4534,20 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::RequestCompactionModel
 pub fn finstack_ai_kernel::RequestCompactionModel::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::RequestCompactionModel
 pub fn finstack_ai_kernel::RequestCompactionModel::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_kernel::RequestExtensionEffect
+pub finstack_ai_kernel::RequestExtensionEffect::requested: finstack_ai_kernel::EffectRequested
+impl core::clone::Clone for finstack_ai_kernel::RequestExtensionEffect
+pub fn finstack_ai_kernel::RequestExtensionEffect::clone(&self) -> finstack_ai_kernel::RequestExtensionEffect
+impl core::cmp::Eq for finstack_ai_kernel::RequestExtensionEffect
+impl core::cmp::PartialEq for finstack_ai_kernel::RequestExtensionEffect
+pub fn finstack_ai_kernel::RequestExtensionEffect::eq(&self, &finstack_ai_kernel::RequestExtensionEffect) -> bool
+impl core::fmt::Debug for finstack_ai_kernel::RequestExtensionEffect
+pub fn finstack_ai_kernel::RequestExtensionEffect::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_kernel::RequestExtensionEffect
+impl serde_core::ser::Serialize for finstack_ai_kernel::RequestExtensionEffect
+pub fn finstack_ai_kernel::RequestExtensionEffect::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::RequestExtensionEffect
+pub fn finstack_ai_kernel::RequestExtensionEffect::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::RequestInteraction
 pub finstack_ai_kernel::RequestInteraction::request: finstack_ai_kernel::InteractionRequest
 impl core::clone::Clone for finstack_ai_kernel::RequestInteraction
@@ -4794,6 +4896,7 @@ pub struct finstack_ai_kernel::SessionProjection
 impl finstack_ai_kernel::SessionProjection
 pub fn finstack_ai_kernel::SessionProjection::active_on_lane(&self, finstack_ai_kernel::LaneId) -> core::option::Option<finstack_ai_kernel::RunId>
 pub fn finstack_ai_kernel::SessionProjection::apply_envelope(&mut self, &finstack_ai_kernel::RecordEnvelope) -> core::result::Result<(), finstack_ai_kernel::ConversationError>
+pub fn finstack_ai_kernel::SessionProjection::apply_structural_draft(&mut self, &finstack_ai_kernel::RecordDraft) -> core::result::Result<(), finstack_ai_kernel::ConversationError>
 pub fn finstack_ai_kernel::SessionProjection::child_mapping(&self, finstack_ai_kernel::RunId, finstack_ai_kernel::EffectId) -> core::option::Option<&finstack_ai_kernel::ChildRunPrepared>
 pub const fn finstack_ai_kernel::SessionProjection::child_mappings(&self) -> &alloc::collections::btree::map::BTreeMap<(finstack_ai_kernel::RunId, finstack_ai_kernel::EffectId), finstack_ai_kernel::ChildRunPrepared>
 pub const fn finstack_ai_kernel::SessionProjection::entries(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EntryId, finstack_ai_kernel::ConversationEntry>
@@ -4806,6 +4909,7 @@ pub const fn finstack_ai_kernel::SessionProjection::metadata(&self) -> &finstack
 pub fn finstack_ai_kernel::SessionProjection::new(finstack_ai_kernel::SessionId) -> Self
 pub const fn finstack_ai_kernel::SessionProjection::operations(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::RunId, finstack_ai_kernel::OperationSummary>
 pub fn finstack_ai_kernel::SessionProjection::preview_conversation_entries<'a>(&self, impl core::iter::traits::collect::IntoIterator<Item = &'a finstack_ai_kernel::ConversationEntry>) -> core::result::Result<(), finstack_ai_kernel::ConversationError>
+pub fn finstack_ai_kernel::SessionProjection::preview_structural_drafts<'a>(&self, impl core::iter::traits::collect::IntoIterator<Item = &'a finstack_ai_kernel::RecordDraft>) -> core::result::Result<Self, finstack_ai_kernel::ConversationError>
 pub const fn finstack_ai_kernel::SessionProjection::session_id(&self) -> core::option::Option<finstack_ai_kernel::SessionId>
 pub fn finstack_ai_kernel::SessionProjection::walk(&self, finstack_ai_kernel::EntryId) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::ConversationEntry>, finstack_ai_kernel::ConversationError>
 impl core::clone::Clone for finstack_ai_kernel::SessionProjection

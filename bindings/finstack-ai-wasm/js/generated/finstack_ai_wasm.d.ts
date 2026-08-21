@@ -471,6 +471,15 @@ export class Run {
      */
     nextEventBatch(): Promise<any>;
     /**
+     * Snapshot bounded, redacted observer-delivery diagnostics.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when run startup failed before a runtime
+     * handle was published.
+     */
+    observerDiagnostics(): Promise<any>;
+    /**
      * Wait for the retained terminal result.
      *
      * # Errors
@@ -790,6 +799,7 @@ export interface InitOutput {
     readonly run_closeEvents: (a: number) => number;
     readonly run_locator: (a: number) => number;
     readonly run_nextEventBatch: (a: number) => number;
+    readonly run_observerDiagnostics: (a: number) => number;
     readonly run_result: (a: number) => number;
     readonly run_session: (a: number) => number;
     readonly run_startChild: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
@@ -811,9 +821,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_5084: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_5098: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_436: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_5132: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5146: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_443: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

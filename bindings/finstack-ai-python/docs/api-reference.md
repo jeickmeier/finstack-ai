@@ -53,7 +53,8 @@ Workspace version is **1.0.0**. The package is not on PyPI.
 - `await Session.lane_by_id(lane_id)` looks up a lane by durable identity.
 - `Lane.run(agent, input, ...)` starts a root run on an idle lane.
   `await Lane.suspend()` parks the in-process driver. `await Lane.resume(agent)`
-  respawns it. `await Lane.cancel()` cancels the active run.
+  respawns it. Cancel through the live `Run` handle so cancellation retains
+  the initiating principal and authorization evidence.
   `await Lane.append_text(text)` appends a user message and does not start a
   run.
 
@@ -114,4 +115,4 @@ and expose `code`, `retryable`, and safe locator `context` where available.
 | `CancelledError` | `agent_run_cancelled` |
 | `TimeoutError` | `agent_run_timeout` |
 
-See [troubleshooting](../../../docs/site/troubleshooting.md).
+See troubleshooting.

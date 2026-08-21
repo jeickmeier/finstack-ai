@@ -56,6 +56,25 @@ impl Run {
         })
     }
 
+    /// Snapshot bounded, redacted observer-delivery diagnostics.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when run startup failed before a runtime
+    /// handle was published.
+    #[wasm_bindgen(js_name = observerDiagnostics)]
+    pub fn observer_diagnostics(&self) -> js_sys::Promise {
+        let run = self.inner.clone();
+        executor::drive(async move {
+            let locator = run.locator().clone();
+            let diagnostics = run
+                .observer_diagnostics()
+                .await
+                .map_err(|error| agent_error(&error, Some(&locator)))?;
+            observer_diagnostics_object(&diagnostics)
+        })
+    }
+
     /// Submit idempotent durable cancellation.
     ///
     /// # Errors
@@ -131,6 +150,40 @@ impl Run {
         self.inner.close_events();
         js_sys::Promise::resolve(&JsValue::UNDEFINED)
     }
+}
+
+fn observer_diagnostics_object(
+    diagnostics: &finstack_ai::runtime::ObserverDiagnostics,
+) -> Result<JsValue, JsValue> {
+    let recent = js_sys::Array::new();
+    for diagnostic in diagnostics.recent.iter() {
+        let item = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &item,
+            &JsValue::from_str("code"),
+            &JsValue::from_str(diagnostic.code),
+        )?;
+        js_sys::Reflect::set(
+            &item,
+            &JsValue::from_str("detail"),
+            &JsValue::from_str(diagnostic.detail),
+        )?;
+        recent.push(&item);
+    }
+
+    let snapshot = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &snapshot,
+        &JsValue::from_str("total"),
+        &js_sys::BigInt::from(diagnostics.total),
+    )?;
+    js_sys::Reflect::set(
+        &snapshot,
+        &JsValue::from_str("dropped"),
+        &js_sys::BigInt::from(diagnostics.dropped),
+    )?;
+    js_sys::Reflect::set(&snapshot, &JsValue::from_str("recent"), &recent)?;
+    Ok(snapshot.into())
 }
 
 fn parse_child_placement(value: &str) -> Result<ChildPlacement, JsValue> {

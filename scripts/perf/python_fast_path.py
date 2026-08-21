@@ -17,22 +17,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = (
-    REPO_ROOT
-    / "docs"
-    / "implementation"
-    / "artifacts"
-    / "pr-063"
-    / "python-fast-path-report.json"
-)
-SESSION_PROFILES = (
-    REPO_ROOT
-    / "docs"
-    / "implementation"
-    / "artifacts"
-    / "pr-063"
-    / "session-profiles.json"
-)
+DEFAULT_OUTPUT = REPO_ROOT / "target" / "performance" / "python-fast-path-report.json"
+SESSION_PROFILES = REPO_ROOT / "target" / "performance" / "session-profiles.json"
 WORKLOAD = "rust-backed-python-fast-path-v1"
 OVERHEAD_TARGET_PERCENT = 10.0
 EVENT_THROUGHPUT_TARGET = 100_000.0

@@ -11,6 +11,7 @@ use crate::primitives::RawJson;
 use crate::primitives::Timestamp;
 use crate::primitives::{ComponentId, EffectId, EffectOutputKey, InteractionId};
 use crate::primitives::{Version, validated_text};
+use crate::records::lifecycle::StageCursor;
 
 use super::EffectError;
 
@@ -207,15 +208,22 @@ pub enum EffectInput {
     },
     /// Context request JSON.
     Context {
+        /// Exact stage invocation being extended.
+        cursor: StageCursor,
         /// Request payload.
         request: RawJson,
     },
     /// Middleware stage input.
     Middleware {
+        /// Exact stage invocation being extended.
+        cursor: StageCursor,
         /// Stage name.
         stage: Arc<str>,
         /// Input payload.
         input: RawJson,
+        /// Optional durable child-model result used to resume compaction.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume: Option<RawJson>,
     },
     /// Interaction paired by digest.
     Interaction {
@@ -246,11 +254,15 @@ impl<'de> Deserialize<'de> for EffectInput {
                 call: ToolCallBlock,
             },
             Context {
+                cursor: StageCursor,
                 request: RawJson,
             },
             Middleware {
+                cursor: StageCursor,
                 stage: BoundedString<{ crate::content::TEXT_MAX_BYTES }>,
                 input: RawJson,
+                #[serde(default)]
+                resume: Option<RawJson>,
             },
             Interaction {
                 interaction_id: InteractionId,
@@ -264,10 +276,17 @@ impl<'de> Deserialize<'de> for EffectInput {
         Ok(match Wire::deserialize(deserializer)? {
             Wire::Model { request } => Self::Model { request },
             Wire::Tool { call } => Self::Tool { call },
-            Wire::Context { request } => Self::Context { request },
-            Wire::Middleware { stage, input } => Self::Middleware {
+            Wire::Context { cursor, request } => Self::Context { cursor, request },
+            Wire::Middleware {
+                cursor,
+                stage,
+                input,
+                resume,
+            } => Self::Middleware {
+                cursor,
                 stage: Arc::from(stage.into_inner()),
                 input,
+                resume,
             },
             Wire::Interaction {
                 interaction_id,

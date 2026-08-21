@@ -30,8 +30,7 @@ use finstack_ai_kernel::{
     RunEvent, RunEventBody, RunEventKind, RunId, SessionId, Usage, Version, label_is_valid,
 };
 use finstack_ai_runtime::{
-    OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
-    ObserverDiagnostic, ObserverError, ObserverPayloadMode, ObserverQueue, ObserverQueuePush,
+    Observer, ObserverDescriptor, ObserverDiagnostic, ObserverError, ObserverPayloadMode,
     PortFuture,
 };
 use thiserror::Error;
@@ -166,14 +165,11 @@ pub struct LedgerSnapshot {
     pub unattributed_effects: u64,
     /// Events ignored because the ledger reached its entry bound.
     pub overflowed_events: u64,
-    /// Observer queue drops.
-    pub dropped_events: u64,
 }
 
 /// Read-only spend-ledger observer. Default payload mode is metadata-only.
 pub struct BillingObserver {
     descriptor: ObserverDescriptor,
-    queue: ObserverQueue<()>,
     state: Mutex<LedgerState>,
     max_entries: usize,
     diagnostic: Mutex<Option<ObserverDiagnostic>>,
@@ -184,18 +180,12 @@ impl BillingObserver {
     ///
     /// # Arguments
     ///
-    /// * `queue_capacity` - Bounded diagnostics-queue capacity (`1..=1_000_000`).
-    /// * `backpressure` - Queue policy applied when the bound is reached.
     /// * `max_entries` - Distinct (session, run, model) keys retained (`1..=1_000_000`).
     ///
     /// # Errors
     ///
-    /// Rejects an invalid identity, queue bound, or entry bound.
-    pub fn try_new(
-        queue_capacity: usize,
-        backpressure: ObserverBackpressure,
-        max_entries: usize,
-    ) -> Result<Self, BillingObserverError> {
+    /// Rejects an invalid identity or entry bound.
+    pub fn try_new(max_entries: usize) -> Result<Self, BillingObserverError> {
         if max_entries == 0 || max_entries > MAX_ENTRIES_CEILING {
             return Err(BillingObserverError::Configuration {
                 reason: "invalid_max_entries",
@@ -218,22 +208,10 @@ impl BillingObserver {
                 payload_mode: ObserverPayloadMode::MetadataOnly,
                 metadata: Metadata::empty(),
             },
-            queue: ObserverQueue::try_new(queue_capacity, backpressure).map_err(|_| {
-                BillingObserverError::Configuration {
-                    reason: "invalid_queue_capacity",
-                }
-            })?,
             state: Mutex::new(LedgerState::default()),
             max_entries,
             diagnostic: Mutex::new(None),
         })
-    }
-
-    /// Cumulative adapter-queue drops. The queue counts every drop, including
-    /// disconnected/poisoned pushes.
-    #[must_use]
-    pub fn dropped(&self) -> u64 {
-        self.queue.dropped()
     }
 
     /// Last overflow or saturation diagnostic.
@@ -282,7 +260,6 @@ impl BillingObserver {
             usage,
             unattributed_effects: state.unattributed_effects,
             overflowed_events: state.overflowed_events,
-            dropped_events: self.dropped(),
         }
     }
 
@@ -323,7 +300,6 @@ impl BillingObserver {
             "kind": "summary",
             "unattributed_effects": snapshot.unattributed_effects.to_string(),
             "overflowed_events": snapshot.overflowed_events.to_string(),
-            "dropped_events": snapshot.dropped_events.to_string(),
         });
         push_line(&mut out, &summary);
         out
@@ -415,14 +391,6 @@ impl BillingObserver {
             *slot = Some(BILLING_MODEL_NAME_INVALID);
         }
     }
-
-    /// Record a drop already counted by `self.queue.dropped()`. Only the
-    /// diagnostic is latched here; the queue counts every drop itself.
-    fn record_overflow(&self) {
-        if let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
-        }
-    }
 }
 
 impl Observer for BillingObserver {
@@ -433,20 +401,7 @@ impl Observer for BillingObserver {
     fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
         for event in batch.iter() {
             self.ingest(event);
-            match self.queue.push(()) {
-                Ok(ObserverQueuePush::Accepted) => {}
-                Ok(ObserverQueuePush::Dropped) => self.record_overflow(),
-                Err(ObserverError::CapacityExceeded) => {
-                    self.record_overflow();
-                    return Box::pin(async move { Err(ObserverError::CapacityExceeded) });
-                }
-                Err(error) => {
-                    self.record_overflow();
-                    return Box::pin(async move { Err(error) });
-                }
-            }
         }
-        let _ = self.queue.drain();
         Box::pin(async { Ok(()) })
     }
 }

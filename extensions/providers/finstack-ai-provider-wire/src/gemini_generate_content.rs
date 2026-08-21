@@ -12,10 +12,13 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{
-    ContentBlock, JsonBlock, LimitKey, ModelResponse, ModelStreamItem, ModelToolCall, OpaqueBlock,
-    OpaquePayload, ProviderIds, RawJson, ReasoningDelta, TextBlock, TextDelta, ToolCallDelta,
-    Usage, UsageDelta,
+use finstack_ai_kernel::{
+    ContentBlock, JsonBlock, LimitKey, OpaqueBlock, OpaquePayload, ProviderIds, RawJson, TextBlock,
+    Usage,
+};
+use finstack_ai_runtime::{
+    ModelResponse, ModelStreamItem, ModelToolCall, ReasoningDelta, TextDelta, ToolCallDelta,
+    UsageDelta,
 };
 
 use super::StreamNormError;
@@ -692,7 +695,7 @@ mod tests {
                 r#"{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"SAFETY","index":0}],"responseId":"resp-1"}"#,
             )
             .expect_err("safety finish reason");
-        assert_eq!(error.kind, super::super::StreamNormKind::Response);
+        assert_eq!(error.kind, crate::StreamNormKind::Response);
         assert!(!assembly.completed());
     }
 
@@ -702,7 +705,7 @@ mod tests {
         let error = assembly
             .consume(r#"{"promptFeedback":{"blockReason":"SAFETY"},"responseId":"resp-1"}"#)
             .expect_err("block reason");
-        assert_eq!(error.kind, super::super::StreamNormKind::Response);
+        assert_eq!(error.kind, crate::StreamNormKind::Response);
     }
 
     #[test]

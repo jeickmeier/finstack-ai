@@ -1,4 +1,4 @@
-"""PR-031 optional Pydantic tool and structured-output adapters."""
+"""Optional Pydantic tool and structured-output adapters."""
 
 from __future__ import annotations
 

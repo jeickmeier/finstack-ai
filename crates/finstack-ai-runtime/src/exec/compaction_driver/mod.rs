@@ -10,29 +10,24 @@ mod tests;
 
 use std::sync::Arc;
 
-#[cfg(test)]
-use finstack_ai_kernel::EffectId;
 use finstack_ai_kernel::{
     AllocatedIds, AppendBatchTag, EffectCompleted, EffectKind, EffectOutputKind, EffectPurpose,
     EffectRelation, EffectTag, EventTag, KernelInput, Message, MessageRole, MessageTag, Metadata,
-    ModelRef, ModelRequestId, ModelSettled, ModelSettlement, RecordBody, RecordTag,
-    RequestCompactionModel, Stage, TransitionEnv,
+    ModelRef, ModelRequestId, ModelSettled, ModelSettlement, RecordTag, RequestCompactionModel,
+    TransitionEnv,
 };
 
 use crate::coordinator::CommitCoordinator;
 use crate::middleware::{
     CompactionModelRequest, CompactionModelResume, StageOutcome, authorize_compaction_model_request,
 };
-use crate::middleware_driver::derived_stage_effect_id;
 use crate::model::{
     Model, ModelCallContext, ModelRequest, ModelResponse, ModelStreamAssembler, ModelStreamLimits,
     ModelTerminal, validate_model_request,
 };
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
-use crate::{
-    CancellationSignal, Clock, LoadRequest, LockedModelContextProfile, RandomSource, RunCallContext,
-};
+use crate::{CancellationSignal, Clock, LockedModelContextProfile, RandomSource, RunCallContext};
 
 const COMPACTION_PHASE_UNAVAILABLE: &str = "compaction_phase_unavailable";
 
@@ -48,7 +43,7 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
     profile: &LockedModelContextProfile,
     model: &dyn Model,
     request: &CompactionModelRequest,
-    cycle: u64,
+    _cycle: u64,
     cancellation: &CancellationSignal,
 ) -> Result<CompactionModelResume, RunHandleError> {
     let seed = coordinator
@@ -70,7 +65,9 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
     }
     validate_model_request(model, &request.request, profile)
         .map_err(|error| compaction_model_error(&error))?;
-    let parent_effect_id = derived_stage_effect_id(&seed.locator, cycle, Stage::BeforeModel);
+    let parent_effect_id = coordinator
+        .last_middleware_effect_id()
+        .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
     let request_json = request
         .request
         .canonical_bytes()
@@ -404,63 +401,49 @@ pub(crate) async fn load_completed_compaction_resume(
     coordinator: &CommitCoordinator,
     cycle: u64,
 ) -> Result<Option<CompactionModelResume>, RunHandleError> {
-    let Some(session_id) = coordinator.state().session_id else {
+    let parent = coordinator.last_middleware_effect_id().or_else(|| {
+        coordinator
+            .replayed_completed_effects()
+            .values()
+            .find_map(|(requested, completed)| {
+                let matches_cursor = matches!(
+                    requested.input(),
+                    finstack_ai_kernel::EffectInput::Middleware { cursor, .. }
+                        if cursor.cycle == cycle && cursor.stage == finstack_ai_kernel::Stage::BeforeModel
+                );
+                if !matches_cursor {
+                    return None;
+                }
+                serde_json::from_slice::<StageOutcome>(completed.output().as_bytes())
+                    .ok()
+                    .filter(|outcome| matches!(outcome, StageOutcome::RequestCompactionModel(_)))
+                    .map(|_| requested.effect_id())
+            })
+    });
+    let Some(parent) = parent else {
         return Ok(None);
     };
-    let Some(seed) = coordinator.stage_dispatch_seed() else {
-        return Ok(None);
-    };
-    let parent = derived_stage_effect_id(&seed.locator, cycle, Stage::BeforeModel);
-    let loaded = coordinator
-        .journal_store()
-        .load(LoadRequest { session_id })
-        .await
-        .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
-    let mut completed_by_effect = std::collections::BTreeMap::new();
-    for batch in loaded.committed_batches.iter() {
-        for record in batch.records.iter() {
-            match record.body() {
-                RecordBody::EffectCompleted(completed) => {
-                    completed_by_effect.insert(completed.effect_id(), completed.clone());
-                }
-                RecordBody::EffectRequested(requested)
-                    if requested.is_compaction_summary()
-                        && requested.kind() == EffectKind::Model
-                        && requested
-                            .relation()
-                            .is_some_and(|relation| relation.parent_effect_id == parent)
-                        && coordinator
-                            .state()
-                            .model_settlements
-                            .contains_key(&requested.effect_id()) =>
-                {
-                    if let Some(completed) = completed_by_effect.get(&requested.effect_id()) {
-                        let result: ModelResponse =
-                            serde_json::from_slice(completed.output().as_bytes())
-                                .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
-                        return Ok(Some(CompactionModelResume {
-                            request_id: ModelRequestId::from_bytes(
-                                *requested.effect_id().as_bytes(),
-                            ),
-                            effect_id: requested.effect_id(),
-                            result,
-                            resume_state: finstack_ai_kernel::RawJson::parse(b"{}")
-                                .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?,
-                        }));
-                    }
-                }
-                _ => {}
-            }
+    for (requested, completed) in coordinator.replayed_completed_effects().values() {
+        if requested.is_compaction_summary()
+            && requested.kind() == EffectKind::Model
+            && requested
+                .relation()
+                .is_some_and(|relation| relation.parent_effect_id == parent)
+            && coordinator
+                .state()
+                .model_settlements
+                .contains_key(&requested.effect_id())
+        {
+            let result: ModelResponse = serde_json::from_slice(completed.output().as_bytes())
+                .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
+            return Ok(Some(CompactionModelResume {
+                request_id: ModelRequestId::from_bytes(*requested.effect_id().as_bytes()),
+                effect_id: requested.effect_id(),
+                result,
+                resume_state: finstack_ai_kernel::RawJson::parse(b"{}")
+                    .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?,
+            }));
         }
     }
     Ok(None)
-}
-
-/// Parent linkage recorded on the child effect.
-#[cfg(test)]
-pub(crate) fn compaction_parent_effect_id(
-    locator: &finstack_ai_kernel::OperationLocator,
-    cycle: u64,
-) -> EffectId {
-    derived_stage_effect_id(locator, cycle, Stage::BeforeModel)
 }

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    CapabilityId, EntryId, Message, MessageRole, MessageTag, ProviderIds, SEMANTIC_ARRAY_MAX_ITEMS,
-    Sensitivity,
+    CapabilityId, EffectInput, EffectTag, EntryId, Message, MessageRole, MessageTag, ProviderIds,
+    SEMANTIC_ARRAY_MAX_ITEMS, Sensitivity, StageCursor,
 };
 
 use crate::context::{
@@ -16,9 +16,7 @@ use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
 use crate::{Clock, RandomSource, RunCallContext};
 
-use super::commit::{
-    chain_digest, committed_context_call, context_error, derived_context_effect_id,
-};
+use super::commit::{ContextInvocation, chain_digest, committed_context_call, context_error};
 use super::{ContextDriver, ProtectedProjection, empty_assembled};
 
 /// Assembled provider context plus the message array and `protected` map.
@@ -38,11 +36,11 @@ pub(crate) struct ContextStagePlan {
 ///
 /// Returns a stable context or identity error when a provider or assembly fails.
 pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
-    coordinator: &CommitCoordinator,
+    coordinator: &mut CommitCoordinator,
     driver: &ContextDriver,
     sources: &SettlementSources<C, R>,
     profile: &LockedModelContextProfile,
-    cycle: u64,
+    cursor: StageCursor,
     base_messages: &[Message],
 ) -> Result<ContextStagePlan, RunHandleError> {
     if driver.cancellation().is_cancelled() {
@@ -63,8 +61,40 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
         let provider_index = u32::try_from(index).map_err(|_| RunHandleError::Middleware {
             code: Arc::from(crate::CONTEXT_CONFIGURATION_INVALID),
         })?;
+        let replay = ContextReplay {
+            component: &provider.descriptor().invocation,
+            chain_digest: digest,
+            provider_index,
+            cursor,
+            run_id: seed.locator.run_id,
+        };
+        if let Some(contribution) = replayed_context_contribution(coordinator, &replay)? {
+            recorded.push(RecordedContextContribution {
+                component: provider.descriptor().invocation.component,
+                provider_index,
+                contribution,
+            });
+            continue;
+        }
+        let effect_id = coordinator
+            .state()
+            .pending_extension_effect
+            .as_ref()
+            .filter(|pending| {
+                pending.cursor == cursor
+                    && pending.requested.component() == Some(&provider.descriptor().invocation)
+                    && matches!(pending.requested.input(), EffectInput::Context { .. })
+                    && pending
+                        .requested
+                        .pipeline()
+                        .is_some_and(|pipeline| pipeline.index() == provider_index)
+            })
+            .map_or_else(
+                || sources.generate::<EffectTag>(),
+                |pending| Ok(pending.requested.effect_id()),
+            )?;
         let run = RunCallContext {
-            effect_id: derived_context_effect_id(&seed.locator, cycle, provider_index),
+            effect_id,
             locator: seed.locator.clone(),
             authorization: seed.authorization.clone(),
             attempt: seed.attempt,
@@ -74,13 +104,16 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
             relation_depth: seed.relation_depth,
         };
         let contribution = committed_context_call(
-            driver,
-            provider.as_ref(),
-            provider_index,
-            run,
-            request.clone(),
-            digest,
-            sources,
+            coordinator,
+            ContextInvocation {
+                provider: provider.as_ref(),
+                provider_index,
+                run,
+                request: request.clone(),
+                chain_digest: digest,
+                cursor,
+                sources,
+            },
         )
         .await?;
         recorded.push(RecordedContextContribution {
@@ -100,6 +133,48 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
         messages,
         projection,
     })
+}
+
+struct ContextReplay<'a> {
+    component: &'a finstack_ai_kernel::ComponentInvocation,
+    chain_digest: finstack_ai_kernel::Digest,
+    provider_index: u32,
+    cursor: StageCursor,
+    run_id: finstack_ai_kernel::RunId,
+}
+
+fn replayed_context_contribution(
+    coordinator: &CommitCoordinator,
+    replay: &ContextReplay<'_>,
+) -> Result<Option<crate::context::ContextContribution>, RunHandleError> {
+    coordinator
+        .replayed_completed_effects()
+        .values()
+        .find(|(requested, _)| {
+            requested.component() == Some(replay.component)
+                && coordinator
+                    .replayed_extension_envelope(requested.effect_id())
+                    .is_some_and(|envelope| envelope.run_id() == Some(replay.run_id))
+                && requested.pipeline().is_some_and(|pipeline| {
+                    pipeline.chain_digest() == replay.chain_digest
+                        && pipeline.index() == replay.provider_index
+                })
+                && matches!(
+                    requested.input(),
+                    EffectInput::Context {
+                        cursor: requested_cursor,
+                        ..
+                    } if *requested_cursor == replay.cursor
+                )
+        })
+        .map(|(_, completed)| {
+            serde_json::from_slice(completed.output().as_bytes()).map_err(|_| {
+                RunHandleError::Middleware {
+                    code: Arc::from(crate::CONTEXT_CONTRIBUTION_INVALID),
+                }
+            })
+        })
+        .transpose()
 }
 
 fn context_request(

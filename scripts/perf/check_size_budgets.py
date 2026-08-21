@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TABLE_PATH = REPO_ROOT / "docs" / "implementation" / "perf-size-budgets.json"
+TABLE_PATH = REPO_ROOT / "schemas" / "benchmark-report" / "v1" / "size-budgets.json"
 
 
 def load_table() -> dict[str, object]:
@@ -71,12 +71,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=Path,
-        default=REPO_ROOT
-        / "docs"
-        / "implementation"
-        / "artifacts"
-        / "pr-063"
-        / "size-budget-report.json",
+        default=REPO_ROOT / "target" / "performance" / "size-budget-report.json",
     )
     args = parser.parse_args()
     table = load_table()
@@ -101,7 +96,11 @@ def main() -> int:
         print(f"{status} {result['id']}: {result['detail']}")
         if not result["within_budget"]:
             failed = True
-    print(f"wrote {args.out.relative_to(REPO_ROOT)}")
+    try:
+        displayed_output = args.out.relative_to(REPO_ROOT)
+    except ValueError:
+        displayed_output = args.out
+    print(f"wrote {displayed_output}")
     return 1 if failed else 0
 
 

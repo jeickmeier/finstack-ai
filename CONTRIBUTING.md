@@ -30,6 +30,8 @@ Tasks:
 - `mise run install-all` — pinned tools plus Rust, Python, and WASM environments
 - `mise run ci-all` — sequential local equivalent of hosted CI
 - `mise run ci-rust` / `ci-python` / `ci-wasm` — per-language required checks
+- `mise run runtime` — runtime minimal/native/WASM-host lint and focused tests
+- `mise run check-repository-references` — reject links to removed historical planning artifacts
 - `mise run build-all` / `build-rust` / `build-python` / `build-wasm` — optional profile after `--` (default `dev`)
 - `mise run check-all` / `check-rust` / `check-python` / `check-wasm` — formatting, lint, and typecheck
 - `mise run test-all` / `test-rust` / `test-python` / `test-wasm` — language test suites
@@ -49,30 +51,22 @@ Use `git commit -s` (or an equivalent that adds the trailer). The project does n
 
 ## Coding conventions
 
-- Follow the [Engineering Standards](docs/planning/00-finstack-ai-engineering-standards.md).
-- Preserve the workspace layout and dependency direction in the [Technical Design](docs/planning/03-finstack-ai-technical-design.md) sections 2–4.
+- Preserve the package ownership and dependency direction documented in [`AGENTS.md`](AGENTS.md).
 - Agent-oriented repository rules live under [`.agents/rules/`](.agents/rules/) and [`AGENTS.md`](AGENTS.md).
 - Public names follow the shared semantic vocabulary with idiomatic case per language.
 - Do not add `rust-toolchain.toml` or a Cargo `xtask` crate; root `mise.toml` is the sole toolchain pin and task entrypoint.
 - Keep the kernel deterministic, synchronous, and I/O-free.
 
-## Architecture, security, and evidence
+## Architecture, security, and validation
 
-Before proposing substantial changes, read:
+Before proposing substantial changes, read [`AGENTS.md`](AGENTS.md), the
+applicable [agent rules](.agents/rules/), [`SECURITY.md`](SECURITY.md), and the
+dual-license texts: [MIT](licenses/LICENSE-MIT) OR
+[Apache-2.0](licenses/LICENSE-APACHE).
 
-- [Engineering Standards](docs/planning/00-finstack-ai-engineering-standards.md) — including exception and waiver rules (section 14)
-- [Security and Threat Model](docs/planning/06-finstack-ai-security-threat-model.md) — review triggers and controls
-- [Implementation control set](docs/implementation/README.md) — delivery ledger, evidence register, exceptions register, ADR register
-- [Public RFCs](docs/rfcs/README.md) — required in addition to an ADR for journal, event-order, WIT, and remote/process contract changes
-- [Trust levels](docs/site/security-trust-levels.md) — T0–T5; in-process code is not a sandbox
-- Dual-license texts: [MIT](licenses/LICENSE-MIT) OR [Apache-2.0](licenses/LICENSE-APACHE)
-
-Pull requests should:
-
-- stay within one logical PR from the [Implementation Plan](docs/planning/04-finstack-ai-implementation-plan.md) when practical;
-- note architecture or threat-model review triggers when they apply;
-- record real evidence in the evidence register rather than inventing completion; and
-- link any ADR or time-bounded waiver required for a standards exception.
+Changes should remain one coherent behavior slice, identify architecture or
+security review triggers, document exact validation results, and link any
+current architecture decision or time-bounded waiver required for an exception.
 
 ## Ownership
 
@@ -80,4 +74,4 @@ Contribution acceptance and releases are owned by the **finstack-ai maintainers*
 
 ## Pull requests
 
-Use the repository pull request template. Keep commits short and imperative. Do not mix unrelated logical PRs for convenience.
+Use the repository pull request template. Keep commits short and imperative. Do not mix unrelated behavior changes for convenience.

@@ -198,6 +198,21 @@ pub(super) fn decide_reconciliation(
     let mut bodies = Vec::new();
     for effect_id in &newly_cancelled {
         if let Some(pending) = state
+            .pending_extension_effect
+            .as_ref()
+            .filter(|pending| pending.requested.effect_id() == *effect_id)
+        {
+            bodies.push(RecordBody::EffectCancelled(
+                EffectCancelled::try_new(
+                    *effect_id,
+                    pending.requested.output_contract().clone(),
+                    Some("cancelled"),
+                    Option::<&str>::None,
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+        }
+        if let Some(pending) = state
             .pending_model_effect
             .as_ref()
             .filter(|pending| pending.requested.effect_id() == *effect_id)

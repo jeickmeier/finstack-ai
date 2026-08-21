@@ -14,8 +14,7 @@ uv run --isolated --no-project --with-editable bindings/finstack-ai-python \
   python examples/python-minimal/python-callback/main.py
 ```
 
-See [docs/site/python.md](../../docs/site/python.md). Callbacks are
-[T2](../../docs/site/security-trust-levels.md) and are not isolated.
+Callbacks are trusted in-process code and are not isolated.
 
 The curated wheel links the Rust-backed OpenAI Responses, Anthropic Messages,
 OpenRouter Responses, and native Ollama paths into the same extension module.

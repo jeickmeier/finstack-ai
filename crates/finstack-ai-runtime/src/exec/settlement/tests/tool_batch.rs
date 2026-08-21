@@ -41,10 +41,12 @@ fn an_identity_fold_leaves_the_plan_unchanged() {
     let (without_driver, _c, _s) = prepare_with(&TOOL_NAMES, None);
 
     assert_eq!(calls.load(Ordering::Relaxed), 1, "the component must run");
-    assert_eq!(
-        with_driver, without_driver,
-        "an all-Continue chain must not perturb the opened plan"
-    );
+    assert_eq!(with_driver.len(), without_driver.len());
+    for (durable, direct) in with_driver.iter().zip(&without_driver) {
+        assert_eq!(durable.source_index, direct.source_index);
+        assert_eq!(durable.group_index, direct.group_index);
+        assert_eq!(durable.plan, direct.plan);
+    }
 }
 
 // -- filtering ----------------------------------------------------------

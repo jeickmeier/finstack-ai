@@ -1,4 +1,4 @@
-//! Compile-only proof that leaf extensions implement PR-018 ports through public runtime APIs.
+//! Compile-only proof that leaf extensions implement extension-port contract ports through public runtime APIs.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::float_cmp)]

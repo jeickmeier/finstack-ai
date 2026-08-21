@@ -177,6 +177,9 @@ impl CommitCoordinator {
         }
         let mut drafts = Vec::new();
         for record in committed.records.iter() {
+            if !self.session.lanes().contains_key(&record.lane_id()) {
+                continue;
+            }
             let message = match record.body() {
                 RecordBody::EntryAppended(entry) => &entry.message,
                 RecordBody::ToolCallSettled(settled) => &settled.message,
@@ -357,13 +360,11 @@ fn preview_session_records(
     records: &[RecordDraft],
 ) -> Result<(), CommitCoordinatorError> {
     session
-        .preview_conversation_entries(records.iter().filter_map(|record| match record.body() {
-            RecordBody::ConversationEntry(entry) => Some(entry),
-            _ => None,
-        }))
+        .preview_structural_drafts(records)
         .map_err(|_| CommitCoordinatorError::BoundaryFault {
             code: "session_records_invalid",
         })
+        .map(|_| ())
 }
 
 fn lane_moved_record_id(entry_id: EntryId) -> RecordId {

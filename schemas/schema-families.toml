@@ -1,6 +1,5 @@
-# Machine-readable contract-family registry for PR-004 schema governance.
-# Authoritative behavior remains in docs/planning and
-# docs/implementation/compatibility-governance.md.
+# Machine-readable contract-family registry. Current schemas and compatibility
+# fixtures are authoritative for their versioned wire shapes.
 
 [families."public-rust-api"]
 owner = "me@jeickmeier.com"

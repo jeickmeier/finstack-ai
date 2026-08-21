@@ -20,7 +20,93 @@ pub struct AppendIdentity {
     /// Optimistic next-sequence precondition.
     pub expected_sequence: u64,
     /// Canonical CBOR of each record draft, in request order.
+    #[serde(with = "byte_vecs")]
     pub draft_cbor: Vec<Vec<u8>>,
+}
+
+mod byte_vecs {
+    use std::fmt;
+
+    use serde::de::{SeqAccess, Visitor};
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S>(values: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        struct Bytes<'a>(&'a [u8]);
+
+        impl Serialize for Bytes<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                if self.0.len() > finstack_ai_protocol::CANONICAL_ARRAY_MAX_ITEMS {
+                    return serializer.serialize_bytes(self.0);
+                }
+                let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+                for byte in self.0 {
+                    sequence.serialize_element(byte)?;
+                }
+                sequence.end()
+            }
+        }
+
+        let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+        for value in values {
+            sequence.serialize_element(&Bytes(value))?;
+        }
+        sequence.end()
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Bytes(Vec<u8>);
+
+        impl<'de> Deserialize<'de> for Bytes {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct BytesVisitor;
+
+                impl<'de> Visitor<'de> for BytesVisitor {
+                    type Value = Bytes;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("a byte string or an array of bytes")
+                    }
+
+                    fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E> {
+                        Ok(Bytes(value.to_vec()))
+                    }
+
+                    fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
+                        Ok(Bytes(value))
+                    }
+
+                    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+                    where
+                        A: SeqAccess<'de>,
+                    {
+                        let mut bytes = Vec::with_capacity(sequence.size_hint().unwrap_or(0));
+                        while let Some(byte) = sequence.next_element()? {
+                            bytes.push(byte);
+                        }
+                        Ok(Bytes(bytes))
+                    }
+                }
+
+                deserializer.deserialize_any(BytesVisitor)
+            }
+        }
+
+        Vec::<Bytes>::deserialize(deserializer)
+            .map(|values| values.into_iter().map(|value| value.0).collect())
+    }
 }
 
 /// Compute the durable identity of one append request.
@@ -355,5 +441,40 @@ mod tests {
             request_cbor(&frozen).expect("bytes"),
             request_cbor(&frozen).expect("bytes again")
         );
+    }
+
+    #[test]
+    fn identity_encodes_large_drafts_as_byte_strings() {
+        let identity = AppendIdentity {
+            batch_id: [1; 16],
+            session_id: [2; 16],
+            expected_sequence: 3,
+            draft_cbor: vec![vec![7; 4_097]],
+        };
+
+        let encoded = encode(&identity).expect("large draft identity");
+        let decoded = finstack_ai_protocol::decode::<AppendIdentity>(&encoded).expect("decode");
+        assert_eq!(decoded, identity);
+    }
+
+    #[test]
+    fn identity_decodes_legacy_byte_arrays() {
+        #[derive(Serialize)]
+        struct LegacyIdentity {
+            batch_id: [u8; 16],
+            session_id: [u8; 16],
+            expected_sequence: u64,
+            draft_cbor: Vec<Vec<u8>>,
+        }
+
+        let legacy = LegacyIdentity {
+            batch_id: [1; 16],
+            session_id: [2; 16],
+            expected_sequence: 3,
+            draft_cbor: vec![vec![4, 5, 6]],
+        };
+        let encoded = encode(&legacy).expect("legacy identity");
+        let decoded = finstack_ai_protocol::decode::<AppendIdentity>(&encoded).expect("decode");
+        assert_eq!(decoded.draft_cbor, legacy.draft_cbor);
     }
 }

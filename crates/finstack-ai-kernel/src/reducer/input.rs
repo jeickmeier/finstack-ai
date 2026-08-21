@@ -61,6 +61,53 @@ pub enum KernelInput {
     InteractionSettled(InteractionSettled),
     /// Request one runtime-owned compaction-summary model effect without consuming `BeforeModel`.
     RequestCompactionModel(RequestCompactionModel),
+    /// Request one durable context-provider or middleware effect without consuming its stage.
+    RequestExtensionEffect(RequestExtensionEffect),
+    /// Settle the outstanding context-provider or middleware effect.
+    ExtensionEffectSettled(ExtensionEffectSettled),
+}
+
+/// Durable request for one context-provider or middleware invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestExtensionEffect {
+    /// Fully normalized effect request. Its input contains the exact stage cursor.
+    pub requested: crate::EffectRequested,
+}
+
+/// Settlement of the outstanding context-provider or middleware invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionEffectSettled {
+    /// Exact stage cursor held by the outstanding request.
+    pub cursor: StageCursor,
+    /// Normalized terminal outcome.
+    pub outcome: ExtensionSettlement,
+}
+
+/// Terminal context-provider or middleware effect outcome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the public terminal settlement variants preserve frozen effect payloads by value"
+)]
+pub enum ExtensionSettlement {
+    /// Successful effect completion.
+    Completed(EffectCompleted),
+    /// Failed effect completion.
+    Failed(EffectFailed),
+}
+
+impl ExtensionSettlement {
+    /// Effect identity shared by every settlement variant.
+    #[must_use]
+    pub fn effect_id(&self) -> EffectId {
+        match self {
+            Self::Completed(value) => value.effect_id(),
+            Self::Failed(value) => value.effect_id(),
+        }
+    }
 }
 
 /// Runtime-owned compaction-summary model request (ADR-042).
@@ -520,6 +567,10 @@ impl<'de> Deserialize<'de> for ExternalEffectCompletion {
 /// External completion outcome supported at the generic effect boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the frozen external-completion API stores its error descriptor by value"
+)]
 pub enum ExternalEffectOutcome {
     /// Successful normalized output.
     Completed {
@@ -560,6 +611,10 @@ impl<'de> Deserialize<'de> for ExternalEffectOutcome {
 
         #[derive(Deserialize)]
         #[serde(rename_all = "snake_case")]
+        #[allow(
+            clippy::large_enum_variant,
+            reason = "the private wire mirror preserves the frozen JSON shape"
+        )]
         enum Wire {
             Completed(CompletedWire),
             Failed(FailedWire),

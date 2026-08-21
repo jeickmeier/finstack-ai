@@ -108,6 +108,12 @@ pub(super) fn decide(
         (KernelInput::RequestCompactionModel(input), SettlementReview::Unreviewed) => {
             decide_request_compaction_model(state, env, &input)
         }
+        (KernelInput::RequestExtensionEffect(input), SettlementReview::Unreviewed) => {
+            super::extension::decide_request(state, env, &input)
+        }
+        (KernelInput::ExtensionEffectSettled(input), SettlementReview::Unreviewed) => {
+            super::extension::decide_settled(state, env, &input)
+        }
         _ => Err(KernelError::InvariantViolation),
     }
 }

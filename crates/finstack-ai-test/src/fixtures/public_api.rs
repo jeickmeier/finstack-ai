@@ -1,4 +1,4 @@
-//! Compatibility fixture runner for `public-rust-api` (PR-006–PR-014).
+//! Compatibility fixture runner for `public-rust-api` (public-API fixture baseline–reducer contract baseline).
 //!
 //! Boundary recipes are materialized and measured before assertions so exact and
 //! one-over ceilings are evidence, not declarations. Python/JavaScript/CBOR

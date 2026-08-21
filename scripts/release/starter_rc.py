@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run in-tree starters against staged RC artifacts (PR-065-A02)."""
+"""Run in-tree starters against staged release-candidate artifacts."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-STAGE = REPO_ROOT / "target" / "pr-065-rc"
+STAGE = REPO_ROOT / "target" / "release-staging" / "starter-rc"
 PYTHON = REPO_ROOT / "bindings" / "finstack-ai-python"
 JS_PACKAGE = REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js"
 STARTERS = (

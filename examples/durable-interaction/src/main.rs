@@ -373,6 +373,7 @@ async fn spawn_owner(
     clock: ExternalClock,
     random: u64,
 ) -> Result<RunTaskOwner, BoxError> {
+    let model = Arc::new(finstack_ai_runtime::ReadyModel::prepare(model).await?);
     Ok(RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(store),
         RunTaskConfig {
@@ -388,8 +389,6 @@ async fn spawn_owner(
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -526,6 +525,7 @@ async fn drive_past_missing_facade_decisions(
 ) -> Result<(), BoxError> {
     let recovered = CommitCoordinator::recover(Arc::clone(journal) as _, id(1)).await?;
     let cycle = recovered.state().cycle;
+    let model = Arc::new(finstack_ai_runtime::ReadyModel::prepare(model).await?);
 
     let facade = RunTaskOwner::spawn_with_model_and_tools(
         recovered,
@@ -542,8 +542,6 @@ async fn drive_past_missing_facade_decisions(
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {

@@ -1,4 +1,4 @@
-//! Public-API fixtures for PR-008 run/effect/record/event subjects.
+//! Public-API fixtures for record-and-event fixture baseline run/effect/record/event subjects.
 
 use finstack_ai_kernel::{
     APPEND_BATCH_MAX_RECORDS, AppendRequest, EffectInput, EffectKind, EffectOutputContract,
@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::fixtures::public_api::{Expect, PublicApiFixture, PublicApiFixtureError};
 
-/// Execute a PR-008 public-rust-api fixture subject.
+/// Execute a record-and-event fixture baseline public-rust-api fixture subject.
 pub(crate) fn run_pr008_subject(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     match fixture.subject.as_str() {
         "run-accepted" => run_run_accepted(fixture),

@@ -16,6 +16,7 @@ pub(super) struct StateGrowth<'a> {
     pub messages: usize,
     pub stage: Option<StageCursor>,
     pub model: Option<EffectId>,
+    pub extension: Option<EffectId>,
     pub completion: Option<&'a str>,
     pub resolution: Option<&'a str>,
     pub tool_calls: &'a [ToolCallId],
@@ -58,6 +59,16 @@ pub(super) fn preflight_decision(
             growth
                 .model
                 .is_some_and(|key| !state.model_settlements.contains_key(&key)),
+        ),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "extension_settlements",
+        state.extension_settlements.len(),
+        usize::from(
+            growth
+                .extension
+                .is_some_and(|key| !state.extension_settlements.contains_key(&key)),
         ),
         SEMANTIC_MAP_MAX_ENTRIES,
     )?;
@@ -161,6 +172,7 @@ pub(super) fn preflight_batch(
     let mut messages = 0_usize;
     let mut stage_keys = BTreeSet::new();
     let mut model_keys = BTreeSet::new();
+    let mut extension_keys = BTreeSet::new();
     let mut completion_keys = BTreeSet::new();
     let mut resolution_keys = BTreeSet::new();
     let mut tool_call_keys = BTreeSet::new();
@@ -205,6 +217,13 @@ pub(super) fn preflight_batch(
                     if !state.tool_settlements.contains_key(&value.effect_id()) {
                         tool_settlement_keys.insert(value.effect_id());
                     }
+                } else if matches!(
+                    value.output_contract().kind,
+                    crate::EffectOutputKind::ContextContribution
+                        | crate::EffectOutputKind::MiddlewareOutcome
+                ) && !state.extension_settlements.contains_key(&value.effect_id())
+                {
+                    extension_keys.insert(value.effect_id());
                 } else if value.output_contract().kind == crate::EffectOutputKind::ModelResponse
                     && !state.model_settlements.contains_key(&value.effect_id())
                 {
@@ -250,6 +269,13 @@ pub(super) fn preflight_batch(
                     if !state.tool_settlements.contains_key(&value.effect_id()) {
                         tool_settlement_keys.insert(value.effect_id());
                     }
+                } else if matches!(
+                    value.output_contract().kind,
+                    crate::EffectOutputKind::ContextContribution
+                        | crate::EffectOutputKind::MiddlewareOutcome
+                ) && !state.extension_settlements.contains_key(&value.effect_id())
+                {
+                    extension_keys.insert(value.effect_id());
                 } else if value.output_contract().kind == crate::EffectOutputKind::ModelResponse
                     && !state.model_settlements.contains_key(&value.effect_id())
                 {
@@ -280,6 +306,12 @@ pub(super) fn preflight_batch(
         "model_settlements",
         state.model_settlements.len(),
         model_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "extension_settlements",
+        state.extension_settlements.len(),
+        extension_keys.len(),
         SEMANTIC_MAP_MAX_ENTRIES,
     )?;
     check(

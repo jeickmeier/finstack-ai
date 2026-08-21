@@ -90,6 +90,11 @@ async fn drive_past_missing_facade_decisions(
         CommitCoordinator::recover(Arc::clone(&dyn_journal), locator().session_id)
             .await
             .expect("recover for facade");
+    let ready_model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(Arc::clone(model))
+            .await
+            .expect("model readiness"),
+    );
     let facade = RunTaskOwner::spawn_with_model_and_tools(
         recovered_coordinator,
         RunTaskConfig {
@@ -105,8 +110,6 @@ async fn drive_past_missing_facade_decisions(
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -115,7 +118,7 @@ async fn drive_past_missing_facade_decisions(
             global_max_concurrency: 2,
             stream_limits: ToolStreamLimits::default(),
         },
-        Arc::clone(model),
+        ready_model,
         locked_profile(),
         Arc::clone(catalog),
         clock.clone(),
@@ -397,6 +400,11 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
         ],
     ));
     let clock = ExternalClock::new(timestamp(2_500));
+    let ready_model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(Arc::clone(&model))
+            .await
+            .expect("model readiness"),
+    );
     let owner = RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(journal.clone()),
         RunTaskConfig {
@@ -412,8 +420,6 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -422,7 +428,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
             global_max_concurrency: 2,
             stream_limits: ToolStreamLimits::default(),
         },
-        Arc::clone(&model),
+        ready_model,
         locked_profile(),
         Arc::clone(&catalog),
         clock.clone(),
@@ -650,6 +656,11 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
         ],
     ));
     let clock = ExternalClock::new(timestamp(2_500));
+    let ready_model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(Arc::clone(&model))
+            .await
+            .expect("model readiness"),
+    );
     let owner = RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(journal.clone()),
         RunTaskConfig {
@@ -665,8 +676,6 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
@@ -675,7 +684,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
             global_max_concurrency: 2,
             stream_limits: ToolStreamLimits::default(),
         },
-        Arc::clone(&model),
+        ready_model,
         locked_profile(),
         Arc::clone(&catalog),
         clock.clone(),

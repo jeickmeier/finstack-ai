@@ -6,12 +6,8 @@ use finstack_ai_kernel::{
 };
 
 use super::shared::HostWork;
-use crate::context::{
-    CONTEXT_STAGE, CommittedContextCall, ContextCallContext, ContextProvider, ContextRequest,
-};
 use crate::coordinator::{
-    ContextDispatchSeed, DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch,
-    ToolDispatchSeed,
+    DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch, ToolDispatchSeed,
 };
 use crate::{
     CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelRequest,
@@ -23,7 +19,6 @@ pub(super) struct HostDispatcher {
     pub(super) model: Arc<dyn Model>,
     pub(super) profile: LockedModelContextProfile,
     pub(super) catalog: Option<Arc<ResolvedToolCatalog>>,
-    pub(super) context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
     pub(super) pending: Arc<Mutex<VecDeque<HostWork>>>,
     pub(super) active: Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>,
     pub(super) parent: CancellationSignal,
@@ -184,67 +179,6 @@ impl HostDispatcher {
         let result = self.enqueue_tool(effect_id, seed);
         Box::pin(async move { result })
     }
-
-    fn dispatch_context(
-        &self,
-        effect_id: EffectId,
-        seed: ContextDispatchSeed,
-    ) -> PortFuture<Result<(), DispatchError>> {
-        let providers = self.context_providers.clone();
-        let parent = self.parent.clone();
-        Box::pin(async move {
-            let providers = providers.ok_or(DispatchError {
-                code: "unsupported_effect_driver",
-            })?;
-            let pipeline = seed.requested.pipeline().ok_or(DispatchError {
-                code: "unsupported_effect_driver",
-            })?;
-            if pipeline.stage() != CONTEXT_STAGE {
-                return Err(DispatchError {
-                    code: "unsupported_effect_driver",
-                });
-            }
-            let index = usize::try_from(pipeline.index()).map_err(|_| DispatchError {
-                code: "unsupported_effect_driver",
-            })?;
-            let provider = providers.get(index).ok_or(DispatchError {
-                code: "unsupported_effect_driver",
-            })?;
-            let EffectInput::Context { request: raw } = seed.requested.input() else {
-                return Err(DispatchError {
-                    code: "unsupported_effect_driver",
-                });
-            };
-            let request: ContextRequest =
-                serde_json::from_slice(raw.as_bytes()).map_err(|_| DispatchError {
-                    code: "unsupported_effect_driver",
-                })?;
-            let context = ContextCallContext {
-                run: RunCallContext {
-                    locator: seed.locator,
-                    authorization: seed.authorization,
-                    effect_id,
-                    attempt: seed.attempt,
-                    deadline: seed.requested.deadline(),
-                    budget_scope_id: seed.budget_scope_id,
-                    cancellation: parent.child(),
-                    relation_depth: seed.relation_depth,
-                },
-                provider_index: pipeline.index(),
-                chain_digest: pipeline.chain_digest(),
-            };
-            CommittedContextCall::try_new(&seed.envelope, context, request, &provider.descriptor())
-                .map_err(|_| DispatchError {
-                    code: "unsupported_effect_driver",
-                })?
-                .invoke(provider.as_ref())
-                .await
-                .map(|_| ())
-                .map_err(|_| DispatchError {
-                    code: "unsupported_effect_driver",
-                })
-        })
-    }
 }
 
 impl PostCommitDispatcher for HostDispatcher {
@@ -305,8 +239,11 @@ impl PostCommitDispatcher for HostDispatcher {
                 if let Some(seed) = dispatch.tool {
                     return self.dispatch_tool(effect_id, seed);
                 }
-                if let Some(seed) = dispatch.context {
-                    return self.dispatch_context(effect_id, seed);
+                if dispatch.context.is_some() {
+                    // The stage driver owns context invocation and settlement.
+                    // This dispatcher only acknowledges the committed intent;
+                    // run cancellation is carried by the stage-driver call.
+                    return Box::pin(async { Ok(()) });
                 }
                 Box::pin(async {
                     Err(DispatchError {

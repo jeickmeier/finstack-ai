@@ -172,9 +172,7 @@ pub(crate) struct SessionRow {
 
 /// A previously committed batch, rehydrated for an idempotent replay.
 pub(crate) struct LoadedBatch {
-    /// Stored [`AppendIdentity`] CBOR, compared byte-for-byte on replay.
-    pub(crate) request_cbor: Vec<u8>,
-    /// Decoded identity, used for the record-reuse replay comparison.
+    /// Decoded identity, used for idempotent replay comparison.
     pub(crate) identity: AppendIdentity,
     /// The batch as it was returned when first committed.
     pub(crate) committed: CommittedBatch,
@@ -767,7 +765,6 @@ pub(crate) async fn load_batch(
             reason_code: "committed_batch_invalid",
         })?;
     Ok(Some(LoadedBatch {
-        request_cbor,
         identity,
         committed,
     }))

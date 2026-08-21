@@ -42,18 +42,12 @@ Or launch Jupyter from that environment:
 uv run jupyter notebook examples/python-notebooks
 ```
 
-Verification (`uv run python scripts/docs/notebooks.py` from the repository root):
-
-```bash
-uv run python scripts/docs/notebooks.py
-```
-
 ## Trust and network
 
 | Notebook | Trust | Network |
 | --- | --- | --- |
 | [01_orientation.ipynb](01_orientation.ipynb) | Import only | None |
-| [02_first_agent.ipynb](02_first_agent.ipynb) | [T2](../../docs/site/security-trust-levels.md) callback | None |
+| [02_first_agent.ipynb](02_first_agent.ipynb) | T2 callback | None |
 | [03_tools_and_structured_output.ipynb](03_tools_and_structured_output.ipynb) | T2 callback + Pydantic extra | None |
 | [04_runs_events_sessions.ipynb](04_runs_events_sessions.ipynb) | T2 callback | None |
 | [05_ollama_and_harness.ipynb](05_ollama_and_harness.ipynb) | T1 provider + T2 ports | Construct-only unless local Ollama has `gemma4:26b` |
@@ -65,7 +59,7 @@ uv run python scripts/docs/notebooks.py
 | [11_memory.ipynb](11_memory.ipynb) | T2 callback + native memory extension | None |
 
 T1 native providers and T2 Python callbacks run in-process. They are not
-isolated. See [trust levels](../../docs/site/security-trust-levels.md).
+isolated. See trust levels.
 
 ## Live cells
 

@@ -13,6 +13,18 @@ fn budget_charge_and_release_are_post_commit_and_idempotent() {
         accept_input(),
     ))
     .expect("accept parent");
+    block_on(commit.commit_session_records(
+        id(388),
+        vec![session_draft(
+            id(389),
+            id::<SessionTag>(1),
+            id::<LaneTag>(2),
+            timestamp(1_025),
+            RecordBody::LaneCreated(LaneCreated::try_new("main").expect("lane")),
+        )
+        .expect("parent lane draft")],
+    ))
+    .expect("create parent lane");
     create_compatible_lane(&mut commit, 340, 390, 391);
 
     let parent = OperationLocator {

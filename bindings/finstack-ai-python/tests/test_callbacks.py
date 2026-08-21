@@ -1,4 +1,4 @@
-"""PR-030 trusted Python callback adapter behavior."""
+"""Trusted Python callback adapter behavior."""
 
 from __future__ import annotations
 
@@ -6,13 +6,11 @@ import asyncio
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 from pathlib import Path
-
-import pytest
+from typing import Any
 
 import finstack_ai
-
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -178,6 +176,45 @@ def test_coarse_port_adapters_validate_and_cache_registration() -> None:
             component="python.observer.invalid",
             payload_mode="credential",
         )
+
+
+def test_run_exposes_bounded_redacted_observer_diagnostics() -> None:
+    async def model_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        del context, request
+        return {
+            "text": "observer failures stay non-semantic",
+            "completion_id": "python-obs-1",
+        }
+
+    async def failing_observer(batch: list[dict[str, Any]]) -> None:
+        del batch
+        raise RuntimeError("host secret must not escape")
+
+    async def exercise() -> tuple[str, dict[str, Any]]:
+        observer = finstack_ai.PythonObserver(
+            failing_observer,
+            component="python.observer.failing",
+            payload_mode="redacted",
+        )
+        agent = await finstack_ai.Agent.from_python(
+            _model(model_callback),
+            observers=[observer],
+        )
+        run = agent.start("hello")
+        result = await run.result()
+        return result.text, await run.observer_diagnostics()
+
+    text, diagnostics = asyncio.run(exercise())
+    assert text == "observer failures stay non-semantic"
+    assert diagnostics["total"] >= 1
+    assert diagnostics["dropped"] == 0
+    assert diagnostics["recent"]
+    assert set(diagnostics["recent"][0]) == {"code", "detail"}
+    assert diagnostics["recent"][0]["code"] == "observer_delivery_failed"
+    assert diagnostics["recent"][0]["detail"] == "observer delivery failed"
+    assert "secret" not in repr(diagnostics)
 
 
 @pytest.mark.parametrize(

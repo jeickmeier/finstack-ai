@@ -39,6 +39,8 @@ export type {
   EventOptions,
   ExternalIdentitySnapshot,
   LaneInspectSnapshot,
+  ObserverDiagnostic,
+  ObserverDiagnostics,
   RunOptions,
   RunResultSnapshot,
   SessionInspectPhase,

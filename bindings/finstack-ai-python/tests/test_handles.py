@@ -1,4 +1,4 @@
-"""PR-028 Rust-backed async handle, batching, cancellation, and error tests."""
+"""Rust-backed async handle, batching, cancellation, and error tests."""
 
 from __future__ import annotations
 

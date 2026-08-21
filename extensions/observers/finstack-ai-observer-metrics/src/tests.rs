@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use finstack_ai_kernel::{
     ContentBlock, Digest, EventTag, Id, IdTag, LaneTag, Message, MessageRole, Metadata,
@@ -7,9 +6,7 @@ use finstack_ai_kernel::{
     RunTag, SessionTag, TextBlock, Timestamp,
 };
 use finstack_ai_kernel::{RunEvent, Sensitivity};
-use finstack_ai_runtime::{
-    CompactionEvidence, CompactionResult, Observer, ObserverBackpressure, PromptCacheImpact,
-};
+use finstack_ai_runtime::{CompactionEvidence, CompactionResult, Observer, PromptCacheImpact};
 use finstack_ai_test::check_observer_conformance;
 
 use super::MetricsObserver;
@@ -65,7 +62,7 @@ fn evidence() -> CompactionEvidence {
 
 #[tokio::test]
 async fn conformance_accepts_an_empty_batch() {
-    let metrics = MetricsObserver::try_new(8, ObserverBackpressure::DropProgress).expect("metrics");
+    let metrics = MetricsObserver::try_new().expect("metrics");
     check_observer_conformance(&metrics, Arc::from([]))
         .await
         .expect("conformance");
@@ -73,7 +70,7 @@ async fn conformance_accepts_an_empty_batch() {
 
 #[tokio::test]
 async fn encode_prometheus_omits_canary_and_compaction_text() {
-    let metrics = MetricsObserver::try_new(8, ObserverBackpressure::DropProgress).expect("metrics");
+    let metrics = MetricsObserver::try_new().expect("metrics");
     metrics
         .observe(Arc::from([event(RunEventBody::QueueDepthWarning(
             QueueDepthWarning { depth: 3, limit: 8 },
@@ -106,59 +103,4 @@ async fn encode_prometheus_omits_canary_and_compaction_text() {
     assert!(text.contains("finstack.compaction.sliding_window"));
     assert!(!text.contains(CANARY));
     assert!(!text.contains("replacement"));
-}
-
-#[tokio::test]
-async fn drop_progress_overflow_is_diagnosed() {
-    let metrics = MetricsObserver::try_new(1, ObserverBackpressure::DropProgress).expect("metrics");
-    metrics
-        .observe(Arc::from([
-            event(RunEventBody::QueueDepthWarning(QueueDepthWarning {
-                depth: 1,
-                limit: 8,
-            })),
-            event(RunEventBody::QueueDepthWarning(QueueDepthWarning {
-                depth: 2,
-                limit: 8,
-            })),
-        ]))
-        .await
-        .expect("observe");
-    // Capacity-1 queue, 2 events in one batch: exactly one drop, not two.
-    assert_eq!(metrics.dropped(), 1);
-    assert_eq!(
-        metrics.last_diagnostic().expect("diagnostic").code,
-        "observer_queue_overflow"
-    );
-    assert!(
-        metrics
-            .encode_prometheus()
-            .contains("finstack_observer_dropped_total")
-    );
-}
-
-#[tokio::test]
-async fn block_bounded_timeout_does_not_hang() {
-    let metrics = MetricsObserver::try_new(
-        1,
-        ObserverBackpressure::BlockBounded {
-            timeout: Duration::from_millis(1),
-        },
-    )
-    .expect("metrics");
-    metrics
-        .observe(Arc::from([
-            event(RunEventBody::QueueDepthWarning(QueueDepthWarning {
-                depth: 1,
-                limit: 8,
-            })),
-            event(RunEventBody::QueueDepthWarning(QueueDepthWarning {
-                depth: 2,
-                limit: 8,
-            })),
-        ]))
-        .await
-        .expect("observe");
-    // Capacity-1 queue, 2 events in one batch: exactly one drop, not two.
-    assert_eq!(metrics.dropped(), 1);
 }

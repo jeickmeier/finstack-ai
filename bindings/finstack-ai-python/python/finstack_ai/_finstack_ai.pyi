@@ -287,6 +287,21 @@ class HttpFetchToolset:
     @property
     def tool_count(self) -> int: ...
 
+class E2bSandboxToolset:
+    """Composable T4 E2B sandbox toolset for a real model-backed agent."""
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        endpoint: str | None = None,
+        template: str | None = None,
+    ) -> None: ...
+    @property
+    def component(self) -> str: ...
+    @property
+    def tool_count(self) -> int: ...
+
 class MemoryObserver:
     """Capture observer handle produced by :meth:`MemoryExtension.observer`."""
 
@@ -514,15 +529,6 @@ class Lane:
 
         Raises:
             ConfigurationError: The lane cannot be inspected.
-        """
-    def cancel(self) -> Awaitable[None]:
-        """Cancel the active run on this lane.
-
-        Rust owns fan-out through child mappings. An idle lane is a no-op.
-
-        Raises:
-            ConfigurationError: The journal cannot be loaded or the cancel
-                commit fails.
         """
     def append_text(self, text: str) -> Awaitable[str]:
         """Append one user text message on this idle lane.
@@ -788,6 +794,19 @@ class Attachment:
                 ``path`` cannot be read, or exceeds 4 MiB.
         """
 
+class ObserverDiagnostic(TypedDict):
+    """One stable, redacted observer-delivery diagnostic."""
+
+    code: str
+    detail: str
+
+class ObserverDiagnostics(TypedDict):
+    """Bounded process-local observer diagnostic snapshot."""
+
+    total: int
+    dropped: int
+    recent: list[ObserverDiagnostic]
+
 class Run:
     """Shared control and observation handle for one Rust-owned run."""
 
@@ -806,6 +825,21 @@ class Run:
             RuntimeError: The runtime failed after accept.
             CancelledError: The run reached its durable cancelled terminal.
             TimeoutError: The operational deadline elapsed.
+        """
+    async def observer_diagnostics(self) -> ObserverDiagnostics:
+        """Snapshot bounded, redacted observer-delivery diagnostics.
+
+        The snapshot is process-local and non-semantic. Reading it does not
+        affect the journal, kernel state, run result, or best-effort observer
+        delivery.
+
+        Returns:
+            Total failures, count evicted from the bounded recent list, and
+            recent stable ``code``/``detail`` dictionaries in source order.
+
+        Raises:
+            RuntimeError: Run startup failed before a runtime handle was
+                published.
         """
     async def list_interactions(self) -> list[dict[str, object]]:
         """List the outstanding typed interaction for this run.
@@ -937,7 +971,11 @@ class Agent:
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
         toolsets: list[
-            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
         ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
@@ -1019,7 +1057,11 @@ class Agent:
         reasoning_summary: str | None = None,
         media_tools: bool = False,
         toolsets: list[
-            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
         ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
@@ -1094,7 +1136,11 @@ class Agent:
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
         toolsets: list[
-            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
         ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
@@ -1167,7 +1213,9 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset | HttpFetchToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | HttpFetchToolset | E2bSandboxToolset
+        ]
         | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
@@ -1238,7 +1286,9 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | MemoryToolset | E2bSandboxToolset
+        ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
@@ -1305,7 +1355,11 @@ class Agent:
         auth: str | None = None,
         api_key: str | None = None,
         toolsets: list[
-            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
         ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
@@ -1357,65 +1411,14 @@ class Agent:
                 invalid.
         """
     @staticmethod
-    async def e2b_sandbox(
-        model: str,
-        instruction: str | None = None,
-        capabilities: list[Capability] | None = None,
-        active_capabilities: list[str] | None = None,
-        *,
-        api_key: str,
-        endpoint: str | None = None,
-        template: str | None = None,
-        toolsets: list[
-            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
-        ]
-        | None = None,
-        context_providers: list[PythonContextProvider | MemoryContextProvider]
-        | None = None,
-        middleware: list[PythonMiddleware] | None = None,
-        observers: list[PythonObserver | MemoryObserver] | None = None,
-        output_type: Any | None = None,
-        child_runs: ChildRunPolicy | None = None,
-        approval_grant: ApprovalGrantMode | None = None,
-    ) -> Agent:
-        """Build a Rust-backed T4 E2B sandbox agent.
-
-        Registers the E2B Toolset. This factory does not read environment
-        variables. Construction fails without ``api_key``. Non-loopback
-        endpoints must be HTTPS. The leaf is not Landlock and is not isolated.
-
-        Args:
-            model: Catalog model name reserved for the constructed agent.
-            instruction: Optional stable instruction prefix.
-            capabilities: Optional declarative capability catalog.
-            active_capabilities: Application capability ids to activate.
-            api_key: Explicit E2B credential.
-            endpoint: Optional HTTPS product endpoint, or loopback HTTP for
-                fixtures. Defaults to ``https://api.e2b.dev``.
-            template: Optional sandbox template. Defaults to ``base``.
-            toolsets: Optional trusted Python toolset callbacks.
-            context_providers: Optional trusted context-provider callbacks.
-            middleware: Optional trusted middleware callbacks.
-            observers: Optional trusted observer callbacks.
-            output_type: Optional Pydantic output type. Lazily requires the
-                Pydantic extra.
-            child_runs: Optional child-run admission policy. Defaults to
-                :meth:`ChildRunPolicy.deny`.
-            approval_grant: Optional paid-tool approval grant mode. Defaults
-                to :meth:`ApprovalGrantMode.per_call`.
-
-        Returns:
-            An immutable Rust-owned agent handle.
-
-        Raises:
-            ConfigurationError: The API key, endpoint, capability set, or port
-                registration is invalid.
-        """
-    @staticmethod
     async def from_python(
         model: PythonModel,
         toolsets: list[
-            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
         ]
         | None = None,
         instruction: str | None = None,

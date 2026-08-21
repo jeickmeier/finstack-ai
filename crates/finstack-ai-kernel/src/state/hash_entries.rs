@@ -7,10 +7,27 @@ use crate::records::lifecycle::{Stage, StageCursor};
 use crate::records::tools::{ToolCallIdentity, ToolSettlementFingerprint};
 
 use super::types::{
-    CompletionIdentityHashEntryV1, ModelSettlementHashEntryV1, ResolutionIdentityHashEntryV6,
-    StageSettlementHashEntryV1, ToolCallIdentityHashRef, ToolSettlementHashEntryV2,
+    CompletionIdentityHashEntryV1, ExtensionSettlementHashEntryV7, ModelSettlementHashEntryV1,
+    ResolutionIdentityHashEntryV6, StageSettlementHashEntryV1, ToolCallIdentityHashRef,
+    ToolSettlementHashEntryV2,
 };
-use super::{CompletionIdentity, ModelSettlementFingerprint, ResolutionIdentity};
+use super::{
+    CompletionIdentity, ExtensionSettlementFingerprint, ModelSettlementFingerprint,
+    ResolutionIdentity,
+};
+
+pub(super) fn extension_hash_entries(
+    entries: &BTreeMap<EffectId, ExtensionSettlementFingerprint>,
+) -> Vec<ExtensionSettlementHashEntryV7> {
+    entries
+        .iter()
+        .map(|(effect_id, settlement)| ExtensionSettlementHashEntryV7 {
+            effect_id: *effect_id,
+            kind: settlement.kind,
+            settlement_digest: settlement.digest,
+        })
+        .collect()
+}
 
 pub(super) fn stage_hash_entries(
     entries: &BTreeMap<StageCursor, Digest>,

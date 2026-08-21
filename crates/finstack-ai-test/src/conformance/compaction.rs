@@ -46,7 +46,7 @@ pub struct CompactionConformanceReport {
     pub compared_projections: usize,
 }
 
-/// Prove the PR-023 compaction integrity matrix using public runtime APIs.
+/// Prove the compaction contract compaction integrity matrix using public runtime APIs.
 ///
 /// # Errors
 ///

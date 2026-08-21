@@ -483,7 +483,8 @@ pub struct MiddlewareContext {
 }
 
 /// Child-model result used to resume the same middleware invocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CompactionModelResume {
     /// Child request identity.
     pub request_id: ModelRequestId,
@@ -507,7 +508,8 @@ pub(super) fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, Middle
 /// Stable wire-format name for a stage, used to build the `PipelinePosition`
 /// stage string.
 #[must_use]
-pub fn stage_name(stage: Stage) -> &'static str {
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) fn stage_name(stage: Stage) -> &'static str {
     match stage {
         Stage::BeforeRun => "before_run",
         Stage::PrepareContext => "prepare_context",

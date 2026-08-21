@@ -349,6 +349,10 @@ fn effect_request(
             schema_digest: Digest::raw_json(b"context-contribution-v1"),
         },
         EffectInput::Context {
+            cursor: finstack_ai_kernel::StageCursor {
+                cycle: 0,
+                stage: finstack_ai_kernel::Stage::PrepareContext,
+            },
             request: request.to_raw_json().expect("request"),
         },
         RetrySafety::SafeToRetry,

@@ -94,7 +94,7 @@ pub struct SyntheticToolClosure {
 /// One source-ordered executable or synthetic call plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-#[expect(
+#[allow(
     clippy::large_enum_variant,
     reason = "the frozen public wire contract stores both plan payloads by value"
 )]

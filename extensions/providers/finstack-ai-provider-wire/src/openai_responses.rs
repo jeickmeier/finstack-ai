@@ -6,9 +6,10 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{
-    ContentBlock, JsonBlock, ModelResponse, ModelStreamItem, ModelToolCall, ProviderIds, RawJson,
-    ReasoningDelta, TextBlock, TextDelta, ToolCallDelta, Usage, UsageDelta,
+use finstack_ai_kernel::{ContentBlock, JsonBlock, ProviderIds, RawJson, TextBlock, Usage};
+use finstack_ai_runtime::{
+    ModelResponse, ModelStreamItem, ModelToolCall, ReasoningDelta, TextDelta, ToolCallDelta,
+    UsageDelta,
 };
 
 use super::StreamNormError;
@@ -442,7 +443,7 @@ mod tests {
                 .consume(r#"{"type":"response.incomplete","sequence_number":1,"response":{"id":"resp-1","incomplete_details":{"reason":"max_output_tokens"}}}"#)
                 .expect_err("incomplete")
                 .kind,
-            super::super::StreamNormKind::Incomplete
+            crate::StreamNormKind::Incomplete
         );
         let mut assembly = OpenAiResponsesAssembly::new("request-2".to_owned(), false);
         assert_eq!(
@@ -452,7 +453,7 @@ mod tests {
                 )
                 .expect_err("failed")
                 .kind,
-            super::super::StreamNormKind::Response
+            crate::StreamNormKind::Response
         );
     }
 

@@ -1,8 +1,7 @@
 //! `OpenRouter` Responses SSE event assembly (shared OpenAI-Responses normalization).
 
-use finstack_ai_runtime::{
-    ModelError, ModelStreamItem, OpenAiResponsesAssembly, StreamNormError, StreamNormKind,
-};
+use finstack_ai_provider_wire::{OpenAiResponsesAssembly, StreamNormError, StreamNormKind};
+use finstack_ai_runtime::{ModelError, ModelStreamItem};
 
 use crate::error::{incomplete_error, response_error, stream_error, stream_limit_error};
 

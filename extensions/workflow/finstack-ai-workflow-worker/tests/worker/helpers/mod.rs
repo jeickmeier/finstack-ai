@@ -245,6 +245,11 @@ pub(crate) async fn spawn_model_owner(
     clock: impl Clock + Send + Sync + 'static,
     random: u64,
 ) -> RunTaskOwner {
+    let model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(model)
+            .await
+            .expect("model readiness"),
+    );
     RunTaskOwner::spawn_with_model(
         coordinator,
         RunTaskConfig {
@@ -260,8 +265,6 @@ pub(crate) async fn spawn_model_owner(
             job_capacity: 2,
             result_capacity: 2,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         model,

@@ -1,4 +1,4 @@
-//! Explicit-route remote child invoker over PR-058 framing.
+//! Explicit-route remote child invoker over session-server framing contract framing.
 //!
 //! Native-only. `wasm-host` callers use the SDK inherent, which returns
 //! `agent_run_unsupported_plan` without linking this crate.

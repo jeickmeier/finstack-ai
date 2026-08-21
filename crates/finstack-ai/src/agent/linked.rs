@@ -6,44 +6,44 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 use finstack_ai_kernel::ComponentId;
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 use finstack_ai_kernel::{AgentId, BundleId};
 use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
 use finstack_ai_runtime::{
     ArtifactStore, ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
 };
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 use finstack_ai_runtime::{JournalStore, Model};
 
 use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy, RunPolicy};
 
 use super::builder::NativeAgentBuilder;
 use super::handle::Agent;
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 use super::types::AGENT_RUN_INVALID_CONFIGURATION;
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 use super::types::AGENT_RUN_UNSUPPORTED_PLAN;
 use super::types::AgentRunError;
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const OPENAI_TIMEOUT: Duration = Duration::from_mins(2);
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const LINKED_CONTEXT_WINDOW_TOKENS: u64 = 1_050_000;
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const LINKED_RESERVED_OUTPUT_TOKENS: u64 = 128_000;
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const LINKED_ANTHROPIC_OUTPUT_TOKENS: u64 = 64_000;
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const LINKED_MEDIA_MAX_RESULT_BYTES: usize = 262_144;
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 const REASONING_SUMMARIES: &[&str] = &["auto", "concise", "detailed"];
 
 /// Already-resolved port handles supplied by a language binding.
@@ -202,20 +202,6 @@ pub struct GatewayAgentSpec {
     pub auth_kind: Option<String>,
     /// Explicit credential. Never read from the environment.
     pub api_key: Option<String>,
-    /// Shared instruction, ports, and child-run policy.
-    pub common: LinkedCommon,
-}
-
-/// Arguments for [`Agent::e2b_sandbox`].
-pub struct E2bSandboxAgentSpec {
-    /// Catalog model name reserved for the constructed agent.
-    pub model: String,
-    /// Explicit E2B API key. Never read from the environment.
-    pub api_key: String,
-    /// Optional HTTPS product endpoint, or loopback HTTP for fixtures.
-    pub endpoint: Option<String>,
-    /// Optional sandbox template. Defaults to `base`.
-    pub template: Option<String>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -383,24 +369,9 @@ impl Agent {
     pub async fn gateway(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
         gateway_inner(spec).await
     }
-
-    /// Construct an agent that registers the T4 E2B sandbox Toolset.
-    ///
-    /// Reuses `finstack-ai-sandbox-e2b` under `native-tokio` only. Does not
-    /// read environment variables. Construction fails without an explicit API
-    /// key. Non-loopback endpoints must be HTTPS.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
-    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the API key or endpoint
-    /// is invalid.
-    pub async fn e2b_sandbox(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        e2b_sandbox_inner(spec).await
-    }
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_openai::{
         Authentication, OpenAiConfig, OpenAiModelConfig, OpenAiProvider, SecretString,
@@ -453,7 +424,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     .await
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_openrouter::{
         Authentication, OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider, SecretString,
@@ -513,7 +484,7 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
     .await
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_anthropic::{
         AnthropicConfig, AnthropicModelConfig, AnthropicProvider, Authentication, SecretString,
@@ -559,7 +530,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
     .await
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_gemini::{
         Authentication, GeminiConfig, GeminiModelConfig, GeminiProvider, SecretString,
@@ -609,7 +580,7 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     .await
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 
@@ -648,7 +619,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
     .await
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_runtime::{Authentication, CredentialReference, CredentialStore};
 
@@ -724,7 +695,7 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
     .await
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn gateway_provider(
     wire_protocol: &str,
     endpoint: &str,
@@ -815,7 +786,7 @@ fn gateway_provider(
     }
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn gateway_gemini_provider(
     endpoint: &str,
     model: &str,
@@ -850,94 +821,40 @@ fn gateway_gemini_provider(
     ))
 }
 
-#[cfg(feature = "native-tokio")]
-async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    use finstack_ai_sandbox_e2b::{E2bSandboxConfig, E2bSandboxError, E2bSandboxToolset};
-
-    if spec.api_key.is_empty() {
-        return Err(AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "e2b sandbox construction requires an explicit API key",
-        ));
-    }
-    let model_name = ModelName::try_new(&spec.model).map_err(|error| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            format!("{}: {}", error.code(), error.message()),
-        )
-    })?;
-    let toolset = E2bSandboxToolset::try_new(E2bSandboxConfig {
-        api_key: spec.api_key,
-        endpoint: spec.endpoint.unwrap_or_default(),
-        template: spec.template,
-    })
-    .map_err(|error| match error {
-        E2bSandboxError::CredentialRequired => AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "e2b sandbox construction requires an explicit API key",
-        ),
-        E2bSandboxError::EndpointInvalid { reason } => {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, reason)
-        }
-    })?;
-    let mut common = spec.common;
-    common
-        .ports
-        .toolsets
-        .push((component("python.toolset.e2b")?, Arc::new(toolset)));
-    let provider: Arc<dyn Model> = Arc::new(E2bCatalogModel {
-        name: model_name.clone(),
-    });
-    build_linked_provider(
-        ("python.agent.e2b", "python.bundle.e2b", "python.model.e2b"),
-        provider,
-        model_name,
-        common,
-        empty_model_settings()?,
-        DEFAULT_TIMEOUT,
-    )
-    .await
-}
-
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "openai").await
 }
 
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "openrouter").await
 }
 
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "anthropic").await
 }
 
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "gemini").await
 }
 
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "ollama").await
 }
 
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "gateway").await
 }
 
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    unsupported_provider(spec, "e2b_sandbox").await
-}
-
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[cfg(not(feature = "linked-providers"))]
 #[expect(
     clippy::unused_async,
-    reason = "wasm-host keeps the same async signature as native-tokio"
+    reason = "unsupported linked features keep the same async signature"
 )]
 async fn unsupported_provider<T>(
     _spec: T,
@@ -945,11 +862,11 @@ async fn unsupported_provider<T>(
 ) -> Result<LinkedAgent, AgentRunError> {
     Err(AgentRunError::configuration(
         AGENT_RUN_UNSUPPORTED_PLAN,
-        format!("Agent::{name} is not supported on wasm-host"),
+        format!("Agent::{name} requires the linked-providers feature"),
     ))
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 async fn build_linked_provider(
     (agent_id, bundle_id, model_id): (&str, &str, &str),
     provider: Arc<dyn Model>,
@@ -972,7 +889,7 @@ async fn build_linked_provider(
     .await
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn memory_store() -> Result<(ComponentRef, Arc<dyn JournalStore>), AgentRunError> {
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
@@ -990,7 +907,7 @@ fn memory_store() -> Result<(ComponentRef, Arc<dyn JournalStore>), AgentRunError
     Ok((component("python.store.memory")?, store))
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id).map_err(|error| {
@@ -1002,7 +919,7 @@ fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
 
 /// Register the `OpenAI` media toolset, attaching the host artifact store
 /// when the linked ports already have one.
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn register_openai_media(
     ports: &mut LinkedAgentPorts,
     api_key: String,
@@ -1028,7 +945,7 @@ fn register_openai_media(
 }
 
 /// Register the `OpenRouter` media toolset on any linked constructor.
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn register_openrouter_media(
     ports: &mut LinkedAgentPorts,
     spec: OpenRouterMediaToolsSpec,
@@ -1056,7 +973,7 @@ fn register_openrouter_media(
     Ok(())
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn model_configuration_error(error: &finstack_ai_runtime::ModelError) -> AgentRunError {
     AgentRunError::configuration(
         AGENT_RUN_INVALID_CONFIGURATION,
@@ -1064,7 +981,7 @@ fn model_configuration_error(error: &finstack_ai_runtime::ModelError) -> AgentRu
     )
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn secret_configuration_error() -> AgentRunError {
     AgentRunError::configuration(
         AGENT_RUN_INVALID_CONFIGURATION,
@@ -1072,7 +989,7 @@ fn secret_configuration_error() -> AgentRunError {
     )
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn gateway_authentication(
     kind: Option<&str>,
     api_key: Option<String>,
@@ -1102,21 +1019,30 @@ fn gateway_authentication(
     }
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn require_https_or_loopback(endpoint: &str) -> Result<(), AgentRunError> {
-    let Some(rest) = endpoint
-        .strip_prefix("http://")
-        .or_else(|| endpoint.strip_prefix("HTTP://"))
-    else {
+    let parsed = url::Url::parse(endpoint).map_err(|_| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "provider endpoint must be a valid http or https URL",
+        )
+    })?;
+    if parsed.username() != "" || parsed.password().is_some() || parsed.host().is_none() {
+        return Err(AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "provider endpoint must not contain userinfo and must include a host",
+        ));
+    }
+    if parsed.scheme().eq_ignore_ascii_case("https") {
         return Ok(());
-    };
-    let host = rest
-        .split(['/', ':', '?'])
-        .next()
-        .unwrap_or("")
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-    if matches!(host, "127.0.0.1" | "localhost" | "::1") {
+    }
+    if parsed.scheme().eq_ignore_ascii_case("http")
+        && parsed.host().is_some_and(|host| match host {
+            url::Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+            url::Host::Ipv4(address) => address.is_loopback(),
+            url::Host::Ipv6(address) => address.is_loopback(),
+        })
+    {
         return Ok(());
     }
     Err(AgentRunError::configuration(
@@ -1125,12 +1051,15 @@ fn require_https_or_loopback(endpoint: &str) -> Result<(), AgentRunError> {
     ))
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn require_https_for_credentials(endpoint: &str, has_secret: bool) -> Result<(), AgentRunError> {
     if !has_secret {
         return Ok(());
     }
-    if endpoint.len() < 8 || !endpoint[..8].eq_ignore_ascii_case("https://") {
+    let is_https = url::Url::parse(endpoint)
+        .ok()
+        .is_some_and(|url| url.scheme().eq_ignore_ascii_case("https"));
+    if !is_https {
         return Err(AgentRunError::configuration(
             AGENT_RUN_INVALID_CONFIGURATION,
             "provider credentials require HTTPS",
@@ -1139,7 +1068,7 @@ fn require_https_for_credentials(endpoint: &str, has_secret: bool) -> Result<(),
     Ok(())
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn empty_model_settings() -> Result<ModelSettings, AgentRunError> {
     Ok(ModelSettings {
         values: RawJson::parse(b"{}").map_err(|error| {
@@ -1148,7 +1077,7 @@ fn empty_model_settings() -> Result<ModelSettings, AgentRunError> {
     })
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(feature = "linked-providers")]
 fn reasoning_settings(
     effort: Option<&str>,
     summary: Option<&str>,
@@ -1181,101 +1110,6 @@ fn reasoning_settings(
         .map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })
-}
-
-#[cfg(feature = "native-tokio")]
-struct E2bCatalogModel {
-    name: ModelName,
-}
-
-#[cfg(feature = "native-tokio")]
-impl Model for E2bCatalogModel {
-    fn descriptor(&self) -> finstack_ai_runtime::ModelDescriptor {
-        finstack_ai_runtime::ModelDescriptor {
-            provider: Arc::from("e2b"),
-            models: Arc::from([self.name.clone()]),
-            metadata: finstack_ai_kernel::Metadata::empty(),
-        }
-    }
-
-    fn capabilities(&self, model: &ModelName) -> finstack_ai_runtime::ModelCapabilities {
-        use std::collections::BTreeSet;
-
-        use finstack_ai_runtime::{
-            InputCapabilities, ModelCapabilities, ModelContextProfile, StructuredOutputCapability,
-            TokenEstimatorRef, TokenEstimatorSource,
-        };
-
-        ModelCapabilities {
-            input: InputCapabilities {
-                text: true,
-                json: true,
-                images: false,
-                audio: false,
-                files: false,
-            },
-            context_profile: ModelContextProfile {
-                provider: Arc::from("e2b"),
-                model: model.clone(),
-                hard_input_bytes: LINKED_CONTEXT_WINDOW_TOKENS,
-                context_window_tokens: LINKED_CONTEXT_WINDOW_TOKENS,
-                max_output_tokens: LINKED_RESERVED_OUTPUT_TOKENS,
-                reserved_output_tokens: LINKED_RESERVED_OUTPUT_TOKENS,
-                provider_overhead_tokens: LINKED_PROVIDER_OVERHEAD_TOKENS,
-                estimator: TokenEstimatorRef {
-                    id: Arc::from("e2b.utf8-byte-upper-bound"),
-                    version: Arc::from("1"),
-                    source: TokenEstimatorSource::ConservativeUpperBound,
-                },
-            },
-            native_tool_calls: true,
-            parallel_tool_calls: false,
-            structured_output: StructuredOutputCapability::Unsupported,
-            reasoning: false,
-            prompt_cache: false,
-            resumable_stream: false,
-            idempotent_requests: false,
-            native_capabilities: BTreeSet::new(),
-        }
-    }
-
-    fn estimate_input_tokens(
-        &self,
-        _model: &ModelName,
-        canonical_request: &[u8],
-    ) -> Result<finstack_ai_runtime::ModelTokenEstimate, finstack_ai_runtime::ModelError> {
-        use finstack_ai_runtime::{ModelTokenEstimate, TokenEstimatorRef, TokenEstimatorSource};
-
-        Ok(ModelTokenEstimate {
-            input_tokens: u64::try_from(canonical_request.len()).unwrap_or(u64::MAX),
-            estimator: TokenEstimatorRef {
-                id: Arc::from("e2b.utf8-byte-upper-bound"),
-                version: Arc::from("1"),
-                source: TokenEstimatorSource::ConservativeUpperBound,
-            },
-        })
-    }
-
-    fn request(
-        &self,
-        _request: finstack_ai_runtime::ModelRequest,
-    ) -> finstack_ai_runtime::PortFuture<
-        Result<finstack_ai_runtime::ModelEventStream, finstack_ai_runtime::ModelError>,
-    > {
-        use finstack_ai_kernel::ErrorCategory;
-        use finstack_ai_runtime::{MODEL_REQUEST_INVALID, ModelError};
-
-        Box::pin(async {
-            Err(ModelError::try_new(
-                MODEL_REQUEST_INVALID,
-                ErrorCategory::Validation,
-                false,
-                "e2b_sandbox registers the T4 toolset and does not invoke a model",
-                finstack_ai_kernel::Metadata::empty(),
-            )
-            .unwrap_or_else(Into::into))
-        })
-    }
 }
 
 #[cfg(all(test, feature = "native-tokio"))]
@@ -1617,6 +1451,32 @@ mod tests {
         assert!(!error.to_string().contains(canary));
     }
 
+    #[test]
+    fn gateway_endpoint_policy_accepts_only_loopback_http() {
+        for endpoint in [
+            "http://localhost:8080/v1",
+            "http://127.0.0.1:8080/v1",
+            "http://[::1]:8080/v1",
+            "https://api.example.test/v1",
+            "HTTPS://api.example.test/v1",
+        ] {
+            require_https_or_loopback(endpoint).expect(endpoint);
+        }
+    }
+
+    #[test]
+    fn gateway_endpoint_policy_rejects_unsafe_or_malformed_urls() {
+        for endpoint in [
+            "http://8.8.8.8/v1",
+            "http://user:pass@localhost/v1",
+            "http:///missing-host",
+            "ftp://localhost/v1",
+            "http://[::2]/v1",
+        ] {
+            assert!(require_https_or_loopback(endpoint).is_err(), "{endpoint}");
+        }
+    }
+
     #[tokio::test]
     async fn gateway_gemini_generate_content_constructs_without_a_network_request() {
         let mut spec = gateway_spec();
@@ -1646,40 +1506,5 @@ mod tests {
         let error = Agent::gateway(spec).await.err().expect("openai_chat");
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("openai_chat"));
-    }
-
-    fn e2b_spec() -> E2bSandboxAgentSpec {
-        E2bSandboxAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "e2b-secret-canary-045".into(),
-            endpoint: Some("https://api.e2b.dev".into()),
-            template: None,
-            common: common(),
-        }
-    }
-
-    #[tokio::test]
-    async fn e2b_sandbox_constructs_without_a_network_request() {
-        let built = Agent::e2b_sandbox(e2b_spec()).await.expect("e2b construct");
-        assert!(built.agent.capability_catalog().is_empty());
-    }
-
-    #[tokio::test]
-    async fn e2b_sandbox_rejects_a_missing_api_key() {
-        let mut spec = e2b_spec();
-        spec.api_key.clear();
-        let error = Agent::e2b_sandbox(spec).await.err().expect("missing key");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-        assert!(error.to_string().contains("API key"));
-    }
-
-    #[tokio::test]
-    async fn e2b_sandbox_rejects_plaintext_non_loopback() {
-        let mut spec = e2b_spec();
-        spec.endpoint = Some("http://8.8.8.8".into());
-        let error = Agent::e2b_sandbox(spec).await.err().expect("plaintext");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-        assert!(error.to_string().contains("plaintext HTTP"));
-        assert!(!error.to_string().contains("e2b-secret-canary-045"));
     }
 }

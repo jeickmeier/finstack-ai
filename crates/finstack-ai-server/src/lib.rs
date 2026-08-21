@@ -1,4 +1,4 @@
-//! Reference Unix-socket / loopback session server (PR-058).
+//! Reference Unix-socket / loopback session server (session-server framing contract).
 //!
 //! Default SDK and runtime stay free of this crate and of `rustls`.
 

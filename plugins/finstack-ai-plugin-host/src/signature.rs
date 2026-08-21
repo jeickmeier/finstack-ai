@@ -1,4 +1,4 @@
-//! Host-side ed25519 verification over the PR-050 manifest digest payload.
+//! Host-side ed25519 verification over the plugin-manifest contract manifest digest payload.
 
 use std::collections::BTreeMap;
 

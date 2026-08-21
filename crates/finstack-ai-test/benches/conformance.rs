@@ -1,4 +1,4 @@
-//! Criterion microbenchmarks for conformance and PR-009 reducer hot paths.
+//! Criterion microbenchmarks for conformance and model-only reducer baseline reducer hot paths.
 //!
 //! The reducer group executes a deterministic scripted model trace with no
 //! provider, network, storage, or runtime latency.
@@ -107,7 +107,7 @@ fn scripted_model_reducer(c: &mut Criterion) {
     let trace = load_golden_trace(compatibility_fixture(
         "golden-trace/v1/trace/valid--pr009-model-completed.json",
     ))
-    .expect("load PR-009 reducer trace");
+    .expect("load model-only reducer baseline reducer trace");
     let runner = ConformanceRunner::new();
     let adapter = ReducerRustAdapter;
     group.bench_function("execute_model_only_completion", |bencher| {

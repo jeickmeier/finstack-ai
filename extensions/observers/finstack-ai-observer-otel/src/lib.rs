@@ -21,14 +21,13 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, RunEventKind, Version};
 use finstack_ai_runtime::{
-    OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
-    ObserverDiagnostic, ObserverError, ObserverEventView, ObserverPayloadMode, ObserverQueue,
-    ObserverQueuePush, PortFuture,
+    Observer, ObserverDescriptor, ObserverDiagnostic, ObserverError, ObserverEventView,
+    ObserverPayloadMode, PortFuture,
 };
 use opentelemetry::KeyValue;
 use opentelemetry::trace::{Span, Tracer, TracerProvider};
@@ -55,13 +54,19 @@ pub struct CapturedSpan {
     pub attributes: Vec<(String, String)>,
 }
 
-/// OpenTelemetry observer with a bounded export queue and in-memory capture.
+/// Diagnostic stored when the in-memory capture evicts its oldest span.
+pub const OTEL_CAPTURE_SATURATED: ObserverDiagnostic = ObserverDiagnostic {
+    code: "otel_capture_saturated",
+    detail: "OpenTelemetry in-memory capture evicted its oldest span",
+};
+
+/// OpenTelemetry observer with bounded in-memory capture.
 pub struct OtelObserver {
     descriptor: ObserverDescriptor,
     provider: SdkTracerProvider,
-    queue: ObserverQueue<CapturedSpan>,
     captured: Mutex<Vec<CapturedSpan>>,
     capture_capacity: usize,
+    dropped: AtomicU64,
     diagnostic: Mutex<Option<ObserverDiagnostic>>,
 }
 
@@ -70,24 +75,25 @@ impl OtelObserver {
     ///
     /// # Errors
     ///
-    /// Rejects an invalid identity or queue bound.
-    pub fn try_redacted(
-        queue_capacity: usize,
-        backpressure: ObserverBackpressure,
-    ) -> Result<Self, OtelObserverError> {
-        Self::try_new(ObserverPayloadMode::Redacted, queue_capacity, backpressure)
+    /// Rejects an invalid identity or capture bound.
+    pub fn try_redacted(capture_capacity: usize) -> Result<Self, OtelObserverError> {
+        Self::try_new(ObserverPayloadMode::Redacted, capture_capacity)
     }
 
     /// Construct an observer with an explicit payload mode.
     ///
     /// # Errors
     ///
-    /// Rejects an invalid identity or queue bound.
+    /// Rejects an invalid identity or capture bound.
     pub fn try_new(
         payload_mode: ObserverPayloadMode,
-        queue_capacity: usize,
-        backpressure: ObserverBackpressure,
+        capture_capacity: usize,
     ) -> Result<Self, OtelObserverError> {
+        if capture_capacity == 0 || capture_capacity > 1_000_000 {
+            return Err(OtelObserverError::Configuration {
+                reason: "invalid_capture_capacity",
+            });
+        }
         let provider = SdkTracerProvider::builder().build();
         Ok(Self {
             descriptor: ObserverDescriptor {
@@ -107,13 +113,9 @@ impl OtelObserver {
                 metadata: Metadata::empty(),
             },
             provider,
-            queue: ObserverQueue::try_new(queue_capacity, backpressure).map_err(|_| {
-                OtelObserverError::Configuration {
-                    reason: "invalid_queue_capacity",
-                }
-            })?,
             captured: Mutex::new(Vec::new()),
-            capture_capacity: queue_capacity,
+            capture_capacity,
+            dropped: AtomicU64::new(0),
             diagnostic: Mutex::new(None),
         })
     }
@@ -130,10 +132,10 @@ impl OtelObserver {
             .map_err(|_| ObserverError::Unavailable)
     }
 
-    /// Cumulative dropped export spans.
+    /// Cumulative spans evicted from the bounded in-memory capture.
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.queue.dropped()
+        self.dropped.load(Ordering::Relaxed)
     }
 
     /// Last overflow diagnostic.
@@ -147,9 +149,11 @@ impl OtelObserver {
         let _ = self.provider.force_flush();
     }
 
-    fn record_overflow(&self) {
+    fn record_capture_saturation(&self, count: usize) {
+        self.dropped
+            .fetch_add(u64::try_from(count).unwrap_or(u64::MAX), Ordering::Relaxed);
         if let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
+            *slot = Some(OTEL_CAPTURE_SATURATED);
         }
     }
 
@@ -191,21 +195,10 @@ impl Observer for OtelObserver {
     }
 
     fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
-        for event in batch.iter() {
-            let span = self.map_span(event);
-            match self.queue.push(span) {
-                Ok(ObserverQueuePush::Accepted) => {}
-                Ok(ObserverQueuePush::Dropped) => self.record_overflow(),
-                Err(error) => {
-                    self.record_overflow();
-                    return Box::pin(async move { Err(error) });
-                }
-            }
-        }
-        let accepted = match self.queue.drain() {
-            Ok(spans) => spans,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
+        let accepted = batch
+            .iter()
+            .map(|event| self.map_span(event))
+            .collect::<Vec<_>>();
         let tracer = self.provider.tracer("finstack-ai-observer-otel");
         for span in &accepted {
             let attributes = span
@@ -224,7 +217,7 @@ impl Observer for OtelObserver {
             if captured.len() > self.capture_capacity {
                 let overflow = captured.len().saturating_sub(self.capture_capacity);
                 captured.drain(..overflow);
-                self.record_overflow();
+                self.record_capture_saturation(overflow);
             }
         }
         self.force_flush();
@@ -246,12 +239,6 @@ fn span_name(kind: RunEventKind) -> &'static str {
 
 fn serde_json_string(value: &impl serde::Serialize) -> String {
     serde_json::to_string(value).unwrap_or_default()
-}
-
-/// Default bounded-block timeout used by examples.
-#[must_use]
-pub const fn default_block_timeout() -> Duration {
-    Duration::from_millis(20)
 }
 
 #[cfg(test)]

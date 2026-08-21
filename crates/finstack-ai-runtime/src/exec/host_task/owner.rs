@@ -6,19 +6,23 @@ use crate::context::CONTEXT_RECOVERY_UNCERTAIN;
 use crate::coordinator::{CommitCoordinator, PostCommitDispatcher};
 use crate::event_hub::event_hub;
 use crate::host_driver;
+use crate::observer::{
+    OBSERVER_DELIVERY_FAILED, OBSERVER_SHUTDOWN_TIMEOUT, OBSERVER_SUBSCRIPTION_FAILED,
+};
 use crate::run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
     ToolTaskConfig,
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
-    model_handle_error, model_resume_retry_seed, prepare_tool_batch_if_ready,
-    resume_pending_context_effects, resume_pending_model_effect, resume_pending_tool_effects,
-    tool_resume_retry_seeds, validate_model_binding,
+    model_resume_retry_seed, prepare_tool_batch_if_ready, resume_pending_context_effects,
+    resume_pending_model_effect, resume_pending_tool_effects, tool_resume_retry_seeds,
+    validate_model_binding,
 };
 use crate::{
-    CancellationSignal, Clock, InvocationResumeAction, LockedModelContextProfile, Model,
-    ModelWarmupContext, RandomSource, ResolvedToolCatalog, ToolResumeAction, ToolStreamAssembler,
+    CancellationSignal, Clock, EventSubscriptionConfig, EventSubscriptionError,
+    InvocationResumeAction, LockedModelContextProfile, Observer, ObserverDiagnostic, RandomSource,
+    ReadyModel, ResolvedToolCatalog, ToolResumeAction, ToolStreamAssembler,
 };
 
 use super::dispatcher::HostDispatcher;
@@ -27,9 +31,11 @@ use super::handle::RunHandle;
 use super::shared::Shared;
 use super::worker::{run_worker, run_worker_with_effects};
 
-/// Single owner of the sequential host-driven run worker.
+/// Single owner of the host-driven run worker and its bounded child tasks.
 pub struct RunTaskOwner {
     handle: RunHandle,
+    worker: host_driver::HostTaskHandle,
+    observer_tasks: Vec<host_driver::HostTaskHandle>,
     run_cancellation: CancellationSignal,
     shutdown_deadline: Duration,
     joined: bool,
@@ -59,7 +65,7 @@ impl RunTaskOwner {
             .map_err(|_| RunHandleError::IntakeClosed)?
             .clone()
             .ok_or(RunHandleError::InvalidConfiguration)?;
-        host_driver::spawn(Box::pin(run_worker(
+        let worker = host_driver::spawn(Box::pin(run_worker(
             coordinator,
             intake,
             Arc::clone(&shared),
@@ -67,22 +73,24 @@ impl RunTaskOwner {
         .map_err(|_| RunHandleError::InvalidConfiguration)?;
         Ok(Self {
             handle,
+            worker,
+            observer_tasks: Vec::new(),
             run_cancellation: CancellationSignal::new(),
             shutdown_deadline: config.shutdown_deadline,
             joined: false,
         })
     }
 
-    /// Warm one retained model and start the sequential commit/model owner.
+    /// Start the sequential commit/model owner with a prepared model.
     ///
     /// # Errors
     ///
-    /// Returns configuration or warmup errors before publishing a run handle.
+    /// Returns configuration errors before publishing a run handle.
     pub async fn spawn_with_model<C, R>(
         coordinator: CommitCoordinator,
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
-        model: Arc<dyn Model>,
+        ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         clock: C,
         random: R,
@@ -96,7 +104,7 @@ impl RunTaskOwner {
             run_config,
             model_config,
             None,
-            model,
+            ready_model,
             profile,
             None,
             clock,
@@ -105,15 +113,14 @@ impl RunTaskOwner {
         .await
     }
 
-    /// Warm one retained model and start the sequential model/tool owner.
+    /// Start the model/tool owner with a prepared model.
     ///
-    /// Sequential tool execution is enough for the wasm-host preview. Native
-    /// parallel tool scheduling is not ported.
+    /// Consecutive calls admitted by the kernel as parallel execute in bounded
+    /// host-driver child tasks. Sequential and barrier calls remain exclusive.
     ///
     /// # Errors
     ///
-    /// Returns configuration, model warmup, or binding errors before publishing
-    /// a run handle.
+    /// Returns configuration or binding errors before publishing a run handle.
     #[expect(
         clippy::too_many_arguments,
         reason = "the public constructor receives the two explicit port configurations and injected identity sources"
@@ -123,7 +130,7 @@ impl RunTaskOwner {
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
         tool_config: ToolTaskConfig,
-        model: Arc<dyn Model>,
+        ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Arc<ResolvedToolCatalog>,
         clock: C,
@@ -138,7 +145,7 @@ impl RunTaskOwner {
             run_config,
             model_config,
             Some(tool_config),
-            model,
+            ready_model,
             profile,
             Some(catalog),
             clock,
@@ -157,7 +164,7 @@ impl RunTaskOwner {
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
         tool_config: Option<ToolTaskConfig>,
-        model: Arc<dyn Model>,
+        ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Option<Arc<ResolvedToolCatalog>>,
         clock: C,
@@ -172,14 +179,20 @@ impl RunTaskOwner {
             event_hub(run_config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
         coordinator.install_event_publisher(Arc::new(event_handle.clone()));
         let model_assembler = model_config.validate()?;
-        let tool_assembler = tool_config
+        let retry_policy = model_config.same_identity_retry;
+        let tool_runtime = tool_config
             .map(|config| {
                 config
                     .validate()
                     .map_err(|_| RunHandleError::InvalidConfiguration)?;
-                Ok(ToolStreamAssembler::new(config.stream_limits))
+                Ok((config, ToolStreamAssembler::new(config.stream_limits)))
             })
             .transpose()?;
+        let (tool_config, tool_assembler) = tool_runtime
+            .map_or((None, None), |(config, assembler)| {
+                (Some(config), Some(assembler))
+            });
+        let model = ready_model.shared_model();
         validate_model_binding(model.as_ref(), &profile)?;
         let mut sources = SettlementSources::try_new(clock, random)?;
         sources.set_approval_grant(run_config.approval_grant);
@@ -193,25 +206,31 @@ impl RunTaskOwner {
                 cancellation: parent.child(),
             });
         }
-        model
-            .warmup(ModelWarmupContext {
-                cancellation: parent.child(),
-                deadline: model_config.warmup_deadline,
-                metadata: model_config.warmup_metadata.clone(),
-            })
-            .await
-            .map_err(|error| model_handle_error(&error))?;
-
+        // The wasm host is deliberately single-threaded, but the same owned
+        // scheduler graph uses `Arc` on native targets where it is `Send`.
+        #[cfg_attr(
+            target_arch = "wasm32",
+            expect(
+                clippy::arc_with_non_send_sync,
+                reason = "the target-neutral owned scheduler graph is single-threaded on wasm32"
+            )
+        )]
         let pending = Arc::new(Mutex::new(VecDeque::new()));
         let active = Arc::new(Mutex::new(BTreeMap::new()));
         // Cloned before the move: the worker needs the locked profile to
         // assemble `StageInput::BeforeModel`, and the dispatcher takes ownership.
         let stage_profile = profile.clone();
+        #[cfg_attr(
+            target_arch = "wasm32",
+            expect(
+                clippy::arc_with_non_send_sync,
+                reason = "the target-neutral owned scheduler graph is single-threaded on wasm32"
+            )
+        )]
         let dispatcher = Arc::new(HostDispatcher {
             model: Arc::clone(&model),
             profile,
             catalog: catalog.clone(),
-            context_providers: coordinator.context_providers().map(Arc::clone),
             pending: Arc::clone(&pending),
             active: Arc::clone(&active),
             parent: parent.clone(),
@@ -301,23 +320,27 @@ impl RunTaskOwner {
             .map_err(|_| RunHandleError::IntakeClosed)?
             .clone()
             .ok_or(RunHandleError::InvalidConfiguration)?;
-        host_driver::spawn(Box::pin(run_worker_with_effects(
+        let worker = host_driver::spawn(Box::pin(run_worker_with_effects(
             coordinator,
             intake,
             Arc::clone(&shared),
             model,
             model_assembler,
             tool_assembler,
+            tool_config,
             catalog,
             pending,
             active,
             sources,
             stage_driver,
             stage_profile,
+            retry_policy,
         )))
         .map_err(|_| RunHandleError::InvalidConfiguration)?;
         Ok(Self {
             handle,
+            worker,
+            observer_tasks: Vec::new(),
             run_cancellation,
             shutdown_deadline: run_config.shutdown_deadline,
             joined: false,
@@ -328,6 +351,51 @@ impl RunTaskOwner {
     #[must_use]
     pub fn handle(&self) -> RunHandle {
         self.handle.clone()
+    }
+
+    /// Attach one observer pump to this owner's shutdown and abort lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns a subscription error when the event hub is closed, full, or
+    /// the supplied delivery configuration is invalid.
+    pub async fn attach_observer(
+        &mut self,
+        observer: Arc<dyn Observer>,
+        config: EventSubscriptionConfig,
+    ) -> Result<(), EventSubscriptionError> {
+        let mut subscription = match self.handle.subscribe_observer(config).await {
+            Ok(subscription) => subscription,
+            Err(error) => {
+                self.handle.record_observer_diagnostic(ObserverDiagnostic {
+                    code: OBSERVER_SUBSCRIPTION_FAILED,
+                    detail: "observer subscription failed",
+                });
+                return Err(error);
+            }
+        };
+        let handle = self.handle.clone();
+        let task = host_driver::spawn(Box::pin(async move {
+            while let Some(batch) = subscription.next_batch().await {
+                if observer.observe(Arc::from(batch.events())).await.is_err() {
+                    handle.record_observer_diagnostic(ObserverDiagnostic {
+                        code: OBSERVER_DELIVERY_FAILED,
+                        detail: "observer delivery failed",
+                    });
+                    break;
+                }
+            }
+            subscription.close();
+        }))
+        .map_err(|_| {
+            self.handle.record_observer_diagnostic(ObserverDiagnostic {
+                code: OBSERVER_SUBSCRIPTION_FAILED,
+                detail: "observer task failed to start",
+            });
+            EventSubscriptionError::HubClosed
+        })?;
+        self.observer_tasks.push(task);
+        Ok(())
     }
 
     /// Close intake and wait for the local worker to stop.
@@ -345,17 +413,50 @@ impl RunTaskOwner {
         let stopped = host_driver::timeout(deadline, wait_until_stopped(&self.handle))
             .await
             .is_ok();
-        if !stopped && !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
-            self.handle.set_status(RunStatus::Stopped);
+        let mut aborted_tasks = 0_usize;
+        if !stopped {
+            if !self.worker.is_completed() {
+                self.worker.abort();
+                aborted_tasks = 1;
+            }
+            host_driver::yield_now().await;
+            self.worker.completed().await;
+            if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
+                self.handle.set_status(RunStatus::Stopped);
+            }
         }
+        let observers_stopped = host_driver::timeout(deadline, async {
+            for task in &self.observer_tasks {
+                task.completed().await;
+            }
+        })
+        .await
+        .is_ok();
+        if !observers_stopped {
+            self.handle.record_observer_diagnostic(ObserverDiagnostic {
+                code: OBSERVER_SHUTDOWN_TIMEOUT,
+                detail: "observer shutdown timed out",
+            });
+            for task in &self.observer_tasks {
+                if !task.is_completed() {
+                    task.abort();
+                    aborted_tasks = aborted_tasks.saturating_add(1);
+                }
+            }
+            host_driver::yield_now().await;
+            for task in &self.observer_tasks {
+                task.completed().await;
+            }
+        }
+        let graceful = stopped && observers_stopped;
         let report = ShutdownReport {
-            outcome: if stopped {
+            outcome: if graceful {
                 ShutdownOutcome::Graceful
             } else {
                 ShutdownOutcome::Forced
             },
             signalled_effects: 0,
-            aborted_tasks: usize::from(!stopped),
+            aborted_tasks,
         };
         if let Ok(mut value) = self.handle.shared.shutdown_report.lock() {
             *value = Some(report);
@@ -370,6 +471,10 @@ impl Drop for RunTaskOwner {
         if !self.joined {
             self.handle.shutdown();
             self.run_cancellation.cancel();
+            self.worker.abort();
+            for task in &self.observer_tasks {
+                task.abort();
+            }
             if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
                 self.handle.set_status(RunStatus::Stopped);
             }
@@ -377,7 +482,7 @@ impl Drop for RunTaskOwner {
                 *value = Some(ShutdownReport {
                     outcome: ShutdownOutcome::OwnerDropped,
                     signalled_effects: 0,
-                    aborted_tasks: 1,
+                    aborted_tasks: 0,
                 });
             }
         }

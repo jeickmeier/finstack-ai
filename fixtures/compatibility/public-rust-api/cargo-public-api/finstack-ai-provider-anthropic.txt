@@ -9,10 +9,10 @@ pub struct finstack_ai_provider_anthropic::AnthropicConfig
 impl finstack_ai_provider_anthropic::AnthropicConfig
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_anthropic_version(self, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
-pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_authentication(self, finstack_ai_runtime::ports::model::provider_util::credentials::Authentication) -> Self
-pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_credential_store(self, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialStore, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialReference) -> Self
+pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_authentication(self, finstack_ai_runtime::ports::model::support::credentials::Authentication) -> Self
+pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_credential_store(self, finstack_ai_runtime::ports::model::support::credentials::CredentialStore, finstack_ai_runtime::ports::model::support::credentials::CredentialReference) -> Self
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_headers(self, alloc::vec::Vec<finstack_ai_provider_anthropic::SecretHeader>) -> Self
-pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::provider_util::media::MediaResolver>) -> Self
+pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::support::media::MediaResolver>) -> Self
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_messages_path(self, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_request_timeout(self, core::time::Duration) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_stream_limits(self, usize, usize) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
@@ -63,7 +63,7 @@ pub fn finstack_ai_provider_anthropic::AnthropicProvider::reconcile(&self, finst
 pub fn finstack_ai_provider_anthropic::AnthropicProvider::request(&self, finstack_ai_runtime::ports::model::context::ModelRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::stream::ModelEventStream, finstack_ai_runtime::ports::model::error::ModelError>>
 pub struct finstack_ai_provider_anthropic::SecretHeader
 impl finstack_ai_provider_anthropic::SecretHeader
-pub fn finstack_ai_provider_anthropic::SecretHeader::try_new(impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_anthropic::SecretHeader::try_new(impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::support::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 impl core::clone::Clone for finstack_ai_provider_anthropic::SecretHeader
 pub fn finstack_ai_provider_anthropic::SecretHeader::clone(&self) -> finstack_ai_provider_anthropic::SecretHeader
 impl core::cmp::Eq for finstack_ai_provider_anthropic::SecretHeader

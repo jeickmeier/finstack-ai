@@ -1,4 +1,4 @@
-//! Real PR-009 reducer-backed golden-trace acceptance tests.
+//! Real model-only reducer baseline reducer-backed golden-trace acceptance tests.
 
 use finstack_ai_kernel::{ContentBlock, Kernel, KernelState};
 use finstack_ai_test::{
@@ -24,7 +24,8 @@ const ALL_PR009_TRACES: [&str; 5] = [
 ];
 
 fn load_trace(relative: &str) -> GoldenTrace {
-    load_golden_trace(compatibility_fixture(relative)).expect("load PR-009 trace")
+    load_golden_trace(compatibility_fixture(relative))
+        .expect("load model-only reducer baseline trace")
 }
 
 fn execute_trace(trace: &GoldenTrace) -> ExpectedTrace {

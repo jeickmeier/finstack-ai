@@ -64,7 +64,7 @@ impl CommittedContextCall {
             || requested.deadline() != context.run.deadline
             || requested.retry_safety() == RetrySafety::Unknown
             || requested.output_contract().kind != EffectOutputKind::ContextContribution
-            || !matches!(requested.input(), EffectInput::Context { request } if request == &raw)
+            || !matches!(requested.input(), EffectInput::Context { request, .. } if request == &raw)
         {
             return Err(ContextError::commit_required());
         }

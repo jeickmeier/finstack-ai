@@ -116,6 +116,6 @@ Not necessarily the five highest-impact findings — the five that most reduce *
 
 One sentence. Example:
 
-> Proceed to Phase 2 (Plan) to break these findings into PR-sized slices, or narrow the scope further if the user wants to focus on a specific cluster.
+> Proceed to Phase 2 (Plan) to break these findings into coherent implementation slices, or narrow the scope further if the user wants to focus on a specific cluster.
 
 **Awaiting user input:** confirm scope, pick priorities, or request re-audit with different focus.

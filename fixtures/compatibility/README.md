@@ -1,7 +1,7 @@
 # Compatibility fixtures
 
-Fixture roots for versioned public contracts. PR-004 defines naming and
-ownership only; payload corpora arrive with owning implementation PRs.
+Fixture roots for versioned public contracts. Each payload corpus is owned by
+the implementation and test suite that consume it.
 
 ## Naming
 
@@ -34,4 +34,5 @@ fixtures/compatibility/<family>/migrations/v<from>-to-v<to>--<slug>.{before,afte
 | Plugin lockfile | [`plugin-lock/`](plugin-lock/) |
 
 Reserved README-only directories are not passing conformance evidence.
-Active PR-005 corpora under `golden-trace/` and `benchmark-report/` are.
+Active corpora under `golden-trace/` and `benchmark-report/` are executable
+conformance evidence.

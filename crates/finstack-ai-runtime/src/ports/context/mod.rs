@@ -14,7 +14,7 @@ mod tests;
 pub use assembly::{AssembledContext, ContextTruncationDiagnostic, assemble_context};
 #[cfg(all(test, feature = "native-tokio"))]
 pub(crate) use committed::context_resume_action;
-#[cfg(test)]
+#[cfg(all(test, any(feature = "native-tokio", feature = "wasm-host")))]
 pub(crate) use committed::map_context_reconcile_result;
 pub use committed::{CommittedContextCall, InvocationResumeAction, RecordedContextContribution};
 #[cfg(any(

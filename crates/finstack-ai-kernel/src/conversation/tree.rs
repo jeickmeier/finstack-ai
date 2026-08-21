@@ -203,6 +203,15 @@ pub enum ConversationError {
     /// `LaneMoved` pointed at an unknown entry.
     #[error("lane leaf does not exist")]
     UnknownLeaf,
+    /// A lane identity was reused.
+    #[error("lane identity already exists")]
+    DuplicateLaneId,
+    /// A stable lane name was reused by another identity.
+    #[error("lane name already exists")]
+    DuplicateLaneName,
+    /// A structural draft referenced a lane that does not exist.
+    #[error("lane does not exist")]
+    UnknownLane,
 }
 
 impl ConversationError {
@@ -218,6 +227,9 @@ impl ConversationError {
             Self::InvalidToolPair => "conversation_invalid_tool_pair",
             Self::EnvelopeMismatch => "conversation_envelope_mismatch",
             Self::UnknownLeaf => "conversation_unknown_leaf",
+            Self::DuplicateLaneId => "conversation_duplicate_lane_id",
+            Self::DuplicateLaneName => "conversation_duplicate_lane_name",
+            Self::UnknownLane => "conversation_unknown_lane",
         }
     }
 }
@@ -548,6 +560,77 @@ impl SessionProjection {
         Ok(())
     }
 
+    /// Preview a structural draft batch against a cloned projection.
+    ///
+    /// Drafts are applied in order so later entries may reference lanes or
+    /// parents introduced earlier in the same batch. The current projection is
+    /// never mutated.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConversationError`] for duplicate lane identities or names,
+    /// unknown lanes, missing fork parents, invalid moves, or envelope/body
+    /// identity mismatches.
+    pub fn preview_structural_drafts<'a>(
+        &self,
+        drafts: impl IntoIterator<Item = &'a crate::RecordDraft>,
+    ) -> Result<Self, ConversationError> {
+        let mut preview = self.clone();
+        for draft in drafts {
+            preview.apply_structural_draft(draft)?;
+        }
+        Ok(preview)
+    }
+
+    /// Apply one pre-commit structural draft to this projection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConversationError`] when the draft conflicts with committed or
+    /// earlier previewed structure.
+    pub fn apply_structural_draft(
+        &mut self,
+        draft: &crate::RecordDraft,
+    ) -> Result<(), ConversationError> {
+        if let Some(session_id) = self.session_id
+            && draft.session_id() != session_id
+        {
+            return Err(ConversationError::EnvelopeMismatch);
+        }
+        if self.session_id.is_none() {
+            self.session_id = Some(draft.session_id());
+        }
+        match draft.body() {
+            RecordBody::SessionCreated(created) => {
+                self.metadata = created.metadata().clone();
+            }
+            RecordBody::LaneCreated(created) => {
+                self.apply_lane_created(draft.lane_id(), created)?;
+            }
+            RecordBody::ConversationEntry(entry) => {
+                if entry.lane_id() != draft.lane_id() {
+                    return Err(ConversationError::EnvelopeMismatch);
+                }
+                if !self.lanes.contains_key(&draft.lane_id()) {
+                    return Err(ConversationError::UnknownLane);
+                }
+                apply_conversation_entry(&mut self.entries, entry.clone())?;
+                self.lanes
+                    .get_mut(&draft.lane_id())
+                    .ok_or(ConversationError::UnknownLane)?
+                    .leaf_id = Some(entry.id());
+            }
+            RecordBody::LaneMoved(moved) => {
+                self.apply_lane_moved(draft.lane_id(), moved)?;
+            }
+            RecordBody::SnapshotWritten(_) => {}
+            _ => {
+                return Err(ConversationError::EnvelopeMismatch);
+            }
+        }
+        Ok(())
+    }
+
     /// Apply one committed envelope. Operation records that are not conversation
     /// facts are ignored except `RunAccepted`, terminals, and `ChildRunPrepared`.
     ///
@@ -567,7 +650,9 @@ impl SessionProjection {
             RecordBody::SessionCreated(created) => {
                 self.metadata = created.metadata().clone();
             }
-            RecordBody::LaneCreated(created) => self.apply_lane_created(record.lane_id(), created),
+            RecordBody::LaneCreated(created) => {
+                self.apply_lane_created(record.lane_id(), created)?;
+            }
             RecordBody::ConversationEntry(entry) => self.apply_recorded_entry(record, entry)?,
             RecordBody::LaneMoved(moved) => self.apply_lane_moved(record.lane_id(), moved)?,
             RecordBody::EntryAppended(entry) => {
@@ -605,11 +690,29 @@ impl SessionProjection {
         Ok(())
     }
 
-    pub(crate) fn apply_lane_created(&mut self, lane_id: LaneId, created: &LaneCreated) {
-        self.lanes.entry(lane_id).or_insert(LaneProjection {
-            name: std::sync::Arc::from(created.name()),
-            leaf_id: None,
-        });
+    pub(crate) fn apply_lane_created(
+        &mut self,
+        lane_id: LaneId,
+        created: &LaneCreated,
+    ) -> Result<(), ConversationError> {
+        if self.lanes.contains_key(&lane_id) {
+            return Err(ConversationError::DuplicateLaneId);
+        }
+        if self
+            .lanes
+            .values()
+            .any(|lane| lane.name.as_ref() == created.name())
+        {
+            return Err(ConversationError::DuplicateLaneName);
+        }
+        self.lanes.insert(
+            lane_id,
+            LaneProjection {
+                name: std::sync::Arc::from(created.name()),
+                leaf_id: None,
+            },
+        );
+        Ok(())
     }
 
     fn apply_recorded_entry(
@@ -632,12 +735,16 @@ impl SessionProjection {
         lane_id: LaneId,
         moved: &LaneMoved,
     ) -> Result<(), ConversationError> {
+        if !self.lanes.contains_key(&lane_id) {
+            return Err(ConversationError::UnknownLane);
+        }
         if !self.entries.contains_key(&moved.leaf_id()) {
             return Err(ConversationError::UnknownLeaf);
         }
-        if let Some(lane) = self.lanes.get_mut(&lane_id) {
-            lane.leaf_id = Some(moved.leaf_id());
-        }
+        self.lanes
+            .get_mut(&lane_id)
+            .ok_or(ConversationError::UnknownLane)?
+            .leaf_id = Some(moved.leaf_id());
         Ok(())
     }
 

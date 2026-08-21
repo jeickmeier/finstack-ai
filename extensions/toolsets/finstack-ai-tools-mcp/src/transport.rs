@@ -443,7 +443,7 @@ fn stdio_io(error: &std::io::Error) -> McpError {
     McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio i/o failed: {error}"))
 }
 
-fn drain_std_stderr(stderr: std::process::ChildStderr) {
+fn drain_std_stderr(stderr: std::fs::File) {
     std::thread::spawn(move || {
         use std::io::BufRead;
         let mut reader = std::io::BufReader::new(stderr);
@@ -454,50 +454,12 @@ fn drain_std_stderr(stderr: std::process::ChildStderr) {
     });
 }
 
-fn tokio_file_from_stdin(stdin: std::process::ChildStdin) -> tokio::fs::File {
-    tokio::fs::File::from_std(std_file_from_stdin(stdin))
+fn tokio_file_from_stdin(stdin: std::fs::File) -> tokio::fs::File {
+    tokio::fs::File::from_std(stdin)
 }
 
-fn tokio_file_from_stdout(stdout: std::process::ChildStdout) -> tokio::fs::File {
-    tokio::fs::File::from_std(std_file_from_stdout(stdout))
-}
-
-#[allow(
-    unsafe_code,
-    reason = "stdio confinement wraps owned child pipes as tokio files"
-)]
-fn std_file_from_stdin(stdin: std::process::ChildStdin) -> std::fs::File {
-    #[cfg(unix)]
-    {
-        use std::os::fd::{FromRawFd, IntoRawFd};
-        // SAFETY: `ChildStdin` owns the fd; `into_raw_fd` transfers it.
-        unsafe { std::fs::File::from_raw_fd(stdin.into_raw_fd()) }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::{FromRawHandle, IntoRawHandle};
-        // SAFETY: `ChildStdin` owns the handle; `into_raw_handle` transfers it.
-        unsafe { std::fs::File::from_raw_handle(stdin.into_raw_handle()) }
-    }
-}
-
-#[allow(
-    unsafe_code,
-    reason = "stdio confinement wraps owned child pipes as tokio files"
-)]
-fn std_file_from_stdout(stdout: std::process::ChildStdout) -> std::fs::File {
-    #[cfg(unix)]
-    {
-        use std::os::fd::{FromRawFd, IntoRawFd};
-        // SAFETY: `ChildStdout` owns the fd; `into_raw_fd` transfers it.
-        unsafe { std::fs::File::from_raw_fd(stdout.into_raw_fd()) }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::{FromRawHandle, IntoRawHandle};
-        // SAFETY: `ChildStdout` owns the handle; `into_raw_handle` transfers it.
-        unsafe { std::fs::File::from_raw_handle(stdout.into_raw_handle()) }
-    }
+fn tokio_file_from_stdout(stdout: std::fs::File) -> tokio::fs::File {
+    tokio::fs::File::from_std(stdout)
 }
 
 impl McpTransport for StdioTransport {

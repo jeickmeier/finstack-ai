@@ -3,14 +3,14 @@
 Experimental same-origin browser persistence demo for `@finstack/ai`.
 
 IndexedDB is a trusted host JournalStore adapter. It is not JournalStore v1
-and not crash-durable. Persistence remains experimental after PR-048;
+and not crash-durable. Persistence remains experimental;
 it does not meet NFR-REL-001. `health().detail` is
 `js_indexeddb_experimental`. Reload restore is **inspect**, not
 continue-the-run.
 
-Trust class: JS host adapters are [T2](../../docs/site/security-trust-levels.md).
+Trust class: JS host adapters are T2.
 They are not isolated. Stored prompts and results are
-[T5](../../docs/site/security-trust-levels.md).
+T5.
 
 Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`; not on npm).
 

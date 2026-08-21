@@ -5,9 +5,9 @@ mod error;
 mod identity;
 mod port;
 mod profile;
-mod provider_util;
 mod request;
 mod stream;
+mod support;
 
 #[cfg(test)]
 mod tests;
@@ -54,23 +54,15 @@ pub use context::{
 };
 pub use error::ModelError;
 pub use identity::{ModelDescriptor, ModelName};
-pub use port::{Model, validate_model_request};
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use port::validate_model_request;
+pub use port::{Model, ReadyModel};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use port::{parse_committed_model_request, stable_model_dispatch_code};
 pub use profile::{
     InputCapabilities, LockedModelContextProfile, ModelCapabilities, ModelContextProfile,
     ModelContextProfileOverride, StructuredOutputCapability, TokenEstimatorRef,
     TokenEstimatorSource, resolve_model_context_profile,
-};
-pub use provider_util::{
-    AnthropicMessagesAssembly, Authentication, CredentialReference, CredentialRejected,
-    CredentialStore, GEMINI_CACHED_TOKENS_KEY, GEMINI_CODE_RESULT_MEDIA_TYPE,
-    GEMINI_CONTINUATION_PROVIDER, GEMINI_EXECUTABLE_CODE_MEDIA_TYPE, GEMINI_GROUNDING_MEDIA_TYPE,
-    GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly, MediaResolveError, MediaResolveKind,
-    MediaResolver, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
-    OpenAiResponsesAssembly, ResolveDraftMediaError, ResolvedMedia, SECRET_MAX_BYTES,
-    SecretRejected, SecretString, SseEvent, SseEventParser, SseParseError, StreamNormError,
-    StreamNormKind, resolve_draft_media, secret_is_valid, thinking_level_budget,
 };
 pub use request::{
     ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft,
@@ -81,4 +73,9 @@ pub use stream::{
     AssembledModelStream, ModelEventStream, ModelProgress, ModelStreamAssembler, ModelStreamItem,
     ModelStreamLimits, ModelTerminal, OpaqueProviderEvent, ReasoningDelta, TextDelta,
     ToolCallDelta, UsageDelta,
+};
+pub use support::{
+    Authentication, CredentialReference, CredentialRejected, CredentialStore, MediaResolveError,
+    MediaResolveKind, MediaResolver, ResolveDraftMediaError, ResolvedMedia, SECRET_MAX_BYTES,
+    SecretRejected, SecretString, resolve_draft_media, secret_is_valid, thinking_level_budget,
 };

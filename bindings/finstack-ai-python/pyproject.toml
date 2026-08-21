@@ -37,7 +37,7 @@ exclude = ["python/**/__pycache__", "python/**/*.pyc"]
 
 # Maturin's generated Cargo SBOM embeds the ephemeral PEP 517 extraction path,
 # which makes otherwise identical wheels differ and leaks builder paths. The
-# release-metadata PR owns deterministic SBOM/provenance staging.
+# Release tooling owns deterministic SBOM/provenance staging.
 [tool.maturin.sbom]
 rust = false
 auditwheel = false

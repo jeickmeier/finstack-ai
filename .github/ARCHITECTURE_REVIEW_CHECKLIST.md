@@ -23,4 +23,4 @@ Source: Architecture Specification §27.
 - [ ] No forbidden kernel dependency (direct or transitive)
 - [ ] Runtime defaults remain empty; facade `native-tokio` / `wasm-host` pass-through only
 - [ ] Browser WASM depends on the facade with defaults disabled and only `wasm-host`
-- [ ] Exceptions, if any, have an ADR id, exceptions-register row, and allowlist entry
+- [ ] Exceptions, if any, have an owned architecture decision, an expiry, and the narrowest practical allowlist entry

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://finstack.ai/schemas/benchmark-report/v1/python-fast-path.schema.json",
   "title": "PythonFastPathBenchmarkReport",
-  "description": "Separated native and Rust-backed Python fast-path measurements (PR-029).",
+  "description": "Separated native and Rust-backed Python fast-path measurements.",
   "type": "object",
   "additionalProperties": false,
   "required": [

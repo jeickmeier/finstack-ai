@@ -7,22 +7,27 @@ use wasm_bindgen::prelude::*;
 
 /// Install spawn, sleep, clock, and random hooks for the host driver.
 pub fn install_host_driver() {
-    finstack_ai::runtime::host_driver::install_spawner(crate::executor::spawn_port_future);
-    finstack_ai::runtime::host_driver::install_sleeper(|duration, done| {
-        let millis =
-            u32::try_from(duration.as_millis().min(u128::from(u32::MAX))).unwrap_or(u32::MAX);
-        let global = js_sys::global();
-        if let Ok(set_timeout) = js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout"))
-            && let Ok(set_timeout) = set_timeout.dyn_into::<js_sys::Function>()
-        {
-            let callback = Closure::once_into_js(move || done());
-            let _ = set_timeout.call2(&global, &callback, &JsValue::from(millis));
-            return;
-        }
-        done();
-    });
-    finstack_ai::runtime::host_driver::install_clock(Arc::new(BrowserClock));
-    finstack_ai::runtime::host_driver::install_random(Arc::new(BrowserRandom));
+    finstack_ai::runtime::host_driver::install_driver(
+        finstack_ai::runtime::host_driver::HostDriverHooks::new(
+            crate::executor::spawn_port_future,
+            |duration, done| {
+                let millis = u32::try_from(duration.as_millis().min(u128::from(u32::MAX)))
+                    .unwrap_or(u32::MAX);
+                let global = js_sys::global();
+                if let Ok(set_timeout) =
+                    js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout"))
+                    && let Ok(set_timeout) = set_timeout.dyn_into::<js_sys::Function>()
+                {
+                    let callback = Closure::once_into_js(move || done());
+                    let _ = set_timeout.call2(&global, &callback, &JsValue::from(millis));
+                    return;
+                }
+                done();
+            },
+            Arc::new(BrowserClock),
+            Arc::new(BrowserRandom),
+        ),
+    );
 }
 
 struct BrowserClock;

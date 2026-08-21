@@ -1,4 +1,4 @@
-//! Shared SSE framing and event-field parsing.
+//! Target-neutral SSE framing and event-field parsing.
 
 /// Incremental SSE frame splitter. Event interpretation stays in the caller.
 #[derive(Debug)]

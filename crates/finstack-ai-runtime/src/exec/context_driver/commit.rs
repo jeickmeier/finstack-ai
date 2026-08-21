@@ -1,7 +1,8 @@
 use finstack_ai_kernel::{
-    Digest, EffectId, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind,
-    EffectRequested, EventTag, OperationLocator, PipelinePosition, RECORD_FORMAT_VERSION,
-    RECORD_KIND_VERSION, RecordBody, RecordEnvelope, RecordTag, RetrySafety,
+    AllocatedIds, AppendBatchTag, Digest, EffectCompleted, EffectFailed, EffectInput, EffectKind,
+    EffectOutputContract, EffectOutputKind, EffectRequested, EventTag, ExtensionEffectSettled,
+    ExtensionSettlement, KernelInput, PipelinePosition, ProviderIds, RECORD_KIND_VERSION,
+    RecordBody, RecordTag, RequestExtensionEffect, RetrySafety, StageCursor, TransitionEnv,
 };
 
 use crate::context::{
@@ -12,9 +13,15 @@ use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
 use crate::{Clock, RandomSource, RunCallContext};
 
-use super::ContextDriver;
-
-const DOMAIN_CONTEXT_INVOCATION: &str = "context-provider-invocation";
+pub(crate) struct ContextInvocation<'a, C, R> {
+    pub(crate) provider: &'a dyn ContextProvider,
+    pub(crate) provider_index: u32,
+    pub(crate) run: RunCallContext,
+    pub(crate) request: ContextRequest,
+    pub(crate) chain_digest: Digest,
+    pub(crate) cursor: StageCursor,
+    pub(crate) sources: &'a SettlementSources<C, R>,
+}
 
 /// Build the committed guard and invoke one locked provider.
 ///
@@ -23,49 +30,142 @@ const DOMAIN_CONTEXT_INVOCATION: &str = "context-provider-invocation";
 /// Returns a stable context or identity error when the envelope cannot be
 /// constructed or the provider fails.
 pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
-    _driver: &ContextDriver,
-    provider: &dyn ContextProvider,
-    provider_index: u32,
-    run: RunCallContext,
-    request: ContextRequest,
-    chain_digest: Digest,
-    sources: &SettlementSources<C, R>,
+    coordinator: &mut crate::CommitCoordinator,
+    invocation: ContextInvocation<'_, C, R>,
 ) -> Result<crate::context::ContextContribution, RunHandleError> {
-    let descriptor = provider.descriptor();
-    let envelope = committed_envelope(
-        &run,
-        &descriptor,
-        provider_index,
-        chain_digest,
-        &request,
-        sources,
-    )?;
-    let context = ContextCallContext {
-        run,
-        provider_index,
-        chain_digest,
-    };
-    let call = CommittedContextCall::try_new(&envelope, context, request, &descriptor)
+    let descriptor = invocation.provider.descriptor();
+    let pipeline = PipelinePosition::try_new(
+        invocation.chain_digest,
+        CONTEXT_STAGE,
+        invocation.provider_index,
+    )
+    .map_err(|_| RunHandleError::Middleware {
+        code: std::sync::Arc::from(crate::CONTEXT_CONFIGURATION_INVALID),
+    })?;
+    let raw = invocation
+        .request
+        .to_raw_json()
         .map_err(|error| context_error(&error))?;
-    call.invoke(provider)
+    let output_contract = EffectOutputContract {
+        kind: EffectOutputKind::ContextContribution,
+        schema_version: 1,
+        schema_digest: Digest::raw_json(b"context-contribution-v1"),
+    };
+    let recovering = coordinator
+        .state()
+        .pending_extension_effect
+        .as_ref()
+        .is_some_and(|pending| pending.requested.effect_id() == invocation.run.effect_id);
+    let (requested, envelope) = if recovering {
+        let pending = coordinator
+            .state()
+            .pending_extension_effect
+            .as_ref()
+            .ok_or_else(|| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+        let envelope = coordinator
+            .replayed_extension_envelope(invocation.run.effect_id)
+            .cloned()
+            .ok_or_else(|| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+        (pending.requested.clone(), envelope)
+    } else {
+        let requested = EffectRequested::try_new(
+            invocation.run.effect_id,
+            EffectKind::Context,
+            None,
+            Some(descriptor.invocation.clone()),
+            Some(pipeline),
+            output_contract,
+            EffectInput::Context {
+                cursor: invocation.cursor,
+                request: raw,
+            },
+            RetrySafety::SafeToRetry,
+            invocation.run.deadline,
+        )
+        .map_err(|_| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+        let env = request_environment(invocation.sources, &requested)?;
+        let outcome = coordinator
+            .submit(
+                env,
+                KernelInput::RequestExtensionEffect(RequestExtensionEffect {
+                    requested: requested.clone(),
+                }),
+            )
+            .await
+            .map_err(RunHandleError::Coordinator)?;
+        let envelope = outcome
+            .committed
+            .as_ref()
+            .and_then(|batch| {
+                batch.records.iter().find(|record| {
+                    matches!(record.body(), RecordBody::EffectRequested(value) if value.effect_id() == requested.effect_id())
+                })
+            })
+            .cloned()
+            .ok_or_else(|| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+        (requested, envelope)
+    };
+    let context = ContextCallContext {
+        run: invocation.run,
+        provider_index: invocation.provider_index,
+        chain_digest: invocation.chain_digest,
+    };
+    let call = CommittedContextCall::try_new(&envelope, context, invocation.request, &descriptor)
+        .map_err(|error| context_error(&error))?;
+    let result = if recovering {
+        call.resume(invocation.provider).await
+    } else {
+        call.invoke(invocation.provider).await
+    };
+    let settlement = context_settlement(&requested, &result)?;
+    coordinator
+        .submit(
+            settlement_environment(invocation.sources, &settlement)?,
+            KernelInput::ExtensionEffectSettled(ExtensionEffectSettled {
+                cursor: invocation.cursor,
+                outcome: settlement,
+            }),
+        )
         .await
-        .map_err(|error| context_error(&error))
+        .map_err(RunHandleError::Coordinator)?;
+    result.map_err(|error| context_error(&error))
 }
 
-/// Domain-separated correlation id for one provider invocation.
-#[must_use]
-pub(crate) fn derived_context_effect_id(
-    locator: &OperationLocator,
-    cycle: u64,
-    provider_index: u32,
-) -> EffectId {
-    let canonical =
-        serde_json_canonicalizer::to_vec(&(locator, cycle, CONTEXT_STAGE, provider_index))
-            .unwrap_or_else(|_| Vec::new());
-    let digest = finstack_ai_kernel::fixed_domain_digest!(DOMAIN_CONTEXT_INVOCATION, 1, &canonical);
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest.as_bytes()[..16]);
-    EffectId::from_bytes(bytes)
+fn context_settlement(
+    requested: &EffectRequested,
+    result: &Result<crate::context::ContextContribution, ContextError>,
+) -> Result<ExtensionSettlement, RunHandleError> {
+    match result {
+        Ok(contribution) => {
+            let bytes = serde_json_canonicalizer::to_vec(contribution)
+                .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?;
+            let output = finstack_ai_kernel::RawJson::parse(bytes)
+                .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?;
+            Ok(ExtensionSettlement::Completed(
+                EffectCompleted::try_new(
+                    requested.effect_id(),
+                    requested.output_contract().clone(),
+                    output,
+                    None,
+                    Vec::new(),
+                    ProviderIds::empty(),
+                    None::<&str>,
+                    None,
+                )
+                .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?,
+            ))
+        }
+        Err(error) => Ok(ExtensionSettlement::Failed(
+            EffectFailed::try_new(
+                requested.effect_id(),
+                requested.output_contract().clone(),
+                error.descriptor(),
+                None,
+                None::<&str>,
+            )
+            .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?,
+        )),
+    }
 }
 
 pub(crate) fn chain_digest(providers: &[std::sync::Arc<dyn ContextProvider>]) -> Digest {
@@ -78,71 +178,73 @@ pub(crate) fn chain_digest(providers: &[std::sync::Arc<dyn ContextProvider>]) ->
         .unwrap_or_else(|_| Digest::raw_json(b"context-provider-chain"))
 }
 
-fn committed_envelope<C: Clock, R: RandomSource>(
-    run: &RunCallContext,
-    descriptor: &ContextProviderDescriptor,
-    provider_index: u32,
-    chain_digest: Digest,
-    request: &ContextRequest,
+fn request_environment<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
-) -> Result<RecordEnvelope, RunHandleError> {
-    let raw = request
-        .to_raw_json()
-        .map_err(|error| context_error(&error))?;
-    let requested = EffectRequested::try_new(
-        run.effect_id,
-        EffectKind::Context,
-        None,
-        Some(descriptor.invocation.clone()),
-        Some(
-            PipelinePosition::try_new(chain_digest, CONTEXT_STAGE, provider_index).map_err(
-                |_| RunHandleError::Middleware {
-                    code: std::sync::Arc::from(crate::CONTEXT_CONFIGURATION_INVALID),
-                },
-            )?,
-        ),
-        EffectOutputContract {
-            kind: EffectOutputKind::ContextContribution,
-            schema_version: 1,
-            schema_digest: Digest::raw_json(b"context-contribution-v1"),
-        },
-        EffectInput::Context { request: raw },
-        RetrySafety::SafeToRetry,
-        run.deadline,
-    )
-    .map_err(|_| RunHandleError::Middleware {
-        code: std::sync::Arc::from(crate::CONTEXT_COMMIT_REQUIRED),
-    })?;
-    let body = RecordBody::EffectRequested(requested);
+    requested: &EffectRequested,
+) -> Result<TransitionEnv, RunHandleError> {
+    let body = RecordBody::EffectRequested(requested.clone());
     let event_count =
         body.derived_event_count(RECORD_KIND_VERSION)
             .map_err(|_| RunHandleError::Middleware {
                 code: std::sync::Arc::from(crate::CONTEXT_COMMIT_REQUIRED),
             })?;
-    let mut events = Vec::with_capacity(event_count);
-    for _ in 0..event_count {
-        events.push(sources.generate::<EventTag>()?);
-    }
-    let now = sources.now()?;
-    RecordEnvelope::try_new(
-        RECORD_FORMAT_VERSION,
-        RECORD_KIND_VERSION,
-        sources.generate::<RecordTag>()?,
-        run.locator.session_id,
-        run.locator.lane_id,
-        Some(run.locator.run_id),
-        1,
-        now,
-        None,
-        Digest::raw_json(b"context-request"),
-        None,
-        Digest::raw_json(b"context-request"),
-        events,
-        body,
-    )
-    .map_err(|_| RunHandleError::Middleware {
-        code: std::sync::Arc::from(crate::CONTEXT_COMMIT_REQUIRED),
+    Ok(TransitionEnv {
+        now: sources.now()?,
+        ids: AllocatedIds::try_new(
+            vec![sources.generate::<RecordTag>()?],
+            (0..event_count)
+                .map(|_| sources.generate::<EventTag>())
+                .collect::<Result<Vec<_>, _>>()?,
+            vec![requested.effect_id()],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![sources.generate::<AppendBatchTag>()?],
+            Vec::new(),
+        )
+        .map_err(|_| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?,
     })
+}
+
+fn settlement_environment<C: Clock, R: RandomSource>(
+    sources: &SettlementSources<C, R>,
+    settlement: &ExtensionSettlement,
+) -> Result<TransitionEnv, RunHandleError> {
+    let body = match settlement {
+        ExtensionSettlement::Completed(value) => RecordBody::EffectCompleted(value.clone()),
+        ExtensionSettlement::Failed(value) => RecordBody::EffectFailed(value.clone()),
+    };
+    let event_count = body
+        .derived_event_count(RECORD_KIND_VERSION)
+        .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?;
+    Ok(TransitionEnv {
+        now: sources.now()?,
+        ids: AllocatedIds::try_new(
+            vec![sources.generate::<RecordTag>()?],
+            (0..event_count)
+                .map(|_| sources.generate::<EventTag>())
+                .collect::<Result<Vec<_>, _>>()?,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![sources.generate::<AppendBatchTag>()?],
+            Vec::new(),
+        )
+        .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?,
+    })
+}
+
+fn context_stage_error(code: &'static str) -> RunHandleError {
+    RunHandleError::Middleware {
+        code: std::sync::Arc::from(code),
+    }
 }
 
 pub(crate) fn context_error(error: &ContextError) -> RunHandleError {

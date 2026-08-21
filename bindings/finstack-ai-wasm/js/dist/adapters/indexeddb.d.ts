@@ -2,7 +2,7 @@
  * Experimental same-origin IndexedDB journal and artifact batteries.
  *
  * Persistence is origin-scoped and not crash-durable. `health().detail` stays
- * `js_indexeddb_experimental`: PR-048 does not claim NFR-REL-001 for IndexedDB.
+ * `js_indexeddb_experimental` and does not claim crash durability.
  * Schema version remains 1.
  */
 import type { HostArtifactStore, HostJournalStore } from "../host.js";

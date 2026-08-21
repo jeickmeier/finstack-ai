@@ -43,11 +43,30 @@ mise run ci-wasm
 description = "Format, lint, test, and deny the Rust workspace"
 run = """
 set -euo pipefail
+mise run check-repository-references
+mise run runtime
 mise run check-rust
 mise run test-rust
 "$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" check
 "$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --manifest-path fuzz/Cargo.toml check
 """
+
+[tasks.runtime]
+description = "Lint and test the runtime crate across minimal, native, and WASM-host configurations"
+run = """
+set -euo pipefail
+export PATH="$(mise where cargo:cargo-nextest)/bin:${PATH}"
+cargo clippy -p finstack-ai-runtime --all-targets --locked --no-default-features -- -D warnings
+cargo clippy -p finstack-ai-runtime --all-targets --locked --no-default-features --features native-tokio -- -D warnings
+cargo nextest run -p finstack-ai-runtime --locked --no-default-features --features native-tokio
+cargo test -p finstack-ai-runtime --doc --locked --no-default-features --features native-tokio
+cargo check -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host
+cargo clippy -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host -- -D warnings
+"""
+
+[tasks.check-repository-references]
+description = "Reject references to removed planning and delivery-history artifacts"
+run = "python scripts/ci/check_stale_references.py"
 
 [tasks.ci-python]
 description = "Format, lint, typecheck, and test Python bindings"
@@ -62,7 +81,6 @@ description = "WASM target checks, package gates, and the three-browser harness"
 run = """
 set -euo pipefail
 . ./scripts/ci/lib.sh
-uv run --no-project python scripts/perf/check_size_budgets.py
 cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --features wasm-host
 cargo check -p finstack-ai --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host
@@ -79,6 +97,7 @@ else
   export FINSTACK_WASM_REPRO=0
 fi
 mise run build-wasm -- release
+uv run --no-project python scripts/perf/check_size_budgets.py
 FINSTACK_WASM_SKIP_BUILD=1 FINSTACK_WASM_SKIP_TYPECHECK=1 mise run test-wasm
 """
 

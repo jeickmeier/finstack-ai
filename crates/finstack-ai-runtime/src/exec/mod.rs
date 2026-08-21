@@ -6,6 +6,7 @@ pub(crate) mod compaction_driver;
 pub(crate) mod context_driver;
 pub(crate) mod coordinator;
 pub(crate) mod event_hub;
+#[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) mod middleware_driver;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

@@ -1,4 +1,4 @@
-//! PR-015 provider-neutral Model port and runtime acceptance proofs.
+//! model-port contract provider-neutral Model port and runtime acceptance proofs.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -50,8 +50,6 @@ pub(crate) fn owner_model_config() -> ModelTaskConfig {
         job_capacity: 2,
         result_capacity: 2,
         stream_limits: ModelStreamLimits::default(),
-        warmup_deadline: None,
-        warmup_metadata: Metadata::empty(),
         same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }
@@ -80,6 +78,13 @@ pub(crate) async fn spawn_model_owner_with_clock<C>(
 where
     C: Clock + Send + Sync + 'static,
 {
+    let model = Arc::new(
+        finstack_ai_runtime::ReadyModel::prepare(model)
+            .await
+            .map_err(|error| RunHandleError::Model {
+                code: Arc::from(error.code()),
+            })?,
+    );
     Box::pin(RunTaskOwner::spawn_with_model(
         coordinator,
         owner_run_config(),

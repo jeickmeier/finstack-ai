@@ -26,6 +26,103 @@ fn missing_before_run_outcome_invokes_the_whole_chain_after_recover() {
 }
 
 #[test]
+fn completed_middleware_effect_replays_without_a_second_invocation() {
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = accepted_on(Arc::clone(&store));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let driver = counting_driver("fixture.before-run", Stage::BeforeRun, &calls);
+    let cursor = StageCursor {
+        cycle: 0,
+        stage: Stage::BeforeRun,
+    };
+    let sources = test_sources();
+    let settled = before_run_settled();
+    let input = stage_input(
+        coordinator.state(),
+        cursor.stage,
+        &settled.outcome,
+        &test_profile(),
+        coordinator.context_projection(),
+    )
+    .expect("before-run input");
+
+    let fold = block_on(run_stage_chain(
+        &mut coordinator,
+        Some(&driver),
+        &sources,
+        cursor,
+        input,
+    ))
+    .expect("commit middleware effect");
+    assert!(fold.is_identity());
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    drop(coordinator);
+
+    let mut recovered = recover(store);
+    let (requested, _) = recovered
+        .replayed_completed_effects()
+        .values()
+        .next()
+        .expect("completed middleware effect index");
+    assert_eq!(
+        recovered
+            .replayed_extension_envelope(requested.effect_id())
+            .and_then(RecordEnvelope::run_id),
+        Some(id::<RunTag>(3))
+    );
+    assert_eq!(
+        requested
+            .pipeline()
+            .map(finstack_ai_kernel::PipelinePosition::chain_digest),
+        Some(driver.chain().digest())
+    );
+    block_on(settle_facade_stage(
+        &mut recovered,
+        Some(&driver),
+        &test_sources(),
+        &test_profile(),
+        env(1_100, &[2], &[], &[], &[], &[], &[], 102),
+        settled,
+    ))
+    .expect("settle from recorded middleware outcome");
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        1,
+        "a completed middleware effect must be replayed instead of invoked again"
+    );
+}
+
+#[test]
+fn rejected_middleware_outcome_commits_a_failed_effect_settlement() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    let driver = driver_for(
+        "fixture.invalid-before-run",
+        Stage::BeforeRun,
+        StageOutcome::FilterTools(Arc::from([])),
+    );
+
+    let error = block_on(settle_facade_stage(
+        &mut coordinator,
+        Some(&driver),
+        &test_sources(),
+        &test_profile(),
+        env(1_100, &[2], &[], &[], &[], &[], &[], 102),
+        before_run_settled(),
+    ))
+    .expect_err("FilterTools is invalid at BeforeRun");
+    assert!(matches!(
+        error,
+        RunHandleError::Middleware { ref code }
+            if code.as_ref() == crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED
+    ));
+    assert!(
+        coordinator.state().pending_extension_effect.is_none(),
+        "validation failure must not strand a pending durable effect"
+    );
+    assert_eq!(coordinator.state().extension_settlements.len(), 1);
+}
+
+#[test]
 fn recorded_before_run_is_not_invoked_when_prepare_context_settles() {
     let store = Arc::new(MemoryStore::new());
     let mut coordinator = accepted_on(Arc::clone(&store));

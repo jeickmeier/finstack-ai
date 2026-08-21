@@ -28,6 +28,8 @@ use crate::{
 };
 
 pub(crate) use dispatch::PostCommitDispatcher;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use dispatch::StageDispatchSeed;
 #[cfg(feature = "native-tokio")]
 pub(crate) use dispatch::TimerDispatchSeed;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
@@ -151,7 +153,7 @@ pub struct CommitCoordinator {
     event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
     replay_scope: ReplayScope,
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
-    capability_owners: Option<Arc<BTreeMap<ComponentId, CapabilityId>>>,
+    capability_owners: Option<Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>>,
     context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     context_projection: Option<
@@ -161,6 +163,23 @@ pub struct CommitCoordinator {
         >,
     >,
     last_model_continuation: Option<finstack_ai_kernel::RawJson>,
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    replayed_completed_effects: BTreeMap<
+        finstack_ai_kernel::EffectId,
+        (
+            finstack_ai_kernel::EffectRequested,
+            finstack_ai_kernel::EffectCompleted,
+        ),
+    >,
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    replayed_extension_envelopes:
+        BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::RecordEnvelope>,
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    last_middleware_effect_id: Option<finstack_ai_kernel::EffectId>,
+    /// Process-local compaction acceleration. Deliberately absent from every
+    /// journal and snapshot representation, and initialized empty on recovery.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    compaction_checkpoint: Option<crate::middleware::CompactionCheckpoint>,
 }
 
 impl CommitCoordinator {
@@ -190,6 +209,14 @@ impl CommitCoordinator {
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             context_projection: None,
             last_model_continuation: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            replayed_completed_effects: BTreeMap::new(),
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            replayed_extension_envelopes: BTreeMap::new(),
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            last_middleware_effect_id: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            compaction_checkpoint: None,
         }
     }
 
@@ -204,6 +231,89 @@ impl CommitCoordinator {
     #[must_use]
     pub const fn last_model_continuation(&self) -> Option<&finstack_ai_kernel::RawJson> {
         self.last_model_continuation.as_ref()
+    }
+
+    /// Completed request/output pairs retained from the recovery load.
+    ///
+    /// This runtime-only index lets recovery consumers inspect a completed
+    /// effect without loading the full journal a second time.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn replayed_completed_effects(
+        &self,
+    ) -> &BTreeMap<
+        finstack_ai_kernel::EffectId,
+        (
+            finstack_ai_kernel::EffectRequested,
+            finstack_ai_kernel::EffectCompleted,
+        ),
+    > {
+        &self.replayed_completed_effects
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn replayed_extension_envelope(
+        &self,
+        effect_id: finstack_ai_kernel::EffectId,
+    ) -> Option<&finstack_ai_kernel::RecordEnvelope> {
+        self.replayed_extension_envelopes.get(&effect_id)
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn note_middleware_effect(&mut self, effect_id: finstack_ai_kernel::EffectId) {
+        self.last_middleware_effect_id = Some(effect_id);
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) const fn last_middleware_effect_id(&self) -> Option<finstack_ai_kernel::EffectId> {
+        self.last_middleware_effect_id
+    }
+
+    /// Return the cached checkpoint only when it exactly matches this
+    /// compactor and the current canonical-history prefix.
+    ///
+    /// Any mismatch (or integrity failure while checking the cache value) is
+    /// an ordinary cache miss and invalidates the process-local entry. The
+    /// canonical history remains the only recovery source of truth.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn compatible_compaction_checkpoint(
+        &mut self,
+        descriptor: &crate::middleware::MiddlewareDescriptor,
+        input: &crate::middleware::BeforeModelInput,
+    ) -> Option<crate::middleware::CompactionCheckpoint> {
+        let compatible = self
+            .compaction_checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| {
+                crate::middleware::compaction_checkpoint_compatible(descriptor, input, checkpoint)
+                    .unwrap_or(false)
+            });
+        if compatible {
+            self.compaction_checkpoint.clone()
+        } else {
+            self.compaction_checkpoint = None;
+            None
+        }
+    }
+
+    /// Replace the disposable cache after a validated compaction result.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn retain_compaction_checkpoint(
+        &mut self,
+        checkpoint: Option<crate::middleware::CompactionCheckpoint>,
+    ) {
+        self.compaction_checkpoint = checkpoint;
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(super) fn discard_compaction_checkpoint(&mut self) {
+        self.compaction_checkpoint = None;
+    }
+
+    #[cfg(all(test, any(feature = "native-tokio", feature = "wasm-host")))]
+    pub(crate) const fn cached_compaction_checkpoint(
+        &self,
+    ) -> Option<&crate::middleware::CompactionCheckpoint> {
+        self.compaction_checkpoint.as_ref()
     }
 
     /// Borrow replay-derived semantic state.
@@ -316,7 +426,10 @@ impl CommitCoordinator {
     }
 
     /// Install the lock-time capability-to-component ownership map.
-    pub fn install_capability_owners(&mut self, owners: Arc<BTreeMap<ComponentId, CapabilityId>>) {
+    pub fn install_capability_owners(
+        &mut self,
+        owners: Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>,
+    ) {
         self.capability_owners = Some(owners);
     }
 
@@ -326,13 +439,14 @@ impl CommitCoordinator {
         let Some(owners) = self.capability_owners.as_ref() else {
             return true;
         };
-        let Some(owner) = owners.get(component) else {
+        let Some(component_owners) = owners.get(component) else {
             return true;
         };
-        self.state()
-            .active_capabilities
-            .iter()
-            .any(|item| &item.capability_id == owner)
+        self.state().active_capabilities.iter().any(|item| {
+            component_owners
+                .iter()
+                .any(|owner| &item.capability_id == owner)
+        })
     }
 
     /// Install the resolved `ContextProvider` list the runtime drives at

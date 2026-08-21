@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use finstack_ai_kernel::{
     Digest, ErrorCategory, ExternalHandleRef, KernelState, Metadata, OutputSpec, ProviderIds,
@@ -14,6 +15,38 @@ struct EstimatorModel {
     profile: ModelContextProfile,
     estimate: u64,
     estimator: TokenEstimatorRef,
+}
+
+struct WarmupModel {
+    inner: EstimatorModel,
+    warmups: AtomicUsize,
+}
+
+impl Model for WarmupModel {
+    fn descriptor(&self) -> ModelDescriptor {
+        self.inner.descriptor()
+    }
+
+    fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
+        self.inner.capabilities(model)
+    }
+
+    fn warmup(&self, _context: ModelWarmupContext) -> PortFuture<Result<(), ModelError>> {
+        self.warmups.fetch_add(1, Ordering::AcqRel);
+        Box::pin(async { Ok(()) })
+    }
+
+    fn estimate_input_tokens(
+        &self,
+        model: &ModelName,
+        canonical_request: &[u8],
+    ) -> Result<ModelTokenEstimate, ModelError> {
+        self.inner.estimate_input_tokens(model, canonical_request)
+    }
+
+    fn request(&self, request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
+        self.inner.request(request)
+    }
 }
 
 impl Model for EstimatorModel {
@@ -99,6 +132,27 @@ fn draft() -> ModelRequestDraft {
             max_output_tokens: 20,
         },
     }
+}
+
+#[tokio::test]
+async fn ready_model_is_a_reusable_proof_for_one_successful_warmup() {
+    let provider = profile();
+    let model = Arc::new(WarmupModel {
+        inner: EstimatorModel {
+            profile: provider.clone(),
+            estimate: 1,
+            estimator: provider.estimator,
+        },
+        warmups: AtomicUsize::new(0),
+    });
+    let model_port: Arc<dyn Model> = model.clone();
+    let ready = ReadyModel::prepare(model_port).await.expect("ready model");
+
+    assert_eq!(model.warmups.load(Ordering::Acquire), 1);
+    let first = ready.shared_model();
+    let second = ready.shared_model();
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(model.warmups.load(Ordering::Acquire), 1);
 }
 
 #[test]

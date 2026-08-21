@@ -1,4 +1,59 @@
 #[tokio::test]
+async fn concurrent_session_create_interns_one_runtime() {
+    let store = memory_store();
+    let (left, right) = tokio::join!(
+        SessionRuntime::create(
+            Arc::clone(&store),
+            "tenant-a",
+            create_ids(1, 2, 100)
+        ),
+        SessionRuntime::create(
+            Arc::clone(&store),
+            "tenant-a",
+            create_ids(1, 22, 120)
+        ),
+    );
+    let left = left.expect("first create");
+    let right = right.expect("second create");
+    assert!(Arc::ptr_eq(&left, &right));
+    let projection = left.projection().expect("projection");
+    assert_eq!(projection.lanes().len(), 1);
+    assert!(projection.lane("main").is_some());
+}
+
+#[tokio::test]
+async fn interned_session_rejects_a_different_tenant_scope() {
+    let store = memory_store();
+    let session = open_session(Arc::clone(&store)).await;
+    let Err(error) = SessionRuntime::open(store, session.session_id(), "tenant-b").await else {
+        panic!("tenant mismatch must fail");
+    };
+    assert_eq!(error.code(), "tenant_scope_mismatch");
+}
+
+#[tokio::test]
+async fn concurrent_duplicate_lane_name_has_one_winner() {
+    let session = open_session(memory_store()).await;
+    let (left, right) = tokio::join!(
+        session.create_lane("research", None, lane_ids(50, 140, false)),
+        session.create_lane("research", None, lane_ids(51, 150, false)),
+    );
+    assert!(left.is_ok() ^ right.is_ok());
+    let failure = left.err().or_else(|| right.err()).expect("one failure");
+    assert_eq!(failure, SessionError::DuplicateLaneName);
+    assert_eq!(
+        session
+            .projection()
+            .expect("projection")
+            .lanes()
+            .iter()
+            .filter(|(_, lane)| lane.name.as_ref() == "research")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn shared_prefix_fork_diverges_without_copying_entries() {
     let session = open_session(memory_store()).await;
     let a = session

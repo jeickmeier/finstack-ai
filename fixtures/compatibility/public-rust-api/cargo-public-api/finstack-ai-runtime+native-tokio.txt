@@ -262,7 +262,7 @@ pub enum finstack_ai_runtime::ConfinementBackend
 pub finstack_ai_runtime::ConfinementBackend::LinuxLandlock
 pub finstack_ai_runtime::ConfinementBackend::MacosSeatbelt
 pub finstack_ai_runtime::ConfinementBackend::Unavailable
-pub finstack_ai_runtime::ConfinementBackend::WindowsRestrictedJob
+pub finstack_ai_runtime::ConfinementBackend::WindowsLpacJob
 impl core::clone::Clone for finstack_ai_runtime::ConfinementBackend
 pub fn finstack_ai_runtime::ConfinementBackend::clone(&self) -> finstack_ai_runtime::ConfinementBackend
 impl core::cmp::Eq for finstack_ai_runtime::ConfinementBackend
@@ -628,20 +628,6 @@ pub fn finstack_ai_runtime::ModelTerminal::eq(&self, &finstack_ai_runtime::Model
 impl core::fmt::Debug for finstack_ai_runtime::ModelTerminal
 pub fn finstack_ai_runtime::ModelTerminal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::ModelTerminal
-pub enum finstack_ai_runtime::NdjsonError
-pub finstack_ai_runtime::NdjsonError::InvalidUtf8
-pub finstack_ai_runtime::NdjsonError::Limit
-impl core::clone::Clone for finstack_ai_runtime::NdjsonError
-pub fn finstack_ai_runtime::NdjsonError::clone(&self) -> finstack_ai_runtime::NdjsonError
-impl core::cmp::Eq for finstack_ai_runtime::NdjsonError
-impl core::cmp::PartialEq for finstack_ai_runtime::NdjsonError
-pub fn finstack_ai_runtime::NdjsonError::eq(&self, &finstack_ai_runtime::NdjsonError) -> bool
-impl core::convert::From<finstack_ai_runtime::NdjsonError> for finstack_ai_runtime::StreamNormError
-pub fn finstack_ai_runtime::StreamNormError::from(finstack_ai_runtime::NdjsonError) -> Self
-impl core::fmt::Debug for finstack_ai_runtime::NdjsonError
-pub fn finstack_ai_runtime::NdjsonError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai_runtime::NdjsonError
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::NdjsonError
 pub enum finstack_ai_runtime::ObjectError
 pub finstack_ai_runtime::ObjectError::Integrity
 pub finstack_ai_runtime::ObjectError::Integrity::message: alloc::sync::Arc<str>
@@ -675,20 +661,6 @@ pub fn finstack_ai_runtime::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_
 impl core::fmt::Display for finstack_ai_runtime::ObjectError
 pub fn finstack_ai_runtime::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObjectError
-pub enum finstack_ai_runtime::ObserverBackpressure
-pub finstack_ai_runtime::ObserverBackpressure::BlockBounded
-pub finstack_ai_runtime::ObserverBackpressure::BlockBounded::timeout: core::time::Duration
-pub finstack_ai_runtime::ObserverBackpressure::Disconnect
-pub finstack_ai_runtime::ObserverBackpressure::DropProgress
-impl core::clone::Clone for finstack_ai_runtime::ObserverBackpressure
-pub fn finstack_ai_runtime::ObserverBackpressure::clone(&self) -> finstack_ai_runtime::ObserverBackpressure
-impl core::cmp::Eq for finstack_ai_runtime::ObserverBackpressure
-impl core::cmp::PartialEq for finstack_ai_runtime::ObserverBackpressure
-pub fn finstack_ai_runtime::ObserverBackpressure::eq(&self, &finstack_ai_runtime::ObserverBackpressure) -> bool
-impl core::fmt::Debug for finstack_ai_runtime::ObserverBackpressure
-pub fn finstack_ai_runtime::ObserverBackpressure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai_runtime::ObserverBackpressure
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObserverBackpressure
 pub enum finstack_ai_runtime::ObserverError
 pub finstack_ai_runtime::ObserverError::CapacityExceeded
 pub finstack_ai_runtime::ObserverError::ConfigurationInvalid
@@ -724,18 +696,6 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::ObserverPayloadMode
 pub fn finstack_ai_runtime::ObserverPayloadMode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ObserverPayloadMode
 pub fn finstack_ai_runtime::ObserverPayloadMode::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub enum finstack_ai_runtime::ObserverQueuePush
-pub finstack_ai_runtime::ObserverQueuePush::Accepted
-pub finstack_ai_runtime::ObserverQueuePush::Dropped
-impl core::clone::Clone for finstack_ai_runtime::ObserverQueuePush
-pub fn finstack_ai_runtime::ObserverQueuePush::clone(&self) -> finstack_ai_runtime::ObserverQueuePush
-impl core::cmp::Eq for finstack_ai_runtime::ObserverQueuePush
-impl core::cmp::PartialEq for finstack_ai_runtime::ObserverQueuePush
-pub fn finstack_ai_runtime::ObserverQueuePush::eq(&self, &finstack_ai_runtime::ObserverQueuePush) -> bool
-impl core::fmt::Debug for finstack_ai_runtime::ObserverQueuePush
-pub fn finstack_ai_runtime::ObserverQueuePush::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai_runtime::ObserverQueuePush
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObserverQueuePush
 pub enum finstack_ai_runtime::OrderTier
 pub finstack_ai_runtime::OrderTier::ContextCompaction
 pub finstack_ai_runtime::OrderTier::ContextMutation
@@ -983,10 +943,12 @@ pub finstack_ai_runtime::SessionError::Conversation(finstack_ai_kernel::conversa
 pub finstack_ai_runtime::SessionError::DuplicateLaneName
 pub finstack_ai_runtime::SessionError::Identity(finstack_ai_runtime::IdentityMapError)
 pub finstack_ai_runtime::SessionError::InvalidLaneName
+pub finstack_ai_runtime::SessionError::InvalidMessageText
 pub finstack_ai_runtime::SessionError::LaneBusy
 pub finstack_ai_runtime::SessionError::Poisoned
 pub finstack_ai_runtime::SessionError::Recover
 pub finstack_ai_runtime::SessionError::Recover::code: &'static str
+pub finstack_ai_runtime::SessionError::TenantScopeMismatch
 pub finstack_ai_runtime::SessionError::UnknownEntry
 pub finstack_ai_runtime::SessionError::UnknownLane
 impl finstack_ai_runtime::SessionError
@@ -1032,19 +994,6 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::SideEffectClass
 pub fn finstack_ai_runtime::SideEffectClass::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::SideEffectClass
 pub fn finstack_ai_runtime::SideEffectClass::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub enum finstack_ai_runtime::SseParseError
-pub finstack_ai_runtime::SseParseError::DuplicateName
-pub finstack_ai_runtime::SseParseError::InvalidUtf8
-pub finstack_ai_runtime::SseParseError::Limit
-impl core::clone::Clone for finstack_ai_runtime::SseParseError
-pub fn finstack_ai_runtime::SseParseError::clone(&self) -> finstack_ai_runtime::SseParseError
-impl core::cmp::Eq for finstack_ai_runtime::SseParseError
-impl core::cmp::PartialEq for finstack_ai_runtime::SseParseError
-pub fn finstack_ai_runtime::SseParseError::eq(&self, &finstack_ai_runtime::SseParseError) -> bool
-impl core::fmt::Debug for finstack_ai_runtime::SseParseError
-pub fn finstack_ai_runtime::SseParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai_runtime::SseParseError
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::SseParseError
 pub enum finstack_ai_runtime::StageInput
 pub finstack_ai_runtime::StageInput::AfterModel
 pub finstack_ai_runtime::StageInput::AfterModel::value: finstack_ai_kernel::primitives::raw_json::RawJson
@@ -1130,20 +1079,6 @@ pub fn finstack_ai_runtime::StoreError::fmt(&self, &mut core::fmt::Formatter<'_>
 impl core::fmt::Display for finstack_ai_runtime::StoreError
 pub fn finstack_ai_runtime::StoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::StoreError
-pub enum finstack_ai_runtime::StreamNormKind
-pub finstack_ai_runtime::StreamNormKind::Incomplete
-pub finstack_ai_runtime::StreamNormKind::Limit
-pub finstack_ai_runtime::StreamNormKind::Response
-pub finstack_ai_runtime::StreamNormKind::Stream
-impl core::clone::Clone for finstack_ai_runtime::StreamNormKind
-pub fn finstack_ai_runtime::StreamNormKind::clone(&self) -> finstack_ai_runtime::StreamNormKind
-impl core::cmp::Eq for finstack_ai_runtime::StreamNormKind
-impl core::cmp::PartialEq for finstack_ai_runtime::StreamNormKind
-pub fn finstack_ai_runtime::StreamNormKind::eq(&self, &finstack_ai_runtime::StreamNormKind) -> bool
-impl core::fmt::Debug for finstack_ai_runtime::StreamNormKind
-pub fn finstack_ai_runtime::StreamNormKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai_runtime::StreamNormKind
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::StreamNormKind
 pub enum finstack_ai_runtime::StructuredOutputCapability
 pub finstack_ai_runtime::StructuredOutputCapability::Native
 pub finstack_ai_runtime::StructuredOutputCapability::Prompted
@@ -1382,10 +1317,6 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::AgentRef
 pub fn finstack_ai_runtime::AgentRef::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::AgentRef
 pub fn finstack_ai_runtime::AgentRef::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_runtime::AnthropicMessagesAssembly
-impl finstack_ai_runtime::AnthropicMessagesAssembly
-pub fn finstack_ai_runtime::AnthropicMessagesAssembly::consume(&mut self, &str, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ModelStreamItem>, finstack_ai_runtime::StreamNormError>
-pub fn finstack_ai_runtime::AnthropicMessagesAssembly::new(alloc::string::String, bool) -> Self
 pub struct finstack_ai_runtime::ApprovalMetadata
 pub finstack_ai_runtime::ApprovalMetadata::attributes: finstack_ai_kernel::primitives::raw_json::Metadata
 pub finstack_ai_runtime::ApprovalMetadata::reason: core::option::Option<alloc::sync::Arc<str>>
@@ -1637,7 +1568,7 @@ pub fn finstack_ai_runtime::CommitCoordinator::component_is_active(&self, &finst
 pub fn finstack_ai_runtime::CommitCoordinator::context_providers(&self) -> core::option::Option<&alloc::sync::Arc<[alloc::sync::Arc<dyn finstack_ai_runtime::ContextProvider>]>>
 pub const fn finstack_ai_runtime::CommitCoordinator::fault(&self) -> core::option::Option<finstack_ai_runtime::RunFault>
 pub const fn finstack_ai_runtime::CommitCoordinator::head_checksum(&self) -> core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
-pub fn finstack_ai_runtime::CommitCoordinator::install_capability_owners(&mut self, alloc::sync::Arc<alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::ids::CapabilityId>>)
+pub fn finstack_ai_runtime::CommitCoordinator::install_capability_owners(&mut self, alloc::sync::Arc<alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, alloc::sync::Arc<[finstack_ai_kernel::primitives::ids::CapabilityId]>>>)
 pub fn finstack_ai_runtime::CommitCoordinator::install_context_providers(&mut self, alloc::sync::Arc<[alloc::sync::Arc<dyn finstack_ai_runtime::ContextProvider>]>)
 pub fn finstack_ai_runtime::CommitCoordinator::install_middleware_chain(&mut self, alloc::sync::Arc<finstack_ai_runtime::ResolvedMiddlewareChain>)
 pub const fn finstack_ai_runtime::CommitCoordinator::last_model_continuation(&self) -> core::option::Option<&finstack_ai_kernel::primitives::raw_json::RawJson>
@@ -1753,6 +1684,10 @@ pub fn finstack_ai_runtime::CompactionModelResume::eq(&self, &finstack_ai_runtim
 impl core::fmt::Debug for finstack_ai_runtime::CompactionModelResume
 pub fn finstack_ai_runtime::CompactionModelResume::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::CompactionModelResume
+impl serde_core::ser::Serialize for finstack_ai_runtime::CompactionModelResume
+pub fn finstack_ai_runtime::CompactionModelResume::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::CompactionModelResume
+pub fn finstack_ai_runtime::CompactionModelResume::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_runtime::CompactionResult
 pub finstack_ai_runtime::CompactionResult::checkpoint: core::option::Option<finstack_ai_runtime::CompactionCheckpoint>
 pub finstack_ai_runtime::CompactionResult::derived_summaries: alloc::sync::Arc<[finstack_ai_runtime::ContextItem]>
@@ -1789,9 +1724,9 @@ pub fn finstack_ai_runtime::CompactionSourceEntry::serialize<__S>(&self, __S) ->
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::CompactionSourceEntry
 pub fn finstack_ai_runtime::CompactionSourceEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_runtime::ConfinedChild
-pub finstack_ai_runtime::ConfinedChild::stderr: core::option::Option<std::process::ChildStderr>
-pub finstack_ai_runtime::ConfinedChild::stdin: core::option::Option<std::process::ChildStdin>
-pub finstack_ai_runtime::ConfinedChild::stdout: core::option::Option<std::process::ChildStdout>
+pub finstack_ai_runtime::ConfinedChild::stderr: core::option::Option<std::fs::File>
+pub finstack_ai_runtime::ConfinedChild::stdin: core::option::Option<std::fs::File>
+pub finstack_ai_runtime::ConfinedChild::stdout: core::option::Option<std::fs::File>
 impl finstack_ai_runtime::ConfinedChild
 pub fn finstack_ai_runtime::ConfinedChild::kill(&mut self) -> core::io::error::Result<()>
 pub fn finstack_ai_runtime::ConfinedChild::try_wait(&mut self) -> core::io::error::Result<core::option::Option<std::process::ExitStatus>>
@@ -1821,15 +1756,16 @@ impl finstack_ai_runtime::ConfinementProfile
 pub fn finstack_ai_runtime::ConfinementProfile::cwd(&self) -> core::option::Option<&std::path::Path>
 pub fn finstack_ai_runtime::ConfinementProfile::root(&self) -> &std::path::Path
 pub fn finstack_ai_runtime::ConfinementProfile::try_new(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_runtime::ConfinementError>
+pub const fn finstack_ai_runtime::ConfinementProfile::windows_lpac(&self) -> core::option::Option<&finstack_ai_runtime::WindowsLpacProfile>
 pub fn finstack_ai_runtime::ConfinementProfile::with_authorized_cwd(self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_runtime::ConfinementError>
+pub fn finstack_ai_runtime::ConfinementProfile::with_windows_lpac(self, finstack_ai_runtime::WindowsLpacProfile) -> Self
 impl core::clone::Clone for finstack_ai_runtime::ConfinementProfile
 pub fn finstack_ai_runtime::ConfinementProfile::clone(&self) -> finstack_ai_runtime::ConfinementProfile
 impl core::cmp::Eq for finstack_ai_runtime::ConfinementProfile
 impl core::cmp::PartialEq for finstack_ai_runtime::ConfinementProfile
-pub fn finstack_ai_runtime::ConfinementProfile::eq(&self, &finstack_ai_runtime::ConfinementProfile) -> bool
+pub fn finstack_ai_runtime::ConfinementProfile::eq(&self, &Self) -> bool
 impl core::fmt::Debug for finstack_ai_runtime::ConfinementProfile
 pub fn finstack_ai_runtime::ConfinementProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::ConfinementProfile
 pub struct finstack_ai_runtime::ContextBudget
 pub finstack_ai_runtime::ContextBudget::max_bytes: u64
 pub finstack_ai_runtime::ContextBudget::max_items: usize
@@ -2159,12 +2095,6 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::ExternalIdentityKey
 pub fn finstack_ai_runtime::ExternalIdentityKey::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ExternalIdentityKey
 pub fn finstack_ai_runtime::ExternalIdentityKey::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_runtime::GeminiGenerateContentAssembly
-impl finstack_ai_runtime::GeminiGenerateContentAssembly
-pub const fn finstack_ai_runtime::GeminiGenerateContentAssembly::completed(&self) -> bool
-pub fn finstack_ai_runtime::GeminiGenerateContentAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ModelStreamItem>, finstack_ai_runtime::StreamNormError>
-pub fn finstack_ai_runtime::GeminiGenerateContentAssembly::finish(&mut self) -> core::result::Result<(), finstack_ai_runtime::StreamNormError>
-pub fn finstack_ai_runtime::GeminiGenerateContentAssembly::new(alloc::string::String, bool) -> Self
 pub struct finstack_ai_runtime::IdempotencyHorizon
 pub finstack_ai_runtime::IdempotencyHorizon::expire_at: finstack_ai_kernel::primitives::time::Timestamp
 impl core::clone::Clone for finstack_ai_runtime::IdempotencyHorizon
@@ -2678,8 +2608,6 @@ pub finstack_ai_runtime::ModelTaskConfig::job_capacity: usize
 pub finstack_ai_runtime::ModelTaskConfig::result_capacity: usize
 pub finstack_ai_runtime::ModelTaskConfig::same_identity_retry: finstack_ai_runtime::SameIdentityRetryPolicy
 pub finstack_ai_runtime::ModelTaskConfig::stream_limits: finstack_ai_runtime::ModelStreamLimits
-pub finstack_ai_runtime::ModelTaskConfig::warmup_deadline: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
-pub finstack_ai_runtime::ModelTaskConfig::warmup_metadata: finstack_ai_kernel::primitives::raw_json::Metadata
 impl core::clone::Clone for finstack_ai_runtime::ModelTaskConfig
 pub fn finstack_ai_runtime::ModelTaskConfig::clone(&self) -> finstack_ai_runtime::ModelTaskConfig
 impl core::cmp::Eq for finstack_ai_runtime::ModelTaskConfig
@@ -2721,6 +2649,8 @@ pub finstack_ai_runtime::ModelWarmupContext::deadline: core::option::Option<fins
 pub finstack_ai_runtime::ModelWarmupContext::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
 impl core::clone::Clone for finstack_ai_runtime::ModelWarmupContext
 pub fn finstack_ai_runtime::ModelWarmupContext::clone(&self) -> finstack_ai_runtime::ModelWarmupContext
+impl core::default::Default for finstack_ai_runtime::ModelWarmupContext
+pub fn finstack_ai_runtime::ModelWarmupContext::default() -> Self
 impl core::fmt::Debug for finstack_ai_runtime::ModelWarmupContext
 pub fn finstack_ai_runtime::ModelWarmupContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai_runtime::MonotonicDeadline
@@ -2735,11 +2665,6 @@ impl core::clone::Clone for finstack_ai_runtime::MonotonicDeadline
 pub fn finstack_ai_runtime::MonotonicDeadline::clone(&self) -> finstack_ai_runtime::MonotonicDeadline
 impl core::fmt::Debug for finstack_ai_runtime::MonotonicDeadline
 pub fn finstack_ai_runtime::MonotonicDeadline::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct finstack_ai_runtime::NdjsonParser
-impl finstack_ai_runtime::NdjsonParser
-pub fn finstack_ai_runtime::NdjsonParser::finish(self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_runtime::NdjsonError>
-pub const fn finstack_ai_runtime::NdjsonParser::new(usize, usize) -> Self
-pub fn finstack_ai_runtime::NdjsonParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_runtime::NdjsonError>
 pub struct finstack_ai_runtime::NestedSample
 pub finstack_ai_runtime::NestedSample::output: finstack_ai_kernel::primitives::raw_json::RawJson
 impl core::clone::Clone for finstack_ai_runtime::NestedSample
@@ -2905,6 +2830,18 @@ impl core::fmt::Debug for finstack_ai_runtime::ObserverDiagnostic
 pub fn finstack_ai_runtime::ObserverDiagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::ObserverDiagnostic
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObserverDiagnostic
+pub struct finstack_ai_runtime::ObserverDiagnostics
+pub finstack_ai_runtime::ObserverDiagnostics::dropped: u64
+pub finstack_ai_runtime::ObserverDiagnostics::recent: alloc::sync::Arc<[finstack_ai_runtime::ObserverDiagnostic]>
+pub finstack_ai_runtime::ObserverDiagnostics::total: u64
+impl core::clone::Clone for finstack_ai_runtime::ObserverDiagnostics
+pub fn finstack_ai_runtime::ObserverDiagnostics::clone(&self) -> finstack_ai_runtime::ObserverDiagnostics
+impl core::cmp::Eq for finstack_ai_runtime::ObserverDiagnostics
+impl core::cmp::PartialEq for finstack_ai_runtime::ObserverDiagnostics
+pub fn finstack_ai_runtime::ObserverDiagnostics::eq(&self, &finstack_ai_runtime::ObserverDiagnostics) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ObserverDiagnostics
+pub fn finstack_ai_runtime::ObserverDiagnostics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObserverDiagnostics
 pub struct finstack_ai_runtime::ObserverEventView
 pub finstack_ai_runtime::ObserverEventView::body: core::option::Option<finstack_ai_kernel::events::body::RunEventBody>
 pub finstack_ai_runtime::ObserverEventView::class: finstack_ai_kernel::events::RunEventClass
@@ -2934,35 +2871,6 @@ pub fn finstack_ai_runtime::ObserverEventView::fmt(&self, &mut core::fmt::Format
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::ObserverEventView
 impl serde_core::ser::Serialize for finstack_ai_runtime::ObserverEventView
 pub fn finstack_ai_runtime::ObserverEventView::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-pub struct finstack_ai_runtime::ObserverQueue<T>
-impl<T> finstack_ai_runtime::ObserverQueue<T>
-pub fn finstack_ai_runtime::ObserverQueue<T>::depth(&self) -> usize
-pub fn finstack_ai_runtime::ObserverQueue<T>::drain(&self) -> core::result::Result<alloc::vec::Vec<T>, finstack_ai_runtime::ObserverError>
-pub fn finstack_ai_runtime::ObserverQueue<T>::dropped(&self) -> u64
-pub fn finstack_ai_runtime::ObserverQueue<T>::is_disconnected(&self) -> bool
-pub fn finstack_ai_runtime::ObserverQueue<T>::push(&self, T) -> core::result::Result<finstack_ai_runtime::ObserverQueuePush, finstack_ai_runtime::ObserverError>
-pub fn finstack_ai_runtime::ObserverQueue<T>::try_new(usize, finstack_ai_runtime::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_runtime::ObserverError>
-impl<T: core::fmt::Debug> core::fmt::Debug for finstack_ai_runtime::ObserverQueue<T>
-pub fn finstack_ai_runtime::ObserverQueue<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct finstack_ai_runtime::OllamaChatAssembly
-pub finstack_ai_runtime::OllamaChatAssembly::done: bool
-impl finstack_ai_runtime::OllamaChatAssembly
-pub fn finstack_ai_runtime::OllamaChatAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ModelStreamItem>, finstack_ai_runtime::StreamNormError>
-pub fn finstack_ai_runtime::OllamaChatAssembly::finish(self) -> core::result::Result<finstack_ai_runtime::ModelResponse, finstack_ai_runtime::StreamNormError>
-pub fn finstack_ai_runtime::OllamaChatAssembly::new(alloc::string::String, bool, core::option::Option<alloc::vec::Vec<finstack_ai_runtime::OllamaReplayEntry>>) -> Self
-pub struct finstack_ai_runtime::OllamaReplayEntry
-pub finstack_ai_runtime::OllamaReplayEntry::digest: core::option::Option<alloc::string::String>
-pub finstack_ai_runtime::OllamaReplayEntry::thinking: alloc::string::String
-impl core::clone::Clone for finstack_ai_runtime::OllamaReplayEntry
-pub fn finstack_ai_runtime::OllamaReplayEntry::clone(&self) -> finstack_ai_runtime::OllamaReplayEntry
-impl core::cmp::Eq for finstack_ai_runtime::OllamaReplayEntry
-impl core::cmp::PartialEq for finstack_ai_runtime::OllamaReplayEntry
-pub fn finstack_ai_runtime::OllamaReplayEntry::eq(&self, &finstack_ai_runtime::OllamaReplayEntry) -> bool
-impl core::default::Default for finstack_ai_runtime::OllamaReplayEntry
-pub fn finstack_ai_runtime::OllamaReplayEntry::default() -> finstack_ai_runtime::OllamaReplayEntry
-impl core::fmt::Debug for finstack_ai_runtime::OllamaReplayEntry
-pub fn finstack_ai_runtime::OllamaReplayEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::OllamaReplayEntry
 pub struct finstack_ai_runtime::OpaqueProviderEvent
 pub finstack_ai_runtime::OpaqueProviderEvent::namespace: alloc::sync::Arc<str>
 pub finstack_ai_runtime::OpaqueProviderEvent::payload: finstack_ai_kernel::primitives::raw_json::RawJson
@@ -2992,10 +2900,6 @@ pub fn finstack_ai_runtime::OpaqueSnapshot::eq(&self, &finstack_ai_runtime::Opaq
 impl core::fmt::Debug for finstack_ai_runtime::OpaqueSnapshot
 pub fn finstack_ai_runtime::OpaqueSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::OpaqueSnapshot
-pub struct finstack_ai_runtime::OpenAiResponsesAssembly
-impl finstack_ai_runtime::OpenAiResponsesAssembly
-pub fn finstack_ai_runtime::OpenAiResponsesAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ModelStreamItem>, finstack_ai_runtime::StreamNormError>
-pub fn finstack_ai_runtime::OpenAiResponsesAssembly::new(alloc::string::String, bool) -> Self
 pub struct finstack_ai_runtime::OsRandomSource
 impl core::clone::Clone for finstack_ai_runtime::OsRandomSource
 pub fn finstack_ai_runtime::OsRandomSource::clone(&self) -> finstack_ai_runtime::OsRandomSource
@@ -3098,6 +3002,21 @@ impl core::fmt::Debug for finstack_ai_runtime::PruneRequest
 pub fn finstack_ai_runtime::PruneRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::PruneRequest
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::PruneRequest
+pub struct finstack_ai_runtime::ReadyModel
+impl finstack_ai_runtime::ReadyModel
+pub fn finstack_ai_runtime::ReadyModel::as_model(&self) -> &dyn finstack_ai_runtime::Model
+pub async fn finstack_ai_runtime::ReadyModel::prepare(alloc::sync::Arc<dyn finstack_ai_runtime::Model>) -> core::result::Result<Self, finstack_ai_runtime::ModelError>
+pub async fn finstack_ai_runtime::ReadyModel::prepare_with_context(alloc::sync::Arc<dyn finstack_ai_runtime::Model>, finstack_ai_runtime::ModelWarmupContext) -> core::result::Result<Self, finstack_ai_runtime::ModelError>
+pub fn finstack_ai_runtime::ReadyModel::shared_model(&self) -> alloc::sync::Arc<dyn finstack_ai_runtime::Model>
+impl core::clone::Clone for finstack_ai_runtime::ReadyModel
+pub fn finstack_ai_runtime::ReadyModel::clone(&self) -> finstack_ai_runtime::ReadyModel
+impl finstack_ai_runtime::Model for finstack_ai_runtime::ReadyModel
+pub fn finstack_ai_runtime::ReadyModel::capabilities(&self, &finstack_ai_runtime::ModelName) -> finstack_ai_runtime::ModelCapabilities
+pub fn finstack_ai_runtime::ReadyModel::descriptor(&self) -> finstack_ai_runtime::ModelDescriptor
+pub fn finstack_ai_runtime::ReadyModel::estimate_input_tokens(&self, &finstack_ai_runtime::ModelName, &[u8]) -> core::result::Result<finstack_ai_runtime::ModelTokenEstimate, finstack_ai_runtime::ModelError>
+pub fn finstack_ai_runtime::ReadyModel::reconcile(&self, finstack_ai_runtime::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelReconcileResult, finstack_ai_runtime::ModelError>>
+pub fn finstack_ai_runtime::ReadyModel::request(&self, finstack_ai_runtime::ModelRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelEventStream, finstack_ai_runtime::ModelError>>
+pub fn finstack_ai_runtime::ReadyModel::warmup(&self, finstack_ai_runtime::ModelWarmupContext) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ModelError>>
 pub struct finstack_ai_runtime::ReasoningDelta
 pub finstack_ai_runtime::ReasoningDelta::text: alloc::sync::Arc<str>
 impl core::clone::Clone for finstack_ai_runtime::ReasoningDelta
@@ -3172,6 +3091,23 @@ impl core::clone::Clone for finstack_ai_runtime::ResolvedToolCatalog
 pub fn finstack_ai_runtime::ResolvedToolCatalog::clone(&self) -> finstack_ai_runtime::ResolvedToolCatalog
 impl core::fmt::Debug for finstack_ai_runtime::ResolvedToolCatalog
 pub fn finstack_ai_runtime::ResolvedToolCatalog::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_runtime::RetryBackoffPolicy
+pub finstack_ai_runtime::RetryBackoffPolicy::initial_delay: core::time::Duration
+pub finstack_ai_runtime::RetryBackoffPolicy::maximum_delay: core::time::Duration
+pub finstack_ai_runtime::RetryBackoffPolicy::maximum_jitter: core::time::Duration
+impl finstack_ai_runtime::RetryBackoffPolicy
+pub fn finstack_ai_runtime::RetryBackoffPolicy::delay(self, finstack_ai_kernel::primitives::ids::EffectId, u32) -> core::time::Duration
+impl core::clone::Clone for finstack_ai_runtime::RetryBackoffPolicy
+pub fn finstack_ai_runtime::RetryBackoffPolicy::clone(&self) -> finstack_ai_runtime::RetryBackoffPolicy
+impl core::cmp::Eq for finstack_ai_runtime::RetryBackoffPolicy
+impl core::cmp::PartialEq for finstack_ai_runtime::RetryBackoffPolicy
+pub fn finstack_ai_runtime::RetryBackoffPolicy::eq(&self, &finstack_ai_runtime::RetryBackoffPolicy) -> bool
+impl core::default::Default for finstack_ai_runtime::RetryBackoffPolicy
+pub fn finstack_ai_runtime::RetryBackoffPolicy::default() -> Self
+impl core::fmt::Debug for finstack_ai_runtime::RetryBackoffPolicy
+pub fn finstack_ai_runtime::RetryBackoffPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::RetryBackoffPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::RetryBackoffPolicy
 pub struct finstack_ai_runtime::RunCallContext
 pub finstack_ai_runtime::RunCallContext::attempt: u32
 pub finstack_ai_runtime::RunCallContext::authorization: finstack_ai_runtime::AuthorizationContext
@@ -3199,6 +3135,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_runtime::RunFault
 pub struct finstack_ai_runtime::RunHandle
 impl finstack_ai_runtime::RunHandle
 pub fn finstack_ai_runtime::RunHandle::observe_status(&self) -> tokio::sync::watch::Receiver<finstack_ai_runtime::RunStatus>
+pub fn finstack_ai_runtime::RunHandle::observer_diagnostics(&self) -> finstack_ai_runtime::ObserverDiagnostics
 pub fn finstack_ai_runtime::RunHandle::shutdown(&self)
 pub fn finstack_ai_runtime::RunHandle::shutdown_report(&self) -> core::option::Option<finstack_ai_runtime::ShutdownReport>
 pub fn finstack_ai_runtime::RunHandle::status(&self) -> finstack_ai_runtime::RunStatus
@@ -3226,14 +3163,16 @@ impl core::marker::Copy for finstack_ai_runtime::RunTaskConfig
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::RunTaskConfig
 pub struct finstack_ai_runtime::RunTaskOwner
 impl finstack_ai_runtime::RunTaskOwner
+pub async fn finstack_ai_runtime::RunTaskOwner::attach_observer(&mut self, alloc::sync::Arc<dyn finstack_ai_runtime::Observer>, finstack_ai_runtime::EventSubscriptionConfig) -> core::result::Result<(), finstack_ai_runtime::EventSubscriptionError>
 pub fn finstack_ai_runtime::RunTaskOwner::handle(&self) -> finstack_ai_runtime::RunHandle
 pub async fn finstack_ai_runtime::RunTaskOwner::shutdown(&mut self) -> finstack_ai_runtime::ShutdownReport
 pub fn finstack_ai_runtime::RunTaskOwner::spawn(finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::RunTaskConfig) -> core::result::Result<Self, finstack_ai_runtime::RunHandleError>
-pub async fn finstack_ai_runtime::RunTaskOwner::spawn_with_model<C, R>(finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::RunTaskConfig, finstack_ai_runtime::ModelTaskConfig, alloc::sync::Arc<dyn finstack_ai_runtime::Model>, finstack_ai_runtime::LockedModelContextProfile, C, R) -> core::result::Result<Self, finstack_ai_runtime::RunHandleError> where C: finstack_ai_runtime::Clock + core::marker::Send + core::marker::Sync + 'static, R: finstack_ai_runtime::RandomSource + core::marker::Send + core::marker::Sync + 'static
-pub async fn finstack_ai_runtime::RunTaskOwner::spawn_with_model_and_tools<C, R>(finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::RunTaskConfig, finstack_ai_runtime::ModelTaskConfig, finstack_ai_runtime::ToolTaskConfig, alloc::sync::Arc<dyn finstack_ai_runtime::Model>, finstack_ai_runtime::LockedModelContextProfile, alloc::sync::Arc<finstack_ai_runtime::ResolvedToolCatalog>, C, R) -> core::result::Result<Self, finstack_ai_runtime::RunHandleError> where C: finstack_ai_runtime::Clock + core::marker::Send + core::marker::Sync + 'static, R: finstack_ai_runtime::RandomSource + core::marker::Send + core::marker::Sync + 'static
+pub async fn finstack_ai_runtime::RunTaskOwner::spawn_with_model<C, R>(finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::RunTaskConfig, finstack_ai_runtime::ModelTaskConfig, alloc::sync::Arc<finstack_ai_runtime::ReadyModel>, finstack_ai_runtime::LockedModelContextProfile, C, R) -> core::result::Result<Self, finstack_ai_runtime::RunHandleError> where C: finstack_ai_runtime::Clock + core::marker::Send + core::marker::Sync + 'static, R: finstack_ai_runtime::RandomSource + core::marker::Send + core::marker::Sync + 'static
+pub async fn finstack_ai_runtime::RunTaskOwner::spawn_with_model_and_tools<C, R>(finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::RunTaskConfig, finstack_ai_runtime::ModelTaskConfig, finstack_ai_runtime::ToolTaskConfig, alloc::sync::Arc<finstack_ai_runtime::ReadyModel>, finstack_ai_runtime::LockedModelContextProfile, alloc::sync::Arc<finstack_ai_runtime::ResolvedToolCatalog>, C, R) -> core::result::Result<Self, finstack_ai_runtime::RunHandleError> where C: finstack_ai_runtime::Clock + core::marker::Send + core::marker::Sync + 'static, R: finstack_ai_runtime::RandomSource + core::marker::Send + core::marker::Sync + 'static
 impl core::ops::drop::Drop for finstack_ai_runtime::RunTaskOwner
 pub fn finstack_ai_runtime::RunTaskOwner::drop(&mut self)
 pub struct finstack_ai_runtime::SameIdentityRetryPolicy
+pub finstack_ai_runtime::SameIdentityRetryPolicy::backoff: finstack_ai_runtime::RetryBackoffPolicy
 pub finstack_ai_runtime::SameIdentityRetryPolicy::max_retries: u32
 impl core::clone::Clone for finstack_ai_runtime::SameIdentityRetryPolicy
 pub fn finstack_ai_runtime::SameIdentityRetryPolicy::clone(&self) -> finstack_ai_runtime::SameIdentityRetryPolicy
@@ -3349,7 +3288,10 @@ pub struct finstack_ai_runtime::SessionRuntime
 impl finstack_ai_runtime::SessionRuntime
 pub async fn finstack_ai_runtime::SessionRuntime::accept_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::records::run::accepted::RunAccepted, finstack_ai_kernel::state::env::TransitionEnv) -> core::result::Result<finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::SessionError>
 pub async fn finstack_ai_runtime::SessionRuntime::append_message(&self, finstack_ai_kernel::primitives::ids::LaneId, &finstack_ai_kernel::conversation::message::Message, finstack_ai_runtime::LaneAppendIds) -> core::result::Result<finstack_ai_kernel::primitives::ids::EntryId, finstack_ai_runtime::SessionError>
+pub async fn finstack_ai_runtime::SessionRuntime::append_message_for_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::primitives::ids::RunId, &finstack_ai_kernel::conversation::message::Message, finstack_ai_runtime::LaneAppendIds) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::conversation::message::Message>, finstack_ai_runtime::SessionError>
+pub async fn finstack_ai_runtime::SessionRuntime::append_message_from_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::primitives::ids::RunId, &finstack_ai_kernel::conversation::message::Message, finstack_ai_runtime::LaneAppendIds) -> core::result::Result<finstack_ai_kernel::primitives::ids::EntryId, finstack_ai_runtime::SessionError>
 pub fn finstack_ai_runtime::SessionRuntime::bind_external_identity(&self, &dyn finstack_ai_runtime::ExternalIdentityMap, finstack_ai_runtime::ExternalIdentityKey, finstack_ai_kernel::primitives::ids::LaneId) -> core::result::Result<(), finstack_ai_runtime::SessionError>
+pub fn finstack_ai_runtime::SessionRuntime::bind_run_handle(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::primitives::ids::RunId, finstack_ai_runtime::RunHandle) -> core::result::Result<(), finstack_ai_runtime::SessionError>
 pub async fn finstack_ai_runtime::SessionRuntime::cancel_run<F>(&self, finstack_ai_kernel::primitives::ids::RunId, finstack_ai_kernel::records::run::cancellation::CancellationInitiator, &mut F) -> core::result::Result<(), finstack_ai_runtime::SessionError> where F: core::ops::function::FnMut() -> core::result::Result<finstack_ai_kernel::state::env::TransitionEnv, finstack_ai_runtime::SessionError> + core::marker::Send
 pub async fn finstack_ai_runtime::SessionRuntime::coordinator_for_run(&self, core::option::Option<finstack_ai_kernel::primitives::ids::RunId>) -> core::result::Result<finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::SessionError>
 pub async fn finstack_ai_runtime::SessionRuntime::create(alloc::sync::Arc<dyn finstack_ai_runtime::JournalStore>, impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_runtime::SessionCreateIds) -> core::result::Result<alloc::sync::Arc<Self>, finstack_ai_runtime::SessionError>
@@ -3362,6 +3304,7 @@ pub async fn finstack_ai_runtime::SessionRuntime::open(alloc::sync::Arc<dyn fins
 pub fn finstack_ai_runtime::SessionRuntime::projection(&self) -> core::result::Result<finstack_ai_kernel::conversation::tree::SessionProjection, finstack_ai_runtime::SessionError>
 pub async fn finstack_ai_runtime::SessionRuntime::refresh(&self) -> core::result::Result<finstack_ai_kernel::conversation::tree::SessionProjection, finstack_ai_runtime::SessionError>
 pub fn finstack_ai_runtime::SessionRuntime::release(&self, finstack_ai_kernel::primitives::ids::LaneId)
+pub fn finstack_ai_runtime::SessionRuntime::release_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::primitives::ids::RunId)
 pub const fn finstack_ai_runtime::SessionRuntime::session_id(&self) -> finstack_ai_kernel::primitives::ids::SessionId
 pub fn finstack_ai_runtime::SessionRuntime::store(&self) -> alloc::sync::Arc<dyn finstack_ai_runtime::JournalStore>
 pub fn finstack_ai_runtime::SessionRuntime::tenant_scope(&self) -> &str
@@ -3417,24 +3360,6 @@ impl core::fmt::Debug for finstack_ai_runtime::SnapshotSchedule
 pub fn finstack_ai_runtime::SnapshotSchedule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::SnapshotSchedule
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::SnapshotSchedule
-pub struct finstack_ai_runtime::SseEvent
-pub finstack_ai_runtime::SseEvent::data: alloc::string::String
-pub finstack_ai_runtime::SseEvent::name: core::option::Option<alloc::string::String>
-impl core::clone::Clone for finstack_ai_runtime::SseEvent
-pub fn finstack_ai_runtime::SseEvent::clone(&self) -> finstack_ai_runtime::SseEvent
-impl core::cmp::Eq for finstack_ai_runtime::SseEvent
-impl core::cmp::PartialEq for finstack_ai_runtime::SseEvent
-pub fn finstack_ai_runtime::SseEvent::eq(&self, &finstack_ai_runtime::SseEvent) -> bool
-impl core::fmt::Debug for finstack_ai_runtime::SseEvent
-pub fn finstack_ai_runtime::SseEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::SseEvent
-pub struct finstack_ai_runtime::SseEventParser
-impl finstack_ai_runtime::SseEventParser
-pub fn finstack_ai_runtime::SseEventParser::finish_clean(&self) -> bool
-pub const fn finstack_ai_runtime::SseEventParser::new(usize, usize) -> Self
-pub fn finstack_ai_runtime::SseEventParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::SseEvent>, finstack_ai_runtime::SseParseError>
-impl core::fmt::Debug for finstack_ai_runtime::SseEventParser
-pub fn finstack_ai_runtime::SseEventParser::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai_runtime::StageMask(_)
 impl finstack_ai_runtime::StageMask
 pub const finstack_ai_runtime::StageMask::ALL: Self
@@ -3498,19 +3423,6 @@ impl core::fmt::Debug for finstack_ai_runtime::StoreLimits
 pub fn finstack_ai_runtime::StoreLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::StoreLimits
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::StoreLimits
-pub struct finstack_ai_runtime::StreamNormError
-pub finstack_ai_runtime::StreamNormError::kind: finstack_ai_runtime::StreamNormKind
-pub finstack_ai_runtime::StreamNormError::message: &'static str
-impl core::clone::Clone for finstack_ai_runtime::StreamNormError
-pub fn finstack_ai_runtime::StreamNormError::clone(&self) -> finstack_ai_runtime::StreamNormError
-impl core::cmp::Eq for finstack_ai_runtime::StreamNormError
-impl core::cmp::PartialEq for finstack_ai_runtime::StreamNormError
-pub fn finstack_ai_runtime::StreamNormError::eq(&self, &finstack_ai_runtime::StreamNormError) -> bool
-impl core::convert::From<finstack_ai_runtime::NdjsonError> for finstack_ai_runtime::StreamNormError
-pub fn finstack_ai_runtime::StreamNormError::from(finstack_ai_runtime::NdjsonError) -> Self
-impl core::fmt::Debug for finstack_ai_runtime::StreamNormError
-pub fn finstack_ai_runtime::StreamNormError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::StreamNormError
 pub struct finstack_ai_runtime::SystemClock
 impl core::clone::Clone for finstack_ai_runtime::SystemClock
 pub fn finstack_ai_runtime::SystemClock::clone(&self) -> finstack_ai_runtime::SystemClock
@@ -3781,6 +3693,18 @@ pub fn finstack_ai_runtime::UuidV7Generator<C, R>::clone(&self) -> finstack_ai_r
 impl<C: core::fmt::Debug, R: core::fmt::Debug> core::fmt::Debug for finstack_ai_runtime::UuidV7Generator<C, R>
 pub fn finstack_ai_runtime::UuidV7Generator<C, R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<C: core::marker::Copy, R: core::marker::Copy> core::marker::Copy for finstack_ai_runtime::UuidV7Generator<C, R>
+pub struct finstack_ai_runtime::WindowsLpacProfile
+impl finstack_ai_runtime::WindowsLpacProfile
+pub fn finstack_ai_runtime::WindowsLpacProfile::moniker(&self) -> &str
+pub fn finstack_ai_runtime::WindowsLpacProfile::try_new(impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, finstack_ai_runtime::ConfinementError>
+impl core::clone::Clone for finstack_ai_runtime::WindowsLpacProfile
+pub fn finstack_ai_runtime::WindowsLpacProfile::clone(&self) -> finstack_ai_runtime::WindowsLpacProfile
+impl core::cmp::Eq for finstack_ai_runtime::WindowsLpacProfile
+impl core::cmp::PartialEq for finstack_ai_runtime::WindowsLpacProfile
+pub fn finstack_ai_runtime::WindowsLpacProfile::eq(&self, &finstack_ai_runtime::WindowsLpacProfile) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::WindowsLpacProfile
+pub fn finstack_ai_runtime::WindowsLpacProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::WindowsLpacProfile
 pub struct finstack_ai_runtime::WorkflowCheckpoint
 pub finstack_ai_runtime::WorkflowCheckpoint::external_handles: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::EffectId, finstack_ai_kernel::primitives::handles::ExternalHandleRef>
 pub finstack_ai_runtime::WorkflowCheckpoint::lane_id: finstack_ai_kernel::primitives::ids::LaneId
@@ -3820,11 +3744,12 @@ pub fn finstack_ai_runtime::WorkflowSession::retry_decision(&self, finstack_ai_k
 pub fn finstack_ai_runtime::WorkflowSession::tenant_scope(&self) -> &str
 pub async fn finstack_ai_runtime::WorkflowSession::trusted(alloc::sync::Arc<dyn finstack_ai_runtime::JournalStore>, finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai_runtime::ExternalClock, u64) -> core::result::Result<Self, finstack_ai_runtime::WorkflowDriverError>
 pub fn finstack_ai_runtime::WorkflowSession::with_approval_grant(self, finstack_ai_runtime::ApprovalGrantMode) -> Self
-pub fn finstack_ai_runtime::WorkflowSession::with_capability_owners(self, alloc::sync::Arc<alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::ids::CapabilityId>>) -> Self
+pub fn finstack_ai_runtime::WorkflowSession::with_capability_owners(self, alloc::sync::Arc<alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, alloc::sync::Arc<[finstack_ai_kernel::primitives::ids::CapabilityId]>>>) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_context_providers(self, alloc::sync::Arc<[alloc::sync::Arc<dyn finstack_ai_runtime::ContextProvider>]>) -> Self
 pub const fn finstack_ai_runtime::WorkflowSession::with_drive_timeout(self, core::time::Duration) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_middleware_chain(self, alloc::sync::Arc<finstack_ai_runtime::ResolvedMiddlewareChain>) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_ports(self, alloc::sync::Arc<dyn finstack_ai_runtime::Model>, finstack_ai_runtime::LockedModelContextProfile, core::option::Option<alloc::sync::Arc<finstack_ai_runtime::ResolvedToolCatalog>>) -> Self
+pub fn finstack_ai_runtime::WorkflowSession::with_ready_ports(self, alloc::sync::Arc<finstack_ai_runtime::ReadyModel>, finstack_ai_runtime::LockedModelContextProfile, core::option::Option<alloc::sync::Arc<finstack_ai_runtime::ResolvedToolCatalog>>) -> Self
 pub struct finstack_ai_runtime::WriteMetadataRequest
 pub finstack_ai_runtime::WriteMetadataRequest::expected_head_checksum: core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
 pub finstack_ai_runtime::WriteMetadataRequest::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
@@ -3844,16 +3769,13 @@ pub const finstack_ai_runtime::COMPACTION_MODEL_NOT_AUTHORIZED: &str
 pub const finstack_ai_runtime::COMPACTION_RESULT_INVALID: &str
 pub const finstack_ai_runtime::CONFINEMENT_UNAVAILABLE: &str
 pub const finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED: &str
+pub const finstack_ai_runtime::CONTEXT_COMMIT_REQUIRED: &str
+pub const finstack_ai_runtime::CONTEXT_CONFIGURATION_INVALID: &str
 pub const finstack_ai_runtime::CONTEXT_CONTRIBUTION_INVALID: &str
-pub const finstack_ai_runtime::GEMINI_CACHED_TOKENS_KEY: &str
-pub const finstack_ai_runtime::GEMINI_CODE_RESULT_MEDIA_TYPE: &str
-pub const finstack_ai_runtime::GEMINI_CONTINUATION_PROVIDER: &str
-pub const finstack_ai_runtime::GEMINI_EXECUTABLE_CODE_MEDIA_TYPE: &str
-pub const finstack_ai_runtime::GEMINI_GROUNDING_MEDIA_TYPE: &str
-pub const finstack_ai_runtime::GEMINI_THOUGHTS_TOKENS_KEY: &str
 pub const finstack_ai_runtime::MAX_ARTIFACT_BYTES: usize
 pub const finstack_ai_runtime::MAX_OBJECT_KEY_BYTES: usize
 pub const finstack_ai_runtime::MCP_SAMPLING_REQUIRED: &str
+pub const finstack_ai_runtime::MCP_SAMPLING_UNAVAILABLE: &str
 pub const finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED: &str
 pub const finstack_ai_runtime::MODEL_RECONCILIATION_UNSUPPORTED: &str
 pub const finstack_ai_runtime::MODEL_REQUEST_INVALID: &str
@@ -3876,7 +3798,9 @@ pub const finstack_ai_runtime::OBJECT_SCOPE_MISMATCH: &str
 pub const finstack_ai_runtime::OBJECT_TOO_LARGE: &str
 pub const finstack_ai_runtime::OBJECT_UNAVAILABLE: &str
 pub const finstack_ai_runtime::OBJECT_UNSUPPORTED: &str
-pub const finstack_ai_runtime::OBSERVER_QUEUE_OVERFLOW: finstack_ai_runtime::ObserverDiagnostic
+pub const finstack_ai_runtime::OBSERVER_DELIVERY_FAILED: &str
+pub const finstack_ai_runtime::OBSERVER_SHUTDOWN_TIMEOUT: &str
+pub const finstack_ai_runtime::OBSERVER_SUBSCRIPTION_FAILED: &str
 pub const finstack_ai_runtime::SCAN_PAGE_MAX_RECORDS: u32
 pub const finstack_ai_runtime::SECRET_MAX_BYTES: usize
 pub const finstack_ai_runtime::TOOL_CANCELLED: &str
@@ -3939,6 +3863,13 @@ pub fn finstack_ai_runtime::Model::estimate_input_tokens(&self, &finstack_ai_run
 pub fn finstack_ai_runtime::Model::reconcile(&self, finstack_ai_runtime::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelReconcileResult, finstack_ai_runtime::ModelError>>
 pub fn finstack_ai_runtime::Model::request(&self, finstack_ai_runtime::ModelRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelEventStream, finstack_ai_runtime::ModelError>>
 pub fn finstack_ai_runtime::Model::warmup(&self, finstack_ai_runtime::ModelWarmupContext) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ModelError>>
+impl finstack_ai_runtime::Model for finstack_ai_runtime::ReadyModel
+pub fn finstack_ai_runtime::ReadyModel::capabilities(&self, &finstack_ai_runtime::ModelName) -> finstack_ai_runtime::ModelCapabilities
+pub fn finstack_ai_runtime::ReadyModel::descriptor(&self) -> finstack_ai_runtime::ModelDescriptor
+pub fn finstack_ai_runtime::ReadyModel::estimate_input_tokens(&self, &finstack_ai_runtime::ModelName, &[u8]) -> core::result::Result<finstack_ai_runtime::ModelTokenEstimate, finstack_ai_runtime::ModelError>
+pub fn finstack_ai_runtime::ReadyModel::reconcile(&self, finstack_ai_runtime::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelReconcileResult, finstack_ai_runtime::ModelError>>
+pub fn finstack_ai_runtime::ReadyModel::request(&self, finstack_ai_runtime::ModelRequest) -> finstack_ai_runtime::PortFuture<core::result::Result<finstack_ai_runtime::ModelEventStream, finstack_ai_runtime::ModelError>>
+pub fn finstack_ai_runtime::ReadyModel::warmup(&self, finstack_ai_runtime::ModelWarmupContext) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ModelError>>
 pub trait finstack_ai_runtime::ObjectStore: finstack_ai_runtime::PortObject
 pub fn finstack_ai_runtime::ObjectStore::delete(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey) -> finstack_ai_runtime::PortFuture<core::result::Result<(), finstack_ai_runtime::ObjectError>>
 pub fn finstack_ai_runtime::ObjectStore::get(&self, finstack_ai_runtime::ObjectScope, finstack_ai_runtime::ObjectKey) -> finstack_ai_runtime::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::ObjectError>>
@@ -3989,7 +3920,11 @@ pub fn finstack_ai_runtime::compaction_source_digest(&alloc::sync::Arc<[finstack
 pub fn finstack_ai_runtime::compaction_summary_digest(&finstack_ai_runtime::CompactedSummary) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_runtime::MiddlewareError>
 pub fn finstack_ai_runtime::interaction_resume_action(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::time::Timestamp) -> finstack_ai_runtime::InteractionResumeAction
 pub fn finstack_ai_runtime::journal_export_jsonl<T: serde_core::ser::Serialize>(&[T], finstack_ai_runtime::ObserverPayloadMode) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ObserverError>
+pub fn finstack_ai_runtime::map_model_reconcile_result(&finstack_ai_kernel::state::KernelState, &finstack_ai_runtime::ModelReconcileResult, bool) -> finstack_ai_runtime::ModelResumeAction
+pub fn finstack_ai_runtime::map_tool_reconcile_result(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId, &finstack_ai_runtime::ToolReconcileResult, bool) -> finstack_ai_runtime::ToolResumeAction
 pub fn finstack_ai_runtime::model_resume_action(&finstack_ai_kernel::state::KernelState) -> finstack_ai_runtime::ModelResumeAction
+pub fn finstack_ai_runtime::model_retry_allowed(&finstack_ai_kernel::effects::lifecycle::EffectRequested, &finstack_ai_runtime::ModelCapabilities) -> bool
+pub fn finstack_ai_runtime::normalize_tool_result(finstack_ai_kernel::primitives::ids::ToolCallId, finstack_ai_runtime::ToolResult) -> core::result::Result<finstack_ai_kernel::content::tool::ToolResultBlock, finstack_ai_runtime::ToolError>
 pub fn finstack_ai_runtime::observer_events_jsonl(&[finstack_ai_kernel::events::envelope::RunEvent], finstack_ai_runtime::ObserverPayloadMode) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ObserverError>
 pub fn finstack_ai_runtime::physical_object_key(core::option::Option<&str>, &finstack_ai_kernel::primitives::digest::Digest, &finstack_ai_runtime::ObjectKey) -> alloc::string::String
 pub const fn finstack_ai_runtime::resolve_checkpoint_sequence(u64, core::option::Option<u64>) -> u64
@@ -4001,6 +3936,7 @@ pub async fn finstack_ai_runtime::stage_required_artifact(&dyn finstack_ai_runti
 pub fn finstack_ai_runtime::support_bundle_versions(&str, &[&str]) -> serde_json::value::Value
 pub fn finstack_ai_runtime::thinking_level_budget(&str) -> core::option::Option<u64>
 pub fn finstack_ai_runtime::tool_resume_action(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId) -> finstack_ai_runtime::ToolResumeAction
+pub fn finstack_ai_runtime::tool_retry_allowed(&finstack_ai_kernel::effects::lifecycle::EffectRequested, &finstack_ai_runtime::ToolSpec) -> bool
 pub fn finstack_ai_runtime::validate_compaction_result(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::BeforeModelInput, &finstack_ai_runtime::CompactionResult) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>
 pub fn finstack_ai_runtime::validate_object_metadata(&finstack_ai_runtime::ObjectMetadata) -> core::result::Result<(), finstack_ai_runtime::ObjectError>
 pub fn finstack_ai_runtime::validate_stage_outcome(&finstack_ai_runtime::MiddlewareDescriptor, &finstack_ai_runtime::StageInput, &finstack_ai_runtime::StageOutcome) -> core::result::Result<(), finstack_ai_runtime::MiddlewareError>

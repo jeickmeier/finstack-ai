@@ -7,8 +7,8 @@ use finstack_ai_kernel::{
     EffectRequested, EffectTag, EntryTag, EventTag, Id, IdTag, InteractionKind, InteractionRequest,
     InteractionTag, InvocationRecovery, LaneTag, Message, MessageRole, Metadata, OutputSpec,
     PipelinePosition, ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, RecordBody,
-    RecordEnvelope, RecordTag, RetrySafety, RunTag, Sensitivity, SessionTag, Stage, TextBlock,
-    Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
+    RecordEnvelope, RecordTag, RetrySafety, RunTag, Sensitivity, SessionTag, Stage, StageCursor,
+    TextBlock, Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
 };
 
 use crate::{
@@ -84,7 +84,7 @@ fn compactor_descriptor(id: &str) -> MiddlewareDescriptor {
                 patch: 0,
             },
             configuration_digest: Digest::raw_json(b"{\"window\":2}"),
-            recovery: InvocationRecovery::Reconcile,
+            recovery: InvocationRecovery::RecomputeSafe,
         },
         stages: StageMask::from_stages([Stage::BeforeModel]),
         order: MiddlewareOrder {
@@ -541,8 +541,13 @@ fn middleware_effect(
             schema_digest: Digest::raw_json(b"middleware-outcome-v1"),
         },
         EffectInput::Middleware {
+            cursor: StageCursor {
+                cycle: 0,
+                stage: input.stage(),
+            },
             stage: Arc::from(stage_name(input.stage())),
             input: input.to_raw_json().expect("input"),
+            resume: None,
         },
         RetrySafety::SafeToRetry,
         None,

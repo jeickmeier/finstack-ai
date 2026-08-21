@@ -1,4 +1,4 @@
-# cargo-deny policy restored by PR-065 (FIND-064-004).
+# cargo-deny policy restored by  (FIND-064-004).
 # Controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13.
 
 [graph]
@@ -29,7 +29,7 @@ version = 2
 allow = [
     "MIT",
     "Apache-2.0",
-    # Transitive deps of offline `jsonschema` 0.40 (PR-005 harness; OSI-approved).
+    # Transitive deps of offline `jsonschema` 0.40 ( harness; OSI-approved).
     "Unicode-3.0",
     "MIT-0",
     "Zlib",

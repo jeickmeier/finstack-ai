@@ -115,10 +115,9 @@ pub fn finstack_ai_observer_notify::InteractionNotification::serialize<__S>(&sel
 pub struct finstack_ai_observer_notify::NotifyObserver
 impl finstack_ai_observer_notify::NotifyObserver
 pub fn finstack_ai_observer_notify::NotifyObserver::delivered(&self) -> u64
-pub fn finstack_ai_observer_notify::NotifyObserver::dropped(&self) -> u64
 pub fn finstack_ai_observer_notify::NotifyObserver::failed(&self) -> u64
-pub fn finstack_ai_observer_notify::NotifyObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic>
-pub fn finstack_ai_observer_notify::NotifyObserver::try_new(alloc::sync::Arc<dyn finstack_ai_observer_notify::NotificationSink>, finstack_ai_observer_notify::DeliveryPolicy, usize, finstack_ai_runtime::ports::observer::queue::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
+pub fn finstack_ai_observer_notify::NotifyObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::ObserverDiagnostic>
+pub fn finstack_ai_observer_notify::NotifyObserver::try_new(alloc::sync::Arc<dyn finstack_ai_observer_notify::NotificationSink>, finstack_ai_observer_notify::DeliveryPolicy) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
 impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_observer_notify::NotifyObserver
 pub fn finstack_ai_observer_notify::NotifyObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
 pub fn finstack_ai_observer_notify::NotifyObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
@@ -137,7 +136,7 @@ impl serde_core::ser::Serialize for finstack_ai_observer_notify::PrincipalLabel
 pub fn finstack_ai_observer_notify::PrincipalLabel::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub struct finstack_ai_observer_notify::SlackSink
 impl finstack_ai_observer_notify::SlackSink
-pub fn finstack_ai_observer_notify::SlackSink::try_new(finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
+pub fn finstack_ai_observer_notify::SlackSink::try_new(finstack_ai_runtime::ports::model::support::secret::SecretString) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
 impl core::fmt::Debug for finstack_ai_observer_notify::SlackSink
 pub fn finstack_ai_observer_notify::SlackSink::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_observer_notify::NotificationSink for finstack_ai_observer_notify::SlackSink
@@ -145,13 +144,13 @@ pub fn finstack_ai_observer_notify::SlackSink::deliver(&self, finstack_ai_observ
 pub fn finstack_ai_observer_notify::SlackSink::name(&self) -> &'static str
 pub struct finstack_ai_observer_notify::WebhookSink
 impl finstack_ai_observer_notify::WebhookSink
-pub fn finstack_ai_observer_notify::WebhookSink::try_new(finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
+pub fn finstack_ai_observer_notify::WebhookSink::try_new(finstack_ai_runtime::ports::model::support::secret::SecretString) -> core::result::Result<Self, finstack_ai_observer_notify::NotifyObserverError>
 impl core::fmt::Debug for finstack_ai_observer_notify::WebhookSink
 pub fn finstack_ai_observer_notify::WebhookSink::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_observer_notify::NotificationSink for finstack_ai_observer_notify::WebhookSink
 pub fn finstack_ai_observer_notify::WebhookSink::deliver(&self, finstack_ai_observer_notify::InteractionNotification) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_observer_notify::SinkError>>
 pub fn finstack_ai_observer_notify::WebhookSink::name(&self) -> &'static str
-pub const finstack_ai_observer_notify::NOTIFY_DELIVERY_FAILED: finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic
+pub const finstack_ai_observer_notify::NOTIFY_DELIVERY_FAILED: finstack_ai_runtime::ports::observer::ObserverDiagnostic
 pub trait finstack_ai_observer_notify::NotificationSink: core::marker::Send + core::marker::Sync + 'static
 pub fn finstack_ai_observer_notify::NotificationSink::deliver(&self, finstack_ai_observer_notify::InteractionNotification) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_observer_notify::SinkError>>
 pub fn finstack_ai_observer_notify::NotificationSink::name(&self) -> &'static str

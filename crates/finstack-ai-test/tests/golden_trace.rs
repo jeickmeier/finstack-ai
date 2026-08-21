@@ -1,4 +1,4 @@
-//! Integration tests for golden-trace loading and validation (PR-005).
+//! Integration tests for golden-trace loading and validation (golden-trace baseline).
 
 use finstack_ai_test::{
     DurabilityClass, TraceError, compare_normalized_bytes, compatibility_fixture,
@@ -76,10 +76,10 @@ fn pr009_scripted_step_contract_rejects_missing_fields_and_kind_misuse() {
         "golden-trace/v1/scripted-input/invalid--external-completed-missing-text.json",
     ] {
         let text = std::fs::read_to_string(compatibility_fixture(relative))
-            .expect("read invalid PR-009 scripted fixture");
+            .expect("read invalid model-only reducer baseline scripted fixture");
         let value: serde_json::Value = serde_json::from_str(&text).expect("parse invalid fixture");
         let error = validate_against_schema("golden-trace", 1, "scripted-input", &value)
-            .expect_err("invalid PR-009 scripted step must fail");
+            .expect_err("invalid model-only reducer baseline scripted step must fail");
         assert!(matches!(error, TraceError::Schema(_)), "{relative}");
     }
 }

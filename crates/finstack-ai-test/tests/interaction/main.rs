@@ -1,4 +1,4 @@
-//! PR-044 typed-interaction crash, router, and envelope proofs.
+//! interaction contract typed-interaction crash, router, and envelope proofs.
 
 use std::sync::Arc;
 

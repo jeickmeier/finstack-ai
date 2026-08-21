@@ -1,4 +1,4 @@
-//! Historical journal v1 compatibility runner (PR-039 / A08).
+//! Historical journal v1 compatibility runner (journal-v1 compatibility / A08).
 
 use std::fs;
 use std::path::{Path, PathBuf};

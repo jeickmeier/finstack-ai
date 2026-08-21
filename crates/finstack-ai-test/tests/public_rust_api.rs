@@ -1,4 +1,4 @@
-//! Public-rust-api compatibility corpus (PR-006–PR-015).
+//! Public-rust-api compatibility corpus (public-API fixture baseline–model-port contract).
 
 use std::collections::BTreeSet;
 

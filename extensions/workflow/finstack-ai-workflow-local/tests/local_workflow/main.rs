@@ -1,4 +1,4 @@
-//! PR-059 reference-driver proofs (A01, A02, A04, TM-19).
+//! local-workflow contract reference-driver proofs (A01, A02, A04, TM-19).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -360,6 +360,24 @@ export class Run {
         }
     }
     /**
+     * Snapshot bounded, redacted observer-delivery diagnostics.
+     *
+     * The snapshot is process-local and non-semantic. Reading it does not affect
+     * the journal, kernel state, run result, or best-effort observer delivery.
+     *
+     * @returns Exact totals and the bounded recent diagnostic list.
+     * @throws {FinstackError} When run startup failed before a runtime handle was
+     * published.
+     */
+    async observerDiagnostics() {
+        try {
+            return (await this.#handle.observerDiagnostics());
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
      * Submit idempotent durable cancellation.
      *
      * @param reason - Optional non-secret reason. Not persisted as raw host text.

@@ -69,6 +69,12 @@ pub(super) fn decide_stage(
 ) -> Result<Decision, KernelError> {
     validate_stage_input(input)?;
     reject_terminal(state)?;
+    if state.pending_extension_effect.is_some() {
+        return Err(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "stage_settled",
+        });
+    }
     let expected = expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
         phase: state.phase,
         input: "stage_settled",

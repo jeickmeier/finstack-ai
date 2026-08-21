@@ -227,9 +227,10 @@ impl AgentRun {
                 "interaction list requires a principal-authored run",
             ));
         };
-        let Ok(recovered) = CommitCoordinator::recover(
+        let Ok(recovered) = CommitCoordinator::recover_run(
             Arc::clone(&self.inner.store),
             self.inner.locator.session_id,
+            Some(self.inner.locator.run_id),
         )
         .await
         else {
@@ -274,9 +275,12 @@ impl AgentRun {
         &self,
         resolution: InteractionResolution,
     ) -> Result<(), AgentRunError> {
-        if let Ok(recovered) =
-            CommitCoordinator::recover(Arc::clone(&self.inner.store), self.inner.locator.session_id)
-                .await
+        if let Ok(recovered) = CommitCoordinator::recover_run(
+            Arc::clone(&self.inner.store),
+            self.inner.locator.session_id,
+            Some(self.inner.locator.run_id),
+        )
+        .await
             && let Some(pending) = recovered.state().pending_interaction.as_ref()
             && pending.request.interaction_id() == resolution.interaction_id()
         {
@@ -320,6 +324,21 @@ impl AgentRun {
         }
     }
 
+    /// Snapshot bounded, redacted observer-delivery diagnostics for this run.
+    ///
+    /// Diagnostics are process-local and non-semantic: reading them never
+    /// mutates the journal or kernel state.
+    ///
+    /// # Errors
+    ///
+    /// Returns the retained startup failure when no runtime handle was
+    /// published.
+    pub async fn observer_diagnostics(
+        &self,
+    ) -> Result<finstack_ai_runtime::ObserverDiagnostics, AgentRunError> {
+        Ok(self.runtime_handle().await?.observer_diagnostics())
+    }
+
     /// Submit one idempotent durable cancellation request.
     ///
     /// Cancellation is explicit and independent of Python/Rust handle drops.
@@ -330,6 +349,14 @@ impl AgentRun {
     /// Returns a stable runtime failure if run startup or cancellation commit
     /// fails.
     pub async fn cancel(&self) -> Result<(), AgentRunError> {
+        self.cancel_with_initiator(self.inner.cancellation_initiator.clone())
+            .await
+    }
+
+    pub(crate) async fn cancel_with_initiator(
+        &self,
+        initiator: CancellationInitiator,
+    ) -> Result<(), AgentRunError> {
         let should_start = {
             let mut cancellation =
                 self.inner.cancellation.lock().map_err(|_| {
@@ -348,7 +375,7 @@ impl AgentRun {
         if should_start {
             let run = self.clone();
             if let Err(error) = driver::spawn(Box::pin(async move {
-                let result = run.submit_cancellation().await;
+                let result = run.submit_cancellation_with(initiator).await;
                 if let Ok(mut cancellation) = run.inner.cancellation.lock() {
                     cancellation.result = Some(result);
                 }
@@ -462,7 +489,16 @@ impl AgentRun {
         }
     }
 
+    #[cfg(feature = "native-tokio")]
     pub(super) async fn submit_cancellation(&self) -> Result<(), AgentRunError> {
+        self.submit_cancellation_with(self.inner.cancellation_initiator.clone())
+            .await
+    }
+
+    async fn submit_cancellation_with(
+        &self,
+        initiator: CancellationInitiator,
+    ) -> Result<(), AgentRunError> {
         if self
             .inner
             .result
@@ -495,7 +531,7 @@ impl AgentRun {
             &handle,
             NativeIds::cancellation_environment()?,
             KernelInput::CancelRequested(CancelRequested {
-                initiator: self.inner.cancellation_initiator.clone(),
+                initiator,
                 reason: Some(Arc::from("frontend cancellation")),
             }),
         )

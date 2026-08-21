@@ -1,0 +1,117 @@
+pub mod finstack_ai_provider_wire
+pub enum finstack_ai_provider_wire::NdjsonError
+pub finstack_ai_provider_wire::NdjsonError::InvalidUtf8
+pub finstack_ai_provider_wire::NdjsonError::Limit
+impl core::clone::Clone for finstack_ai_provider_wire::NdjsonError
+pub fn finstack_ai_provider_wire::NdjsonError::clone(&self) -> finstack_ai_provider_wire::NdjsonError
+impl core::cmp::Eq for finstack_ai_provider_wire::NdjsonError
+impl core::cmp::PartialEq for finstack_ai_provider_wire::NdjsonError
+pub fn finstack_ai_provider_wire::NdjsonError::eq(&self, &finstack_ai_provider_wire::NdjsonError) -> bool
+impl core::convert::From<finstack_ai_provider_wire::NdjsonError> for finstack_ai_provider_wire::StreamNormError
+pub fn finstack_ai_provider_wire::StreamNormError::from(finstack_ai_provider_wire::NdjsonError) -> Self
+impl core::fmt::Debug for finstack_ai_provider_wire::NdjsonError
+pub fn finstack_ai_provider_wire::NdjsonError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_provider_wire::NdjsonError
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::NdjsonError
+pub enum finstack_ai_provider_wire::SseParseError
+pub finstack_ai_provider_wire::SseParseError::DuplicateName
+pub finstack_ai_provider_wire::SseParseError::InvalidUtf8
+pub finstack_ai_provider_wire::SseParseError::Limit
+impl core::clone::Clone for finstack_ai_provider_wire::SseParseError
+pub fn finstack_ai_provider_wire::SseParseError::clone(&self) -> finstack_ai_provider_wire::SseParseError
+impl core::cmp::Eq for finstack_ai_provider_wire::SseParseError
+impl core::cmp::PartialEq for finstack_ai_provider_wire::SseParseError
+pub fn finstack_ai_provider_wire::SseParseError::eq(&self, &finstack_ai_provider_wire::SseParseError) -> bool
+impl core::fmt::Debug for finstack_ai_provider_wire::SseParseError
+pub fn finstack_ai_provider_wire::SseParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_provider_wire::SseParseError
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::SseParseError
+pub enum finstack_ai_provider_wire::StreamNormKind
+pub finstack_ai_provider_wire::StreamNormKind::Incomplete
+pub finstack_ai_provider_wire::StreamNormKind::Limit
+pub finstack_ai_provider_wire::StreamNormKind::Response
+pub finstack_ai_provider_wire::StreamNormKind::Stream
+impl core::clone::Clone for finstack_ai_provider_wire::StreamNormKind
+pub fn finstack_ai_provider_wire::StreamNormKind::clone(&self) -> finstack_ai_provider_wire::StreamNormKind
+impl core::cmp::Eq for finstack_ai_provider_wire::StreamNormKind
+impl core::cmp::PartialEq for finstack_ai_provider_wire::StreamNormKind
+pub fn finstack_ai_provider_wire::StreamNormKind::eq(&self, &finstack_ai_provider_wire::StreamNormKind) -> bool
+impl core::fmt::Debug for finstack_ai_provider_wire::StreamNormKind
+pub fn finstack_ai_provider_wire::StreamNormKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_provider_wire::StreamNormKind
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::StreamNormKind
+pub struct finstack_ai_provider_wire::AnthropicMessagesAssembly
+impl finstack_ai_provider_wire::AnthropicMessagesAssembly
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::consume(&mut self, &str, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::new(alloc::string::String, bool) -> Self
+pub struct finstack_ai_provider_wire::GeminiGenerateContentAssembly
+impl finstack_ai_provider_wire::GeminiGenerateContentAssembly
+pub const fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::completed(&self) -> bool
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::finish(&mut self) -> core::result::Result<(), finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::new(alloc::string::String, bool) -> Self
+pub struct finstack_ai_provider_wire::NdjsonParser
+impl finstack_ai_provider_wire::NdjsonParser
+pub fn finstack_ai_provider_wire::NdjsonParser::finish(self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::NdjsonError>
+pub const fn finstack_ai_provider_wire::NdjsonParser::new(usize, usize) -> Self
+pub fn finstack_ai_provider_wire::NdjsonParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::NdjsonError>
+pub struct finstack_ai_provider_wire::OllamaChatAssembly
+pub finstack_ai_provider_wire::OllamaChatAssembly::done: bool
+impl finstack_ai_provider_wire::OllamaChatAssembly
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::finish(self) -> core::result::Result<finstack_ai_runtime::ports::model::request::ModelResponse, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::new(alloc::string::String, bool, core::option::Option<alloc::vec::Vec<finstack_ai_provider_wire::OllamaReplayEntry>>) -> Self
+pub struct finstack_ai_provider_wire::OllamaReplayEntry
+pub finstack_ai_provider_wire::OllamaReplayEntry::digest: core::option::Option<alloc::string::String>
+pub finstack_ai_provider_wire::OllamaReplayEntry::thinking: alloc::string::String
+impl core::clone::Clone for finstack_ai_provider_wire::OllamaReplayEntry
+pub fn finstack_ai_provider_wire::OllamaReplayEntry::clone(&self) -> finstack_ai_provider_wire::OllamaReplayEntry
+impl core::cmp::Eq for finstack_ai_provider_wire::OllamaReplayEntry
+impl core::cmp::PartialEq for finstack_ai_provider_wire::OllamaReplayEntry
+pub fn finstack_ai_provider_wire::OllamaReplayEntry::eq(&self, &finstack_ai_provider_wire::OllamaReplayEntry) -> bool
+impl core::default::Default for finstack_ai_provider_wire::OllamaReplayEntry
+pub fn finstack_ai_provider_wire::OllamaReplayEntry::default() -> finstack_ai_provider_wire::OllamaReplayEntry
+impl core::fmt::Debug for finstack_ai_provider_wire::OllamaReplayEntry
+pub fn finstack_ai_provider_wire::OllamaReplayEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::OllamaReplayEntry
+pub struct finstack_ai_provider_wire::OpenAiResponsesAssembly
+impl finstack_ai_provider_wire::OpenAiResponsesAssembly
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::new(alloc::string::String, bool) -> Self
+pub struct finstack_ai_provider_wire::SseEvent
+pub finstack_ai_provider_wire::SseEvent::data: alloc::string::String
+pub finstack_ai_provider_wire::SseEvent::name: core::option::Option<alloc::string::String>
+impl core::clone::Clone for finstack_ai_provider_wire::SseEvent
+pub fn finstack_ai_provider_wire::SseEvent::clone(&self) -> finstack_ai_provider_wire::SseEvent
+impl core::cmp::Eq for finstack_ai_provider_wire::SseEvent
+impl core::cmp::PartialEq for finstack_ai_provider_wire::SseEvent
+pub fn finstack_ai_provider_wire::SseEvent::eq(&self, &finstack_ai_provider_wire::SseEvent) -> bool
+impl core::fmt::Debug for finstack_ai_provider_wire::SseEvent
+pub fn finstack_ai_provider_wire::SseEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::SseEvent
+pub struct finstack_ai_provider_wire::SseEventParser
+impl finstack_ai_provider_wire::SseEventParser
+pub fn finstack_ai_provider_wire::SseEventParser::finish_clean(&self) -> bool
+pub const fn finstack_ai_provider_wire::SseEventParser::new(usize, usize) -> Self
+pub fn finstack_ai_provider_wire::SseEventParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<finstack_ai_provider_wire::SseEvent>, finstack_ai_provider_wire::SseParseError>
+impl core::fmt::Debug for finstack_ai_provider_wire::SseEventParser
+pub fn finstack_ai_provider_wire::SseEventParser::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_provider_wire::StreamNormError
+pub finstack_ai_provider_wire::StreamNormError::kind: finstack_ai_provider_wire::StreamNormKind
+pub finstack_ai_provider_wire::StreamNormError::message: &'static str
+impl core::clone::Clone for finstack_ai_provider_wire::StreamNormError
+pub fn finstack_ai_provider_wire::StreamNormError::clone(&self) -> finstack_ai_provider_wire::StreamNormError
+impl core::cmp::Eq for finstack_ai_provider_wire::StreamNormError
+impl core::cmp::PartialEq for finstack_ai_provider_wire::StreamNormError
+pub fn finstack_ai_provider_wire::StreamNormError::eq(&self, &finstack_ai_provider_wire::StreamNormError) -> bool
+impl core::convert::From<finstack_ai_provider_wire::NdjsonError> for finstack_ai_provider_wire::StreamNormError
+pub fn finstack_ai_provider_wire::StreamNormError::from(finstack_ai_provider_wire::NdjsonError) -> Self
+impl core::fmt::Debug for finstack_ai_provider_wire::StreamNormError
+pub fn finstack_ai_provider_wire::StreamNormError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::StreamNormError
+pub const finstack_ai_provider_wire::GEMINI_CACHED_TOKENS_KEY: &str
+pub const finstack_ai_provider_wire::GEMINI_CODE_RESULT_MEDIA_TYPE: &str
+pub const finstack_ai_provider_wire::GEMINI_CONTINUATION_PROVIDER: &str
+pub const finstack_ai_provider_wire::GEMINI_EXECUTABLE_CODE_MEDIA_TYPE: &str
+pub const finstack_ai_provider_wire::GEMINI_GROUNDING_MEDIA_TYPE: &str
+pub const finstack_ai_provider_wire::GEMINI_THOUGHTS_TOKENS_KEY: &str

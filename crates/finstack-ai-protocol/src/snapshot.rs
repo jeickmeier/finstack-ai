@@ -1,4 +1,4 @@
-//! Direct versioned kernel-state CBOR snapshot envelope (ADR-032 / PR-041).
+//! Direct versioned kernel-state CBOR snapshot envelope (ADR-032 / snapshot replay contract).
 
 use finstack_ai_kernel::{Digest, KernelState, RawJson, Timestamp};
 use serde::{Deserialize, Serialize};

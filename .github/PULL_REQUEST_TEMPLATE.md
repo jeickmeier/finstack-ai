@@ -2,9 +2,9 @@
 
 <!-- What does this change and why? -->
 
-## Logical PR / plan reference
+## Task / issue reference
 
-<!-- e.g. PR-001 from docs/planning/04-finstack-ai-implementation-plan.md -->
+<!-- Link the current issue, task, or decision record when one exists. -->
 
 -
 
@@ -37,11 +37,11 @@
 - [ ] Architecture review checklist completed: [.github/ARCHITECTURE_REVIEW_CHECKLIST.md](./ARCHITECTURE_REVIEW_CHECKLIST.md)
 - [ ] Dependency direction preserved: `kernel <- runtime <- SDK/bindings`; protocol stays outward (kernel DTOs only as needed)
 - [ ] No forbidden kernel I/O or host-language binding dependencies introduced
-- [ ] Scope matches one coherent logical PR; deferred work not pulled in early
-- [ ] Engineering Standards and Security/Threat Model review triggers considered ([Eng Standards](../docs/planning/00-finstack-ai-engineering-standards.md), [Threat Model](../docs/planning/06-finstack-ai-security-threat-model.md))
-- [ ] Schema/contract changes use the [change-classification template](../docs/implementation/schema-change-template.md) when applicable
-- [ ] Exceptions/waivers recorded when required ([exceptions register](../docs/implementation/exceptions-register.md))
-- [ ] Acceptance evidence updated when criteria are claimed ([evidence register](../docs/implementation/evidence-register.md))
+- [ ] Scope is one coherent behavior change; deferred work is not pulled in early
+- [ ] Applicable architecture, compatibility, and security review triggers considered
+- [ ] Schema/contract changes include migration or explicit clean-break handling
+- [ ] Exceptions or waivers are explicit, owned, and time-bounded
+- [ ] Exact validation commands and results are recorded below
 - [ ] Commits are DCO signed-off (`git commit -s`)
 - [ ] Affected `mise run` / `cargo` checks documented below
 - [ ] Hosted CI workflow considered (see [`.github/ci/README.md`](./ci/README.md))

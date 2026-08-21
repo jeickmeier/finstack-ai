@@ -80,6 +80,53 @@ test("runs a model-only scripted Agent to a text result", async ({ page }) => {
   });
 });
 
+test("reports bounded redacted observer diagnostics without affecting results", async ({
+  page,
+}) => {
+  const result = await page.evaluate(async ({ modelOptions }) => {
+    const model = new window.finstackTest.JsModel(
+      {
+        request: async () => ({
+          text: "observer failures stay non-semantic",
+          completion_id: "js-observer-1",
+        }),
+      },
+      modelOptions,
+    );
+    const observer = new window.finstackTest.JsObserver(
+      {
+        observe: async () => {
+          throw new Error("host secret must not escape");
+        },
+      },
+      { component: "js.observer.failing", payloadMode: "redacted" },
+    );
+    const agent = await window.finstackTest.Agent.create({
+      model,
+      observers: [observer],
+    });
+    const run = agent.start("hello");
+    const runResult = await run.result();
+    const diagnostics = await run.observerDiagnostics();
+    return {
+      text: runResult.text,
+      total: diagnostics.total.toString(),
+      dropped: diagnostics.dropped.toString(),
+      recent: diagnostics.recent,
+    };
+  }, { modelOptions: MODEL_OPTIONS });
+
+  expect(result.text).toBe("observer failures stay non-semantic");
+  expect(BigInt(result.total)).toBeGreaterThanOrEqual(1n);
+  expect(result.dropped).toBe("0");
+  expect(result.recent.length).toBeGreaterThan(0);
+  expect(result.recent[0]).toEqual({
+    code: "observer_delivery_failed",
+    detail: "observer delivery failed",
+  });
+  expect(JSON.stringify(result.recent)).not.toContain("secret");
+});
+
 test("completes a scripted tool-using Agent cycle", async ({ page }) => {
   const result = await page.evaluate(
     async ({ modelOptions, toolOptions }) => {

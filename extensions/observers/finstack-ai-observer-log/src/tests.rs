@@ -1,15 +1,12 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use finstack_ai_kernel::{
     EventTag, Id, IdTag, LaneTag, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag, Timestamp,
 };
 use finstack_ai_kernel::{RunEvent, Sensitivity};
-use finstack_ai_runtime::{
-    Observer, ObserverBackpressure, ObserverPayloadMode, journal_export_jsonl,
-};
+use finstack_ai_runtime::{Observer, ObserverPayloadMode, journal_export_jsonl};
 use finstack_ai_test::check_observer_conformance;
 use tempfile::tempdir;
 
@@ -50,19 +47,15 @@ fn warning(depth: u32) -> RunEventBody {
     RunEventBody::QueueDepthWarning(QueueDepthWarning { depth, limit: 8 })
 }
 
-fn observer(
-    writer: Arc<Mutex<Vec<u8>>>,
-    capacity: usize,
-    policy: ObserverBackpressure,
-) -> LogObserver {
+fn observer(writer: Arc<Mutex<Vec<u8>>>) -> LogObserver {
     let sink: Arc<Mutex<dyn Write + Send>> = writer;
-    LogObserver::try_new(ObserverPayloadMode::Redacted, sink, capacity, policy).expect("observer")
+    LogObserver::try_new(ObserverPayloadMode::Redacted, sink).expect("observer")
 }
 
 #[tokio::test]
 async fn conformance_accepts_an_empty_batch() {
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let log = observer(writer, 8, ObserverBackpressure::DropProgress);
+    let log = observer(writer);
     check_observer_conformance(&log, Arc::from([]))
         .await
         .expect("conformance");
@@ -71,7 +64,7 @@ async fn conformance_accepts_an_empty_batch() {
 #[tokio::test]
 async fn redacted_logs_omit_secret_and_credential_bodies() {
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let log = observer(Arc::clone(&writer), 8, ObserverBackpressure::DropProgress);
+    let log = observer(Arc::clone(&writer));
     let secret = event(
         Sensitivity::Secret,
         RunEventBody::QueueDepthWarning(QueueDepthWarning { depth: 1, limit: 8 }),
@@ -97,7 +90,7 @@ async fn redacted_logs_omit_secret_and_credential_bodies() {
 #[tokio::test]
 async fn secret_canary_never_appears_in_log_jsonl_or_bundle() {
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let log = observer(Arc::clone(&writer), 8, ObserverBackpressure::DropProgress);
+    let log = observer(Arc::clone(&writer));
     let body = RunEventBody::QueueDepthWarning(QueueDepthWarning { depth: 1, limit: 8 });
     let secret = event(Sensitivity::Secret, body);
     log.observe(Arc::from([secret.clone()]))
@@ -123,54 +116,4 @@ async fn secret_canary_never_appears_in_log_jsonl_or_bundle() {
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains(CANARY), "{} leaked canary", path.display());
     }
-}
-
-#[tokio::test]
-async fn drop_progress_overflow_is_diagnosed_and_does_not_fail_the_call() {
-    let writer = Arc::new(Mutex::new(Vec::new()));
-    let log = observer(writer, 1, ObserverBackpressure::DropProgress);
-    log.observe(Arc::from([
-        event(Sensitivity::Public, warning(1)),
-        event(Sensitivity::Public, warning(2)),
-    ]))
-    .await
-    .expect("observe");
-    assert!(log.dropped() >= 1);
-    assert_eq!(
-        log.last_diagnostic().expect("diagnostic").code,
-        "observer_queue_overflow"
-    );
-}
-
-#[tokio::test]
-async fn disconnect_overflow_returns_capacity_exceeded() {
-    let writer = Arc::new(Mutex::new(Vec::new()));
-    let log = observer(writer, 1, ObserverBackpressure::Disconnect);
-    let error = log
-        .observe(Arc::from([
-            event(Sensitivity::Public, warning(1)),
-            event(Sensitivity::Public, warning(2)),
-        ]))
-        .await
-        .expect_err("disconnect");
-    assert_eq!(error.code(), "observer_capacity_exceeded");
-}
-
-#[tokio::test]
-async fn block_bounded_timeout_drops_instead_of_hanging() {
-    let writer = Arc::new(Mutex::new(Vec::new()));
-    let log = observer(
-        writer,
-        1,
-        ObserverBackpressure::BlockBounded {
-            timeout: Duration::from_millis(1),
-        },
-    );
-    log.observe(Arc::from([
-        event(Sensitivity::Public, warning(1)),
-        event(Sensitivity::Public, warning(2)),
-    ]))
-    .await
-    .expect("observe");
-    assert!(log.dropped() >= 1);
 }

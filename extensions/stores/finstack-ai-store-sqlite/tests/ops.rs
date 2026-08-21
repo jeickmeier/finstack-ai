@@ -1,4 +1,4 @@
-//! PR-048 `sqlite_ops` leaf-command proofs.
+//! crash-recovery contract `sqlite_ops` leaf-command proofs.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

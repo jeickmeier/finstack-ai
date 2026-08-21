@@ -25,6 +25,9 @@ pub(crate) fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::E
     if let Some(pending) = &state.pending_interaction {
         effects.push(pending.request.effect_id());
     }
+    if let Some(pending) = &state.pending_extension_effect {
+        effects.push(pending.requested.effect_id());
+    }
     if let Some(pending) = &state.retry.pending {
         effects.push(pending.timer_effect_id);
     }

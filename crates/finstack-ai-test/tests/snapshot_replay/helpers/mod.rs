@@ -1,4 +1,4 @@
-//! PR-041 snapshot discard, mismatch, and replay-equivalence proofs.
+//! snapshot replay contract snapshot discard, mismatch, and replay-equivalence proofs.
 
 use std::future::Future;
 use std::sync::Arc;

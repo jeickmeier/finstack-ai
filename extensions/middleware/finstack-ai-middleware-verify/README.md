@@ -71,19 +71,16 @@ chain re-runs from its first component, including components that already
 ran. A verifier with hidden state, wall-clock reads, or network calls will
 diverge between the original run and its replay. Verifiers needing
 committed, effect-bearing checks (running a test suite, fetching a source)
-do not belong here — see the runtime-owned-phase pattern in
-[ADR-042](../../../docs/implementation/adrs/ADR-042-model-assisted-compaction-runtime-phase.md)
-for the model this crate deliberately does not follow.
+do not belong here; they require a runtime-owned durable effect path that this
+crate deliberately does not implement.
 
 ## `RequestInteraction` is gone
 
 The former `VerifyDecision::RequestInteraction` mode has been removed
 outright rather than kept as a documented dead end. Pausing a run for human
-approval has no single-settlement shape at any stage — see
-[Shipping leaves](../../../docs/site/middleware.md#shipping-leaves) and the
-stage/outcome matrix on that page for why the fold has nowhere for it to
-land. Approval-gated finalize, if ever wanted, needs a kernel input of its
-own, not a middleware outcome.
+approval has no single-settlement middleware shape, so the fold has nowhere
+for it to land. Approval-gated finalize, if added, needs a kernel input of its
+own rather than a middleware outcome.
 
 ## Usage
 

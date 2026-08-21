@@ -1,4 +1,4 @@
-"""Non-default PR-030 Model and Toolset port-conformance fixture."""
+"""Non-default Model and Toolset port-conformance fixture."""
 
 from __future__ import annotations
 

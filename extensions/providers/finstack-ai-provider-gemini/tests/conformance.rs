@@ -10,11 +10,12 @@ use finstack_ai_kernel::{
     ToolId,
 };
 use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
+use finstack_ai_provider_wire::GeminiGenerateContentAssembly;
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal,
-    GeminiGenerateContentAssembly, Model, ModelCallContext, ModelName, ModelRequest,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem, ModelStreamLimits,
-    ModelTerminal, RunCallContext, SideEffectClass, ToolDeferralSupport, ToolSpec,
+    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal, Model,
+    ModelCallContext, ModelName, ModelRequest, ModelRequestDraft, ModelRequestLimits,
+    ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTerminal, RunCallContext,
+    SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
 use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

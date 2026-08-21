@@ -1,4 +1,4 @@
-//! TM-04 config-key scan. Keys ending in `_ref` are allowed.
+//! TM-04 heuristic configuration scan. Credential-free references are not a parser-backed exemption.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -28,16 +28,13 @@ pub(super) fn ensure_secret_free_config(
 
 /// Secret-key detector for bundle configuration objects.
 ///
-/// Scans object keys only. String values are ignored to avoid false positives.
-/// Keys ending in `_ref` are allowed. Tokens are split on non-alphanumeric
-/// characters so `auth` matches `auth_token` but not `oauth` or `author`.
-/// Innocuous keys that hold credential values remain a host problem
-/// (TM-04 residual); this is not a config-schema allowlist.
+/// Scans keys and rejects credential-shaped string values. This is a heuristic,
+/// not a complete secret detector or config-schema allowlist.
 fn contains_secret(value: &serde_json::Value) -> bool {
     match value {
-        serde_json::Value::Object(map) => map
-            .iter()
-            .any(|(key, value)| key_looks_secret(key) || contains_secret(value)),
+        serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
+            key_looks_secret(key) || value_looks_secret(value) || contains_secret(value)
+        }),
         serde_json::Value::Array(values) => values.iter().any(contains_secret),
         serde_json::Value::Null
         | serde_json::Value::Bool(_)
@@ -61,16 +58,28 @@ const SECRET_TOKENS: &[&str] = &[
 const SECRET_COMPOUNDS: &[&[&str]] = &[&["api", "key"], &["access", "key"], &["private", "key"]];
 
 fn key_looks_secret(key: &str) -> bool {
-    let normalized = key.to_ascii_lowercase();
-    if normalized.ends_with("_ref") {
-        return false;
+    let normalized = key.to_string();
+    let mut separated = String::with_capacity(normalized.len() + 4);
+    for (index, character) in normalized.chars().enumerate() {
+        if index > 0 && character.is_ascii_uppercase() {
+            separated.push('_');
+        }
+        separated.push(character.to_ascii_lowercase());
     }
-    let tokens: Vec<&str> = normalized
+    let tokens: Vec<&str> = separated
         .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|token| !token.is_empty())
+        .filter(|token| !token.is_empty() && *token != "ref")
         .collect();
     tokens.iter().any(|token| SECRET_TOKENS.contains(token))
         || tokens
             .windows(2)
             .any(|pair| SECRET_COMPOUNDS.contains(&pair))
+}
+
+fn value_looks_secret(value: &serde_json::Value) -> bool {
+    let serde_json::Value::String(value) = value else {
+        return false;
+    };
+    let lower = value.to_ascii_lowercase();
+    lower.starts_with("sk-") || lower.starts_with("aiza") || lower.starts_with("bearer ")
 }

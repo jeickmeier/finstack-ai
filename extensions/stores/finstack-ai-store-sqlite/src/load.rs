@@ -24,7 +24,6 @@ use crate::error::{
 };
 
 pub(crate) struct LoadedBatch {
-    pub(crate) request_cbor: Vec<u8>,
     pub(crate) identity: AppendIdentity,
     pub(crate) committed: CommittedBatch,
 }
@@ -77,7 +76,6 @@ pub(crate) fn load_batch(
         reason_code: "committed_batch_invalid",
     })?;
     Ok(Some(LoadedBatch {
-        request_cbor,
         identity,
         committed,
     }))

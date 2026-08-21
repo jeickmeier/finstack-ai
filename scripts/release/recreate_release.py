@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Two-run local staging checksum identity (PR-066 unpublished 1.0.0)."""
+"""Verify two-run checksum identity for an unpublished 1.0.0 staging build."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_stage import REPO_ROOT, checksum_text, stage
 
-WORK = REPO_ROOT / "target" / "pr-066-recreate"
-RECORD = REPO_ROOT / "docs" / "implementation" / "artifacts" / "pr-066"
+WORK = REPO_ROOT / "target" / "release-staging" / "recreate"
+RECORD = WORK / "records"
 
 
 def main() -> int:

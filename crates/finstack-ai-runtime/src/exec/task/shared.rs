@@ -6,6 +6,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::CommitOutcome;
 use crate::event_hub::EventHubHandle;
+use crate::observer::ObserverDiagnosticBuffer;
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
 
 pub(super) struct Shared {
@@ -16,6 +17,7 @@ pub(super) struct Shared {
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
     pub(super) timer_already_due: AtomicU64,
     pub(super) timer_backward_clock_clamped: AtomicU64,
+    pub(super) observer_diagnostics: Mutex<ObserverDiagnosticBuffer>,
 }
 
 pub(super) struct RunCommand {

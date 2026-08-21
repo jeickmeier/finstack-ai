@@ -9,9 +9,8 @@ use crate::store::{PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
-    E2bSandboxAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
-    Session,
+    GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
+    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
 };
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
@@ -29,6 +28,7 @@ use crate::callbacks::{
     PyPythonContextProvider, PyPythonMiddleware, PyPythonModel, PyPythonObserver, PyPythonToolset,
 };
 use crate::capability::PyCapability;
+use crate::e2b::PyE2bSandboxToolset;
 use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
@@ -50,6 +50,8 @@ pub(crate) enum PyToolsetArg {
     Memory(Py<PyMemoryToolset>),
     /// Rust bounded HTTP fetch toolset.
     HttpFetch(Py<PyHttpFetchToolset>),
+    /// Rust E2B sandbox toolset.
+    E2b(Py<PyE2bSandboxToolset>),
 }
 
 impl PyToolsetArg {
@@ -68,6 +70,7 @@ impl PyToolsetArg {
                 .borrow()
                 .registration(py, Arc::clone(artifact_store)),
             Self::HttpFetch(toolset) => Ok(toolset.bind(py).borrow().registration()),
+            Self::E2b(toolset) => Ok(toolset.bind(py).borrow().registration()),
         }
     }
 }
@@ -547,68 +550,6 @@ impl PyAgent {
                 hard_input_bytes,
                 auth_kind: auth,
                 api_key,
-                common: LinkedCommon {
-                    instruction,
-                    capabilities,
-                    active_capabilities,
-                    ports,
-                    child_runs,
-                    approval_grant,
-                },
-            })
-            .await;
-            Python::attach(|py| {
-                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
-            })
-        })
-    }
-
-    /// Construct a Rust-backed T4 E2B sandbox agent.
-    ///
-    /// `api_key` is required and keyword-only. The binding does not read
-    /// environment variables.
-    #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, endpoint = None, template = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "linked factory forwards e2b route and primary port components distinctly"
-    )]
-    fn e2b_sandbox(
-        py: Python<'_>,
-        model: String,
-        instruction: Option<String>,
-        capabilities: Option<Vec<Py<PyCapability>>>,
-        active_capabilities: Option<Vec<String>>,
-        api_key: String,
-        endpoint: Option<String>,
-        template: Option<String>,
-        toolsets: Option<Vec<PyToolsetArg>>,
-        context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
-        observers: Option<Vec<PyObserverArg>>,
-        output_type: Option<Py<PyAny>>,
-        child_runs: Option<Py<PyChildRunPolicy>>,
-        approval_grant: Option<Py<PyApprovalGrantMode>>,
-    ) -> PyResult<Bound<'_, PyAny>> {
-        let (capabilities, active_capabilities) =
-            capability_configuration(py, capabilities, active_capabilities)?;
-        let (ports, artifact_store, attachment_index) = linked_ports(
-            py,
-            toolsets,
-            context_providers,
-            middleware,
-            observers,
-            output_type,
-        )?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter) = split_linked_ports(ports);
-            let built = Agent::e2b_sandbox(E2bSandboxAgentSpec {
-                model,
-                api_key,
-                endpoint,
-                template,
                 common: LinkedCommon {
                     instruction,
                     capabilities,

@@ -294,8 +294,7 @@ fn fresh_router_loads_only_locator_session_and_audits_unknown_target_idempotentl
         let submitted_at = timestamp(2_000);
         for _ in 0..2 {
             assert_eq!(
-                router
-                    .route(completion("subject"), submitted_at)
+                Box::pin(router.route(completion("subject"), submitted_at))
                     .await
                     .expect_err("unknown target"),
                 ExternalRouteError::IngressRejected
@@ -322,8 +321,7 @@ fn principal_mismatch_and_unknown_interaction_are_audited_nonrevealing() {
         let completion_router =
             ExternalCompletionRouter::new(Arc::clone(&store), Arc::clone(&gate));
         assert_eq!(
-            completion_router
-                .route(completion("different-subject"), timestamp(2_000))
+            Box::pin(completion_router.route(completion("different-subject"), timestamp(2_000)),)
                 .await
                 .expect_err("scope"),
             ExternalRouteError::IngressRejected
@@ -361,8 +359,7 @@ fn audit_write_failure_rejects_closed_with_same_response() {
         .expect("gate");
         let router = ExternalCompletionRouter::new(store, gate);
         assert_eq!(
-            router
-                .route(completion("subject"), timestamp(2_000))
+            Box::pin(router.route(completion("subject"), timestamp(2_000)))
                 .await
                 .expect_err("closed"),
             ExternalRouteError::IngressRejected

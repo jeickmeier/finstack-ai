@@ -1,4 +1,4 @@
-//! Length-prefixed PR-058 client over an explicit stream.
+//! Length-prefixed session-server framing contract client over an explicit stream.
 
 use finstack_ai_kernel::ChildRunLocator;
 use finstack_ai_protocol::{

@@ -14,9 +14,14 @@ use super::expand::{build_lock, effective_config, expand_spec, required_services
 use super::secret::ensure_secret_free_config;
 use super::{
     BundleCatalog, BundleConflict, BundleRequirement, BundleResolutionError, BundleSpec,
-    CompositionRecipe, HostFeature, LockedBundle, ResolvedAgentLock, RuntimeServices,
-    VersionRequirement,
+    CompositionRecipe, HostFeature, LockedBundle, RequiredServices, ResolvedAgentLock,
+    RuntimeServices, VersionRequirement,
 };
+
+type ResolvedCapabilities = (
+    BTreeMap<CapabilityId, (LockedBundle, Arc<CapabilitySpec>)>,
+    RequiredServices,
+);
 
 /// Finite resolver from exact bundle/catalog registrations to one immutable agent.
 pub struct BundleResolver<'a> {
@@ -75,7 +80,8 @@ impl<'a> BundleResolver<'a> {
                     item: Arc::from(agent_id.as_str()),
                 })?,
         );
-        let capabilities = self.resolve_capabilities(&bundle, &base_spec)?;
+        let (capabilities, required_services) =
+            self.resolve_capabilities(registry, &bundle, &base_spec)?;
         let recipe = Arc::new(CompositionRecipe {
             bundle,
             base_spec,
@@ -84,6 +90,7 @@ impl<'a> BundleResolver<'a> {
             active_application: BTreeSet::new(),
             active_model: BTreeSet::new(),
             services: self.services.clone(),
+            required_services,
         });
         self.resolve_recipe(registry, recipe, context).await
     }
@@ -197,6 +204,7 @@ impl<'a> BundleResolver<'a> {
             active_application,
             active_model,
             services: current_recipe.services.clone(),
+            required_services: current_recipe.required_services,
         });
         self.resolve_recipe(registry, recipe, context).await
     }
@@ -396,11 +404,13 @@ impl<'a> BundleResolver<'a> {
 
     fn resolve_capabilities(
         &self,
+        registry: &Registry,
         bundle: &Arc<BundleSpec>,
         spec: &AgentSpec,
-    ) -> Result<BTreeMap<CapabilityId, (LockedBundle, Arc<CapabilitySpec>)>, BundleResolutionError>
-    {
+    ) -> Result<ResolvedCapabilities, BundleResolutionError> {
         let mut resolved = BTreeMap::new();
+        let mut required = required_services(bundle);
+        let mut validated_sources = BTreeSet::from([bundle.id.clone()]);
         for reference in spec.capabilities.iter() {
             let source_bundle = match reference.bundle.as_ref() {
                 None => Arc::clone(bundle),
@@ -414,6 +424,14 @@ impl<'a> BundleResolver<'a> {
                 }
             };
             source_bundle.validate()?;
+            if validated_sources.insert(source_bundle.id.clone()) {
+                self.validate_environment(registry, &source_bundle)?;
+            }
+            let source_required = required_services(&source_bundle);
+            required.agent_invoker |= source_required.agent_invoker;
+            required.budget_ledger |= source_required.budget_ledger;
+            required.artifact_store |= source_required.artifact_store;
+            required.object_store |= source_required.object_store;
             let capability = Arc::new(
                 source_bundle
                     .capabilities
@@ -442,7 +460,7 @@ impl<'a> BundleResolver<'a> {
                 });
             }
         }
-        Ok(resolved)
+        Ok((resolved, required))
     }
 
     async fn resolve_recipe(

@@ -14,7 +14,7 @@ use super::{KernelState, RetryState, RunPhase, TerminalCandidate, TerminalState}
 
 impl KernelState {
     /// Validate frozen semantic collection ceilings for a programmatically
-    /// assembled state. The ceilings apply across state-hash versions 1–6.
+    /// assembled state. The ceilings apply across state-hash versions 1–7.
     ///
     /// # Errors
     ///
@@ -42,6 +42,7 @@ impl KernelState {
             ("budget_reservations", self.budget_reservations.len()),
             ("budget_charges", self.budget_charges.len()),
             ("resolution_identities", self.resolution_identities.len()),
+            ("extension_settlements", self.extension_settlements.len()),
         ] {
             if length > SEMANTIC_MAP_MAX_ENTRIES {
                 return Err(KernelError::InvalidInputPayload {
@@ -90,17 +91,69 @@ impl KernelState {
         let has_interaction_state = self.pending_interaction.is_some()
             || !self.resolution_identities.is_empty()
             || self.last_interaction_terminal.is_some();
-        if !matches!(self.state_version, 1..=6)
+        let has_extension_state =
+            self.pending_extension_effect.is_some() || !self.extension_settlements.is_empty();
+        if !matches!(self.state_version, 1..=7)
             || (self.state_version == 1 && has_tool_state)
             || (self.state_version < 3 && has_control_state)
             || (self.state_version < 4 && has_structured_state)
             || (self.state_version < 5 && has_composition_state)
             || (self.state_version < 6 && has_interaction_state)
+            || (self.state_version < 7 && has_extension_state)
         {
             return Err(KernelError::InvalidInputPayload {
                 field: "state_version",
                 reason_code: "unsupported_or_inconsistent",
             });
+        }
+        if let Some(pending) = &self.pending_extension_effect {
+            let expected_phase = match pending.cursor.stage {
+                crate::Stage::BeforeRun => RunPhase::BeforeRun,
+                crate::Stage::PrepareContext => RunPhase::PreparingContext,
+                crate::Stage::BeforeModel => RunPhase::BeforeModel,
+                crate::Stage::AfterModel => RunPhase::AfterModel,
+                crate::Stage::BeforeToolBatch => RunPhase::BeforeToolBatch,
+                crate::Stage::AfterToolBatch => RunPhase::AfterToolBatch,
+                crate::Stage::BeforeFinalize => RunPhase::BeforeFinalize,
+            };
+            let request_shape = match pending.requested.input() {
+                EffectInput::Context { cursor, .. } => {
+                    pending.requested.kind() == EffectKind::Context
+                        && cursor.stage == crate::Stage::PrepareContext
+                        && pending.requested.component().is_some()
+                        && pending
+                            .requested
+                            .pipeline()
+                            .is_some_and(|pipeline| pipeline.stage() == "prepare_context")
+                        && pending.requested.output_contract().kind
+                            == EffectOutputKind::ContextContribution
+                        && *cursor == pending.cursor
+                }
+                EffectInput::Middleware { cursor, stage, .. } => {
+                    pending.requested.kind() == EffectKind::Middleware
+                        && pending.requested.component().is_some()
+                        && pending.requested.pipeline().is_some_and(|pipeline| {
+                            pipeline.stage() == stage.as_ref()
+                                && stage.as_ref()
+                                    == crate::reducer::extension::stage_name(cursor.stage)
+                        })
+                        && pending.requested.output_contract().kind
+                            == EffectOutputKind::MiddlewareOutcome
+                        && *cursor == pending.cursor
+                }
+                _ => false,
+            };
+            let phase_matches = if self.cancellation.is_some() {
+                matches!(self.phase, Some(RunPhase::Cancelling | RunPhase::Suspended))
+            } else {
+                self.phase == Some(expected_phase)
+            };
+            if pending.cursor.cycle != self.cycle || !phase_matches || !request_shape {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "pending_extension_effect",
+                    reason_code: "inconsistent",
+                });
+            }
         }
         if (self.phase == Some(RunPhase::AwaitingInteraction) && self.pending_interaction.is_none())
             || (self.pending_interaction.is_some()

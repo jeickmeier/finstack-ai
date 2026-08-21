@@ -11,14 +11,7 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUT = (
-    REPO_ROOT
-    / "docs"
-    / "implementation"
-    / "artifacts"
-    / "pr-063"
-    / "startup-report.json"
-)
+DEFAULT_OUT = REPO_ROOT / "target" / "performance" / "startup-report.json"
 
 
 def run(

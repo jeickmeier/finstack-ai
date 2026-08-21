@@ -1,4 +1,4 @@
-//! PR-048 crash-prefix matrix: drop the owner, recover, assert a legal class.
+//! crash-recovery contract crash-prefix matrix: drop the owner, recover, assert a legal class.
 #![allow(
     clippy::too_many_lines,
     reason = "each prefix cluster is one legal-class matrix"

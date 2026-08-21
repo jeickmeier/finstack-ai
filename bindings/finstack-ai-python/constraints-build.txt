@@ -1,4 +1,4 @@
-# Exact, hashed build-backend pin for PR-027 Python package builds.
+# Exact, hashed build-backend pin for reproducible Python package builds.
 # Regenerate digests from the PyPI release JSON when bumping the pin.
 maturin==1.14.1 \
     --hash=sha256:15cea8fcb3ba47dd636f50092bb34baea8b04ac777392f23e6bf8a9a61efb894 \

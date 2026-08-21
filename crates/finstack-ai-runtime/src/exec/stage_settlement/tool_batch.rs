@@ -9,6 +9,8 @@ use crate::middleware_driver::{
     MIDDLEWARE_STAGE_UNLANDABLE, StageDriver, StageFold, StageTerminal,
 };
 use crate::run_types::RunHandleError;
+use crate::settlement::SettlementSources;
+use crate::{Clock, RandomSource};
 
 use super::driver::run_stage_chain;
 use super::stage_error;
@@ -50,10 +52,11 @@ pub(crate) enum ToolBatchPolicy {
 /// [`MIDDLEWARE_STAGE_UNLANDABLE`] for a fold carrying a contribution that has
 /// no expression in [`ToolBatchPolicy`] — rejected rather than silently
 /// dropped, exactly as [`apply_fold`] rejects one it cannot land.
-pub(crate) async fn run_tool_batch_chain(
-    coordinator: &CommitCoordinator,
+pub(crate) async fn run_tool_batch_chain<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
     catalog: &ResolvedToolCatalog,
     driver: Option<&StageDriver>,
+    sources: &SettlementSources<C, R>,
     cursor: StageCursor,
     calls: &[ToolCallBlock],
 ) -> Result<ToolBatchPolicy, RunHandleError> {
@@ -73,7 +76,7 @@ pub(crate) async fn run_tool_batch_chain(
             .collect::<Vec<_>>()
             .into(),
     }));
-    let fold = run_stage_chain(coordinator, Some(driver), cursor, input).await?;
+    let fold = run_stage_chain(coordinator, Some(driver), sources, cursor, input).await?;
     tool_batch_policy(&fold)
 }
 

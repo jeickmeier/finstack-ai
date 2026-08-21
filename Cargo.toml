@@ -16,6 +16,7 @@ members = [
     "extensions/stores/finstack-ai-store-object-s3",
     "extensions/stores/finstack-ai-store-object-local",
     "extensions/stores/finstack-ai-store-artifact-object",
+    "extensions/providers/finstack-ai-provider-wire",
     "extensions/providers/finstack-ai-provider-openai",
     "extensions/providers/finstack-ai-provider-ollama",
     "extensions/providers/finstack-ai-provider-anthropic",
@@ -137,6 +138,7 @@ finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-obje
 finstack-ai-store-object-local = { path = "extensions/stores/finstack-ai-store-object-local", version = "1.0.0" }
 finstack-ai-store-artifact-object = { path = "extensions/stores/finstack-ai-store-artifact-object", version = "1.0.0" }
 rusqlite = { version = "0.37.0", default-features = false, features = ["bundled"] }
+finstack-ai-provider-wire = { path = "extensions/providers/finstack-ai-provider-wire", version = "1.0.0" }
 finstack-ai-provider-openai = { path = "extensions/providers/finstack-ai-provider-openai", version = "1.0.0" }
 finstack-ai-provider-ollama = { path = "extensions/providers/finstack-ai-provider-ollama", version = "1.0.0" }
 finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "1.0.0" }
@@ -187,21 +189,21 @@ finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "1.0
 # Guest-only; do not add to kernel/runtime/SDK/host. Pin matches fixture guests.
 wit-bindgen = { version = "0.57.1", default-features = false, features = ["macros", "realloc"] }
 # Newest crates.io release whose MSRV is ≤ 1.97.1. Do not enable the implicit
-# filesystem `cache` feature (TM-08 / PR-051 host-owned compile cache).
+# filesystem `cache` feature (TM-08 /  host-owned compile cache).
 wasmtime = { version = "47.0.3", default-features = false, features = ["runtime", "component-model", "async", "cranelift", "std"] }
 # Same line as wasmtime. Host-only; deny-by-default WASI context. Do not enable
-# ambient inherit helpers as crate features (PR-052 / SEC-INV-006).
+# ambient inherit helpers as crate features ( / SEC-INV-006).
 wasmtime-wasi = { version = "47.0.3", default-features = false }
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 serde_path_to_error = "0.1.20"
 # Offline draft 2020-12 validation only; keep default features off to avoid
-# network resolvers (TDD §15.3 / PR-005 fixture harness).
+# network resolvers (TDD §15.3 /  fixture harness).
 jsonschema = { version = "0.40.2", default-features = false }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 flamegraph = "0.6.13"
-# Kernel value-type dependencies (PR-006 / TDD §3.3). The kernel stores UUID
+# Kernel value-type dependencies ( / TDD §3.3). The kernel stores UUID
 # bytes without depending on `uuid` (keeps wasm-bindgen out of ARCH001). Runtime
 # owns UUIDv7 generation via injected clock/random and the `uuid` crate.
 bytes = "1.12.1"

@@ -43,9 +43,10 @@ cargo test -p finstack-ai-guest-sdk --offline --locked
 cargo test -p finstack-ai-plugin-host --offline --locked -- reference_
 ```
 
-Trusted native in-process batteries (providers, toolsets, stores, observers) live under [`../extensions/`](../extensions/), not here. See [Technical Design §2](../docs/planning/03-finstack-ai-technical-design.md).
+Trusted native in-process batteries (providers, toolsets, stores, observers)
+live under [`../extensions/`](../extensions/), not here.
 
-Trust class: isolated Wasmtime guests are [T3](../docs/site/security-trust-levels.md).
+Trust class: isolated Wasmtime guests are T3.
 In-process WIT guests inherit host authority and are not a sandbox.
 
 ## Quick start
@@ -58,5 +59,3 @@ uv run --no-project python scripts/plugin_wasm/template_check.py
 
 [MIT](../licenses/LICENSE-MIT) OR [Apache-2.0](../licenses/LICENSE-APACHE).
 [DCO](../CONTRIBUTING.md). [Maintainers](../GOVERNANCE.md).
-[ADRs](../docs/implementation/adr-register.md).
-[RFCs](../docs/rfcs/README.md).

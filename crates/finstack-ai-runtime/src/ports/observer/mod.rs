@@ -1,8 +1,9 @@
 //! Immutable observer port and no-op/reference adapters.
 
 pub(crate) mod export;
-pub(crate) mod queue;
 
+#[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
+use std::collections::VecDeque;
 use std::sync::Arc;
 #[cfg(all(test, feature = "native-tokio"))]
 use std::sync::Mutex;
@@ -23,6 +24,103 @@ pub const OBSERVER_CONFIGURATION_INVALID: &str = "observer_configuration_invalid
 pub const OBSERVER_CAPACITY_EXCEEDED: &str = "observer_capacity_exceeded";
 /// Stable poisoned reference-observer state error.
 pub const OBSERVER_UNAVAILABLE: &str = "observer_unavailable";
+/// Stable observer subscription failure diagnostic.
+pub const OBSERVER_SUBSCRIPTION_FAILED: &str = "observer_subscription_failed";
+/// Stable observer callback failure diagnostic.
+pub const OBSERVER_DELIVERY_FAILED: &str = "observer_delivery_failed";
+/// Stable observer shutdown timeout diagnostic.
+pub const OBSERVER_SHUTDOWN_TIMEOUT: &str = "observer_shutdown_timeout";
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
+const MAX_OBSERVER_DIAGNOSTICS: usize = 32;
+
+/// Non-semantic observer diagnostic. Never a `RunEvent` kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObserverDiagnostic {
+    /// Stable diagnostic code.
+    pub code: &'static str,
+    /// Non-secret operator text.
+    pub detail: &'static str,
+}
+
+/// Bounded non-semantic diagnostics retained by one process-local run owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObserverDiagnostics {
+    /// Total diagnostics observed, including entries evicted from `recent`.
+    pub total: u64,
+    /// Number of older diagnostics evicted to preserve the fixed bound.
+    pub dropped: u64,
+    /// Most recent redacted diagnostics in source order.
+    pub recent: Arc<[ObserverDiagnostic]>,
+}
+
+impl ObserverDiagnostics {
+    /// Return a safe snapshot when the diagnostics lock cannot be read.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn unavailable() -> Self {
+        Self {
+            total: 1,
+            dropped: 0,
+            recent: Arc::from([ObserverDiagnostic {
+                code: OBSERVER_UNAVAILABLE,
+                detail: "observer diagnostics unavailable",
+            }]),
+        }
+    }
+}
+
+/// Mutable fixed-capacity storage shared by one process-local run owner.
+#[derive(Default)]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
+pub(crate) struct ObserverDiagnosticBuffer {
+    total: u64,
+    recent: VecDeque<ObserverDiagnostic>,
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
+impl ObserverDiagnosticBuffer {
+    /// Retain one redacted diagnostic, evicting the oldest entry at capacity.
+    pub(crate) fn record(&mut self, diagnostic: ObserverDiagnostic) {
+        self.total = self.total.saturating_add(1);
+        if self.recent.len() == MAX_OBSERVER_DIAGNOSTICS {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(diagnostic);
+    }
+
+    /// Clone the current bounded summary for read-only callers.
+    pub(crate) fn snapshot(&self) -> ObserverDiagnostics {
+        let retained = u64::try_from(self.recent.len()).unwrap_or(u64::MAX);
+        ObserverDiagnostics {
+            total: self.total,
+            dropped: self.total.saturating_sub(retained),
+            recent: self.recent.iter().copied().collect::<Vec<_>>().into(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_retain_only_the_fixed_recent_bound() {
+        let mut diagnostics = ObserverDiagnosticBuffer::default();
+        for _ in 0..(MAX_OBSERVER_DIAGNOSTICS + 5) {
+            diagnostics.record(ObserverDiagnostic {
+                code: OBSERVER_DELIVERY_FAILED,
+                detail: "observer delivery failed",
+            });
+        }
+        let snapshot = diagnostics.snapshot();
+        assert_eq!(
+            snapshot.total,
+            u64::try_from(MAX_OBSERVER_DIAGNOSTICS + 5).expect("bound")
+        );
+        assert_eq!(snapshot.dropped, 5);
+        assert_eq!(snapshot.recent.len(), MAX_OBSERVER_DIAGNOSTICS);
+    }
+}
 
 /// Payload projection requested by a trusted native observer adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

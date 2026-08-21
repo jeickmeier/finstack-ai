@@ -4,16 +4,16 @@ use std::sync::Arc;
 use crate::{CapabilityActivation, InstructionSpec};
 use finstack_ai_kernel::{
     AcceptRun, ActiveCapability, CapabilitiesActivated, CapabilityActivationSource, KernelInput,
-    LaneId, OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
-    RawJson, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted,
-    RunId, RunPhase, SessionId, Stage, TerminalState,
+    LaneId, Message, OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec,
+    OutputValidated, RawJson, ReducerStageOutcome, RetryClassification, RetryDirective,
+    RetrySafety, RunAccepted, RunId, RunPhase, SessionId, Stage, TerminalState,
 };
 use finstack_ai_runtime::{LoadRequest, LockedModelContextProfile, RunHandle};
 
 use super::handle::Agent;
 use super::prepare::{
     NativeIds, StageIds, ensure_nonterminal_failure, model_draft, model_output_contract,
-    recover_state, structured_candidate, submit, submit_stage, wait_for_phase,
+    recover_state, structured_candidate, submit, submit_stage, wait_for_cycle, wait_for_phase,
 };
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
@@ -35,6 +35,7 @@ impl Agent {
         request: AgentRunRequest,
         profile: LockedModelContextProfile,
         locator: OperationLocator,
+        prior_history: Arc<[Message]>,
     ) -> Result<AgentRunOutput, AgentRunError> {
         submit(
             handle,
@@ -116,7 +117,7 @@ impl Agent {
         .await?;
 
         loop {
-            let state = recover_state(Arc::clone(&store), session_id).await?;
+            let state = recover_state(Arc::clone(&store), session_id, locator.run_id).await?;
             self.validate_restored_mask(&state.active_capabilities)?;
             if let Some(host) = self.activation_host() {
                 host.seed_active(locator.run_id, Arc::clone(&state.active_capabilities));
@@ -131,6 +132,7 @@ impl Agent {
             let messages = self.context_messages(
                 &request.input,
                 &request.attachments,
+                &prior_history,
                 &state.messages,
                 &extra,
             )?;
@@ -142,7 +144,7 @@ impl Agent {
                 StageIds::context(),
             )
             .await?;
-            let state = recover_state(Arc::clone(&store), session_id).await?;
+            let state = recover_state(Arc::clone(&store), session_id, locator.run_id).await?;
             let draft = model_draft(
                 request.model.clone(),
                 state
@@ -181,6 +183,7 @@ impl Agent {
                 handle,
                 Arc::clone(&store),
                 session_id,
+                locator.run_id,
                 &[
                     RunPhase::AfterModel,
                     RunPhase::AfterToolBatch,
@@ -225,7 +228,7 @@ impl Agent {
                     }),
                 )
                 .await?;
-                after_model = recover_state(Arc::clone(&store), session_id).await?;
+                after_model = recover_state(Arc::clone(&store), session_id, locator.run_id).await?;
             }
             let next = if after_model.phase == Some(RunPhase::BeforeFinalize) {
                 after_model
@@ -242,6 +245,7 @@ impl Agent {
                     handle,
                     Arc::clone(&store),
                     session_id,
+                    locator.run_id,
                     &[
                         RunPhase::BeforeFinalize,
                         RunPhase::AfterToolBatch,
@@ -286,7 +290,14 @@ impl Agent {
                     StageIds::retry(),
                 )
                 .await?;
-                await_retry_cycle(handle, Arc::clone(&store), session_id).await?;
+                await_retry_cycle(
+                    handle,
+                    Arc::clone(&store),
+                    session_id,
+                    locator.run_id,
+                    next.cycle,
+                )
+                .await?;
                 continue;
             }
 
@@ -298,7 +309,7 @@ impl Agent {
                 StageIds::finalize(),
             )
             .await?;
-            let terminal = recover_state(Arc::clone(&store), session_id).await?;
+            let terminal = recover_state(Arc::clone(&store), session_id, locator.run_id).await?;
             if terminal.terminal.is_none() {
                 if matches!(
                     terminal.phase,
@@ -316,7 +327,14 @@ impl Agent {
                     // through exactly `Sleeping` then `PreparingContext`. A new
                     // phase on that path must be added here too; the error
                     // below names the phase so a mismatch is diagnosable.
-                    await_retry_cycle(handle, Arc::clone(&store), session_id).await?;
+                    await_retry_cycle(
+                        handle,
+                        Arc::clone(&store),
+                        session_id,
+                        locator.run_id,
+                        terminal.cycle,
+                    )
+                    .await?;
                     continue;
                 }
                 return Err(AgentRunError::runtime_message(format!(
@@ -398,7 +416,7 @@ impl Agent {
             return Ok(());
         };
         self.validate_restored_mask(&complete)?;
-        let state = recover_state(Arc::clone(store), session_id).await?;
+        let state = recover_state(Arc::clone(store), session_id, run_id).await?;
         let Some(digest) = host.lock_digest() else {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
@@ -429,17 +447,9 @@ async fn await_retry_cycle(
     handle: &RunHandle,
     store: Arc<dyn finstack_ai_runtime::JournalStore>,
     session_id: finstack_ai_kernel::SessionId,
+    run_id: finstack_ai_kernel::RunId,
+    prior_cycle: u64,
 ) -> Result<(), AgentRunError> {
-    let retry = wait_for_phase(
-        handle,
-        store,
-        session_id,
-        &[
-            RunPhase::PreparingContext,
-            RunPhase::Failed,
-            RunPhase::Cancelled,
-        ],
-    )
-    .await?;
+    let retry = wait_for_cycle(handle, store, session_id, run_id, prior_cycle).await?;
     ensure_nonterminal_failure(&retry)
 }

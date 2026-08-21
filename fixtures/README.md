@@ -7,5 +7,3 @@ Fixture trees used by validation and CI evidence.
   [`compatibility/README.md`](compatibility/README.md).
 
 Do not commit credential-shaped material under `examples/` or `fixtures/`.
-
-See docs/planning/03-finstack-ai-technical-design.md §2.

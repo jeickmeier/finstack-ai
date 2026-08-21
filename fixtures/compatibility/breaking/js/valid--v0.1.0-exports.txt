@@ -42,6 +42,8 @@ Lane
 LaneInspectSnapshot
 Locator
 MemoryExternalIdentityMap
+ObserverDiagnostic
+ObserverDiagnostics
 POST_AUTH_FRAME_MAX_BYTES
 PRE_AUTH_FRAME_MAX_BYTES
 PrebetaKind

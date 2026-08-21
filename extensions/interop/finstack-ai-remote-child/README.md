@@ -1,6 +1,6 @@
 # finstack-ai-remote-child
 
-Native `AgentInvoker` for `RemoteChildSession` over PR-058 remote framing.
+Native `AgentInvoker` for `RemoteChildSession` over  remote framing.
 
 Construction takes an explicit loopback TCP or Unix-socket route plus optional
 Bearer credentials. The invoker never reads environment variables and never

@@ -40,8 +40,8 @@ use crate::state::projection::{
 
 use super::super::{
     BudgetReservationReplay, CancellationState, CurrentTurn, InteractionTerminal,
-    InteractionTerminalOutcome, PendingInteraction, PendingModelEffect, RetryState, RunPhase,
-    TerminalCandidate, TerminalState,
+    InteractionTerminalOutcome, PendingExtensionEffect, PendingInteraction, PendingModelEffect,
+    RetryState, RunPhase, TerminalCandidate, TerminalState,
 };
 
 #[derive(Serialize)]
@@ -490,6 +490,21 @@ impl<'a> From<&'a PendingModelEffect> for PendingModelEffectProjection<'a> {
             model_request_id: value.model_request_id,
             requested: EffectRequestedProjection::from(&value.requested),
             deferred: value.deferred.as_ref().map(EffectDeferredProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct PendingExtensionEffectProjection<'a> {
+    cursor: StageCursor,
+    requested: EffectRequestedProjection<'a>,
+}
+
+impl<'a> From<&'a PendingExtensionEffect> for PendingExtensionEffectProjection<'a> {
+    fn from(value: &'a PendingExtensionEffect) -> Self {
+        Self {
+            cursor: value.cursor,
+            requested: EffectRequestedProjection::from(&value.requested),
         }
     }
 }

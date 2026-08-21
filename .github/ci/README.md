@@ -17,6 +17,8 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | `install-all` | Pinned tools plus Rust, Python, and WASM environments |
 | `ci-all` | Sequential local equivalent of the hosted `ci-rust` / `ci-python` / `ci-wasm` jobs |
 | `ci-rust` / `ci-python` / `ci-wasm` | Per-language required checks; hosted CI runs these in parallel |
+| `runtime` | Runtime lint/tests across minimal, native, and WASM-host configurations |
+| `check-repository-references` | Reject references to removed planning and delivery-history artifacts |
 | `build-all` / `build-rust` / `build-python` / `build-wasm` | Build each language. Optional profile after `--` (default `dev`; WASM also accepts `release-fast`) |
 | `check-all` / `check-rust` / `check-python` / `check-wasm` | Formatting, lint, and typecheck |
 | `test-all` / `test-rust` / `test-python` / `test-wasm` | Language test suites |
@@ -54,27 +56,6 @@ Required checks intentionally have **no** `paths` / `paths-ignore` filters.
   interpreter. The WASM job caches Playwright browsers and runs the glue
   recreate compare only when glue-related paths change.
 
-## Retired automation
-
-The following historical mise tasks no longer exist: `format`, `check`,
-`test`, `ci`, `kernel`, `runtime`, `python-binding`, `wasm-binding`,
-`coverage` (replaced by `coverage-all`),
-`generate-wasm`, `test-browser`, `stage-wasm`, `benchmark`,
-`benchmark-smoke`, `benchmark-wasm`, `supply-chain`, `secret-scan`,
-`secret-scan-canary`, `fuzz-smoke`, `fuzz-local`, `conformance`,
-`docs-links`, `docs-quickstarts`, `docs-notebooks`, `docs-license`,
-`migrate`, `gen-wit`, `check-wit`, `gen-guest-sdk`, `check-guest-sdk`,
-`gen-plugin-wasm`, `check-plugin-wasm`, `check-plugin-template`,
-`gen-plugin-lock`, `check-plugin-lock`, `check-public-items`,
-`check-size-budgets`, `measure-packaging-profile`, `starter-rc`,
-`recreate-release`, `release-rehearsal`, `hotfix-rehearsal`,
-`architecture`, `schema-governance`, `test-schema-governance`, `docs`,
-`check-minimal`, `test-miri`, `check-nightly`, `release-smoke`,
-`release-reproducible`, `build-python-wheel-ci`, per-PR `test-pr0xx`
-wrappers, and the focused `test-kernel` / `test-model` / `test-tool` /
-`test-events` / `test-extensions` / `test-lifecycle` / `test-runtime` /
-`test-runtime-gate` / `test-sdk` slices. Historical evidence under
-`docs/implementation/` records the runs made while those gates were
-active.
-
-Do not invent a passing result for a retired task.
+Task availability is defined only by the current root `mise.toml`. Inspect it
+before invoking a task and never report an unavailable or unrun command as
+passing.

@@ -21,7 +21,7 @@ use crate::{
     RunCallContext,
 };
 
-use super::commit::{chain_digest, derived_context_effect_id};
+use super::commit::chain_digest;
 use super::structural_protected;
 
 fn id<T: IdTag>(ordinal: u64) -> Id<T> {
@@ -57,18 +57,6 @@ fn structural_protected_covers_system_developer_and_trailing_user() {
     assert!(!structural_protected(&history_user, false));
     assert!(!structural_protected(&assistant, true));
     assert!(structural_protected(&current, true));
-}
-
-#[test]
-fn derived_context_effect_id_is_stable_for_the_same_cursor() {
-    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-        .expect("locator");
-    let first = derived_context_effect_id(&locator, 0, 0);
-    let second = derived_context_effect_id(&locator, 0, 0);
-    let other = derived_context_effect_id(&locator, 0, 1);
-    assert_eq!(first, second);
-    assert_ne!(first, other);
-    assert_ne!(first, EffectId::from_bytes([0; 16]));
 }
 
 #[test]
@@ -255,6 +243,10 @@ fn request_envelope(
             schema_digest: Digest::raw_json(b"context-contribution-v1"),
         },
         EffectInput::Context {
+            cursor: finstack_ai_kernel::StageCursor {
+                cycle: 0,
+                stage: finstack_ai_kernel::Stage::PrepareContext,
+            },
             request: request.to_raw_json().expect("request"),
         },
         RetrySafety::SafeToRetry,
@@ -291,9 +283,7 @@ fn context_reconcile_completed_resumes_without_a_second_collect() {
     let contribution = contribution("already-done");
     let (provider, calls, last_id) =
         reconcile_fixture(ContextReconcileResult::Completed(contribution.clone()));
-    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-        .expect("locator");
-    let effect_id = derived_context_effect_id(&locator, 0, 0);
+    let effect_id = id::<finstack_ai_kernel::EffectTag>(10);
     let resumed = resume_after_crash(&provider, effect_id).expect("completed");
     assert_eq!(resumed, contribution);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -307,9 +297,7 @@ fn context_reconcile_completed_resumes_without_a_second_collect() {
 #[test]
 fn context_reconcile_not_started_retries_collect_with_the_same_effect_id() {
     let (provider, calls, last_id) = reconcile_fixture(ContextReconcileResult::NotStarted);
-    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-        .expect("locator");
-    let effect_id = derived_context_effect_id(&locator, 0, 0);
+    let effect_id = id::<finstack_ai_kernel::EffectTag>(10);
     resume_after_crash(&provider, effect_id).expect("retry");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(last_id.lock().expect("id").as_ref(), Some(&effect_id));
@@ -322,9 +310,7 @@ fn context_reconcile_not_started_retries_collect_with_the_same_effect_id() {
 #[test]
 fn context_reconcile_retry_safe_retries_collect_with_the_same_effect_id() {
     let (provider, calls, last_id) = reconcile_fixture(ContextReconcileResult::RetrySafe);
-    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-        .expect("locator");
-    let effect_id = derived_context_effect_id(&locator, 0, 0);
+    let effect_id = id::<finstack_ai_kernel::EffectTag>(10);
     resume_after_crash(&provider, effect_id).expect("retry");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(last_id.lock().expect("id").as_ref(), Some(&effect_id));
@@ -337,9 +323,7 @@ fn context_reconcile_retry_safe_retries_collect_with_the_same_effect_id() {
 #[test]
 fn context_reconcile_unknown_fails_closed() {
     let (provider, calls, _) = reconcile_fixture(ContextReconcileResult::Unknown);
-    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-        .expect("locator");
-    let effect_id = derived_context_effect_id(&locator, 0, 0);
+    let effect_id = id::<finstack_ai_kernel::EffectTag>(10);
     let error = resume_after_crash(&provider, effect_id).expect_err("unknown");
     assert_eq!(error.code(), CONTEXT_RECOVERY_UNCERTAIN);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -352,9 +336,7 @@ fn context_reconcile_unknown_fails_closed() {
 #[test]
 fn context_reconcile_non_repeatable_does_not_retry() {
     let (provider, calls, _) = reconcile_fixture(ContextReconcileResult::NonRepeatable);
-    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-        .expect("locator");
-    let effect_id = derived_context_effect_id(&locator, 0, 0);
+    let effect_id = id::<finstack_ai_kernel::EffectTag>(10);
     let error = resume_after_crash(&provider, effect_id).expect_err("non-repeatable");
     assert_eq!(error.code(), CONTEXT_RECOVERY_UNCERTAIN);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -369,9 +351,7 @@ fn crash_after_context_request_recovers_contribution_once() {
     let contribution = contribution("already-done");
     let (provider, calls, last_id) =
         reconcile_fixture(ContextReconcileResult::Completed(contribution.clone()));
-    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-        .expect("locator");
-    let effect_id = derived_context_effect_id(&locator, 0, 0);
+    let effect_id = id::<finstack_ai_kernel::EffectTag>(10);
     let request = context_request();
     let _requested = request_envelope(effect_id, &provider.descriptor(), &request);
     let resumed = resume_after_crash(&provider, effect_id).expect("recover");
@@ -386,12 +366,7 @@ fn local_context_conformance(
     provider: &ReconcileFixture,
 ) -> Result<ContextContribution, ContextError> {
     let descriptor = provider.descriptor();
-    let effect_id = derived_context_effect_id(
-        &finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
-            .expect("locator"),
-        0,
-        0,
-    );
+    let effect_id = id::<finstack_ai_kernel::EffectTag>(10);
     let collected = block_on(provider.collect(call_context(effect_id), context_request()))?;
     if provider.descriptor() != descriptor {
         return Err(ContextError::try_new(

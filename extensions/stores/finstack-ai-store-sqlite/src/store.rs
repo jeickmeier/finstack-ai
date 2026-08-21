@@ -101,7 +101,7 @@ impl SqliteJournalStore {
         &self.path
     }
 
-    /// Current database page count on the owned connection. Used by PR-040 disk-full tests.
+    /// Current database page count on the owned connection. Used by SQLite durability contract disk-full tests.
     #[doc(hidden)]
     pub fn page_count(&self) -> Result<i64, StoreError> {
         self.worker.call(|ctx| {
@@ -111,7 +111,7 @@ impl SqliteJournalStore {
         })
     }
 
-    /// Cap the database page count on the owned connection. Used by PR-040 disk-full tests.
+    /// Cap the database page count on the owned connection. Used by SQLite durability contract disk-full tests.
     #[doc(hidden)]
     pub fn set_max_page_count(&self, pages: i64) -> Result<(), StoreError> {
         self.worker.call(move |ctx| {
@@ -152,7 +152,7 @@ impl SqliteJournalStore {
         })
     }
 
-    /// Persist a batch's rows, then `ROLLBACK`. Used by PR-040-A01.
+    /// Persist a batch's rows, then `ROLLBACK`. Used by SQLite rollback fault case.
     #[doc(hidden)]
     pub fn append_then_rollback(&self, request: &AppendRequest) -> Result<(), StoreError> {
         let request = request.clone();

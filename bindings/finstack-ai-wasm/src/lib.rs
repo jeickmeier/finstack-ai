@@ -780,9 +780,8 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use finstack_ai::{
-        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, E2bSandboxAgentSpec,
-        GatewayAgentSpec, GeminiAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
-        OpenRouterAgentSpec,
+        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec,
+        LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
     };
 
     use super::{health, parse_document_markdown};
@@ -905,22 +904,12 @@ mod tests {
         }))
         .err()
         .expect("gateway");
-        let e2b = ready(Agent::e2b_sandbox(E2bSandboxAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "e2b-unused".into(),
-            endpoint: Some("https://api.e2b.dev".into()),
-            template: None,
-            common: LinkedCommon::default(),
-        }))
-        .err()
-        .expect("e2b");
         assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(openrouter.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(anthropic.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(gemini.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(gateway.code(), AGENT_RUN_UNSUPPORTED_PLAN);
-        assert_eq!(e2b.code(), AGENT_RUN_UNSUPPORTED_PLAN);
     }
 
     const SAMPLE_CSV: &[u8] = b"quarter,revenue\nQ1,1250\nQ2,1310\n";

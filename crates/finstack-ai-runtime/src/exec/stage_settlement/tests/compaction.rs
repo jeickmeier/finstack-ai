@@ -113,6 +113,320 @@ fn evidence_correct_compaction(
     }
 }
 
+fn checkpointed_compaction(
+    descriptor: &MiddlewareDescriptor,
+    input: &BeforeModelInput,
+) -> crate::middleware::CompactionResult {
+    let retained = input
+        .source_entries
+        .iter()
+        .map(|entry| entry.message.clone())
+        .collect::<Vec<_>>();
+    let mut result = evidence_correct_compaction(input, &retained);
+    let summary = ContextItem::try_new(
+        ContextItemKind::DerivedSummary,
+        vec![ContentBlock::Text(
+            TextBlock::try_new("cached summary").expect("text"),
+        )],
+        ContextProvenance {
+            source_id: Arc::from("fixture.compaction-cache"),
+            source_ref: None,
+            external: false,
+        },
+        ContextAuthority::Untrusted,
+        0,
+        4,
+        Sensitivity::Internal,
+        false,
+    )
+    .expect("summary");
+    let derived_summaries: Arc<[ContextItem]> = Arc::from([summary]);
+    let summary = crate::middleware::CompactedSummary::Inline(Arc::clone(&derived_summaries));
+    let summary_digest =
+        crate::middleware::compaction_summary_digest(&summary).expect("summary digest");
+    let source_digest =
+        crate::middleware::compaction_source_digest(&input.source_entries).expect("source digest");
+    result.derived_summaries = derived_summaries;
+    result.evidence.summary_digest = Some(summary_digest);
+    result.checkpoint = Some(crate::middleware::CompactionCheckpoint {
+        component_id: descriptor.invocation.component.clone(),
+        strategy_id: Arc::from("fixture.strategy"),
+        strategy_version: 1,
+        configuration_digest: descriptor.invocation.configuration_digest,
+        model_context_profile_digest: input.model_context_profile_digest,
+        covered_through_entry_id: input
+            .source_entries
+            .last()
+            .expect("non-empty source")
+            .entry_id,
+        source_digest,
+        summary,
+        summary_digest,
+        sensitivity: Sensitivity::Internal,
+    });
+    result
+}
+
+struct CacheAwareCompactor {
+    descriptor: MiddlewareDescriptor,
+    seen: Arc<Mutex<Vec<Option<crate::middleware::CompactionCheckpoint>>>>,
+}
+
+impl crate::middleware::Middleware for CacheAwareCompactor {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn invoke(
+        &self,
+        _ctx: crate::middleware::MiddlewareContext,
+        input: StageInput,
+    ) -> PortFuture<Result<StageOutcome, crate::middleware::MiddlewareError>> {
+        let descriptor = self.descriptor.clone();
+        let seen = Arc::clone(&self.seen);
+        Box::pin(async move {
+            let StageInput::BeforeModel(input) = input else {
+                return Err(crate::middleware::MiddlewareError::outcome_not_allowed());
+            };
+            seen.lock()
+                .expect("cache capture lock")
+                .push(input.checkpoint.clone());
+            Ok(StageOutcome::CompactContext(Box::new(
+                checkpointed_compaction(&descriptor, &input),
+            )))
+        })
+    }
+}
+
+fn cache_aware_driver() -> (
+    StageDriver,
+    Arc<Mutex<Vec<Option<crate::middleware::CompactionCheckpoint>>>>,
+) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let middleware: Arc<dyn crate::middleware::Middleware> = Arc::new(CacheAwareCompactor {
+        descriptor: compactor_descriptor("fixture.compactor"),
+        seen: Arc::clone(&seen),
+    });
+    let driver = StageDriver::new(
+        Arc::new(
+            ResolvedMiddlewareChain::try_new(vec![MiddlewareRegistration { middleware }])
+                .expect("chain"),
+        ),
+        CancellationSignal::new(),
+    );
+    (driver, seen)
+}
+
+fn before_model_stage_input(draft: &crate::ModelRequestDraft) -> StageInput {
+    StageInput::BeforeModel(Box::new(assembled_before_model_input(draft)))
+}
+
+fn run_compaction_chain(
+    coordinator: &mut CommitCoordinator,
+    driver: &StageDriver,
+    input: StageInput,
+) {
+    block_on(run_stage_chain(
+        coordinator,
+        Some(driver),
+        &test_sources(),
+        StageCursor {
+            cycle: 0,
+            stage: Stage::BeforeModel,
+        },
+        input,
+    ))
+    .expect("compaction chain");
+}
+
+fn projected_compactor_input(
+    coordinator: &mut CommitCoordinator,
+    driver: &StageDriver,
+    input: &StageInput,
+) -> BeforeModelInput {
+    let resolved = &driver.chain().stage(Stage::BeforeModel)[0];
+    let StageInput::BeforeModel(input) = component_input(coordinator, resolved, input) else {
+        panic!("compactor input must remain BeforeModel");
+    };
+    *input
+}
+
+#[test]
+fn compatible_checkpoint_hits_without_entering_the_journal() {
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = accepted_on(store.clone());
+    drive_to_before_model(&mut coordinator);
+    let (driver, seen) = cache_aware_driver();
+    let input = before_model_stage_input(&request_draft(
+        vec![user_message(4, "current user")],
+        Vec::new(),
+    ));
+
+    run_compaction_chain(&mut coordinator, &driver, input.clone());
+    let projected = projected_compactor_input(&mut coordinator, &driver, &input);
+
+    let seen = seen.lock().expect("seen lock");
+    assert!(seen[0].is_none(), "the first invocation starts cold");
+    assert!(
+        projected.checkpoint.is_some(),
+        "the exact history/profile match hits"
+    );
+    drop(seen);
+
+    let loaded = block_on(store.load(LoadRequest {
+        session_id: id::<SessionTag>(1),
+    }))
+    .expect("load journal");
+    for record in loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+    {
+        match record.body() {
+            finstack_ai_kernel::RecordBody::EffectRequested(requested) => {
+                if let finstack_ai_kernel::EffectInput::Middleware { input, .. } = requested.input()
+                {
+                    let input: StageInput =
+                        serde_json::from_slice(input.as_bytes()).expect("stage input");
+                    if let StageInput::BeforeModel(input) = input {
+                        assert!(
+                            input.checkpoint.is_none(),
+                            "checkpoint data must not enter EffectRequested"
+                        );
+                    }
+                }
+            }
+            finstack_ai_kernel::RecordBody::EffectCompleted(completed)
+                if completed.output_contract().kind
+                    == finstack_ai_kernel::EffectOutputKind::MiddlewareOutcome =>
+            {
+                let outcome: StageOutcome = serde_json::from_slice(completed.output().as_bytes())
+                    .expect("middleware outcome");
+                if let StageOutcome::CompactContext(result) = outcome {
+                    assert!(
+                        result.checkpoint.is_none(),
+                        "checkpoint data must not enter EffectCompleted"
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn profile_mismatch_invalidates_the_disposable_checkpoint() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_before_model(&mut coordinator);
+    let (driver, _) = cache_aware_driver();
+    let mut input = assembled_before_model_input(&request_draft(
+        vec![user_message(4, "current user")],
+        Vec::new(),
+    ));
+    run_compaction_chain(
+        &mut coordinator,
+        &driver,
+        StageInput::BeforeModel(Box::new(input.clone())),
+    );
+    input.model_context_profile_digest = Digest::raw_json(b"different-profile");
+    let projected = projected_compactor_input(
+        &mut coordinator,
+        &driver,
+        &StageInput::BeforeModel(Box::new(input)),
+    );
+
+    assert!(
+        projected.checkpoint.is_none(),
+        "profile mismatch must invalidate rather than expose stale data"
+    );
+}
+
+#[test]
+fn protected_source_change_invalidates_the_disposable_checkpoint() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    drive_to_before_model(&mut coordinator);
+    let (driver, _) = cache_aware_driver();
+    let original = before_model_stage_input(&request_draft(
+        vec![
+            Message::try_new(
+                id(8),
+                MessageRole::System,
+                vec![ContentBlock::Text(
+                    TextBlock::try_new("policy-v1").expect("text"),
+                )],
+                timestamp(900),
+                None,
+                ProviderIds::empty(),
+                Metadata::empty(),
+            )
+            .expect("system message"),
+            user_message(4, "current user"),
+        ],
+        Vec::new(),
+    ));
+    let changed = before_model_stage_input(&request_draft(
+        vec![
+            Message::try_new(
+                id(8),
+                MessageRole::System,
+                vec![ContentBlock::Text(
+                    TextBlock::try_new("policy-v2").expect("text"),
+                )],
+                timestamp(900),
+                None,
+                ProviderIds::empty(),
+                Metadata::empty(),
+            )
+            .expect("system message"),
+            user_message(4, "current user"),
+        ],
+        Vec::new(),
+    ));
+
+    run_compaction_chain(&mut coordinator, &driver, original);
+    let projected = projected_compactor_input(&mut coordinator, &driver, &changed);
+
+    assert!(
+        projected.checkpoint.is_none(),
+        "a byte change in a protected covered source must be a miss"
+    );
+}
+
+#[test]
+fn recovery_discards_the_process_local_checkpoint() {
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = accepted_on(store.clone());
+    drive_to_before_model(&mut coordinator);
+    let (driver, _) = cache_aware_driver();
+    let mut input = assembled_before_model_input(&request_draft(
+        vec![user_message(4, "current user")],
+        Vec::new(),
+    ));
+    run_compaction_chain(
+        &mut coordinator,
+        &driver,
+        StageInput::BeforeModel(Box::new(input.clone())),
+    );
+    assert!(coordinator.cached_compaction_checkpoint().is_some());
+
+    let mut recovered = recover(store);
+    assert!(
+        recovered.cached_compaction_checkpoint().is_none(),
+        "recovery must not reconstruct a disposable checkpoint"
+    );
+    let (driver, _) = cache_aware_driver();
+    input.model_context_profile_digest = Digest::raw_json(b"post-restart-profile");
+    let projected = projected_compactor_input(
+        &mut recovered,
+        &driver,
+        &StageInput::BeforeModel(Box::new(input)),
+    );
+    assert!(
+        projected.checkpoint.is_none(),
+        "the first invocation input after restart starts cold"
+    );
+}
+
 /// Sliding-window `CompactContext` is landable once the trailing current
 /// user is structurally protected. `RequestCompactionModel` stays unlandable.
 #[test]
@@ -220,9 +534,10 @@ fn prepare_context_instructions_compose_with_a_before_model_compaction() {
         "the injected instruction must be a protected System source entry"
     );
     assert!(
-        input.source_entries.last().is_some_and(|entry| {
-            entry.protected && entry.message.role() == MessageRole::User
-        }),
+        input
+            .source_entries
+            .last()
+            .is_some_and(|entry| { entry.protected && entry.message.role() == MessageRole::User }),
         "the trailing current user must stay last and structurally protected"
     );
 
@@ -357,8 +672,10 @@ fn driver_from_pair(
     let middleware: Vec<MiddlewareRegistration> = [first, second]
         .into_iter()
         .map(|(descriptor, outcome)| {
-            let middleware: Arc<dyn crate::middleware::Middleware> =
-                Arc::new(Fixed { descriptor, outcome });
+            let middleware: Arc<dyn crate::middleware::Middleware> = Arc::new(Fixed {
+                descriptor,
+                outcome,
+            });
             MiddlewareRegistration { middleware }
         })
         .collect();

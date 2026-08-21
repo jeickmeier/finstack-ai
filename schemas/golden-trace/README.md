@@ -15,7 +15,7 @@ schemas/golden-trace/v1/test-kit.schema.json
 Payload declaration ceilings mirror Technical Design §6.5. Format v1 retains
 the original scripted fields and adds strict model-only completion, deferral,
 external-completion (required `text`, including empty text), and
-`before_finalize` continuation steps for PR-009.
+`before_finalize` continuation steps.
 The native reducer adapter obtains semantic state hashes from
 `KernelState::state_hash`; fixture normalization itself remains sorted-key JSON
 comparison and does not implement semantic JCS.

@@ -1,4 +1,4 @@
-//! PR-046 immutable conversation tree, main lane, and child-mapping restore.
+//! conversation-tree contract immutable conversation tree, main lane, and child-mapping restore.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

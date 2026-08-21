@@ -24,15 +24,13 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, Metadata, RunEvent, RunEventBody, RunEventKind, Version,
 };
 use finstack_ai_runtime::{
-    CompactionEvidence, CompactionResult, OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure,
-    ObserverDescriptor, ObserverDiagnostic, ObserverError, ObserverPayloadMode, ObserverQueue,
-    ObserverQueuePush, PortFuture, PromptCacheImpact,
+    CompactionEvidence, CompactionResult, Observer, ObserverDescriptor, ObserverError,
+    ObserverPayloadMode, PortFuture, PromptCacheImpact,
 };
 use thiserror::Error;
 
@@ -91,9 +89,7 @@ struct MetricsState {
 /// Prometheus text exposition observer. Default payload mode is metadata-only.
 pub struct MetricsObserver {
     descriptor: ObserverDescriptor,
-    queue: ObserverQueue<()>,
     state: Mutex<MetricsState>,
-    diagnostic: Mutex<Option<ObserverDiagnostic>>,
 }
 
 impl MetricsObserver {
@@ -101,11 +97,8 @@ impl MetricsObserver {
     ///
     /// # Errors
     ///
-    /// Rejects an invalid identity or queue bound.
-    pub fn try_new(
-        queue_capacity: usize,
-        backpressure: ObserverBackpressure,
-    ) -> Result<Self, MetricsObserverError> {
+    /// Rejects an invalid observer identity.
+    pub fn try_new() -> Result<Self, MetricsObserverError> {
         Ok(Self {
             descriptor: ObserverDescriptor {
                 component: ComponentRef::new(
@@ -123,27 +116,8 @@ impl MetricsObserver {
                 payload_mode: ObserverPayloadMode::MetadataOnly,
                 metadata: Metadata::empty(),
             },
-            queue: ObserverQueue::try_new(queue_capacity, backpressure).map_err(|_| {
-                MetricsObserverError::Configuration {
-                    reason: "invalid_queue_capacity",
-                }
-            })?,
             state: Mutex::new(MetricsState::default()),
-            diagnostic: Mutex::new(None),
         })
-    }
-
-    /// Cumulative adapter-queue drops. The queue counts every drop, including
-    /// disconnected/poisoned pushes.
-    #[must_use]
-    pub fn dropped(&self) -> u64 {
-        self.queue.dropped()
-    }
-
-    /// Last overflow diagnostic.
-    #[must_use]
-    pub fn last_diagnostic(&self) -> Option<ObserverDiagnostic> {
-        self.diagnostic.lock().ok().and_then(|slot| *slot)
     }
 
     /// Record store latency without accepting store-private payloads.
@@ -199,7 +173,7 @@ impl MetricsObserver {
             return String::new();
         };
         let mut out = String::new();
-        emit_runtime_series(&mut out, &state, self.queue.depth(), self.dropped());
+        emit_runtime_series(&mut out, &state);
         emit_compaction_series(&mut out, &state);
         out
     }
@@ -257,14 +231,6 @@ impl MetricsObserver {
             _ => {}
         }
     }
-
-    /// Record a drop already counted by `self.queue.dropped()`. Only the
-    /// diagnostic is latched here; the queue counts every drop itself.
-    fn record_overflow(&self) {
-        if let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
-        }
-    }
 }
 
 impl Observer for MetricsObserver {
@@ -275,46 +241,24 @@ impl Observer for MetricsObserver {
     fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
         for event in batch.iter() {
             self.ingest(event);
-            match self.queue.push(()) {
-                Ok(ObserverQueuePush::Accepted) => {}
-                Ok(ObserverQueuePush::Dropped) => self.record_overflow(),
-                Err(ObserverError::CapacityExceeded) => {
-                    self.record_overflow();
-                    return Box::pin(async move { Err(ObserverError::CapacityExceeded) });
-                }
-                Err(error) => {
-                    self.record_overflow();
-                    return Box::pin(async move { Err(error) });
-                }
-            }
         }
-        let _ = self.queue.drain();
         Box::pin(async { Ok(()) })
     }
 }
 
-fn emit_runtime_series(
-    out: &mut String,
-    state: &MetricsState,
-    exporter_depth: usize,
-    dropped: u64,
-) {
+fn emit_runtime_series(out: &mut String, state: &MetricsState) {
     emit_gauge(
         out,
         "finstack_runtime_status",
         "Runtime lifecycle gauge",
         &state.status,
     );
-    out.push_str("# HELP finstack_runtime_queue_depth Hub and exporter queue depth\n");
+    out.push_str("# HELP finstack_runtime_queue_depth Event hub queue depth\n");
     out.push_str("# TYPE finstack_runtime_queue_depth gauge\n");
     let _ = writeln!(
         out,
         "finstack_runtime_queue_depth{{queue=\"hub\"}} {}",
         state.hub_queue_depth
-    );
-    let _ = writeln!(
-        out,
-        "finstack_runtime_queue_depth{{queue=\"exporter\"}} {exporter_depth}"
     );
     emit_histogram(
         out,
@@ -347,9 +291,6 @@ fn emit_runtime_series(
         "class",
         &state.recovery,
     );
-    out.push_str("# HELP finstack_observer_dropped_total Observer backpressure drops\n");
-    out.push_str("# TYPE finstack_observer_dropped_total counter\n");
-    let _ = writeln!(out, "finstack_observer_dropped_total {dropped}");
 }
 
 fn emit_compaction_series(out: &mut String, state: &MetricsState) {
@@ -465,12 +406,6 @@ fn escape_label(value: &str) -> String {
         .replace('\\', r"\\")
         .replace('\n', r"\n")
         .replace('"', r#"\""#)
-}
-
-/// Default bounded-block timeout used by examples.
-#[must_use]
-pub const fn default_block_timeout() -> Duration {
-    Duration::from_millis(20)
 }
 
 #[cfg(test)]

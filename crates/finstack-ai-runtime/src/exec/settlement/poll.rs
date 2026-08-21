@@ -1,13 +1,20 @@
+#[cfg(feature = "native-tokio")]
 use std::collections::BTreeMap;
 
+#[cfg(any(feature = "native-tokio", test))]
 use finstack_ai_kernel::{
-    ActiveToolCallStatus, EffectDeferred, EffectId, ExternalEffectCompletedInput,
-    ExternalEffectCompletion, ExternalEffectOutcome, KernelInput, KernelState,
-    ReconciliationPolicy, Timestamp,
+    ActiveToolCallStatus, EffectDeferred, EffectId, KernelState, ReconciliationPolicy, Timestamp,
+};
+#[cfg(feature = "native-tokio")]
+use finstack_ai_kernel::{
+    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, KernelInput,
 };
 
+#[cfg(feature = "native-tokio")]
 use crate::coordinator::CommitCoordinator;
+#[cfg(feature = "native-tokio")]
 use crate::run_types::RunHandleError;
+#[cfg(feature = "native-tokio")]
 use crate::{
     CancellationSignal, Clock, PendingToolEffect, RandomSource, ReconcileContext,
     ResolvedToolCatalog, RunCallContext, TOOL_DEFERRAL_EXPIRED, TOOL_RECONCILIATION_UNSUPPORTED,
@@ -15,11 +22,15 @@ use crate::{
     tool_retry_allowed,
 };
 
+#[cfg(feature = "native-tokio")]
 use super::ids::submit_resume_input;
+#[cfg(feature = "native-tokio")]
 use super::tool::{apply_tool_reconcile_result, deferred_tool_seed};
+#[cfg(feature = "native-tokio")]
 use super::{SettlementSources, tool_handle_error};
 
 /// A committed deferred effect's next poll deadline.
+#[cfg(any(feature = "native-tokio", test))]
 pub(crate) struct DuePoll {
     /// Deferred effect identity.
     pub effect_id: EffectId,
@@ -31,6 +42,7 @@ pub(crate) struct DuePoll {
 ///
 /// Membership ignores `now`; the driver is responsible for filtering deadlines
 /// whose `at` is less than or equal to `now`.
+#[cfg(any(feature = "native-tokio", test))]
 pub(crate) fn due_polls(state: &KernelState, now: Timestamp) -> Vec<DuePoll> {
     let _ = now;
     state
@@ -60,6 +72,7 @@ pub(crate) fn due_polls(state: &KernelState, now: Timestamp) -> Vec<DuePoll> {
 }
 
 /// Return whether a deferred effect has reached its inclusive expiry.
+#[cfg(any(feature = "native-tokio", test))]
 pub(crate) fn expired(deferred: &EffectDeferred, now: Timestamp) -> bool {
     deferred
         .expires_at
@@ -75,6 +88,7 @@ pub(crate) fn expired(deferred: &EffectDeferred, now: Timestamp) -> bool {
 ///
 /// Returns a stable tool error when expiry settlement, reconciliation, or
 /// uncertainty handling fails.
+#[cfg(feature = "native-tokio")]
 pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     catalog: &ResolvedToolCatalog,
@@ -129,6 +143,7 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
 }
 
 /// Return the earliest wake-up needed by committed and local deferral state.
+#[cfg(feature = "native-tokio")]
 pub(crate) fn next_due_poll_or_expiry(
     state: &KernelState,
     process_local_deadlines: &BTreeMap<EffectId, Option<Timestamp>>,
@@ -162,6 +177,7 @@ pub(crate) fn next_due_poll_or_expiry(
         .min()
 }
 
+#[cfg(feature = "native-tokio")]
 async fn fail_expired_deferral<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     effect_id: EffectId,
@@ -193,6 +209,7 @@ async fn fail_expired_deferral<C: Clock, R: RandomSource>(
     .await
 }
 
+#[cfg(feature = "native-tokio")]
 async fn reconcile_due_tool<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     catalog: &ResolvedToolCatalog,

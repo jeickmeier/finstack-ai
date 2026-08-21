@@ -2,9 +2,8 @@
 
 > **Status: sliding-window, large-tool-output, and summarize land.**
 > Summarize still never holds a `Model` handle; the runtime-owned
-> phase (ADR-042) fulfills `RequestCompactionModel`. Read
-> [Middleware](../../../docs/site/middleware.md)
-> before working on it.
+> phase fulfills `RequestCompactionModel`. Read the current runtime and
+> middleware contracts before working on it.
 
 One `MiddlewareRole::ContextCompactor` leaf. Strategies are selected by
 configuration, not by registering a second compactor:
@@ -20,7 +19,7 @@ Deterministic strategies complete as `CompactContext`. Summarize never
 depends on a `Model` handle or a middleware-owned child effect. A first
 summarize invoke without resume fails closed
 (`COMPACTION_MODEL_NOT_AUTHORIZED`). Configuration cannot self-authorize
-secondary-model dispatch; runtime authorization is owned by PR-112.
+secondary-model dispatch; the runtime owns authorization.
 Canonical history is not mutated.
 
 ## Landing

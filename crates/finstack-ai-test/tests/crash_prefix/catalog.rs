@@ -43,7 +43,7 @@ fn crash_prefix_catalog_covers_every_effect_kind_and_lane_operation() {
 #[tokio::test]
 #[allow(
     clippy::too_many_lines,
-    reason = "PR-064 catalog adds one recover prefix per EffectKind and lane operation"
+    reason = "crash-prefix catalog catalog adds one recover prefix per EffectKind and lane operation"
 )]
 async fn prefix_effect_kind_and_lane_catalog() {
     let store = memory_store();

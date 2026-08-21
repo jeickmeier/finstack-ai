@@ -253,14 +253,7 @@ def check_size() -> int:
             f"{entry['path']}: {entry['bytes']} bytes, gzip {entry['gzip_bytes']}"
             + (f", brotli {entry['brotli_bytes']}" if "brotli_bytes" in entry else "")
         )
-    report_path = (
-        REPO_ROOT
-        / "docs"
-        / "implementation"
-        / "artifacts"
-        / "pr-038"
-        / "bundle-size.json"
-    )
+    report_path = REPO_ROOT / "target" / "performance" / "bundle-size.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"

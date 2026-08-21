@@ -220,14 +220,16 @@ pub use records::{
 };
 pub use reducer::{
     AcceptRun, CancelRequested, CancellationReconciledInput, CommittedBatch, Decision,
-    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome,
-    InteractionSettled, Kernel, KernelError, KernelInput, ModelSettled, ModelSettlement,
-    PostCommitAction, ReducerStageOutcome, RequestCompactionModel, RequestInteraction,
-    StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
+    ExtensionEffectSettled, ExtensionSettlement, ExternalEffectCompletedInput,
+    ExternalEffectCompletion, ExternalEffectOutcome, InteractionSettled, Kernel, KernelError,
+    KernelInput, ModelSettled, ModelSettlement, PostCommitAction, ReducerStageOutcome,
+    RequestCompactionModel, RequestExtensionEffect, RequestInteraction, StageSettled,
+    TimerFiredInput, ToolBatchSettled, ToolSettlement,
 };
 pub use state::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn,
-    InteractionTerminal, InteractionTerminalOutcome, KernelState, ModelSettlementFingerprint,
-    ModelSettlementKind, PendingInteraction, PendingModelEffect, ResolutionIdentity, RetryState,
+    ExtensionSettlementFingerprint, ExtensionSettlementKind, InteractionTerminal,
+    InteractionTerminalOutcome, KernelState, ModelSettlementFingerprint, ModelSettlementKind,
+    PendingExtensionEffect, PendingInteraction, PendingModelEffect, ResolutionIdentity, RetryState,
     RunPhase, TerminalCandidate, TerminalState, TransitionEnv,
 };

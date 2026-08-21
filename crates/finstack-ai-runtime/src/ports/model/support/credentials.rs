@@ -129,8 +129,9 @@ impl CredentialStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{Authentication, CredentialReference, CredentialRejected, CredentialStore};
-    use crate::ports::model::provider_util::secret::SecretString;
+    use super::{
+        Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretString,
+    };
 
     #[test]
     fn store_resolves_named_entries_and_redacts_debug() {

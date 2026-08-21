@@ -1,4 +1,4 @@
-//! PR-016 Toolset port, validation, scheduler, ordering, and panic proofs.
+//! tool-port contract Toolset port, validation, scheduler, ordering, and panic proofs.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

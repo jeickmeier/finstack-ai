@@ -7,6 +7,7 @@ use finstack_ai_kernel::{KernelInput, TransitionEnv};
 use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
 use crate::event_hub::EventHubHandle;
 use crate::host_driver::Signal;
+use crate::observer::ObserverDiagnosticBuffer;
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
 use crate::{CommitOutcome, ModelRequest, ResolvedTool, ToolCallContext};
 
@@ -21,6 +22,7 @@ pub(super) struct Shared {
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
     pub(super) timer_already_due: AtomicU64,
     pub(super) timer_backward_clock_clamped: AtomicU64,
+    pub(super) observer_diagnostics: Mutex<ObserverDiagnosticBuffer>,
     pub(super) work: Signal,
 }
 
@@ -35,6 +37,7 @@ impl Shared {
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
             timer_backward_clock_clamped: AtomicU64::new(0),
+            observer_diagnostics: Mutex::new(ObserverDiagnosticBuffer::default()),
             work: Signal::new(),
         })
     }

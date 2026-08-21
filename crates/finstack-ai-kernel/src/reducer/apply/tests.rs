@@ -6,8 +6,9 @@ use super::record::apply_record;
 use crate::content::{ContentBlock, JsonBlock};
 use crate::conversation::{Message, MessageRole, ProviderIds};
 use crate::effects::{
-    EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
-    InteractionKind, InteractionRequest, ReconciliationPolicy, RetrySafety,
+    ComponentInvocation, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind,
+    EffectRequested, InteractionKind, InteractionRequest, InvocationRecovery, PipelinePosition,
+    ReconciliationPolicy, RetrySafety,
 };
 use crate::primitives::ComponentId;
 use crate::primitives::Digest;
@@ -15,7 +16,7 @@ use crate::primitives::ExternalHandleRef;
 use crate::primitives::Timestamp;
 use crate::primitives::{BoundedMap, ComponentRef, Metadata, RawJson, Version};
 use crate::records::lifecycle::{
-    EntryAppended, RunCancelled, RunCompleted, RunFailed, RunSuspended,
+    EntryAppended, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage, StageCursor,
 };
 use crate::records::run::{CancellationInitiator, CancellationRequest, CancellationRequested};
 use crate::records::{
@@ -222,6 +223,108 @@ fn child_preparation_and_budget_replay_are_idempotent_and_conflict_closed() {
         apply(&settled, &conflict_batch, 0),
         Err(KernelError::InvalidRecordOrder)
     );
+}
+
+#[test]
+fn extension_effect_replay_holds_cursor_until_terminal_settlement() {
+    let (mut state, timestamp) = accepted_before_finalize();
+    state.phase = Some(RunPhase::BeforeRun);
+    let effect_id = fixed_id::<crate::EffectTag>(40);
+    let cursor = StageCursor {
+        cycle: 0,
+        stage: Stage::BeforeRun,
+    };
+    let contract = EffectOutputContract {
+        kind: EffectOutputKind::MiddlewareOutcome,
+        schema_version: 1,
+        schema_digest: Digest::raw_json(b"middleware-output"),
+    };
+    let requested = EffectRequested::try_new(
+        effect_id,
+        EffectKind::Middleware,
+        None,
+        Some(ComponentInvocation {
+            component: ComponentId::parse("finstack.middleware.fixture").expect("component"),
+            version: Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            },
+            configuration_digest: Digest::raw_json(b"configuration"),
+            recovery: InvocationRecovery::RecomputeSafe,
+        }),
+        Some(
+            PipelinePosition::try_new(Digest::raw_json(b"chain"), "before_run", 0)
+                .expect("pipeline"),
+        ),
+        contract.clone(),
+        EffectInput::Middleware {
+            cursor,
+            stage: Arc::from("before_run"),
+            input: RawJson::parse("{}").expect("input"),
+            resume: None,
+        },
+        RetrySafety::SafeToRetry,
+        None,
+    )
+    .expect("request");
+    let request_batch = CommittedBatch::try_new(
+        fixed_id::<crate::AppendBatchTag>(41),
+        1,
+        1,
+        vec![envelope(
+            1,
+            41,
+            timestamp,
+            RecordBody::EffectRequested(requested.clone()),
+        )],
+    )
+    .expect("request batch");
+    let requested_state = apply(&state, &request_batch, 0).expect("request apply").0;
+    assert_eq!(requested_state.phase, Some(RunPhase::BeforeRun));
+    assert_eq!(
+        requested_state
+            .pending_extension_effect
+            .as_ref()
+            .map(|pending| pending.cursor),
+        Some(cursor)
+    );
+    assert_eq!(requested_state.state_version, 7);
+
+    let completed = crate::EffectCompleted::try_new(
+        effect_id,
+        contract,
+        RawJson::parse(r#"{"outcome":"continue"}"#).expect("output"),
+        None,
+        vec![],
+        ProviderIds::empty(),
+        Some("middleware-completion"),
+        None,
+    )
+    .expect("completion");
+    let completion_batch = CommittedBatch::try_new(
+        fixed_id::<crate::AppendBatchTag>(42),
+        2,
+        2,
+        vec![envelope(
+            2,
+            42,
+            timestamp,
+            RecordBody::EffectCompleted(completed),
+        )],
+    )
+    .expect("completion batch");
+    let settled = apply(&requested_state, &completion_batch, 1)
+        .expect("completion apply")
+        .0;
+    assert!(settled.pending_extension_effect.is_none());
+    assert!(settled.extension_settlements.contains_key(&effect_id));
+    assert_eq!(settled.phase, Some(RunPhase::BeforeRun));
+    settled.validate().expect("valid v7 state");
+    let encoded = serde_json::to_vec(&settled).expect("serialize v7");
+    let decoded: KernelState = serde_json::from_slice(&encoded).expect("deserialize v7");
+    assert_eq!(decoded, settled);
+    assert_eq!(decoded.state_hash(), settled.state_hash());
 }
 
 fn accepted_before_finalize() -> (KernelState, Timestamp) {

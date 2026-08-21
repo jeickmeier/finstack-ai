@@ -15,7 +15,7 @@ use finstack_ai_kernel::{
 };
 use futures_core::Stream;
 
-use crate::compaction_driver::{compaction_parent_effect_id, resume_pending_compaction_model};
+use crate::compaction_driver::resume_pending_compaction_model;
 use crate::context::{ContextAuthority, ContextItem, ContextItemKind, ContextProvenance};
 use crate::middleware::{
     BeforeModelInput, CompactionEvidence, CompactionResult, MiddlewareDescriptor, MiddlewareOrder,
@@ -817,14 +817,15 @@ fn summarize_completes_against_a_scripted_model_without_duplicating_on_retry() {
     assert_eq!(summary_occurrences(&committed_draft(&coordinator)), 1);
     let requested = compaction_requests(&coordinator);
     assert_eq!(requested.len(), 1, "one child model effect");
-    let parent =
-        compaction_parent_effect_id(&coordinator.stage_dispatch_seed().expect("seed").locator, 0);
+    let parent = coordinator
+        .last_middleware_effect_id()
+        .expect("durable middleware parent");
     assert_eq!(
         requested[0]
             .relation()
             .map(|relation| relation.parent_effect_id),
         Some(parent),
-        "parent linkage is the derived BeforeModel identity"
+        "parent linkage is the committed BeforeModel middleware effect"
     );
     assert!(
         coordinator

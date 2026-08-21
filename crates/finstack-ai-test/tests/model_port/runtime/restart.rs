@@ -43,11 +43,13 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
             job_capacity: 1,
             result_capacity: 1,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
-        model_port,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(model_port)
+                .await
+                .expect("model readiness"),
+        ),
         locked_profile(),
         FixedClock::new(timestamp(2_000)),
         CounterRandom(AtomicU64::new(400)),
@@ -134,11 +136,13 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
             job_capacity: 1,
             result_capacity: 1,
             stream_limits: ModelStreamLimits::default(),
-            warmup_deadline: None,
-            warmup_metadata: Metadata::empty(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
-        replacement,
+        Arc::new(
+            finstack_ai_runtime::ReadyModel::prepare(replacement)
+                .await
+                .expect("replacement model readiness"),
+        ),
         locked_profile(),
         FixedClock::new(timestamp(20_000)),
         CounterRandom(AtomicU64::new(500)),

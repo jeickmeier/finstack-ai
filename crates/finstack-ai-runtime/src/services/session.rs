@@ -1,25 +1,25 @@
-//! In-process session writer, lane guard, and lineage fan-out (PR-047).
+//! In-process session writer, lane guard, and lineage fan-out.
 //!
 //! This is composition over the existing journal store. It is not a seventh
 //! port and does not add `KernelState` fields.
 
 use std::collections::BTreeMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::OnceLock;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     AppendBatchId, CancellationInitiator, ChildPlacement, ConversationEntry, ConversationError,
-    DeadlinePropagation, EntryId, KernelInput, LABEL_MAX_BYTES, LaneCreated, LaneId, LaneMoved,
-    Message, Metadata, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft,
-    RecordId, RunAccepted, RunId, SessionCreated, SessionId, SessionProjection, Timestamp,
-    TransitionEnv,
+    DeadlinePropagation, EntryBody, EntryId, KernelInput, LABEL_MAX_BYTES, LaneCreated, LaneId,
+    LaneMoved, Message, Metadata, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
+    RecordDraft, RecordId, RunAccepted, RunId, SessionCreated, SessionId, SessionProjection,
+    Timestamp, TransitionEnv,
 };
 use thiserror::Error;
 
 use crate::coordinator::{CommitCoordinator, CommitCoordinatorError, project_loaded};
 use crate::journal::{JournalStore, LoadRequest};
 use crate::services::identity_map::{ExternalIdentityKey, ExternalIdentityMap, IdentityMapError};
+use crate::services::session_intern::{self, InternDecision};
+use crate::services::session_sync::StructuralGate;
 
 /// In-process owner of one `(session_id, lane_id)` guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,12 +116,18 @@ pub enum SessionError {
     /// Lane name is empty, oversized, or a second `main`.
     #[error("invalid lane name")]
     InvalidLaneName,
+    /// Message text is empty or exceeds the content bound.
+    #[error("invalid message text")]
+    InvalidMessageText,
     /// Another lane already uses this application name.
     #[error("duplicate lane name")]
     DuplicateLaneName,
     /// Shared session state is poisoned.
     #[error("session lock is poisoned")]
     Poisoned,
+    /// An interned runtime belongs to a different tenant scope.
+    #[error("session tenant scope mismatch")]
+    TenantScopeMismatch,
     /// Host identity map rejected the bind.
     #[error("identity map: {0}")]
     Identity(IdentityMapError),
@@ -140,8 +146,10 @@ impl SessionError {
             Self::UnknownEntry => "unknown_entry",
             Self::LaneBusy => "lane_busy",
             Self::InvalidLaneName => "invalid_lane_name",
+            Self::InvalidMessageText => "invalid_message_text",
             Self::DuplicateLaneName => "duplicate_lane_name",
             Self::Poisoned => "session_lock_poisoned",
+            Self::TenantScopeMismatch => "tenant_scope_mismatch",
             Self::Identity(IdentityMapError::Conflict) => "identity_conflict",
             Self::Identity(IdentityMapError::InvalidKey { .. }) => "invalid_identity_key",
             Self::Conversation(_) => "conversation_invalid",
@@ -164,6 +172,8 @@ impl SessionError {
 struct SessionInner {
     projection: SessionProjection,
     guards: BTreeMap<LaneId, LaneOwner>,
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    live_runs: BTreeMap<RunId, crate::RunHandle>,
     /// Structural-only coordinator at the live session head. Taken out for
     /// the duration of one structural commit so the mutex is not held across
     /// store I/O.
@@ -176,6 +186,7 @@ pub struct SessionRuntime {
     session_id: SessionId,
     tenant_scope: Arc<str>,
     inner: Mutex<SessionInner>,
+    structural: StructuralGate,
 }
 
 impl SessionRuntime {
@@ -190,57 +201,90 @@ impl SessionRuntime {
         ids: SessionCreateIds,
     ) -> Result<Arc<Self>, SessionError> {
         let tenant_scope = tenant_scope.into();
-        if let Some(existing) = interned(&store, ids.session_id)? {
-            return Ok(existing);
+        loop {
+            match session_intern::decide(&store, ids.session_id)? {
+                InternDecision::Existing(existing) => {
+                    existing.ensure_tenant_scope(&tenant_scope)?;
+                    return Ok(existing);
+                }
+                InternDecision::Wait(follower) => follower.wait().await,
+                InternDecision::Lead(leader) => {
+                    let loaded = store
+                        .load(LoadRequest {
+                            session_id: ids.session_id,
+                        })
+                        .await
+                        .map_err(|_| SessionError::Recover {
+                            code: "session_load_failed",
+                        })?;
+                    if loaded.head_sequence > 0 {
+                        let projection = project_loaded(&loaded)
+                            .map_err(|code| SessionError::Recover { code })?;
+                        let coordinator = CommitCoordinator::structural_from_loaded(
+                            Arc::clone(&store),
+                            &loaded,
+                            projection.clone(),
+                        )
+                        .map_err(|error| SessionError::recover(&error))?;
+                        return leader.complete(Self {
+                            store,
+                            session_id: ids.session_id,
+                            tenant_scope,
+                            inner: Mutex::new(SessionInner {
+                                projection,
+                                guards: BTreeMap::new(),
+                                #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+                                live_runs: BTreeMap::new(),
+                                head: Some(coordinator),
+                            }),
+                            structural: StructuralGate::default(),
+                        });
+                    }
+                    let mut coordinator = CommitCoordinator::new(Arc::clone(&store));
+                    coordinator
+                        .commit_session_records(
+                            ids.batch_id,
+                            vec![
+                                session_draft(
+                                    ids.session_created_record_id,
+                                    ids.session_id,
+                                    ids.main_lane_id,
+                                    ids.now,
+                                    RecordBody::SessionCreated(SessionCreated::new(
+                                        Metadata::empty(),
+                                    )),
+                                )?,
+                                session_draft(
+                                    ids.lane_created_record_id,
+                                    ids.session_id,
+                                    ids.main_lane_id,
+                                    ids.now,
+                                    RecordBody::LaneCreated(
+                                        LaneCreated::try_new("main")
+                                            .map_err(|_| SessionError::InvalidLaneName)?,
+                                    ),
+                                )?,
+                            ],
+                        )
+                        .await
+                        .map_err(|error| SessionError::commit(&error))?;
+                    coordinator.mark_structural_head();
+                    return leader.complete(Self {
+                        store,
+                        session_id: ids.session_id,
+                        tenant_scope,
+                        inner: Mutex::new(SessionInner {
+                            projection: coordinator.session().clone(),
+                            guards: BTreeMap::new(),
+                            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+                            live_runs: BTreeMap::new(),
+                            head: Some(coordinator),
+                        }),
+                        structural: StructuralGate::default(),
+                    });
+                }
+            }
         }
-        let loaded = store
-            .load(LoadRequest {
-                session_id: ids.session_id,
-            })
-            .await
-            .map_err(|_| SessionError::Recover {
-                code: "session_load_failed",
-            })?;
-        if loaded.head_sequence > 0 {
-            return Self::open(store, ids.session_id, tenant_scope).await;
-        }
-        let mut coordinator = CommitCoordinator::new(Arc::clone(&store));
-        coordinator
-            .commit_session_records(
-                ids.batch_id,
-                vec![
-                    session_draft(
-                        ids.session_created_record_id,
-                        ids.session_id,
-                        ids.main_lane_id,
-                        ids.now,
-                        RecordBody::SessionCreated(SessionCreated::new(Metadata::empty())),
-                    )?,
-                    session_draft(
-                        ids.lane_created_record_id,
-                        ids.session_id,
-                        ids.main_lane_id,
-                        ids.now,
-                        RecordBody::LaneCreated(
-                            LaneCreated::try_new("main")
-                                .map_err(|_| SessionError::InvalidLaneName)?,
-                        ),
-                    )?,
-                ],
-            )
-            .await
-            .map_err(|error| SessionError::commit(&error))?;
-        coordinator.mark_structural_head();
-        intern(Self {
-            store,
-            session_id: ids.session_id,
-            tenant_scope,
-            inner: Mutex::new(SessionInner {
-                projection: coordinator.session().clone(),
-                guards: BTreeMap::new(),
-                head: Some(coordinator),
-            }),
-        })
     }
 
     /// Rebuild the projection without respawning non-terminal runs.
@@ -255,33 +299,44 @@ impl SessionRuntime {
         session_id: SessionId,
         tenant_scope: impl Into<Arc<str>>,
     ) -> Result<Arc<Self>, SessionError> {
-        if let Some(existing) = interned(&store, session_id)? {
-            return Ok(existing);
+        let tenant_scope = tenant_scope.into();
+        loop {
+            match session_intern::decide(&store, session_id)? {
+                InternDecision::Existing(existing) => {
+                    existing.ensure_tenant_scope(&tenant_scope)?;
+                    return Ok(existing);
+                }
+                InternDecision::Wait(follower) => follower.wait().await,
+                InternDecision::Lead(leader) => {
+                    let loaded = store.load(LoadRequest { session_id }).await.map_err(|_| {
+                        SessionError::Recover {
+                            code: "session_load_failed",
+                        }
+                    })?;
+                    let projection =
+                        project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
+                    let coordinator = CommitCoordinator::structural_from_loaded(
+                        Arc::clone(&store),
+                        &loaded,
+                        projection.clone(),
+                    )
+                    .map_err(|error| SessionError::recover(&error))?;
+                    return leader.complete(Self {
+                        store,
+                        session_id,
+                        tenant_scope,
+                        inner: Mutex::new(SessionInner {
+                            projection,
+                            guards: BTreeMap::new(),
+                            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+                            live_runs: BTreeMap::new(),
+                            head: Some(coordinator),
+                        }),
+                        structural: StructuralGate::default(),
+                    });
+                }
+            }
         }
-        let loaded =
-            store
-                .load(LoadRequest { session_id })
-                .await
-                .map_err(|_| SessionError::Recover {
-                    code: "session_load_failed",
-                })?;
-        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
-        let coordinator = CommitCoordinator::structural_from_loaded(
-            Arc::clone(&store),
-            &loaded,
-            projection.clone(),
-        )
-        .map_err(|error| SessionError::recover(&error))?;
-        intern(Self {
-            store,
-            session_id,
-            tenant_scope: tenant_scope.into(),
-            inner: Mutex::new(SessionInner {
-                projection,
-                guards: BTreeMap::new(),
-                head: Some(coordinator),
-            }),
-        })
     }
 
     /// Return the interned writer for this store and session, when present.
@@ -293,7 +348,7 @@ impl SessionRuntime {
         store: &Arc<dyn JournalStore>,
         session_id: SessionId,
     ) -> Result<Option<Arc<Self>>, SessionError> {
-        interned(store, session_id)
+        session_intern::existing(store, session_id)
     }
 
     /// Durable session identity.
@@ -329,6 +384,11 @@ impl SessionRuntime {
     ///
     /// Returns a recover failure when load or projection fails.
     pub async fn refresh(&self) -> Result<SessionProjection, SessionError> {
+        let _structural = self.structural.acquire().await?;
+        self.refresh_locked().await
+    }
+
+    async fn refresh_locked(&self) -> Result<SessionProjection, SessionError> {
         let loaded = self
             .store
             .load(LoadRequest {
@@ -363,6 +423,7 @@ impl SessionRuntime {
         fork: Option<EntryId>,
         ids: LaneCreateIds,
     ) -> Result<LaneId, SessionError> {
+        let _structural = self.structural.acquire().await?;
         let name = name.into();
         let created =
             LaneCreated::try_new(Arc::clone(&name)).map_err(|_| SessionError::InvalidLaneName)?;
@@ -404,6 +465,7 @@ impl SessionRuntime {
         batch_id: AppendBatchId,
         now: Timestamp,
     ) -> Result<(), SessionError> {
+        let _structural = self.structural.acquire().await?;
         {
             let inner = self.lock()?;
             if inner.projection.lane_by_id(lane_id).is_none() {
@@ -444,6 +506,7 @@ impl SessionRuntime {
         message: &Message,
         ids: LaneAppendIds,
     ) -> Result<EntryId, SessionError> {
+        let _structural = self.structural.acquire().await?;
         let parent_id = {
             let inner = self.lock()?;
             if inner.projection.lane_by_id(lane_id).is_none() {
@@ -484,6 +547,140 @@ impl SessionRuntime {
             .await;
         self.release(lane_id);
         result?;
+        Ok(entry_id)
+    }
+
+    /// Atomically reserve an idle lane for `run_id` and append its user input.
+    ///
+    /// The returned messages are the complete durable history immediately
+    /// preceding `message`. The active guard remains held on success and must
+    /// be released with [`Self::release_run`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a busy-lane, unknown-lane, invalid-history, or commit failure.
+    pub async fn append_message_for_run(
+        &self,
+        lane_id: LaneId,
+        run_id: RunId,
+        message: &Message,
+        ids: LaneAppendIds,
+    ) -> Result<Vec<Message>, SessionError> {
+        let _structural = self.structural.acquire().await?;
+        let (parent_id, history) = {
+            let mut inner = self.lock()?;
+            let lane = inner
+                .projection
+                .lane_by_id(lane_id)
+                .ok_or(SessionError::UnknownLane)?;
+            if inner.projection.active_on_lane(lane_id).is_some()
+                || inner.guards.contains_key(&lane_id)
+            {
+                return Err(SessionError::LaneBusy);
+            }
+            let history = match lane.leaf_id {
+                Some(leaf_id) => inner
+                    .projection
+                    .history(leaf_id)
+                    .map_err(SessionError::Conversation)?
+                    .into_iter()
+                    .map(|entry| match entry.body() {
+                        EntryBody::Message(message) => message.clone(),
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            let parent_id = lane.leaf_id;
+            inner.guards.insert(lane_id, LaneOwner::Active(run_id));
+            (parent_id, history)
+        };
+        let entry = match ConversationEntry::from_message(message, parent_id, lane_id, 0) {
+            Ok(entry) => entry,
+            Err(error) => {
+                self.release_run(lane_id, run_id);
+                return Err(SessionError::Conversation(error));
+            }
+        };
+        let entry_id = entry.id();
+        let records = match (|| -> Result<Vec<RecordDraft>, SessionError> {
+            Ok(vec![
+                session_draft(
+                    ids.entry_record_id,
+                    self.session_id,
+                    lane_id,
+                    message.created_at(),
+                    RecordBody::ConversationEntry(entry),
+                )?,
+                session_draft(
+                    ids.lane_moved_record_id,
+                    self.session_id,
+                    lane_id,
+                    message.created_at(),
+                    RecordBody::LaneMoved(LaneMoved::new(entry_id)),
+                )?,
+            ])
+        })() {
+            Ok(records) => records,
+            Err(error) => {
+                self.release_run(lane_id, run_id);
+                return Err(error);
+            }
+        };
+        let result = self.commit_records(ids.batch_id, records).await;
+        if let Err(error) = result {
+            self.release_run(lane_id, run_id);
+            return Err(error);
+        }
+        Ok(history)
+    }
+
+    /// Append the completed assistant message while the matching run owns the lane.
+    ///
+    /// # Errors
+    ///
+    /// Returns a busy-lane, unknown-lane, conversation, or commit failure.
+    pub async fn append_message_from_run(
+        &self,
+        lane_id: LaneId,
+        run_id: RunId,
+        message: &Message,
+        ids: LaneAppendIds,
+    ) -> Result<EntryId, SessionError> {
+        let _structural = self.structural.acquire().await?;
+        let parent_id = {
+            let inner = self.lock()?;
+            let lane = inner
+                .projection
+                .lane_by_id(lane_id)
+                .ok_or(SessionError::UnknownLane)?;
+            if inner.guards.get(&lane_id) != Some(&LaneOwner::Active(run_id)) {
+                return Err(SessionError::LaneBusy);
+            }
+            lane.leaf_id
+        };
+        let entry = ConversationEntry::from_message(message, parent_id, lane_id, 0)
+            .map_err(SessionError::Conversation)?;
+        let entry_id = entry.id();
+        self.commit_records(
+            ids.batch_id,
+            vec![
+                session_draft(
+                    ids.entry_record_id,
+                    self.session_id,
+                    lane_id,
+                    message.created_at(),
+                    RecordBody::ConversationEntry(entry),
+                )?,
+                session_draft(
+                    ids.lane_moved_record_id,
+                    self.session_id,
+                    lane_id,
+                    message.created_at(),
+                    RecordBody::LaneMoved(LaneMoved::new(entry_id)),
+                )?,
+            ],
+        )
+        .await?;
         Ok(entry_id)
     }
 
@@ -535,6 +732,41 @@ impl SessionRuntime {
         if let Ok(mut inner) = self.lock() {
             inner.guards.remove(&lane_id);
         }
+    }
+
+    /// Release a run guard only when it is still owned by `run_id`.
+    pub fn release_run(&self, lane_id: LaneId, run_id: RunId) {
+        if let Ok(mut inner) = self.lock()
+            && inner.guards.get(&lane_id) == Some(&LaneOwner::Active(run_id))
+        {
+            inner.guards.remove(&lane_id);
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            inner.live_runs.remove(&run_id);
+        }
+    }
+
+    /// Attach the live runtime handle for the run currently owning `lane_id`.
+    ///
+    /// This keeps authenticated lane cancellation on the owning coordinator,
+    /// where committed cancellation can signal active effect drivers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::LaneBusy`] when the guard no longer belongs to
+    /// `run_id`.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub fn bind_run_handle(
+        &self,
+        lane_id: LaneId,
+        run_id: RunId,
+        handle: crate::RunHandle,
+    ) -> Result<(), SessionError> {
+        let mut inner = self.lock()?;
+        if inner.guards.get(&lane_id) != Some(&LaneOwner::Active(run_id)) {
+            return Err(SessionError::LaneBusy);
+        }
+        inner.live_runs.insert(run_id, handle);
+        Ok(())
     }
 
     /// Whether this process currently owns `(session_id, lane_id)`.
@@ -610,26 +842,48 @@ impl SessionRuntime {
         if let Some(operation) = projection.operations().get(&run_id)
             && !operation.terminal
         {
-            let mut coordinator = self.coordinator_for_run(Some(run_id)).await?;
-            match coordinator
-                .submit(
-                    next_env()?,
-                    KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
-                        initiator: initiator.clone(),
-                        reason: None,
-                    }),
-                )
-                .await
-            {
-                Ok(_)
-                | Err(CommitCoordinatorError::Decision {
-                    code: "invalid_input_payload",
-                }) => {}
-                Err(error) => return Err(SessionError::commit(&error)),
+            let input = KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+                initiator: initiator.clone(),
+                reason: None,
+            });
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            let live = self.lock()?.live_runs.get(&run_id).cloned();
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            if let Some(handle) = live {
+                let outcome =
+                    handle
+                        .submit(next_env()?, input)
+                        .await
+                        .map_err(|_| SessionError::Commit {
+                            code: "live_run_cancel_failed",
+                        })?;
+                if let Some(fault) = outcome.fault {
+                    return Err(SessionError::Commit { code: fault.code });
+                }
+            } else {
+                self.cancel_recovered(run_id, next_env()?, input).await?;
             }
-            self.sync_structural_head(&coordinator)?;
+            #[cfg(not(any(feature = "native-tokio", feature = "wasm-host")))]
+            self.cancel_recovered(run_id, next_env()?, input).await?;
         }
         self.fan_out(run_id, &initiator, next_env).await
+    }
+
+    async fn cancel_recovered(
+        &self,
+        run_id: RunId,
+        env: TransitionEnv,
+        input: KernelInput,
+    ) -> Result<(), SessionError> {
+        let mut coordinator = self.coordinator_for_run(Some(run_id)).await?;
+        match coordinator.submit(env, input).await {
+            Ok(_)
+            | Err(CommitCoordinatorError::Decision {
+                code: "invalid_input_payload",
+            }) => {}
+            Err(error) => return Err(SessionError::commit(&error)),
+        }
+        self.sync_structural_head(&coordinator)
     }
 
     /// Bind this session's lane into a host-owned identity map.
@@ -781,6 +1035,14 @@ impl SessionRuntime {
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, SessionInner>, SessionError> {
         self.inner.lock().map_err(|_| SessionError::Poisoned)
     }
+
+    fn ensure_tenant_scope(&self, tenant_scope: &str) -> Result<(), SessionError> {
+        if self.tenant_scope.as_ref() == tenant_scope {
+            Ok(())
+        } else {
+            Err(SessionError::TenantScopeMismatch)
+        }
+    }
 }
 
 fn fanout_initiator(
@@ -826,68 +1088,6 @@ fn session_draft(
     })
 }
 
-type InternKey = (usize, SessionId);
-
-fn store_key(store: &Arc<dyn JournalStore>) -> usize {
-    Arc::as_ptr(store).cast::<u8>() as usize
-}
-
-#[cfg(test)]
-thread_local! {
-    static FAIL_INTERNS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-fn with_interns<R>(
-    f: impl FnOnce(&mut BTreeMap<InternKey, Weak<SessionRuntime>>) -> R,
-) -> Result<R, SessionError> {
-    #[cfg(test)]
-    if FAIL_INTERNS.with(std::cell::Cell::get) {
-        return Err(SessionError::Poisoned);
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        static INTERNS: OnceLock<Mutex<BTreeMap<InternKey, Weak<SessionRuntime>>>> =
-            OnceLock::new();
-        INTERNS
-            .get_or_init(|| Mutex::new(BTreeMap::new()))
-            .lock()
-            .map(|mut map| f(&mut map))
-            .map_err(|_| SessionError::Poisoned)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::cell::RefCell;
-        thread_local! {
-            static INTERNS: RefCell<BTreeMap<InternKey, Weak<SessionRuntime>>> =
-                const { RefCell::new(BTreeMap::new()) };
-        }
-        INTERNS.with(|cell| {
-            cell.try_borrow_mut()
-                .map(|mut map| f(&mut map))
-                .map_err(|_| SessionError::Poisoned)
-        })
-    }
-}
-
-fn interned(
-    store: &Arc<dyn JournalStore>,
-    session_id: SessionId,
-) -> Result<Option<Arc<SessionRuntime>>, SessionError> {
-    with_interns(|map| {
-        map.get(&(store_key(store), session_id))
-            .and_then(Weak::upgrade)
-    })
-}
-
-fn intern(runtime: SessionRuntime) -> Result<Arc<SessionRuntime>, SessionError> {
-    let key = (store_key(&runtime.store), runtime.session_id);
-    let runtime = Arc::new(runtime);
-    with_interns(|map| {
-        map.insert(key, Arc::downgrade(&runtime));
-    })?;
-    Ok(runtime)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -896,6 +1096,10 @@ mod tests {
     fn session_error_codes_are_stable() {
         assert_eq!(SessionError::LaneBusy.code(), "lane_busy");
         assert_eq!(SessionError::UnknownLane.code(), "unknown_lane");
+        assert_eq!(
+            SessionError::InvalidMessageText.code(),
+            "invalid_message_text"
+        );
         assert_eq!(
             SessionError::DuplicateLaneName.code(),
             "duplicate_lane_name"
@@ -949,44 +1153,39 @@ mod tests {
         }
     }
 
-    struct FailInterns;
-
-    impl FailInterns {
-        fn arm() -> Self {
-            FAIL_INTERNS.with(|flag| flag.set(true));
-            Self
-        }
-    }
-
-    impl Drop for FailInterns {
-        fn drop(&mut self) {
-            FAIL_INTERNS.with(|flag| flag.set(false));
-        }
-    }
-
     #[test]
     fn intern_table_unavailable_does_not_yield_a_second_owner() {
         let store: Arc<dyn JournalStore> = Arc::new(UnavailableStore);
         let session_id = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
-        let _guard = FailInterns::arm();
+        let _guard = session_intern::FailInterns::arm();
         assert!(matches!(
             SessionRuntime::existing(&store, session_id),
             Err(SessionError::Poisoned)
         ));
-        let leaked = intern(SessionRuntime {
-            store: Arc::clone(&store),
-            session_id,
-            tenant_scope: Arc::from("tenant"),
-            inner: Mutex::new(SessionInner {
-                projection: SessionProjection::new(session_id),
-                guards: BTreeMap::new(),
-                head: None,
-            }),
-        });
-        assert!(matches!(leaked, Err(SessionError::Poisoned)));
         assert!(matches!(
             SessionRuntime::existing(&store, session_id),
             Err(SessionError::Poisoned)
+        ));
+    }
+
+    #[test]
+    fn session_intern_allows_one_initialization_leader_per_store_and_session() {
+        let store: Arc<dyn JournalStore> = Arc::new(UnavailableStore);
+        let session_id = SessionId::parse("11234567-89ab-7cde-89ab-0123456789ab").expect("id");
+        let leader = match session_intern::decide(&store, session_id).expect("first decision") {
+            InternDecision::Lead(leader) => leader,
+            InternDecision::Existing(_) | InternDecision::Wait(_) => {
+                panic!("first decision must lead")
+            }
+        };
+        assert!(matches!(
+            session_intern::decide(&store, session_id).expect("second decision"),
+            InternDecision::Wait(_)
+        ));
+        drop(leader);
+        assert!(matches!(
+            session_intern::decide(&store, session_id).expect("retry decision"),
+            InternDecision::Lead(_)
         ));
     }
 }

@@ -72,8 +72,8 @@ pub fn finstack_ai_completion_ingress::CompletionIngress::mint(&self, &finstack_
 pub fn finstack_ai_completion_ingress::CompletionIngress::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, alloc::sync::Arc<finstack_ai_runtime::services::audit::SecurityAuditGate>, finstack_ai_completion_ingress::CompletionIngressConfig) -> core::result::Result<Self, finstack_ai_completion_ingress::CompletionIngressConfigError>
 pub fn finstack_ai_completion_ingress::CompletionIngress::with_horizon(self, finstack_ai_runtime::ports::journal::IdempotencyHorizon) -> Self
 pub struct finstack_ai_completion_ingress::CompletionIngressConfig
-pub finstack_ai_completion_ingress::CompletionIngressConfig::additional_verification_keys: alloc::vec::Vec<(alloc::string::String, finstack_ai_runtime::ports::model::provider_util::secret::SecretString)>
-pub finstack_ai_completion_ingress::CompletionIngressConfig::key: finstack_ai_runtime::ports::model::provider_util::secret::SecretString
+pub finstack_ai_completion_ingress::CompletionIngressConfig::additional_verification_keys: alloc::vec::Vec<(alloc::string::String, finstack_ai_runtime::ports::model::support::secret::SecretString)>
+pub finstack_ai_completion_ingress::CompletionIngressConfig::key: finstack_ai_runtime::ports::model::support::secret::SecretString
 pub finstack_ai_completion_ingress::CompletionIngressConfig::key_id: alloc::string::String
 impl core::clone::Clone for finstack_ai_completion_ingress::CompletionIngressConfig
 pub fn finstack_ai_completion_ingress::CompletionIngressConfig::clone(&self) -> finstack_ai_completion_ingress::CompletionIngressConfig

@@ -1,4 +1,4 @@
-//! PR-040 fault, busy, power-loss, and graph proofs.
+//! `SQLite` durability contract fault, busy, power-loss, and graph proofs.
 
 use std::fs;
 use std::future::Future;
@@ -223,7 +223,7 @@ fn disk_full_maps_to_sqlite_disk_full() {
 }
 
 #[test]
-#[ignore = "known flake; not an A01 row (TDD §18.2 / PR-048 pitfall 13)"]
+#[ignore = "known flake; not an A01 row (TDD §18.2 / crash-recovery contract pitfall 13)"]
 fn concurrent_readers_never_observe_a_torn_batch() {
     let dir = TempDir::new().expect("tempdir");
     let store = Arc::new(open(

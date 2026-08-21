@@ -721,7 +721,10 @@ async fn explicit_replacement_checks_and_records_the_existing_source() {
         .await
         .expect("replacement resolves");
     let expected: Arc<dyn Model> = replacement_model;
-    assert!(Arc::ptr_eq(agent.run_plan().model().handle(), &expected));
+    assert!(Arc::ptr_eq(
+        &agent.run_plan().model().handle().shared_model(),
+        &expected
+    ));
 }
 
 #[tokio::test]
@@ -745,7 +748,10 @@ async fn resolved_plan_retains_direct_handles_without_registry_lookup() {
         .expect("resolution succeeds");
     assert_eq!(registry.lookup_count, 2);
     let plan = agent.run_plan();
-    assert!(Arc::ptr_eq(plan.model().handle(), &expected_model));
+    assert!(Arc::ptr_eq(
+        &plan.model().handle().shared_model(),
+        &expected_model
+    ));
     let _ = plan.model().handle().descriptor();
     let _ = plan.store().handle().health().await;
     let _ = agent.run_plan();
@@ -826,6 +832,7 @@ async fn selected_factory_and_model_warmup_execute_once() {
         .register_extension(&store_extension)
         .expect("store registers");
     let mut registry = registrar.into_registry();
+    let mut first_ready = None;
 
     for expected in [
         ResolutionDiagnosticKind::FactoryConstructed,
@@ -839,7 +846,12 @@ async fn selected_factory_and_model_warmup_execute_once() {
             .await
             .expect("factory resolution succeeds");
         assert_eq!(agent.resolution_report().diagnostics[0].kind, expected);
-        let _ = agent.run_plan().model().handle().descriptor();
+        let ready = Arc::clone(agent.run_plan().model().handle());
+        if let Some(first) = &first_ready {
+            assert!(Arc::ptr_eq(first, &ready));
+        } else {
+            first_ready = Some(ready);
+        }
     }
     assert_eq!(constructions.load(Ordering::Acquire), 1);
     assert_eq!(scripted.warmup_count(), 1);

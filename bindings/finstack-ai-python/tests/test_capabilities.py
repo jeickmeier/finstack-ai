@@ -1,4 +1,4 @@
-"""PR-032 shared capability-catalog and Python activation conformance."""
+"""Shared capability-catalog and Python activation conformance."""
 
 from __future__ import annotations
 

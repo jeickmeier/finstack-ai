@@ -1,11 +1,10 @@
-"""PR-047 live Session/Lane handles and identity hooks."""
+"""Live Session/Lane handles and identity hooks."""
 
 from __future__ import annotations
 
 import asyncio
 
 import finstack_ai
-
 from test_handles import _agent, _ollama_ndjson, _server
 
 
@@ -65,17 +64,4 @@ def test_idle_lane_run_returns_a_live_run() -> None:
         assert result.text == "hello"
 
     with _server(_ollama_ndjson(["hello"])) as server:
-        asyncio.run(exercise(server))
-
-
-def test_lane_cancel_is_a_noop_on_an_idle_lane() -> None:
-    async def exercise(server: object) -> None:
-        agent = await _agent(server)  # type: ignore[arg-type]
-        session = await agent.create_session("tenant-a")
-        main = await session.lane("main")
-        await main.cancel()
-        inspect = await main.inspect()
-        assert inspect["active_run_id"] is None
-
-    with _server(_ollama_ndjson(["ok"])) as server:
         asyncio.run(exercise(server))
