@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     AppendBatchId, CancellationInitiator, ChildPlacement, ConversationEntry, ConversationError,
-    DeadlinePropagation, EntryBody, EntryId, KernelInput, LABEL_MAX_BYTES, LaneCreated, LaneId,
-    LaneMoved, Message, Metadata, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
+    DeadlinePropagation, Digest, EntryBody, EntryId, KernelInput, LABEL_MAX_BYTES, LaneCreated,
+    LaneId, LaneMoved, Message, Metadata, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
     RecordDraft, RecordId, RunAccepted, RunId, SessionCreated, SessionId, SessionProjection,
     Timestamp, TransitionEnv,
 };
@@ -87,6 +87,19 @@ pub struct LaneAppendIds {
     pub lane_moved_record_id: RecordId,
     /// Append batch identity.
     pub batch_id: AppendBatchId,
+}
+
+/// Validated durable context captured while atomically accepting a lane run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaneRunContext {
+    /// Complete selected-lane history through the newly committed user message.
+    pub messages: Arc<[Message]>,
+    /// Conversation leaf created for the newly committed user message.
+    pub source_leaf_id: EntryId,
+    /// Last journal sequence confirmed by the structural commit.
+    pub journal_sequence: u64,
+    /// Confirmed journal head checksum after the structural commit.
+    pub head_checksum: Option<Digest>,
 }
 
 /// Session-writer failures that fail closed.
@@ -566,8 +579,31 @@ impl SessionRuntime {
         message: &Message,
         ids: LaneAppendIds,
     ) -> Result<Vec<Message>, SessionError> {
+        let context = self
+            .begin_run_with_message(lane_id, run_id, message, ids)
+            .await?;
+        let prior_len = context.messages.len().saturating_sub(1);
+        Ok(context.messages[..prior_len].to_vec())
+    }
+
+    /// Atomically reserve an idle lane, append its user input, and return the
+    /// validated durable history through that exact message.
+    ///
+    /// The active guard remains held on success and must be released with
+    /// [`Self::release_run`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a busy-lane, unknown-lane, invalid-history, or commit failure.
+    pub async fn begin_run_with_message(
+        &self,
+        lane_id: LaneId,
+        run_id: RunId,
+        message: &Message,
+        ids: LaneAppendIds,
+    ) -> Result<LaneRunContext, SessionError> {
         let _structural = self.structural.acquire().await?;
-        let (parent_id, history) = {
+        let parent_id = {
             let mut inner = self.lock()?;
             let lane = inner
                 .projection
@@ -578,21 +614,15 @@ impl SessionRuntime {
             {
                 return Err(SessionError::LaneBusy);
             }
-            let history = match lane.leaf_id {
-                Some(leaf_id) => inner
+            if let Some(leaf_id) = lane.leaf_id {
+                inner
                     .projection
                     .history(leaf_id)
-                    .map_err(SessionError::Conversation)?
-                    .into_iter()
-                    .map(|entry| match entry.body() {
-                        EntryBody::Message(message) => message.clone(),
-                    })
-                    .collect(),
-                None => Vec::new(),
-            };
+                    .map_err(SessionError::Conversation)?;
+            }
             let parent_id = lane.leaf_id;
             inner.guards.insert(lane_id, LaneOwner::Active(run_id));
-            (parent_id, history)
+            parent_id
         };
         let entry = match ConversationEntry::from_message(message, parent_id, lane_id, 0) {
             Ok(entry) => entry,
@@ -626,12 +656,29 @@ impl SessionRuntime {
                 return Err(error);
             }
         };
-        let result = self.commit_records(ids.batch_id, records).await;
-        if let Err(error) = result {
+        if let Err(error) = self.commit_records(ids.batch_id, records).await {
             self.release_run(lane_id, run_id);
             return Err(error);
         }
-        Ok(history)
+        let inner = self.lock()?;
+        let history = inner
+            .projection
+            .history(entry_id)
+            .map_err(SessionError::Conversation)?
+            .into_iter()
+            .map(|entry| match entry.body() {
+                EntryBody::Message(message) => message.clone(),
+            })
+            .collect::<Vec<_>>();
+        let head = inner.head.as_ref().ok_or(SessionError::Recover {
+            code: "structural_head_missing",
+        })?;
+        Ok(LaneRunContext {
+            messages: history.into(),
+            source_leaf_id: entry_id,
+            journal_sequence: head.state().last_applied_sequence,
+            head_checksum: head.head_checksum(),
+        })
     }
 
     /// Append the completed assistant message while the matching run owns the lane.
@@ -655,6 +702,12 @@ impl SessionRuntime {
                 .ok_or(SessionError::UnknownLane)?;
             if inner.guards.get(&lane_id) != Some(&LaneOwner::Active(run_id)) {
                 return Err(SessionError::LaneBusy);
+            }
+            if let Some(leaf_id) = lane.leaf_id
+                && let Some(entry) = inner.projection.entries().get(&leaf_id)
+                && matches!(entry.body(), EntryBody::Message(existing) if existing == message)
+            {
+                return Ok(leaf_id);
             }
             lane.leaf_id
         };

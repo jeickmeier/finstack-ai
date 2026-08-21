@@ -154,7 +154,8 @@ pub use services::process_confinement::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::process_confinement::{configure_process_tree, terminate_process_tree};
 pub use session::{
-    LaneAppendIds, LaneCreateIds, LaneInspect, SessionCreateIds, SessionError, SessionRuntime,
+    LaneAppendIds, LaneCreateIds, LaneInspect, LaneRunContext, SessionCreateIds, SessionError,
+    SessionRuntime,
 };
 
 pub use context::{

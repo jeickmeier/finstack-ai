@@ -376,6 +376,60 @@ async fn prepared_user_message_carries_file_blocks_for_attachments() {
     assert_eq!(file_blocks[0].blob(), attachment.artifact.blob());
 }
 
+#[tokio::test]
+async fn standalone_run_reuses_committed_user_message_and_appends_assistant() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("preview ready")],
+    ));
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let attachment = test_attachment();
+    let mut run_request = request("Say hello");
+    run_request.attachments = Arc::from([attachment]);
+
+    let output = agent.run(run_request).await.expect("run");
+    let sent_request = model.last_request().expect("first request");
+    let model_user = sent_request
+        .draft
+        .messages
+        .iter()
+        .find(|message| message.role() == finstack_ai_kernel::MessageRole::User)
+        .expect("model user message");
+    let loaded = store
+        .load(LoadRequest {
+            session_id: output.locator.session_id,
+        })
+        .await
+        .expect("load session");
+    let conversation_messages = loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .filter_map(|record| match record.body() {
+            RecordBody::ConversationEntry(entry) => match entry.body() {
+                finstack_ai_kernel::EntryBody::Message(message) => Some(message),
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        conversation_messages
+            .iter()
+            .map(|message| (message.role(), *message.id()))
+            .collect::<Vec<_>>(),
+        vec![
+            (finstack_ai_kernel::MessageRole::User, *model_user.id()),
+            (
+                finstack_ai_kernel::MessageRole::Assistant,
+                *output.message.id()
+            ),
+        ]
+    );
+    assert_eq!(conversation_messages[0], model_user);
+    assert_eq!(conversation_messages[1], &output.message);
+}
+
 #[test]
 fn compact_model_catalog_is_bounded_and_tokenized_deterministically() {
     let oversized = CapabilitySpec {

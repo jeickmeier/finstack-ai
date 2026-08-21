@@ -4,16 +4,17 @@ use std::sync::Arc;
 use crate::{CapabilityActivation, InstructionSpec};
 use finstack_ai_kernel::{
     AcceptRun, ActiveCapability, CapabilitiesActivated, CapabilityActivationSource, KernelInput,
-    LaneId, Message, OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec,
-    OutputValidated, RawJson, ReducerStageOutcome, RetryClassification, RetryDirective,
-    RetrySafety, RunAccepted, RunId, RunPhase, SessionId, Stage, TerminalState,
+    LaneId, OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
+    RawJson, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted,
+    RunId, RunPhase, SessionId, Stage, TerminalState,
 };
 use finstack_ai_runtime::{LoadRequest, LockedModelContextProfile, RunHandle};
 
 use super::handle::Agent;
 use super::prepare::{
-    NativeIds, StageIds, ensure_nonterminal_failure, model_draft, model_output_contract,
-    recover_state, structured_candidate, submit, submit_stage, wait_for_cycle, wait_for_phase,
+    NativeIds, RunContextSeed, StageIds, ensure_nonterminal_failure, model_draft,
+    model_output_contract, recover_state, structured_candidate, submit, submit_stage,
+    wait_for_cycle, wait_for_phase,
 };
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
@@ -35,7 +36,7 @@ impl Agent {
         request: AgentRunRequest,
         profile: LockedModelContextProfile,
         locator: OperationLocator,
-        prior_history: Arc<[Message]>,
+        context_seed: RunContextSeed,
     ) -> Result<AgentRunOutput, AgentRunError> {
         submit(
             handle,
@@ -129,13 +130,7 @@ impl Agent {
                 ));
             }
             let extra = self.extra_capability_instructions(&state.active_capabilities);
-            let messages = self.context_messages(
-                &request.input,
-                &request.attachments,
-                &prior_history,
-                &state.messages,
-                &extra,
-            )?;
+            let messages = self.context_messages(&context_seed, &state.messages, &extra)?;
             submit_stage(
                 handle,
                 state.cycle,

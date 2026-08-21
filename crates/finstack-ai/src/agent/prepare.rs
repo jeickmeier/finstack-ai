@@ -3,23 +3,22 @@ use std::time::Duration;
 
 use finstack_ai_kernel::{
     AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation, CancellationInitiator,
-    CancellationPropagation, CancellationRequestTag, ContentBlock, ConversationEntry,
-    DeadlinePropagation, Digest, EffectOutputContract, EffectOutputKind, EventTag, KernelInput,
-    LaneCreated, LaneId, LaneMoved, LaneTag, MediaRef, Message, MessageId, MessageRole, MessageTag,
-    Metadata, ModelRequestTag, OperationLocator, OutputSpec, PrincipalPropagation, ProviderIds,
-    RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, RecordBody, RecordDraft, RecordTag,
-    ReducerStageOutcome, RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunTag,
-    Sensitivity, SessionCreated, SessionId, SessionTag, Stage, StageCursor, StageSettled,
-    StructuredResultSource, TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag,
+    CancellationPropagation, CancellationRequestTag, ContentBlock, DeadlinePropagation, Digest,
+    EffectOutputContract, EffectOutputKind, EventTag, KernelInput, LaneId, LaneTag, MediaRef,
+    Message, MessageId, MessageRole, MessageTag, Metadata, ModelRequestTag, OperationLocator,
+    OutputSpec, PrincipalPropagation, ProviderIds, RawJson, RecordTag, ReducerStageOutcome,
+    RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunTag, Sensitivity, SessionId,
+    SessionTag, Stage, StageCursor, StageSettled, StructuredResultSource, TerminalState, TextBlock,
+    Timestamp, TransitionEnv, TurnTag,
 };
 use finstack_ai_runtime::{
     ApprovalGrantMode, CommitCoordinator, ContextProvider, EventBatchConfig, EventFilter,
     EventHubConfig, EventLagPolicy, EventSubscriptionConfig, LaneAppendIds,
     LockedModelContextProfile, Model, ModelContextProfileOverride, ModelName, ModelRequestDraft,
     ModelRequestLimits, ModelSettings, ModelTaskConfig, Observer, ProgressCoalescing, ReadyModel,
-    RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SessionError, SessionRuntime,
-    StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig, UuidV7Generator,
-    resolve_model_context_profile,
+    RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SessionCreateIds,
+    SessionError, SessionRuntime, StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig,
+    UuidV7Generator, resolve_model_context_profile,
 };
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -50,8 +49,14 @@ pub(super) struct PreparedAgentRun {
     pub(super) accepted: RunAccepted,
     pub(super) request: AgentRunRequest,
     pub(super) locator: OperationLocator,
-    pub(super) bootstrap: bool,
     pub(super) session: Option<crate::Session>,
+}
+
+pub(super) struct RunContextSeed {
+    pub(super) messages: Arc<[Message]>,
+    pub(super) source_leaf_id: finstack_ai_kernel::EntryId,
+    pub(super) journal_sequence: u64,
+    pub(super) head_checksum: Option<Digest>,
 }
 
 impl PreparedAgentRun {
@@ -159,7 +164,6 @@ impl Agent {
             accepted,
             request,
             locator,
-            bootstrap: true,
             session: None,
         })
     }
@@ -181,7 +185,6 @@ impl Agent {
         .map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?;
-        prepared.bootstrap = false;
         prepared.session = Some(lane.session().clone());
         Ok(prepared)
     }
@@ -200,7 +203,6 @@ impl Agent {
         prepared.lane_id = locator.lane_id;
         prepared.accepted = accepted;
         prepared.locator = locator;
-        prepared.bootstrap = false;
         prepared.session = Some(session);
         Ok(prepared)
     }
@@ -214,76 +216,79 @@ impl Agent {
         prepared: PreparedAgentRun,
         execution: &Weak<AgentRunInner>,
     ) -> Result<AgentRunOutput, AgentRunError> {
-        let mut coordinator = CommitCoordinator::new(Arc::clone(&prepared.store));
-        let mut acquired_lane = None;
-        let mut prior_history = Vec::new();
-        if prepared.bootstrap {
-            if let Err(error) = bootstrap_main_lane(
-                &mut coordinator,
-                prepared.session_id,
-                prepared.lane_id,
-                &prepared.request.input,
-                &prepared.request.attachments,
-            )
-            .await
-            {
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-            if coordinator
-                .session()
-                .active_on_lane(prepared.lane_id)
-                .is_some()
-            {
-                let error = AgentRunError::configuration(
-                    AGENT_RUN_INVALID_CONFIGURATION,
-                    "main lane already has an active operation",
-                );
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-        } else if let Some(session) = &prepared.session {
-            let runtime = match session.runtime().await {
+        let runtime = if let Some(session) = &prepared.session {
+            match session.runtime().await {
                 Ok(runtime) => runtime,
                 Err(error) => {
                     let error = session_error(&error);
                     publish_start_failure(execution, &error);
                     return Err(error);
                 }
-            };
-            prior_history = match append_lane_input(
-                &runtime,
+            }
+        } else {
+            match create_session_runtime(
+                Arc::clone(&prepared.store),
+                prepared.request.security.tenant_scope(),
+                prepared.session_id,
                 prepared.lane_id,
-                prepared.accepted.run_id(),
-                &prepared.request.input,
-                &prepared.request.attachments,
             )
             .await
             {
-                Ok(history) => history,
+                Ok(runtime) => runtime,
                 Err(error) => {
                     publish_start_failure(execution, &error);
                     return Err(error);
                 }
-            };
-            acquired_lane = Some((
-                Arc::clone(&runtime),
-                prepared.lane_id,
-                prepared.accepted.run_id(),
-            ));
-            coordinator = match runtime
-                .coordinator_for_run(Some(prepared.accepted.run_id()))
-                .await
-            {
-                Ok(coordinator) => coordinator,
-                Err(error) => {
-                    runtime.release_run(prepared.lane_id, prepared.accepted.run_id());
-                    let error = session_error(&error);
-                    publish_start_failure(execution, &error);
-                    return Err(error);
-                }
-            };
+            }
+        };
+        let context_seed = match append_lane_input(
+            &runtime,
+            prepared.lane_id,
+            prepared.accepted.run_id(),
+            &prepared.request.input,
+            &prepared.request.attachments,
+        )
+        .await
+        {
+            Ok(seed) => seed,
+            Err(error) => {
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
+        };
+        let seeded_leaf = runtime.projection().ok().and_then(|projection| {
+            projection
+                .lane_by_id(prepared.lane_id)
+                .and_then(|lane| lane.leaf_id)
+        });
+        if seeded_leaf != Some(context_seed.source_leaf_id)
+            || context_seed.journal_sequence == 0
+            || context_seed.head_checksum.is_none()
+        {
+            runtime.release_run(prepared.lane_id, prepared.accepted.run_id());
+            let error = AgentRunError::runtime_message(
+                "accepted lane context does not match the confirmed session head",
+            );
+            publish_start_failure(execution, &error);
+            return Err(error);
         }
+        let acquired_lane = Some((
+            Arc::clone(&runtime),
+            prepared.lane_id,
+            prepared.accepted.run_id(),
+        ));
+        let mut coordinator = match runtime
+            .coordinator_for_run(Some(prepared.accepted.run_id()))
+            .await
+        {
+            Ok(coordinator) => coordinator,
+            Err(error) => {
+                runtime.release_run(prepared.lane_id, prepared.accepted.run_id());
+                let error = session_error(&error);
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
+        };
         coordinator
             .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
         coordinator.install_capability_owners(self.capability_index().as_arc_owners());
@@ -381,14 +386,18 @@ impl Agent {
                 prepared.request,
                 prepared.profile,
                 prepared.locator,
-                prior_history.into(),
+                context_seed,
             )),
         )
         .await;
         let _shutdown = owner.shutdown().await;
         if let Some((runtime, lane_id, run_id)) = acquired_lane {
-            if let Ok(Ok(output)) = &result
-                && let Err(error) = runtime
+            if let Ok(Ok(output)) = &result {
+                if let Err(error) = runtime.refresh().await {
+                    runtime.release_run(lane_id, run_id);
+                    return Err(session_error(&error));
+                }
+                if let Err(error) = runtime
                     .append_message_from_run(
                         lane_id,
                         run_id,
@@ -400,9 +409,10 @@ impl Agent {
                         },
                     )
                     .await
-            {
-                runtime.release_run(lane_id, run_id);
-                return Err(session_error(&error));
+                {
+                    runtime.release_run(lane_id, run_id);
+                    return Err(session_error(&error));
+                }
             }
             runtime.release_run(lane_id, run_id);
         }
@@ -413,9 +423,7 @@ impl Agent {
     }
     pub(super) fn context_messages(
         &self,
-        input: &str,
-        attachments: &[AttachmentInput],
-        prior_history: &[Message],
+        seed: &RunContextSeed,
         committed: &[Message],
         extra_capability_instructions: &[crate::InstructionSpec],
     ) -> Result<Arc<[Message]>, AgentRunError> {
@@ -427,7 +435,7 @@ impl Agent {
             )
         })?;
         let mut messages =
-            Vec::with_capacity(spec.instructions.len() + prior_history.len() + committed.len() + 1);
+            Vec::with_capacity(spec.instructions.len() + seed.messages.len() + committed.len());
         for instruction in spec.instructions.iter() {
             messages.push(text_message(
                 NativeIds::generate::<MessageTag>()?,
@@ -446,14 +454,7 @@ impl Agent {
                 &[],
             )?);
         }
-        messages.extend_from_slice(prior_history);
-        messages.push(text_message(
-            NativeIds::generate::<MessageTag>()?,
-            MessageRole::User,
-            input,
-            now,
-            attachments,
-        )?);
+        messages.extend_from_slice(&seed.messages);
         messages.extend_from_slice(committed);
         Ok(messages.into())
     }
@@ -819,7 +820,7 @@ async fn append_lane_input(
     run_id: finstack_ai_kernel::RunId,
     input: &str,
     attachments: &[AttachmentInput],
-) -> Result<Vec<Message>, AgentRunError> {
+) -> Result<RunContextSeed, AgentRunError> {
     let now = NativeIds::now()?;
     let message = text_message(
         NativeIds::generate::<MessageTag>()?,
@@ -829,7 +830,7 @@ async fn append_lane_input(
         attachments,
     )?;
     runtime
-        .append_message_for_run(
+        .begin_run_with_message(
             lane_id,
             run_id,
             &message,
@@ -840,88 +841,35 @@ async fn append_lane_input(
             },
         )
         .await
+        .map(|context| RunContextSeed {
+            messages: context.messages,
+            source_leaf_id: context.source_leaf_id,
+            journal_sequence: context.journal_sequence,
+            head_checksum: context.head_checksum,
+        })
         .map_err(|error| session_error(&error))
 }
 
-async fn bootstrap_main_lane(
-    coordinator: &mut CommitCoordinator,
+async fn create_session_runtime(
+    store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    tenant_scope: &str,
     session_id: SessionId,
     lane_id: LaneId,
-    input: &str,
-    attachments: &[AttachmentInput],
-) -> Result<(), AgentRunError> {
-    let now = NativeIds::now()?;
-    let message = text_message(
-        NativeIds::generate::<MessageTag>()?,
-        MessageRole::User,
-        input,
-        now,
-        attachments,
-    )?;
-    let entry = ConversationEntry::from_message(&message, None, lane_id, 0).map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })?;
-    let leaf = entry.id();
-    let records = vec![
-        session_record_draft(
-            NativeIds::generate()?,
+) -> Result<Arc<SessionRuntime>, AgentRunError> {
+    SessionRuntime::create(
+        store,
+        Arc::<str>::from(tenant_scope),
+        SessionCreateIds {
             session_id,
-            lane_id,
-            now,
-            RecordBody::SessionCreated(SessionCreated::new(Metadata::empty())),
-        )?,
-        session_record_draft(
-            NativeIds::generate()?,
-            session_id,
-            lane_id,
-            now,
-            RecordBody::LaneCreated(LaneCreated::try_new("main").map_err(|error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            })?),
-        )?,
-        session_record_draft(
-            NativeIds::generate()?,
-            session_id,
-            lane_id,
-            now,
-            RecordBody::ConversationEntry(entry),
-        )?,
-        session_record_draft(
-            NativeIds::generate()?,
-            session_id,
-            lane_id,
-            now,
-            RecordBody::LaneMoved(LaneMoved::new(leaf)),
-        )?,
-    ];
-    coordinator
-        .commit_session_records(NativeIds::generate()?, records)
-        .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-    Ok(())
-}
-
-fn session_record_draft(
-    record_id: finstack_ai_kernel::RecordId,
-    session_id: SessionId,
-    lane_id: LaneId,
-    timestamp: Timestamp,
-    body: RecordBody,
-) -> Result<RecordDraft, AgentRunError> {
-    RecordDraft::try_new(
-        RECORD_FORMAT_VERSION,
-        RECORD_KIND_VERSION,
-        record_id,
-        session_id,
-        lane_id,
-        None,
-        timestamp,
-        Vec::new(),
-        body,
+            main_lane_id: lane_id,
+            session_created_record_id: NativeIds::generate()?,
+            lane_created_record_id: NativeIds::generate()?,
+            batch_id: NativeIds::generate()?,
+            now: NativeIds::now()?,
+        },
     )
-    .map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })
+    .await
+    .map_err(|error| session_error(&error))
 }
 
 fn text_message(
