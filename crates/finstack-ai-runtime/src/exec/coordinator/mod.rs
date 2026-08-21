@@ -310,6 +310,20 @@ impl CommitCoordinator {
         checkpoint: Option<crate::middleware::CompactionCheckpoint>,
     ) {
         self.compaction_checkpoint = checkpoint;
+        if let Some(publisher) = &self.live_state_publisher {
+            publisher.publish_compaction_checkpoint(self.compaction_checkpoint.as_ref());
+        }
+    }
+
+    /// Seed one disposable checkpoint candidate from an agent-owned cache.
+    /// Existing compatibility checks revalidate it before any use.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    #[doc(hidden)]
+    pub fn seed_compaction_checkpoint(
+        &mut self,
+        checkpoint: crate::middleware::CompactionCheckpoint,
+    ) {
+        self.compaction_checkpoint = Some(checkpoint);
     }
 
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

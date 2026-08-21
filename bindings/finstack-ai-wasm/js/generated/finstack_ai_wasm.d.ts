@@ -83,6 +83,10 @@ export class Agent {
      * Returns a structured host error when the request is invalid.
      */
     start(input: string, timeout_seconds: number | null | undefined, max_cycles: number | null | undefined, max_output_retries: number | null | undefined, capability: string | null | undefined, attachments: any): Run;
+    /**
+     * Compose an agent with a fresh bounded process-local history cache.
+     */
+    withHistoryCache(policy: HistoryCachePolicy): Agent;
 }
 
 /**
@@ -157,6 +161,30 @@ export class EventBatch {
      * Last contained sequence.
      */
     readonly lastSequence: bigint;
+}
+
+/**
+ * Bounded process-local history checkpoint cache policy.
+ */
+export class HistoryCachePolicy {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Return a disabled cache policy.
+     */
+    static disabled(): HistoryCachePolicy;
+    /**
+     * Construct a validated cache policy.
+     */
+    constructor(max_entries: number, max_bytes: number);
+    /**
+     * Maximum aggregate serialized checkpoint bytes.
+     */
+    readonly maxBytes: number;
+    /**
+     * Maximum retained entries.
+     */
+    readonly maxEntries: number;
 }
 
 /**
@@ -732,6 +760,7 @@ export interface InitOutput {
     readonly __wbg_agent_free: (a: number, b: number) => void;
     readonly __wbg_event_free: (a: number, b: number) => void;
     readonly __wbg_eventbatch_free: (a: number, b: number) => void;
+    readonly __wbg_historycachepolicy_free: (a: number, b: number) => void;
     readonly __wbg_jsartifactstore_free: (a: number, b: number) => void;
     readonly __wbg_jsclock_free: (a: number, b: number) => void;
     readonly __wbg_jscontextprovider_free: (a: number, b: number) => void;
@@ -756,6 +785,7 @@ export interface InitOutput {
     readonly agent_reResolve: (a: number) => number;
     readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;
+    readonly agent_withHistoryCache: (a: number, b: number) => number;
     readonly applyScriptedCoordinatorCommands: (a: number, b: number, c: number) => void;
     readonly buildMetadata: (a: number) => void;
     readonly compilePortProxies: () => void;
@@ -771,6 +801,10 @@ export interface InitOutput {
     readonly eventbatch_toJson: (a: number, b: number) => void;
     readonly eventbatch_toJsonBytes: (a: number, b: number) => void;
     readonly health: (a: number) => void;
+    readonly historycachepolicy_disabled: () => number;
+    readonly historycachepolicy_maxBytes: (a: number) => number;
+    readonly historycachepolicy_maxEntries: (a: number) => number;
+    readonly historycachepolicy_new: (a: number, b: number, c: number) => void;
     readonly journalKnownAnswer: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly jsartifactstore_new: (a: number, b: number) => void;
     readonly jsclock_new: (a: number, b: number) => void;
@@ -831,8 +865,8 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_5196: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_5210: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5209: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5223: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_460: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;

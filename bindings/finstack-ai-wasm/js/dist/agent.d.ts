@@ -1,4 +1,4 @@
-import { Agent as WasmAgent, Event as WasmEvent, EventBatch as WasmEventBatch, Lane as WasmLane, Locator as WasmLocator, MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession } from "../generated/finstack_ai_wasm.js";
+import { Agent as WasmAgent, HistoryCachePolicy as WasmHistoryCachePolicy, Event as WasmEvent, EventBatch as WasmEventBatch, Lane as WasmLane, Locator as WasmLocator, MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession } from "../generated/finstack_ai_wasm.js";
 import type { JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsToolset } from "./adapters.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 export { FinstackError } from "./errors.js";
@@ -31,6 +31,16 @@ export interface CapabilityCatalogItem {
     id: string;
     /** Compact non-secret description. */
     description: string;
+}
+/** Bounded process-local compaction checkpoint cache policy. */
+export declare class HistoryCachePolicy {
+    #private;
+    constructor(maxEntries?: number, maxBytes?: number);
+    static disabled(): HistoryCachePolicy;
+    get maxEntries(): number;
+    get maxBytes(): number;
+    /** @internal */
+    handle(): WasmHistoryCachePolicy;
 }
 /**
  * One Rust-owned capability activation committed for a run.
@@ -176,6 +186,8 @@ export declare class Agent {
     constructor(handle: WasmAgent);
     /** @internal */
     handle(): WasmAgent;
+    /** Compose an agent with a fresh bounded process-local history cache. */
+    withHistoryCache(policy: HistoryCachePolicy): Agent;
     /**
      * Construct an Agent over a trusted {@link JsModel} and optional toolsets.
      *

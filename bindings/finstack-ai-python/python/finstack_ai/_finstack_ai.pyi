@@ -973,6 +973,17 @@ class Run:
     async def close_events(self) -> None:
         """Close event observation without cancelling execution."""
 
+class HistoryCachePolicy:
+    """Bounded process-local compaction checkpoint cache policy."""
+
+    def __init__(self, max_entries: int = 64, max_bytes: int = 16777216) -> None: ...
+    @staticmethod
+    def disabled() -> HistoryCachePolicy: ...
+    @property
+    def max_entries(self) -> int: ...
+    @property
+    def max_bytes(self) -> int: ...
+
 class Agent:
     """Immutable Rust-owned resolved agent handle."""
 
@@ -1497,6 +1508,8 @@ class Agent:
         Returns:
             ``id: description`` lines under the 8 KiB registration ceiling.
         """
+    def with_history_cache(self, policy: HistoryCachePolicy) -> Agent:
+        """Compose an agent with a fresh bounded process-local history cache."""
     def read_artifact(self, artifact: dict[str, Any]) -> bytes:
         """Read back the bytes behind an artifact reference a tool returned.
 

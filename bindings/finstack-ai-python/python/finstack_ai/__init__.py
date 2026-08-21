@@ -19,6 +19,7 @@ from ._finstack_ai import (
     EventBatchIterator,
     FinstackError,
     HttpFetchToolset,
+    HistoryCachePolicy,
     Lane,
     Locator,
     MemoryContextProvider,
@@ -192,6 +193,7 @@ def parse_document(
 
 __all__ = [
     "Agent",
+    "HistoryCachePolicy",
     "ApprovalGrantMode",
     "Attachment",
     "BuildMetadata",

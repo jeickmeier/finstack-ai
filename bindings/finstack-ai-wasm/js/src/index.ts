@@ -16,6 +16,7 @@ export {
   Event,
   EventBatch,
   FinstackError,
+  HistoryCachePolicy,
   Lane,
   Locator,
   MemoryExternalIdentityMap,

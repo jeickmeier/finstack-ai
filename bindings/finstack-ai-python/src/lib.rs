@@ -48,7 +48,7 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
-use agent::PyAgent;
+use agent::{PyAgent, PyHistoryCachePolicy};
 use approval_grant::PyApprovalGrantMode;
 use callbacks::{
     PyCallbackContext, PyPythonContextProvider, PyPythonMiddleware, PyPythonModel,
@@ -114,6 +114,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("CancelledError", module.py().get_type::<CancelledError>())?;
     module.add("TimeoutError", module.py().get_type::<TimeoutError>())?;
     module.add_class::<PyAgent>()?;
+    module.add_class::<PyHistoryCachePolicy>()?;
     module.add_class::<PyCapability>()?;
     module.add_class::<PyChildRunPolicy>()?;
     module.add_class::<PyApprovalGrantMode>()?;

@@ -224,6 +224,7 @@ impl RunTaskOwner {
             kernel_state: Mutex::new(coordinator.state().clone()),
             record_kinds: Mutex::new(Arc::from([])),
             session_head: Mutex::new(None),
+            compaction_checkpoint: Mutex::new(None),
             events: event_handle,
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
@@ -428,6 +429,7 @@ impl RunTaskOwner {
             kernel_state: Mutex::new(coordinator.state().clone()),
             record_kinds: Mutex::new(Arc::from([])),
             session_head: Mutex::new(None),
+            compaction_checkpoint: Mutex::new(None),
             events: event_handle,
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
@@ -723,6 +725,7 @@ impl RunTaskOwner {
             kernel_state: Mutex::new(coordinator.state().clone()),
             record_kinds: Mutex::new(Arc::from([])),
             session_head: Mutex::new(None),
+            compaction_checkpoint: Mutex::new(None),
             events: event_handle,
             shutdown_report: Mutex::new(None),
             timer_already_due: AtomicU64::new(0),
@@ -815,6 +818,18 @@ impl RunTaskOwner {
             .lock()
             .ok()
             .and_then(|mut update| update.take())
+    }
+
+    /// Take the latest validated process-local compaction checkpoint.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn take_compaction_checkpoint(&mut self) -> Option<crate::CompactionCheckpoint> {
+        self.handle
+            .shared
+            .compaction_checkpoint
+            .lock()
+            .ok()
+            .and_then(|mut checkpoint| checkpoint.take())
     }
 
     /// Attach one observer pump to this owner's shutdown and abort lifecycle.

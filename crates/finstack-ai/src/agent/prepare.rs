@@ -306,6 +306,15 @@ impl Agent {
             .collect::<Vec<_>>()
             .into();
         coordinator.install_context_providers(providers);
+        if let Ok(mut cache) = self.history_cache.lock()
+            && let Some(checkpoint) = cache.candidate(
+                prepared.session_id,
+                prepared.lane_id,
+                prepared.profile.digest,
+            )
+        {
+            coordinator.seed_compaction_checkpoint(checkpoint);
+        }
         let observer_count = self.resolved.run_plan().observers().len();
         let approval_grant = self
             .resolved
@@ -382,6 +391,8 @@ impl Agent {
         let timeout = prepared.request.timeout;
         let locator = prepared.locator.clone();
         let effective_deadline = prepared.accepted.effective_deadline();
+        let cache_session_id = prepared.session_id;
+        let cache_lane_id = prepared.lane_id;
         let result = driver::timeout(
             timeout,
             Box::pin(self.drive(
@@ -439,12 +450,17 @@ impl Agent {
                     runtime.release_run(lane_id, run_id);
                     return Err(session_error(&error));
                 }
+                if let Some(checkpoint) = owner.take_compaction_checkpoint()
+                    && let Ok(mut cache) = self.history_cache.lock()
+                {
+                    cache.insert(cache_session_id, cache_lane_id, checkpoint);
+                }
             } else if let Err(error) = runtime.invalidate_session_head() {
                 runtime.release_run(lane_id, run_id);
                 return Err(session_error(&error));
             }
-            if let Ok(output) = &result {
-                if let Err(error) = runtime
+            if let Ok(output) = &result
+                && let Err(error) = runtime
                     .append_message_from_run(
                         lane_id,
                         run_id,
@@ -456,10 +472,9 @@ impl Agent {
                         },
                     )
                     .await
-                {
-                    runtime.release_run(lane_id, run_id);
-                    return Err(session_error(&error));
-                }
+            {
+                runtime.release_run(lane_id, run_id);
+                return Err(session_error(&error));
             }
             runtime.release_run(lane_id, run_id);
         }
@@ -699,16 +714,13 @@ async fn settle_deadline_timeout(
         settle_controller_cancellation(handle, CancellationInitiator::Deadline, effective_deadline)
             .await?;
     match terminal.terminal.as_ref() {
-        Some(TerminalState::Completed(_)) => {
-            output_from_live_state(handle, locator, &terminal, timeout)
-        }
         Some(TerminalState::Cancelled(_)) => Err(AgentRunError::Timeout { timeout }),
         Some(TerminalState::Failed(failed))
             if failed.error.code.as_ref() == "deadline_exceeded" =>
         {
             Err(AgentRunError::Timeout { timeout })
         }
-        Some(TerminalState::Failed(_)) => {
+        Some(TerminalState::Completed(_) | TerminalState::Failed(_)) => {
             output_from_live_state(handle, locator, &terminal, timeout)
         }
         None => Err(runtime_uncertainty(

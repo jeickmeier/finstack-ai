@@ -464,6 +464,18 @@ impl RunTaskOwner {
             .and_then(|mut update| update.take())
     }
 
+    /// Take the latest validated process-local compaction checkpoint.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn take_compaction_checkpoint(&mut self) -> Option<crate::CompactionCheckpoint> {
+        self.handle
+            .shared
+            .compaction_checkpoint
+            .lock()
+            .ok()
+            .and_then(|mut checkpoint| checkpoint.take())
+    }
+
     /// Attach one observer pump to this owner's shutdown and abort lifecycle.
     ///
     /// # Errors

@@ -57,12 +57,25 @@ async fn reconcile_classified_effect<C: Clock, R: RandomSource>(
         IdleCancelClass::Completed => (Arc::from([effect_id]), Arc::from([]), Arc::from([])),
         IdleCancelClass::Uncertain => (Arc::from([]), Arc::from([]), Arc::from([effect_id])),
     };
-    let input = KernelInput::CancellationReconciled(CancellationReconciledInput {
-        request_id,
-        completed_effects,
-        cancelled_effects,
-        uncertain_effects,
-    });
+    reconcile_effect_sets(
+        coordinator,
+        sources,
+        CancellationReconciledInput {
+            request_id,
+            completed_effects,
+            cancelled_effects,
+            uncertain_effects,
+        },
+    )
+    .await
+}
+
+async fn reconcile_effect_sets<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    reconciliation: CancellationReconciledInput,
+) -> Result<(), RunHandleError> {
+    let input = KernelInput::CancellationReconciled(reconciliation);
     let now = sources.now()?;
     let ids = allocate_for_runtime_input(coordinator, now, &input, sources)?;
     let outcome = coordinator
@@ -88,6 +101,20 @@ pub(crate) async fn drain_idle_cancellation<C: Clock, R: RandomSource>(
             || coordinator.state().phase == Some(RunPhase::Suspended)
         {
             return Ok(());
+        }
+        if cancellation.outstanding_effects.is_empty() {
+            reconcile_effect_sets(
+                coordinator,
+                sources,
+                CancellationReconciledInput {
+                    request_id: cancellation.request.request_id,
+                    completed_effects: Arc::from([]),
+                    cancelled_effects: Arc::from([]),
+                    uncertain_effects: Arc::from([]),
+                },
+            )
+            .await?;
+            continue;
         }
         let Some(effect_id) = cancellation
             .outstanding_effects
@@ -134,6 +161,15 @@ fn idle_cancellation_class(
             pending.deferred.is_some(),
             force_all,
         );
+    }
+    if let Some(pending) = state.pending_extension_effect.as_ref()
+        && pending.requested.effect_id() == effect_id
+    {
+        // Extension calls execute inline with the command worker. A later
+        // cancellation command can only observe one here after that call has
+        // returned without a durable settlement, so it is idle and can be
+        // classified from the committed retry-safety contract.
+        return effect_idle_class(pending.requested.retry_safety(), true, force_all);
     }
     state.active_tool_batch.as_ref().and_then(|batch| {
         batch.calls.iter().find_map(|call| {

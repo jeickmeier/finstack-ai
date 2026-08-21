@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use finstack_ai_kernel::{CompactionAuthorization, Message, ToolCallId};
 #[cfg(test)]
@@ -13,8 +14,8 @@ use super::digest::{
 };
 use super::error::MiddlewareError;
 use super::types::{
-    BeforeModelInput, CompactionModelRequest, CompactionResult, MiddlewareDescriptor,
-    MiddlewareRole, Stage, StageInput, StageOutcome, canonical_bytes,
+    BeforeModelInput, CompactionModelRequest, CompactionResult, CompactionSourceEntry,
+    MiddlewareDescriptor, MiddlewareRole, Stage, StageInput, StageOutcome, canonical_bytes,
 };
 use super::{COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED};
 
@@ -340,22 +341,27 @@ fn validate_checkpoint(
     let Some(checkpoint) = &result.checkpoint else {
         return Ok(());
     };
-    let Some(last_covered) = result.evidence.covered_entry_ids.last() else {
+    let Some(covered_index) = input
+        .source_entries
+        .iter()
+        .position(|entry| entry.entry_id == checkpoint.covered_through_entry_id)
+    else {
         return Err(MiddlewareError::compaction_invalid());
     };
+    let covered_prefix: Arc<[CompactionSourceEntry]> =
+        input.source_entries[..=covered_index].to_vec().into();
+    let checkpoint_source_digest = compaction_source_digest(&covered_prefix)?;
     if checkpoint.component_id != descriptor.invocation.component
         || checkpoint.strategy_id != result.evidence.strategy_id
         || checkpoint.strategy_version != result.evidence.strategy_version
         || checkpoint.configuration_digest != descriptor.invocation.configuration_digest
         || checkpoint.model_context_profile_digest != input.model_context_profile_digest
-        || checkpoint.covered_through_entry_id != *last_covered
-        || checkpoint.source_digest != result.evidence.source_digest
+        || checkpoint.source_digest != checkpoint_source_digest
     {
         return Err(MiddlewareError::compaction_invalid());
     }
     let summary_digest = compaction_summary_digest(&checkpoint.summary)?;
-    let source_sensitivity = input
-        .source_entries
+    let source_sensitivity = covered_prefix
         .iter()
         .map(|entry| sensitivity_rank(entry.sensitivity))
         .max()

@@ -1,5 +1,6 @@
 import {
   Agent as WasmAgent,
+  HistoryCachePolicy as WasmHistoryCachePolicy,
   Event as WasmEvent,
   EventBatch as WasmEventBatch,
   Lane as WasmLane,
@@ -75,6 +76,33 @@ export interface CapabilityCatalogItem {
   id: string;
   /** Compact non-secret description. */
   description: string;
+}
+
+/** Bounded process-local compaction checkpoint cache policy. */
+export class HistoryCachePolicy {
+  readonly #handle: WasmHistoryCachePolicy;
+
+  constructor(maxEntries = 64, maxBytes = 16 * 1024 * 1024) {
+    requireWasm();
+    this.#handle = new WasmHistoryCachePolicy(maxEntries, maxBytes);
+  }
+
+  static disabled(): HistoryCachePolicy {
+    return new HistoryCachePolicy(0, 0);
+  }
+
+  get maxEntries(): number {
+    return this.#handle.maxEntries;
+  }
+
+  get maxBytes(): number {
+    return this.#handle.maxBytes;
+  }
+
+  /** @internal */
+  handle(): WasmHistoryCachePolicy {
+    return this.#handle;
+  }
 }
 
 /**
@@ -264,6 +292,12 @@ export class Agent {
   /** @internal */
   handle(): WasmAgent {
     return this.#handle;
+  }
+
+  /** Compose an agent with a fresh bounded process-local history cache. */
+  withHistoryCache(policy: HistoryCachePolicy): Agent {
+    requireWasm();
+    return new Agent(this.#handle.withHistoryCache(policy.handle()));
   }
 
   /**

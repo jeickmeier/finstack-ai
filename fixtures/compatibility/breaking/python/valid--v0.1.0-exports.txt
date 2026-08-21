@@ -13,6 +13,7 @@ Event
 EventBatch
 EventBatchIterator
 FinstackError
+HistoryCachePolicy
 HttpFetchToolset
 Lane
 Locator

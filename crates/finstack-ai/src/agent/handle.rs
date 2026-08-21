@@ -15,6 +15,7 @@ use finstack_ai_runtime::{
 
 use super::activation::NativeCapabilityHost;
 use super::builder::NativeAgentBuilder;
+use super::history::{HistoryCache, HistoryCachePolicy};
 use super::mask::CapabilityContributionIndex;
 use super::run::{AgentRun, AgentRunInner, CancellationState, EventStreamState, publish_result};
 use super::types::{
@@ -51,6 +52,8 @@ pub struct Agent {
     pub(super) activation_host: Option<Arc<NativeCapabilityHost>>,
     pub(super) artifact_store: Option<Arc<dyn ArtifactStore>>,
     pub(super) rebuild: Option<Arc<NativeAgentBuilder>>,
+    pub(super) history_cache_policy: HistoryCachePolicy,
+    pub(super) history_cache: Arc<Mutex<HistoryCache>>,
 }
 
 #[derive(Clone)]
@@ -202,6 +205,8 @@ impl Agent {
             activation_host: None,
             artifact_store: None,
             rebuild: None,
+            history_cache_policy: HistoryCachePolicy::default(),
+            history_cache: HistoryCache::shared(HistoryCachePolicy::default()),
         })
     }
 
@@ -227,7 +232,44 @@ impl Agent {
             })?
             .as_ref()
             .clone();
-        builder.rebuild_from_live_catalogs().await
+        let mut rebuilt = builder.rebuild_from_live_catalogs().await?;
+        rebuilt.history_cache_policy = self.history_cache_policy;
+        rebuilt.history_cache = Arc::clone(&self.history_cache);
+        Ok(rebuilt)
+    }
+
+    /// Return an immutable composition with a fresh bounded history cache.
+    #[must_use]
+    pub fn with_history_cache_policy(mut self, policy: HistoryCachePolicy) -> Self {
+        let cache = HistoryCache::shared(policy);
+        self.history_cache_policy = policy;
+        self.history_cache = Arc::clone(&cache);
+        self.model_capabilities = self
+            .model_capabilities
+            .iter()
+            .map(|variant| {
+                let prepared = match &variant.prepared {
+                    Ok(agent) => {
+                        let mut agent = agent.as_ref().clone();
+                        agent.history_cache_policy = policy;
+                        agent.history_cache = Arc::clone(&cache);
+                        Ok(Arc::new(agent))
+                    }
+                    Err(error) => Err(error.clone()),
+                };
+                ModelCapabilityVariant {
+                    entry: variant.entry.clone(),
+                    prepared,
+                }
+            })
+            .collect::<Vec<_>>()
+            .into();
+        if let Some(rebuild) = &self.rebuild {
+            let mut builder = rebuild.as_ref().clone();
+            builder.set_history_cache_policy(policy);
+            self.rebuild = Some(Arc::new(builder));
+        }
+        self
     }
 
     pub(super) fn attach_capability_surface(
@@ -509,6 +551,8 @@ impl Agent {
         let prepared = variant.prepared.as_ref().map_err(AgentRunError::clone)?;
         let mut agent = prepared.as_ref().clone();
         agent.structured_output.clone_from(&self.structured_output);
+        agent.history_cache_policy = self.history_cache_policy;
+        agent.history_cache = Arc::clone(&self.history_cache);
         Ok(agent)
     }
 

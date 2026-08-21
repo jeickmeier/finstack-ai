@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use finstack_ai::Agent as FacadeAgent;
 use finstack_ai::runtime::{ArtifactStore, ModelName};
+use finstack_ai::{Agent as FacadeAgent, HistoryCachePolicy as FacadeHistoryCachePolicy};
 use finstack_ai_kernel::SessionId;
 use wasm_bindgen::prelude::*;
 
@@ -29,8 +29,60 @@ pub struct Agent {
     pub(super) artifact_store: Arc<dyn ArtifactStore>,
 }
 
+/// Bounded process-local history checkpoint cache policy.
+#[wasm_bindgen(js_name = HistoryCachePolicy)]
+pub struct HistoryCachePolicy {
+    inner: FacadeHistoryCachePolicy,
+}
+
+#[wasm_bindgen(js_class = HistoryCachePolicy)]
+impl HistoryCachePolicy {
+    /// Construct a validated cache policy.
+    #[wasm_bindgen(constructor)]
+    pub fn new(max_entries: usize, max_bytes: usize) -> Result<HistoryCachePolicy, JsValue> {
+        FacadeHistoryCachePolicy::try_new(max_entries, max_bytes)
+            .map(|inner| Self { inner })
+            .map_err(|error| agent_error(&error, None))
+    }
+
+    /// Return a disabled cache policy.
+    #[wasm_bindgen(js_name = disabled)]
+    pub fn disabled() -> HistoryCachePolicy {
+        Self {
+            inner: FacadeHistoryCachePolicy::disabled(),
+        }
+    }
+
+    /// Maximum retained entries.
+    #[wasm_bindgen(getter, js_name = maxEntries)]
+    pub fn max_entries(&self) -> usize {
+        self.inner.max_entries()
+    }
+
+    /// Maximum aggregate serialized checkpoint bytes.
+    #[wasm_bindgen(getter, js_name = maxBytes)]
+    pub fn max_bytes(&self) -> usize {
+        self.inner.max_bytes()
+    }
+}
+
 #[wasm_bindgen(js_class = Agent)]
 impl Agent {
+    /// Compose an agent with a fresh bounded process-local history cache.
+    #[wasm_bindgen(js_name = withHistoryCache)]
+    pub fn with_history_cache(&self, policy: &HistoryCachePolicy) -> Agent {
+        Agent {
+            inner: Arc::new(
+                self.inner
+                    .as_ref()
+                    .clone()
+                    .with_history_cache_policy(policy.inner),
+            ),
+            model: self.model.clone(),
+            artifact_store: Arc::clone(&self.artifact_store),
+        }
+    }
+
     /// Construct an Agent over a trusted JS model and optional toolsets.
     ///
     /// Linked provider constructors (`openai`, `anthropic`, and peers) are

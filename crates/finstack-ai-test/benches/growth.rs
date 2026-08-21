@@ -52,9 +52,9 @@ fn bench_id<T: IdTag>(ordinal: u64) -> Id<T> {
 
 fn session_histories() -> &'static [usize] {
     if bench_quick() {
-        &[16, 64, 256]
+        &[16, 128, 1_024]
     } else {
-        &[100, 1_000, 10_000]
+        &[16, 128, 1_024, 10_000]
     }
 }
 

@@ -17,13 +17,17 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata, ApprovalRequirement,
-    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalRouteOutcome,
-    JournalStore, LoadRequest, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRole, Model, ModelContextProfile, ModelDeferral,
-    ModelName, ModelResponse, ModelStreamItem, ModelToolCall, NoopObserver, Observer,
-    ObserverDescriptor, ObserverError, ObserverPayloadMode, OrderTier, PortFuture, SideEffectClass,
-    StageInput, StageMask, StageOutcome, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    ToolDeferral, ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset, child_relation_digest,
+    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, CompactedSummary,
+    CompactionCheckpoint, CompactionEvidence, CompactionResult, ContextAuthority, ContextItem,
+    ContextItemKind, ContextProvenance, ExternalRouteOutcome, JournalStore, LoadRequest,
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, Model, ModelContextProfile, ModelDeferral, ModelName, ModelResponse,
+    ModelStreamItem, ModelToolCall, NoopObserver, Observer, ObserverDescriptor, ObserverError,
+    ObserverPayloadMode, OrderTier, PortFuture, PromptCacheImpact, SideEffectClass, StageInput,
+    StageMask, StageOutcome, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferral,
+    ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset, child_relation_digest,
+    compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
+    compaction_summary_digest,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -54,6 +58,69 @@ struct PreviewExtension {
     model: Arc<ScriptedModel>,
     store: Arc<MemoryJournalStore>,
     calculator: Option<Arc<CalculatorToolset>>,
+}
+
+struct LoadCountingStore {
+    inner: Arc<MemoryJournalStore>,
+    loads: AtomicUsize,
+}
+
+impl LoadCountingStore {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(
+                MemoryJournalStore::try_new(MemoryStoreLimits {
+                    sessions: 4,
+                    batches_per_session: 256,
+                    records_per_session: 2_048,
+                    snapshot_bytes: 8_192,
+                })
+                .expect("store"),
+            ),
+            loads: AtomicUsize::new(0),
+        }
+    }
+
+    fn reset_loads(&self) {
+        self.loads.store(0, Ordering::Release);
+    }
+
+    fn load_count(&self) -> usize {
+        self.loads.load(Ordering::Acquire)
+    }
+}
+
+impl JournalStore for LoadCountingStore {
+    fn append(
+        &self,
+        request: finstack_ai_kernel::AppendRequest,
+    ) -> PortFuture<Result<finstack_ai_kernel::CommittedBatch, finstack_ai_runtime::StoreError>>
+    {
+        self.inner.append(request)
+    }
+
+    fn load(
+        &self,
+        request: LoadRequest,
+    ) -> PortFuture<Result<finstack_ai_runtime::LoadedSession, finstack_ai_runtime::StoreError>>
+    {
+        self.loads.fetch_add(1, Ordering::AcqRel);
+        self.inner.load(request)
+    }
+
+    fn write_snapshot(
+        &self,
+        request: finstack_ai_runtime::SnapshotRequest,
+    ) -> PortFuture<Result<finstack_ai_runtime::SnapshotReceipt, finstack_ai_runtime::StoreError>>
+    {
+        self.inner.write_snapshot(request)
+    }
+
+    fn health(
+        &self,
+    ) -> PortFuture<Result<finstack_ai_runtime::StoreHealth, finstack_ai_runtime::StoreError>> {
+        self.inner.health()
+    }
 }
 
 impl Extension for PreviewExtension {
@@ -2131,4 +2198,287 @@ async fn drive_loop_continues_past_a_superseded_finalize() {
         verifier_retries, 1,
         "journal must show exactly one framework verifier retry"
     );
+}
+
+#[tokio::test]
+async fn multi_cycle_run_loads_once_and_reuses_the_handed_off_session_head() {
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![
+            completed_with_id("first answer", "load-count-completion-1"),
+            completed_with_id("second answer", "load-count-completion-2"),
+        ],
+    ));
+    let store = Arc::new(LoadCountingStore::new());
+    let middleware: Arc<dyn Middleware> = Arc::new(FinalizeVerifierRetry::new());
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.load-count").expect("agent"),
+        BundleId::parse("test.bundle.load-count").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.load-count").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.load-count").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store) as Arc<dyn JournalStore>,
+        ),
+    )
+    .middleware(
+        ComponentRef::new(
+            ComponentId::parse("test.middleware.finalize-verification-retry").expect("component"),
+            Some(VERSION),
+        ),
+        middleware,
+    )
+    .build()
+    .await
+    .expect("agent");
+    let session = Session::create(
+        Arc::clone(&store) as Arc<dyn JournalStore>,
+        "tenant-preview",
+    )
+    .await
+    .expect("session");
+    let lane = session.lane("main").await.expect("main lane");
+    store.reset_loads();
+
+    let output = lane
+        .run(&agent, request("answer twice"))
+        .expect("start run")
+        .result()
+        .await
+        .expect("multi-cycle result");
+    assert_eq!(output.text(), "second answer");
+    assert_eq!(
+        store.load_count(),
+        1,
+        "one initial recovery must serve all cycles and finalization"
+    );
+
+    lane.append_text("post-run structural mutation")
+        .await
+        .expect("append through adopted session head");
+    assert_eq!(
+        store.load_count(),
+        1,
+        "the handed-off session head must avoid a second recovery load"
+    );
+}
+
+struct CheckpointCompactor {
+    summary_builds: AtomicUsize,
+    cache_hits: AtomicUsize,
+}
+
+impl CheckpointCompactor {
+    fn descriptor_value() -> MiddlewareDescriptor {
+        MiddlewareDescriptor {
+            invocation: ComponentInvocation {
+                component: ComponentId::parse("test.middleware.checkpoint-compactor")
+                    .expect("component"),
+                version: VERSION,
+                configuration_digest: Digest::raw_json(b"checkpoint-compactor-v1"),
+                recovery: InvocationRecovery::RecomputeSafe,
+            },
+            stages: StageMask::from_stages([Stage::BeforeModel]),
+            order: MiddlewareOrder {
+                tier: OrderTier::ContextCompaction,
+                priority: 0,
+                before: Arc::from([]),
+                after: Arc::from([]),
+            },
+            role: MiddlewareRole::ContextCompactor {
+                strategy_id: Arc::from("test.checkpoint"),
+                strategy_version: 1,
+            },
+            metadata: Metadata::empty(),
+        }
+    }
+
+    fn compact(
+        descriptor: &MiddlewareDescriptor,
+        input: &finstack_ai_runtime::BeforeModelInput,
+    ) -> CompactionResult {
+        let replacement_messages = input.request.messages.clone();
+        let summary = ContextItem::try_new(
+            ContextItemKind::DerivedSummary,
+            vec![ContentBlock::Text(
+                TextBlock::try_new("validated cached summary").expect("summary text"),
+            )],
+            ContextProvenance {
+                source_id: Arc::from("test.checkpoint"),
+                source_ref: None,
+                external: false,
+            },
+            ContextAuthority::Untrusted,
+            0,
+            4,
+            finstack_ai_kernel::Sensitivity::Credential,
+            false,
+        )
+        .expect("summary");
+        let derived_summaries: Arc<[ContextItem]> = Arc::from([summary]);
+        let checkpoint_summary = CompactedSummary::Inline(Arc::clone(&derived_summaries));
+        let summary_digest =
+            compaction_summary_digest(&checkpoint_summary).expect("summary digest");
+        let source_digest = compaction_source_digest(&input.source_entries).expect("source digest");
+        let covered_entry_ids: Arc<[finstack_ai_kernel::EntryId]> = input
+            .source_entries
+            .iter()
+            .map(|entry| entry.entry_id)
+            .collect::<Vec<_>>()
+            .into();
+        let protected = input
+            .source_entries
+            .iter()
+            .filter(|entry| entry.protected)
+            .map(|entry| entry.entry_id)
+            .collect::<Vec<_>>();
+        let checkpoint_end = input
+            .source_entries
+            .iter()
+            .rposition(|entry| !entry.protected);
+        let result = CompactionResult {
+            replacement_messages: Arc::clone(&replacement_messages),
+            derived_summaries,
+            evidence: CompactionEvidence {
+                strategy_id: Arc::from("test.checkpoint"),
+                strategy_version: 1,
+                configuration_digest: descriptor.invocation.configuration_digest,
+                model_context_profile_digest: input.model_context_profile_digest,
+                source_digest,
+                protected_item_set_digest: compaction_protected_set_digest(&protected)
+                    .expect("protected digest"),
+                covered_entry_ids: Arc::clone(&covered_entry_ids),
+                retained_entry_ids: covered_entry_ids,
+                projection_digest: compaction_projection_digest(&replacement_messages)
+                    .expect("projection digest"),
+                estimated_tokens_before: 900,
+                estimated_tokens_after: 800,
+                summary_digest: Some(summary_digest),
+                cache_impact: PromptCacheImpact::StablePrefixPreserved,
+            },
+            checkpoint: checkpoint_end.map(|index| {
+                let checkpoint_entries: Arc<[finstack_ai_runtime::CompactionSourceEntry]> =
+                    input.source_entries[..=index].to_vec().into();
+                let checkpoint_source = compaction_source_digest(&checkpoint_entries)
+                    .expect("checkpoint source digest");
+                CompactionCheckpoint {
+                    component_id: descriptor.invocation.component.clone(),
+                    strategy_id: Arc::from("test.checkpoint"),
+                    strategy_version: 1,
+                    configuration_digest: descriptor.invocation.configuration_digest,
+                    model_context_profile_digest: input.model_context_profile_digest,
+                    covered_through_entry_id: input.source_entries[index].entry_id,
+                    source_digest: checkpoint_source,
+                    summary: checkpoint_summary,
+                    summary_digest,
+                    sensitivity: finstack_ai_kernel::Sensitivity::Credential,
+                }
+            }),
+        };
+        finstack_ai_runtime::validate_compaction_result(descriptor, input, &result)
+            .expect("test compaction must validate");
+        result
+    }
+}
+
+impl Middleware for CheckpointCompactor {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        Self::descriptor_value()
+    }
+
+    fn invoke(
+        &self,
+        _ctx: MiddlewareContext,
+        input: StageInput,
+    ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
+        let StageInput::BeforeModel(input) = input else {
+            return Box::pin(async { Ok(StageOutcome::Continue) });
+        };
+        if input.checkpoint.is_some() {
+            self.cache_hits.fetch_add(1, Ordering::AcqRel);
+        } else {
+            self.summary_builds.fetch_add(1, Ordering::AcqRel);
+        }
+        let result = Self::compact(&Self::descriptor_value(), &input);
+        Box::pin(async move { Ok(StageOutcome::CompactContext(Box::new(result))) })
+    }
+}
+
+#[tokio::test]
+async fn second_lane_turn_reuses_a_validated_compaction_checkpoint() {
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("first"), completed("second")],
+    ));
+    let store = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 4,
+            batches_per_session: 128,
+            records_per_session: 1_024,
+            snapshot_bytes: 8_192,
+        })
+        .expect("store"),
+    );
+    let compactor = Arc::new(CheckpointCompactor {
+        summary_builds: AtomicUsize::new(0),
+        cache_hits: AtomicUsize::new(0),
+    });
+    let middleware: Arc<dyn Middleware> = compactor.clone();
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.checkpoint-cache").expect("agent"),
+        BundleId::parse("test.bundle.checkpoint-cache").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.checkpoint-cache").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.checkpoint-cache").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store) as Arc<dyn JournalStore>,
+        ),
+    )
+    .middleware(
+        ComponentRef::new(
+            ComponentId::parse("test.middleware.checkpoint-compactor").expect("middleware"),
+            Some(VERSION),
+        ),
+        middleware,
+    )
+    .build()
+    .await
+    .expect("agent");
+    let session = Session::create(store, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("lane");
+    lane.append_text("durable history before the cached turns")
+        .await
+        .expect("seed history");
+
+    lane.run(&agent, request("first turn"))
+        .expect("first start")
+        .result()
+        .await
+        .expect("first result");
+    lane.run(&agent, request("second turn"))
+        .expect("second start")
+        .result()
+        .await
+        .expect("second result");
+
+    assert_eq!(compactor.summary_builds.load(Ordering::Acquire), 1);
+    assert_eq!(compactor.cache_hits.load(Ordering::Acquire), 1);
 }

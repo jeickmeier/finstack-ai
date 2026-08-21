@@ -1017,6 +1017,7 @@ pub async fn finstack_ai::Agent::run(&self, finstack_ai::AgentRunRequest) -> cor
 pub fn finstack_ai::Agent::start(&self, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::start_on_lane(&self, &finstack_ai::Lane, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::try_with_output_schema(self, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentRunError>
+pub fn finstack_ai::Agent::with_history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
 impl core::clone::Clone for finstack_ai::Agent
 pub fn finstack_ai::Agent::clone(&self) -> finstack_ai::Agent
 pub struct finstack_ai::AgentBuilder
@@ -1077,12 +1078,14 @@ impl finstack_ai::AgentRun
 pub async fn finstack_ai::AgentRun::cancel(&self) -> core::result::Result<(), finstack_ai::AgentRunError>
 pub fn finstack_ai::AgentRun::close_events(&self)
 pub async fn finstack_ai::AgentRun::list_interactions(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::effects::interaction::InteractionRequest>, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::live_state(&self) -> core::result::Result<finstack_ai_runtime::exec::live_state::LiveRunState, finstack_ai::AgentRunError>
 pub fn finstack_ai::AgentRun::locator(&self) -> &finstack_ai_kernel::records::run::external::OperationLocator
 pub async fn finstack_ai::AgentRun::next_event_batch(&self) -> core::result::Result<core::option::Option<finstack_ai_runtime::exec::event_hub::EventBatch>, finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::observer_diagnostics(&self) -> core::result::Result<finstack_ai_runtime::ports::observer::ObserverDiagnostics, finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::resolve_interaction(&self, finstack_ai_kernel::effects::interaction::InteractionResolution) -> core::result::Result<(), finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::result(&self) -> core::result::Result<finstack_ai::AgentRunOutput, finstack_ai::AgentRunError>
 pub fn finstack_ai::AgentRun::session(&self) -> finstack_ai::Session
+pub async fn finstack_ai::AgentRun::wait_for_live_state(&self, u64) -> core::result::Result<finstack_ai_runtime::exec::live_state::LiveRunState, finstack_ai::AgentRunError>
 impl core::clone::Clone for finstack_ai::AgentRun
 pub fn finstack_ai::AgentRun::clone(&self) -> finstack_ai::AgentRun
 pub struct finstack_ai::AgentRunOutput
@@ -1369,6 +1372,27 @@ pub finstack_ai::GeminiAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::GeminiAgentSpec::endpoint: alloc::string::String
 pub finstack_ai::GeminiAgentSpec::model: alloc::string::String
 pub finstack_ai::GeminiAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
+pub struct finstack_ai::HistoryCachePolicy
+impl finstack_ai::HistoryCachePolicy
+pub const finstack_ai::HistoryCachePolicy::DEFAULT_MAX_BYTES: usize
+pub const finstack_ai::HistoryCachePolicy::DEFAULT_MAX_ENTRIES: usize
+pub const finstack_ai::HistoryCachePolicy::MAX_BYTES: usize
+pub const finstack_ai::HistoryCachePolicy::MAX_ENTRIES: usize
+pub const fn finstack_ai::HistoryCachePolicy::disabled() -> Self
+pub const fn finstack_ai::HistoryCachePolicy::max_bytes(self) -> usize
+pub const fn finstack_ai::HistoryCachePolicy::max_entries(self) -> usize
+pub fn finstack_ai::HistoryCachePolicy::try_new(usize, usize) -> core::result::Result<Self, finstack_ai::AgentRunError>
+impl core::clone::Clone for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::clone(&self) -> finstack_ai::HistoryCachePolicy
+impl core::cmp::Eq for finstack_ai::HistoryCachePolicy
+impl core::cmp::PartialEq for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::eq(&self, &finstack_ai::HistoryCachePolicy) -> bool
+impl core::default::Default for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::default() -> Self
+impl core::fmt::Debug for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::HistoryCachePolicy
+impl core::marker::StructuralPartialEq for finstack_ai::HistoryCachePolicy
 pub struct finstack_ai::InstructionSpec
 impl finstack_ai::InstructionSpec
 pub fn finstack_ai::InstructionSpec::text(&self) -> &str
@@ -1483,6 +1507,7 @@ pub fn finstack_ai::NativeAgentBuilder::capability_context_provider(self, finsta
 pub fn finstack_ai::NativeAgentBuilder::capability_middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::capability_toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::context_provider(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
 pub fn finstack_ai::NativeAgentBuilder::middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::observer(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::policy(self, finstack_ai::RunPolicy) -> Self

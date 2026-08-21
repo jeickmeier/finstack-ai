@@ -231,6 +231,16 @@ export class Agent {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
     }
+    /**
+     * Compose an agent with a fresh bounded process-local history cache.
+     * @param {HistoryCachePolicy} policy
+     * @returns {Agent}
+     */
+    withHistoryCache(policy) {
+        _assertClass(policy, HistoryCachePolicy);
+        const ret = wasm.agent_withHistoryCache(this.__wbg_ptr, policy.__wbg_ptr);
+        return Agent.__wrap(ret);
+    }
 }
 if (Symbol.dispose) Agent.prototype[Symbol.dispose] = Agent.prototype.free;
 
@@ -470,6 +480,75 @@ export class EventBatch {
     }
 }
 if (Symbol.dispose) EventBatch.prototype[Symbol.dispose] = EventBatch.prototype.free;
+
+/**
+ * Bounded process-local history checkpoint cache policy.
+ */
+export class HistoryCachePolicy {
+    static __wrap(ptr) {
+        const obj = Object.create(HistoryCachePolicy.prototype);
+        obj.__wbg_ptr = ptr;
+        HistoryCachePolicyFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        HistoryCachePolicyFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_historycachepolicy_free(ptr, 0);
+    }
+    /**
+     * Return a disabled cache policy.
+     * @returns {HistoryCachePolicy}
+     */
+    static disabled() {
+        const ret = wasm.historycachepolicy_disabled();
+        return HistoryCachePolicy.__wrap(ret);
+    }
+    /**
+     * Maximum aggregate serialized checkpoint bytes.
+     * @returns {number}
+     */
+    get maxBytes() {
+        const ret = wasm.historycachepolicy_maxBytes(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Maximum retained entries.
+     * @returns {number}
+     */
+    get maxEntries() {
+        const ret = wasm.historycachepolicy_maxEntries(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Construct a validated cache policy.
+     * @param {number} max_entries
+     * @param {number} max_bytes
+     */
+    constructor(max_entries, max_bytes) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.historycachepolicy_new(retptr, max_entries, max_bytes);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            this.__wbg_ptr = r0;
+            HistoryCachePolicyFinalization.register(this, this.__wbg_ptr, this);
+            return this;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) HistoryCachePolicy.prototype[Symbol.dispose] = HistoryCachePolicy.prototype.free;
 
 /**
  * Host artifact-store wrapper over `Uint8Array` payloads.
@@ -2202,7 +2281,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_5210(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_5223(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -2289,7 +2368,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1163, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_5196);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_5209);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
@@ -2330,10 +2409,10 @@ function __wasm_bindgen_func_elem_460(arg0, arg1) {
     wasm.__wasm_bindgen_func_elem_460(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_5196(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_5209(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_5196(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_5209(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -2344,8 +2423,8 @@ function __wasm_bindgen_func_elem_5196(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_5210(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_5210(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_5223(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_5223(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -2357,6 +2436,9 @@ const EventFinalization = (typeof FinalizationRegistry === 'undefined')
 const EventBatchFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_eventbatch_free(ptr, 1));
+const HistoryCachePolicyFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_historycachepolicy_free(ptr, 1));
 const JsArtifactStoreFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_jsartifactstore_free(ptr, 1));

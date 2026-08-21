@@ -110,6 +110,8 @@ pub(crate) trait LiveStatePublisher: Send + Sync {
         fault_code: Option<&'static str>,
         record_kinds: &[Arc<str>],
     );
+
+    fn publish_compaction_checkpoint(&self, checkpoint: Option<&crate::CompactionCheckpoint>);
 }
 
 pub(crate) fn session_head_update(

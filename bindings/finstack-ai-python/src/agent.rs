@@ -9,8 +9,9 @@ use crate::store::{PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
-    GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
-    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
+    GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts,
+    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
+    Session,
 };
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
@@ -129,6 +130,47 @@ const PREVIEW_VERSION: Version = Version {
     patch: 1,
 };
 
+/// Bounded process-local history checkpoint cache policy.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "HistoryCachePolicy",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone, Copy)]
+pub(crate) struct PyHistoryCachePolicy {
+    inner: HistoryCachePolicy,
+}
+
+#[pymethods]
+impl PyHistoryCachePolicy {
+    #[new]
+    #[pyo3(signature = (max_entries = HistoryCachePolicy::DEFAULT_MAX_ENTRIES, max_bytes = HistoryCachePolicy::DEFAULT_MAX_BYTES))]
+    fn new(max_entries: usize, max_bytes: usize) -> PyResult<Self> {
+        HistoryCachePolicy::try_new(max_entries, max_bytes)
+            .map(|inner| Self { inner })
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    /// Return a policy that disables checkpoint reuse.
+    #[staticmethod]
+    fn disabled() -> Self {
+        Self {
+            inner: HistoryCachePolicy::disabled(),
+        }
+    }
+
+    #[getter]
+    fn max_entries(&self) -> usize {
+        self.inner.max_entries()
+    }
+
+    #[getter]
+    fn max_bytes(&self) -> usize {
+        self.inner.max_bytes()
+    }
+}
+
 /// Rust-owned resolved agent handle.
 #[pyclass(module = "finstack_ai._finstack_ai", name = "Agent", frozen)]
 pub(crate) struct PyAgent {
@@ -146,6 +188,27 @@ pub(crate) struct PyAgent {
 
 #[pymethods]
 impl PyAgent {
+    /// Compose an agent with a fresh bounded process-local history cache.
+    fn with_history_cache(&self, py: Python<'_>, policy: &Bound<'_, PyHistoryCachePolicy>) -> Self {
+        let policy = policy.borrow();
+        Self {
+            inner: Arc::new(
+                self.inner
+                    .as_ref()
+                    .clone()
+                    .with_history_cache_policy(policy.inner),
+            ),
+            model: self.model.clone(),
+            output_adapter: self
+                .output_adapter
+                .as_ref()
+                .map(|adapter| adapter.clone_ref(py)),
+            settings: self.settings.clone(),
+            default_timeout_seconds: self.default_timeout_seconds,
+            artifact_store: Arc::clone(&self.artifact_store),
+        }
+    }
+
     /// Construct a Rust-backed official `OpenAI` Responses agent.
     ///
     /// `api_key` is required and keyword-only. The factory always targets

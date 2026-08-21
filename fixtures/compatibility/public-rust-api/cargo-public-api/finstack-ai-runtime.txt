@@ -3052,9 +3052,23 @@ impl core::fmt::Debug for finstack_ai_runtime::SessionCreateIds
 pub fn finstack_ai_runtime::SessionCreateIds::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::SessionCreateIds
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::SessionCreateIds
+pub struct finstack_ai_runtime::SessionHeadUpdate
+pub finstack_ai_runtime::SessionHeadUpdate::head_checksum: core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
+pub finstack_ai_runtime::SessionHeadUpdate::last_applied_sequence: u64
+pub finstack_ai_runtime::SessionHeadUpdate::projection: finstack_ai_kernel::conversation::tree::SessionProjection
+pub finstack_ai_runtime::SessionHeadUpdate::session_id: finstack_ai_kernel::primitives::ids::SessionId
+impl core::clone::Clone for finstack_ai_runtime::SessionHeadUpdate
+pub fn finstack_ai_runtime::SessionHeadUpdate::clone(&self) -> finstack_ai_runtime::SessionHeadUpdate
+impl core::cmp::Eq for finstack_ai_runtime::SessionHeadUpdate
+impl core::cmp::PartialEq for finstack_ai_runtime::SessionHeadUpdate
+pub fn finstack_ai_runtime::SessionHeadUpdate::eq(&self, &finstack_ai_runtime::SessionHeadUpdate) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::SessionHeadUpdate
+pub fn finstack_ai_runtime::SessionHeadUpdate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::SessionHeadUpdate
 pub struct finstack_ai_runtime::SessionRuntime
 impl finstack_ai_runtime::SessionRuntime
 pub async fn finstack_ai_runtime::SessionRuntime::accept_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::records::run::accepted::RunAccepted, finstack_ai_kernel::state::env::TransitionEnv) -> core::result::Result<finstack_ai_runtime::CommitCoordinator, finstack_ai_runtime::SessionError>
+pub async fn finstack_ai_runtime::SessionRuntime::adopt_session_head(&self, finstack_ai_runtime::SessionHeadUpdate) -> core::result::Result<(), finstack_ai_runtime::SessionError>
 pub async fn finstack_ai_runtime::SessionRuntime::append_message(&self, finstack_ai_kernel::primitives::ids::LaneId, &finstack_ai_kernel::conversation::message::Message, finstack_ai_runtime::LaneAppendIds) -> core::result::Result<finstack_ai_kernel::primitives::ids::EntryId, finstack_ai_runtime::SessionError>
 pub async fn finstack_ai_runtime::SessionRuntime::append_message_for_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::primitives::ids::RunId, &finstack_ai_kernel::conversation::message::Message, finstack_ai_runtime::LaneAppendIds) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::conversation::message::Message>, finstack_ai_runtime::SessionError>
 pub async fn finstack_ai_runtime::SessionRuntime::append_message_from_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::primitives::ids::RunId, &finstack_ai_kernel::conversation::message::Message, finstack_ai_runtime::LaneAppendIds) -> core::result::Result<finstack_ai_kernel::primitives::ids::EntryId, finstack_ai_runtime::SessionError>

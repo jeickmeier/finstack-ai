@@ -1,7 +1,28 @@
-import { Agent as WasmAgent, Event as WasmEvent, EventBatch as WasmEventBatch, Lane as WasmLane, Locator as WasmLocator, MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession, } from "../generated/finstack_ai_wasm.js";
+import { Agent as WasmAgent, HistoryCachePolicy as WasmHistoryCachePolicy, Event as WasmEvent, EventBatch as WasmEventBatch, Lane as WasmLane, Locator as WasmLocator, MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession, } from "../generated/finstack_ai_wasm.js";
 import { requireWasm, wasmContextProviderHandle, wasmJournalStoreHandle, wasmMiddlewareHandle, wasmModelHandle, wasmObserverHandle, wasmToolsetHandle, } from "./adapters.js";
 import { FinstackError } from "./errors.js";
 export { FinstackError } from "./errors.js";
+/** Bounded process-local compaction checkpoint cache policy. */
+export class HistoryCachePolicy {
+    #handle;
+    constructor(maxEntries = 64, maxBytes = 16 * 1024 * 1024) {
+        requireWasm();
+        this.#handle = new WasmHistoryCachePolicy(maxEntries, maxBytes);
+    }
+    static disabled() {
+        return new HistoryCachePolicy(0, 0);
+    }
+    get maxEntries() {
+        return this.#handle.maxEntries;
+    }
+    get maxBytes() {
+        return this.#handle.maxBytes;
+    }
+    /** @internal */
+    handle() {
+        return this.#handle;
+    }
+}
 /**
  * How a run parks and releases paid-tool approvals.
  *
@@ -61,6 +82,11 @@ export class Agent {
     /** @internal */
     handle() {
         return this.#handle;
+    }
+    /** Compose an agent with a fresh bounded process-local history cache. */
+    withHistoryCache(policy) {
+        requireWasm();
+        return new Agent(this.#handle.withHistoryCache(policy.handle()));
     }
     /**
      * Construct an Agent over a trusted {@link JsModel} and optional toolsets.

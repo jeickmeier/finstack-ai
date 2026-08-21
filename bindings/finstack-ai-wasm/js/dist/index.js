@@ -1,6 +1,6 @@
 import initWasm, { buildMetadata as wasmBuildMetadata, health as wasmHealth, journalKnownAnswer as wasmJournalKnownAnswer, normalizePrebetaShape as wasmNormalizePrebetaShape, parseDocument as wasmParseDocument, parseDocumentMarkdown as wasmParseDocumentMarkdown, } from "../generated/finstack_ai_wasm.js";
 import { setAdaptersInitialized } from "./adapters.js";
-export { Agent, ApprovalGrantMode, Event, EventBatch, FinstackError, Lane, Locator, MemoryExternalIdentityMap, Run, RunResult, Session, } from "./agent.js";
+export { Agent, ApprovalGrantMode, Event, EventBatch, FinstackError, HistoryCachePolicy, Lane, Locator, MemoryExternalIdentityMap, Run, RunResult, Session, } from "./agent.js";
 export { POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, decodeFrame, decodeFrameLength, encodeFrame, } from "./remote.js";
 export { JsArtifactStore, JsClock, JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsRandomSource, JsToolset, createHostClock, createHostRandomSource, createMemoryArtifactStore, createMemoryJournalStore, } from "./adapters.js";
 let initialized = false;

@@ -20,6 +20,7 @@ mod child_wasm;
 pub mod deferred;
 mod drive;
 mod handle;
+mod history;
 mod lane;
 mod linked;
 mod mask;
@@ -44,6 +45,7 @@ pub use deferred::{
     DeferredChildPlanner, DeferredPlanError, OutstandingDeferral, outstanding_deferrals,
 };
 pub use handle::Agent;
+pub use history::HistoryCachePolicy;
 #[cfg(feature = "native-tokio")]
 pub(crate) use lane::{LaneLive, live_run};
 pub use linked::{

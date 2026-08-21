@@ -18,6 +18,7 @@ use finstack_ai_runtime::{
 
 use super::PREVIEW_ENGINE_VERSION;
 use super::handle::{Agent, ModelCapabilityVariant};
+use super::history::{HistoryCache, HistoryCachePolicy};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, CapabilityCatalogEntry,
     MAX_COMPACT_CATALOG_BYTES,
@@ -84,6 +85,7 @@ pub struct NativeAgentBuilder {
     policy: RunPolicy,
     child_policy_binding: Option<ChildRunPolicy>,
     activation_host: Option<Arc<super::activation::NativeCapabilityHost>>,
+    history_cache_policy: HistoryCachePolicy,
 }
 
 impl NativeAgentBuilder {
@@ -109,7 +111,19 @@ impl NativeAgentBuilder {
             policy: RunPolicy::default(),
             child_policy_binding: None,
             activation_host: None,
+            history_cache_policy: HistoryCachePolicy::default(),
         }
+    }
+
+    /// Configure the bounded process-local compaction checkpoint cache.
+    #[must_use]
+    pub fn history_cache_policy(mut self, policy: HistoryCachePolicy) -> Self {
+        self.history_cache_policy = policy;
+        self
+    }
+
+    pub(super) fn set_history_cache_policy(&mut self, policy: HistoryCachePolicy) {
+        self.history_cache_policy = policy;
     }
 
     /// Bind the artifact store used for staging and committed-reference ownership.
@@ -376,6 +390,8 @@ impl NativeAgentBuilder {
                 .map_err(invalid_config)?
         };
         let mut agent = Agent::try_from_resolved(Arc::new(resolved_agent))?;
+        agent.history_cache_policy = self.history_cache_policy;
+        agent.history_cache = HistoryCache::shared(self.history_cache_policy);
         let contributions =
             super::mask::CapabilityContributionIndex::from_specs(&self.capabilities);
         agent.attach_capability_surface(
@@ -539,6 +555,8 @@ async fn resolve_model_variants(
             .await
             .map_err(invalid_config)?;
         let prepared = Agent::try_from_resolved(Arc::new(resolved)).and_then(|mut variant| {
+            variant.history_cache_policy = agent.history_cache_policy;
+            variant.history_cache = Arc::clone(&agent.history_cache);
             variant.attach_capability_surface(
                 Arc::clone(&agent.capability_specs),
                 agent.capability_index.clone(),

@@ -18,6 +18,7 @@ pub(super) struct Shared {
     pub(super) kernel_state: Mutex<finstack_ai_kernel::KernelState>,
     pub(super) record_kinds: Mutex<Arc<[Arc<str>]>>,
     pub(super) session_head: Mutex<Option<crate::SessionHeadUpdate>>,
+    pub(super) compaction_checkpoint: Mutex<Option<crate::CompactionCheckpoint>>,
     pub(super) events: EventHubHandle,
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
     pub(super) timer_already_due: AtomicU64,
@@ -59,6 +60,12 @@ impl LiveStatePublisher for Shared {
             fault_code.map(Arc::from).or(current.fault_code),
             state,
         ));
+    }
+
+    fn publish_compaction_checkpoint(&self, checkpoint: Option<&crate::CompactionCheckpoint>) {
+        if let Ok(mut current) = self.compaction_checkpoint.lock() {
+            current.clone_from(&checkpoint.cloned());
+        }
     }
 }
 
