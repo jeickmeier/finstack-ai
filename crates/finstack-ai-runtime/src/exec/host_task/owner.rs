@@ -451,6 +451,19 @@ impl RunTaskOwner {
         self.handle.clone()
     }
 
+    /// Take the latest confirmed structural session head retained by this owner.
+    ///
+    /// Callers should consume this only after graceful, non-faulted shutdown.
+    #[must_use]
+    pub fn take_session_head(&mut self) -> Option<crate::SessionHeadUpdate> {
+        self.handle
+            .shared
+            .session_head
+            .lock()
+            .ok()
+            .and_then(|mut update| update.take())
+    }
+
     /// Attach one observer pump to this owner's shutdown and abort lifecycle.
     ///
     /// # Errors

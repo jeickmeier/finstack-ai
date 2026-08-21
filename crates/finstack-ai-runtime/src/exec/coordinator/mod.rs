@@ -344,6 +344,8 @@ impl CommitCoordinator {
         if let Some(publisher) = &self.live_state_publisher {
             publisher.publish_semantic(
                 self.state(),
+                self.session(),
+                self.head_checksum(),
                 self.fault.map(|fault| fault.code),
                 &self.record_kinds,
             );

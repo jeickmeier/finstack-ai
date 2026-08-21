@@ -155,7 +155,7 @@ pub use services::process_confinement::{
 pub use services::process_confinement::{configure_process_tree, terminate_process_tree};
 pub use session::{
     LaneAppendIds, LaneCreateIds, LaneInspect, LaneRunContext, SessionCreateIds, SessionError,
-    SessionRuntime,
+    SessionHeadUpdate, SessionRuntime,
 };
 
 pub use context::{

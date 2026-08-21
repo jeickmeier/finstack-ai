@@ -7,6 +7,7 @@ use finstack_ai_kernel::{
     RunPhase, TerminalState,
 };
 
+use crate::SessionHeadUpdate;
 use crate::run_types::RunStatus;
 
 /// Curated latest-only state for one live or completed run owner.
@@ -104,7 +105,22 @@ pub(crate) trait LiveStatePublisher: Send + Sync {
     fn publish_semantic(
         &self,
         state: &KernelState,
+        session: &finstack_ai_kernel::SessionProjection,
+        head_checksum: Option<Digest>,
         fault_code: Option<&'static str>,
         record_kinds: &[Arc<str>],
     );
+}
+
+pub(crate) fn session_head_update(
+    state: &KernelState,
+    session: &finstack_ai_kernel::SessionProjection,
+    head_checksum: Option<Digest>,
+) -> Option<SessionHeadUpdate> {
+    Some(SessionHeadUpdate {
+        session_id: session.session_id()?,
+        last_applied_sequence: state.last_applied_sequence,
+        head_checksum,
+        projection: session.clone(),
+    })
 }

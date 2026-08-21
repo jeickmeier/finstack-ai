@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::CommitOutcome;
 use crate::event_hub::EventHubHandle;
-use crate::exec::live_state::{LiveRunState, LiveStatePublisher};
+use crate::exec::live_state::{LiveRunState, LiveStatePublisher, session_head_update};
 use crate::observer::ObserverDiagnosticBuffer;
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
 
@@ -17,6 +17,7 @@ pub(super) struct Shared {
     pub(super) live_state: watch::Sender<LiveRunState>,
     pub(super) kernel_state: Mutex<finstack_ai_kernel::KernelState>,
     pub(super) record_kinds: Mutex<Arc<[Arc<str>]>>,
+    pub(super) session_head: Mutex<Option<crate::SessionHeadUpdate>>,
     pub(super) events: EventHubHandle,
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
     pub(super) timer_already_due: AtomicU64,
@@ -36,6 +37,8 @@ impl LiveStatePublisher for Shared {
     fn publish_semantic(
         &self,
         state: &finstack_ai_kernel::KernelState,
+        session: &finstack_ai_kernel::SessionProjection,
+        head_checksum: Option<finstack_ai_kernel::Digest>,
         fault_code: Option<&'static str>,
         record_kinds: &[Arc<str>],
     ) {
@@ -44,6 +47,9 @@ impl LiveStatePublisher for Shared {
         }
         if let Ok(mut current) = self.record_kinds.lock() {
             *current = record_kinds.into();
+        }
+        if let Ok(mut current) = self.session_head.lock() {
+            *current = session_head_update(state, session, head_checksum);
         }
         let current = self.live_state.borrow().clone();
         let status = *self.status.borrow();

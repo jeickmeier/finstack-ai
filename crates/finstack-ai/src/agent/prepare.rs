@@ -417,13 +417,33 @@ impl Agent {
             }
             Err(_) => settle_deadline_timeout(&handle, locator, timeout, effective_deadline).await,
         };
-        let _shutdown = owner.shutdown().await;
+        let shutdown = owner.shutdown().await;
         if let Some((runtime, lane_id, run_id)) = acquired_lane {
-            if let Ok(output) = &result {
-                if let Err(error) = runtime.refresh().await {
+            let graceful = matches!(
+                shutdown.outcome,
+                finstack_ai_runtime::ShutdownOutcome::Graceful
+            ) && !matches!(
+                handle.status(),
+                finstack_ai_runtime::RunStatus::Faulted { .. }
+            );
+            if graceful {
+                let Some(update) = owner.take_session_head() else {
+                    let _invalidated = runtime.invalidate_session_head();
+                    runtime.release_run(lane_id, run_id);
+                    return Err(runtime_uncertainty(
+                        "graceful owner shutdown did not retain a confirmed session head",
+                    ));
+                };
+                if let Err(error) = runtime.adopt_session_head(update).await {
+                    let _invalidated = runtime.invalidate_session_head();
                     runtime.release_run(lane_id, run_id);
                     return Err(session_error(&error));
                 }
+            } else if let Err(error) = runtime.invalidate_session_head() {
+                runtime.release_run(lane_id, run_id);
+                return Err(session_error(&error));
+            }
+            if let Ok(output) = &result {
                 if let Err(error) = runtime
                     .append_message_from_run(
                         lane_id,

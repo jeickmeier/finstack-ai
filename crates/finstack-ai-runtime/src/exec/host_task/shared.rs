@@ -6,7 +6,7 @@ use finstack_ai_kernel::{KernelInput, TransitionEnv};
 
 use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
 use crate::event_hub::EventHubHandle;
-use crate::exec::live_state::{LiveRunState, LiveStatePublisher};
+use crate::exec::live_state::{LiveRunState, LiveStatePublisher, session_head_update};
 use crate::host_driver::Signal;
 use crate::observer::ObserverDiagnosticBuffer;
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
@@ -22,6 +22,7 @@ pub(super) struct Shared {
     pub(super) live_state: Mutex<LiveRunState>,
     pub(super) kernel_state: Mutex<finstack_ai_kernel::KernelState>,
     pub(super) record_kinds: Mutex<Arc<[Arc<str>]>>,
+    pub(super) session_head: Mutex<Option<crate::SessionHeadUpdate>>,
     pub(super) live_state_changed: Signal,
     pub(super) events: EventHubHandle,
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
@@ -46,6 +47,7 @@ impl Shared {
             live_state: Mutex::new(initial_live_state),
             kernel_state: Mutex::new(initial_kernel_state),
             record_kinds: Mutex::new(Arc::from([])),
+            session_head: Mutex::new(None),
             live_state_changed: Signal::new(),
             events,
             shutdown_report: Mutex::new(None),
@@ -72,6 +74,8 @@ impl LiveStatePublisher for Shared {
     fn publish_semantic(
         &self,
         state: &finstack_ai_kernel::KernelState,
+        session: &finstack_ai_kernel::SessionProjection,
+        head_checksum: Option<finstack_ai_kernel::Digest>,
         fault_code: Option<&'static str>,
         record_kinds: &[Arc<str>],
     ) {
@@ -80,6 +84,9 @@ impl LiveStatePublisher for Shared {
         }
         if let Ok(mut current) = self.record_kinds.lock() {
             *current = record_kinds.into();
+        }
+        if let Ok(mut current) = self.session_head.lock() {
+            *current = session_head_update(state, session, head_checksum);
         }
         let status = self.status.lock().map_or(
             RunStatus::Faulted {

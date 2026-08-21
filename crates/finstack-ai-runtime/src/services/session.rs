@@ -91,6 +91,7 @@ pub struct LaneAppendIds {
 
 /// Validated durable context captured while atomically accepting a lane run.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct LaneRunContext {
     /// Complete selected-lane history through the newly committed user message.
     pub messages: Arc<[Message]>,
@@ -100,6 +101,22 @@ pub struct LaneRunContext {
     pub journal_sequence: u64,
     /// Confirmed journal head checksum after the structural commit.
     pub head_checksum: Option<Digest>,
+}
+
+/// Latest confirmed structural session head returned by a run owner.
+///
+/// This is a process-local handoff. It is never serialized into the journal,
+/// snapshots, events, or language bindings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionHeadUpdate {
+    /// Session whose structural head was confirmed.
+    pub session_id: SessionId,
+    /// Last applied journal sequence.
+    pub last_applied_sequence: u64,
+    /// Checksum of the confirmed journal head.
+    pub head_checksum: Option<Digest>,
+    /// Complete validated session projection at that head.
+    pub projection: SessionProjection,
 }
 
 /// Session-writer failures that fail closed.
@@ -401,6 +418,57 @@ impl SessionRuntime {
         self.refresh_locked().await
     }
 
+    /// Adopt a graceful run owner's latest confirmed structural session head.
+    ///
+    /// Newer updates advance the cached structural coordinator. Equal updates
+    /// are idempotent when their checksum agrees and invalidate the cache when
+    /// it does not. Older updates are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recover failure for a mismatched session identity or invalid
+    /// sequence adoption.
+    pub async fn adopt_session_head(&self, update: SessionHeadUpdate) -> Result<(), SessionError> {
+        let _structural = self.structural.acquire().await?;
+        if update.session_id != self.session_id
+            || update.projection.session_id() != Some(self.session_id)
+        {
+            return Err(SessionError::Recover {
+                code: "session_head_id_mismatch",
+            });
+        }
+        let mut inner = self.lock()?;
+        let Some(head) = inner.head.as_mut() else {
+            return Ok(());
+        };
+        let current_sequence = head.state().last_applied_sequence;
+        if update.last_applied_sequence < current_sequence {
+            return Ok(());
+        }
+        if update.last_applied_sequence == current_sequence {
+            if update.head_checksum != head.head_checksum() {
+                inner.head = None;
+            }
+            return Ok(());
+        }
+        head.adopt_live_session(
+            update.projection.clone(),
+            update.last_applied_sequence,
+            update.head_checksum,
+        )
+        .map_err(|error| SessionError::recover(&error))?;
+        inner.projection = update.projection;
+        Ok(())
+    }
+
+    /// Invalidate the process-local structural head after a forced or faulted
+    /// owner boundary. The next structural mutation performs one cold load.
+    #[doc(hidden)]
+    pub fn invalidate_session_head(&self) -> Result<(), SessionError> {
+        self.lock()?.head = None;
+        Ok(())
+    }
+
     async fn refresh_locked(&self) -> Result<SessionProjection, SessionError> {
         let loaded = self
             .store
@@ -595,6 +663,7 @@ impl SessionRuntime {
     /// # Errors
     ///
     /// Returns a busy-lane, unknown-lane, invalid-history, or commit failure.
+    #[doc(hidden)]
     pub async fn begin_run_with_message(
         &self,
         lane_id: LaneId,
@@ -1240,5 +1309,110 @@ mod tests {
             session_intern::decide(&store, session_id).expect("retry decision"),
             InternDecision::Lead(_)
         ));
+    }
+
+    #[cfg(feature = "native-tokio")]
+    #[tokio::test]
+    async fn session_head_adoption_handles_new_equal_old_and_divergent_updates() {
+        let session_id =
+            SessionId::parse("21234567-89ab-7cde-89ab-0123456789ab").expect("session id");
+        let store: Arc<dyn JournalStore> = Arc::new(UnavailableStore);
+        let initial_projection = SessionProjection::new(session_id);
+        let initial_checksum = Some(Digest::raw_json(b"initial"));
+        let mut head = CommitCoordinator::new(Arc::clone(&store));
+        head.mark_structural_head();
+        head.adopt_live_session(initial_projection.clone(), 10, initial_checksum)
+            .expect("initial head");
+        let runtime = SessionRuntime {
+            store,
+            session_id,
+            tenant_scope: Arc::from("tenant"),
+            inner: Mutex::new(SessionInner {
+                projection: initial_projection,
+                guards: BTreeMap::new(),
+                live_runs: BTreeMap::new(),
+                head: Some(head),
+            }),
+            structural: StructuralGate::default(),
+        };
+
+        let newer_checksum = Some(Digest::raw_json(b"newer"));
+        runtime
+            .adopt_session_head(SessionHeadUpdate {
+                session_id,
+                last_applied_sequence: 12,
+                head_checksum: newer_checksum,
+                projection: SessionProjection::new(session_id),
+            })
+            .await
+            .expect("newer update");
+        {
+            let inner = runtime.lock().expect("lock");
+            let head = inner.head.as_ref().expect("cached head");
+            assert_eq!(head.state().last_applied_sequence, 12);
+            assert_eq!(head.head_checksum(), newer_checksum);
+        }
+        let cached = runtime
+            .take_structural_head()
+            .await
+            .expect("adopted head avoids unavailable-store load");
+        runtime.put_structural_head(cached).expect("return head");
+
+        runtime
+            .adopt_session_head(SessionHeadUpdate {
+                session_id,
+                last_applied_sequence: 12,
+                head_checksum: newer_checksum,
+                projection: SessionProjection::new(session_id),
+            })
+            .await
+            .expect("idempotent update");
+        runtime
+            .adopt_session_head(SessionHeadUpdate {
+                session_id,
+                last_applied_sequence: 11,
+                head_checksum: Some(Digest::raw_json(b"older")),
+                projection: SessionProjection::new(session_id),
+            })
+            .await
+            .expect("older update");
+        assert_eq!(
+            runtime
+                .lock()
+                .expect("lock")
+                .head
+                .as_ref()
+                .expect("cached head")
+                .state()
+                .last_applied_sequence,
+            12
+        );
+
+        let other_session =
+            SessionId::parse("31234567-89ab-7cde-89ab-0123456789ab").expect("other session");
+        assert!(matches!(
+            runtime
+                .adopt_session_head(SessionHeadUpdate {
+                    session_id: other_session,
+                    last_applied_sequence: 13,
+                    head_checksum: Some(Digest::raw_json(b"other")),
+                    projection: SessionProjection::new(other_session),
+                })
+                .await,
+            Err(SessionError::Recover {
+                code: "session_head_id_mismatch"
+            })
+        ));
+
+        runtime
+            .adopt_session_head(SessionHeadUpdate {
+                session_id,
+                last_applied_sequence: 12,
+                head_checksum: Some(Digest::raw_json(b"divergent")),
+                projection: SessionProjection::new(session_id),
+            })
+            .await
+            .expect("divergent update invalidates");
+        assert!(runtime.lock().expect("lock").head.is_none());
     }
 }
