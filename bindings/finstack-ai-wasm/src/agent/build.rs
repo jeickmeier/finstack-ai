@@ -10,7 +10,7 @@ use finstack_ai::{
 };
 use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, RawJson, Version};
 use finstack_ai_kernel::{ContentBlock, SessionId, TerminalState};
-use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
+use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_tools_document::DocumentToolset;
 use wasm_bindgen::prelude::*;
@@ -47,30 +47,25 @@ fn document_ingest_component(id: &str) -> Result<ComponentRef, JsValue> {
 /// toolset/middleware ports.
 ///
 /// Constructing these once per `Agent` and sharing the same
-/// `Arc<dyn ArtifactStore>` / `Arc<AttachmentIndex>` across attachment
+/// `Arc<dyn ArtifactStore>` across attachment
 /// staging, `DocumentToolset`, and `DocumentIngestMiddleware` is required so
 /// all three resolve the exact same staged `ArtifactRef` (mirrors
 /// `finstack-ai-python`'s `document_ingest_ports`).
 struct DocumentIngestPorts {
     artifact_store: Arc<dyn ArtifactStore>,
-    attachment_index: Arc<AttachmentIndex>,
     toolset: (ComponentRef, Arc<dyn Toolset>),
     middleware: (ComponentRef, Arc<dyn Middleware>),
 }
 
 fn document_ingest_ports() -> Result<DocumentIngestPorts, JsValue> {
     let artifact_store = Arc::new(DocumentArtifactStore::default());
-    let attachment_index = Arc::new(AttachmentIndex::default());
     let dyn_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>;
-    let toolset = DocumentToolset::try_new()
-        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?
-        .with_artifact_store(Arc::clone(&dyn_store));
-    let middleware =
-        DocumentIngestMiddleware::try_new(Arc::clone(&dyn_store), Arc::clone(&attachment_index))
-            .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
+    let toolset = DocumentToolset::try_new(Arc::clone(&dyn_store))
+        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
+    let middleware = DocumentIngestMiddleware::try_new(Arc::clone(&dyn_store))
+        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
     Ok(DocumentIngestPorts {
         artifact_store: dyn_store,
-        attachment_index,
         toolset: (
             document_ingest_component("finstack.tools.document")?,
             Arc::new(toolset) as Arc<dyn Toolset>,
@@ -157,7 +152,6 @@ pub(super) async fn build_agent(
         inner: Arc::new(built.agent),
         model: model_name,
         artifact_store: document_ingest.artifact_store,
-        attachment_index: document_ingest.attachment_index,
     })
 }
 

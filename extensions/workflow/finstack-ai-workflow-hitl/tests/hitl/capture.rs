@@ -18,7 +18,7 @@ use finstack_ai_runtime::{
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
 use finstack_ai_workflow_hitl::{
-    HitlInboxStore, InteractionStatus, MemoryHitlStore, capture, park,
+    HitlInboxStore, InteractionStatus, InteractionTransition, MemoryHitlStore, capture, park,
 };
 use finstack_ai_workflow_worker::{MemoryWorkerStore, WakeIndexStore, WakeReason};
 
@@ -75,7 +75,7 @@ pub(crate) fn memory_store() -> Arc<MemoryJournalStore> {
     )
 }
 
-fn accepted() -> RunAccepted {
+pub(crate) fn accepted() -> RunAccepted {
     let run_id = id(3);
     RunAccepted::try_new(
         run_id,
@@ -182,7 +182,14 @@ fn capture_writes_one_open_row_for_an_interaction_wait() {
     };
     let inbox = MemoryHitlStore::new();
 
-    let captured = capture(&inbox, &checkpoint(), &wait, timestamp(2_000)).expect("capture");
+    let captured = capture(
+        &inbox,
+        &checkpoint(),
+        &wait,
+        accepted().security(),
+        timestamp(2_000),
+    )
+    .expect("capture");
 
     assert!(captured);
     let row = inbox
@@ -215,10 +222,17 @@ fn capture_ignores_non_interaction_waits() {
         due_at: timestamp(5_000),
     };
 
-    let captured = capture(&inbox, &checkpoint(), &wait, timestamp(2_000)).expect("capture");
+    let captured = capture(
+        &inbox,
+        &checkpoint(),
+        &wait,
+        accepted().security(),
+        timestamp(2_000),
+    )
+    .expect("capture");
 
     assert!(!captured);
-    assert!(inbox.load_active().expect("active").is_empty());
+    assert!(inbox.load_active(10).expect("active").is_empty());
 }
 
 #[test]
@@ -230,10 +244,28 @@ fn capture_is_idempotent_on_recapture() {
     };
     let inbox = MemoryHitlStore::new();
 
-    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(2_000)).expect("first"));
-    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(4_000)).expect("second"));
+    assert!(
+        capture(
+            &inbox,
+            &checkpoint(),
+            &wait,
+            accepted().security(),
+            timestamp(2_000),
+        )
+        .expect("first")
+    );
+    assert!(
+        capture(
+            &inbox,
+            &checkpoint(),
+            &wait,
+            accepted().security(),
+            timestamp(4_000),
+        )
+        .expect("second")
+    );
 
-    let rows = inbox.load_open("tenant-a").expect("open");
+    let rows = inbox.load_open("tenant-a", 10).expect("open");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].requested_at, timestamp(4_000));
     assert_eq!(rows[0].expires_at, None);
@@ -247,18 +279,40 @@ fn recapture_preserves_a_settled_row() {
         request: approval_request(interaction_id, id(51), None),
     };
     let inbox = MemoryHitlStore::new();
-    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(2_000)).expect("first"));
+    assert!(
+        capture(
+            &inbox,
+            &checkpoint(),
+            &wait,
+            accepted().security(),
+            timestamp(2_000),
+        )
+        .expect("first")
+    );
     inbox
-        .set_status(
+        .transition(
             "tenant-a",
             &interaction_id.to_canonical_string(),
-            InteractionStatus::Delivered,
-            Some("subject"),
-            timestamp(3_000),
+            InteractionTransition {
+                expected: InteractionStatus::Open,
+                next: InteractionStatus::Buffered,
+                resolved_by: Some("subject"),
+                outcome_code: Some("buffered"),
+                updated_at: timestamp(3_000),
+            },
         )
         .expect("deliver");
 
-    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(4_000)).expect("recapture"));
+    assert!(
+        capture(
+            &inbox,
+            &checkpoint(),
+            &wait,
+            accepted().security(),
+            timestamp(4_000),
+        )
+        .expect("recapture")
+    );
 
     let row = inbox
         .load("tenant-a", &interaction_id.to_canonical_string())
@@ -266,12 +320,12 @@ fn recapture_preserves_a_settled_row() {
         .expect("row");
     assert_eq!(
         row.status,
-        InteractionStatus::Delivered,
+        InteractionStatus::Buffered,
         "a re-park after a restart must not revive a settled row"
     );
     assert_eq!(row.resolved_by.as_deref(), Some("subject"));
     assert!(
-        inbox.load_open("tenant-a").expect("open").is_empty(),
+        inbox.load_open("tenant-a", 10).expect("open").is_empty(),
         "the settled row stays out of the pending view"
     );
 }
@@ -284,18 +338,40 @@ fn recapture_resets_a_stale_closed_row_to_open() {
         request: approval_request(interaction_id, id(61), None),
     };
     let inbox = MemoryHitlStore::new();
-    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(2_000)).expect("first"));
+    assert!(
+        capture(
+            &inbox,
+            &checkpoint(),
+            &wait,
+            accepted().security(),
+            timestamp(2_000),
+        )
+        .expect("first")
+    );
     inbox
-        .set_status(
+        .transition(
             "tenant-a",
             &interaction_id.to_canonical_string(),
-            InteractionStatus::Closed,
-            None,
-            timestamp(3_000),
+            InteractionTransition {
+                expected: InteractionStatus::Open,
+                next: InteractionStatus::Closed,
+                resolved_by: None,
+                outcome_code: Some("test"),
+                updated_at: timestamp(3_000),
+            },
         )
         .expect("close");
 
-    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(4_000)).expect("recapture"));
+    assert!(
+        capture(
+            &inbox,
+            &checkpoint(),
+            &wait,
+            accepted().security(),
+            timestamp(4_000),
+        )
+        .expect("recapture")
+    );
 
     let row = inbox
         .load("tenant-a", &interaction_id.to_canonical_string())
@@ -308,7 +384,7 @@ fn recapture_resets_a_stale_closed_row_to_open() {
     );
     assert!(row.resolved_by.is_none());
     assert_eq!(
-        inbox.load_open("tenant-a").expect("open").len(),
+        inbox.load_open("tenant-a", 10).expect("open").len(),
         1,
         "the interaction returns to the pending view"
     );
@@ -389,7 +465,7 @@ async fn park_indexes_the_wake_row_and_captures_the_inbox_row() {
     let interaction_id = request_interaction(&journal, timestamp(2_000)).await;
     let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(profile(), Vec::new()));
     let clock = ExternalClock::new(timestamp(2_000));
-    let mut session = WorkflowSession::trusted(
+    let mut session = WorkflowSession::trusted_seeded(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
         locator(),
         clock,
@@ -413,7 +489,7 @@ async fn park_indexes_the_wake_row_and_captures_the_inbox_row() {
     assert_eq!(wake_rows[0].workflow_kind.as_ref(), "hitl-demo");
     assert_eq!(wake_rows[0].session_id, checkpoint.session_id);
 
-    let inbox_rows = inbox.load_open("tenant-a").expect("inbox rows");
+    let inbox_rows = inbox.load_open("tenant-a", 10).expect("inbox rows");
     assert_eq!(inbox_rows.len(), 1);
     assert_eq!(inbox_rows[0].status, InteractionStatus::Open);
     assert_eq!(inbox_rows[0].kind.as_ref(), "approval");

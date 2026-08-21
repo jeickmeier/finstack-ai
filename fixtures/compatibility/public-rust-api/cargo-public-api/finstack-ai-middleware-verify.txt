@@ -14,8 +14,8 @@ impl core::marker::Copy for finstack_ai_middleware_verify::EvidenceKind
 impl core::marker::StructuralPartialEq for finstack_ai_middleware_verify::EvidenceKind
 pub enum finstack_ai_middleware_verify::Verdict
 pub finstack_ai_middleware_verify::Verdict::Accept
-pub finstack_ai_middleware_verify::Verdict::Bounce(alloc::vec::Vec<finstack_ai_middleware_verify::EvidenceFinding>)
-pub finstack_ai_middleware_verify::Verdict::Reject(alloc::vec::Vec<finstack_ai_middleware_verify::EvidenceFinding>)
+pub finstack_ai_middleware_verify::Verdict::Bounce(finstack_ai_middleware_verify::EvidenceFindings)
+pub finstack_ai_middleware_verify::Verdict::Reject(finstack_ai_middleware_verify::EvidenceFindings)
 impl core::clone::Clone for finstack_ai_middleware_verify::Verdict
 pub fn finstack_ai_middleware_verify::Verdict::clone(&self) -> finstack_ai_middleware_verify::Verdict
 impl core::fmt::Debug for finstack_ai_middleware_verify::Verdict
@@ -43,6 +43,17 @@ impl core::clone::Clone for finstack_ai_middleware_verify::EvidenceFinding
 pub fn finstack_ai_middleware_verify::EvidenceFinding::clone(&self) -> finstack_ai_middleware_verify::EvidenceFinding
 impl core::fmt::Debug for finstack_ai_middleware_verify::EvidenceFinding
 pub fn finstack_ai_middleware_verify::EvidenceFinding::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_middleware_verify::EvidenceFindings
+impl finstack_ai_middleware_verify::EvidenceFindings
+pub fn finstack_ai_middleware_verify::EvidenceFindings::as_slice(&self) -> &[finstack_ai_middleware_verify::EvidenceFinding]
+pub fn finstack_ai_middleware_verify::EvidenceFindings::is_empty(&self) -> bool
+pub fn finstack_ai_middleware_verify::EvidenceFindings::try_new(alloc::vec::Vec<finstack_ai_middleware_verify::EvidenceFinding>) -> core::result::Result<Self, finstack_ai_middleware_verify::VerifyError>
+impl core::clone::Clone for finstack_ai_middleware_verify::EvidenceFindings
+pub fn finstack_ai_middleware_verify::EvidenceFindings::clone(&self) -> finstack_ai_middleware_verify::EvidenceFindings
+impl core::default::Default for finstack_ai_middleware_verify::EvidenceFindings
+pub fn finstack_ai_middleware_verify::EvidenceFindings::default() -> finstack_ai_middleware_verify::EvidenceFindings
+impl core::fmt::Debug for finstack_ai_middleware_verify::EvidenceFindings
+pub fn finstack_ai_middleware_verify::EvidenceFindings::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai_middleware_verify::VerifyMiddleware
 impl finstack_ai_middleware_verify::VerifyMiddleware
 pub fn finstack_ai_middleware_verify::VerifyMiddleware::try_new(alloc::sync::Arc<dyn finstack_ai_middleware_verify::EvidenceVerifier>, finstack_ai_middleware_verify::VerifyPolicy) -> core::result::Result<Self, finstack_ai_middleware_verify::VerifyError>

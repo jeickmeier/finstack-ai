@@ -71,7 +71,12 @@ async fn compatible_lane_child_mapping_survives_recover_and_rejects_remap() {
         .expect("equal retry");
     assert_eq!(first, attached);
     let mut conflicting = compatible;
-    conflicting.request_digest = Digest::raw_json(br#"{"request":"child-b"}"#);
+    conflicting.input = Arc::from([finstack_ai_kernel::ContentBlock::Text(
+        finstack_ai_kernel::TextBlock::try_new("different work").expect("text"),
+    )]);
+    conflicting.request_digest = conflicting
+        .canonical_digest()
+        .expect("conflicting child request digest");
     assert!(matches!(
         children
             .start_or_attach(

@@ -68,6 +68,19 @@ mod tests {
         assert!(error.to_string().contains("loopback"));
     }
 
+    #[test]
+    fn construction_rejects_relative_unix_socket() {
+        let error = RemoteChildInvoker::try_new(RemoteChildRoute {
+            endpoint: "unix:relative.sock".into(),
+            service: "finstack.remote.worker".into(),
+            route: "route-1".into(),
+            token: None,
+        })
+        .err()
+        .expect("relative unix path");
+        assert!(error.to_string().contains("unix endpoint"));
+    }
+
     #[tokio::test]
     async fn start_or_attach_is_idempotent_and_cancel_is_not_a_noop() {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -208,7 +221,7 @@ mod tests {
         let input = Arc::from([ContentBlock::Text(
             TextBlock::try_new("hello").expect("text"),
         )]);
-        ChildRunRequest {
+        let mut request = ChildRunRequest {
             agent,
             input,
             placement: ChildPlacement::RemoteChildSession,
@@ -217,8 +230,10 @@ mod tests {
             requested_budget: BudgetRequest::default(),
             delegation_id: None,
             metadata: Metadata::empty(),
-            request_digest: Digest::raw_json(b"{\"n\":1}"),
-        }
+            request_digest: Digest::raw_json(b"null"),
+        };
+        request.request_digest = request.canonical_digest().expect("digest");
+        request
     }
 
     fn child_context() -> ChildRunContext {

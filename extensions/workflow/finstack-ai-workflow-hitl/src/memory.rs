@@ -3,11 +3,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::Timestamp;
-
 use crate::error::HitlError;
 use crate::row::{InteractionRow, InteractionStatus};
-use crate::store::HitlInboxStore;
+use crate::store::{HitlInboxStore, InteractionTransition};
 
 type Rows = BTreeMap<(Arc<str>, Arc<str>), InteractionRow>;
 
@@ -40,13 +38,20 @@ impl HitlInboxStore for MemoryHitlStore {
         let mut rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
             code: "memory_hitl_lock_poisoned",
         })?;
-        rows.insert(
-            (
-                Arc::clone(&row.tenant_scope),
-                Arc::clone(&row.interaction_id),
-            ),
-            row.clone(),
+        let key = (
+            Arc::clone(&row.tenant_scope),
+            Arc::clone(&row.interaction_id),
         );
+        let mut captured = row.clone();
+        if let Some(existing) = rows.get(&key)
+            && existing.status != InteractionStatus::Closed
+        {
+            captured.status = existing.status;
+            captured.resolved_by.clone_from(&existing.resolved_by);
+            captured.outcome_code.clone_from(&existing.outcome_code);
+            captured.updated_at = existing.updated_at;
+        }
+        rows.insert(key, captured);
         Ok(())
     }
 
@@ -63,22 +68,31 @@ impl HitlInboxStore for MemoryHitlStore {
             .cloned())
     }
 
-    fn load_open(&self, tenant_scope: &str) -> Result<Vec<InteractionRow>, HitlError> {
+    fn load_open(
+        &self,
+        tenant_scope: &str,
+        limit: usize,
+    ) -> Result<Vec<InteractionRow>, HitlError> {
         let rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
             code: "memory_hitl_lock_poisoned",
         })?;
         let mut open: Vec<InteractionRow> = rows
             .values()
             .filter(|row| {
-                row.tenant_scope.as_ref() == tenant_scope && row.status == InteractionStatus::Open
+                row.tenant_scope.as_ref() == tenant_scope
+                    && matches!(
+                        row.status,
+                        InteractionStatus::Open | InteractionStatus::Rejected
+                    )
             })
             .cloned()
             .collect();
         sort_by_requested_then_id(&mut open);
+        open.truncate(limit);
         Ok(open)
     }
 
-    fn load_active(&self) -> Result<Vec<InteractionRow>, HitlError> {
+    fn load_active(&self, limit: usize) -> Result<Vec<InteractionRow>, HitlError> {
         let rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
             code: "memory_hitl_lock_poisoned",
         })?;
@@ -87,32 +101,35 @@ impl HitlInboxStore for MemoryHitlStore {
             .filter(|row| {
                 matches!(
                     row.status,
-                    InteractionStatus::Open | InteractionStatus::Delivered
+                    InteractionStatus::Open | InteractionStatus::Buffered
                 )
             })
             .cloned()
             .collect();
         sort_by_requested_then_id(&mut active);
+        active.truncate(limit);
         Ok(active)
     }
 
-    fn set_status(
+    fn transition(
         &self,
         tenant_scope: &str,
         interaction_id: &str,
-        status: InteractionStatus,
-        resolved_by: Option<&str>,
-        updated_at: Timestamp,
-    ) -> Result<(), HitlError> {
+        transition: InteractionTransition<'_>,
+    ) -> Result<bool, HitlError> {
         let mut rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
             code: "memory_hitl_lock_poisoned",
         })?;
         let Some(row) = rows.get_mut(&(Arc::from(tenant_scope), Arc::from(interaction_id))) else {
             return Err(HitlError::UnknownInteraction);
         };
-        row.status = status;
-        row.resolved_by = resolved_by.map(Arc::from);
-        row.updated_at = updated_at;
-        Ok(())
+        if row.status != transition.expected {
+            return Ok(false);
+        }
+        row.status = transition.next;
+        row.resolved_by = transition.resolved_by.map(Arc::from);
+        row.outcome_code = transition.outcome_code.map(Arc::from);
+        row.updated_at = transition.updated_at;
+        Ok(true)
     }
 }

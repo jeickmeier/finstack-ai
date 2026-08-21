@@ -233,6 +233,9 @@ pub struct BeforeModelInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BeforeToolBatchInput {
+    /// Previously committed executable write-class tool calls in this run.
+    #[serde(default)]
+    pub prior_write_tool_calls: u64,
     /// Source calls of the batch, in source order.
     pub calls: Arc<[ToolCallBlock]>,
     /// The resolved tool universe visible to this run's catalog, in catalog

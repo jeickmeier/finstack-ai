@@ -5,7 +5,7 @@ use thiserror::Error;
 /// Stable registration/mapping failure for dual-major `@0.0.4` / `@1.0.0` WIT values.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WitMapError {
-    /// A payload exceeded its TDD §6.5 ceiling before a copy was allocated.
+    /// A payload exceeded its contract section 6.5 ceiling before a copy was allocated.
     #[error("plugin_payload_too_large: {field} is {len} bytes; max {max}")]
     PayloadTooLarge {
         /// Field or frame that exceeded its ceiling.

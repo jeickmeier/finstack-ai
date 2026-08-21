@@ -115,20 +115,10 @@ pub fn finstack_ai_tools_document::DocumentError::fmt(&self, &mut core::fmt::For
 impl core::fmt::Display for finstack_ai_tools_document::DocumentError
 pub fn finstack_ai_tools_document::DocumentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_tools_document::DocumentError
-pub struct finstack_ai_tools_document::DocumentSource
-pub finstack_ai_tools_document::DocumentSource::artifact: core::option::Option<serde_json::value::Value>
-pub finstack_ai_tools_document::DocumentSource::path: core::option::Option<alloc::string::String>
-impl core::clone::Clone for finstack_ai_tools_document::DocumentSource
-pub fn finstack_ai_tools_document::DocumentSource::clone(&self) -> finstack_ai_tools_document::DocumentSource
-impl core::fmt::Debug for finstack_ai_tools_document::DocumentSource
-pub fn finstack_ai_tools_document::DocumentSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_tools_document::DocumentSource
-pub fn finstack_ai_tools_document::DocumentSource::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_tools_document::DocumentToolset
 impl finstack_ai_tools_document::DocumentToolset
-pub fn finstack_ai_tools_document::DocumentToolset::try_new() -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
-pub fn finstack_ai_tools_document::DocumentToolset::try_with_limits(finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
-pub fn finstack_ai_tools_document::DocumentToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
+pub fn finstack_ai_tools_document::DocumentToolset::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
+pub fn finstack_ai_tools_document::DocumentToolset::try_with_limits(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
 impl core::clone::Clone for finstack_ai_tools_document::DocumentToolset
 pub fn finstack_ai_tools_document::DocumentToolset::clone(&self) -> finstack_ai_tools_document::DocumentToolset
 impl core::fmt::Debug for finstack_ai_tools_document::DocumentToolset
@@ -140,7 +130,6 @@ pub fn finstack_ai_tools_document::DocumentToolset::reconcile(&self, finstack_ai
 pub fn finstack_ai_tools_document::DocumentToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
 pub const finstack_ai_tools_document::DOCUMENT_INVALID_ARGUMENTS: &str
 pub const finstack_ai_tools_document::DOCUMENT_PARSE_FAILED: &str
-pub const finstack_ai_tools_document::DOCUMENT_PATH_UNSUPPORTED: &str
 pub const finstack_ai_tools_document::DOCUMENT_SOURCE_UNAVAILABLE: &str
 pub const finstack_ai_tools_document::DOCUMENT_TOO_LARGE: &str
 pub const finstack_ai_tools_document::DOCUMENT_UNSUPPORTED_FORMAT: &str

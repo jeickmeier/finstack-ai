@@ -25,20 +25,18 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
-    AgentId, BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, Digest, ErrorCategory,
-    Metadata, OperationLocator, RawJson, RetrySafety, TextBlock, ToolExecutionMode, ToolId,
-    ValidatedToolCall,
+    AgentId, BudgetRequest, ChildPlacement, ContentBlock, ErrorCategory, Metadata, RawJson,
+    RetrySafety, TextBlock, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_kernel::{LaneTag, RunTag, SessionTag};
 use finstack_ai_runtime::{
-    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata,
-    ApprovalRequirement, ChildRunContext, ChildRunHandle, ChildRunRequest, IdGenerationError,
-    OsRandomSource, PortFuture, SideEffectClass, SystemClock, ToolCallContext, ToolDeferralSupport,
-    ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    UuidV7Generator, verify_authority,
+    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentRef, ApprovalMetadata,
+    ApprovalRequirement, ChildRunHandle, ChildRunStartRequest, ChildRunStarter, PortFuture,
+    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult,
+    ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -62,6 +60,11 @@ pub const SUBAGENT_AGENT_NOT_ALLOWED: &str = "subagent_agent_not_allowed";
 pub const SUBAGENT_INVALID_ARGUMENTS: &str = "subagent_invalid_arguments";
 /// Named child is not in the in-process start table.
 pub const SUBAGENT_CHILD_NOT_FOUND: &str = "subagent_child_not_found";
+/// The bounded in-process child table is full.
+pub const SUBAGENT_LIMIT_EXCEEDED: &str = "subagent_limit_exceeded";
+
+const DEFAULT_MAX_TRACKED_CHILDREN: usize = 1_024;
+const MAX_TRACKED_CHILDREN: usize = 65_536;
 /// Construction failure for [`SubagentToolset`].
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SubagentError {
@@ -73,19 +76,21 @@ pub enum SubagentError {
     },
 }
 
-/// Host-invoker subagent toolset with a frozen agent allow-list.
+/// Host-bound subagent toolset with a frozen agent allow-list.
 pub struct SubagentToolset {
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
-    invoker: Arc<dyn AgentInvoker>,
+    starter: Arc<ChildRunStarter>,
     allow_list: Arc<[AgentRef]>,
     children: Arc<Mutex<BTreeMap<ChildKey, StartedChild>>>,
+    tracked_slots: Arc<AtomicUsize>,
+    max_tracked_children: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct ChildKey {
     tenant_scope: Arc<str>,
-    session_id: Arc<str>,
+    owner_session_id: Arc<str>,
     run_id: Arc<str>,
 }
 
@@ -96,20 +101,40 @@ struct StartedChild {
 }
 
 impl SubagentToolset {
-    /// Construct the toolset over a host invoker and a non-empty allow-list.
+    /// Construct the toolset over a host child starter and a non-empty allow-list.
     ///
     /// # Errors
     ///
     /// Returns [`SubagentError::Configuration`] when the allow-list is empty or
     /// a checked-in tool specification cannot be built.
     pub fn try_new(
-        invoker: Arc<dyn AgentInvoker>,
+        starter: Arc<ChildRunStarter>,
         allow_list: impl Into<Arc<[AgentRef]>>,
+    ) -> Result<Self, SubagentError> {
+        Self::try_with_max_tracked_children(starter, allow_list, DEFAULT_MAX_TRACKED_CHILDREN)
+    }
+
+    /// Construct the toolset with an explicit bound for locally tracked children.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubagentError::Configuration`] when the allow-list is empty,
+    /// `max_tracked_children` is outside `1..=65_536`, or a checked-in tool
+    /// specification cannot be built.
+    pub fn try_with_max_tracked_children(
+        starter: Arc<ChildRunStarter>,
+        allow_list: impl Into<Arc<[AgentRef]>>,
+        max_tracked_children: usize,
     ) -> Result<Self, SubagentError> {
         let allow_list = allow_list.into();
         if allow_list.is_empty() {
             return Err(SubagentError::Configuration {
                 reason: "empty_allow_list",
+            });
+        }
+        if !(1..=MAX_TRACKED_CHILDREN).contains(&max_tracked_children) {
+            return Err(SubagentError::Configuration {
+                reason: "invalid_max_tracked_children",
             });
         }
         let tools = Arc::from([
@@ -138,9 +163,11 @@ impl SubagentToolset {
                 metadata: Metadata::empty(),
             },
             tools,
-            invoker,
+            starter,
             allow_list,
             children: Arc::new(Mutex::new(BTreeMap::new())),
+            tracked_slots: Arc::new(AtomicUsize::new(0)),
+            max_tracked_children,
         })
     }
 }
@@ -175,9 +202,11 @@ impl Toolset for SubagentToolset {
         ctx: ToolCallContext,
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        let invoker = Arc::clone(&self.invoker);
+        let starter = Arc::clone(&self.starter);
         let allow_list = Arc::clone(&self.allow_list);
         let table = Arc::clone(&self.children);
+        let tracked_slots = Arc::clone(&self.tracked_slots);
+        let max_tracked_children = self.max_tracked_children;
         Box::pin(async move {
             verify_authority(&ctx)?;
             let name = call.call.tool_name();
@@ -190,12 +219,32 @@ impl Toolset for SubagentToolset {
             }
             let snapshot = table.lock().map(|guard| guard.clone()).unwrap_or_default();
             let result = if name == START_NAME {
-                start_child(&invoker, &allow_list, &ctx, &call).await
+                if !reserve_child_slot(&tracked_slots, max_tracked_children) {
+                    return Ok(completed(
+                        error_result(
+                            SUBAGENT_LIMIT_EXCEEDED,
+                            "subagent child tracking limit is reached",
+                        )
+                        .output,
+                        true,
+                    ));
+                }
+                let result = Box::pin(start_child(&starter, &allow_list, &ctx, &call)).await;
+                if !matches!(result.as_ref(), Ok(outcome) if outcome.started.is_some()) {
+                    release_child_slot(&tracked_slots);
+                }
+                result
             } else if name == STATUS_NAME {
-                status_child(&snapshot, &ctx, &call)
+                status_child(&starter, &snapshot, &ctx, &call).await
             } else {
-                cancel_child(&invoker, &snapshot, &ctx, &call).await
+                cancel_child(&starter, &snapshot, &ctx, &call).await
             }?;
+            if let Some(key) = result.remove.as_ref()
+                && let Ok(mut children) = table.lock()
+                && children.remove(key).is_some()
+            {
+                release_child_slot(&tracked_slots);
+            }
             if let Some(started) = result.started
                 && let Ok(mut children) = table.lock()
             {
@@ -210,6 +259,7 @@ struct CallOutcome {
     output: RawJson,
     is_error: bool,
     started: Option<StartedRecord>,
+    remove: Option<ChildKey>,
 }
 
 struct StartedRecord {
@@ -218,7 +268,7 @@ struct StartedRecord {
 }
 
 async fn start_child(
-    invoker: &Arc<dyn AgentInvoker>,
+    starter: &Arc<ChildRunStarter>,
     allow_list: &[AgentRef],
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
@@ -246,13 +296,6 @@ async fn start_child(
             "remote child placement is not started by this toolset",
         ));
     }
-    let locator = child_locator(&ctx.run.locator, placement).map_err(|_| {
-        tool_error(
-            SUBAGENT_INVALID_ARGUMENTS,
-            ErrorCategory::Internal,
-            "subagent locator allocation failed",
-        )
-    })?;
     let input = Arc::from([ContentBlock::Text(
         TextBlock::try_new(arguments.input.as_ref()).map_err(|_| {
             tool_error(
@@ -262,37 +305,27 @@ async fn start_child(
             )
         })?,
     )]);
-    let request_digest = request_digest(agent, &input, placement, &locator)?;
-    let request = ChildRunRequest {
+    let request = ChildRunStartRequest {
         agent: agent.clone(),
         input,
         placement,
-        locator,
+        remote: None,
         requested_deadline: ctx.run.deadline,
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest,
     };
-    if let Err(error) = request.validate() {
-        return Ok(invoke_error_result(&error));
-    }
-    let context = ChildRunContext {
-        parent: ctx.run.locator.clone(),
-        parent_effect_id: ctx.run.effect_id,
-        authorization: ctx.run.authorization.clone(),
-    };
-    match invoker.start_or_attach(context, request).await {
+    match Box::pin(starter.start_or_attach(ctx, request)).await {
         Ok(handle) => {
             let run_id = Arc::<str>::from(handle.locator.operation.run_id.to_string());
             let key = ChildKey {
-                tenant_scope: Arc::clone(&handle.locator.operation.tenant_scope),
-                session_id: Arc::<str>::from(handle.locator.operation.session_id.to_string()),
+                tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
+                owner_session_id: Arc::from(ctx.run.locator.session_id.to_string()),
                 run_id: Arc::clone(&run_id),
             };
             let output = result_json(&serde_json::json!({
                 "run_id": run_id.as_ref(),
-                "session_id": key.session_id.as_ref(),
+                "session_id": handle.locator.operation.session_id.to_string(),
                 "status": "accepted",
             }))?;
             Ok(CallOutcome {
@@ -302,13 +335,15 @@ async fn start_child(
                     key,
                     child: StartedChild { handle, placement },
                 }),
+                remove: None,
             })
         }
         Err(error) => Ok(invoke_error_result(&error)),
     }
 }
 
-fn status_child(
+async fn status_child(
+    starter: &Arc<ChildRunStarter>,
     children: &BTreeMap<ChildKey, StartedChild>,
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
@@ -320,37 +355,44 @@ fn status_child(
             "status requires run_id",
         ));
     };
-    let Some((key, child)) = lookup_child(children, ctx.run.locator.tenant_scope.as_ref(), run_id)
-    else {
+    let Some((key, child)) = lookup_child(children, &ctx.run.locator, run_id) else {
         return Ok(error_result(
             SUBAGENT_CHILD_NOT_FOUND,
             "no started child matches run_id",
         ));
     };
+    let status = match starter.status(&child.handle.locator).await {
+        Ok(status) => status,
+        Err(error) => return Ok(invoke_error_result(&error)),
+    };
     let output = result_json(&serde_json::json!({
         "run_id": key.run_id.as_ref(),
         "session_id": child.handle.locator.operation.session_id.to_string(),
-        "status": "accepted",
+        "status": status.as_str(),
     }))?;
     Ok(CallOutcome {
         output,
         is_error: false,
         started: None,
+        remove: status.is_terminal().then(|| key.clone()),
     })
 }
 
 fn lookup_child<'a>(
     children: &'a BTreeMap<ChildKey, StartedChild>,
-    tenant_scope: &str,
+    owner: &finstack_ai_kernel::OperationLocator,
     run_id: &str,
 ) -> Option<(&'a ChildKey, &'a StartedChild)> {
-    children
-        .iter()
-        .find(|(key, _)| key.tenant_scope.as_ref() == tenant_scope && key.run_id.as_ref() == run_id)
+    let key = ChildKey {
+        tenant_scope: Arc::clone(&owner.tenant_scope),
+        owner_session_id: Arc::from(owner.session_id.to_string()),
+        run_id: Arc::from(run_id),
+    };
+    children.get_key_value(&key)
 }
 
 async fn cancel_child(
-    invoker: &Arc<dyn AgentInvoker>,
+    starter: &Arc<ChildRunStarter>,
     children: &BTreeMap<ChildKey, StartedChild>,
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
@@ -362,15 +404,14 @@ async fn cancel_child(
             "cancel requires run_id",
         ));
     };
-    let Some((key, child)) = lookup_child(children, ctx.run.locator.tenant_scope.as_ref(), run_id)
-    else {
+    let Some((key, child)) = lookup_child(children, &ctx.run.locator, run_id) else {
         return Ok(error_result(
             SUBAGENT_CHILD_NOT_FOUND,
             "no started child matches run_id",
         ));
     };
     let run_id = &key.run_id;
-    if let Err(error) = invoker.cancel(&child.handle.locator).await {
+    if let Err(error) = starter.cancel(&child.handle.locator).await {
         return Ok(invoke_error_result(&error));
     }
     let output = result_json(&serde_json::json!({
@@ -382,67 +423,8 @@ async fn cancel_child(
         output,
         is_error: false,
         started: None,
+        remove: Some(key.clone()),
     })
-}
-
-fn child_locator(
-    parent: &OperationLocator,
-    placement: ChildPlacement,
-) -> Result<ChildRunLocator, IdGenerationError> {
-    let generator = UuidV7Generator::new(SystemClock, OsRandomSource);
-    let run_id = generator.generate::<RunTag>()?;
-    let lane_id = generator.generate::<LaneTag>()?;
-    let session_id = match placement {
-        ChildPlacement::CompatibleLaneInParentSession => parent.session_id,
-        ChildPlacement::IsolatedChildSession | ChildPlacement::RemoteChildSession => {
-            generator.generate::<SessionTag>()?
-        }
-    };
-    Ok(ChildRunLocator {
-        operation: OperationLocator::try_new(
-            parent.tenant_scope.as_ref(),
-            session_id,
-            lane_id,
-            run_id,
-        )
-        .map_err(|_| IdGenerationError::Source("child locator is invalid".into()))?,
-        remote: None,
-    })
-}
-
-fn request_digest(
-    agent: &AgentRef,
-    input: &[ContentBlock],
-    placement: ChildPlacement,
-    locator: &ChildRunLocator,
-) -> Result<Digest, ToolError> {
-    let canonical = serde_json::to_vec(&serde_json::json!({
-        "agent_id": agent.id.to_string(),
-        "input": input.iter().map(content_text).collect::<Vec<_>>(),
-        "placement": placement_name(placement),
-        "run_id": locator.operation.run_id.to_string(),
-    }))
-    .map_err(|_| {
-        tool_error(
-            SUBAGENT_INVALID_ARGUMENTS,
-            ErrorCategory::Internal,
-            "subagent request digest serialization failed",
-        )
-    })?;
-    Digest::domain_separated("child-run-request", 1, &canonical).map_err(|_| {
-        tool_error(
-            SUBAGENT_INVALID_ARGUMENTS,
-            ErrorCategory::Internal,
-            "subagent request digest failed",
-        )
-    })
-}
-
-fn content_text(block: &ContentBlock) -> String {
-    match block {
-        ContentBlock::Text(text) => text.text().to_string(),
-        _ => String::new(),
-    }
 }
 
 fn placement_name(placement: ChildPlacement) -> &'static str {
@@ -481,7 +463,22 @@ fn error_result(code: &'static str, message: &'static str) -> CallOutcome {
             .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
         is_error: true,
         started: None,
+        remove: None,
     }
+}
+
+fn reserve_child_slot(slots: &AtomicUsize, max: usize) -> bool {
+    slots
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            (current < max).then_some(current + 1)
+        })
+        .is_ok()
+}
+
+fn release_child_slot(slots: &AtomicUsize) {
+    let _ = slots.try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        current.checked_sub(1)
+    });
 }
 
 fn result_json(value: &serde_json::Value) -> Result<RawJson, ToolError> {

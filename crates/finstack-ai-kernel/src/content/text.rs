@@ -12,9 +12,9 @@ use super::BoundedString;
 use super::error::ContentError;
 use serde::Deserializer;
 
-/// V1 individual text/byte-string ceiling (4 MiB; TDD §6.5).
+/// V1 individual text/byte-string ceiling (4 MiB; contract section 6.5).
 pub const TEXT_MAX_BYTES: usize = 4 * 1024 * 1024;
-/// V1 content-array item ceiling (TDD §6.5).
+/// V1 content-array item ceiling (contract section 6.5).
 pub const CONTENT_MAX_ITEMS: usize = 4_096;
 /// V1 ceiling for media-type, blob-id, tool-name, and similar short labels.
 pub const LABEL_MAX_BYTES: usize = 256;

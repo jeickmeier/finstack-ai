@@ -24,6 +24,10 @@ calling `PostgresJournalStore::try_open`. Defaults:
 | `pool_size` | `8` (`DEFAULT_POOL_SIZE`) | pooled connections; must be non-zero |
 | `schema_policy` | `SchemaPolicy::Manage` | see below |
 | `connect_timeout` | `5s` (`DEFAULT_CONNECT_TIMEOUT`) | applied to the initial connection and every pooled reconnect |
+| `checkout_timeout` | `5s` (`DEFAULT_CHECKOUT_TIMEOUT`) | maximum pool wait |
+| `operation_timeout` | `30s` (`DEFAULT_OPERATION_TIMEOUT`) | client deadline and server `statement_timeout` |
+| `tls_mode` | `PostgresTlsMode::Require` | rustls with hostname verification; plaintext requires explicit `Disable` |
+| `tls_ca_pem` | `None` | optional additional PEM trust anchors; redacted from debug output |
 
 `PostgresStoreConfig::validate` rejects a zero `pool_size`
 (`StoreError::InvalidRequest{reason_code: "zero_pool_size"}`), a zero
@@ -69,17 +73,18 @@ Any stored version other than the current one fails closed regardless of
 policy — `StoreError::Integrity{reason_code: "postgres_schema_unsupported"}`
 — so an old build never reads a newer schema forward.
 
-## TLS
+## TLS and deadlines
 
-This crate's v1 wiring is plaintext-only (`tokio_postgres::NoTls`). A
-connection URL whose `sslmode` demands TLS (`require`, `verify-ca`,
-`verify-full`) is rejected up front in `PostgresJournalStore::try_open` with
-`StoreError::InvalidRequest{reason_code: "postgres_tls_unsupported"}` rather
-than silently connecting in plaintext. `sslmode=disable`, `allow`,
-`prefer`, or an absent `sslmode` all connect normally. Until
-`tokio-postgres-rustls` wiring lands, put TLS at the network layer (a
-private network, an SSH tunnel, or a TLS-terminating proxy/sidecar) in
-front of a plaintext connection.
+TLS is required by default through rustls, bundled WebPKI roots, hostname
+verification, and optional additional PEM roots. `PostgresTlsMode::Disable`
+is the only plaintext opt-in. URLs and certificate bytes are redacted from
+`Debug` output.
+
+Connection establishment, pool checkout, and operations have independent
+deadlines. Each session also receives PostgreSQL `statement_timeout`.
+Timed-out connections are discarded; read timeouts report unavailable while
+mutating timeouts report `AmbiguousAcknowledgement` so idempotent retry can
+resolve whether the commit became durable.
 
 ## Testing
 

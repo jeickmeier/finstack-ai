@@ -85,7 +85,7 @@ impl WriteBudget {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct JailbreakTriggers {
-    patterns: Vec<Arc<str>>,
+    patterns: Arc<[Arc<str>]>,
     action: JailbreakAction,
 }
 
@@ -246,22 +246,25 @@ impl ToolPolicyConfig {
                 reason: "too_many_patterns",
             });
         }
-        for pattern in &patterns {
-            if pattern.is_empty() {
+        let mut normalized_patterns = Vec::with_capacity(patterns.len());
+        for pattern in patterns {
+            let normalized = pattern.trim().to_lowercase();
+            if normalized.is_empty() {
                 return Err(ToolPolicyError::Configuration {
                     reason: "empty_pattern",
                 });
             }
-            if pattern.len() > MAX_PATTERN_BYTES {
+            if normalized.len() > MAX_PATTERN_BYTES {
                 return Err(ToolPolicyError::Configuration {
                     reason: "pattern_too_long",
                 });
             }
-            if pattern.contains('\0') {
+            if normalized.contains('\0') {
                 return Err(ToolPolicyError::Configuration {
                     reason: "pattern_contains_nul",
                 });
             }
+            normalized_patterns.push(Arc::from(normalized));
         }
         if let JailbreakAction::RestrictTo(tools) = &action
             && tools.len() > MAX_TOOLS_PER_SET
@@ -270,7 +273,10 @@ impl ToolPolicyConfig {
                 reason: "too_many_tools",
             });
         }
-        self.jailbreak = Some(JailbreakTriggers { patterns, action });
+        self.jailbreak = Some(JailbreakTriggers {
+            patterns: normalized_patterns.into(),
+            action,
+        });
         Ok(self)
     }
 
@@ -307,6 +313,11 @@ impl ToolPolicyConfig {
         if restricted.len() > MAX_TOOLS_PER_SET {
             return Err(ToolPolicyError::Configuration {
                 reason: "too_many_tools",
+            });
+        }
+        if restricted.is_empty() {
+            return Err(ToolPolicyError::Configuration {
+                reason: "empty_restricted_tools",
             });
         }
         self.child_depth = Some(ChildDepthGate {

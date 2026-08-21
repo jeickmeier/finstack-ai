@@ -1,9 +1,10 @@
 //! [`Observer`] adapter that captures extracted candidate memories into a
 //! [`MemoryStore`].
 //!
-//! Capture is best-effort: a failing [`MemoryStore::put`] is swallowed
-//! (logged nowhere yet, but never surfaced as an [`ObserverError`]) because
-//! losing an opportunistic memory capture must never look like run impact.
+//! Capture is best-effort: a failing [`MemoryStore::put`] is recorded in
+//! bounded adapter-owned diagnostics but never surfaced as an
+//! [`ObserverError`], because losing an opportunistic memory capture must
+//! never look like run impact.
 //! Only misconfiguration at construction time — an invalid component id —
 //! fails [`MemoryObserver::try_new`].
 //!
@@ -11,7 +12,8 @@
 //! [`INLINE_BODY_MAX_BYTES`] is skipped rather than stored unbounded.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Sensitivity, Version};
 use finstack_ai_runtime::{
@@ -32,6 +34,31 @@ pub struct MemoryObserver {
     scope: MemoryScope,
     extractor: Arc<dyn MemoryExtractor>,
     clock: MemoryClock,
+    diagnostics: Arc<ObserverDiagnostics>,
+}
+
+#[derive(Debug, Default)]
+struct ObserverDiagnostics {
+    attempted: AtomicU64,
+    stored: AtomicU64,
+    dropped: AtomicU64,
+    failed: AtomicU64,
+    last_diagnostic: Mutex<Option<&'static str>>,
+}
+
+/// Non-authoritative health snapshot for memory capture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryObserverDiagnostics {
+    /// Candidate writes attempted.
+    pub attempted: u64,
+    /// Candidate writes stored or idempotently replayed.
+    pub stored: u64,
+    /// Candidates deliberately dropped by a local bound or policy.
+    pub dropped: u64,
+    /// Candidate writes that failed.
+    pub failed: u64,
+    /// Stable code for the most recent drop/failure, if any.
+    pub last_diagnostic: Option<&'static str>,
 }
 
 impl MemoryObserver {
@@ -48,6 +75,7 @@ impl MemoryObserver {
         extractor: Arc<dyn MemoryExtractor>,
         clock: MemoryClock,
     ) -> Result<Self, MemoryError> {
+        scope.validate()?;
         let component = ComponentId::parse("finstack.observer.memory").map_err(|_| {
             MemoryError::Configuration {
                 reason: "invalid_component_id",
@@ -75,7 +103,25 @@ impl MemoryObserver {
             scope,
             extractor,
             clock,
+            diagnostics: Arc::new(ObserverDiagnostics::default()),
         })
+    }
+
+    /// Snapshot best-effort capture health without affecting run semantics.
+    #[must_use]
+    pub fn diagnostics(&self) -> MemoryObserverDiagnostics {
+        MemoryObserverDiagnostics {
+            attempted: self.diagnostics.attempted.load(Ordering::Relaxed),
+            stored: self.diagnostics.stored.load(Ordering::Relaxed),
+            dropped: self.diagnostics.dropped.load(Ordering::Relaxed),
+            failed: self.diagnostics.failed.load(Ordering::Relaxed),
+            last_diagnostic: self
+                .diagnostics
+                .last_diagnostic
+                .lock()
+                .ok()
+                .and_then(|diagnostic| *diagnostic),
+        }
     }
 }
 
@@ -89,6 +135,7 @@ impl Observer for MemoryObserver {
         let scope = self.scope.clone();
         let extractor = Arc::clone(&self.extractor);
         let clock = self.clock.clone();
+        let diagnostics = Arc::clone(&self.diagnostics);
         Box::pin(async move {
             let filtered: Vec<RunEvent> = batch
                 .iter()
@@ -104,6 +151,7 @@ impl Observer for MemoryObserver {
             let mut next_index: HashMap<(Arc<str>, Arc<str>), usize> = HashMap::new();
 
             for candidate in candidates {
+                diagnostics.attempted.fetch_add(1, Ordering::Relaxed);
                 let run_text = candidate
                     .source_run
                     .clone()
@@ -127,6 +175,10 @@ impl Observer for MemoryObserver {
                 // allocated above first, so the surviving candidates'
                 // idempotency keys do not depend on the cap.
                 if candidate.body.len() > INLINE_BODY_MAX_BYTES {
+                    diagnostics.dropped.fetch_add(1, Ordering::Relaxed);
+                    if let Ok(mut last) = diagnostics.last_diagnostic.lock() {
+                        *last = Some("memory_capture_body_too_large");
+                    }
                     continue;
                 }
 
@@ -172,7 +224,14 @@ impl Observer for MemoryObserver {
                 // Store failures never propagate: losing an opportunistic
                 // capture is not run impact. Genuine misconfiguration is
                 // caught in `try_new` instead.
-                let _ = store.put(idempotency_key, record).await;
+                if store.put(idempotency_key, record).await.is_ok() {
+                    diagnostics.stored.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    diagnostics.failed.fetch_add(1, Ordering::Relaxed);
+                    if let Ok(mut last) = diagnostics.last_diagnostic.lock() {
+                        *last = Some("memory_capture_store_failed");
+                    }
+                }
             }
 
             Ok(())

@@ -219,9 +219,10 @@ fn map_messages(
 ) -> Result<Vec<WireMessage>, ModelError> {
     let mut mapped = Vec::new();
     let mut assistant_index = 0_usize;
+    let tool_names = index_tool_names(messages);
     for message in messages {
         if message.role() == MessageRole::Tool {
-            mapped.extend(map_tool_results(messages, message)?);
+            mapped.extend(map_tool_results(&tool_names, message)?);
             continue;
         }
         let thinking = if message.role() == MessageRole::Assistant {
@@ -315,7 +316,7 @@ fn resolved_image(
 }
 
 fn map_tool_results(
-    messages: &[Message],
+    tool_names: &BTreeMap<finstack_ai_kernel::ToolCallId, String>,
     message: &Message,
 ) -> Result<Vec<WireMessage>, ModelError> {
     message
@@ -327,7 +328,7 @@ fn map_tool_results(
                 content: Some(render_text(result.content())?),
                 thinking: None,
                 tool_calls: Vec::new(),
-                tool_name: Some(tool_name_for(messages, result.tool_call_id())?),
+                tool_name: Some(tool_name_for(tool_names, result.tool_call_id())?),
                 images: Vec::new(),
             }),
             _ => Err(request_error("tool messages contain unsupported content")),
@@ -336,24 +337,30 @@ fn map_tool_results(
 }
 
 fn tool_name_for(
-    messages: &[Message],
+    tool_names: &BTreeMap<finstack_ai_kernel::ToolCallId, String>,
     tool_call_id: &finstack_ai_kernel::ToolCallId,
 ) -> Result<String, ModelError> {
+    tool_names
+        .get(tool_call_id)
+        .cloned()
+        .ok_or_else(|| request_error("tool result has no matching assistant tool call"))
+}
+
+fn index_tool_names(messages: &[Message]) -> BTreeMap<finstack_ai_kernel::ToolCallId, String> {
+    let mut tool_names = BTreeMap::new();
     for message in messages {
         if message.role() != MessageRole::Assistant {
             continue;
         }
         for block in message.content() {
-            if let ContentBlock::ToolCall(call) = block
-                && call.tool_call_id() == tool_call_id
-            {
-                return Ok(call.tool_name().to_owned());
+            if let ContentBlock::ToolCall(call) = block {
+                tool_names
+                    .entry(*call.tool_call_id())
+                    .or_insert_with(|| call.tool_name().to_owned());
             }
         }
     }
-    Err(request_error(
-        "tool result has no matching assistant tool call",
-    ))
+    tool_names
 }
 
 fn render_text(content: &[ContentBlock]) -> Result<String, ModelError> {

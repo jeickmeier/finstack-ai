@@ -1,4 +1,4 @@
-//! Listen-address policy (TDD §28.2).
+//! Listen-address policy (contract section 28.2).
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;

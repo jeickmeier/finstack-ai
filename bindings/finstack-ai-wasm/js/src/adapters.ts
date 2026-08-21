@@ -414,22 +414,181 @@ export function createMemoryJournalStore(): HostJournalStore {
 }
 
 /**
- * Scripted in-memory artifact store over `Uint8Array` values.
+ * Finite capacity for the scripted in-memory artifact store.
+ */
+export interface MemoryArtifactStoreOptions {
+  /** Stable non-secret host-local identity used in diagnostics. */
+  storeId: string;
+  /** Maximum bytes accepted for one artifact. */
+  maxArtifactBytes: number;
+  /** Maximum distinct scoped artifact references. */
+  maxArtifacts: number;
+  /** Maximum aggregate retained artifact bytes. */
+  maxTotalBytes: number;
+  /** Maximum distinct owners retaining one artifact. */
+  maxOwnersPerArtifact: number;
+  /** Grace period before an unowned artifact can be collected. */
+  orphanGraceMs: number;
+  /** Maximum entries examined by one collection call. */
+  maxGcBatch: number;
+}
+
+/**
+ * Scripted bounded in-memory artifact store over `Uint8Array` values.
  *
+ * @param options - Required finite store identity and capacities.
  * @returns A host store that keeps bytes in process memory.
  */
-export function createMemoryArtifactStore(): HostArtifactStore {
-  const entries = new Map<string, Uint8Array>();
+export function createMemoryArtifactStore(options: MemoryArtifactStoreOptions): HostArtifactStore {
+  if (
+    options.storeId.length === 0 ||
+    !Number.isSafeInteger(options.maxArtifactBytes) ||
+    options.maxArtifactBytes < 0 ||
+    !Number.isSafeInteger(options.maxArtifacts) ||
+    options.maxArtifacts < 0 ||
+    !Number.isSafeInteger(options.maxTotalBytes) ||
+    options.maxTotalBytes < 0 ||
+    !Number.isSafeInteger(options.maxOwnersPerArtifact) ||
+    options.maxOwnersPerArtifact < 0 ||
+    !Number.isSafeInteger(options.orphanGraceMs) ||
+    options.orphanGraceMs < 0 ||
+    !Number.isSafeInteger(options.maxGcBatch) ||
+    options.maxGcBatch < 0
+  ) {
+    throw new TypeError("invalid artifact store options");
+  }
+  const entries = new Map<
+    string,
+    {
+      scope: string;
+      artifact: string;
+      bytes: Uint8Array;
+      owners: Set<string>;
+      unreferencedSince?: number;
+    }
+  >();
+  let totalBytes = 0;
   return {
-    async stagePut(_scope, content, _metadata, id) {
-      entries.set(String(id ?? content.length), content);
+    async stagePut(scope, content, _metadata, artifact, storageKey) {
+      const key = String(storageKey ?? "");
+      const scopeJson = String(scope ?? "");
+      const artifactJson = String(artifact ?? "");
+      if (key.length === 0 || scopeJson.length === 0 || artifactJson.length === 0) {
+        throw new TypeError("artifact identity missing");
+      }
+      if (content.byteLength > options.maxArtifactBytes) {
+        throw new TypeError("artifact exceeds per-item capacity");
+      }
+      const existing = entries.get(key);
+      if (existing) {
+        const bytesMatch =
+          existing.bytes.byteLength === content.byteLength &&
+          existing.bytes.every((value, index) => value === content[index]);
+        if (
+          existing.scope !== scopeJson ||
+          existing.artifact !== artifactJson ||
+          !bytesMatch
+        ) {
+          throw new TypeError("artifact identity collision");
+        }
+        return;
+      }
+      if (entries.size >= options.maxArtifacts) {
+        throw new TypeError("artifact count capacity exceeded");
+      }
+      if (totalBytes + content.byteLength > options.maxTotalBytes) {
+        throw new TypeError("artifact byte capacity exceeded");
+      }
+      const bytes = content.slice();
+      entries.set(key, {
+        scope: scopeJson,
+        artifact: artifactJson,
+        bytes,
+        owners: new Set(),
+      });
+      totalBytes += bytes.byteLength;
     },
-    async get(key) {
-      const found = entries.get(String(key));
+    async get(scope, artifact, storageKey) {
+      const found = entries.get(String(storageKey));
       if (!found) {
         throw new TypeError("artifact missing");
       }
-      return found;
+      if (found.scope !== String(scope) || found.artifact !== String(artifact)) {
+        throw new TypeError("artifact scope or reference mismatch");
+      }
+      return found.bytes.slice();
+    },
+    async getByBlob(scope, blob) {
+      const scopeJson = String(scope ?? "");
+      const blobJson = String(blob ?? "");
+      for (const entry of entries.values()) {
+        if (entry.scope !== scopeJson) continue;
+        let artifact: { blob?: unknown };
+        try {
+          artifact = JSON.parse(entry.artifact) as { blob?: unknown };
+        } catch {
+          throw new TypeError("stored artifact reference is invalid");
+        }
+        if (JSON.stringify(artifact.blob) === blobJson) {
+          return [entry.artifact, entry.bytes.slice()];
+        }
+      }
+      throw new TypeError("artifact missing");
+    },
+    async pin(scope, artifact, storageKey, owner) {
+      const found = entries.get(String(storageKey));
+      if (!found) {
+        throw new TypeError("artifact missing");
+      }
+      if (found.scope !== String(scope) || found.artifact !== String(artifact)) {
+        throw new TypeError("artifact scope or reference mismatch");
+      }
+      const ownerId = String(owner ?? "");
+      if (ownerId.length === 0) {
+        throw new TypeError("artifact owner missing");
+      }
+      if (!found.owners.has(ownerId) && found.owners.size >= options.maxOwnersPerArtifact) {
+        throw new TypeError("artifact owner capacity exceeded");
+      }
+      found.owners.add(ownerId);
+      delete found.unreferencedSince;
+    },
+    async unpin(scope, artifact, storageKey, owner, nowUnixMs) {
+      const found = entries.get(String(storageKey));
+      if (!found) {
+        throw new TypeError("artifact missing");
+      }
+      if (found.scope !== String(scope) || found.artifact !== String(artifact)) {
+        throw new TypeError("artifact scope or reference mismatch");
+      }
+      if (found.owners.delete(String(owner)) && found.owners.size === 0) {
+        found.unreferencedSince = Number(nowUnixMs);
+      }
+    },
+    async collectOrphans(scope, nowUnixMs, limit) {
+      const scopeJson = String(scope);
+      const now = Number(nowUnixMs);
+      const boundedLimit = Math.min(Number(limit), options.maxGcBatch);
+      let examined = 0;
+      let deleted = 0;
+      let bytesDeleted = 0;
+      for (const [key, entry] of entries) {
+        if (examined >= boundedLimit) break;
+        if (entry.scope !== scopeJson) continue;
+        examined += 1;
+        if (entry.owners.size > 0) continue;
+        if (entry.unreferencedSince === undefined) {
+          entry.unreferencedSince = now;
+          continue;
+        }
+        if (now - entry.unreferencedSince >= options.orphanGraceMs) {
+          entries.delete(key);
+          totalBytes -= entry.bytes.byteLength;
+          deleted += 1;
+          bytesDeleted += entry.bytes.byteLength;
+        }
+      }
+      return { examined, deleted, bytes_deleted: bytesDeleted };
     },
   };
 }

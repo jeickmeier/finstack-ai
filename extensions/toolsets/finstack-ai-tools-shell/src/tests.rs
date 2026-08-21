@@ -86,12 +86,16 @@ async fn invoke(
     arguments: serde_json::Value,
 ) -> Result<ToolResult, ToolError> {
     let mut stream = toolset.call(context(), call(toolset, &arguments)).await?;
-    let item = stream.next().await.expect("item").expect("ok");
-    assert!(stream.next().await.is_none());
-    match item {
-        ToolStreamItem::Completed(result) => Ok(result),
-        _ => panic!("expected completed tool result"),
+    let mut completed = None;
+    while let Some(item) = stream.next().await {
+        match item? {
+            ToolStreamItem::Artifact(_) => {}
+            ToolStreamItem::Completed(result) if completed.is_none() => completed = Some(result),
+            ToolStreamItem::Completed(_) => panic!("duplicate completed tool result"),
+            _ => panic!("unexpected shell tool stream item"),
+        }
     }
+    Ok(completed.expect("completed tool result"))
 }
 
 fn echo_policy() -> ShellPolicy {
@@ -177,6 +181,32 @@ async fn timeout_kills_sleep_without_fabricating_success() {
         .await
         .expect_err("timeout");
     assert_eq!(error.code(), SHELL_TIMEOUT);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn successful_leader_does_not_leave_descendant_owned_pipes_open() {
+    let policy = ShellPolicy::try_new(["/bin/sh"]).expect("policy");
+    let toolset = ShellToolset::try_new(policy, None)
+        .expect("shell")
+        .try_with_limits(ShellLimits {
+            timeout: Duration::from_secs(2),
+            max_output_bytes: 4_096,
+            inline_result_bytes: 4_096,
+        })
+        .expect("limits");
+    let started = std::time::Instant::now();
+    let result = invoke(
+        &toolset,
+        serde_json::json!({"argv":["/bin/sh", "-c", "sleep 10 &"]}),
+    )
+    .await
+    .expect("leader success");
+    assert!(!result.is_error);
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "descendant-owned pipes must be closed during bounded cleanup"
+    );
 }
 
 #[cfg(unix)]
@@ -400,6 +430,7 @@ async fn published_toolset_conformance_suite() {
             expected: AssembledToolStream {
                 progress: Arc::from([]),
                 usage: None,
+                artifacts: Arc::from([]),
                 terminal: ToolTerminal::Completed(result),
             },
             stream_limits: ToolStreamLimits::default(),

@@ -158,9 +158,12 @@ impl InstructionsMiddleware {
                     reason: "entry_text_invalid",
                 }
             })?);
-            // bytes/4 over-counts tokens for non-ASCII text (multi-byte UTF-8),
-            // which is conservative for budgeting: never under-reports.
-            let estimated_tokens = u64::try_from(entry.text.len() / 4).unwrap_or(u64::MAX);
+            // Provider-neutral fallback: round up by four UTF-8 bytes per
+            // token and never report zero for emitted content.
+            let estimated_tokens = u64::try_from(entry.text.len())
+                .unwrap_or(u64::MAX)
+                .div_ceil(4)
+                .max(1);
             let item = ContextItem::try_new(
                 ContextItemKind::Instruction,
                 vec![block],

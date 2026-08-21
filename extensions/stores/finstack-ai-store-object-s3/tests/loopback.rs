@@ -38,21 +38,16 @@ fn metadata(media_type: &str) -> ObjectMetadata {
     }
 }
 
-fn hex16() -> String {
-    scope()
-        .digest()
-        .expect("scope digest")
-        .to_hex()
-        .chars()
-        .take(16)
-        .collect()
+fn scope_hex() -> String {
+    scope().digest().expect("scope digest").to_hex()
 }
 
 fn store(base_url: &str, addressing: Addressing, max_object_bytes: Option<u64>) -> S3ObjectStore {
     let mut config = S3ObjectStoreConfig::try_new(base_url, "bucket", "us-east-1")
         .expect("config")
         .with_addressing(addressing)
-        .with_key_prefix("finstack")
+        .try_with_key_prefix("finstack")
+        .expect("prefix")
         .with_credentials(
             "AKIAEXAMPLE",
             SecretString::try_new("supersecretvalue").expect("secret"),
@@ -183,7 +178,7 @@ async fn put_signs_path_style_and_sends_metadata_headers() {
     assert!(
         request.starts_with(&format!(
             "PUT /bucket/finstack/{}/docs/a.pdf HTTP/1.1",
-            hex16()
+            scope_hex()
         )),
         "captured request: {request}"
     );
@@ -225,7 +220,10 @@ async fn put_virtual_host_addressing_targets_bucket_host() {
         "captured request: {request}"
     );
     assert!(
-        request.starts_with(&format!("put /finstack/{}/docs/a.pdf http/1.1", hex16())),
+        request.starts_with(&format!(
+            "put /finstack/{}/docs/a.pdf http/1.1",
+            scope_hex()
+        )),
         "captured request: {request}"
     );
     assert!(
@@ -333,18 +331,18 @@ async fn delete_treats_404_as_success() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn list_walks_continuation_tokens() {
-    let hex16 = hex16();
+    let scope_hex = scope_hex();
     let first_page = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult>\
          <IsTruncated>true</IsTruncated>\
-         <Contents><Key>finstack/{hex16}/docs/a.pdf</Key><Size>5</Size></Contents>\
+         <Contents><Key>finstack/{scope_hex}/docs/a.pdf</Key><Size>5</Size></Contents>\
          <NextContinuationToken>TOKEN1</NextContinuationToken>\
          </ListBucketResult>"
     );
     let second_page = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult>\
          <IsTruncated>false</IsTruncated>\
-         <Contents><Key>finstack/{hex16}/docs/b.pdf</Key><Size>6</Size></Contents>\
+         <Contents><Key>finstack/{scope_hex}/docs/b.pdf</Key><Size>6</Size></Contents>\
          </ListBucketResult>"
     );
     let (base_url, server) = serve(vec![
@@ -399,7 +397,7 @@ async fn presign_get_produces_a_signed_query_url() {
     assert!(
         presigned
             .url
-            .contains(&format!("/bucket/finstack/{}/docs/a.pdf", hex16())),
+            .contains(&format!("/bucket/finstack/{}/docs/a.pdf", scope_hex())),
         "url: {}",
         presigned.url
     );
@@ -528,6 +526,7 @@ mod s3_stub {
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
 
+    use finstack_ai_kernel::Digest;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
@@ -570,6 +569,22 @@ mod s3_stub {
                 let Some(key) = key else {
                     return respond(&mut socket, 400, "", Vec::new()).await;
                 };
+                let if_none_match = header(&headers, "if-none-match");
+                let if_match = header(&headers, "if-match");
+                let condition_failed = {
+                    let objects = state.lock().expect("lock");
+                    (if_none_match == Some("*") && objects.contains_key(&key))
+                        || if_match.is_some_and(|expected| {
+                            objects
+                                .get(&key)
+                                .map(|object| object_etag(&object.body))
+                                .as_deref()
+                                != Some(expected)
+                        })
+                };
+                if condition_failed {
+                    return respond(&mut socket, 412, "Precondition Failed", Vec::new()).await;
+                }
                 let meta_headers: Vec<(String, String)> = headers
                     .iter()
                     .filter(|(name, _)| name.starts_with("x-amz-meta-") || name == "content-type")
@@ -608,6 +623,7 @@ mod s3_stub {
                 let found = state.lock().expect("lock").get(&key).map(|object| {
                     let mut meta = object.headers.clone();
                     meta.push(("content-length".to_owned(), object.body.len().to_string()));
+                    meta.push(("etag".to_owned(), object_etag(&object.body)));
                     meta
                 });
                 match found {
@@ -618,13 +634,37 @@ mod s3_stub {
                 }
             }
             "DELETE" => {
-                if let Some(key) = key {
-                    state.lock().expect("lock").remove(&key);
+                let Some(key) = key else {
+                    return respond(&mut socket, 400, "", Vec::new()).await;
+                };
+                let if_match = header(&headers, "if-match");
+                let condition_failed = if_match.is_some_and(|expected| {
+                    state
+                        .lock()
+                        .expect("lock")
+                        .get(&key)
+                        .map(|object| object_etag(&object.body))
+                        .as_deref()
+                        != Some(expected)
+                });
+                if condition_failed {
+                    return respond(&mut socket, 412, "Precondition Failed", Vec::new()).await;
                 }
+                state.lock().expect("lock").remove(&key);
                 respond(&mut socket, 204, "No Content", Vec::new()).await;
             }
             _ => respond(&mut socket, 400, "Bad Request", Vec::new()).await,
         }
+    }
+
+    fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find_map(|(header, value)| (header == name).then_some(value.as_str()))
+    }
+
+    fn object_etag(body: &[u8]) -> String {
+        format!("\"{}\"", Digest::blob_content(body).to_hex())
     }
 
     async fn handle_list(socket: &mut TcpStream, state: &State, query: &str) {

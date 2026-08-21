@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    ArtifactRef, Bytes, Digest, Metadata, PortFuture, PortObject, RunId, Sensitivity, SessionId,
+    ArtifactId, ArtifactRef, BlobRef, Bytes, Digest, Metadata, PortFuture, PortObject, RunId,
+    Sensitivity, SessionId, Timestamp,
 };
 
 /// Stable code for an unavailable artifact service.
@@ -21,8 +22,20 @@ pub const ARTIFACT_INTEGRITY_FAILURE: &str = "artifact_integrity_failure";
 pub const ARTIFACT_TOO_LARGE: &str = "artifact_too_large";
 /// Stable code for malformed artifact metadata.
 pub const ARTIFACT_INVALID_METADATA: &str = "artifact_invalid_metadata";
+/// Stable code for exhausted aggregate artifact-store capacity.
+pub const ARTIFACT_CAPACITY_EXCEEDED: &str = "artifact_capacity_exceeded";
 /// Default individual byte-string ceiling; stores may override via `limits()`.
 pub const MAX_ARTIFACT_BYTES: usize = 4 * 1024 * 1024;
+/// Default number of artifacts retained by bounded in-process stores.
+pub const MAX_ARTIFACTS: usize = 4_096;
+/// Default aggregate byte ceiling for bounded in-process stores.
+pub const MAX_TOTAL_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
+/// Default maximum number of owners pinning one artifact.
+pub const MAX_ARTIFACT_OWNERS: usize = 128;
+/// Default grace period before an unreferenced artifact becomes collectible.
+pub const DEFAULT_ARTIFACT_ORPHAN_GRACE_MS: u64 = 5 * 60 * 1_000;
+/// Default maximum number of entries examined by one garbage-collection call.
+pub const MAX_ARTIFACT_GC_BATCH: usize = 128;
 
 /// Exact authorization and integrity scope for an artifact operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,23 +93,137 @@ pub struct ArtifactMetadata {
     pub attributes: Metadata,
 }
 
-/// Per-store artifact size ceiling.
+/// Per-store artifact capacity ceilings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtifactStoreLimits {
     /// Reject staged content above this size; never truncate.
     pub max_artifact_bytes: usize,
+    /// Maximum distinct artifacts retained by the store.
+    ///
+    /// `usize::MAX` means the adapter delegates aggregate capacity to its
+    /// external backing service.
+    pub max_artifacts: usize,
+    /// Maximum aggregate retained content bytes.
+    ///
+    /// `u64::MAX` means the adapter delegates aggregate capacity to its
+    /// external backing service.
+    pub max_total_bytes: u64,
+    /// Maximum distinct owners pinning one artifact.
+    pub max_owners_per_artifact: usize,
+    /// Grace period before an unreferenced artifact becomes collectible.
+    pub orphan_grace_ms: u64,
+    /// Maximum entries examined by one garbage-collection call.
+    pub max_gc_batch: usize,
 }
 
 impl Default for ArtifactStoreLimits {
     fn default() -> Self {
         Self {
             max_artifact_bytes: MAX_ARTIFACT_BYTES,
+            max_artifacts: MAX_ARTIFACTS,
+            max_total_bytes: MAX_TOTAL_ARTIFACT_BYTES,
+            max_owners_per_artifact: MAX_ARTIFACT_OWNERS,
+            orphan_grace_ms: DEFAULT_ARTIFACT_ORPHAN_GRACE_MS,
+            max_gc_batch: MAX_ARTIFACT_GC_BATCH,
         }
     }
 }
 
+/// Whether artifact state survives a host restart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactPersistence {
+    /// Process- or page-local state.
+    Ephemeral,
+    /// State backed by durable storage.
+    Durable,
+}
+
+/// Stable non-secret identity and effective limits for an artifact store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactStoreDescriptor {
+    /// Stable store identity used by configuration digests and diagnostics.
+    pub store_id: Arc<str>,
+    /// Restart persistence classification.
+    pub persistence: ArtifactPersistence,
+    /// Effective finite capacity and lifecycle limits.
+    pub limits: ArtifactStoreLimits,
+}
+
+/// Stable owner that keeps an artifact reachable.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "Arc<str>", into = "Arc<str>")]
+pub struct ArtifactOwnerId(Arc<str>);
+
+impl ArtifactOwnerId {
+    /// Construct a bounded non-empty owner identity.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty, NUL-bearing, or over-256-byte values.
+    pub fn try_new(value: impl AsRef<str>) -> Result<Self, ArtifactError> {
+        let value = value.as_ref();
+        if value.is_empty() || value.len() > 256 || value.as_bytes().contains(&0) {
+            return Err(ArtifactError::InvalidMetadata {
+                message: Arc::from("artifact_owner_invalid"),
+            });
+        }
+        Ok(Self(Arc::from(value)))
+    }
+
+    /// Borrow the stable owner identity.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<Arc<str>> for ArtifactOwnerId {
+    type Error = ArtifactError;
+
+    fn try_from(value: Arc<str>) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
+impl From<ArtifactOwnerId> for Arc<str> {
+    fn from(value: ArtifactOwnerId) -> Self {
+        value.0
+    }
+}
+
+/// Result of one bounded scoped orphan-collection pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactGcReport {
+    /// Candidate entries examined.
+    pub examined: usize,
+    /// Eligible entries deleted.
+    pub deleted: usize,
+    /// Content bytes deleted.
+    pub bytes_deleted: u64,
+}
+
+/// Exact scoped artifact reference and independently verified bytes returned
+/// by a blob lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactRead {
+    /// Store-owned exact reference.
+    pub reference: ArtifactRef,
+    /// Exact artifact bytes.
+    pub content: Bytes,
+}
+
 /// Scoped application/runtime artifact service.
 pub trait ArtifactStore: PortObject {
+    /// Stable identity, persistence, and limits for composition checks.
+    fn descriptor(&self) -> ArtifactStoreDescriptor {
+        ArtifactStoreDescriptor {
+            store_id: Arc::from("artifact-store.unspecified"),
+            persistence: ArtifactPersistence::Ephemeral,
+            limits: self.limits(),
+        }
+    }
+
     /// Durably stage exact bytes before the referencing journal append.
     fn stage_put(
         &self,
@@ -112,9 +239,65 @@ pub trait ArtifactStore: PortObject {
         artifact: ArtifactRef,
     ) -> PortFuture<Result<Bytes, ArtifactError>>;
 
+    /// Resolve a digest-bearing blob within an already authorized scope.
+    fn get_by_blob(
+        &self,
+        _scope: ArtifactScope,
+        _blob: BlobRef,
+    ) -> PortFuture<Result<ArtifactRead, ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("artifact_blob_lookup_unsupported"),
+            })
+        })
+    }
+
     /// This store's size ceilings. Defaults to the v1 4 MiB constant.
     fn limits(&self) -> ArtifactStoreLimits {
         ArtifactStoreLimits::default()
+    }
+
+    /// Idempotently retain an exact artifact for `owner`.
+    fn pin(
+        &self,
+        _scope: ArtifactScope,
+        _artifact: ArtifactRef,
+        _owner: ArtifactOwnerId,
+    ) -> PortFuture<Result<(), ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("artifact_lifecycle_unsupported"),
+            })
+        })
+    }
+
+    /// Idempotently release one exact artifact owner.
+    fn unpin(
+        &self,
+        _scope: ArtifactScope,
+        _artifact: ArtifactRef,
+        _owner: ArtifactOwnerId,
+        _now: Timestamp,
+    ) -> PortFuture<Result<(), ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("artifact_lifecycle_unsupported"),
+            })
+        })
+    }
+
+    /// Collect a bounded number of grace-expired, unowned artifacts in scope.
+    fn collect_orphans(
+        &self,
+        _scope: ArtifactScope,
+        _now: Timestamp,
+        _limit: usize,
+    ) -> PortFuture<Result<ArtifactGcReport, ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("artifact_lifecycle_unsupported"),
+            })
+        })
     }
 }
 
@@ -141,6 +324,129 @@ pub async fn stage_required_artifact(
         .await?;
     validate_staged_artifact(&scope, &content, &metadata, &artifact, &limits)?;
     Ok(artifact)
+}
+
+/// Construct the exact [`ArtifactRef`] required by the artifact contract.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::InvalidMetadata`] for malformed scope or
+/// metadata and [`ArtifactError::TooLarge`] when `content` exceeds `limits`.
+pub fn build_artifact_ref(
+    scope: &ArtifactScope,
+    content: &[u8],
+    metadata: &ArtifactMetadata,
+    limits: &ArtifactStoreLimits,
+) -> Result<ArtifactRef, ArtifactError> {
+    validate_artifact_input(scope, content, metadata, limits)?;
+    let digest = Digest::blob_content(content);
+    let blob = BlobRef::try_new(
+        digest.to_hex(),
+        metadata.media_type.as_ref(),
+        u64::try_from(content.len()).map_err(|_| ArtifactError::InvalidMetadata {
+            message: Arc::from("invalid_length"),
+        })?,
+        Some(digest),
+        metadata.name.as_deref(),
+    )
+    .map_err(|_| ArtifactError::InvalidMetadata {
+        message: Arc::from("invalid_blob"),
+    })?;
+    let mut artifact_id = [0_u8; 16];
+    artifact_id.copy_from_slice(&digest.as_bytes()[..16]);
+    ArtifactRef::try_new(
+        ArtifactId::from_bytes(artifact_id),
+        metadata.kind.as_ref(),
+        blob,
+        digest,
+        scope.digest()?,
+        metadata.attributes.clone(),
+    )
+    .map_err(|_| ArtifactError::InvalidMetadata {
+        message: Arc::from("invalid_artifact"),
+    })
+}
+
+/// Derive the physical identity for an exact scoped artifact reference.
+///
+/// The key deliberately includes the complete serialized reference rather
+/// than only its content-derived [`ArtifactId`], so equal bytes staged under
+/// different scopes or metadata cannot alias in map- or object-backed stores.
+///
+/// # Errors
+///
+/// Returns a scope or metadata error when the submitted reference is invalid.
+pub fn artifact_storage_key(
+    scope: &ArtifactScope,
+    artifact: &ArtifactRef,
+) -> Result<Digest, ArtifactError> {
+    validate_artifact_scope(scope, artifact)?;
+    let canonical =
+        serde_json_canonicalizer::to_vec(artifact).map_err(|_| ArtifactError::InvalidMetadata {
+            message: Arc::from("artifact_reference_invalid"),
+        })?;
+    Digest::domain_separated("artifact-storage-key", 1, &canonical).map_err(|_| {
+        ArtifactError::InvalidMetadata {
+            message: Arc::from("artifact_reference_invalid"),
+        }
+    })
+}
+
+/// Validate a requested scope against the exact frozen artifact binding.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::ScopeMismatch`] when the bindings differ.
+pub fn validate_artifact_scope(
+    scope: &ArtifactScope,
+    artifact: &ArtifactRef,
+) -> Result<(), ArtifactError> {
+    let expected = scope.digest()?;
+    let actual = artifact.scope_digest();
+    if expected != actual {
+        return Err(ArtifactError::ScopeMismatch { expected, actual });
+    }
+    Ok(())
+}
+
+/// Verify bytes returned for an exact scoped artifact reference.
+///
+/// # Errors
+///
+/// Returns a scope or integrity error when the reference and bytes disagree.
+pub fn validate_retrieved_artifact(
+    scope: &ArtifactScope,
+    artifact: &ArtifactRef,
+    content: &[u8],
+) -> Result<(), ArtifactError> {
+    validate_artifact_scope(scope, artifact)?;
+    let digest = Digest::blob_content(content);
+    let blob = artifact.blob();
+    if artifact.content_digest() != digest
+        || blob.digest().copied() != Some(digest)
+        || blob.length() != u64::try_from(content.len()).unwrap_or(u64::MAX)
+    {
+        return Err(ArtifactError::Integrity {
+            message: Arc::from("content_reference_mismatch"),
+        });
+    }
+    Ok(())
+}
+
+/// Load and independently verify a required artifact.
+///
+/// # Errors
+///
+/// Propagates store errors and rejects wrong-scope or corrupt returned bytes.
+pub async fn get_required_artifact(
+    store: &dyn ArtifactStore,
+    scope: ArtifactScope,
+    artifact: ArtifactRef,
+) -> Result<Bytes, ArtifactError> {
+    validate_artifact_scope(&scope, &artifact)?;
+    let content = store.get(scope.clone(), artifact.clone()).await?;
+    validate_retrieved_artifact(&scope, &artifact, &content)?;
+    Ok(content)
 }
 
 /// Validate exact staging output without granting authority from metadata.
@@ -262,6 +568,14 @@ pub enum ArtifactError {
         /// Stable diagnostic.
         message: Arc<str>,
     },
+    /// The store reached a finite aggregate capacity ceiling.
+    #[error("{}: {resource} limit {limit} exceeded", ARTIFACT_CAPACITY_EXCEEDED)]
+    CapacityExceeded {
+        /// Stable resource name such as `artifacts` or `total_bytes`.
+        resource: &'static str,
+        /// Configured resource ceiling.
+        limit: u64,
+    },
 }
 
 impl ArtifactError {
@@ -275,6 +589,7 @@ impl ArtifactError {
             Self::Integrity { .. } => ARTIFACT_INTEGRITY_FAILURE,
             Self::TooLarge { .. } => ARTIFACT_TOO_LARGE,
             Self::InvalidMetadata { .. } => ARTIFACT_INVALID_METADATA,
+            Self::CapacityExceeded { .. } => ARTIFACT_CAPACITY_EXCEEDED,
         }
     }
 }
@@ -343,6 +658,32 @@ mod tests {
         scope: ArtifactScope,
         content: Bytes,
         artifact: ArtifactRef,
+    }
+
+    struct UncheckedStore {
+        artifact: ArtifactRef,
+        content: Bytes,
+    }
+
+    impl ArtifactStore for UncheckedStore {
+        fn stage_put(
+            &self,
+            _: ArtifactScope,
+            _: Bytes,
+            _: ArtifactMetadata,
+        ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
+            let artifact = self.artifact.clone();
+            Box::pin(async move { Ok(artifact) })
+        }
+
+        fn get(
+            &self,
+            _: ArtifactScope,
+            _: ArtifactRef,
+        ) -> PortFuture<Result<Bytes, ArtifactError>> {
+            let content = self.content.clone();
+            Box::pin(async move { Ok(content) })
+        }
     }
 
     struct LifecycleStore {
@@ -487,6 +828,74 @@ mod tests {
     }
 
     #[test]
+    fn physical_key_includes_scope_and_exact_metadata() {
+        let first_scope = scope();
+        let content = b"artifact bytes";
+        let first_metadata = metadata();
+        let first = build_artifact_ref(
+            &first_scope,
+            content,
+            &first_metadata,
+            &ArtifactStoreLimits::default(),
+        )
+        .expect("first reference");
+
+        let second_scope = ArtifactScope {
+            tenant_scope: Arc::from("tenant-b"),
+            ..first_scope.clone()
+        };
+        let second = build_artifact_ref(
+            &second_scope,
+            content,
+            &first_metadata,
+            &ArtifactStoreLimits::default(),
+        )
+        .expect("second reference");
+        assert_eq!(first.id(), second.id(), "wire id stays content-derived");
+        assert_ne!(
+            artifact_storage_key(&first_scope, &first).expect("first key"),
+            artifact_storage_key(&second_scope, &second).expect("second key")
+        );
+
+        let renamed_metadata = ArtifactMetadata {
+            name: Some(Arc::from("renamed.bin")),
+            ..first_metadata
+        };
+        let renamed = build_artifact_ref(
+            &first_scope,
+            content,
+            &renamed_metadata,
+            &ArtifactStoreLimits::default(),
+        )
+        .expect("renamed reference");
+        assert_ne!(
+            artifact_storage_key(&first_scope, &first).expect("first key"),
+            artifact_storage_key(&first_scope, &renamed).expect("renamed key")
+        );
+    }
+
+    #[test]
+    fn required_read_does_not_trust_store_returned_bytes() {
+        let scope = scope();
+        let artifact = build_artifact_ref(
+            &scope,
+            b"expected",
+            &metadata(),
+            &ArtifactStoreLimits::default(),
+        )
+        .expect("reference");
+        let store = UncheckedStore {
+            artifact: artifact.clone(),
+            content: Bytes::from_static(b"corrupt"),
+        };
+
+        assert!(matches!(
+            block_on(get_required_artifact(&store, scope, artifact)),
+            Err(ArtifactError::Integrity { .. })
+        ));
+    }
+
+    #[test]
     fn oversized_content_is_rejected_not_truncated() {
         let scope = scope();
         let metadata = metadata();
@@ -607,6 +1016,7 @@ mod tests {
         let content = Bytes::from(vec![0_u8; MAX_ARTIFACT_BYTES + 1]);
         let raised = ArtifactStoreLimits {
             max_artifact_bytes: 8 * 1024 * 1024,
+            ..ArtifactStoreLimits::default()
         };
         assert!(validate_artifact_input(&scope(), &content, &metadata(), &raised).is_ok());
         let default = ArtifactStoreLimits::default();

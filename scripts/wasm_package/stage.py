@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Stage signed-ready npm alpha artifacts without publishing."""
 
 from __future__ import annotations
@@ -9,13 +8,13 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JS_PACKAGE = REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js"
 EXAMPLE = REPO_ROOT / "examples" / "ts-alpha-install"
-OUT_DIR = REPO_ROOT / "target" / "release-staging" / "npm"
+OUT_DIR = REPO_ROOT / "dist" / "npm-staging"
 
 
 def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -135,7 +134,7 @@ def main() -> int:
             "tarball": staged.name,
             "tarball_sha256": sha256(staged),
             "sbom_sha256": sha256(sbom),
-            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "members": members,
         }
         (OUT_DIR / "staged-manifest.json").write_text(

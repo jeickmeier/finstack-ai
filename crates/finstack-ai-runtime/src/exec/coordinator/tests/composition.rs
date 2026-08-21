@@ -91,7 +91,7 @@ fn child_retry_reconciles_ambiguous_reservation_before_invoke() {
             decision_id: Arc::from("decision-v1"),
         },
     };
-    let request = ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: AgentRef {
             id: crate::AgentId::parse("finstack.agent.child").expect("agent id"),
             bundle: None,
@@ -106,8 +106,9 @@ fn child_retry_reconciles_ambiguous_reservation_before_invoke() {
         requested_budget: budget,
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
+        request_digest: Digest::raw_json(b"null"),
     };
+    request.request_digest = request.canonical_digest().expect("digest");
     let ids = ChildCoordinationIds {
         preparation_batch_id: id(201),
         preparation_record_id: id(202),
@@ -167,7 +168,8 @@ fn child_retry_reconciles_ambiguous_reservation_before_invoke() {
     );
 
     let mut conflicting = request;
-    conflicting.request_digest = Digest::raw_json(br#"{"request":"child-b"}"#);
+    conflicting.delegation_id = Some(Arc::from("different-delegation"));
+    conflicting.request_digest = conflicting.canonical_digest().expect("digest");
     assert!(matches!(
         block_on(coordinator.start_or_attach(
             &mut commit,
@@ -284,7 +286,7 @@ fn every_child_placement_converges_and_rejects_conflicting_digest() {
                 decision_id: Arc::from("decision-v1"),
             },
         };
-        let request = ChildRunRequest {
+        let mut request = ChildRunRequest {
             agent: AgentRef {
                 id: crate::AgentId::parse("finstack.agent.placement").expect("agent id"),
                 bundle: None,
@@ -297,8 +299,9 @@ fn every_child_placement_converges_and_rejects_conflicting_digest() {
             requested_budget: BudgetRequest::default(),
             delegation_id: None,
             metadata: Metadata::empty(),
-            request_digest: Digest::raw_json(format!(r#"{{"placement":{index}}}"#).as_bytes()),
+            request_digest: Digest::raw_json(b"null"),
         };
+        request.request_digest = request.canonical_digest().expect("digest");
         let ordinal = 500 + u64::try_from(index).expect("index") * 10;
         let ids = ChildCoordinationIds {
             preparation_batch_id: id(ordinal),
@@ -336,7 +339,8 @@ fn every_child_placement_converges_and_rejects_conflicting_digest() {
         );
 
         let mut conflicting = request;
-        conflicting.request_digest = Digest::raw_json(b"conflicting child request");
+        conflicting.delegation_id = Some(Arc::from("different-delegation"));
+        conflicting.request_digest = conflicting.canonical_digest().expect("digest");
         assert!(matches!(
             block_on(coordinator.start_or_attach(
                 &mut commit,

@@ -308,7 +308,7 @@ fn provider(base_url: &str, thinking: bool, cache: bool) -> AnthropicProvider {
         AnthropicModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
             .expect("model");
     if thinking {
-        model = model.with_thinking(true, 1_024).expect("thinking");
+        model = model.with_thinking(true, 512).expect("thinking");
     }
     if cache {
         model = model.with_cache_breakpoints(true);

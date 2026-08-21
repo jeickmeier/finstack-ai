@@ -1,4 +1,4 @@
-//! Store, session, lane, and snapshot journal bodies (TDD §12.2).
+//! Store, session, lane, and snapshot journal bodies (contract section 12.2).
 
 use std::sync::Arc;
 

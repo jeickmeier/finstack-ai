@@ -3,13 +3,13 @@
  *
  * Persistence is origin-scoped and not crash-durable. `health().detail` stays
  * `js_indexeddb_experimental` and does not claim crash durability.
- * Schema version remains 1.
+ * Schema version 2 stores exact scoped artifact references.
  */
 import type { HostArtifactStore, HostJournalStore } from "../host.js";
 /** Default experimental database name. */
 export declare const INDEXED_DB_NAME = "finstack-ai-experimental";
 /** Provisional IndexedDB schema version. */
-export declare const INDEXED_DB_SCHEMA_VERSION = 1;
+export declare const INDEXED_DB_SCHEMA_VERSION = 2;
 /**
  * Options for the experimental IndexedDB batteries.
  */
@@ -28,6 +28,14 @@ export interface IndexedDbStoreOptions {
     maxBlobBytes?: number;
     /** Artifact count ceiling. Defaults to 32. */
     maxBlobs?: number;
+    /** Aggregate artifact byte ceiling. Defaults to 8388608. */
+    maxTotalBlobBytes?: number;
+    /** Maximum owners retaining one artifact. Defaults to 128. */
+    maxArtifactOwners?: number;
+    /** Unowned artifact grace period in milliseconds. Defaults to 300000. */
+    artifactOrphanGraceMs?: number;
+    /** Maximum artifacts examined by one collection call. Defaults to 128. */
+    maxArtifactGcBatch?: number;
 }
 /**
  * Create an experimental IndexedDB journal store.

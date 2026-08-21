@@ -22,6 +22,7 @@ fn first_pass_and_reconcile_deferred_settlements_are_byte_identical() {
         seed: seed.clone(),
         result: Ok(AssembledToolTerminal {
             usage: Some(crate::Usage::empty()),
+            artifacts: std::sync::Arc::from([]),
             terminal: crate::ToolTerminal::Deferred(deferral.clone()),
         }),
     })

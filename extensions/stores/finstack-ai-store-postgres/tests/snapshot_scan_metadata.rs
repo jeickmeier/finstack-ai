@@ -46,6 +46,7 @@ fn wide_limits() -> StoreLimits {
 /// raw connection to the same schema (to corrupt a stored row directly).
 async fn open_store(url: &str, schema: &str) -> PostgresJournalStore {
     let mut config = PostgresStoreConfig::new(url, wide_limits());
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.schema = Arc::from(schema);
     PostgresJournalStore::try_open(config)
         .await
@@ -182,6 +183,7 @@ async fn oversized_snapshot_is_limit_exceeded() {
         ..wide_limits()
     };
     let mut config = finstack_ai_store_postgres::PostgresStoreConfig::new(url.as_str(), limits);
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.schema = Arc::from(helpers::fresh_schema_name().as_str());
     let schema = config.schema.to_string();
     let store = PostgresJournalStore::try_open(config)

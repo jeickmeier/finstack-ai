@@ -2,7 +2,7 @@
 
 use finstack_ai_kernel::RunPhase;
 
-/// Legal restored class after process loss (TDD §23.4).
+/// Legal restored class after process loss (contract section 23.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LegalRestore {
     /// Terminal success.

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use finstack_ai_kernel::{EffectId, Timestamp};
+use finstack_ai_kernel::{EffectId, OperationLocator, Timestamp};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
@@ -263,12 +263,50 @@ impl RunTaskOwner {
         C: Clock + Send + Sync + 'static,
         R: RandomSource + Send + Sync + 'static,
     {
+        Self::spawn_with_model_and_artifacts(
+            coordinator,
+            run_config,
+            model_config,
+            ready_model,
+            profile,
+            None,
+            clock,
+            random,
+        )
+        .await
+    }
+
+    /// Start the model owner with an optional artifact ownership service.
+    ///
+    /// # Errors
+    ///
+    /// Returns configuration, binding, recovery, or worker-start errors before
+    /// publishing a run handle.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the constructor receives explicit port configuration, artifact ownership, and injected identity sources"
+    )]
+    pub async fn spawn_with_model_and_artifacts<C, R>(
+        coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        ready_model: Arc<ReadyModel>,
+        profile: LockedModelContextProfile,
+        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + Send + Sync + 'static,
+        R: RandomSource + Send + Sync + 'static,
+    {
         Box::pin(Self::spawn_with_model_inner(
             coordinator,
             run_config,
             model_config,
             ready_model,
             profile,
+            artifact_store,
             clock,
             random,
         ))
@@ -276,8 +314,9 @@ impl RunTaskOwner {
     }
 
     #[expect(
+        clippy::too_many_arguments,
         clippy::too_many_lines,
-        reason = "timer resume, model resume, and worker spawn stay contiguous"
+        reason = "timer resume, model resume, and worker spawn stay contiguous with explicit dependencies"
     )]
     async fn spawn_with_model_inner<C, R>(
         mut coordinator: CommitCoordinator,
@@ -285,6 +324,7 @@ impl RunTaskOwner {
         model_config: ModelTaskConfig,
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
+        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
@@ -300,7 +340,11 @@ impl RunTaskOwner {
         let assembler = model_config.validate()?;
         let model = ready_model.shared_model();
         validate_model_binding(model.as_ref(), &profile)?;
-        let sources = SettlementSources::try_new(clock, random)?;
+        let mut sources = SettlementSources::try_new(clock, random)?;
+        if let Some((store, locator)) = artifact_store {
+            sources.attach_artifact_store(store, locator);
+        }
+        sources.reconcile_recovered_artifacts(&coordinator).await?;
         sources.set_approval_grant(run_config.approval_grant);
         let runtime_clock = sources.clock();
         let run_cancellation = CancellationSignal::new();
@@ -446,6 +490,47 @@ impl RunTaskOwner {
         C: Clock + Send + Sync + 'static,
         R: RandomSource + Send + Sync + 'static,
     {
+        Self::spawn_with_model_tools_and_artifacts(
+            coordinator,
+            run_config,
+            model_config,
+            tool_config,
+            ready_model,
+            profile,
+            catalog,
+            None,
+            clock,
+            random,
+        )
+        .await
+    }
+
+    /// Start the model/tool owner with an optional artifact ownership service.
+    ///
+    /// # Errors
+    ///
+    /// Returns configuration, binding, recovery, or worker-start errors before
+    /// publishing a run handle.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the constructor receives explicit model, tool, artifact, and identity dependencies"
+    )]
+    pub async fn spawn_with_model_tools_and_artifacts<C, R>(
+        coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        tool_config: ToolTaskConfig,
+        ready_model: Arc<ReadyModel>,
+        profile: LockedModelContextProfile,
+        catalog: Arc<ResolvedToolCatalog>,
+        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + Send + Sync + 'static,
+        R: RandomSource + Send + Sync + 'static,
+    {
         Box::pin(Self::spawn_with_model_and_tools_inner(
             coordinator,
             run_config,
@@ -454,6 +539,7 @@ impl RunTaskOwner {
             ready_model,
             profile,
             catalog,
+            artifact_store,
             clock,
             random,
         ))
@@ -473,6 +559,7 @@ impl RunTaskOwner {
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Arc<ResolvedToolCatalog>,
+        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
@@ -492,6 +579,10 @@ impl RunTaskOwner {
         let model = ready_model.shared_model();
         validate_model_binding(model.as_ref(), &profile)?;
         let mut sources = SettlementSources::try_new(clock, random)?;
+        if let Some((store, locator)) = artifact_store {
+            sources.attach_artifact_store(store, locator);
+        }
+        sources.reconcile_recovered_artifacts(&coordinator).await?;
         sources.set_approval_grant(run_config.approval_grant);
         let runtime_clock = sources.clock();
         let run_cancellation = CancellationSignal::new();

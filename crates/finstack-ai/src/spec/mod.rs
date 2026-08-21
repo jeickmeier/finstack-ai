@@ -10,7 +10,7 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize, de};
 use thiserror::Error;
 
-pub use finstack_ai_runtime::ApprovalGrantMode;
+pub use finstack_ai_runtime::{ApprovalGrantMode, ChildRunPolicy};
 
 #[cfg(test)]
 mod tests;
@@ -160,20 +160,6 @@ impl<'de> Deserialize<'de> for CapabilitySpec {
         value.validate().map_err(de::Error::custom)?;
         Ok(value)
     }
-}
-
-/// Explicit child-run admission policy attached to an agent specification.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum ChildRunPolicy {
-    /// Reject every child invocation.
-    #[default]
-    Deny,
-    /// Allow children up to the configured inclusive depth.
-    Allow {
-        /// Maximum child depth accepted by this agent.
-        max_depth: u16,
-    },
 }
 
 /// Serializable run-policy subset owned by agent composition.

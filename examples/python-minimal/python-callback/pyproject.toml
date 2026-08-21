@@ -2,7 +2,7 @@
 name = "finstack-ai-python-callback-starter"
 version = "0.0.0"
 requires-python = ">=3.11"
-dependencies = ["finstack-ai==1.0.0"]
+dependencies = ["finstack-ai==2.0.0"]
 
 [build-system]
 requires = ["hatchling==1.29.0"]

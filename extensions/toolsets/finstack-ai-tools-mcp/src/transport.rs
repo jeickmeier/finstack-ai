@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use futures_util::future::BoxFuture;
@@ -16,11 +17,14 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 use crate::protocol::{Meta, PROTOCOL_VERSION, jsonrpc_request};
+use finstack_ai_kernel::Timestamp;
 use finstack_ai_net_guard::NetGuardError;
+use finstack_ai_net_guard::{BodyReadInterrupt, read_body_bounded_interruptible};
+use finstack_ai_runtime::CancellationSignal;
 
 use crate::{
-    MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_SERVER_NOT_ALLOWLISTED, MCP_TRANSPORT_ERROR,
-    McpError,
+    MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_SERVER_NOT_ALLOWLISTED, MCP_TIMEOUT,
+    MCP_TRANSPORT_ERROR, McpError,
 };
 
 const MAX_LINE_BYTES: u64 = 1024 * 1024;
@@ -32,6 +36,63 @@ const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1_048_576;
 /// wanting a larger cap has to opt in explicitly at construction; there is
 /// no runtime override.
 const MAX_RESPONSE_BYTES_CEILING: usize = 64 * 1_048_576;
+const INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Clone)]
+pub(crate) struct RequestControl {
+    cancellation: CancellationSignal,
+    deadline: Option<Timestamp>,
+}
+
+impl RequestControl {
+    pub(crate) fn new(cancellation: CancellationSignal, deadline: Option<Timestamp>) -> Self {
+        Self {
+            cancellation,
+            deadline,
+        }
+    }
+
+    fn initialization() -> Self {
+        let now_ms = now_unix_ms();
+        let timeout_ms = i64::try_from(INITIALIZATION_TIMEOUT.as_millis()).unwrap_or(i64::MAX);
+        Self {
+            cancellation: CancellationSignal::new(),
+            deadline: Timestamp::from_unix_ms(now_ms.saturating_add(timeout_ms)).ok(),
+        }
+    }
+
+    fn is_interrupted(&self) -> bool {
+        self.cancellation.is_cancelled()
+            || self
+                .deadline
+                .is_some_and(|deadline| deadline.as_unix_ms() <= now_unix_ms())
+    }
+
+    async fn wait_deadline(&self) {
+        let Some(deadline) = self.deadline else {
+            std::future::pending::<()>().await;
+            return;
+        };
+        let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms()).max(0);
+        tokio::time::sleep(Duration::from_millis(u64::try_from(remaining).unwrap_or(0))).await;
+    }
+}
+
+fn now_unix_ms() -> i64 {
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis()),
+    )
+    .unwrap_or(i64::MAX)
+}
+
+fn timeout_error() -> McpError {
+    McpError::stable(
+        MCP_TIMEOUT,
+        "MCP request was cancelled or exceeded its deadline",
+    )
+}
 
 /// One MCP request/response round trip.
 ///
@@ -43,16 +104,26 @@ pub(crate) trait McpTransport: Send + Sync {
         &self,
         method: &str,
         params: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
+        self.request_controlled(method, params, RequestControl::initialization())
+    }
+
+    fn request_controlled(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        control: RequestControl,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>>;
 
-    fn request_identified(
+    fn request_identified_controlled(
         &self,
         id: serde_json::Value,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
         let _ = id;
-        self.request(method, params)
+        self.request_controlled(method, params, control)
     }
 
     /// Drain transport-delivered MCP notifications. Default is none.
@@ -132,13 +203,17 @@ impl ScriptedTransport {
 
 #[cfg(test)]
 impl McpTransport for ScriptedTransport {
-    fn request(
+    fn request_controlled(
         &self,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
         let method = method.to_owned();
         Box::pin(async move {
+            if control.is_interrupted() {
+                return Err(timeout_error());
+            }
             if let Ok(mut methods) = self.methods.lock() {
                 methods.push(method.clone());
             }
@@ -231,12 +306,12 @@ impl StdioConfig {
 
 enum StdioState {
     Unconfined {
-        _child: Child,
+        child: Child,
         stdin: ChildStdin,
         stdout: BufReader<ChildStdout>,
     },
     Confined {
-        _child: finstack_ai_runtime::ConfinedChild,
+        child: finstack_ai_runtime::ConfinedChild,
         stdin: tokio::fs::File,
         stdout: BufReader<tokio::fs::File>,
     },
@@ -279,7 +354,7 @@ impl StdioTransport {
                 drain_std_stderr(stderr);
             }
             StdioState::Confined {
-                _child: child,
+                child,
                 stdin: tokio_file_from_stdin(stdin),
                 stdout: BufReader::new(tokio_file_from_stdout(stdout)),
             }
@@ -292,6 +367,9 @@ impl StdioTransport {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            finstack_ai_runtime::configure_process_tree(command.as_std_mut()).map_err(|error| {
+                McpError::stable(error.code(), "MCP stdio process tree setup failed")
+            })?;
             let mut child = command.spawn().map_err(|error| {
                 McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
             })?;
@@ -303,15 +381,12 @@ impl StdioTransport {
             })?;
             if let Some(mut stderr) = child.stderr.take() {
                 tokio::spawn(async move {
-                    let mut reader = BufReader::new(&mut stderr);
-                    let mut line = String::new();
-                    while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
-                        line.clear();
-                    }
+                    let mut chunk = [0_u8; 8_192];
+                    while stderr.read(&mut chunk).await.unwrap_or(0) > 0 {}
                 });
             }
             StdioState::Unconfined {
-                _child: child,
+                child,
                 stdin,
                 stdout: BufReader::new(stdout),
             }
@@ -350,8 +425,12 @@ impl StdioTransport {
         id: serde_json::Value,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> Result<serde_json::Value, McpError> {
-        if self.poisoned.load(Ordering::SeqCst) {
+        if self.poisoned.load(Ordering::SeqCst) || control.is_interrupted() {
+            if control.is_interrupted() {
+                return Err(timeout_error());
+            }
             return Err(McpError::stable(
                 MCP_PROTOCOL_VIOLATION,
                 "stdio transport is poisoned",
@@ -361,32 +440,28 @@ impl StdioTransport {
         let message = jsonrpc_request(&id, method, &params);
         let line = Self::encode_line(&message)?;
         let mut state = self.state.lock().await;
-        write_stdio_line(&mut state, line.as_bytes()).await?;
-        let mut dispatch = FrameDispatch::new(&id, &self.notifications);
-        loop {
-            let frame = match read_stdio_frame(&mut state).await {
-                Ok(frame) => frame,
-                Err(error) => {
-                    self.poisoned.store(true, Ordering::SeqCst);
-                    return Err(error);
-                }
-            };
-            let value = match decode_frame(&frame) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.poisoned.store(true, Ordering::SeqCst);
-                    return Err(error);
-                }
-            };
-            match dispatch.push(&value) {
-                Ok(Some(result)) => return Ok(result),
-                Ok(None) => {}
-                Err(error) => {
-                    self.poisoned.store(true, Ordering::SeqCst);
-                    return Err(error);
+        let io = async {
+            write_stdio_line(&mut state, line.as_bytes()).await?;
+            let mut dispatch = FrameDispatch::new(&id, &self.notifications);
+            loop {
+                let frame = read_stdio_frame(&mut state).await?;
+                let value = decode_frame(&frame)?;
+                if let Some(result) = dispatch.push(&value)? {
+                    return Ok(result);
                 }
             }
+        };
+        let result = tokio::select! {
+            biased;
+            () = control.cancellation.cancelled() => Err(timeout_error()),
+            () = control.wait_deadline() => Err(timeout_error()),
+            result = io => result,
+        };
+        if result.is_err() {
+            self.poisoned.store(true, Ordering::SeqCst);
+            terminate_stdio_state(&mut state).await;
         }
+        result
     }
 }
 
@@ -445,13 +520,28 @@ fn stdio_io(error: &std::io::Error) -> McpError {
 
 fn drain_std_stderr(stderr: std::fs::File) {
     std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = std::io::BufReader::new(stderr);
-        let mut line = String::new();
-        while reader.read_line(&mut line).unwrap_or(0) > 0 {
-            line.clear();
-        }
+        use std::io::Read as _;
+        let mut stderr = stderr;
+        let mut chunk = [0_u8; 8_192];
+        while stderr.read(&mut chunk).unwrap_or(0) > 0 {}
     });
+}
+
+async fn terminate_stdio_state(state: &mut StdioState) {
+    match state {
+        StdioState::Unconfined { child, stdin, .. } => {
+            let _ = stdin.shutdown().await;
+            if let Some(process_id) = child.id() {
+                let _ = finstack_ai_runtime::terminate_process_tree(process_id);
+            }
+            let _ = child.wait().await;
+        }
+        StdioState::Confined { child, stdin, .. } => {
+            let _ = stdin.shutdown().await;
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 fn tokio_file_from_stdin(stdin: std::fs::File) -> tokio::fs::File {
@@ -463,24 +553,26 @@ fn tokio_file_from_stdout(stdout: std::fs::File) -> tokio::fs::File {
 }
 
 impl McpTransport for StdioTransport {
-    fn request(
+    fn request_controlled(
         &self,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
         let id = serde_json::json!(self.next_id.fetch_add(1, Ordering::Relaxed));
         let method = method.to_owned();
-        Box::pin(async move { self.round_trip(id, &method, params).await })
+        Box::pin(async move { self.round_trip(id, &method, params, control).await })
     }
 
-    fn request_identified(
+    fn request_identified_controlled(
         &self,
         id: serde_json::Value,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
         let method = method.to_owned();
-        Box::pin(async move { self.round_trip(id, &method, params).await })
+        Box::pin(async move { self.round_trip(id, &method, params, control).await })
     }
 
     fn take_notifications(&self) -> Vec<String> {
@@ -628,27 +720,35 @@ impl HttpTransport {
         id: serde_json::Value,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> Result<serde_json::Value, McpError> {
+        if control.is_interrupted() {
+            return Err(timeout_error());
+        }
         let params = with_meta(params);
         let name = params.get("name").and_then(serde_json::Value::as_str);
         let body = jsonrpc_request(&id, method, &params);
-        let response = self
+        let send = self
             .client
             .post(&self.url)
             .headers(Self::headers_for(method, name))
             .json(&body)
-            .send()
-            .await
-            .map_err(|error| {
+            .send();
+        let response = tokio::select! {
+            biased;
+            () = control.cancellation.cancelled() => return Err(timeout_error()),
+            () = control.wait_deadline() => return Err(timeout_error()),
+            result = send => result.map_err(|error| {
                 McpError::stable(MCP_TRANSPORT_ERROR, format!("http post failed: {error}"))
-            })?;
+            })?,
+        };
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_owned();
-        let text = read_bounded_body(response, self.max_response_bytes).await?;
+        let text = read_bounded_body(response, self.max_response_bytes, &control).await?;
         if content_type.starts_with("text/event-stream") {
             return parse_sse_jsonrpc(&text, &id, &self.notifications);
         }
@@ -664,24 +764,26 @@ impl HttpTransport {
 }
 
 impl McpTransport for HttpTransport {
-    fn request(
+    fn request_controlled(
         &self,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
         let id = serde_json::json!(self.next_id.fetch_add(1, Ordering::Relaxed));
         let method = method.to_owned();
-        Box::pin(async move { self.round_trip(id, &method, params).await })
+        Box::pin(async move { self.round_trip(id, &method, params, control).await })
     }
 
-    fn request_identified(
+    fn request_identified_controlled(
         &self,
         id: serde_json::Value,
         method: &str,
         params: serde_json::Value,
+        control: RequestControl,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
         let method = method.to_owned();
-        Box::pin(async move { self.round_trip(id, &method, params).await })
+        Box::pin(async move { self.round_trip(id, &method, params, control).await })
     }
 
     fn take_notifications(&self) -> Vec<String> {
@@ -785,7 +887,8 @@ fn parse_sse_jsonrpc(
 ) -> Result<serde_json::Value, McpError> {
     let mut dispatch = FrameDispatch::new(expected_id, notifications);
     let mut saw_data = false;
-    for event in text.split("\n\n") {
+    let normalized = text.replace("\r\n", "\n");
+    for event in normalized.split("\n\n") {
         let Some(data) = sse_event_data(event) else {
             continue;
         };
@@ -823,10 +926,22 @@ fn sse_event_data(event: &str) -> Option<String> {
     if data.is_empty() { None } else { Some(data) }
 }
 
-async fn read_bounded_body(response: reqwest::Response, cap: usize) -> Result<String, McpError> {
-    let body = finstack_ai_net_guard::read_body_bounded(response, cap)
-        .await
-        .map_err(map_net_guard_error)?;
+async fn read_bounded_body(
+    response: reqwest::Response,
+    cap: usize,
+    control: &RequestControl,
+) -> Result<String, McpError> {
+    let cancellation = control.cancellation.clone();
+    let deadline = control.clone();
+    let body = read_body_bounded_interruptible(
+        response,
+        cap,
+        BodyReadInterrupt::new(async move { cancellation.cancelled().await }, async move {
+            deadline.wait_deadline().await;
+        }),
+    )
+    .await
+    .map_err(map_net_guard_error)?;
     String::from_utf8(body)
         .map_err(|_| McpError::stable(MCP_PROTOCOL_VIOLATION, "http body is not valid utf-8"))
 }
@@ -837,6 +952,7 @@ fn map_net_guard_error(error: NetGuardError) -> McpError {
             MCP_LIMIT_EXCEEDED,
             "http body exceeds the configured byte limit",
         ),
+        NetGuardError::Cancelled | NetGuardError::DeadlineExceeded => timeout_error(),
         other => McpError::stable(MCP_TRANSPORT_ERROR, format!("http body failed: {other}")),
     }
 }
@@ -993,6 +1109,26 @@ mod tests {
             "event: message\n",
             "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"pong\":true}}\n",
             "\n"
+        );
+        let result = parse_sse_jsonrpc(text, &expected, &notifications).expect("sse");
+        assert_eq!(result["pong"], serde_json::json!(true));
+        assert_eq!(
+            notifications.lock().expect("lock").as_slice(),
+            ["notifications/tools/list_changed"]
+        );
+    }
+
+    #[test]
+    fn sse_crlf_events_are_dispatched_separately() {
+        let notifications = Mutex::new(Vec::new());
+        let expected = serde_json::json!(7);
+        let text = concat!(
+            "event: message\r\n",
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\r\n",
+            "\r\n",
+            "event: message\r\n",
+            "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"pong\":true}}\r\n",
+            "\r\n"
         );
         let result = parse_sse_jsonrpc(text, &expected, &notifications).expect("sse");
         assert_eq!(result["pong"], serde_json::json!(true));

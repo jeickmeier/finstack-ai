@@ -46,3 +46,4 @@ impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_mi
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
 pub fn finstack_ai_middleware_tool_policy::ToolPolicyMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>
 pub const finstack_ai_middleware_tool_policy::TOOL_POLICY_JAILBREAK_TRIGGERED: &str
+pub const finstack_ai_middleware_tool_policy::TOOL_POLICY_WRITE_BUDGET_EXCEEDED: &str

@@ -1,4 +1,4 @@
-//! Run lineage, security context, and `RunAccepted` (TDD §11.5).
+//! Run lineage, security context, and `RunAccepted` (contract section 11.5).
 
 mod accepted;
 mod cancellation;

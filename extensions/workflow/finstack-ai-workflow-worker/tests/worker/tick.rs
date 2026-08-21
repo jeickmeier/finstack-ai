@@ -48,9 +48,44 @@ impl RunStarter for CountingStarter {
     ) -> Pin<Box<dyn std::future::Future<Output = Result<StartedRun, WorkerError>> + Send + 'a>>
     {
         self.calls.fetch_add(1, Ordering::AcqRel);
-        let key: Arc<str> = Arc::from(idempotency_key);
-        Box::pin(async move { Ok(StartedRun { session_id: key }) })
+        let _ = idempotency_key;
+        Box::pin(async move {
+            Ok(StartedRun {
+                session_id: id(900),
+            })
+        })
     }
+}
+
+#[test]
+fn builder_rejects_unsafe_runtime_limits() {
+    let store = Arc::new(MemoryWorkerStore::new());
+    let builder = WorkerBuilder::new(
+        memory_store(),
+        Arc::new(MemoryCronStore::new()),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn FireStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .batch_limit(0);
+    let Err(error) = builder.build() else {
+        panic!("zero batch size must fail closed");
+    };
+    assert_eq!(error.code(), "batch_limit_zero");
+
+    let builder = WorkerBuilder::new(
+        memory_store(),
+        Arc::new(MemoryCronStore::new()),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn FireStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .lease_ttl_ms(1_000)
+    .drive_timeout(Duration::from_secs(1));
+    let Err(error) = builder.build() else {
+        panic!("drive budget must stay below the lease ttl");
+    };
+    assert_eq!(error.code(), "drive_timeout_exceeds_lease");
 }
 
 #[tokio::test]
@@ -81,7 +116,8 @@ async fn tick_fires_due_cron_and_starts_runs_exactly_once() {
     )
     .clock(clock.clone())
     .register_starter("nightly", Arc::clone(&starter) as Arc<dyn RunStarter>)
-    .build();
+    .build()
+    .expect("worker");
 
     let early = Box::pin(worker.tick()).await.expect("early tick");
     assert_eq!(early.cron_fires, 0);
@@ -128,7 +164,8 @@ async fn tick_fires_a_due_timer_and_keeps_the_row_when_no_new_wait() {
     .clock(clock.clone())
     .drive_timeout(Duration::from_millis(500))
     .register_ports("research", Arc::new(BindPorts { model }))
-    .build();
+    .build()
+    .expect("worker");
 
     let before_due = Box::pin(worker.tick()).await.expect("before due");
     assert_eq!(before_due.sessions_resumed, 0);
@@ -207,7 +244,8 @@ async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
     // which `build()` asserts.
     .drive_timeout(Duration::from_secs(20))
     .register_ports("research", Arc::new(BindPorts { model }))
-    .build();
+    .build()
+    .expect("worker");
 
     let reparked = tokio::time::timeout(Duration::from_secs(5), Box::pin(worker.tick()))
         .await
@@ -227,11 +265,11 @@ async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
     assert_eq!(rows[0].leased_by, None);
 }
 
-/// A non-timer row is claimable only while its inbox entry exists, so the
-/// entry must outlive a resume that submitted the response but could not
-/// park the run — otherwise the row is skipped forever by the claim gate.
+/// A response the runtime rejects durably is retained as a dead letter and
+/// removed from the retry path, while the original wake remains available
+/// for a corrected command.
 #[tokio::test]
-async fn tick_keeps_the_inbox_entry_when_the_resume_cannot_park() {
+async fn tick_dead_letters_a_durable_external_ingress_rejection() {
     let journal = memory_store();
     let model = deferring_model();
     let clock = ExternalClock::new(timestamp(2_000));
@@ -245,14 +283,17 @@ async fn tick_keeps_the_inbox_entry_when_the_resume_cannot_park() {
     let effect_id = EffectId::parse(row.pending_id.as_ref()).expect("effect id");
     let payload = serde_json::to_vec(&completion_command(effect_id)).expect("payload");
     store
-        .insert(&InboxRow {
-            tenant_scope: Arc::clone(&row.tenant_scope),
-            session_id: row.session_id,
-            pending_id: Arc::clone(&row.pending_id),
-            kind: InboxKind::External,
-            payload: Arc::from(payload.as_slice()),
-            received_at: timestamp(2_000),
-        })
+        .insert(
+            &InboxRow::try_new(
+                Arc::clone(&row.tenant_scope),
+                row.session_id,
+                Arc::clone(&row.pending_id),
+                InboxKind::External,
+                Arc::from(payload.into_boxed_slice()),
+                timestamp(2_000),
+            )
+            .expect("row"),
+        )
         .expect("inbox");
 
     let worker = WorkerBuilder::new(
@@ -265,46 +306,39 @@ async fn tick_keeps_the_inbox_entry_when_the_resume_cannot_park() {
     .clock(clock.clone())
     .drive_timeout(Duration::from_millis(500))
     .register_ports("research", Arc::new(BindPorts { model }))
-    .build();
+    .build()
+    .expect("worker");
 
-    // The completion lands, clearing the deferred wait, but the woken run is
-    // then mid-flight in the stage loop with no wait this worker can park.
+    // The runtime refuses this completion durably. It must leave the active
+    // key, retain operator evidence, and not burn retry attempts forever.
     let first = Box::pin(worker.tick()).await.expect("first tick");
-    assert_eq!(first.failures, 1);
+    assert_eq!(first.failures, 0, "report: {first:?}");
+    assert_eq!(first.responses_rejected, 1);
     assert_eq!(first.sessions_resumed, 0);
     assert_eq!(
-        store.load_all().expect("inbox").len(),
-        1,
-        "an unparked resume keeps its response for redelivery"
+        store.load_batch(10).expect("inbox").len(),
+        0,
+        "a durable rejection leaves the active inbox"
     );
+    assert_eq!(store.load_dead_letters(10).expect("dead letters").len(), 1);
 
-    // Inside the backoff window the row must not be re-claimed. `wake_at` was
-    // pushed to t+1_000 by `record_failure`; at t+500 the row is still
-    // sleeping, so a tick here does no work at all. Without a `wake_at`-aware
-    // dueness predicate for non-timer rows, this poisoned row would be
-    // re-attached and re-driven on every single tick, forever.
+    // With no active response, later ticks leave the journal wait available
+    // for a corrected command and do not retry the rejected bytes.
     clock.jump(500).expect("inside backoff");
-    let inside = Box::pin(worker.tick()).await.expect("backoff tick");
-    assert_eq!(
-        inside.failures, 0,
-        "the row is not retried before its backoff"
-    );
+    let inside = Box::pin(worker.tick()).await.expect("next tick");
+    assert_eq!(inside.failures, 0);
     assert_eq!(inside.sessions_resumed, 0);
     let sleeping = store.load_tenant("tenant-a").expect("rows");
     assert_eq!(sleeping.len(), 1);
-    assert_eq!(
-        sleeping[0].attempts, 1,
-        "no attempt is burned inside the backoff window"
-    );
+    assert_eq!(sleeping[0].attempts, 0);
 
-    // Past the backoff, the row is still claimable — the gate that skips a
-    // non-timer row without an inbox entry must not have swallowed it.
     clock.jump(1_500).expect("past backoff");
     let second = Box::pin(worker.tick()).await.expect("second tick");
-    assert_eq!(second.failures, 1, "the row is retried, not skipped");
+    assert_eq!(second.failures, 0);
+    assert_eq!(second.responses_rejected, 0);
     let rows = store.load_tenant("tenant-a").expect("rows");
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].attempts, 2, "a second attempt was recorded");
+    assert_eq!(rows[0].attempts, 0);
 }
 
 /// `spawn` runs the tick loop on a real interval and `shutdown` returns once
@@ -322,7 +356,8 @@ async fn spawn_ticks_and_shuts_down_cleanly() {
             Arc::clone(&store) as Arc<dyn FireStore>,
             Arc::clone(&store) as Arc<dyn InboxStore>,
         )
-        .build(),
+        .build()
+        .expect("worker"),
     );
     let handle = Arc::clone(&worker).spawn(Duration::from_millis(5));
     tokio::time::sleep(Duration::from_millis(30)).await;

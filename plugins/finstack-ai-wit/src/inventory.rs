@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn experimental_surface_is_coarse_and_dual_major() {
         assert_experimental_surface().expect("surface");
-        assert_eq!(CRATE_VERSION, "1.0.0");
+        assert_eq!(CRATE_VERSION, env!("CARGO_PKG_VERSION"));
         assert_eq!(TOOLSET_WORLD_EXPORTS, ["toolset"]);
         assert_eq!(CONTEXT_WORLD_EXPORTS, ["context-provider"]);
         assert_eq!(CONTEXT_FUNCS, ["collect"]);

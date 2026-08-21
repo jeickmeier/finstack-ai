@@ -75,7 +75,8 @@ pub fn finstack_ai_workflow_local::IntervalSchedule::fmt(&self, &mut core::fmt::
 impl core::marker::StructuralPartialEq for finstack_ai_workflow_local::IntervalSchedule
 pub struct finstack_ai_workflow_local::LocalWorkflowDriver
 impl finstack_ai_workflow_local::LocalWorkflowDriver
-pub async fn finstack_ai_workflow_local::LocalWorkflowDriver::attach(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai_runtime::services::id_generation::ExternalClock, u64, alloc::sync::Arc<dyn finstack_ai_workflow_local::CronScheduleStore>) -> core::result::Result<Self, finstack_ai_runtime::driver::workflow::WorkflowDriverError>
+pub async fn finstack_ai_workflow_local::LocalWorkflowDriver::attach(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai_runtime::services::id_generation::ExternalClock, alloc::sync::Arc<dyn finstack_ai_workflow_local::CronScheduleStore>) -> core::result::Result<Self, finstack_ai_runtime::driver::workflow::WorkflowDriverError>
+pub async fn finstack_ai_workflow_local::LocalWorkflowDriver::attach_seeded(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai_runtime::services::id_generation::ExternalClock, u64, alloc::sync::Arc<dyn finstack_ai_workflow_local::CronScheduleStore>) -> core::result::Result<Self, finstack_ai_runtime::driver::workflow::WorkflowDriverError>
 pub fn finstack_ai_workflow_local::LocalWorkflowDriver::catch_up_fires(&self) -> &[finstack_ai_workflow_local::CronFire]
 pub fn finstack_ai_workflow_local::LocalWorkflowDriver::fire_due(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronFire>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::LocalWorkflowDriver::into_session(self) -> finstack_ai_runtime::driver::workflow::WorkflowSession
@@ -100,7 +101,7 @@ pub fn finstack_ai_workflow_local::MemoryCronStore::default() -> finstack_ai_wor
 impl core::fmt::Debug for finstack_ai_workflow_local::MemoryCronStore
 pub fn finstack_ai_workflow_local::MemoryCronStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_workflow_local::CronScheduleStore for finstack_ai_workflow_local::MemoryCronStore
-pub fn finstack_ai_workflow_local::MemoryCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
+pub fn finstack_ai_workflow_local::MemoryCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::MemoryCronStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::MemoryCronStore::try_claim(&self, &str, &str, i64, finstack_ai_kernel::primitives::time::Timestamp, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<bool, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::MemoryCronStore::upsert(&self, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<(), finstack_ai_workflow_local::CronError>
@@ -109,22 +110,22 @@ impl finstack_ai_workflow_local::SqliteCronStore
 pub fn finstack_ai_workflow_local::SqliteCronStore::open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::path(&self) -> &std::path::Path
 impl finstack_ai_workflow_local::CronScheduleStore for finstack_ai_workflow_local::SqliteCronStore
-pub fn finstack_ai_workflow_local::SqliteCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
+pub fn finstack_ai_workflow_local::SqliteCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::try_claim(&self, &str, &str, i64, finstack_ai_kernel::primitives::time::Timestamp, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<bool, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::upsert(&self, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<(), finstack_ai_workflow_local::CronError>
 pub trait finstack_ai_workflow_local::CronScheduleStore: core::marker::Send + core::marker::Sync
-pub fn finstack_ai_workflow_local::CronScheduleStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
+pub fn finstack_ai_workflow_local::CronScheduleStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::CronScheduleStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::CronScheduleStore::try_claim(&self, &str, &str, i64, finstack_ai_kernel::primitives::time::Timestamp, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<bool, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::CronScheduleStore::upsert(&self, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<(), finstack_ai_workflow_local::CronError>
 impl finstack_ai_workflow_local::CronScheduleStore for finstack_ai_workflow_local::MemoryCronStore
-pub fn finstack_ai_workflow_local::MemoryCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
+pub fn finstack_ai_workflow_local::MemoryCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::MemoryCronStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::MemoryCronStore::try_claim(&self, &str, &str, i64, finstack_ai_kernel::primitives::time::Timestamp, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<bool, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::MemoryCronStore::upsert(&self, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<(), finstack_ai_workflow_local::CronError>
 impl finstack_ai_workflow_local::CronScheduleStore for finstack_ai_workflow_local::SqliteCronStore
-pub fn finstack_ai_workflow_local::SqliteCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
+pub fn finstack_ai_workflow_local::SqliteCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::try_claim(&self, &str, &str, i64, finstack_ai_kernel::primitives::time::Timestamp, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<bool, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::upsert(&self, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<(), finstack_ai_workflow_local::CronError>

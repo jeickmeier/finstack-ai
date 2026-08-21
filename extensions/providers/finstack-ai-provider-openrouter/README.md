@@ -38,8 +38,8 @@ let provider = OpenRouterProvider::try_new(config, vec![model]).expect("provider
 
 `Agent::openrouter` and the Python/WASM linked factories construct this
 provider without a `MediaResolver`. Vision, file, and audio **input**
-require a host-built provider with `with_media_resolver`. ADR-049
-rejected FFI resolvers on those factories.
+require a host-built provider with `with_media_resolver`; linked factories do
+not accept host callback resolvers across FFI.
 
 ## Provider routing
 

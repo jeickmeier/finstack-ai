@@ -184,6 +184,7 @@ fn bare_worker(store: &Arc<MemoryWorkerStore>, clock: &ExternalClock) -> Workflo
     .clock(clock.clone())
     .drive_timeout(Duration::from_millis(200))
     .build()
+    .expect("worker")
 }
 
 /// Synthetic interaction row: no inbox entry, no registered ports factory.
@@ -322,14 +323,15 @@ async fn park_on_approval(seed: u64) -> Parked {
 
     // ACT ONE: park the approval. The committed request carries the run's
     // effective deadline, and `park` copies it onto the wake row.
-    let mut session = WorkflowSession::trusted(journal.clone(), locator(), clock.clone(), seed + 1)
-        .await
-        .expect("attach")
-        .with_ports(
-            Arc::clone(&model),
-            locked_profile(),
-            Some(Arc::clone(&catalog)),
-        );
+    let mut session =
+        WorkflowSession::trusted_seeded(journal.clone(), locator(), clock.clone(), seed + 1)
+            .await
+            .expect("attach")
+            .with_ports(
+                Arc::clone(&model),
+                locked_profile(),
+                Some(Arc::clone(&catalog)),
+            );
     let WorkflowWait::Interaction {
         interaction_id,
         request,
@@ -375,7 +377,8 @@ async fn park_on_approval(seed: u64) -> Parked {
             catalog: Arc::clone(&catalog),
         }),
     )
-    .build();
+    .build()
+    .expect("worker");
 
     Parked {
         journal,
@@ -456,7 +459,7 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
         "an expired approval never executes the tool"
     );
     assert_eq!(
-        store.load_all().expect("inbox").len(),
+        store.load_batch(10).expect("inbox").len(),
         0,
         "the expiry path consumes no inbox entry"
     );
@@ -565,7 +568,7 @@ async fn a_resolution_that_races_the_deadline_still_expires_and_is_counted() {
         "the tool the approval gated never runs"
     );
     assert!(
-        store.load_all().expect("inbox").is_empty(),
+        store.load_batch(10).expect("inbox").is_empty(),
         "the consumed response is drained from the inbox"
     );
 }

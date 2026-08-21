@@ -12,15 +12,16 @@
 //! `ArtifactRef` (the single-instance invariant documented on
 //! `DocumentIngestMiddleware`).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai::runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, PortFuture,
+    ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
+    ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
+    Bytes, PortFuture, artifact_storage_key, build_artifact_ref, validate_artifact_scope,
+    validate_retrieved_artifact,
 };
-use finstack_ai_kernel::ArtifactRef;
-
-use crate::host_artifact::build_artifact;
+use finstack_ai_kernel::{ArtifactRef, BlobRef, Digest, Timestamp};
 
 /// Maximum total staged content bytes retained across all entries before
 /// oldest-first (FIFO) eviction kicks in. Keeps memory bounded for
@@ -32,9 +33,16 @@ const MAX_TOTAL_CONTENT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Default)]
 struct StoreState {
-    entries: BTreeMap<String, (ArtifactRef, Bytes)>,
-    insertion_order: VecDeque<String>,
+    entries: BTreeMap<Digest, StoredArtifact>,
     total_bytes: u64,
+}
+
+struct StoredArtifact {
+    scope: ArtifactScope,
+    artifact: ArtifactRef,
+    content: Bytes,
+    owners: BTreeSet<ArtifactOwnerId>,
+    unreferenced_since: Option<Timestamp>,
 }
 
 type Entries = Arc<Mutex<StoreState>>;
@@ -42,13 +50,9 @@ type Entries = Arc<Mutex<StoreState>>;
 /// Bounded in-memory artifact store used only to stage run attachments for
 /// document ingestion.
 ///
-/// Bounded by [`MAX_TOTAL_CONTENT_BYTES`] total staged content bytes: once
-/// staging a new artifact would push the running total over the cap, the
-/// oldest-staged entries (FIFO, by insertion order) are evicted first,
-/// until the total is back at or under the cap. A `get()` for an evicted
-/// artifact returns [`ArtifactError::NotFound`], which callers already
-/// treat as fail-soft (see the ingest middleware's "could not be read"
-/// note).
+/// Bounded by [`MAX_TOTAL_CONTENT_BYTES`] total staged content bytes. New
+/// writes are rejected at capacity; existing referenced content is never
+/// evicted implicitly.
 #[derive(Default)]
 pub struct DocumentArtifactStore {
     entries: Entries,
@@ -61,48 +65,233 @@ impl ArtifactStore for DocumentArtifactStore {
         content: Bytes,
         metadata: ArtifactMetadata,
     ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
-        let artifact = match build_artifact(&scope, &content, &metadata) {
+        let limits = self.limits();
+        let artifact = match build_artifact_ref(&scope, &content, &metadata, &limits) {
             Ok(artifact) => artifact,
             Err(error) => return Box::pin(async move { Err(error) }),
         };
+        let key = match artifact_storage_key(&scope, &artifact) {
+            Ok(key) => key,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
         let entries = Arc::clone(&self.entries);
-        let key = artifact.id().to_canonical_string();
         Box::pin(async move {
             let mut state = entries.lock().unwrap_or_else(PoisonError::into_inner);
-            let content_len = content.len() as u64;
-            if let Some((_, previous)) = state.entries.get(&key) {
-                state.total_bytes = state.total_bytes.saturating_sub(previous.len() as u64);
-            } else {
-                state.insertion_order.push_back(key.clone());
-            }
-            state.entries.insert(key, (artifact.clone(), content));
-            state.total_bytes = state.total_bytes.saturating_add(content_len);
-            while state.total_bytes > MAX_TOTAL_CONTENT_BYTES {
-                let Some(oldest) = state.insertion_order.pop_front() else {
-                    break;
-                };
-                if let Some((_, bytes)) = state.entries.remove(&oldest) {
-                    state.total_bytes = state.total_bytes.saturating_sub(bytes.len() as u64);
+            if let Some(stored) = state.entries.get(&key) {
+                if stored.scope == scope && stored.artifact == artifact && stored.content == content
+                {
+                    return Ok(artifact);
                 }
+                return Err(ArtifactError::Integrity {
+                    message: Arc::from("artifact_identity_collision"),
+                });
             }
+            if state.entries.len() >= limits.max_artifacts {
+                return Err(ArtifactError::CapacityExceeded {
+                    resource: "artifacts",
+                    limit: u64::try_from(limits.max_artifacts).unwrap_or(u64::MAX),
+                });
+            }
+            let content_len = u64::try_from(content.len()).unwrap_or(u64::MAX);
+            let total_bytes = state.total_bytes.checked_add(content_len).ok_or(
+                ArtifactError::CapacityExceeded {
+                    resource: "total_bytes",
+                    limit: limits.max_total_bytes,
+                },
+            )?;
+            if total_bytes > limits.max_total_bytes {
+                return Err(ArtifactError::CapacityExceeded {
+                    resource: "total_bytes",
+                    limit: limits.max_total_bytes,
+                });
+            }
+            state.entries.insert(
+                key,
+                StoredArtifact {
+                    scope,
+                    artifact: artifact.clone(),
+                    content,
+                    owners: BTreeSet::new(),
+                    unreferenced_since: None,
+                },
+            );
+            state.total_bytes = total_bytes;
             Ok(artifact)
         })
     }
 
     fn get(
         &self,
-        _scope: ArtifactScope,
+        scope: ArtifactScope,
         artifact: ArtifactRef,
     ) -> PortFuture<Result<Bytes, ArtifactError>> {
+        let key = match artifact_storage_key(&scope, &artifact) {
+            Ok(key) => key,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
         let entries = Arc::clone(&self.entries);
-        let key = artifact.id().to_canonical_string();
         Box::pin(async move {
+            validate_artifact_scope(&scope, &artifact)?;
             let state = entries.lock().unwrap_or_else(PoisonError::into_inner);
-            state
+            let stored = state.entries.get(&key).ok_or(ArtifactError::NotFound)?;
+            if stored.scope != scope || stored.artifact != artifact {
+                return Err(ArtifactError::Integrity {
+                    message: Arc::from("stored_reference_mismatch"),
+                });
+            }
+            validate_retrieved_artifact(&scope, &artifact, &stored.content)?;
+            Ok(stored.content.clone())
+        })
+    }
+
+    fn get_by_blob(
+        &self,
+        scope: ArtifactScope,
+        blob: BlobRef,
+    ) -> PortFuture<Result<ArtifactRead, ArtifactError>> {
+        let entries = Arc::clone(&self.entries);
+        Box::pin(async move {
+            if blob.digest().is_none() {
+                return Err(ArtifactError::InvalidMetadata {
+                    message: Arc::from("blob_digest_required"),
+                });
+            }
+            let state = entries.lock().unwrap_or_else(PoisonError::into_inner);
+            let stored = state
                 .entries
-                .get(&key)
-                .map(|(_, bytes)| bytes.clone())
-                .ok_or(ArtifactError::NotFound)
+                .values()
+                .find(|stored| stored.scope == scope && stored.artifact.blob() == &blob)
+                .ok_or(ArtifactError::NotFound)?;
+            validate_retrieved_artifact(&scope, &stored.artifact, &stored.content)?;
+            Ok(ArtifactRead {
+                reference: stored.artifact.clone(),
+                content: stored.content.clone(),
+            })
+        })
+    }
+
+    fn limits(&self) -> ArtifactStoreLimits {
+        ArtifactStoreLimits {
+            max_artifact_bytes: usize::try_from(MAX_TOTAL_CONTENT_BYTES).unwrap_or(usize::MAX),
+            max_total_bytes: MAX_TOTAL_CONTENT_BYTES,
+            ..ArtifactStoreLimits::default()
+        }
+    }
+
+    fn descriptor(&self) -> ArtifactStoreDescriptor {
+        ArtifactStoreDescriptor {
+            store_id: Arc::from("wasm.document-artifacts"),
+            persistence: ArtifactPersistence::Ephemeral,
+            limits: self.limits(),
+        }
+    }
+
+    fn pin(
+        &self,
+        scope: ArtifactScope,
+        artifact: ArtifactRef,
+        owner: ArtifactOwnerId,
+    ) -> PortFuture<Result<(), ArtifactError>> {
+        let key = match artifact_storage_key(&scope, &artifact) {
+            Ok(key) => key,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let entries = Arc::clone(&self.entries);
+        let limits = self.limits();
+        Box::pin(async move {
+            let mut state = entries.lock().unwrap_or_else(PoisonError::into_inner);
+            let stored = state.entries.get_mut(&key).ok_or(ArtifactError::NotFound)?;
+            if stored.scope != scope || stored.artifact != artifact {
+                return Err(ArtifactError::Integrity {
+                    message: Arc::from("stored_reference_mismatch"),
+                });
+            }
+            if !stored.owners.contains(&owner)
+                && stored.owners.len() >= limits.max_owners_per_artifact
+            {
+                return Err(ArtifactError::CapacityExceeded {
+                    resource: "owners",
+                    limit: u64::try_from(limits.max_owners_per_artifact).unwrap_or(u64::MAX),
+                });
+            }
+            stored.owners.insert(owner);
+            stored.unreferenced_since = None;
+            Ok(())
+        })
+    }
+
+    fn unpin(
+        &self,
+        scope: ArtifactScope,
+        artifact: ArtifactRef,
+        owner: ArtifactOwnerId,
+        now: Timestamp,
+    ) -> PortFuture<Result<(), ArtifactError>> {
+        let key = match artifact_storage_key(&scope, &artifact) {
+            Ok(key) => key,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let entries = Arc::clone(&self.entries);
+        Box::pin(async move {
+            let mut state = entries.lock().unwrap_or_else(PoisonError::into_inner);
+            let stored = state.entries.get_mut(&key).ok_or(ArtifactError::NotFound)?;
+            if stored.scope != scope || stored.artifact != artifact {
+                return Err(ArtifactError::Integrity {
+                    message: Arc::from("stored_reference_mismatch"),
+                });
+            }
+            if stored.owners.remove(&owner) && stored.owners.is_empty() {
+                stored.unreferenced_since = Some(now);
+            }
+            Ok(())
+        })
+    }
+
+    fn collect_orphans(
+        &self,
+        scope: ArtifactScope,
+        now: Timestamp,
+        limit: usize,
+    ) -> PortFuture<Result<ArtifactGcReport, ArtifactError>> {
+        let entries = Arc::clone(&self.entries);
+        let limits = self.limits();
+        Box::pin(async move {
+            scope.digest()?;
+            let mut state = entries.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut examined = 0_usize;
+            let mut delete = Vec::new();
+            for (key, stored) in &mut state.entries {
+                if examined >= limit.min(limits.max_gc_batch) || stored.scope != scope {
+                    continue;
+                }
+                examined += 1;
+                if !stored.owners.is_empty() {
+                    continue;
+                }
+                let Some(since) = stored.unreferenced_since else {
+                    stored.unreferenced_since = Some(now);
+                    continue;
+                };
+                let elapsed = now.as_unix_ms().checked_sub(since.as_unix_ms());
+                if elapsed.and_then(|value| u64::try_from(value).ok())
+                    >= Some(limits.orphan_grace_ms)
+                {
+                    delete.push(*key);
+                }
+            }
+            let mut report = ArtifactGcReport {
+                examined,
+                ..ArtifactGcReport::default()
+            };
+            for key in delete {
+                if let Some(stored) = state.entries.remove(&key) {
+                    let bytes = u64::try_from(stored.content.len()).unwrap_or(u64::MAX);
+                    state.total_bytes = state.total_bytes.saturating_sub(bytes);
+                    report.deleted += 1;
+                    report.bytes_deleted = report.bytes_deleted.saturating_add(bytes);
+                }
+            }
+            Ok(report)
         })
     }
 }
@@ -145,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn oldest_entry_is_evicted_once_total_bytes_exceeds_cap() {
+    fn capacity_rejects_new_content_without_evicting_existing_content() {
         let store = DocumentArtifactStore::default();
         // Each chunk is over half the cap, so the second stage_put must
         // evict the first before it fits.
@@ -156,19 +345,18 @@ mod tests {
         let first_artifact =
             block_on_ready(store.stage_put(scope(), Bytes::from(first), metadata("first")))
                 .expect("stage first");
-        let second_artifact =
+        let second_error =
             block_on_ready(store.stage_put(scope(), Bytes::from(second), metadata("second")))
-                .expect("stage second");
+                .expect_err("second artifact exceeds aggregate capacity");
 
+        assert!(
+            matches!(second_error, ArtifactError::CapacityExceeded { .. }),
+            "capacity must reject rather than evict"
+        );
         let first_result = block_on_ready(store.get(scope(), first_artifact));
         assert!(
-            matches!(first_result, Err(ArtifactError::NotFound)),
-            "oldest artifact must be evicted once the byte budget is exceeded"
-        );
-        let second_result = block_on_ready(store.get(scope(), second_artifact));
-        assert!(
-            second_result.is_ok(),
-            "most recently staged artifact must remain readable"
+            first_result.is_ok(),
+            "existing artifact must remain readable"
         );
     }
 }

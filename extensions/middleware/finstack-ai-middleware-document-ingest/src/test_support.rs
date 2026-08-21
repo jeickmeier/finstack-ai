@@ -10,9 +10,9 @@ use finstack_ai_kernel::{
     SessionId, TextBlock, Timestamp,
 };
 use finstack_ai_runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, AuthorizationContext,
-    BeforeModelInput, Bytes, CancellationSignal, ModelName, ModelRequestDraft, ModelRequestLimits,
-    ModelSettings, PortFuture, RunCallContext, StageInput,
+    ArtifactError, ArtifactMetadata, ArtifactRead, ArtifactScope, ArtifactStore,
+    AuthorizationContext, BeforeModelInput, Bytes, CancellationSignal, ModelName,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, PortFuture, RunCallContext, StageInput,
 };
 
 pub(crate) const SAMPLE_CSV: &[u8] = include_bytes!("../../../../fixtures/documents/sample.csv");
@@ -97,21 +97,54 @@ impl ArtifactStore for CaptureArtifactStore {
                 .ok_or(ArtifactError::NotFound)
         })
     }
+
+    fn get_by_blob(
+        &self,
+        scope: ArtifactScope,
+        blob: BlobRef,
+    ) -> PortFuture<Result<ArtifactRead, ArtifactError>> {
+        let staged = Arc::clone(&self.staged);
+        Box::pin(async move {
+            let staged = staged.lock().expect("capture lock");
+            let (_, content, metadata) = staged
+                .iter()
+                .find(|(stored_scope, content, metadata)| {
+                    stored_scope == &scope
+                        && blob.digest().copied() == Some(Digest::blob_content(content))
+                        && blob.media_type() == metadata.media_type.as_ref()
+                        && blob.name() == metadata.name.as_deref()
+                })
+                .ok_or(ArtifactError::NotFound)?;
+            let reference = ArtifactRef::try_new(
+                ArtifactId::from_bytes([9; 16]),
+                metadata.kind.as_ref(),
+                blob,
+                Digest::blob_content(content),
+                scope.digest()?,
+                metadata.attributes.clone(),
+            )
+            .map_err(|_| ArtifactError::Integrity {
+                message: Arc::from("capture reference invalid"),
+            })?;
+            Ok(ArtifactRead {
+                reference,
+                content: content.clone(),
+            })
+        })
+    }
 }
 
 fn test_scope() -> ArtifactScope {
     ArtifactScope {
         tenant_scope: Arc::from("tenant-a"),
-        session_id: SessionId::from_bytes([1; 16]),
-        run_id: Some(RunId::from_bytes([3; 16])),
+        session_id: SessionId::from_bytes([0; 16]),
+        run_id: None,
         sensitivity: finstack_ai_kernel::Sensitivity::Internal,
     }
 }
 
 /// Stage `bytes` into `store` and return the exact `ArtifactRef` it
-/// produced. Callers must separately `AttachmentIndex::insert` this ref for
-/// the middleware to be able to resolve the corresponding `BlobRef` (spec
-/// decision 19) — the dangling-file test deliberately skips that step.
+/// produced.
 pub(crate) fn stage(
     store: &dyn ArtifactStore,
     bytes: &[u8],

@@ -8,7 +8,7 @@ and host; they do not reimplement continuation, recovery, or event order.
 | `finstack-ai` (Python) | [`finstack-ai-python/README.md`](finstack-ai-python/README.md) |
 | `@finstack/ai` (JS/WASM) | [`finstack-ai-wasm/js/README.md`](finstack-ai-wasm/js/README.md) |
 
-Workspace version is **1.0.0**. PyPI and npm packages are not published.
+Workspace version is **2.0.0**. PyPI and npm packages are not published.
 Consume a staged wheel or tarball from this repository.
 
 Python callbacks and JavaScript host adapters are

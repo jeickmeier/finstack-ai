@@ -6,10 +6,10 @@ use finstack_ai_kernel::{
     Sensitivity, TextBlock, Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock,
 };
 use finstack_ai_runtime::{
-    AuthorizationContext, BeforeModelInput, COMPACTION_MODEL_NOT_AUTHORIZED, CancellationSignal,
-    CompactionModelResume, CompactionSourceEntry, Middleware, MiddlewareContext, ModelName,
-    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, RunCallContext,
-    StageInput, StageOutcome, compaction_checkpoint_compatible, validate_stage_outcome,
+    AuthorizationContext, BeforeModelInput, CancellationSignal, CompactionModelResume,
+    CompactionSourceEntry, Middleware, MiddlewareContext, ModelName, ModelRequestDraft,
+    ModelRequestLimits, ModelResponse, ModelSettings, RunCallContext, StageInput, StageOutcome,
+    compaction_checkpoint_compatible, validate_stage_outcome,
 };
 use finstack_ai_test::{
     CompactionConformanceCase, MiddlewareConformanceCase, SharedCompactionProjection,
@@ -289,7 +289,7 @@ async fn middleware_satisfies_the_published_port_conformance_suite() {
     // `Continue` lands in `validate_stage_outcome`'s universally-legal arm and would leave
     // the `CompactContext`/`ContextCompactor`-role stage gating and the deep
     // `validate_compaction_result` evidence/attribution check entirely unexercised.
-    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(250, 0))
+    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(600, 0))
         .expect("middleware");
     let input = history();
     let expected = invoke(&middleware, input.clone(), None)
@@ -314,7 +314,7 @@ async fn middleware_satisfies_the_published_port_conformance_suite() {
 
 #[tokio::test]
 async fn sliding_window_preserves_protected_bytes_and_passes_conformance() {
-    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(250, 0))
+    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(600, 0))
         .expect("middleware");
     let input = history();
     let before = serde_json::to_vec(&input.source_entries).expect("before");
@@ -505,13 +505,32 @@ async fn large_tool_output_keeps_pairs_and_shortens_bodies() {
     );
 }
 
+#[test]
+fn tool_output_truncation_respects_utf8_byte_boundaries() {
+    let blocks = text("ééé");
+    let truncated = truncate_blocks(&blocks, 3);
+    let ContentBlock::Text(value) = &truncated[0] else {
+        panic!("expected text preview");
+    };
+    assert_eq!(value.text(), "é");
+    assert!(value.text().len() <= 3);
+}
+
 #[tokio::test]
-async fn summarize_first_invoke_fails_closed_without_resume() {
+async fn summarize_first_invoke_requests_runtime_authorized_model() {
     let middleware = CompactionMiddleware::try_new(summarize_config()).expect("middleware");
-    let error = invoke(&middleware, history(), None)
-        .await
-        .expect_err("denied");
-    assert_eq!(error.code(), COMPACTION_MODEL_NOT_AUTHORIZED);
+    let outcome = invoke(&middleware, history(), None).await.expect("request");
+    let StageOutcome::RequestCompactionModel(request) = outcome else {
+        panic!("expected compaction model request");
+    };
+    assert_eq!(request.model, summarize_model());
+    assert_eq!(request.budget_scope_id, id(9));
+    assert_eq!(
+        request.residency_policy_digest,
+        Digest::raw_json(b"explicit-residency")
+    );
+    assert_eq!(request.source_sensitivity, Sensitivity::Internal);
+    assert_eq!(request.resume_state.as_bytes(), b"{}");
 }
 
 #[tokio::test]

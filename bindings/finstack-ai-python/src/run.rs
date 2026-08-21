@@ -14,7 +14,6 @@ use finstack_ai::{
 use finstack_ai_kernel::{
     CapabilityId, ChildPlacement, Metadata, OperationLocator, RawJson, Sensitivity, SessionId,
 };
-use finstack_ai_middleware_document_ingest::AttachmentIndex;
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
@@ -377,12 +376,11 @@ fn attachment_scope(tenant_scope: &str) -> finstack_ai::runtime::ArtifactScope {
     }
 }
 
-/// Stage every attachment into `store` and record it in `index` so
-/// `DocumentIngestMiddleware` can resolve the `BlobRef` it sees on the
-/// journaled `File` block back to the exact staged `ArtifactRef`.
+/// Stage every attachment into the canonical tenant-bound pre-run upload
+/// scope so `DocumentIngestMiddleware` can resolve the journaled `BlobRef`
+/// with the same exact scope.
 pub(crate) async fn stage_attachments(
     store: &dyn ArtifactStore,
-    index: &AttachmentIndex,
     tenant_scope: &str,
     attachments: Vec<PyAttachment>,
 ) -> Result<Vec<AttachmentInput>, AgentRunError> {
@@ -407,7 +405,6 @@ pub(crate) async fn stage_attachments(
         )
         .await
         .map_err(|error| configuration_error(error.to_string()))?;
-        index.insert(artifact.clone());
         staged.push(AttachmentInput { artifact });
     }
     Ok(staged)

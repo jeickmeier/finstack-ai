@@ -11,6 +11,92 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+#[cfg(unix)]
+const SIGNAL_KILL: i32 = 9;
+
+#[cfg(unix)]
+#[allow(
+    unsafe_code,
+    reason = "Unix process-group setup and signalling require libc process primitives"
+)]
+unsafe extern "C" {
+    fn setpgid(pid: i32, pgid: i32) -> i32;
+    fn kill(pid: i32, signal: i32) -> i32;
+}
+
+/// Configure a Unix child as the leader of a new owned process group.
+///
+/// # Errors
+///
+/// Unsupported targets fail closed. A later spawn can still fail if the
+/// platform refuses process-group creation in the child.
+pub fn configure_process_tree(command: &mut Command) -> Result<(), ConfinementError> {
+    #[cfg(unix)]
+    {
+        // SAFETY: `pre_exec` executes in the forked child. `setpgid(0, 0)`
+        // changes only that child into a new process-group leader.
+        #[allow(unsafe_code)]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                if setpgid(0, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+        Err(ConfinementError::unavailable(
+            "owned process groups are unavailable on this target",
+        ))
+    }
+}
+
+/// Force-terminate the complete Unix process group led by `process_id`.
+///
+/// # Errors
+///
+/// Returns an I/O error when group termination fails for a reason other than
+/// the group already being absent.
+pub fn terminate_process_tree(process_id: u32) -> std::io::Result<()> {
+    if process_id == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "process id must be non-zero",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        let process_group = i32::try_from(process_id)
+            .map_err(|_| std::io::Error::other("process id exceeds platform range"))?;
+        // SAFETY: a negative pid targets exactly the process group created by
+        // `configure_process_tree`; no pointers cross the FFI boundary.
+        #[allow(
+            unsafe_code,
+            reason = "negative-pid kill targets the owned child process group"
+        )]
+        if unsafe { kill(-process_group, SIGNAL_KILL) } == -1 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(3) {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = process_id;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "owned process groups are unavailable on this target",
+        ))
+    }
+}
+
 /// Stable code when the host cannot confine a child.
 pub const CONFINEMENT_UNAVAILABLE: &str = "process_confinement_unavailable";
 /// Stable code when confinement denies the spawn or the child filesystem view.
@@ -272,6 +358,8 @@ impl ProcessConfinement {
         command: &mut Command,
         profile: &ConfinementProfile,
     ) -> Result<(), ConfinementError> {
+        #[cfg(unix)]
+        configure_process_tree(command)?;
         match self.backend {
             ConfinementBackend::Unavailable => Err(ConfinementError::unavailable(
                 "process confinement is unavailable on this target",
@@ -296,9 +384,11 @@ impl ProcessConfinement {
     /// child running.
     pub fn spawn(
         &self,
-        command: Command,
+        mut command: Command,
         profile: &ConfinementProfile,
     ) -> Result<ConfinedChild, ConfinementError> {
+        #[cfg(unix)]
+        configure_process_tree(&mut command)?;
         match self.backend {
             ConfinementBackend::Unavailable => Err(ConfinementError::unavailable(
                 "process confinement is unavailable on this target",
@@ -358,11 +448,11 @@ impl ConfinedChild {
     pub fn kill(&mut self) -> std::io::Result<()> {
         #[cfg(not(windows))]
         {
-            self.inner.kill()
+            terminate_process_tree(self.inner.id())
         }
         #[cfg(windows)]
         {
-            windows::terminate(&self.process)
+            windows::terminate_job(&self._job)
         }
     }
 
@@ -835,7 +925,6 @@ mod windows {
 
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
     const JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION: u32 = 0x0000_0400;
-    const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
@@ -1022,6 +1111,7 @@ mod windows {
         fn SetHandleInformation(handle: *mut core::ffi::c_void, mask: u32, flags: u32) -> i32;
         fn ResumeThread(thread: *mut core::ffi::c_void) -> u32;
         fn TerminateProcess(process: *mut core::ffi::c_void, exit_code: u32) -> i32;
+        fn TerminateJobObject(job: *mut core::ffi::c_void, exit_code: u32) -> i32;
         fn WaitForSingleObject(handle: *mut core::ffi::c_void, milliseconds: u32) -> u32;
         fn GetExitCodeProcess(process: *mut core::ffi::c_void, exit_code: *mut u32) -> i32;
     }
@@ -1173,8 +1263,8 @@ mod windows {
         })
     }
 
-    pub(super) fn terminate(process: &OwnedHandle) -> std::io::Result<()> {
-        if unsafe { TerminateProcess(raw_handle(process), 1) } == 0 {
+    pub(super) fn terminate_job(job: &OwnedHandle) -> std::io::Result<()> {
+        if unsafe { TerminateJobObject(raw_handle(job), 1) } == 0 {
             return Err(std::io::Error::last_os_error());
         }
         Ok(())
@@ -1494,11 +1584,10 @@ mod windows {
                 per_process_user_time_limit: 0,
                 per_job_user_time_limit: 0,
                 limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                    | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION
-                    | JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+                    | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
                 minimum_working_set_size: 0,
                 maximum_working_set_size: 0,
-                active_process_limit: 1,
+                active_process_limit: 0,
                 affinity: 0,
                 priority_class: 0,
                 scheduling_class: 0,

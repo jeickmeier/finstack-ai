@@ -10,6 +10,23 @@ use crate::{
     ContentBlock, Digest, EffectId, Metadata, OperationLocator, PortFuture, PortObject, Timestamp,
 };
 
+const CHILD_RUN_REQUEST_DIGEST_DOMAIN: &str = "child-run-request";
+const CHILD_RUN_REQUEST_DIGEST_SCHEMA_VERSION: u32 = 2;
+
+/// Host-owned child-run admission policy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum ChildRunPolicy {
+    /// Reject every child invocation.
+    #[default]
+    Deny,
+    /// Allow children up to the configured inclusive depth.
+    Allow {
+        /// Maximum child depth accepted by this agent.
+        max_depth: u16,
+    },
+}
+
 /// Stable code for an unavailable child-agent service.
 pub const AGENT_INVOKE_UNAVAILABLE: &str = "agent_invoke_unavailable";
 /// Stable code for conflicting reuse of a prepared child request.
@@ -65,6 +82,55 @@ pub struct ChildRunRequest {
 }
 
 impl ChildRunRequest {
+    /// Compute the current canonical digest binding every normalized field.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-request error if canonical serialization fails.
+    pub fn canonical_digest(&self) -> Result<Digest, AgentInvokeError> {
+        let canonical = serde_json_canonicalizer::to_vec(&(
+            &self.agent,
+            &self.input,
+            self.placement,
+            &self.locator,
+            self.requested_deadline,
+            &self.requested_budget,
+            &self.delegation_id,
+            &self.metadata,
+        ))
+        .map_err(|_| AgentInvokeError::InvalidRequest {
+            message: Arc::from("child request is not canonically serializable"),
+        })?;
+        Digest::domain_separated(
+            CHILD_RUN_REQUEST_DIGEST_DOMAIN,
+            CHILD_RUN_REQUEST_DIGEST_SCHEMA_VERSION,
+            &canonical,
+        )
+        .map_err(|_| AgentInvokeError::InvalidRequest {
+            message: Arc::from("child request digest domain is invalid"),
+        })
+    }
+
+    fn legacy_sdk_digest(&self) -> Result<Digest, AgentInvokeError> {
+        let canonical = serde_json_canonicalizer::to_vec(&(
+            &self.agent.id,
+            &self.agent.bundle,
+            &self.agent.spec_digest,
+            &self.input,
+            self.placement,
+            &self.locator,
+            self.locator.operation.tenant_scope.as_ref(),
+        ))
+        .map_err(|_| AgentInvokeError::InvalidRequest {
+            message: Arc::from("legacy child request is not canonically serializable"),
+        })?;
+        Digest::domain_separated(CHILD_RUN_REQUEST_DIGEST_DOMAIN, 1, &canonical).map_err(|_| {
+            AgentInvokeError::InvalidRequest {
+                message: Arc::from("legacy child request digest domain is invalid"),
+            }
+        })
+    }
+
     /// Validate intrinsic placement and budget bounds.
     ///
     /// # Errors
@@ -90,6 +156,18 @@ impl ChildRunRequest {
                 message: Arc::from("invalid_delegation_id"),
             });
         }
+        let current = self.canonical_digest()?;
+        if self.request_digest != current {
+            let legacy_fields_are_default = self.requested_deadline.is_none()
+                && self.requested_budget == BudgetRequest::default()
+                && self.delegation_id.is_none()
+                && self.metadata == Metadata::empty();
+            if !legacy_fields_are_default || self.request_digest != self.legacy_sdk_digest()? {
+                return Err(AgentInvokeError::InvalidRequest {
+                    message: Arc::from("child request digest does not bind normalized request"),
+                });
+            }
+        }
         Ok(())
     }
 }
@@ -104,6 +182,45 @@ pub struct ChildRunHandle {
     pub relation_digest: Digest,
 }
 
+/// Current host-observed lifecycle state for an accepted child run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildRunStatus {
+    /// The host accepted the child but has not started execution yet.
+    Accepted,
+    /// The child is executing.
+    Running,
+    /// The child completed successfully.
+    Completed,
+    /// The child reached a terminal failure.
+    Failed,
+    /// Cancellation was durably requested but is not yet terminal.
+    CancellationRequested,
+    /// The child was cancelled.
+    Cancelled,
+}
+
+impl ChildRunStatus {
+    /// Stable model-facing status name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::CancellationRequested => "cancellation_requested",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    /// Whether the status is terminal and no longer needs local tracking.
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+    }
+}
+
 /// Runtime service that accepts or attaches to one exact precommitted child.
 pub trait AgentInvoker: PortObject {
     /// Start the prepared child or attach to its existing equal acceptance.
@@ -112,6 +229,22 @@ pub trait AgentInvoker: PortObject {
         ctx: ChildRunContext,
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>>;
+
+    /// Query the current host-observed lifecycle state of an accepted child.
+    ///
+    /// The default fails closed so hosts that do not implement lifecycle
+    /// observation cannot report a fabricated status.
+    fn status(
+        &self,
+        locator: &ChildRunLocator,
+    ) -> PortFuture<Result<ChildRunStatus, AgentInvokeError>> {
+        let _ = locator;
+        Box::pin(async {
+            Err(AgentInvokeError::Unavailable {
+                message: Arc::from("child status is not implemented"),
+            })
+        })
+    }
 
     /// Submit one durable cancel for a previously accepted child.
     ///

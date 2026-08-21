@@ -5,7 +5,7 @@ Async APIs are primary. Dropping a handle detaches observation and does not
 cancel a run. Hover docs live on the `_finstack_ai.pyi` stub; this page is the
 narrative index.
 
-Workspace version is **1.0.0**. The package is not on PyPI.
+Workspace version is **2.0.0**. The package is not on PyPI.
 
 ## Agent composition
 

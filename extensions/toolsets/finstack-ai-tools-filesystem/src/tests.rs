@@ -95,22 +95,27 @@ async fn invoke(
     let mut stream = toolset
         .call(context(), call(toolset, index, &arguments))
         .await?;
-    let item = stream.next().await.ok_or_else(|| {
+    let mut completed = None;
+    while let Some(item) = stream.next().await {
+        match item? {
+            ToolStreamItem::Artifact(_) => {}
+            ToolStreamItem::Completed(result) if completed.is_none() => completed = Some(result),
+            _ => {
+                return Err(fs_tool_error(
+                    FILESYSTEM_IO_ERROR,
+                    ErrorCategory::Internal,
+                    "test stream returned an invalid item sequence",
+                ));
+            }
+        }
+    }
+    completed.ok_or_else(|| {
         fs_tool_error(
             FILESYSTEM_IO_ERROR,
             ErrorCategory::Internal,
-            "test stream ended early",
+            "test stream ended before completion",
         )
-    })??;
-    assert!(stream.next().await.is_none());
-    match item {
-        ToolStreamItem::Completed(result) => Ok(result),
-        _ => Err(fs_tool_error(
-            FILESYSTEM_IO_ERROR,
-            ErrorCategory::Internal,
-            "test stream returned a non-terminal item",
-        )),
-    }
+    })
 }
 
 fn block_on_thread<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> T {
@@ -526,6 +531,7 @@ impl ArtifactStore for CaptureArtifactStore {
     fn limits(&self) -> ArtifactStoreLimits {
         ArtifactStoreLimits {
             max_artifact_bytes: self.max_artifact_bytes,
+            ..ArtifactStoreLimits::default()
         }
     }
 
@@ -646,4 +652,40 @@ async fn result_ceiling_follows_the_attached_store_not_the_fixed_constant() {
         .await
         .expect_err("serialized result exceeds the store-derived ceiling");
     assert_eq!(error.code(), FILESYSTEM_LIMIT_EXCEEDED);
+}
+
+#[tokio::test]
+async fn search_enforces_the_aggregate_scan_byte_limit() {
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join("a.txt"), "four").expect("first file");
+    std::fs::write(root.path().join("b.txt"), "four").expect("second file");
+    let toolset = FileSystemToolset::try_new(root.path())
+        .expect("filesystem")
+        .try_with_limits(FileSystemLimits {
+            scan_bytes: 7,
+            ..FileSystemLimits::default()
+        })
+        .expect("limits");
+    let search_index = toolset
+        .tools()
+        .iter()
+        .position(|spec| spec.model_name.as_ref() == "filesystem_search")
+        .expect("search tool");
+
+    let error = invoke(
+        &toolset,
+        search_index,
+        serde_json::json!({"query":"absent"}),
+    )
+    .await
+    .expect_err("aggregate scan must fail closed");
+    assert_eq!(error.code(), FILESYSTEM_LIMIT_EXCEEDED);
+}
+
+#[test]
+fn persisted_deadline_that_has_elapsed_is_a_stable_timeout() {
+    let elapsed = finstack_ai_kernel::Timestamp::from_unix_ms(0).expect("timestamp");
+    let error = operation_deadline(Some(elapsed), Some(Duration::from_secs(10)))
+        .expect_err("elapsed deadline");
+    assert_eq!(error.code(), FILESYSTEM_TIMEOUT);
 }

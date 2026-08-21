@@ -3,6 +3,7 @@ pub enum finstack_ai_completion_ingress::CompletionIngressConfigError
 pub finstack_ai_completion_ingress::CompletionIngressConfigError::DuplicateKeyId
 pub finstack_ai_completion_ingress::CompletionIngressConfigError::InvalidKeyId
 pub finstack_ai_completion_ingress::CompletionIngressConfigError::KeyTooShort
+pub finstack_ai_completion_ingress::CompletionIngressConfigError::TooManyVerificationKeys
 impl core::clone::Clone for finstack_ai_completion_ingress::CompletionIngressConfigError
 pub fn finstack_ai_completion_ingress::CompletionIngressConfigError::clone(&self) -> finstack_ai_completion_ingress::CompletionIngressConfigError
 impl core::cmp::Eq for finstack_ai_completion_ingress::CompletionIngressConfigError
@@ -68,6 +69,7 @@ pub fn finstack_ai_completion_ingress::CompletionGrant::clone(&self) -> finstack
 pub struct finstack_ai_completion_ingress::CompletionIngress
 impl finstack_ai_completion_ingress::CompletionIngress
 pub async fn finstack_ai_completion_ingress::CompletionIngress::deliver(&self, &str, &[u8], finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_runtime::driver::ingress::types::ExternalRouteOutcome, finstack_ai_completion_ingress::IngressError>
+pub fn finstack_ai_completion_ingress::CompletionIngress::health(&self) -> finstack_ai_runtime::services::audit::SecurityAuditGateHealth
 pub fn finstack_ai_completion_ingress::CompletionIngress::mint(&self, &finstack_ai_completion_ingress::CompletionGrant) -> core::result::Result<finstack_ai_completion_ingress::CallbackToken, finstack_ai_completion_ingress::MintError>
 pub fn finstack_ai_completion_ingress::CompletionIngress::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, alloc::sync::Arc<finstack_ai_runtime::services::audit::SecurityAuditGate>, finstack_ai_completion_ingress::CompletionIngressConfig) -> core::result::Result<Self, finstack_ai_completion_ingress::CompletionIngressConfigError>
 pub fn finstack_ai_completion_ingress::CompletionIngress::with_horizon(self, finstack_ai_runtime::ports::journal::IdempotencyHorizon) -> Self
@@ -81,4 +83,5 @@ impl core::fmt::Debug for finstack_ai_completion_ingress::CompletionIngressConfi
 pub fn finstack_ai_completion_ingress::CompletionIngressConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const finstack_ai_completion_ingress::MAX_BODY_BYTES: usize
 pub const finstack_ai_completion_ingress::MAX_TOKEN_BYTES: usize
+pub const finstack_ai_completion_ingress::MAX_VERIFICATION_KEYS: usize
 pub const finstack_ai_completion_ingress::MIN_KEY_BYTES: usize

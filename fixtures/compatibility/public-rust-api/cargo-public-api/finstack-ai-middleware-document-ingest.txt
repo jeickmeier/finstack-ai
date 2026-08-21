@@ -13,18 +13,10 @@ pub fn finstack_ai_middleware_document_ingest::DocumentIngestError::fmt(&self, &
 impl core::fmt::Display for finstack_ai_middleware_document_ingest::DocumentIngestError
 pub fn finstack_ai_middleware_document_ingest::DocumentIngestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_middleware_document_ingest::DocumentIngestError
-pub struct finstack_ai_middleware_document_ingest::AttachmentIndex
-impl finstack_ai_middleware_document_ingest::AttachmentIndex
-pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::insert(&self, finstack_ai_kernel::primitives::handles::ArtifactRef)
-pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::lookup(&self, &finstack_ai_kernel::content::blob::BlobRef) -> core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
-impl core::default::Default for finstack_ai_middleware_document_ingest::AttachmentIndex
-pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::default() -> finstack_ai_middleware_document_ingest::AttachmentIndex
-impl core::fmt::Debug for finstack_ai_middleware_document_ingest::AttachmentIndex
-pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
 impl finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
-pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, alloc::sync::Arc<finstack_ai_middleware_document_ingest::AttachmentIndex>) -> core::result::Result<Self, finstack_ai_middleware_document_ingest::DocumentIngestError>
-pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::try_with_limits(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, alloc::sync::Arc<finstack_ai_middleware_document_ingest::AttachmentIndex>, finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_middleware_document_ingest::DocumentIngestError>
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> core::result::Result<Self, finstack_ai_middleware_document_ingest::DocumentIngestError>
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::try_with_limits(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_middleware_document_ingest::DocumentIngestError>
 impl core::clone::Clone for finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
 pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::clone(&self) -> finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
 impl core::fmt::Debug for finstack_ai_middleware_document_ingest::DocumentIngestMiddleware

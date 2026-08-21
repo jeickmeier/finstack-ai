@@ -14,12 +14,17 @@ mod wake;
 mod worker;
 
 pub use error::WorkerError;
-pub use fires::{FireRow, FireStatus, FireStore, idempotency_key};
-pub use inbox::{InboxKind, InboxRow, InboxStore};
+pub use fires::{
+    FireIdempotencyKey, FireRow, FireStartOutcome, FireStatus, FireStore, idempotency_key,
+};
+pub use inbox::{
+    DeadLetterRow, InboxInsertOutcome, InboxKind, InboxRow, InboxStore, MAX_INBOX_PAYLOAD_BYTES,
+};
 pub use memory::MemoryWorkerStore;
 pub use park::park;
 pub use sqlite::{SqliteWorkerStore, is_memory_sqlite_path};
 pub use wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline, lease_open, wake_due};
 pub use worker::{
-    PortsFactory, RunStarter, StartedRun, TickReport, WorkerBuilder, WorkerHandle, WorkflowWorker,
+    InteractionDeliveryOutcome, InteractionLifecycle, PortsFactory, RunStarter, StartedRun,
+    TickReport, WorkerBuilder, WorkerHandle, WorkflowWorker,
 };

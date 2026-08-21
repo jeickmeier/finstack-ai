@@ -1,7 +1,7 @@
 # Native examples
 
 Four offline, secret-free binaries over the public Rust surface.
-Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`). `publish = false`.
+Workspace version is **2.0.0** unpublished (last public tag `v0.1.0`). `publish = false`.
 
 Trust class: T1. Native
 in-process providers and tools are not isolated.

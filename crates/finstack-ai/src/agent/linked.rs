@@ -1,4 +1,4 @@
-//! Rust-owned linked-provider constructors (ADR-045).
+//! Rust-owned linked-provider constructors.
 //!
 //! Python and WASM only map arguments. `wasm-host` methods exist and return
 //! [`crate::AGENT_RUN_UNSUPPORTED_PLAN`]. Constructors never read ambient env.
@@ -243,6 +243,9 @@ impl NativeAgentBuilder {
         for (component, observer) in ports.observers {
             self = self.observer(component, observer);
         }
+        if let Some(store) = ports.artifact_store.clone() {
+            self = self.artifact_store(store);
+        }
         if let Some(instruction) = instruction {
             self = self.try_instruction(instruction)?;
         }
@@ -294,9 +297,9 @@ impl Agent {
     ///
     /// Does not attach a [`finstack_ai_runtime::MediaResolver`]. Vision, file,
     /// and audio input require a host-built provider with
-    /// `with_media_resolver`. ADR-049 rejected FFI resolvers on linked
-    /// constructors. `spec.media_tools` registers outbound media-generation
-    /// tools only.
+    /// `with_media_resolver`; linked constructors do not accept host callback
+    /// resolvers across FFI. `spec.media_tools` registers outbound
+    /// media-generation tools only.
     ///
     /// # Arguments
     ///
@@ -330,8 +333,7 @@ impl Agent {
     ///
     /// Does not read environment variables. Does not hardcode the Google
     /// host: `spec.endpoint` is passed straight into the provider's
-    /// `GeminiConfig::try_new` (ADR-047). HTTPS is required when `api_key`
-    /// is set.
+    /// `GeminiConfig::try_new`. HTTPS is required when `api_key` is set.
     ///
     /// # Errors
     ///

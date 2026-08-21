@@ -85,10 +85,25 @@ impl MemoryJournalStore {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "append validation and the atomic state transition are kept together"
+    )]
     fn append_sync(&self, request: AppendRequest) -> Result<CommittedBatch, StoreError> {
         let mut inner = self.lock()?;
 
         if let Some(existing) = inner.batches_by_id.get(&request.batch_id()) {
+            if existing.history_pruned {
+                return if existing.request == request {
+                    Err(StoreError::InvalidRequest {
+                        reason_code: "append_history_pruned",
+                    })
+                } else {
+                    Err(StoreError::Corruption {
+                        reason_code: "append_batch_id_reuse",
+                    })
+                };
+            }
             return if existing.request == request {
                 Ok(existing.committed.clone())
             } else {
@@ -111,6 +126,16 @@ impl MemoryJournalStore {
             .filter_map(|record| inner.records_by_id.get(&record.record_id()))
             .map(|entry| entry.batch_id)
             .collect::<Vec<_>>();
+        if hits.iter().any(|batch_id| {
+            inner
+                .batches_by_id
+                .get(batch_id)
+                .is_some_and(|entry| entry.history_pruned)
+        }) {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "append_history_pruned",
+            });
+        }
         if let Some(original_batch_id) = classify_record_reuse(&hits, request.records().len())? {
             let existing =
                 inner
@@ -180,6 +205,7 @@ impl MemoryJournalStore {
             BatchIndexEntry {
                 request,
                 committed: committed.clone(),
+                history_pruned: false,
             },
         );
         // The chain this append extended was built by this process from the
@@ -439,6 +465,10 @@ impl MemoryJournalStore {
         })
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "prune validation and the atomic state transition are kept together"
+    )]
     fn prune_sync(&self, request: PruneRequest) -> Result<PruneReceipt, StoreError> {
         let mut inner = self.lock()?;
         let session =
@@ -473,26 +503,40 @@ impl MemoryJournalStore {
         let retained_outstanding = outstanding_count(&accelerated);
         let retained_tombstones = tombstone_count(&accelerated);
         let pruned_through_sequence = snapshot.sequence();
+        let boundary_batch = session
+            .batches
+            .iter()
+            .find(|batch| batch.last_sequence == pruned_through_sequence)
+            .cloned()
+            .ok_or(StoreError::Integrity {
+                reason_code: "prune_boundary_batch_missing",
+            })?;
+        let boundary_record =
+            boundary_batch
+                .records
+                .last()
+                .cloned()
+                .ok_or(StoreError::Integrity {
+                    reason_code: "prune_boundary_record_missing",
+                })?;
+        let boundary_record_id = boundary_record.record_id();
+        let boundary_batch_id = boundary_batch.batch_id;
+        let boundary_record_ids = boundary_batch
+            .records
+            .iter()
+            .map(RecordEnvelope::record_id)
+            .collect::<Vec<_>>();
         session
             .batches
-            .retain(|batch| batch.last_sequence >= pruned_through_sequence);
-        session.records = session
+            .retain(|batch| batch.last_sequence > pruned_through_sequence);
+        session.boundary_record = Some(boundary_record.clone());
+        session.records = 1 + session
             .batches
             .iter()
             .map(|batch| batch.records.len())
-            .sum();
-        if let Some(first) = session
-            .batches
-            .first()
-            .and_then(|batch| batch.records.first())
-        {
-            session.anchor_next_sequence = first.sequence();
-            session.anchor_previous_checksum = first.previous_checksum();
-        }
-        // The retained journal is a different chain prefix than the one the
-        // cached proof described, so the proof is dropped and the pruned
-        // journal re-verified in full before a new one is recorded.
-        self.verified.invalidate(request.session_id);
+            .sum::<usize>();
+        session.anchor_next_sequence = boundary_record.sequence();
+        session.anchor_previous_checksum = boundary_record.previous_checksum();
         let head = VerifiedHead {
             sequence: session.head_sequence,
             checksum: session.head_checksum,
@@ -504,6 +548,27 @@ impl MemoryJournalStore {
             next_sequence: session.anchor_next_sequence,
             previous_checksum: session.anchor_previous_checksum,
         };
+
+        inner.batches_by_id.retain(|_, entry| {
+            entry.request.session_id() != request.session_id
+                || entry.committed.last_sequence >= pruned_through_sequence
+        });
+        if let Some(entry) = inner.batches_by_id.get_mut(&boundary_batch_id) {
+            entry.history_pruned = boundary_batch.first_sequence != boundary_batch.last_sequence;
+        }
+        for record_id in boundary_record_ids {
+            if record_id != boundary_record_id {
+                inner.records_by_id.remove(&record_id);
+            }
+        }
+        let retained_batch_ids = inner.batches_by_id.keys().copied().collect::<Vec<_>>();
+        inner
+            .records_by_id
+            .retain(|_, entry| retained_batch_ids.contains(&entry.batch_id));
+        // The retained journal is a different chain prefix than the one the
+        // cached proof described, so the proof is dropped and the pruned
+        // journal re-verified in full before a new one is recorded.
+        self.verified.invalidate(request.session_id);
         // `inner` is one mutex over *every* session, so nothing expensive may
         // run under it. `records` is already an owned clone and `stored_head`
         // a `Copy` digest, so the chain walk needs no lock at all: release it
@@ -645,6 +710,7 @@ struct SessionData {
     metadata: Metadata,
     records: usize,
     batches: Vec<CommittedBatch>,
+    boundary_record: Option<RecordEnvelope>,
     snapshot: Option<OpaqueSnapshot>,
     anchor_next_sequence: u64,
     anchor_previous_checksum: Option<Digest>,
@@ -658,6 +724,7 @@ impl Default for SessionData {
             metadata: Metadata::empty(),
             records: 0,
             batches: Vec::new(),
+            boundary_record: None,
             snapshot: None,
             anchor_next_sequence: 1,
             anchor_previous_checksum: None,
@@ -668,6 +735,7 @@ impl Default for SessionData {
 struct BatchIndexEntry {
     request: AppendRequest,
     committed: CommittedBatch,
+    history_pruned: bool,
 }
 
 struct RecordIndexEntry {
@@ -731,15 +799,29 @@ fn record_index_entries(
 
 fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {
     session
-        .batches
+        .boundary_record
         .iter()
-        .flat_map(|batch| batch.records.iter().cloned())
+        .cloned()
+        .chain(
+            session
+                .batches
+                .iter()
+                .flat_map(|batch| batch.records.iter().cloned()),
+        )
         .collect()
 }
 
 fn slice_records(session: &SessionData, start: u64, limit: usize) -> (Vec<RecordEnvelope>, bool) {
     let mut records = Vec::new();
     let mut saw_more = false;
+    if let Some(boundary) = &session.boundary_record
+        && boundary.sequence() >= start
+    {
+        if limit == 0 {
+            return (records, true);
+        }
+        records.push(boundary.clone());
+    }
     'batches: for batch in &session.batches {
         for record in batch.records.iter() {
             if record.sequence() < start {

@@ -29,17 +29,17 @@ use std::cell::Cell;
 
 use finstack_ai_kernel::{
     BudgetScopeId, ComponentId, ComponentInvocation, ComponentRef, ContentBlock, Digest,
-    ErrorCategory, InvocationRecovery, Message, Metadata, Sensitivity, Stage, TextBlock,
+    ErrorCategory, InvocationRecovery, Message, Metadata, RawJson, Sensitivity, Stage, TextBlock,
     ToolResultBlock, Version,
 };
 use finstack_ai_runtime::{
     BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,
-    CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionResult,
-    CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
-    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
-    MiddlewareRole, OrderTier, PortFuture, PromptCacheImpact, StageInput, StageMask, StageOutcome,
-    compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
-    compaction_summary_digest, validate_compaction_result,
+    CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionModelRequest,
+    CompactionResult, CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind,
+    ContextProvenance, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
+    MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, PromptCacheImpact, StageInput,
+    StageMask, StageOutcome, compaction_projection_digest, compaction_protected_set_digest,
+    compaction_source_digest, compaction_summary_digest, validate_compaction_result,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -169,9 +169,9 @@ impl CompactionConfig {
         )
     }
 
-    /// Model-assisted summarize identity. Does not grant secondary-model
-    /// authority; a first invoke without resume fails closed until the
-    /// compaction runtime-lock contract runtime lock is present.
+    /// Model-assisted summarize identity. The middleware may request the
+    /// configured child model, but the runtime's durable compaction lock is
+    /// the sole authority for commit and dispatch.
     ///
     /// # Examples
     ///
@@ -331,7 +331,7 @@ fn sliding_window(
     config: &CompactionConfig,
     input: &BeforeModelInput,
 ) -> Result<StageOutcome, MiddlewareError> {
-    let before = estimate_entries(&input.source_entries);
+    let before = estimate_request(&input.request, &input.request.messages, 0)?;
     if before <= config.threshold_tokens {
         return Ok(StageOutcome::Continue);
     }
@@ -339,7 +339,7 @@ fn sliding_window(
         .threshold_tokens
         .saturating_sub(config.hysteresis_tokens)
         .max(1);
-    let pairs = collect_pairs(&input.source_entries);
+    let pairs = PairIndex::collect(&input.source_entries);
     let required = required_indices(&input.source_entries, &pairs);
     let mut retained: BTreeSet<usize> = (0..input.source_entries.len()).collect();
     let mut current = before;
@@ -357,11 +357,14 @@ fn sliding_window(
             &mut retained,
         ));
     }
-    let after = current;
+    let messages = retained_messages(&input.source_entries, &retained);
+    if messages.len() == input.source_entries.len() {
+        return no_compaction_outcome(before, input.hard_input_tokens);
+    }
+    let after = estimate_request(&input.request, &messages, 0)?;
     if after > input.hard_input_tokens {
         return Err(budget_error());
     }
-    let messages = retained_messages(&input.source_entries, &retained);
     finish(
         descriptor,
         config,
@@ -379,7 +382,7 @@ fn large_tool_output(
     config: &CompactionConfig,
     input: &BeforeModelInput,
 ) -> Result<StageOutcome, MiddlewareError> {
-    let before = estimate_entries(&input.source_entries);
+    let before = estimate_request(&input.request, &input.request.messages, 0)?;
     if before <= config.threshold_tokens {
         return Ok(StageOutcome::Continue);
     }
@@ -394,7 +397,10 @@ fn large_tool_output(
             config.large_tool_output_bytes,
         )?);
     }
-    let after = messages.iter().map(estimate_message).sum::<u64>();
+    if messages.as_slice() == input.request.messages.as_ref() {
+        return no_compaction_outcome(before, input.hard_input_tokens);
+    }
+    let after = estimate_request(&input.request, &messages, 0)?;
     if after > input.hard_input_tokens {
         return Err(budget_error());
     }
@@ -416,14 +422,44 @@ fn summarize(
     ctx: &MiddlewareContext,
     input: &BeforeModelInput,
 ) -> Result<StageOutcome, MiddlewareError> {
+    let before = estimate_request(&input.request, &input.request.messages, 0)?;
+    if before <= config.threshold_tokens {
+        return Ok(StageOutcome::Continue);
+    }
     if let Some(resume) = &ctx.compaction_resume {
         return summarize_resume(descriptor, config, input, resume);
     }
-    Err(middleware_error(
-        COMPACTION_MODEL_NOT_AUTHORIZED,
-        ErrorCategory::Middleware,
-        "compaction secondary model is not authorized",
-    ))
+    let model = config.summarize_model.clone().ok_or_else(|| {
+        middleware_error(
+            COMPACTION_MODEL_NOT_AUTHORIZED,
+            ErrorCategory::Middleware,
+            "compaction summary model is not configured",
+        )
+    })?;
+    let budget_scope_id = config.budget_scope_id.ok_or_else(|| {
+        middleware_error(
+            COMPACTION_MODEL_NOT_AUTHORIZED,
+            ErrorCategory::Middleware,
+            "compaction budget scope is not configured",
+        )
+    })?;
+    let resume_state = RawJson::parse(b"{}").map_err(|_| {
+        middleware_error(
+            finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+            ErrorCategory::Middleware,
+            "compaction resume state is invalid",
+        )
+    })?;
+    Ok(StageOutcome::RequestCompactionModel(Box::new(
+        CompactionModelRequest {
+            model,
+            request: input.request.clone(),
+            budget_scope_id,
+            source_sensitivity: max_sensitivity(&input.source_entries),
+            residency_policy_digest: config.residency_policy_digest,
+            resume_state,
+        },
+    )))
 }
 
 fn summarize_resume(
@@ -432,14 +468,10 @@ fn summarize_resume(
     input: &BeforeModelInput,
     resume: &finstack_ai_runtime::CompactionModelResume,
 ) -> Result<StageOutcome, MiddlewareError> {
-    let before = estimate_entries(&input.source_entries);
-    let pairs = collect_pairs(&input.source_entries);
+    let before = estimate_request(&input.request, &input.request.messages, 0)?;
+    let pairs = PairIndex::collect(&input.source_entries);
     let required = required_indices(&input.source_entries, &pairs);
     let messages = retained_messages(&input.source_entries, &required);
-    let after = messages.iter().map(estimate_message).sum::<u64>();
-    if after > input.hard_input_tokens {
-        return Err(budget_error());
-    }
     let summary_text = resume
         .result
         .assistant_content
@@ -484,6 +516,10 @@ fn summarize_resume(
             "compaction derived summary is invalid",
         )
     })?;
+    let after = estimate_request(&input.request, &messages, summary.estimated_tokens)?;
+    if after > input.hard_input_tokens || after > before {
+        return Err(budget_error());
+    }
     finish(
         descriptor,
         config,
@@ -516,14 +552,14 @@ fn finish(
         .filter(|entry| entry.protected)
         .map(|entry| entry.entry_id)
         .collect::<Vec<_>>();
+    let retained_message_ids = replacement_messages
+        .iter()
+        .map(|message| *message.id())
+        .collect::<BTreeSet<_>>();
     let retained_entry_ids = input
         .source_entries
         .iter()
-        .filter(|entry| {
-            replacement_messages
-                .iter()
-                .any(|message| message.id() == entry.message.id())
-        })
+        .filter(|entry| retained_message_ids.contains(entry.message.id()))
         .map(|entry| entry.entry_id)
         .collect::<Vec<_>>();
     let covered_entry_ids: Arc<[finstack_ai_kernel::EntryId]> = input
@@ -555,7 +591,7 @@ fn finish(
             retained_entry_ids: retained_entry_ids.into(),
             projection_digest: compaction_projection_digest(&replacement_messages)?,
             estimated_tokens_before: before,
-            estimated_tokens_after: after.min(before),
+            estimated_tokens_after: after,
             summary_digest: Some(summary_digest),
             cache_impact,
         },
@@ -576,68 +612,72 @@ fn finish(
     Ok(StageOutcome::CompactContext(Box::new(result)))
 }
 
-fn required_indices(
-    entries: &[CompactionSourceEntry],
-    pairs: &BTreeMap<usize, Option<usize>>,
-) -> BTreeSet<usize> {
+struct PairIndex {
+    partner: Vec<Option<usize>>,
+    unmatched_calls: BTreeSet<usize>,
+}
+
+impl PairIndex {
+    fn collect(entries: &[CompactionSourceEntry]) -> Self {
+        #[cfg(test)]
+        PAIR_ANALYSIS_COUNT.with(|count| count.set(count.get().saturating_add(1)));
+        let mut calls = BTreeMap::new();
+        let mut results = BTreeMap::new();
+        for (index, entry) in entries.iter().enumerate() {
+            for block in entry.message.content() {
+                match block {
+                    ContentBlock::ToolCall(call) => {
+                        calls.insert(*call.tool_call_id(), index);
+                    }
+                    ContentBlock::ToolResult(result) => {
+                        results.insert(*result.tool_call_id(), index);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut partner = vec![None; entries.len()];
+        let mut unmatched_calls = BTreeSet::new();
+        for (id, call_index) in calls {
+            if let Some(result_index) = results.get(&id).copied() {
+                partner[call_index] = Some(result_index);
+                partner[result_index] = Some(call_index);
+            } else {
+                unmatched_calls.insert(call_index);
+            }
+        }
+        Self {
+            partner,
+            unmatched_calls,
+        }
+    }
+}
+
+fn required_indices(entries: &[CompactionSourceEntry], pairs: &PairIndex) -> BTreeSet<usize> {
     let mut required = BTreeSet::new();
     for (index, entry) in entries.iter().enumerate() {
         if entry.protected {
             required.insert(index);
         }
     }
-    for (call, result) in pairs {
-        if result.is_none() {
-            required.insert(*call);
-        }
-    }
+    required.extend(pairs.unmatched_calls.iter().copied());
     required
-}
-
-fn collect_pairs(entries: &[CompactionSourceEntry]) -> BTreeMap<usize, Option<usize>> {
-    #[cfg(test)]
-    PAIR_ANALYSIS_COUNT.with(|count| count.set(count.get().saturating_add(1)));
-    let mut calls = BTreeMap::new();
-    let mut results = BTreeMap::new();
-    for (index, entry) in entries.iter().enumerate() {
-        for block in entry.message.content() {
-            match block {
-                ContentBlock::ToolCall(call) => {
-                    calls.insert(*call.tool_call_id(), index);
-                }
-                ContentBlock::ToolResult(result) => {
-                    results.insert(*result.tool_call_id(), index);
-                }
-                _ => {}
-            }
-        }
-    }
-    calls
-        .into_iter()
-        .map(|(id, call_index)| (call_index, results.get(&id).copied()))
-        .collect()
 }
 
 fn drop_with_pair(
     index: usize,
     entries: &[CompactionSourceEntry],
-    pairs: &BTreeMap<usize, Option<usize>>,
+    pairs: &PairIndex,
     retained: &mut BTreeSet<usize>,
 ) -> u64 {
     let mut subtracted = 0_u64;
     if retained.remove(&index) {
         subtracted = subtracted.saturating_add(estimate_message(&entries[index].message));
     }
-    for (call, result) in pairs {
-        if *call == index
-            && let Some(result) = *result
-            && retained.remove(&result)
-        {
-            subtracted = subtracted.saturating_add(estimate_message(&entries[result].message));
-        }
-        if *result == Some(index) && retained.remove(call) {
-            subtracted = subtracted.saturating_add(estimate_message(&entries[*call].message));
-        }
+    if let Some(partner) = pairs.partner[index]
+        && retained.remove(&partner)
+    {
+        subtracted = subtracted.saturating_add(estimate_message(&entries[partner].message));
     }
     subtracted
 }
@@ -714,11 +754,7 @@ fn truncate_blocks(blocks: &[ContentBlock], limit: usize) -> Vec<ContentBlock> {
     for block in blocks {
         match block {
             ContentBlock::Text(text) if text.text().len() > remaining => {
-                let preview = text
-                    .text()
-                    .chars()
-                    .take(remaining.max(1))
-                    .collect::<String>();
+                let preview = utf8_prefix(text.text(), remaining);
                 if let Ok(block) = TextBlock::try_new(preview) {
                     out.push(ContentBlock::Text(block));
                 }
@@ -728,22 +764,51 @@ fn truncate_blocks(blocks: &[ContentBlock], limit: usize) -> Vec<ContentBlock> {
                 remaining = remaining.saturating_sub(text.text().len());
                 out.push(ContentBlock::Text(text.clone()));
             }
-            other => out.push(other.clone()),
+            other => {
+                let encoded_len = serde_json::to_vec(other).map_or(usize::MAX, |bytes| bytes.len());
+                if encoded_len > remaining {
+                    let marker = utf8_prefix("[truncated:non-text]", remaining);
+                    if let Ok(block) = TextBlock::try_new(marker) {
+                        out.push(ContentBlock::Text(block));
+                    }
+                    break;
+                }
+                remaining = remaining.saturating_sub(encoded_len);
+                out.push(other.clone());
+            }
         }
     }
     if out.is_empty()
-        && let Ok(block) = TextBlock::try_new("[truncated]")
+        && let Ok(block) = TextBlock::try_new(utf8_prefix("[truncated]", limit))
     {
         out.push(ContentBlock::Text(block));
     }
     out
 }
 
-fn estimate_entries(entries: &[CompactionSourceEntry]) -> u64 {
-    entries
-        .iter()
-        .map(|entry| estimate_message(&entry.message))
-        .sum()
+fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
+    let mut end = value.len().min(max_bytes);
+    while !value.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    &value[..end]
+}
+
+fn estimate_request(
+    request: &finstack_ai_runtime::ModelRequestDraft,
+    messages: &[Message],
+    additional_tokens: u64,
+) -> Result<u64, MiddlewareError> {
+    let mut rebuilt = request.clone();
+    rebuilt.messages = Arc::from(messages.to_vec());
+    let bytes = rebuilt.canonical_bytes().map_err(|_| {
+        middleware_error(
+            finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+            ErrorCategory::Middleware,
+            "compaction request estimate could not be constructed",
+        )
+    })?;
+    Ok(estimate_tokens(bytes.len()).saturating_add(additional_tokens))
 }
 
 fn estimate_message(message: &Message) -> u64 {
@@ -783,6 +848,17 @@ fn budget_error() -> MiddlewareError {
         ErrorCategory::Limit,
         "compacted projection exceeds the hard model-input budget",
     )
+}
+
+fn no_compaction_outcome(
+    estimated_tokens: u64,
+    hard_input_tokens: u64,
+) -> Result<StageOutcome, MiddlewareError> {
+    if estimated_tokens <= hard_input_tokens {
+        Ok(StageOutcome::Continue)
+    } else {
+        Err(budget_error())
+    }
 }
 
 fn middleware_error(

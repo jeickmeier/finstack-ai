@@ -5,44 +5,37 @@
 //! [`MemoryStore`] — writes belong to the toolset (a later task). It only
 //! reads.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ContentBlock, Digest, InvocationRecovery, Metadata,
     TextBlock, Timestamp, Version,
 };
 use finstack_ai_runtime::{
-    ContextAuthority, ContextCallContext, ContextContribution, ContextError, ContextItem,
-    ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
+    ArtifactStore, ContextAuthority, ContextCallContext, ContextContribution, ContextError,
+    ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
     ContextProviderDescriptor, ContextRequest, PortFuture,
 };
 
 use crate::record::{MemoryError, MemoryId, MemoryScope};
-use crate::store::{MatchEvidence, MemoryHit, MemoryQuery, MemoryStore};
+use crate::store::{
+    MatchEvidence, MemoryHit, MemoryQuery, MemoryStore, reconcile_memory_artifacts,
+};
 
 /// Stable component identity for [`MemoryContextProvider`].
 const COMPONENT_ID: &str = "finstack.context.memory";
 
 /// Tunables for a [`MemoryContextProvider`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct RecallConfig {
     /// Maximum number of items a single `collect` may return.
     pub max_hits: usize,
-    /// Number of leading items whose ordering is remembered across
-    /// consecutive `collect` calls on the same provider instance, so an
-    /// unchanged recall set produces a stable prefix (and cache key) even
-    /// when tie-broken scores would otherwise reorder it.
-    pub stable_prefix: usize,
 }
 
 impl Default for RecallConfig {
     fn default() -> Self {
-        Self {
-            max_hits: 8,
-            stable_prefix: 4,
-        }
+        Self { max_hits: 8 }
     }
 }
 
@@ -50,20 +43,15 @@ impl Default for RecallConfig {
 ///
 /// Reads [`MemoryStore::search`] for keyword and full-text matches, merges
 /// and deterministically orders them, and emits bounded `Reference` context
-/// items. The provider keeps small per-instance state (the previous
-/// collect's leading item ids) purely to stabilize output ordering across
-/// calls; this state is **not persisted** and is intentionally scoped to one
-/// provider instance (typically one agent).
+/// items. Ordering is a pure function of the current records and match
+/// evidence, so identical input produces identical output without mutable
+/// per-provider state.
 pub struct MemoryContextProvider {
     descriptor: ContextProviderDescriptor,
     store: Arc<dyn MemoryStore>,
+    artifact_store: Arc<dyn ArtifactStore>,
     scope: MemoryScope,
     config: RecallConfig,
-    /// Ids of the leading `config.stable_prefix` items from the last
-    /// successful `collect`, in their remembered order. Per-instance,
-    /// in-memory only. `Arc`-wrapped so `collect`'s `'static` future can
-    /// hold its own handle without borrowing `self`.
-    stable_prefix: Arc<Mutex<Vec<MemoryId>>>,
 }
 
 impl MemoryContextProvider {
@@ -75,9 +63,30 @@ impl MemoryContextProvider {
     /// identity is invalid.
     pub fn try_new(
         store: Arc<dyn MemoryStore>,
+        artifact_store: Arc<dyn ArtifactStore>,
         scope: MemoryScope,
         config: RecallConfig,
     ) -> Result<Self, MemoryError> {
+        scope.validate()?;
+        if config.max_hits == 0 || config.max_hits > store.descriptor().limits.max_search_results {
+            return Err(MemoryError::Configuration {
+                reason: "invalid_recall_limit",
+            });
+        }
+        let identity = serde_json_canonicalizer::to_vec(&serde_json::json!({
+            "version": 1,
+            "scope": scope,
+            "recall": config,
+            "memory_store_id": store.descriptor().store_id,
+            "artifact_store_id": artifact_store.descriptor().store_id,
+        }))
+        .map_err(|_| MemoryError::Configuration {
+            reason: "invalid_provider_identity",
+        })?;
+        let configuration_digest = Digest::domain_separated("memory-provider", 1, &identity)
+            .map_err(|_| MemoryError::Configuration {
+                reason: "invalid_provider_identity",
+            })?;
         Ok(Self {
             descriptor: ContextProviderDescriptor {
                 invocation: ComponentInvocation {
@@ -91,16 +100,16 @@ impl MemoryContextProvider {
                         minor: 1,
                         patch: 0,
                     },
-                    configuration_digest: Digest::raw_json(scope.tenant().as_bytes()),
+                    configuration_digest,
                     recovery: InvocationRecovery::RecomputeSafe,
                 },
                 trusted_application_instructions: false,
                 metadata: Metadata::empty(),
             },
             store,
+            artifact_store,
             scope,
             config,
-            stable_prefix: Arc::new(Mutex::new(Vec::new())),
         })
     }
 }
@@ -116,18 +125,9 @@ impl ContextProvider for MemoryContextProvider {
         request: ContextRequest,
     ) -> PortFuture<Result<ContextContribution, ContextError>> {
         let store = Arc::clone(&self.store);
+        let artifact_store = Arc::clone(&self.artifact_store);
         let scope = self.scope.clone();
         let config = self.config;
-        let stable_prefix = Arc::clone(&self.stable_prefix);
-        // `stable_prefix` remembers only ids: cheap to snapshot and cheap to
-        // replace, so cloning it out from under the lock keeps the lock
-        // scope tight around this synchronous read.
-        let remembered_prefix = match stable_prefix.lock() {
-            Ok(guard) => guard.clone(),
-            Err(_) => {
-                return Box::pin(async { Err(contribution_invalid("memory prefix lock failed")) });
-            }
-        };
         Box::pin(async move {
             if ctx.run.locator.tenant_scope.as_ref() != scope.tenant() {
                 return Err(contribution_invalid(
@@ -141,8 +141,15 @@ impl ContextProvider for MemoryContextProvider {
             } else {
                 search_candidates(store.as_ref(), &scope, &query, config.max_hits).await?
             };
+            reconcile_memory_artifacts(
+                store.as_ref(),
+                artifact_store.as_ref(),
+                store.descriptor().limits.max_artifact_actions.min(256),
+            )
+            .await
+            .map_err(|_| contribution_invalid("memory artifact reconciliation failed"))?;
 
-            let ordered = order_candidates(candidates, &remembered_prefix, config.max_hits);
+            let ordered = order_candidates(candidates, config.max_hits);
 
             let mut entries = Vec::with_capacity(ordered.len());
             for hit in ordered {
@@ -154,14 +161,7 @@ impl ContextProvider for MemoryContextProvider {
                 });
             }
 
-            let (contribution, accepted_ids) = apply_budget(entries, &request)?;
-
-            if let Ok(mut guard) = stable_prefix.lock() {
-                guard.clear();
-                guard.extend(accepted_ids.into_iter().take(config.stable_prefix));
-            }
-
-            Ok(contribution)
+            apply_budget(entries, &request)
         })
     }
 }
@@ -181,7 +181,7 @@ async fn search_candidates(
     query: &str,
     max_hits: usize,
 ) -> Result<Vec<MemoryHit>, ContextError> {
-    let limit = max_hits.saturating_mul(2);
+    let limit = max_hits;
     let tokens: Arc<[Arc<str>]> = query
         .split_whitespace()
         .map(Arc::<str>::from)
@@ -229,24 +229,14 @@ async fn search_candidates(
     Ok(merged.into_values().collect())
 }
 
-/// Sort candidates by remembered stable-prefix position first, then by
-/// `(tier asc, id asc)`, and truncate to `max_hits`.
-fn order_candidates(
-    mut candidates: Vec<MemoryHit>,
-    remembered_prefix: &[MemoryId],
-    max_hits: usize,
-) -> Vec<MemoryHit> {
+/// Sort candidates by evidence tier, score, confirmation time, then id.
+fn order_candidates(mut candidates: Vec<MemoryHit>, max_hits: usize) -> Vec<MemoryHit> {
     candidates.sort_by(|a, b| {
-        let a_pos = remembered_prefix.iter().position(|id| id == &a.record.id);
-        let b_pos = remembered_prefix.iter().position(|id| id == &b.record.id);
-        match (a_pos, b_pos) {
-            (Some(x), Some(y)) => x.cmp(&y),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => tier_of(&a.matched)
-                .cmp(&tier_of(&b.matched))
-                .then_with(|| a.record.id.cmp(&b.record.id)),
-        }
+        tier_of(&a.matched)
+            .cmp(&tier_of(&b.matched))
+            .then_with(|| b.score.cmp(&a.score))
+            .then_with(|| b.record.last_confirmed_at.cmp(&a.record.last_confirmed_at))
+            .then_with(|| a.record.id.cmp(&b.record.id))
     });
     candidates.truncate(max_hits);
     candidates
@@ -264,12 +254,13 @@ fn tier_of(evidence: &MatchEvidence) -> u8 {
 fn build_item(hit: &MemoryHit) -> Result<ContextItem, ContextError> {
     let record = &hit.record;
     let artifact_label = artifact_label(record);
+    let rendered = format!("{} [{}]", record.preview, artifact_label);
+    let estimated_tokens = estimate_tokens(&rendered);
     ContextItem::try_new(
         ContextItemKind::Reference,
-        vec![ContentBlock::Text(
-            TextBlock::try_new(format!("{} [{}]", record.preview, artifact_label))
-                .map_err(|_| contribution_invalid("memory preview is invalid"))?,
-        )],
+        vec![ContentBlock::Text(TextBlock::try_new(rendered).map_err(
+            |_| contribution_invalid("memory preview is invalid"),
+        )?)],
         ContextProvenance {
             source_id: Arc::from(COMPONENT_ID),
             source_ref: Some(Arc::from(record.id.as_str())),
@@ -277,7 +268,7 @@ fn build_item(hit: &MemoryHit) -> Result<ContextItem, ContextError> {
         },
         ContextAuthority::Untrusted,
         0,
-        estimate_tokens(&record.preview),
+        estimated_tokens,
         record.sensitivity,
         false,
     )
@@ -286,7 +277,7 @@ fn build_item(hit: &MemoryHit) -> Result<ContextItem, ContextError> {
 fn artifact_label(record: &crate::record::MemoryRecord) -> Arc<str> {
     match &record.body {
         crate::record::MemoryBody::Inline(_) => Arc::from("memory"),
-        crate::record::MemoryBody::Blob(artifact) => artifact
+        crate::record::MemoryBody::Blob { artifact, .. } => artifact
             .blob()
             .name()
             .map_or_else(|| Arc::from("memory"), Arc::from),
@@ -314,7 +305,7 @@ fn query_text(request: &ContextRequest) -> String {
 fn apply_budget(
     entries: Vec<RecallEntry>,
     request: &ContextRequest,
-) -> Result<(ContextContribution, Vec<MemoryId>), ContextError> {
+) -> Result<ContextContribution, ContextError> {
     let mut accepted_items = Vec::new();
     let mut accepted_meta: Vec<(MemoryId, Timestamp)> = Vec::new();
     let mut tokens = 0_u64;
@@ -345,9 +336,7 @@ fn apply_budget(
         accepted_items.push(entry.item);
     }
     let cache_key = cache_key_digest(&accepted_meta);
-    let accepted_ids = accepted_meta.into_iter().map(|(id, _)| id).collect();
-    let contribution = ContextContribution::try_new(accepted_items, Some(cache_key))?;
-    Ok((contribution, accepted_ids))
+    ContextContribution::try_new(accepted_items, Some(cache_key))
 }
 
 /// Deterministic digest over `(id, last_confirmed_at.as_unix_ms())` pairs in

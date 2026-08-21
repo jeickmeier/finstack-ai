@@ -81,7 +81,7 @@ pub struct ScriptedStep {
     /// Timer duration in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
-    /// Optional TDD §6.5 payload declaration ceilings.
+    /// Optional contract section 6.5 payload declaration ceilings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload_declaration: Option<PayloadDeclaration>,
 }

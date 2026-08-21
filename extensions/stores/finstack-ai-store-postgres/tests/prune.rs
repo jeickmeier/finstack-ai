@@ -45,6 +45,7 @@ fn wide_limits() -> StoreLimits {
 /// can be opened onto the same schema (for the concurrency test).
 async fn open_store(url: &str, schema: &str) -> PostgresJournalStore {
     let mut config = PostgresStoreConfig::new(url, wide_limits());
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.schema = Arc::from(schema);
     PostgresJournalStore::try_open(config)
         .await

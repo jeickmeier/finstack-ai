@@ -19,11 +19,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
-    EventId, Id, IdTag, InteractionId, InteractionKind, InteractionTerminal,
-    InteractionTerminalOutcome, StageCursor, ToolCallId,
+    ArtifactRef, EventId, Id, IdTag, InteractionId, InteractionKind, InteractionTerminal,
+    InteractionTerminalOutcome, OperationLocator, Sensitivity, StageCursor, ToolCallId,
 };
 
-use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
+use crate::coordinator::{CommitCoordinator, ModelDispatchSeed, ToolDispatchSeed};
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 use crate::{
@@ -133,6 +133,8 @@ pub(crate) struct SettlementSources<C, R> {
     progress_random: ProgressRandom,
     nested_sampling: Option<NestedSamplingPorts>,
     approval: Mutex<ApprovalGrantLedger>,
+    artifact_store: Option<Arc<dyn crate::ArtifactStore>>,
+    artifact_locator: Option<OperationLocator>,
 }
 
 impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
@@ -144,7 +146,95 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             progress_random,
             nested_sampling: None,
             approval: Mutex::new(ApprovalGrantLedger::new(ApprovalGrantMode::PerCall)),
+            artifact_store: None,
+            artifact_locator: None,
         })
+    }
+
+    pub(crate) fn attach_artifact_store(
+        &mut self,
+        store: Arc<dyn crate::ArtifactStore>,
+        locator: OperationLocator,
+    ) {
+        self.artifact_store = Some(store);
+        self.artifact_locator = Some(locator);
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) async fn reconcile_recovered_artifacts(
+        &self,
+        coordinator: &CommitCoordinator,
+    ) -> Result<(), RunHandleError> {
+        let Some(locator) = self.artifact_locator.as_ref() else {
+            return Ok(());
+        };
+        let loaded = coordinator
+            .journal_store()
+            .load(crate::LoadRequest {
+                session_id: locator.session_id,
+            })
+            .await
+            .map_err(|_| RunHandleError::Artifact {
+                code: "artifact_recovery_journal_load_failed",
+            })?;
+        for record in loaded
+            .committed_batches
+            .iter()
+            .flat_map(|batch| batch.records.iter())
+            .filter(|record| record.run_id() == Some(locator.run_id))
+        {
+            if let finstack_ai_kernel::RecordBody::EffectCompleted(completion) = record.body() {
+                self.pin_committed_artifacts(locator, completion.artifacts())
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn pin_committed_artifacts(
+        &self,
+        locator: &OperationLocator,
+        artifacts: &[ArtifactRef],
+    ) -> Result<(), RunHandleError> {
+        if artifacts.is_empty() {
+            return Ok(());
+        }
+        let store = self
+            .artifact_store
+            .as_ref()
+            .ok_or(RunHandleError::Artifact {
+                code: "artifact_store_missing",
+            })?;
+        let owner = crate::ArtifactOwnerId::try_new(format!("journal:{}", locator.session_id))
+            .map_err(|error| RunHandleError::Artifact { code: error.code() })?;
+        for artifact in artifacts {
+            let scope = [
+                Sensitivity::Public,
+                Sensitivity::Internal,
+                Sensitivity::Confidential,
+                Sensitivity::Secret,
+                Sensitivity::Credential,
+            ]
+            .into_iter()
+            .flat_map(|sensitivity| {
+                [Some(locator.run_id), None].map(|run_id| (sensitivity, run_id))
+            })
+            .map(|(sensitivity, run_id)| crate::ArtifactScope {
+                tenant_scope: Arc::clone(&locator.tenant_scope),
+                session_id: locator.session_id,
+                run_id,
+                sensitivity,
+            })
+            .find(|scope| scope.digest().ok() == Some(artifact.scope_digest()))
+            .ok_or(RunHandleError::Artifact {
+                code: crate::ARTIFACT_SCOPE_MISMATCH,
+            })?;
+            store
+                .pin(scope, artifact.clone(), owner.clone())
+                .await
+                .map_err(|error| RunHandleError::Artifact { code: error.code() })?;
+        }
+        Ok(())
     }
 
     pub(crate) fn set_approval_grant(&self, mode: ApprovalGrantMode) {

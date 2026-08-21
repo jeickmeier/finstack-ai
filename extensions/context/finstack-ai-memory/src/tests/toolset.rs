@@ -144,8 +144,6 @@ fn policy_gates_registered_tools() {
         read: true,
         write: false,
         manage: false,
-        consolidate: false,
-        profile: false,
     };
     assert_eq!(
         names(read_only),
@@ -156,8 +154,6 @@ fn policy_gates_registered_tools() {
         read: false,
         write: true,
         manage: false,
-        consolidate: false,
-        profile: false,
     };
     assert_eq!(names(write_only), BTreeSet::from(["remember".to_owned()]));
 
@@ -165,8 +161,6 @@ fn policy_gates_registered_tools() {
         read: false,
         write: false,
         manage: true,
-        consolidate: false,
-        profile: false,
     };
     assert_eq!(
         names(manage_only),
@@ -186,8 +180,6 @@ fn policy_gates_registered_tools() {
         read: true,
         write: true,
         manage: true,
-        consolidate: true,
-        profile: true,
     };
     assert_eq!(
         names(all_true),
@@ -198,6 +190,52 @@ fn policy_gates_registered_tools() {
             "forget_memory".to_owned(),
             "correct_memory".to_owned(),
         ])
+    );
+}
+
+#[tokio::test]
+async fn policy_is_enforced_at_call_and_reconcile_time() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    store
+        .put(
+            Arc::from("seed"),
+            crate::tests::sample_record("m1", "tenant-a"),
+        )
+        .await
+        .expect("seed");
+    let args = br#"{"id":"m1"}"#;
+    let Err(error) = toolset
+        .call(
+            context(EffectId::from_bytes([40; 16])),
+            validated_call(&toolset, "forget_memory", args),
+        )
+        .await
+    else {
+        panic!("disabled direct call must fail");
+    };
+    assert_eq!(error.code(), crate::MEMORY_TOOL_POLICY_DENIED);
+
+    let effect = finstack_ai_runtime::PendingToolEffect {
+        call: validated_call(&toolset, "forget_memory", args),
+    };
+    let ctx = finstack_ai_runtime::ReconcileContext {
+        run: run_context(EffectId::from_bytes([41; 16])),
+        original_input_digest: Digest::raw_json(b"{}"),
+    };
+    let error = toolset
+        .reconcile(ctx, effect)
+        .await
+        .expect_err("disabled reconciliation");
+    assert_eq!(error.code(), crate::MEMORY_TOOL_POLICY_DENIED);
+    assert!(
+        store
+            .get(
+                MemoryScope::try_new("tenant-a").expect("scope"),
+                crate::MemoryId::parse("m1").expect("id"),
+            )
+            .await
+            .expect("get")
+            .is_some()
     );
 }
 
@@ -252,7 +290,7 @@ async fn remember_stages_large_bodies_as_blobs() {
         .await
         .expect("get")
         .expect("record present");
-    assert!(matches!(record.body, crate::MemoryBody::Blob(_)));
+    assert!(matches!(record.body, crate::MemoryBody::Blob { .. }));
     assert_eq!(record.preview.chars().count(), 256);
 }
 
@@ -302,8 +340,6 @@ async fn forget_and_correct_require_ids_and_are_idempotent() {
         read: true,
         write: true,
         manage: true,
-        consolidate: false,
-        profile: false,
     });
     let effect_id = EffectId::from_bytes([14; 16]);
     let remember_args = br#"{"id":"mem-forgettable","keywords":["alpha"],"body":"body text"}"#;
@@ -337,18 +373,15 @@ async fn forget_and_correct_require_ids_and_are_idempotent() {
         )
         .await
         .expect("get");
-    // Tombstoned records are excluded from scoped get() visibility filters
-    // only via search(); get() itself does not filter tombstoned records out.
-    assert!(record.is_some());
-    assert!(record.expect("record").tombstoned);
+    assert!(record.is_none());
 }
 
 fn expected_derived_id(tenant: &str, body: &str) -> String {
-    let digest = finstack_ai_kernel::fixed_domain_digest!(
-        "memory-tool-derived-id",
-        1,
-        format!("{tenant}\0{body}").as_bytes(),
-    );
+    let scope = MemoryScope::try_new(tenant).expect("scope");
+    let encoded = serde_json_canonicalizer::to_vec(&(scope, body)).expect("canonical identity");
+    let digest =
+        finstack_ai_kernel::Digest::domain_separated("memory-tool-derived-id", 1, &encoded)
+            .expect("digest");
     let hex = digest.to_hex();
     format!("mem-{}", &hex[..16.min(hex.len())])
 }
@@ -360,8 +393,6 @@ async fn correct_memory_supersedes_and_is_idempotent() {
         read: true,
         write: true,
         manage: true,
-        consolidate: false,
-        profile: false,
     });
     let scope = MemoryScope::try_new("tenant-a").expect("scope");
 
@@ -404,15 +435,8 @@ async fn correct_memory_supersedes_and_is_idempotent() {
             crate::MemoryId::parse("mem-old").expect("id"),
         )
         .await
-        .expect("get")
-        .expect("old record present");
-    assert_eq!(
-        old_record
-            .superseded_by
-            .as_ref()
-            .map(crate::MemoryId::as_str),
-        Some(expected_new_id.as_str())
-    );
+        .expect("get");
+    assert!(old_record.is_none());
 
     let new_record = store
         .get(
@@ -476,8 +500,6 @@ async fn correct_memory_stages_large_replacement_bodies_as_blobs() {
         read: true,
         write: true,
         manage: true,
-        consolidate: false,
-        profile: false,
     });
     let scope = MemoryScope::try_new("tenant-a").expect("scope");
 
@@ -515,7 +537,7 @@ async fn correct_memory_stages_large_replacement_bodies_as_blobs() {
         .await
         .expect("get")
         .expect("new record present");
-    assert!(matches!(new_record.body, crate::MemoryBody::Blob(_)));
+    assert!(matches!(new_record.body, crate::MemoryBody::Blob { .. }));
     assert_eq!(new_record.preview.chars().count(), 256);
 }
 
@@ -613,8 +635,6 @@ async fn remember_reports_an_id_conflict_instead_of_clobbering() {
         read: false,
         write: true,
         manage: false,
-        consolidate: false,
-        profile: false,
     });
     let first = call_and_extract(
         &toolset,
@@ -653,8 +673,6 @@ async fn correct_memory_rejects_an_unchanged_body() {
         read: true,
         write: true,
         manage: true,
-        consolidate: false,
-        profile: false,
     });
     let body = "unchanged body text";
     let old_id = expected_derived_id("tenant-a", body);

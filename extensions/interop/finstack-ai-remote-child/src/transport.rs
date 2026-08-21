@@ -5,37 +5,44 @@ use finstack_ai_protocol::{
     FRAME_LENGTH_BYTES, POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1,
     PayloadFamily, ProtocolEnvelope, RemoteAuthMethod, RemoteCommand, RemoteCommandPayload,
     RemoteCommandResult, RemoteLocator, RemotePostAuth, RemotePreAuth, VersionOffer,
-    decode_envelope, decode_frame_len, encode_envelope, encode_frame, select_version,
+    decode_envelope, decode_frame_len, encode_envelope, encode_frame, require_features,
+    select_version,
 };
 use finstack_ai_runtime::AgentInvokeError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{Duration, Instant};
 
-use crate::route::{RemoteChildRoute, RemoteEndpoint, parse_endpoint, unavailable};
+use crate::route::{RemoteEndpoint, ResolvedRemoteRoute, unavailable};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_OPEN_FRAMES: usize = 64;
 const MAX_COMMAND_FRAMES: usize = 64;
 
 pub(crate) async fn exchange(
-    route: &RemoteChildRoute,
+    route: &ResolvedRemoteRoute,
     locator: &ChildRunLocator,
     payload: RemoteCommandPayload,
     command_id: &str,
 ) -> Result<RemoteCommandResult, AgentInvokeError> {
-    match parse_endpoint(&route.endpoint)? {
+    match &route.endpoint {
         RemoteEndpoint::Tcp(addr) => {
             let stream =
-                tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(addr))
+                tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(*addr))
                     .await
                     .map_err(|_| unavailable("remote child connect timed out"))?
                     .map_err(|error| unavailable(error.to_string()))?;
-            exchange_on(stream, route, locator, payload, command_id).await
+            tokio::time::timeout(
+                EXCHANGE_TIMEOUT,
+                exchange_on(stream, route, locator, payload, command_id),
+            )
+            .await
+            .map_err(|_| unavailable("remote child exchange timed out"))?
         }
         RemoteEndpoint::Unix(path) => {
-            unix_exchange(path, route, locator, payload, command_id).await
+            unix_exchange(path.clone(), route, locator, payload, command_id).await
         }
     }
 }
@@ -43,7 +50,7 @@ pub(crate) async fn exchange(
 #[cfg(unix)]
 async fn unix_exchange(
     path: std::path::PathBuf,
-    route: &RemoteChildRoute,
+    route: &ResolvedRemoteRoute,
     locator: &ChildRunLocator,
     payload: RemoteCommandPayload,
     command_id: &str,
@@ -52,13 +59,18 @@ async fn unix_exchange(
         .await
         .map_err(|_| unavailable("remote child connect timed out"))?
         .map_err(|error| unavailable(error.to_string()))?;
-    exchange_on(stream, route, locator, payload, command_id).await
+    tokio::time::timeout(
+        EXCHANGE_TIMEOUT,
+        exchange_on(stream, route, locator, payload, command_id),
+    )
+    .await
+    .map_err(|_| unavailable("remote child exchange timed out"))?
 }
 
 #[cfg(not(unix))]
 async fn unix_exchange(
     _path: std::path::PathBuf,
-    _route: &RemoteChildRoute,
+    _route: &ResolvedRemoteRoute,
     _locator: &ChildRunLocator,
     _payload: RemoteCommandPayload,
     _command_id: &str,
@@ -72,7 +84,7 @@ async fn unix_exchange(
 )]
 pub(crate) async fn exchange_on<S>(
     mut stream: S,
-    route: &RemoteChildRoute,
+    route: &ResolvedRemoteRoute,
     locator: &ChildRunLocator,
     payload: RemoteCommandPayload,
     command_id: &str,
@@ -107,7 +119,12 @@ where
             "remote child server selected the wrong version",
         ));
     }
-    let method = match route.token.as_deref() {
+    require_features(&server_offer, &["auth"]).map_err(|error| unavailable(error.to_string()))?;
+    let method = match route
+        .token
+        .as_ref()
+        .map(finstack_ai_runtime::SecretString::expose)
+    {
         Some(token) if !token.is_empty() => RemoteAuthMethod::Bearer {
             token: token.to_owned(),
         },
@@ -295,13 +312,13 @@ async fn write_frame<W: AsyncWrite + Unpin>(
     ceiling: usize,
 ) -> Result<(), AgentInvokeError> {
     let frame = encode_frame(payload, ceiling).map_err(|error| unavailable(error.to_string()))?;
-    writer
-        .write_all(&frame)
+    tokio::time::timeout(WRITE_TIMEOUT, writer.write_all(&frame))
         .await
+        .map_err(|_| unavailable("remote child write timed out"))?
         .map_err(|error| unavailable(error.to_string()))?;
-    writer
-        .flush()
+    tokio::time::timeout(WRITE_TIMEOUT, writer.flush())
         .await
+        .map_err(|_| unavailable("remote child flush timed out"))?
         .map_err(|error| unavailable(error.to_string()))
 }
 

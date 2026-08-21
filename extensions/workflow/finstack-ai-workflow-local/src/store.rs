@@ -60,8 +60,8 @@ pub trait CronScheduleStore: Send + Sync {
     /// # Errors
     ///
     /// Returns [`CronError::StoreUnavailable`] by default.
-    fn load_due(&self, now: Timestamp) -> Result<Vec<CronSchedule>, CronError> {
-        let _ = now;
+    fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<CronSchedule>, CronError> {
+        let _ = (now, limit);
         Err(CronError::StoreUnavailable {
             code: "load_due_unsupported",
         })
@@ -131,19 +131,27 @@ impl CronScheduleStore for MemoryCronStore {
         Ok(true)
     }
 
-    fn load_due(&self, now: Timestamp) -> Result<Vec<CronSchedule>, CronError> {
+    fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<CronSchedule>, CronError> {
         let inner = self.inner.lock().map_err(|_| CronError::StoreUnavailable {
             code: "memory_cron_lock_poisoned",
         })?;
         Ok(inner
             .values()
             .filter(|schedule| schedule.next_fire_at <= now)
+            .take(limit)
             .cloned()
             .collect())
     }
 }
 
+const CRON_SCHEMA_VERSION: i64 = 1;
+
 const CRON_DDL: &str = "
+CREATE TABLE IF NOT EXISTS finstack_workflow_local_schema (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  version INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO finstack_workflow_local_schema (singleton, version) VALUES (1, 1);
 CREATE TABLE IF NOT EXISTS finstack_workflow_local_cron (
   tenant_scope TEXT NOT NULL,
   schedule_id TEXT NOT NULL,
@@ -187,10 +195,30 @@ impl SqliteCronStore {
                     code: "sqlite_cron_wal",
                 })?;
         }
+        let has_schema = table_exists(&conn, "finstack_workflow_local_schema")?;
+        if !has_schema && table_exists(&conn, "finstack_workflow_local_cron")? {
+            return Err(CronError::StoreIntegrity {
+                code: "cron_schema_reset_required",
+            });
+        }
         conn.execute_batch(CRON_DDL)
             .map_err(|_| CronError::StoreUnavailable {
                 code: "sqlite_cron_schema",
             })?;
+        let version: i64 = conn
+            .query_row(
+                "SELECT version FROM finstack_workflow_local_schema WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| CronError::StoreIntegrity {
+                code: "cron_schema_version",
+            })?;
+        if version != CRON_SCHEMA_VERSION {
+            return Err(CronError::StoreIntegrity {
+                code: "cron_schema_version",
+            });
+        }
         Ok(Self {
             path,
             conn: Mutex::new(conn),
@@ -222,6 +250,17 @@ impl SqliteCronStore {
         })?;
         body(&mut conn)
     }
+}
+
+fn table_exists(conn: &Connection, name: &str) -> Result<bool, CronError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [name],
+        |row| row.get(0),
+    )
+    .map_err(|_| CronError::StoreUnavailable {
+        code: "sqlite_cron_schema",
+    })
 }
 
 impl CronScheduleStore for SqliteCronStore {
@@ -349,7 +388,7 @@ impl CronScheduleStore for SqliteCronStore {
         })
     }
 
-    fn load_due(&self, now: Timestamp) -> Result<Vec<CronSchedule>, CronError> {
+    fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<CronSchedule>, CronError> {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -357,23 +396,27 @@ impl CronScheduleStore for SqliteCronStore {
                             next_fire_unix_ms, last_fired_unix_ms, fire_count
                      FROM finstack_workflow_local_cron
                      WHERE next_fire_unix_ms <= ?1
-                     ORDER BY tenant_scope, schedule_id",
+                     ORDER BY tenant_scope, schedule_id
+                     LIMIT ?2",
                 )
                 .map_err(|_| CronError::StoreUnavailable {
                     code: "sqlite_cron_prepare",
                 })?;
             let rows = stmt
-                .query_map(params![now.as_unix_ms()], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, i64>(4)?,
-                        row.get::<_, Option<i64>>(5)?,
-                        row.get::<_, i64>(6)?,
-                    ))
-                })
+                .query_map(
+                    params![now.as_unix_ms(), i64::try_from(limit).unwrap_or(i64::MAX)],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, Option<i64>>(5)?,
+                            row.get::<_, i64>(6)?,
+                        ))
+                    },
+                )
                 .map_err(|_| CronError::StoreUnavailable {
                     code: "sqlite_cron_query",
                 })?;
@@ -505,7 +548,7 @@ mod tests {
                 .expect("upsert");
         }
         let due = store
-            .load_due(Timestamp::from_unix_ms(2_015).expect("now"))
+            .load_due(Timestamp::from_unix_ms(2_015).expect("now"), 10)
             .expect("due");
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].tenant_scope.as_ref(), "tenant-a");
@@ -531,10 +574,37 @@ mod tests {
                 .expect("upsert");
         }
         let due = store
-            .load_due(Timestamp::from_unix_ms(2_015).expect("now"))
+            .load_due(Timestamp::from_unix_ms(2_015).expect("now"), 10)
             .expect("due");
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].tenant_scope.as_ref(), "tenant-a");
+    }
+
+    #[test]
+    fn sqlite_rejects_an_unversioned_cron_table() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("legacy.sqlite");
+        let legacy = Connection::open(&path).expect("legacy");
+        legacy
+            .execute_batch(
+                "CREATE TABLE finstack_workflow_local_cron (
+                    tenant_scope TEXT NOT NULL,
+                    schedule_id TEXT NOT NULL,
+                    expression TEXT NOT NULL,
+                    origin_unix_ms INTEGER NOT NULL,
+                    next_fire_unix_ms INTEGER NOT NULL,
+                    last_fired_unix_ms INTEGER,
+                    fire_count INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_scope, schedule_id)
+                );",
+            )
+            .expect("schema");
+        drop(legacy);
+
+        let Err(error) = SqliteCronStore::open(&path) else {
+            panic!("unversioned schema must fail closed");
+        };
+        assert_eq!(error.code(), "cron_schema_reset_required");
     }
 
     #[test]

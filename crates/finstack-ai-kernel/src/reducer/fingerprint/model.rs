@@ -52,7 +52,7 @@ pub(in crate::reducer) fn external_digest(
     input: &ExternalEffectCompletedInput,
 ) -> Result<Digest, KernelError> {
     // Failed outcomes always project ExternalFailed so completion-identity
-    // classification (TDD §11.3.3 steps 3–4) can run before assistant-presence
+    // classification (contract section 11.3.3 steps 3–4) can run before assistant-presence
     // checks (step 6). Completed outcomes require the assistant in the projection.
     let fingerprint = match (&input.completion.outcome, &input.assistant_message) {
         (

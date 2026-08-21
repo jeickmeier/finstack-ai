@@ -6,9 +6,11 @@
 //! like the sibling document-ingest middleware. Each detected secret — API
 //! key, token, JWT, PEM private key, card number, IBAN, or email address —
 //! is replaced by a stable `[REDACTED:<kind>]` marker carrying nothing
-//! recoverable. Redaction is idempotent, deterministic, and fail-soft: an
-//! internal failure passes the affected content through unmodified rather
-//! than aborting the run; a detection miss is by definition silent.
+//! recoverable. Redaction is idempotent and deterministic. A detected value
+//! whose marker rewrite would exceed the text ceiling becomes
+//! `[REDACTED:oversized]`; unexpected reconstruction failures abort with a
+//! stable non-secret middleware error rather than passing sensitive content
+//! through.
 //!
 //! # Deployment rule
 //!
@@ -62,8 +64,9 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory, ErrorDescriptor,
-    InvocationRecovery, Message, Metadata, RawJson, Stage, TextBlock, ToolResultBlock, Version,
+    ComponentId, ComponentInvocation, ContentBlock, ContentError, Digest, ErrorCategory,
+    ErrorDescriptor, InvocationRecovery, Message, Metadata, RawJson, Stage, TextBlock,
+    ToolResultBlock, Version,
 };
 use finstack_ai_runtime::{
     BeforeModelInput, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
@@ -84,6 +87,9 @@ const REDACTION_VERSION: Version = Version {
 };
 const FAIL_OUTCOME_FALLBACK_MESSAGE: &str = "model output failed redaction checking";
 const FAIL_CONSTRUCTION_CODE: &str = "redaction_output_fail_unconstructable";
+const REDACTION_REWRITE_CODE: &str = "redaction_rewrite_failed";
+const REDACTION_REWRITE_MESSAGE: &str = "redaction rewrite could not be constructed safely";
+const OVERSIZED_MARKER: &str = "[REDACTED:oversized]";
 
 /// What to do when the model's own output contains a detectable secret.
 ///
@@ -225,6 +231,11 @@ impl RedactionMiddleware {
                         reason: "wrapped_middleware_not_standard_role",
                     });
                 }
+                if inner_descriptor.invocation.recovery != InvocationRecovery::RecomputeSafe {
+                    return Err(RedactionError::Configuration {
+                        reason: "wrapped_middleware_not_recompute_safe",
+                    });
+                }
                 (inner_descriptor.order, Some(inner_descriptor.invocation))
             }
             None => (
@@ -280,6 +291,7 @@ fn configuration_digest(
             "component": invocation.component,
             "version": invocation.version,
             "configuration_digest": invocation.configuration_digest,
+            "recovery": invocation.recovery,
         })),
     });
     let bytes =
@@ -304,12 +316,12 @@ impl Middleware for RedactionMiddleware {
             match input {
                 StageInput::BeforeModel(before_model) => {
                     let Some(inner) = middleware.inner.clone() else {
-                        return Ok(middleware.redact_before_model(&before_model));
+                        return middleware.redact_before_model(&before_model);
                     };
                     let outcome = inner
                         .invoke(ctx, StageInput::BeforeModel(before_model.clone()))
                         .await?;
-                    Ok(middleware.redact_inner_outcome(&before_model, outcome))
+                    middleware.redact_inner_outcome(&before_model, outcome)
                 }
                 StageInput::AfterModel { value } => Ok(middleware.check_after_model(&value)?),
                 _ => Ok(StageOutcome::Continue),
@@ -320,36 +332,42 @@ impl Middleware for RedactionMiddleware {
 
 impl RedactionMiddleware {
     /// Rewrite the model-visible draft, replacing detected secrets with
-    /// markers. Unchanged drafts continue; every internal failure degrades
-    /// to passing the affected content through unmodified (fail-soft).
-    fn redact_before_model(&self, before_model: &BeforeModelInput) -> StageOutcome {
-        let Some(draft) = self.redact_draft(&before_model.request) else {
-            return StageOutcome::Continue;
+    /// markers. Unchanged drafts continue; unexpected reconstruction failures
+    /// fail closed with a stable non-secret error.
+    fn redact_before_model(
+        &self,
+        before_model: &BeforeModelInput,
+    ) -> Result<StageOutcome, MiddlewareError> {
+        let Some(draft) = self.redact_draft(&before_model.request)? else {
+            return Ok(StageOutcome::Continue);
         };
-        let Ok(bytes) = serde_json_canonicalizer::to_vec(&draft) else {
-            return StageOutcome::Continue;
-        };
-        RawJson::parse(bytes).map_or(StageOutcome::Continue, StageOutcome::Replace)
+        encode_replacement(&draft)
     }
 
     /// Redact every message of `draft`. Returns `None` when nothing changed,
     /// so the dominant clean-draft path clones nothing.
-    fn redact_draft(&self, draft: &ModelRequestDraft) -> Option<ModelRequestDraft> {
-        let messages = redact_slice(&draft.messages, |message| self.redact_message(message))?;
-        Some(ModelRequestDraft {
+    fn redact_draft(
+        &self,
+        draft: &ModelRequestDraft,
+    ) -> Result<Option<ModelRequestDraft>, MiddlewareError> {
+        let Some(messages) = redact_slice(&draft.messages, |message| self.redact_message(message))?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ModelRequestDraft {
             messages: messages.into(),
             ..draft.clone()
-        })
+        }))
     }
 
     /// Redact one message's text-bearing blocks, preserving its identity
     /// (id, role, timestamps, model, provider ids, metadata) exactly.
-    /// Returns `None` when unchanged, and also on a rebuild failure so the
-    /// caller keeps the original message: unlike document-ingest there is no
-    /// must-strip invariant here — fail-soft means unredacted pass-through,
-    /// never an aborted run.
-    fn redact_message(&self, message: &Message) -> Option<Message> {
-        let blocks = redact_slice(message.content(), |block| self.redact_block(block))?;
+    /// Returns `None` when unchanged. Rebuild failures fail closed.
+    fn redact_message(&self, message: &Message) -> Result<Option<Message>, MiddlewareError> {
+        let Some(blocks) = redact_slice(message.content(), |block| self.redact_block(block))?
+        else {
+            return Ok(None);
+        };
         Message::try_new(
             *message.id(),
             message.role(),
@@ -359,38 +377,33 @@ impl RedactionMiddleware {
             message.provider_ids().clone(),
             message.metadata().clone(),
         )
-        .ok()
+        .map(Some)
+        .map_err(|_| rewrite_error())
     }
 
     /// Redact whatever draft the wrapped middleware produced.
     ///
     /// `Replace` payloads are parsed back into a [`ModelRequestDraft`],
-    /// redacted, and re-canonicalized; an unparsable payload or a failed
-    /// re-canonicalization passes the inner `Replace` through unchanged
-    /// (fail-soft — the inner middleware's work is never dropped).
+    /// redacted, and re-canonicalized; an unparsable payload or failed
+    /// reconstruction aborts with a stable non-secret middleware error.
     /// `Continue` falls back to redacting the base draft, and every other
     /// outcome passes through untouched.
     fn redact_inner_outcome(
         &self,
         before_model: &BeforeModelInput,
         outcome: StageOutcome,
-    ) -> StageOutcome {
+    ) -> Result<StageOutcome, MiddlewareError> {
         match outcome {
             StageOutcome::Replace(raw) => {
-                let Ok(inner_draft) = serde_json::from_slice::<ModelRequestDraft>(raw.as_bytes())
-                else {
-                    return StageOutcome::Replace(raw);
+                let inner_draft = serde_json::from_slice::<ModelRequestDraft>(raw.as_bytes())
+                    .map_err(|_| rewrite_error())?;
+                let Some(draft) = self.redact_draft(&inner_draft)? else {
+                    return Ok(StageOutcome::Replace(raw));
                 };
-                let Some(draft) = self.redact_draft(&inner_draft) else {
-                    return StageOutcome::Replace(raw);
-                };
-                let Ok(bytes) = serde_json_canonicalizer::to_vec(&draft) else {
-                    return StageOutcome::Replace(raw);
-                };
-                RawJson::parse(bytes).map_or(StageOutcome::Replace(raw), StageOutcome::Replace)
+                encode_replacement(&draft)
             }
             StageOutcome::Continue => self.redact_before_model(before_model),
-            other => other,
+            other => Ok(other),
         }
     }
 
@@ -435,21 +448,35 @@ impl RedactionMiddleware {
     /// further tool blocks). Everything else — `Json`, `Opaque`, media, and
     /// `ToolCall` arguments — passes through untouched (v1 scan surface).
     ///
-    /// Returns `None` when unchanged, and also on a rebuild failure so the
-    /// caller keeps the original block (fail-soft).
-    fn redact_block(&self, block: &ContentBlock) -> Option<ContentBlock> {
+    /// Returns `None` when unchanged. A detected rewrite that grows past the
+    /// text ceiling becomes a bounded marker; other failures fail closed.
+    fn redact_block(&self, block: &ContentBlock) -> Result<Option<ContentBlock>, MiddlewareError> {
         match block {
             ContentBlock::Text(text) => {
-                let redacted = self.detectors.redact(text.text())?;
-                TextBlock::try_new(redacted).ok().map(ContentBlock::Text)
+                let Some(redacted) = self.detectors.redact(text.text()) else {
+                    return Ok(None);
+                };
+                let block = match TextBlock::try_new(redacted) {
+                    Ok(block) => block,
+                    Err(ContentError::TextTooLarge { .. }) => {
+                        TextBlock::try_new(OVERSIZED_MARKER).map_err(|_| rewrite_error())?
+                    }
+                    Err(_) => return Err(rewrite_error()),
+                };
+                Ok(Some(ContentBlock::Text(block)))
             }
             ContentBlock::ToolResult(result) => {
-                let nested = redact_slice(result.content(), |inner| self.redact_block(inner))?;
+                let Some(nested) =
+                    redact_slice(result.content(), |inner| self.redact_block(inner))?
+                else {
+                    return Ok(None);
+                };
                 ToolResultBlock::try_new(*result.tool_call_id(), nested, result.is_error())
-                    .ok()
                     .map(ContentBlock::ToolResult)
+                    .map(Some)
+                    .map_err(|_| rewrite_error())
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 }
@@ -458,10 +485,13 @@ impl RedactionMiddleware {
 /// when no item changed. The originals are cloned only once a change has
 /// actually occurred, so the dominant no-secrets path allocates and copies
 /// nothing.
-fn redact_slice<T: Clone>(items: &[T], mut redact: impl FnMut(&T) -> Option<T>) -> Option<Vec<T>> {
+fn redact_slice<T: Clone>(
+    items: &[T],
+    mut redact: impl FnMut(&T) -> Result<Option<T>, MiddlewareError>,
+) -> Result<Option<Vec<T>>, MiddlewareError> {
     let mut rewritten: Option<Vec<T>> = None;
     for (index, item) in items.iter().enumerate() {
-        match redact(item) {
+        match redact(item)? {
             Some(new_item) => {
                 let vec = rewritten.get_or_insert_with(|| {
                     let mut vec = Vec::with_capacity(items.len());
@@ -477,7 +507,24 @@ fn redact_slice<T: Clone>(items: &[T], mut redact: impl FnMut(&T) -> Option<T>) 
             }
         }
     }
-    rewritten
+    Ok(rewritten)
+}
+
+fn encode_replacement(draft: &ModelRequestDraft) -> Result<StageOutcome, MiddlewareError> {
+    let bytes = serde_json_canonicalizer::to_vec(draft).map_err(|_| rewrite_error())?;
+    RawJson::parse(bytes)
+        .map(StageOutcome::Replace)
+        .map_err(|_| rewrite_error())
+}
+
+fn rewrite_error() -> MiddlewareError {
+    MiddlewareError::try_new(
+        REDACTION_REWRITE_CODE,
+        ErrorCategory::Middleware,
+        REDACTION_REWRITE_MESSAGE,
+        Metadata::empty(),
+    )
+    .unwrap_or_else(Into::into)
 }
 
 /// A `Fail` outcome with a stable code and a safe message (never matched

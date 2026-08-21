@@ -10,8 +10,8 @@ use serde::Deserialize;
 
 use crate::config::OPENROUTER_MEDIA_TRANSPORT_FAILED;
 use crate::http::{
-    BASE64_STANDARD, deliver_media, inline_http_read_cap, invalid_arguments, parse_arguments,
-    send_json, tool_error,
+    BASE64_STANDARD, DeliveredMedia, deliver_media, inline_http_read_cap, invalid_arguments,
+    parse_arguments, send_json, tool_error,
 };
 
 pub(crate) const IMAGE_TOOL_ID: &str = "finstack.tools.openrouter_generate_image";
@@ -53,7 +53,7 @@ pub(crate) async fn handle_image(
     store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
     arguments: &[u8],
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<DeliveredMedia, ToolError> {
     let arguments: ImageArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.prompt.is_empty() {
         return Err(invalid_arguments(

@@ -2,6 +2,7 @@ pub mod finstack_ai
 pub use finstack_ai::ActiveCapability
 pub use finstack_ai::ApprovalGrantMode
 pub use finstack_ai::CapabilityActivationSource
+pub use finstack_ai::ChildRunPolicy
 pub use finstack_ai::CompactionAuthorization
 pub use finstack_ai::ExternalIdentityKey
 pub use finstack_ai::ExternalIdentityMap
@@ -757,25 +758,6 @@ pub fn finstack_ai::ChildRunBridgeError::fmt(&self, &mut core::fmt::Formatter<'_
 impl core::fmt::Display for finstack_ai::ChildRunBridgeError
 pub fn finstack_ai::ChildRunBridgeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai::ChildRunBridgeError
-pub enum finstack_ai::ChildRunPolicy
-pub finstack_ai::ChildRunPolicy::Allow
-pub finstack_ai::ChildRunPolicy::Allow::max_depth: u16
-pub finstack_ai::ChildRunPolicy::Deny
-impl core::clone::Clone for finstack_ai::ChildRunPolicy
-pub fn finstack_ai::ChildRunPolicy::clone(&self) -> finstack_ai::ChildRunPolicy
-impl core::cmp::Eq for finstack_ai::ChildRunPolicy
-impl core::cmp::PartialEq for finstack_ai::ChildRunPolicy
-pub fn finstack_ai::ChildRunPolicy::eq(&self, &finstack_ai::ChildRunPolicy) -> bool
-impl core::default::Default for finstack_ai::ChildRunPolicy
-pub fn finstack_ai::ChildRunPolicy::default() -> finstack_ai::ChildRunPolicy
-impl core::fmt::Debug for finstack_ai::ChildRunPolicy
-pub fn finstack_ai::ChildRunPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai::ChildRunPolicy
-impl core::marker::StructuralPartialEq for finstack_ai::ChildRunPolicy
-impl serde_core::ser::Serialize for finstack_ai::ChildRunPolicy
-pub fn finstack_ai::ChildRunPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::ChildRunPolicy
-pub fn finstack_ai::ChildRunPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai::ChildSettleOutcome
 pub finstack_ai::ChildSettleOutcome::Completed
 pub finstack_ai::ChildSettleOutcome::Failed
@@ -1435,7 +1417,7 @@ pub struct finstack_ai::LinkedCommon
 pub finstack_ai::LinkedCommon::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
 pub finstack_ai::LinkedCommon::approval_grant: finstack_ai_runtime::ports::model::request::ApprovalGrantMode
 pub finstack_ai::LinkedCommon::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
-pub finstack_ai::LinkedCommon::child_runs: finstack_ai::ChildRunPolicy
+pub finstack_ai::LinkedCommon::child_runs: finstack_ai_runtime::services::agent_invoker::ChildRunPolicy
 pub finstack_ai::LinkedCommon::instruction: core::option::Option<alloc::string::String>
 pub finstack_ai::LinkedCommon::ports: finstack_ai::LinkedAgentPorts
 impl core::default::Default for finstack_ai::LinkedCommon
@@ -1493,6 +1475,7 @@ pub fn finstack_ai::LockedComponent::deserialize<__D>(__D) -> core::result::Resu
 pub struct finstack_ai::NativeAgentBuilder
 impl finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::NativeAgentBuilder::activate_application(self, finstack_ai_kernel::primitives::ids::CapabilityId) -> Self
+pub fn finstack_ai::NativeAgentBuilder::artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
 pub async fn finstack_ai::NativeAgentBuilder::build(self) -> core::result::Result<finstack_ai::Agent, finstack_ai::AgentRunError>
 pub fn finstack_ai::NativeAgentBuilder::capability(self, finstack_ai::CapabilitySpec) -> Self
 pub fn finstack_ai::NativeAgentBuilder::capability_activation_host(self, alloc::sync::Arc<finstack_ai::NativeCapabilityHost>) -> Self
@@ -1504,6 +1487,7 @@ pub fn finstack_ai::NativeAgentBuilder::middleware(self, finstack_ai_kernel::pri
 pub fn finstack_ai::NativeAgentBuilder::observer(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::policy(self, finstack_ai::RunPolicy) -> Self
 pub fn finstack_ai::NativeAgentBuilder::toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::try_child_toolset<F, E>(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, F) -> core::result::Result<Self, finstack_ai::AgentRunError> where F: core::ops::function::FnOnce(alloc::sync::Arc<finstack_ai_runtime::services::child_starter::ChildRunStarter>) -> core::result::Result<alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>, E>, E: core::fmt::Display
 pub fn finstack_ai::NativeAgentBuilder::try_instruction(self, impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, finstack_ai::AgentRunError>
 impl finstack_ai::NativeAgentBuilder
 pub async fn finstack_ai::NativeAgentBuilder::build_linked(self, finstack_ai::LinkedCommon, finstack_ai_runtime::ports::model::identity::ModelName, finstack_ai_runtime::ports::model::request::ModelSettings, core::time::Duration) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
@@ -1742,7 +1726,7 @@ impl core::clone::Clone for finstack_ai::ResolvedRunPlan
 pub fn finstack_ai::ResolvedRunPlan::clone(&self) -> finstack_ai::ResolvedRunPlan
 pub struct finstack_ai::RunPolicy
 pub finstack_ai::RunPolicy::approval_grant: finstack_ai_runtime::ports::model::request::ApprovalGrantMode
-pub finstack_ai::RunPolicy::child_runs: finstack_ai::ChildRunPolicy
+pub finstack_ai::RunPolicy::child_runs: finstack_ai_runtime::services::agent_invoker::ChildRunPolicy
 pub finstack_ai::RunPolicy::run_override_allowlist: alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ComponentId>
 impl core::clone::Clone for finstack_ai::RunPolicy
 pub fn finstack_ai::RunPolicy::clone(&self) -> finstack_ai::RunPolicy

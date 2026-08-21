@@ -24,6 +24,8 @@ pub struct CodexRunReport {
     pub thread_id: Option<String>,
     /// Last `agent_message` text, when seen.
     pub last_message: Option<String>,
+    /// Bounded failure diagnostic from `turn.failed` / `error`, when seen.
+    pub failure_message: Option<String>,
     /// Observational token usage from `turn.completed`, when seen.
     pub usage: Option<CodexUsage>,
     /// Process exit code, when the process has exited.
@@ -37,6 +39,8 @@ pub struct CodexRunReport {
 
 /// Upper bound on retained stderr bytes per run.
 const STDERR_TAIL_BYTES: usize = 4_096;
+const THREAD_ID_BYTES: usize = 256;
+const MESSAGE_BYTES: usize = 4_096;
 
 /// Reduced view of one child's Codex event stream and process exit.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -54,14 +58,20 @@ pub(crate) struct RunState {
 impl RunState {
     pub(crate) fn apply(&mut self, event: CodexEvent) {
         match event {
-            CodexEvent::ThreadStarted { thread_id } => self.thread_id = Some(thread_id),
-            CodexEvent::AgentMessage { text } => self.last_message = Some(text),
+            CodexEvent::ThreadStarted { thread_id } => {
+                self.thread_id = Some(truncate(&thread_id, THREAD_ID_BYTES));
+            }
+            CodexEvent::AgentMessage { text } => {
+                self.last_message = Some(truncate(&text, MESSAGE_BYTES));
+            }
             CodexEvent::TurnCompleted { usage } => {
                 if usage.is_some() {
                     self.usage = usage;
                 }
             }
-            CodexEvent::Failed { message } => self.failure = Some(message),
+            CodexEvent::Failed { message } => {
+                self.failure = Some(truncate(&message, MESSAGE_BYTES));
+            }
             CodexEvent::Other => {}
         }
     }
@@ -118,9 +128,21 @@ impl RunState {
             status,
             thread_id: self.thread_id.clone(),
             last_message: self.last_message.clone(),
+            failure_message: self.failure.clone(),
             usage: self.usage,
             exit_code: self.exit_code,
             stderr_tail,
         }
     }
+}
+
+fn truncate(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.get(..end).unwrap_or_default().to_owned()
 }

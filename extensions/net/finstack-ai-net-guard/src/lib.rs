@@ -57,6 +57,12 @@ pub enum NetGuardError {
     /// The body exceeded the caller's byte cap.
     #[error("net_guard_limit_exceeded")]
     LimitExceeded,
+    /// The caller cancelled the in-flight body read.
+    #[error("net_guard_cancelled")]
+    Cancelled,
+    /// The caller's effective deadline elapsed during the body read.
+    #[error("net_guard_deadline_exceeded")]
+    DeadlineExceeded,
 }
 
 mod vet;
@@ -69,7 +75,9 @@ pub use resolve::{
 };
 
 mod client;
-pub use client::{pinned_client, read_body_bounded};
+pub use client::{
+    BodyReadInterrupt, pinned_client, read_body_bounded, read_body_bounded_interruptible,
+};
 
 #[cfg(test)]
 mod tests;

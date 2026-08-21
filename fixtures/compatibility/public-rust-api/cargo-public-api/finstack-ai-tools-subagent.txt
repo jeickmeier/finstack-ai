@@ -15,7 +15,8 @@ pub fn finstack_ai_tools_subagent::SubagentError::fmt(&self, &mut core::fmt::For
 impl core::marker::StructuralPartialEq for finstack_ai_tools_subagent::SubagentError
 pub struct finstack_ai_tools_subagent::SubagentToolset
 impl finstack_ai_tools_subagent::SubagentToolset
-pub fn finstack_ai_tools_subagent::SubagentToolset::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_runtime::services::agent_invoker::AgentRef]>>) -> core::result::Result<Self, finstack_ai_tools_subagent::SubagentError>
+pub fn finstack_ai_tools_subagent::SubagentToolset::try_new(alloc::sync::Arc<finstack_ai_runtime::services::child_starter::ChildRunStarter>, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_runtime::services::agent_invoker::AgentRef]>>) -> core::result::Result<Self, finstack_ai_tools_subagent::SubagentError>
+pub fn finstack_ai_tools_subagent::SubagentToolset::try_with_max_tracked_children(alloc::sync::Arc<finstack_ai_runtime::services::child_starter::ChildRunStarter>, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_runtime::services::agent_invoker::AgentRef]>>, usize) -> core::result::Result<Self, finstack_ai_tools_subagent::SubagentError>
 impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_subagent::SubagentToolset
 pub fn finstack_ai_tools_subagent::SubagentToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
 pub fn finstack_ai_tools_subagent::SubagentToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
@@ -24,3 +25,4 @@ pub const finstack_ai_tools_subagent::SUBAGENT_AGENT_NOT_ALLOWED: &str
 pub const finstack_ai_tools_subagent::SUBAGENT_CHILD_NOT_FOUND: &str
 pub const finstack_ai_tools_subagent::SUBAGENT_CONFIGURATION_INVALID: &str
 pub const finstack_ai_tools_subagent::SUBAGENT_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_subagent::SUBAGENT_LIMIT_EXCEEDED: &str

@@ -57,7 +57,9 @@ use classify::{
 };
 use finstack_ai_kernel::InteractionRequest;
 use protocol::{CallToolResult, ResultType, content_to_json};
-use transport::{HttpTransport, McpTransport, StdioTransport, authorize_http, authorize_stdio};
+use transport::{
+    HttpTransport, McpTransport, RequestControl, StdioTransport, authorize_http, authorize_stdio,
+};
 
 /// Stable protocol-violation code.
 pub const MCP_PROTOCOL_VIOLATION: &str = "mcp_protocol_violation";
@@ -65,6 +67,8 @@ pub const MCP_PROTOCOL_VIOLATION: &str = "mcp_protocol_violation";
 pub const MCP_SERVER_NOT_ALLOWLISTED: &str = "mcp_server_not_allowlisted";
 /// Stable transport-failure code.
 pub const MCP_TRANSPORT_ERROR: &str = "mcp_transport_error";
+/// Stable cancellation/deadline code for an interrupted MCP request.
+pub const MCP_TIMEOUT: &str = "mcp_timeout";
 /// Stable catalog-drift code.
 pub const MCP_CATALOG_DRIFT: &str = "mcp_catalog_drift";
 /// Stable unsupported-result code.
@@ -614,10 +618,11 @@ impl Toolset for McpToolset {
                 "arguments": arguments,
             });
             let value = transport
-                .request_identified(
+                .request_identified_controlled(
                     serde_json::json!(ctx.run.effect_id.to_string()),
                     "tools/call",
                     params,
+                    RequestControl::new(ctx.run.cancellation.clone(), ctx.run.deadline),
                 )
                 .await
                 .map_err(tool_error_from_mcp)?;
@@ -708,10 +713,11 @@ impl Toolset for McpToolset {
             let params = serde_json::from_slice(sample.output.as_bytes())
                 .unwrap_or_else(|_| serde_json::json!({}));
             let value = transport
-                .request_identified(
+                .request_identified_controlled(
                     serde_json::json!(ctx.run.effect_id.to_string()),
                     "sampling/createMessage",
                     params,
+                    RequestControl::new(ctx.run.cancellation.clone(), ctx.run.deadline),
                 )
                 .await
                 .map_err(tool_error_from_mcp)?;

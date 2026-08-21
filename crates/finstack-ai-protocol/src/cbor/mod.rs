@@ -14,7 +14,7 @@ pub(crate) use de::from_canonical;
 pub use diagnostic::{from_diagnostic_json, to_diagnostic_json, to_diagnostic_jsonl};
 pub use value::{CanonicalValue, decode_value, encode_value};
 
-/// Canonical record-envelope byte ceiling (TDD §6.5).
+/// Canonical record-envelope byte ceiling (contract section 6.5).
 pub const CANONICAL_ENVELOPE_MAX_BYTES: usize = 8 * 1024 * 1024;
 /// Atomic append-batch byte ceiling, excluding backend overhead.
 pub const APPEND_BATCH_MAX_BYTES: usize = 16 * 1024 * 1024;

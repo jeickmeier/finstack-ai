@@ -210,8 +210,17 @@ impl Toolset for HostToolset {
     }
 }
 
-fn completed_stream(result: ToolResult) -> ToolEventStream {
-    Box::pin(stream::iter([Ok(ToolStreamItem::Completed(result))]))
+fn completed_stream(
+    result: ToolResult,
+    artifacts: impl IntoIterator<Item = finstack_ai_kernel::ArtifactRef>,
+) -> ToolEventStream {
+    let items = artifacts
+        .into_iter()
+        .map(ToolStreamItem::Artifact)
+        .chain(core::iter::once(ToolStreamItem::Completed(result)))
+        .map(Ok)
+        .collect::<Vec<_>>();
+    Box::pin(stream::iter(items))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -225,10 +234,13 @@ fn tool_items_from_native(result: NativeHostResult) -> Result<ToolEventStream, T
     };
     let output = parse_host_json(&encoded).map_err(tool_failure)?;
     let (raw, is_error) = tool_output_bytes(&output).map_err(tool_failure)?;
-    Ok(completed_stream(ToolResult {
-        output: raw,
-        is_error,
-    }))
+    Ok(completed_stream(
+        ToolResult {
+            output: raw,
+            is_error,
+        },
+        output.artifacts,
+    ))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -243,10 +255,13 @@ fn tool_items_from_js(result: crate::host::HostJsResult) -> Result<ToolEventStre
     let encoded = crate::host::stringify_js(&value).map_err(tool_failure)?;
     let output = parse_host_json(&encoded).map_err(tool_failure)?;
     let (raw, is_error) = tool_output_bytes(&output).map_err(tool_failure)?;
-    Ok(completed_stream(ToolResult {
-        output: raw,
-        is_error,
-    }))
+    Ok(completed_stream(
+        ToolResult {
+            output: raw,
+            is_error,
+        },
+        output.artifacts,
+    ))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

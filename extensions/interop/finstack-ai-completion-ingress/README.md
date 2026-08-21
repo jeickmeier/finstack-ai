@@ -34,7 +34,7 @@ Duplicate deliveries with an equal body are idempotent; conflicting
 duplicates fail closed with durable rejection evidence. Interaction
 resolutions are out of scope for this crate.
 
-Callers must enforce their own transport-level body size cap before
-calling `deliver`: the rejection path digests the full received body, so
-`MAX_BODY_BYTES` bounds acceptance, not the work done to reject oversize
-garbage.
+Callers should align their transport-level body cap with `MAX_BODY_BYTES`.
+Oversize rejection work is independently bounded: audit identity binds the
+total length plus fixed 64 KiB prefix and suffix windows. Operators can inspect
+`CompletionIngress::health()` for audit-path readiness and failure count.

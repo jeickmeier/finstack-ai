@@ -39,3 +39,9 @@ jobs:
       - name: Stage npm pack artifacts
         run: uv run --no-project python scripts/wasm_package/stage.py
 
+      - name: Upload staged npm artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-staging
+          path: dist/npm-staging
+          if-no-files-found: error

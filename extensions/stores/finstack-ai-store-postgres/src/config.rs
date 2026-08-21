@@ -1,3 +1,4 @@
+use core::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,6 +12,10 @@ pub const DEFAULT_POOL_SIZE: usize = 8;
 
 /// Default connect timeout applied when establishing a pooled connection.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default maximum wait for a pooled checkout.
+pub const DEFAULT_CHECKOUT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default maximum server/client operation duration.
+pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum length of a Postgres identifier accepted for [`PostgresStoreConfig::schema`].
 const MAX_SCHEMA_LEN: usize = 63;
@@ -37,8 +42,18 @@ pub enum SchemaPolicy {
     Require,
 }
 
+/// `PostgreSQL` transport policy. TLS is required by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PostgresTlsMode {
+    /// Require rustls with hostname verification.
+    #[default]
+    Require,
+    /// Explicitly allow a plaintext connection.
+    Disable,
+}
+
 /// Open configuration for the postgres journal store.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PostgresStoreConfig {
     /// `postgres://` connection string.
     pub url: Arc<str>,
@@ -64,6 +79,36 @@ pub struct PostgresStoreConfig {
     /// `zero_postgres_connect_timeout`, mirroring sqlite's
     /// `zero_sqlite_busy_timeout`.
     pub connect_timeout: Duration,
+    /// Maximum wait for a pool checkout.
+    pub checkout_timeout: Duration,
+    /// Maximum duration for server statements and client operations.
+    pub operation_timeout: Duration,
+    /// Explicit transport policy; secure by default.
+    pub tls_mode: PostgresTlsMode,
+    /// Optional additional PEM-encoded trust anchors. Debug output redacts it.
+    pub tls_ca_pem: Option<Arc<[u8]>>,
+}
+
+impl fmt::Debug for PostgresStoreConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PostgresStoreConfig")
+            .field("url", &"[REDACTED]")
+            .field("schema", &self.schema)
+            .field("durability", &self.durability)
+            .field("limits", &self.limits)
+            .field("pool_size", &self.pool_size)
+            .field("schema_policy", &self.schema_policy)
+            .field("connect_timeout", &self.connect_timeout)
+            .field("checkout_timeout", &self.checkout_timeout)
+            .field("operation_timeout", &self.operation_timeout)
+            .field("tls_mode", &self.tls_mode)
+            .field(
+                "tls_ca_pem",
+                &self.tls_ca_pem.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
 }
 
 impl PostgresStoreConfig {
@@ -81,6 +126,10 @@ impl PostgresStoreConfig {
             pool_size: DEFAULT_POOL_SIZE,
             schema_policy: SchemaPolicy::Manage,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            checkout_timeout: DEFAULT_CHECKOUT_TIMEOUT,
+            operation_timeout: DEFAULT_OPERATION_TIMEOUT,
+            tls_mode: PostgresTlsMode::Require,
+            tls_ca_pem: None,
         }
     }
 
@@ -104,6 +153,16 @@ impl PostgresStoreConfig {
         if self.connect_timeout.is_zero() {
             return Err(StoreError::InvalidRequest {
                 reason_code: "zero_postgres_connect_timeout",
+            });
+        }
+        if self.checkout_timeout.is_zero() {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "zero_postgres_checkout_timeout",
+            });
+        }
+        if self.operation_timeout.is_zero() {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "zero_postgres_operation_timeout",
             });
         }
         self.limits.validate()?;

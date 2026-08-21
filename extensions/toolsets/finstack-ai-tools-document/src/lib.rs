@@ -6,7 +6,6 @@ pub mod parser;
 mod source;
 mod toolset;
 
-pub use source::DocumentSource;
 pub use toolset::{DocumentError, DocumentToolset};
 
 /// Stable invalid-argument code.
@@ -19,8 +18,5 @@ pub const DOCUMENT_TOO_LARGE: &str = "document_too_large";
 pub const DOCUMENT_SOURCE_UNAVAILABLE: &str = "document_source_unavailable";
 /// Stable unsupported-format code.
 pub const DOCUMENT_UNSUPPORTED_FORMAT: &str = "document_unsupported_format";
-/// Stable path-source-unsupported-on-target code.
-pub const DOCUMENT_PATH_UNSUPPORTED: &str = "document_path_unsupported";
-
 #[cfg(test)]
 mod tests;

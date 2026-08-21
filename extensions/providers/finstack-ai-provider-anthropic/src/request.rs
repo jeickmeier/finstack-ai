@@ -118,7 +118,8 @@ impl MessagesRequest {
                 return Err(request_error("provider settings contain a reserved field"));
             }
         }
-        let thinking = take_thinking(&mut settings, model)?;
+        let max_tokens = draft.limits.max_output_tokens.min(model.max_output_tokens);
+        let thinking = take_thinking(&mut settings, model, max_tokens)?;
         let mut tools = Vec::with_capacity(draft.tools.len());
         for tool in draft.tools.iter() {
             if let OutputSpec::JsonSchema { schema } = &draft.output
@@ -147,7 +148,7 @@ impl MessagesRequest {
 
         Ok(Self {
             model: draft.model.as_str().to_owned(),
-            max_tokens: draft.limits.max_output_tokens.min(model.max_output_tokens),
+            max_tokens,
             stream: true,
             system,
             messages,
@@ -161,6 +162,7 @@ impl MessagesRequest {
 fn take_thinking(
     settings: &mut BTreeMap<String, Value>,
     model: &AnthropicModelConfig,
+    max_tokens: u64,
 ) -> Result<Option<Value>, ModelError> {
     if let Some(value) = settings.remove("thinking") {
         return Ok(Some(value));
@@ -173,7 +175,7 @@ fn take_thinking(
             .as_str()
             .and_then(thinking_level_budget)
             .ok_or_else(|| request_error("thinking_level is not an allowlisted value"))?;
-        if budget >= model.max_output_tokens {
+        if budget >= max_tokens {
             return Err(request_error("thinking budget exceeds max_tokens"));
         }
         return Ok(Some(json!({
@@ -182,7 +184,7 @@ fn take_thinking(
         })));
     }
     if model.thinking {
-        if model.thinking_budget_tokens >= model.max_output_tokens {
+        if model.thinking_budget_tokens >= max_tokens {
             return Err(request_error("thinking budget exceeds max_tokens"));
         }
         return Ok(Some(json!({
@@ -421,6 +423,22 @@ mod tests {
         assert_eq!(value["temperature"], 0);
         assert_eq!(value["stream"], true);
         assert!(value.get("system").is_none());
+    }
+
+    #[test]
+    fn thinking_budget_must_fit_the_effective_request_limit() {
+        let mut configured = draft(b"{}");
+        configured.limits.max_output_tokens = 512;
+        let thinking_model = model().with_thinking(true, 1_024).expect("thinking model");
+        let error = MessagesRequest::try_from_draft(&configured, &thinking_model, &BTreeMap::new())
+            .expect_err("configured thinking must fit the request limit");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+
+        let mut requested = draft(br#"{"thinking_level":"low"}"#);
+        requested.limits.max_output_tokens = 512;
+        let error = MessagesRequest::try_from_draft(&requested, &model(), &BTreeMap::new())
+            .expect_err("requested thinking must fit the request limit");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
 
     #[test]

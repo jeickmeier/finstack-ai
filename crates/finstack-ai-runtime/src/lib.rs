@@ -112,17 +112,26 @@ pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, 
 pub use interaction::{InteractionResumeAction, interaction_resume_action};
 pub use services::agent_invoker::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext,
-    ChildRunHandle, ChildRunRequest,
+    ChildRunHandle, ChildRunPolicy, ChildRunRequest, ChildRunStatus,
 };
 pub use services::artifact::{
-    ARTIFACT_INTEGRITY_FAILURE, ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
-    ArtifactStoreLimits, MAX_ARTIFACT_BYTES, stage_required_artifact, validate_staged_artifact,
+    ARTIFACT_CAPACITY_EXCEEDED, ARTIFACT_INTEGRITY_FAILURE, ARTIFACT_SCOPE_MISMATCH, ArtifactError,
+    ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence, ArtifactRead,
+    ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
+    DEFAULT_ARTIFACT_ORPHAN_GRACE_MS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_GC_BATCH,
+    MAX_ARTIFACT_OWNERS, MAX_ARTIFACTS, MAX_TOTAL_ARTIFACT_BYTES, artifact_storage_key,
+    build_artifact_ref, get_required_artifact, stage_required_artifact, validate_artifact_scope,
+    validate_retrieved_artifact, validate_staged_artifact,
 };
+#[cfg(feature = "native-tokio")]
+pub use services::audit::SecurityAuditGateHealth;
 pub use services::audit::{
     SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
     SecurityAuditReceipt, SecurityAuditSink,
 };
 pub use services::budget::{BudgetError, BudgetLedger, BudgetReservationState};
+#[cfg(feature = "native-tokio")]
+pub use services::child_starter::{ChildRunStartRequest, ChildRunStarter};
 pub use services::composition::{
     BudgetCoordinator, BudgetOperationIds, ChildCoordinationIds, ChildRunCoordinator,
     CompositionError, child_relation_digest,
@@ -131,17 +140,19 @@ pub use services::identity_map::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
 };
 pub use services::object::{
-    MAX_OBJECT_KEY_BYTES, OBJECT_INTEGRITY_FAILURE, OBJECT_INVALID_KEY, OBJECT_INVALID_METADATA,
-    OBJECT_IO_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH, OBJECT_TOO_LARGE,
-    OBJECT_UNAVAILABLE, OBJECT_UNSUPPORTED, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata,
-    ObjectPage, ObjectRef, ObjectScope, ObjectStore, ObjectStoreLimits, PageToken, PresignedUrl,
-    PutPayload, physical_object_key, validate_object_metadata,
+    MAX_OBJECT_KEY_BYTES, OBJECT_CONFLICT, OBJECT_INTEGRITY_FAILURE, OBJECT_INVALID_KEY,
+    OBJECT_INVALID_METADATA, OBJECT_IO_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH,
+    OBJECT_TOO_LARGE, OBJECT_UNAVAILABLE, OBJECT_UNSUPPORTED, ObjectEntry, ObjectError, ObjectKey,
+    ObjectMetadata, ObjectPage, ObjectRef, ObjectScope, ObjectStore, ObjectStoreLimits, PageToken,
+    PresignedUrl, PutPayload, physical_object_key, validate_object_metadata,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::process_confinement::{
     CONFINEMENT_UNAVAILABLE, ConfinedChild, ConfinementBackend, ConfinementError,
     ConfinementProfile, ProcessConfinement, WindowsLpacProfile,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use services::process_confinement::{configure_process_tree, terminate_process_tree};
 pub use session::{
     LaneAppendIds, LaneCreateIds, LaneInspect, SessionCreateIds, SessionError, SessionRuntime,
 };

@@ -232,9 +232,7 @@ class MemoryExtension:
 
     @property
     def tenant(self) -> str: ...
-    def context_provider(
-        self, *, max_hits: int | None = None, stable_prefix: int | None = None
-    ) -> MemoryContextProvider:
+    def context_provider(self, *, max_hits: int | None = None) -> MemoryContextProvider:
         """Return the recall provider handle for ``context_providers``."""
 
     def toolset(self) -> MemoryToolset:

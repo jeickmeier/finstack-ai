@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 #[cfg(feature = "native-tokio")]
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(feature = "native-tokio")]
 use std::time::Duration;
 
 use finstack_ai_kernel::{Digest, PrincipalRef, Timestamp};
@@ -164,6 +166,18 @@ pub enum SecurityAuditError {
 pub struct SecurityAuditGate {
     sink: Arc<dyn SecurityAuditSink>,
     deadline: Duration,
+    ready: AtomicBool,
+    failure_count: AtomicU64,
+}
+
+/// Operator-visible health of the required audit-write path.
+#[cfg(feature = "native-tokio")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SecurityAuditGateHealth {
+    /// Whether the most recent required write completed durably.
+    pub ready: bool,
+    /// Saturating count of required write failures since enablement.
+    pub failure_count: u64,
 }
 
 #[cfg(feature = "native-tokio")]
@@ -188,7 +202,12 @@ impl SecurityAuditGate {
         if !health.ready {
             return Err(SecurityAuditGateError::Unhealthy);
         }
-        Ok(Arc::new(Self { sink, deadline }))
+        Ok(Arc::new(Self {
+            sink,
+            deadline,
+            ready: AtomicBool::new(true),
+            failure_count: AtomicU64::new(0),
+        }))
     }
 }
 
@@ -241,15 +260,52 @@ impl SecurityAuditGate {
         &self,
         event: SecurityAuditEvent,
     ) -> Result<SecurityAuditReceipt, SecurityAuditGateError> {
-        let expected_id = Arc::<str>::from(event.event_id());
-        let receipt = tokio::time::timeout(self.deadline, self.sink.record(event))
-            .await
-            .map_err(|_| SecurityAuditGateError::Timeout)?
-            .map_err(SecurityAuditGateError::Sink)?;
-        if receipt.event_id != expected_id {
-            return Err(SecurityAuditGateError::ReceiptMismatch);
+        match self.record_once(event.clone()).await {
+            Ok(receipt) => Ok(receipt),
+            Err(_) => self.record_once(event).await,
         }
-        Ok(receipt)
+    }
+
+    async fn record_once(
+        &self,
+        event: SecurityAuditEvent,
+    ) -> Result<SecurityAuditReceipt, SecurityAuditGateError> {
+        let expected_id = Arc::<str>::from(event.event_id());
+        let result = tokio::time::timeout(self.deadline, self.sink.record(event))
+            .await
+            .map_err(|_| SecurityAuditGateError::Timeout)
+            .and_then(|value| value.map_err(SecurityAuditGateError::Sink))
+            .and_then(|receipt| {
+                if receipt.event_id == expected_id {
+                    Ok(receipt)
+                } else {
+                    Err(SecurityAuditGateError::ReceiptMismatch)
+                }
+            });
+        match result {
+            Ok(receipt) => {
+                self.ready.store(true, Ordering::Release);
+                Ok(receipt)
+            }
+            Err(error) => {
+                self.ready.store(false, Ordering::Release);
+                let _ =
+                    self.failure_count
+                        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                            Some(current.saturating_add(1))
+                        });
+                Err(error)
+            }
+        }
+    }
+
+    /// Return operator-visible audit-path readiness without calling the sink.
+    #[must_use]
+    pub fn operational_health(&self) -> SecurityAuditGateHealth {
+        SecurityAuditGateHealth {
+            ready: self.ready.load(Ordering::Acquire),
+            failure_count: self.failure_count.load(Ordering::Acquire),
+        }
     }
 }
 
@@ -455,6 +511,13 @@ mod tests {
                     }
                 ))
             ));
+            assert_eq!(
+                gate.operational_health(),
+                SecurityAuditGateHealth {
+                    ready: false,
+                    failure_count: 2,
+                }
+            );
         });
     }
 }

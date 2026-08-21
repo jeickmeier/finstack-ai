@@ -647,6 +647,7 @@ fn compaction_child_model_requires_exact_committed_relation_and_input() {
 #[test]
 fn before_tool_batch_input_serializes_with_stage_tag_calls_and_tools() {
     let input = StageInput::BeforeToolBatch(Box::new(BeforeToolBatchInput {
+        prior_write_tool_calls: 0,
         calls: Arc::from([]),
         tools: Arc::from([]),
     }));

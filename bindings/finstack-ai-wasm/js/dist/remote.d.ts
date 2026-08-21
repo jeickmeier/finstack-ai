@@ -4,7 +4,7 @@
  * Body bytes stay canonical-CBOR produced by the Rust/WASM codec.
  * This module does not add a second JavaScript CBOR library.
  */
-/** Pre-authentication frame ceiling in bytes (TDD §28.2). */
+/** Pre-authentication frame ceiling in bytes (contract section 28.2). */
 export declare const PRE_AUTH_FRAME_MAX_BYTES: number;
 /** Default post-authentication frame ceiling in bytes. */
 export declare const POST_AUTH_FRAME_MAX_BYTES: number;

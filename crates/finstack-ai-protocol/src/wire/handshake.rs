@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION_V1: u16 = 1;
 const VERSION_OFFER_MAX_VERSIONS: usize = 16;
 const VERSION_OFFER_MAX_FEATURES: usize = 64;
 
-/// Envelope payload-schema family (TDD §28.2).
+/// Envelope payload-schema family (contract section 28.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PayloadFamily {

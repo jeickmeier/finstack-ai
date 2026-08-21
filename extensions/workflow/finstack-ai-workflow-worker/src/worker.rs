@@ -8,29 +8,26 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ExternalEffectCompletionCommand, InteractionResolutionCommand, OperationLocator, SessionId,
-    Timestamp, UNIX_EPOCH,
+    ExternalEffectCompletionCommand, InteractionRequest, InteractionResolutionCommand,
+    OperationLocator, RunSecurityContext, SessionId, Timestamp, UNIX_EPOCH,
 };
 use finstack_ai_runtime::{
-    Clock, ExternalClock, JournalStore, SystemClock, WorkflowDriverError, WorkflowSession,
-    WorkflowWait, classify_wait,
+    Clock, ExternalClock, ExternalRouteOutcome, JournalStore, SystemClock, WorkflowCheckpoint,
+    WorkflowDriverError, WorkflowSession, WorkflowWait, classify_wait,
 };
 use finstack_ai_workflow_local::{CronFire, CronSchedule, CronScheduleStore};
 use serde::Serialize;
 
 use crate::error::WorkerError;
 use crate::fires::{FireRow, FireStatus, FireStore, idempotency_key};
-use crate::inbox::{InboxKind, InboxRow, InboxStore};
+use crate::inbox::{InboxInsertOutcome, InboxKind, InboxRow, InboxStore};
 use crate::park::park;
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
-
-/// Key identifying one buffered response: tenant, session, pending effect.
-type InboxKey = (Arc<str>, SessionId, Arc<str>);
 
 /// Binds host-owned ports onto a bare attached session.
 pub trait PortsFactory: Send + Sync {
@@ -42,11 +39,56 @@ pub trait PortsFactory: Send + Sync {
     fn bind(&self, session: WorkflowSession) -> Result<WorkflowSession, WorkerError>;
 }
 
+/// Runtime-authoritative disposition of one buffered interaction command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractionDeliveryOutcome {
+    /// The command was committed or replayed idempotently.
+    Accepted,
+    /// The interaction ingress durably rejected the command.
+    Rejected {
+        /// Stable non-secret rejection reason.
+        reason_code: &'static str,
+    },
+}
+
+/// Optional lifecycle bridge implemented by HITL adapters.
+///
+/// The worker owns journal execution but does not depend on the HITL crate.
+/// This callback lets an adapter capture interactions created during worker
+/// re-park and record the ingress's authoritative delivery outcome.
+pub trait InteractionLifecycle: Send + Sync {
+    /// Capture a newly parked interaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable worker error when the adapter cannot persist it.
+    fn capture(
+        &self,
+        checkpoint: &WorkflowCheckpoint,
+        request: &InteractionRequest,
+        security: &RunSecurityContext,
+        captured_at: Timestamp,
+    ) -> Result<(), WorkerError>;
+
+    /// Record the runtime ingress outcome for a buffered resolution.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable worker error when the adapter cannot persist it.
+    fn settled(
+        &self,
+        tenant_scope: &str,
+        interaction_id: &str,
+        outcome: InteractionDeliveryOutcome,
+        settled_at: Timestamp,
+    ) -> Result<(), WorkerError>;
+}
+
 /// Identity of a run started from a cron fire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartedRun {
-    /// Canonical session id string of the accepted run.
-    pub session_id: Arc<str>,
+    /// Session id of the accepted run.
+    pub session_id: SessionId,
 }
 
 /// Starts one run for one claimed cron fire, idempotently.
@@ -88,6 +130,8 @@ pub struct TickReport {
     /// [`TickReport::sessions_resumed`]. Only a response the ingress actually
     /// accepts — one submitted before the deadline — leaves this counter alone.
     pub sessions_expired: usize,
+    /// Buffered responses durably rejected and moved to dead letters.
+    pub responses_rejected: usize,
     /// Per-item failures isolated during the tick.
     pub failures: usize,
 }
@@ -98,12 +142,26 @@ const DEFAULT_WORKER_ID: &str = "worker-1";
 const DEFAULT_LEASE_TTL_MS: u64 = 30_000;
 /// Default per-session drive budget.
 const DEFAULT_DRIVE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Default upper bound for each adapter scan in one tick phase.
+const DEFAULT_BATCH_LIMIT: usize = 64;
 /// Base backoff applied after a failed resume, in milliseconds.
 const BACKOFF_BASE_MS: u64 = 1_000;
 /// Cap on the backoff exponent, bounding the retry delay.
 const BACKOFF_MAX_SHIFT: u32 = 6;
 /// Delay between state polls while a claimed row is being resumed.
 const POLL_INTERVAL: Duration = Duration::from_millis(1);
+
+#[derive(Clone, Copy)]
+enum ResponseSubmission {
+    Applied,
+    Rejected { reason_code: &'static str },
+}
+
+enum ResumeOutcome {
+    Terminal,
+    Reparked,
+    Rejected,
+}
 
 /// Whether `wait` is still the wait recorded on `row`.
 fn is_recorded_wait(wait: &WorkflowWait, row: &WakeRow) -> bool {
@@ -179,11 +237,12 @@ impl WorkerBuilder {
                 inbox,
                 ports: BTreeMap::new(),
                 starters: BTreeMap::new(),
+                interaction_lifecycle: None,
                 clock: ExternalClock::new(UNIX_EPOCH),
                 worker_id: Arc::from(DEFAULT_WORKER_ID),
                 lease_ttl_ms: DEFAULT_LEASE_TTL_MS,
                 drive_timeout: DEFAULT_DRIVE_TIMEOUT,
-                seed_counter: AtomicU64::new(0),
+                batch_limit: DEFAULT_BATCH_LIMIT,
                 pump_clock: AtomicBool::new(false),
                 start_backoff: Mutex::new(BTreeMap::new()),
             },
@@ -211,6 +270,13 @@ impl WorkerBuilder {
         self
     }
 
+    /// Maximum rows loaded by each scheduler phase. Defaults to `64`.
+    #[must_use]
+    pub const fn batch_limit(mut self, limit: usize) -> Self {
+        self.worker.batch_limit = limit;
+        self
+    }
+
     /// Injected clock. Defaults to a clock fixed at the unix epoch.
     #[must_use]
     pub fn clock(mut self, clock: ExternalClock) -> Self {
@@ -232,22 +298,47 @@ impl WorkerBuilder {
         self
     }
 
+    /// Register the optional HITL lifecycle bridge.
+    #[must_use]
+    pub fn interaction_lifecycle(mut self, lifecycle: Arc<dyn InteractionLifecycle>) -> Self {
+        self.worker.interaction_lifecycle = Some(lifecycle);
+        self
+    }
+
     /// Finish the worker.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Debug builds assert the per-session drive budget is shorter than the
-    /// lease TTL. A drive that can outlive its own lease lets a second worker
-    /// claim the same session while the first is still driving it, which the
-    /// journal's append CAS turns into wasted work and counted failures. The
-    /// defaults satisfy this; overriding either knob must preserve it.
-    #[must_use]
-    pub fn build(self) -> WorkflowWorker {
-        debug_assert!(
-            self.worker.drive_timeout.as_millis() < u128::from(self.worker.lease_ttl_ms),
-            "drive timeout must be shorter than the lease TTL",
-        );
-        self.worker
+    /// Returns [`WorkerError::InvalidConfiguration`] when the worker id is
+    /// empty, a duration is zero, the drive budget can outlive its lease, or
+    /// the batch limit is zero.
+    pub fn build(self) -> Result<WorkflowWorker, WorkerError> {
+        if self.worker.worker_id.is_empty() {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "worker_id_empty",
+            });
+        }
+        if self.worker.lease_ttl_ms == 0 {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "lease_ttl_zero",
+            });
+        }
+        if self.worker.drive_timeout.is_zero() {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "drive_timeout_zero",
+            });
+        }
+        if self.worker.drive_timeout.as_millis() >= u128::from(self.worker.lease_ttl_ms) {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "drive_timeout_exceeds_lease",
+            });
+        }
+        if self.worker.batch_limit == 0 {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "batch_limit_zero",
+            });
+        }
+        Ok(self.worker)
     }
 }
 
@@ -283,6 +374,8 @@ pub struct WorkflowWorker {
     ports: BTreeMap<Arc<str>, Arc<dyn PortsFactory>>,
     /// Run starters keyed by schedule id.
     starters: BTreeMap<Arc<str>, Arc<dyn RunStarter>>,
+    /// Optional adapter bridge for HITL capture and delivery outcomes.
+    interaction_lifecycle: Option<Arc<dyn InteractionLifecycle>>,
     /// Injected clock; the single source of tick time.
     clock: ExternalClock,
     /// Lease holder identity.
@@ -291,8 +384,8 @@ pub struct WorkflowWorker {
     lease_ttl_ms: u64,
     /// Per-session drive budget.
     drive_timeout: Duration,
-    /// Monotonic random seed source for attached sessions.
-    seed_counter: AtomicU64,
+    /// Maximum rows loaded by each adapter scan.
+    batch_limit: usize,
     /// Whether the tick loop drives this worker from wall time.
     pump_clock: AtomicBool,
     /// Process-local start backoff per fire: attempts and next eligible time.
@@ -320,7 +413,7 @@ impl WorkflowWorker {
         &self,
         command: &InteractionResolutionCommand,
         received_at: Timestamp,
-    ) -> Result<(), WorkerError> {
+    ) -> Result<InboxInsertOutcome, WorkerError> {
         self.deliver(
             &command.locator,
             command.resolution.interaction_id().to_canonical_string(),
@@ -344,7 +437,7 @@ impl WorkflowWorker {
         &self,
         command: &ExternalEffectCompletionCommand,
         received_at: Timestamp,
-    ) -> Result<(), WorkerError> {
+    ) -> Result<InboxInsertOutcome, WorkerError> {
         self.deliver(
             &command.locator,
             command.completion.effect_id.to_canonical_string(),
@@ -362,18 +455,19 @@ impl WorkflowWorker {
         kind: InboxKind,
         command: &T,
         received_at: Timestamp,
-    ) -> Result<(), WorkerError> {
+    ) -> Result<InboxInsertOutcome, WorkerError> {
         let payload = serde_json::to_vec(command).map_err(|_| WorkerError::StoreIntegrity {
             code: "inbox_encode",
         })?;
-        self.inbox.insert(&InboxRow {
-            tenant_scope: Arc::clone(&locator.tenant_scope),
-            session_id: locator.session_id,
-            pending_id: Arc::from(pending_id),
+        let row = InboxRow::try_new(
+            Arc::clone(&locator.tenant_scope),
+            locator.session_id,
+            Arc::from(pending_id),
             kind,
-            payload: Arc::from(payload.as_slice()),
+            Arc::from(payload.into_boxed_slice()),
             received_at,
-        })
+        )?;
+        self.inbox.insert(&row)
     }
 
     /// Run one tick: claim due cron fires, bridge them into runs, then
@@ -395,7 +489,7 @@ impl WorkflowWorker {
 
     /// Phase 2: claim every due schedule and record its fire.
     fn tick_cron(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
-        for schedule in self.cron.load_due(now)? {
+        for schedule in self.cron.load_due(now, self.batch_limit)? {
             match self.claim_schedule(&schedule, now) {
                 Ok(true) => report.cron_fires += 1,
                 Ok(false) => {}
@@ -462,7 +556,7 @@ impl WorkflowWorker {
         now: Timestamp,
         report: &mut TickReport,
     ) -> Result<(), WorkerError> {
-        for row in self.fires.load_unstarted()? {
+        for row in self.fires.load_unstarted(self.batch_limit)? {
             let Some(starter) = self.starters.get(row.schedule_id.as_ref()) else {
                 report.failures += 1;
                 continue;
@@ -480,7 +574,7 @@ impl WorkflowWorker {
                 tokio::time::timeout(self.drive_timeout, starter.start(&fire, key.as_str())).await;
             let Ok(Ok(run)) = outcome else {
                 report.failures += 1;
-                self.defer_start(key, now);
+                self.defer_start(key.as_str().to_owned(), now);
                 continue;
             };
             self.clear_start_backoff(key.as_str());
@@ -488,9 +582,9 @@ impl WorkflowWorker {
                 row.tenant_scope.as_ref(),
                 row.schedule_id.as_ref(),
                 row.fire_count,
-                run.session_id.as_ref(),
+                run.session_id,
             ) {
-                Ok(()) => report.runs_started += 1,
+                Ok(_) => report.runs_started += 1,
                 Err(_) => report.failures += 1,
             }
         }
@@ -499,29 +593,16 @@ impl WorkflowWorker {
 
     /// Phase 4: claim and resume every due parked session.
     async fn tick_wake(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
-        let due = self.wake.load_due(now)?;
-        let inbox: BTreeMap<InboxKey, InboxRow> = self
-            .inbox
-            .load_all()?
-            .into_iter()
-            .map(|row| {
-                (
-                    (
-                        Arc::clone(&row.tenant_scope),
-                        row.session_id,
-                        Arc::clone(&row.pending_id),
-                    ),
-                    row,
-                )
-            })
-            .collect();
+        let due = self.wake.load_due(now, self.batch_limit)?;
         for row in due {
-            let key = (
-                Arc::clone(&row.tenant_scope),
+            let Ok(entry) = self.inbox.load(
+                row.tenant_scope.as_ref(),
                 row.session_id,
-                Arc::clone(&row.pending_id),
-            );
-            let entry = inbox.get(&key);
+                row.pending_id.as_ref(),
+            ) else {
+                report.failures += 1;
+                continue;
+            };
             // A past-deadline interaction is due on the clock alone, exactly
             // like a timer: nobody is going to answer it, and the kernel's own
             // expiry can only fire once the session is attached. Interaction
@@ -550,23 +631,92 @@ impl WorkflowWorker {
                 continue;
             }
             let mut expired = false;
-            let outcome = Box::pin(self.resume_row(&row, entry, claim_now, &mut expired)).await;
-            if let Ok(terminal) = outcome {
-                if expired {
-                    report.sessions_expired += 1;
+            let outcome =
+                Box::pin(self.resume_row(&row, entry.as_ref(), claim_now, &mut expired)).await;
+            match outcome {
+                Ok(ResumeOutcome::Terminal) => {
+                    if expired {
+                        report.sessions_expired += 1;
+                    }
+                    report.sessions_resumed += 1;
                 }
-                report.sessions_resumed += 1;
-                if !terminal {
+                Ok(ResumeOutcome::Reparked) => {
+                    if expired {
+                        report.sessions_expired += 1;
+                    }
+                    report.sessions_resumed += 1;
                     report.sessions_reparked += 1;
                 }
-            } else {
-                report.failures += 1;
-                // A store that cannot record the backoff keeps the stale
-                // lease until it expires; the failure is already counted.
-                drop(self.back_off(&row, self.row_now(now)));
+                Ok(ResumeOutcome::Rejected) => {
+                    report.responses_rejected += 1;
+                    drop(self.wake.release(
+                        row.tenant_scope.as_ref(),
+                        row.session_id,
+                        self.worker_id.as_ref(),
+                    ));
+                }
+                Err(WorkerError::LeaseLost) => report.failures += 1,
+                Err(_) => {
+                    report.failures += 1;
+                    // A store that cannot record the backoff keeps the stale
+                    // lease unless the holder can explicitly release it.
+                    if self.back_off(&row, self.row_now(now)).is_err() {
+                        drop(self.wake.release(
+                            row.tenant_scope.as_ref(),
+                            row.session_id,
+                            self.worker_id.as_ref(),
+                        ));
+                    }
+                }
             }
         }
         Ok(())
+    }
+
+    async fn apply_inbox_entry(
+        &self,
+        session: &WorkflowSession,
+        entry: &InboxRow,
+        now: Timestamp,
+    ) -> Result<Option<ResumeOutcome>, WorkerError> {
+        match Box::pin(self.submit_response(session, entry, now)).await {
+            Ok(ResponseSubmission::Applied) => Ok(None),
+            Ok(ResponseSubmission::Rejected { reason_code }) => {
+                self.inbox.dead_letter(
+                    entry.tenant_scope.as_ref(),
+                    entry.session_id,
+                    entry.pending_id.as_ref(),
+                    entry.payload_digest,
+                    reason_code,
+                    now,
+                )?;
+                Ok(Some(ResumeOutcome::Rejected))
+            }
+            Err(error) => {
+                let Some(reason_code) = permanent_response_error(&error) else {
+                    return Err(error);
+                };
+                if entry.kind == InboxKind::Interaction
+                    && let Some(lifecycle) = &self.interaction_lifecycle
+                {
+                    lifecycle.settled(
+                        entry.tenant_scope.as_ref(),
+                        entry.pending_id.as_ref(),
+                        InteractionDeliveryOutcome::Rejected { reason_code },
+                        now,
+                    )?;
+                }
+                self.inbox.dead_letter(
+                    entry.tenant_scope.as_ref(),
+                    entry.session_id,
+                    entry.pending_id.as_ref(),
+                    entry.payload_digest,
+                    reason_code,
+                    now,
+                )?;
+                Ok(Some(ResumeOutcome::Rejected))
+            }
+        }
     }
 
     /// Resume one claimed row. Returns `true` when the run reached a terminal
@@ -583,7 +733,7 @@ impl WorkflowWorker {
         inbox_entry: Option<&InboxRow>,
         now: Timestamp,
         expired: &mut bool,
-    ) -> Result<bool, WorkerError> {
+    ) -> Result<ResumeOutcome, WorkerError> {
         let factory =
             self.ports
                 .get(row.workflow_kind.as_ref())
@@ -599,36 +749,17 @@ impl WorkflowWorker {
         .map_err(|_| WorkerError::StoreIntegrity {
             code: "wake_locator",
         })?;
-        let seed = self.seed_counter.fetch_add(1, Ordering::AcqRel);
         let session =
-            WorkflowSession::trusted(Arc::clone(&self.journal), locator, self.clock.clone(), seed)
+            WorkflowSession::trusted(Arc::clone(&self.journal), locator, self.clock.clone())
                 .await?;
         let mut session = factory
             .bind(session)?
             .with_drive_timeout(self.drive_timeout);
+        self.ensure_lease(row, now)?;
         if let Some(entry) = inbox_entry
-            && let Err(error) = Box::pin(self.submit_response(&session, entry, now)).await
+            && let Some(outcome) = self.apply_inbox_entry(&session, entry, now).await?
         {
-            // A payload whose command locator does not match this session
-            // (TM-19, `require_locator`) can never resolve on any future
-            // attempt either: it is permanently poisoned, not merely
-            // transient. Unlike the drive-timeout case below — where the
-            // entry survives for redelivery once the run can actually be
-            // parked — this entry is deleted so it cannot wedge every
-            // future tick claiming the same row. The wake row itself is
-            // untouched: the caller's `back_off` still records the failure
-            // and the run stays parked on its original wait.
-            if matches!(
-                error,
-                WorkerError::Driver(WorkflowDriverError::UnknownLocator)
-            ) {
-                self.inbox.delete(
-                    entry.tenant_scope.as_ref(),
-                    entry.session_id,
-                    entry.pending_id.as_ref(),
-                )?;
-            }
-            return Err(error);
+            return Ok(outcome);
         }
         // Only meaningful on the expiry path: whether the interaction this row
         // was parked on is *still* pending as the owner respawns. The respawn
@@ -650,6 +781,7 @@ impl WorkflowWorker {
         // this row. Gating on `inbox_entry.is_none()` here would *under*-report
         // exactly that case.
         let was_pending = expiry_due(row, now) && pending_matches_row(&session, row);
+        self.ensure_lease(row, self.row_now(now))?;
         session.respawn_owner().await?;
         if was_pending {
             // `respawn_owner` refreshes *before* it spawns, so the state it
@@ -659,7 +791,17 @@ impl WorkflowWorker {
         }
         let wait = self.drive_past_wait(&mut session, row, now).await?;
         let terminal = matches!(wait, WorkflowWait::Terminal { .. });
-        park(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
+        let security = session
+            .last_state()
+            .accepted
+            .as_ref()
+            .map(|accepted| accepted.security().clone());
+        let checkpoint = park(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
+        if let (Some(lifecycle), Some(security), WorkflowWait::Interaction { request, .. }) =
+            (&self.interaction_lifecycle, security, &wait)
+        {
+            lifecycle.capture(&checkpoint, request, &security, now)?;
+        }
         // Only now is the response fully consumed. Dropping it earlier would
         // strand the row: a non-timer row is claimed only while its inbox
         // entry exists, so a resume that failed after the delete could never
@@ -674,13 +816,23 @@ impl WorkflowWorker {
         // Ordering matters more than atomicity here, and the order above is
         // the one that cannot lose work.
         if let Some(entry) = inbox_entry {
-            self.inbox.delete(
+            let deleted = self.inbox.delete_if_digest(
                 entry.tenant_scope.as_ref(),
                 entry.session_id,
                 entry.pending_id.as_ref(),
+                entry.payload_digest,
             )?;
+            if !deleted {
+                return Err(WorkerError::Conflict {
+                    code: "inbox_consumed_conflict",
+                });
+            }
         }
-        Ok(terminal)
+        Ok(if terminal {
+            ResumeOutcome::Terminal
+        } else {
+            ResumeOutcome::Reparked
+        })
     }
 
     /// Poll until the state parks on a wait other than the one recorded on
@@ -731,7 +883,7 @@ impl WorkflowWorker {
         session: &WorkflowSession,
         entry: &InboxRow,
         now: Timestamp,
-    ) -> Result<(), WorkerError> {
+    ) -> Result<ResponseSubmission, WorkerError> {
         match entry.kind {
             InboxKind::Interaction => {
                 let command: InteractionResolutionCommand =
@@ -740,7 +892,29 @@ impl WorkflowWorker {
                             code: "inbox_payload",
                         }
                     })?;
-                session.resolve_interaction(command, now).await?;
+                let outcome = session.resolve_interaction(command, now).await?;
+                let submission = match outcome {
+                    ExternalRouteOutcome::Committed(_)
+                    | ExternalRouteOutcome::Idempotent { .. } => ResponseSubmission::Applied,
+                    ExternalRouteOutcome::Rejected { reason_code, .. } => {
+                        ResponseSubmission::Rejected { reason_code }
+                    }
+                };
+                if let Some(lifecycle) = &self.interaction_lifecycle {
+                    let outcome = match submission {
+                        ResponseSubmission::Applied => InteractionDeliveryOutcome::Accepted,
+                        ResponseSubmission::Rejected { reason_code } => {
+                            InteractionDeliveryOutcome::Rejected { reason_code }
+                        }
+                    };
+                    lifecycle.settled(
+                        entry.tenant_scope.as_ref(),
+                        entry.pending_id.as_ref(),
+                        outcome,
+                        now,
+                    )?;
+                }
+                return Ok(submission);
             }
             InboxKind::External => {
                 let command: ExternalEffectCompletionCommand =
@@ -749,10 +923,13 @@ impl WorkflowWorker {
                             code: "inbox_payload",
                         }
                     })?;
-                Box::pin(session.complete_external(command, now)).await?;
+                let outcome = Box::pin(session.complete_external(command, now)).await?;
+                if let ExternalRouteOutcome::Rejected { reason_code, .. } = outcome {
+                    return Ok(ResponseSubmission::Rejected { reason_code });
+                }
             }
         }
-        Ok(())
+        Ok(ResponseSubmission::Applied)
     }
 
     /// Record a failed resume with exponential backoff.
@@ -762,6 +939,21 @@ impl WorkflowWorker {
         let retry_at = lease_deadline(now, backoff_ms)?;
         self.wake
             .record_failure(row.tenant_scope.as_ref(), row.session_id, retry_at)
+    }
+
+    /// Renew and verify ownership before journal-affecting resume work.
+    fn ensure_lease(&self, row: &WakeRow, now: Timestamp) -> Result<(), WorkerError> {
+        if self.wake.renew(
+            row.tenant_scope.as_ref(),
+            row.session_id,
+            self.worker_id.as_ref(),
+            now,
+            self.lease_ttl_ms,
+        )? {
+            Ok(())
+        } else {
+            Err(WorkerError::LeaseLost)
+        }
     }
 
     /// Whether this fire's starter is still inside its backoff window.
@@ -850,6 +1042,18 @@ impl WorkflowWorker {
             shutdown: shutdown_tx,
             join,
         }
+    }
+}
+
+fn permanent_response_error(error: &WorkerError) -> Option<&'static str> {
+    match error {
+        WorkerError::Driver(
+            WorkflowDriverError::UnknownLocator | WorkflowDriverError::Ingress(_),
+        )
+        | WorkerError::StoreIntegrity {
+            code: "inbox_payload",
+        } => Some(error.code()),
+        _ => None,
     }
 }
 

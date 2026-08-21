@@ -8,6 +8,8 @@ use thiserror::Error;
 
 /// Minimum accepted signing-key length in bytes.
 pub const MIN_KEY_BYTES: usize = 32;
+/// Maximum total active plus rotation verification keys.
+pub const MAX_VERIFICATION_KEYS: usize = 8;
 
 const KEY_ID_MAX_BYTES: usize = 128;
 
@@ -52,6 +54,9 @@ pub enum CompletionIngressConfigError {
     /// Two keys shared one id.
     #[error("duplicate key id")]
     DuplicateKeyId,
+    /// Active plus rotation keys exceeded [`MAX_VERIFICATION_KEYS`].
+    #[error("too many verification keys")]
+    TooManyVerificationKeys,
 }
 
 #[derive(Debug)]
@@ -71,6 +76,9 @@ fn valid_key_id(id: &str) -> bool {
 pub(crate) fn validated_keys(
     config: &CompletionIngressConfig,
 ) -> Result<ResolvedKeys, CompletionIngressConfigError> {
+    if config.additional_verification_keys.len().saturating_add(1) > MAX_VERIFICATION_KEYS {
+        return Err(CompletionIngressConfigError::TooManyVerificationKeys);
+    }
     let mut keys: Vec<(Arc<str>, SecretString)> = Vec::new();
     let mut push = |id: &str, key: &SecretString| {
         if !valid_key_id(id) {
@@ -154,5 +162,20 @@ mod tests {
         let printed = format!("{config:?}");
         assert!(!printed.contains('a'.to_string().repeat(32).as_str()));
         assert!(printed.contains("REDACTED"));
+    }
+
+    #[test]
+    fn rejects_more_than_eight_total_verification_keys() {
+        let config = CompletionIngressConfig {
+            key_id: "active".to_owned(),
+            key: key(b'a'),
+            additional_verification_keys: (0..MAX_VERIFICATION_KEYS)
+                .map(|index| (format!("old-{index}"), key(b'b')))
+                .collect(),
+        };
+        assert_eq!(
+            validated_keys(&config).expect_err("too many"),
+            CompletionIngressConfigError::TooManyVerificationKeys
+        );
     }
 }

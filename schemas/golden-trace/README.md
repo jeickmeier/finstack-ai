@@ -1,7 +1,7 @@
 # golden-trace
 
 Owner: `me@jeickmeier.com`  
-Compatibility profile: strict reject-unknown (TDD §28.4)  
+Compatibility profile: strict reject-unknown (contract section 28.4)  
 Fixtures: `fixtures/compatibility/golden-trace/`
 
 JSON Schema 2020-12 documents for scripted inputs and golden traces:

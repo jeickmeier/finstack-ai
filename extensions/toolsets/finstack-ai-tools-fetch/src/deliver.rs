@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::{ErrorCategory, Metadata, Sensitivity};
+use finstack_ai_kernel::{ArtifactRef, ErrorCategory, Metadata, Sensitivity};
 use finstack_ai_runtime::{
     ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ToolCallContext,
     ToolError, stage_required_artifact,
@@ -27,7 +27,7 @@ pub(crate) enum DeliveredContent {
     /// Body decoded and inlined as text (merged into the `content` field).
     Inline(String),
     /// Body staged to the artifact store (merged into the `artifact` field).
-    Artifact(serde_json::Value),
+    Artifact(ArtifactRef),
 }
 
 fn tool_error(
@@ -161,7 +161,7 @@ async fn stage_artifact(
     media_type: &str,
     store: &Arc<dyn ArtifactStore>,
     ctx: &ToolCallContext,
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<ArtifactRef, ToolError> {
     let artifact = stage_required_artifact(
         store.as_ref(),
         ArtifactScope {
@@ -191,13 +191,7 @@ async fn stage_artifact(
             "fetch artifact staging failed",
         ),
     })?;
-    serde_json::to_value(&artifact).map_err(|_| {
-        tool_error(
-            FETCH_TRANSPORT_FAILED,
-            ErrorCategory::Internal,
-            "fetch artifact serialization failed",
-        )
-    })
+    Ok(artifact)
 }
 
 /// Inline `text` unless it exceeds `max_result_budget`.

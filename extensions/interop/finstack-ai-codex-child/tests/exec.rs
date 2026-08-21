@@ -65,36 +65,12 @@ fn child_locator(placement: ChildPlacement) -> ChildRunLocator {
     ChildRunLocator { operation, remote }
 }
 
-fn request_digest(input: &[ContentBlock], placement: &str, locator: &ChildRunLocator) -> Digest {
-    let agent = codex_agent_ref().expect("agent");
-    let canonical = serde_json::to_vec(&serde_json::json!({
-        "agent_id": agent.id.to_string(),
-        "input": input
-            .iter()
-            .map(|block| match block {
-                ContentBlock::Text(text) => text.text().to_string(),
-                _ => String::new(),
-            })
-            .collect::<Vec<_>>(),
-        "placement": placement,
-        "run_id": locator.operation.run_id.to_string(),
-    }))
-    .expect("canonical");
-    Digest::domain_separated("child-run-request", 1, &canonical).expect("digest")
-}
-
 fn request_for(prompt: &str, placement: ChildPlacement) -> ChildRunRequest {
     let locator = child_locator(placement);
     let input: Arc<[ContentBlock]> = Arc::from([ContentBlock::Text(
         TextBlock::try_new(prompt).expect("text"),
     )]);
-    let placement_name = match placement {
-        ChildPlacement::RemoteChildSession => "remote_child_session",
-        ChildPlacement::IsolatedChildSession => "isolated_child_session",
-        ChildPlacement::CompatibleLaneInParentSession => "compatible_lane_in_parent_session",
-    };
-    let digest = request_digest(&input, placement_name, &locator);
-    ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: codex_agent_ref().expect("agent"),
         input,
         placement,
@@ -103,8 +79,10 @@ fn request_for(prompt: &str, placement: ChildPlacement) -> ChildRunRequest {
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: digest,
-    }
+        request_digest: Digest::raw_json(b"null"),
+    };
+    request.request_digest = request.canonical_digest().expect("digest");
+    request
 }
 
 fn codex_request(prompt: &str) -> ChildRunRequest {
@@ -114,7 +92,10 @@ fn codex_request(prompt: &str) -> ChildRunRequest {
 async fn wait_until_settled(invoker: &CodexChildInvoker, run_id: &RunId) -> CodexRunReport {
     let start = Instant::now();
     loop {
-        if let Some(report) = invoker.run_status(run_id)
+        let locator = invoker.accepted_locator(&child_context().parent, run_id);
+        if let Some(report) = locator
+            .as_ref()
+            .and_then(|locator| invoker.run_status(locator))
             && report.status != CodexRunStatus::Running
         {
             return report;
@@ -213,8 +194,10 @@ async fn equal_digest_attaches_and_different_digest_conflicts() {
     assert_eq!(first, second);
 
     let mut altered = request;
-    altered.request_digest =
-        Digest::domain_separated("child-run-request", 1, b"different").expect("digest");
+    altered.input = Arc::from([ContentBlock::Text(
+        TextBlock::try_new("task two").expect("text"),
+    )]);
+    altered.request_digest = altered.canonical_digest().expect("digest");
     let error = invoker
         .start_or_attach(child_context(), altered)
         .await

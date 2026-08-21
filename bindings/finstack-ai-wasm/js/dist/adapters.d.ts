@@ -276,11 +276,31 @@ export declare class JsArtifactStore {
  */
 export declare function createMemoryJournalStore(): HostJournalStore;
 /**
- * Scripted in-memory artifact store over `Uint8Array` values.
+ * Finite capacity for the scripted in-memory artifact store.
+ */
+export interface MemoryArtifactStoreOptions {
+    /** Stable non-secret host-local identity used in diagnostics. */
+    storeId: string;
+    /** Maximum bytes accepted for one artifact. */
+    maxArtifactBytes: number;
+    /** Maximum distinct scoped artifact references. */
+    maxArtifacts: number;
+    /** Maximum aggregate retained artifact bytes. */
+    maxTotalBytes: number;
+    /** Maximum distinct owners retaining one artifact. */
+    maxOwnersPerArtifact: number;
+    /** Grace period before an unowned artifact can be collected. */
+    orphanGraceMs: number;
+    /** Maximum entries examined by one collection call. */
+    maxGcBatch: number;
+}
+/**
+ * Scripted bounded in-memory artifact store over `Uint8Array` values.
  *
+ * @param options - Required finite store identity and capacities.
  * @returns A host store that keeps bytes in process memory.
  */
-export declare function createMemoryArtifactStore(): HostArtifactStore;
+export declare function createMemoryArtifactStore(options: MemoryArtifactStoreOptions): HostArtifactStore;
 /**
  * Host clock backed by `Date.now`, or an injected millisecond source.
  *

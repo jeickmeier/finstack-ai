@@ -33,7 +33,7 @@ pub mod store;
 pub mod toolset;
 
 pub use extract::{CandidateMemory, DEFAULT_MARKER, MemoryExtractor, RuleBasedExtractor};
-pub use observer::MemoryObserver;
+pub use observer::{MemoryObserver, MemoryObserverDiagnostics};
 pub use provider::{MemoryContextProvider, RecallConfig};
 #[cfg(not(target_arch = "wasm32"))]
 pub use record::system_clock;
@@ -42,13 +42,14 @@ pub use record::{
     MemoryRecord, MemoryScope, RetentionPolicy,
 };
 pub use store::{
-    InProcessArtifactStore, InProcessMemoryStore, MatchEvidence, MemoryHit, MemoryListing,
-    MemoryPage, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
+    InProcessArtifactStore, InProcessMemoryStore, MatchEvidence, MemoryArtifactAction, MemoryHit,
+    MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError,
+    MemoryStoreLimits, PutOutcome, reconcile_memory_artifacts,
 };
 pub use toolset::{
     INLINE_BODY_MAX_BYTES, MEMORY_TOOL_ID_CONFLICT, MEMORY_TOOL_INVALID_ARGUMENTS,
-    MEMORY_TOOL_NOT_FOUND, MEMORY_TOOL_SELF_SUPERSESSION, MEMORY_TOOL_UNAVAILABLE, MemoryPolicy,
-    MemoryToolset,
+    MEMORY_TOOL_NOT_FOUND, MEMORY_TOOL_POLICY_DENIED, MEMORY_TOOL_SELF_SUPERSESSION,
+    MEMORY_TOOL_UNAVAILABLE, MemoryPolicy, MemoryToolset,
 };
 
 #[cfg(test)]

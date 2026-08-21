@@ -4,7 +4,7 @@ Typed PyO3 facade over the Rust-owned `finstack-ai` engine. Async APIs are
 primary. Dropping a `Run` detaches observation; it does not cancel durable
 execution.
 
-Workspace version is **1.0.0**. The package is not on PyPI. Consume a
+Workspace version is **2.0.0**. The package is not on PyPI. Consume a
 staged wheel or an editable checkout.
 
 ## Quick start

@@ -92,7 +92,7 @@ test("completed worker session survives reload as inspect", async ({ page }) => 
     await client.create({ scenario: "persist", dbName: "pr037-a01" });
     const snapshot = await client.inspectSession(sessionId);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("pr037-a01", 1);
+      const request = indexedDB.open("pr037-a01", 2);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("open failed"));
     });
@@ -284,7 +284,7 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
     };
 
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(dbName, 1);
+      const request = indexedDB.open(dbName, 2);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("open failed"));
     });
@@ -312,13 +312,13 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
     }
 
     await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open(dbName, 1);
+      const request = indexedDB.open(dbName, 2);
       request.onsuccess = () => {
         const opened = request.result;
         const write = opened
           .transaction("meta", "readwrite")
           .objectStore("meta")
-          .put({ key: "schemaVersion", value: 2 });
+          .put({ key: "schemaVersion", value: 3 });
         write.onsuccess = () => {
           opened.close();
           resolve();
@@ -339,11 +339,14 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
       dbName: "pr037-a03-blobs",
       maxBlobBytes: 16,
     });
-    await artifacts.stagePut("{}", new Uint8Array([1, 2, 3]), "{}", "blob-1");
-    const firstGet = Array.from(await artifacts.get("blob-1"));
+    const blob = JSON.stringify({ id: "blob-1" });
+    const artifact = JSON.stringify({ blob: JSON.parse(blob) });
+    await artifacts.stagePut("{}", new Uint8Array([1, 2, 3]), "{}", artifact, "blob-1");
+    const firstGet = Array.from(await artifacts.get("{}", artifact, "blob-1"));
+    const [, byBlobBytes] = await artifacts.getByBlob("{}", blob);
     let oversizeCode = "";
     try {
-      await artifacts.stagePut("{}", new Uint8Array(32), "{}", "blob-big");
+      await artifacts.stagePut("{}", new Uint8Array(32), "{}", "ref-big", "blob-big");
     } catch (error) {
       oversizeCode = (error as { code?: string }).code ?? "";
     }
@@ -358,6 +361,7 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
       corruptCode,
       schemaCode,
       firstGet,
+      byBlob: Array.from(byBlobBytes),
       oversizeCode,
     };
   });
@@ -371,6 +375,7 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
   expect(result.corruptCode).toBe("store_integrity_failure");
   expect(result.schemaCode).toBe("store_integrity_failure");
   expect(result.firstGet).toEqual([1, 2, 3]);
+  expect(result.byBlob).toEqual([1, 2, 3]);
   expect(result.oversizeCode).toBe("store_limit_exceeded");
 
   await page.reload();
@@ -381,7 +386,9 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
       dbName: "pr037-a03-blobs",
       maxBlobBytes: 16,
     });
-    return Array.from(await artifacts.get("blob-1"));
+    const blob = JSON.stringify({ id: "blob-1" });
+    const artifact = JSON.stringify({ blob: JSON.parse(blob) });
+    return Array.from(await artifacts.get("{}", artifact, "blob-1"));
   });
   expect(reloaded).toEqual([1, 2, 3]);
 });

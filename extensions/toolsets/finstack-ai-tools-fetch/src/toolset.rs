@@ -224,8 +224,8 @@ impl Toolset for HttpFetchToolset {
                         "http fetch arguments are invalid",
                     )
                 })?;
-            let value = execute_fetch(&state, &ctx, arguments, artifact_store.as_ref()).await?;
-            let output = serde_json::to_vec(&value).map_err(|_| {
+            let delivered = execute_fetch(&state, &ctx, arguments, artifact_store.as_ref()).await?;
+            let output = serde_json::to_vec(&delivered.value).map_err(|_| {
                 tool_error(
                     FETCH_INVALID_ARGUMENTS,
                     ErrorCategory::Internal,
@@ -256,9 +256,12 @@ impl Toolset for HttpFetchToolset {
                 })?,
                 is_error: false,
             };
-            Ok(Box::pin(stream::once(async move {
-                Ok(ToolStreamItem::Completed(result))
-            })) as ToolEventStream)
+            let mut items = Vec::with_capacity(2);
+            if let Some(artifact) = delivered.artifact {
+                items.push(Ok(ToolStreamItem::Artifact(artifact)));
+            }
+            items.push(Ok(ToolStreamItem::Completed(result)));
+            Ok(Box::pin(stream::iter(items)) as ToolEventStream)
         })
     }
 }

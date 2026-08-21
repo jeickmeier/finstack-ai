@@ -35,10 +35,13 @@ re-derivation use the same canonicalizer
 here via `serde_json_canonicalizer`). A verifier does not need to know which
 stage it was called from.
 
-`Verdict` carries `Vec<EvidenceFinding>` on its non-`Accept` arms.
+`Verdict` carries an opaque `EvidenceFindings` collection on its non-`Accept`
+arms. The collection accepts at most 64 findings and 64 KiB of aggregate note
+text.
 `EvidenceFinding::try_new(kind, note)` pairs an `EvidenceKind`
-(`Citation` | `Test` | `Artifact`) with a bounded, non-secret note; oversized
-notes are truncated rather than rejected.
+(`Citation` | `Test` | `Artifact`) with a non-secret note capped at 4 KiB;
+oversized notes are truncated rather than rejected. Feedback is rendered
+directly into its final bounded buffer.
 
 ## The bounce loop
 

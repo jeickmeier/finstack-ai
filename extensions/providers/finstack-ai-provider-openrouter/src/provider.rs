@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
 use crate::error::{
-    CANCELLED, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, http_error, read_error_body,
+    CANCELLED, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR, error, http_error,
 };
 use crate::request::{ResponsesRequest, serialize_request};
 use crate::sse::SseParser;
@@ -159,8 +159,7 @@ impl OpenRouterProvider {
             .map_err(|source| transport_error(&source))?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let body = read_error_body(response).await;
-            return Err(http_error("models endpoint", status, &body));
+            return Err(http_error("models endpoint", status));
         }
         let cap = self.config.max_stream_bytes();
         let mut body = Vec::new();
@@ -285,11 +284,16 @@ impl Model for OpenRouterProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let media_resolver = self.config.media_resolver();
         Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            let cancellation = request.call.run.cancellation.clone();
             let model = model?;
-            let resolved_media =
-                resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes)
-                    .await
-                    .map_err(map_draft_media)?;
+            let resolved_media = tokio::select! {
+                () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
+                resolved = resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes) => {
+                    resolved.map_err(map_draft_media)?
+                }
+            };
             let wire = ResponsesRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -297,8 +301,10 @@ impl Model for OpenRouterProvider {
                 &resolved_media,
             )?;
             let payload = serialize_request(&wire)?;
+            if payload.len() > max_stream_bytes {
+                return Err(request_limit_error());
+            }
             let request_id = request.call.request_id.to_string();
-            let cancellation = request.call.run.cancellation;
             let send = client
                 .post(endpoint)
                 .header("x-client-request-id", &request_id)
@@ -308,12 +314,12 @@ impl Model for OpenRouterProvider {
                 .send();
             let response = tokio::select! {
                 () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
                 let status = response.status().as_u16();
-                let body = read_error_body(response).await;
-                return Err(http_error("responses endpoint", status, &body));
+                return Err(http_error("responses endpoint", status));
             }
             let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
             let structured = matches!(request.draft.output, OutputSpec::JsonSchema { .. });
@@ -325,6 +331,7 @@ impl Model for OpenRouterProvider {
                 structured,
                 max_event_bytes,
                 max_stream_bytes,
+                deadline,
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
@@ -358,6 +365,10 @@ impl Drop for ReceiverModelStream {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "stream driver keeps request identity, limits, cancellation, and deadline together"
+)]
 async fn drive_response(
     response: reqwest::Response,
     sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
@@ -366,6 +377,7 @@ async fn drive_response(
     structured: bool,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    deadline: tokio::time::Instant,
 ) {
     let mut body = response.bytes_stream();
     let mut parser = SseParser::new(max_event_bytes, max_stream_bytes);
@@ -374,6 +386,10 @@ async fn drive_response(
         let chunk = tokio::select! {
             () = cancellation.cancelled() => {
                 let _ = sender.send(Err(cancelled_error())).await;
+                return;
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                let _ = sender.send(Err(timeout_error())).await;
                 return;
             }
             () = sender.closed() => return,
@@ -459,14 +475,27 @@ fn cancelled_error() -> ModelError {
     )
 }
 
+fn timeout_error() -> ModelError {
+    error(
+        TIMEOUT,
+        ErrorCategory::Deadline,
+        true,
+        "OpenRouter request timed out",
+    )
+}
+
+fn request_limit_error() -> ModelError {
+    error(
+        STREAM_LIMIT_EXCEEDED,
+        ErrorCategory::Limit,
+        false,
+        "OpenRouter request exceeded the configured byte limit",
+    )
+}
+
 fn transport_error(source: &reqwest::Error) -> ModelError {
     if source.is_timeout() {
-        error(
-            TIMEOUT,
-            ErrorCategory::Deadline,
-            true,
-            "OpenRouter request timed out",
-        )
+        timeout_error()
     } else {
         error(
             TRANSPORT_ERROR,
@@ -727,7 +756,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_model_catalog_caps_error_body() {
+    async fn fetch_model_catalog_does_not_read_error_body() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener");
@@ -760,10 +789,9 @@ mod tests {
         .expect("capped error body must not hang")
         .expect_err("http error");
         assert_eq!(error.code(), crate::error::HTTP_ERROR);
-        assert!(
-            error.message().chars().count() < crate::error::ERROR_BODY_CAP,
-            "error message must stay bounded: {}",
-            error.message()
+        assert_eq!(
+            error.message(),
+            "OpenRouter models endpoint returned HTTP 500"
         );
         server.abort();
     }

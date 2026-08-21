@@ -3,7 +3,7 @@
 Mirrors the Rust `document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_file_block`
 lane test (crates/finstack-ai-test/tests/lanes/document_ingest.rs) from the
 Python surface: `finstack_ai.Attachment` inputs are staged through the
-binding-held `InProcessArtifactStore`/`AttachmentIndex` pair and the run
+binding-held `InProcessArtifactStore`, and the run
 still completes normally.
 """
 

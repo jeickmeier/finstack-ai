@@ -40,6 +40,51 @@ struct StoredObject {
     media_type: Arc<str>,
 }
 
+fn prepare_object(
+    limits: ObjectStoreLimits,
+    scope: &ObjectScope,
+    key: ObjectKey,
+    content: PutPayload,
+    metadata: ObjectMetadata,
+) -> Result<(String, StoredObject, ObjectRef), ObjectError> {
+    validate_object_metadata(&metadata)?;
+    let scope_digest = scope.digest()?;
+    let bytes = match content {
+        PutPayload::Bytes(bytes) => bytes,
+        PutPayload::File(path) => {
+            let data = std::fs::read(&path).map_err(|error| ObjectError::Io {
+                message: Arc::from(error.to_string()),
+            })?;
+            Bytes::from(data)
+        }
+    };
+    let length = u64::try_from(bytes.len()).map_err(|_error| ObjectError::Io {
+        message: Arc::from("length_overflow"),
+    })?;
+    if length > limits.max_object_bytes {
+        return Err(ObjectError::TooLarge {
+            len: length,
+            max: limits.max_object_bytes,
+        });
+    }
+    let content_digest = Digest::blob_content(&bytes);
+    let physical = physical_object_key(None, &scope_digest, &key);
+    let stored = StoredObject {
+        scope_digest,
+        content: bytes,
+        content_digest,
+        media_type: Arc::clone(&metadata.media_type),
+    };
+    let object_ref = ObjectRef {
+        key,
+        scope_digest,
+        content_digest,
+        length,
+        media_type: metadata.media_type,
+    };
+    Ok((physical, stored, object_ref))
+}
+
 /// In-memory [`ObjectStore`] fake intended for unit and contract tests.
 ///
 /// Objects are keyed by [`physical_object_key`] with no key prefix, exactly
@@ -103,41 +148,8 @@ impl ObjectStore for FakeObjectStore {
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let result = (|| {
-            validate_object_metadata(&metadata)?;
-            let scope_digest = scope.digest()?;
-            let bytes = match content {
-                PutPayload::Bytes(bytes) => bytes,
-                PutPayload::File(path) => {
-                    let data = std::fs::read(&path).map_err(|error| ObjectError::Io {
-                        message: Arc::from(error.to_string()),
-                    })?;
-                    Bytes::from(data)
-                }
-            };
-            let length = u64::try_from(bytes.len()).map_err(|_error| ObjectError::Io {
-                message: Arc::from("length_overflow"),
-            })?;
-            if length > self.limits.max_object_bytes {
-                return Err(ObjectError::TooLarge {
-                    len: length,
-                    max: self.limits.max_object_bytes,
-                });
-            }
-            let content_digest = Digest::blob_content(&bytes);
-            let physical = physical_object_key(None, &scope_digest, &key);
-            let stored = StoredObject {
-                scope_digest,
-                content: bytes,
-                content_digest,
-                media_type: Arc::clone(&metadata.media_type),
-            };
-            let object_ref = ObjectRef {
-                key,
-                scope_digest,
-                content_digest,
-                length,
-                media_type: Arc::clone(&metadata.media_type),
-            };
+            let (physical, stored, object_ref) =
+                prepare_object(self.limits, &scope, key, content, metadata)?;
             let mut objects = self.lock()?;
             objects.insert(physical, stored);
             Ok(object_ref)
@@ -259,6 +271,66 @@ impl ObjectStore for FakeObjectStore {
         Box::pin(async move { result })
     }
 
+    fn put_if_absent(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+        content: PutPayload,
+        metadata: ObjectMetadata,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        let result = (|| {
+            let (physical, stored, object_ref) =
+                prepare_object(self.limits, &scope, key, content, metadata)?;
+            let mut objects = self.lock()?;
+            if objects.contains_key(&physical) {
+                return Err(ObjectError::Conflict);
+            }
+            objects.insert(physical, stored);
+            Ok(object_ref)
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn replace_if_digest(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+        expected: Digest,
+        content: PutPayload,
+        metadata: ObjectMetadata,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        let result = (|| {
+            let (physical, stored, object_ref) =
+                prepare_object(self.limits, &scope, key, content, metadata)?;
+            let mut objects = self.lock()?;
+            if objects.get(&physical).map(|value| value.content_digest) != Some(expected) {
+                return Err(ObjectError::Conflict);
+            }
+            objects.insert(physical, stored);
+            Ok(object_ref)
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn delete_if_digest(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+        expected: Digest,
+    ) -> PortFuture<Result<(), ObjectError>> {
+        let result = (|| {
+            let scope_digest = scope.digest()?;
+            let physical = physical_object_key(None, &scope_digest, &key);
+            let mut objects = self.lock()?;
+            if objects.get(&physical).map(|value| value.content_digest) != Some(expected) {
+                return Err(ObjectError::Conflict);
+            }
+            objects.remove(&physical);
+            Ok(())
+        })();
+        Box::pin(async move { result })
+    }
+
     fn list(
         &self,
         scope: ObjectScope,
@@ -268,8 +340,7 @@ impl ObjectStore for FakeObjectStore {
         let result = (|| {
             let scope_digest = scope.digest()?;
             let hex = scope_digest.to_hex();
-            let hex16 = hex.get(..16).unwrap_or(&hex).to_string();
-            let scope_prefix = format!("{hex16}/");
+            let scope_prefix = format!("{hex}/");
             let prefix_str = prefix.as_ref().map(|value| value.as_str().to_string());
 
             let matching: Vec<(String, u64)> = {
@@ -379,6 +450,7 @@ pub async fn run_object_store_contract_suite(store: Arc<dyn ObjectStore>, suppor
     cross_scope_read_fails_closed(&*store).await;
     missing_object_is_not_found(&*store).await;
     delete_is_idempotent(&*store).await;
+    conditional_mutations_are_atomic(&*store).await;
     list_pages_within_scope_only(&*store).await;
     oversize_put_is_rejected(&*store).await;
     invalid_key_never_reaches_backend();
@@ -387,6 +459,87 @@ pub async fn run_object_store_contract_suite(store: Arc<dyn ObjectStore>, suppor
     } else {
         presign_is_unsupported(&*store).await;
     }
+}
+
+async fn conditional_mutations_are_atomic(store: &dyn ObjectStore) {
+    let scope = test_scope("tenant-conditional");
+    let key = ObjectKey::try_new("conditional/value.bin")
+        .expect("conditional_mutations_are_atomic: key must be valid");
+    let first = Bytes::from_static(b"first");
+    let second = Bytes::from_static(b"second");
+    let first_ref = store
+        .put_if_absent(
+            scope.clone(),
+            key.clone(),
+            PutPayload::Bytes(first.clone()),
+            test_metadata(),
+        )
+        .await
+        .expect("conditional_mutations_are_atomic: first put must succeed");
+
+    assert!(matches!(
+        store
+            .put_if_absent(
+                scope.clone(),
+                key.clone(),
+                PutPayload::Bytes(second.clone()),
+                test_metadata(),
+            )
+            .await,
+        Err(ObjectError::Conflict)
+    ));
+    assert_eq!(
+        store
+            .get(scope.clone(), key.clone())
+            .await
+            .expect("conditional_mutations_are_atomic: original must remain"),
+        first
+    );
+
+    assert!(matches!(
+        store
+            .replace_if_digest(
+                scope.clone(),
+                key.clone(),
+                Digest::blob_content(b"wrong"),
+                PutPayload::Bytes(second.clone()),
+                test_metadata(),
+            )
+            .await,
+        Err(ObjectError::Conflict)
+    ));
+    let second_ref = store
+        .replace_if_digest(
+            scope.clone(),
+            key.clone(),
+            first_ref.content_digest,
+            PutPayload::Bytes(second.clone()),
+            test_metadata(),
+        )
+        .await
+        .expect("conditional_mutations_are_atomic: matching replace must succeed");
+    assert_eq!(
+        store
+            .get(scope.clone(), key.clone())
+            .await
+            .expect("conditional_mutations_are_atomic: replacement must remain"),
+        second
+    );
+
+    assert!(matches!(
+        store
+            .delete_if_digest(scope.clone(), key.clone(), Digest::blob_content(b"wrong"),)
+            .await,
+        Err(ObjectError::Conflict)
+    ));
+    store
+        .delete_if_digest(scope.clone(), key.clone(), second_ref.content_digest)
+        .await
+        .expect("conditional_mutations_are_atomic: matching delete must succeed");
+    assert!(matches!(
+        store.get(scope, key).await,
+        Err(ObjectError::NotFound)
+    ));
 }
 
 async fn put_get_round_trip(store: &dyn ObjectStore) {

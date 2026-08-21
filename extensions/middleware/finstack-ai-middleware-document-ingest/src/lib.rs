@@ -6,17 +6,12 @@
 //! containing extracted Markdown (or a fail-soft note). Providers therefore
 //! never see media blocks they cannot map.
 //!
-//! # `BlobRef` -> `ArtifactRef` resolution
+//! # Scoped blob resolution
 //!
-//! A `ContentBlock::File` only ever carries a `BlobRef` on the wire, and no
-//! `ArtifactStore` implementation guarantees that a full `ArtifactRef` (id,
-//! kind, digests, metadata) can be reconstructed from that bare `BlobRef`
-//! alone (spec decision 19). This middleware instead consults an
-//! [`AttachmentIndex`] populated wherever attachments are staged: the caller
-//! that staged the artifact hands its exact `ArtifactRef` to
-//! [`AttachmentIndex::insert`], and this middleware looks it up by blob id.
-//! A miss (never staged, or evicted) is treated as fail-soft "could not be
-//! read".
+//! A `ContentBlock::File` carries only a `BlobRef`. The artifact store resolves
+//! that blob inside the authorized run scope and returns both the exact
+//! store-owned `ArtifactRef` and verified bytes. No process-local attachment
+//! index participates in correctness.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -44,13 +39,13 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{
-    ArtifactRef, BlobRef, ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory,
+    BlobRef, ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory,
     InvocationRecovery, Message, MessageRole, Metadata, RawJson, Stage, TextBlock, Version,
 };
 use finstack_ai_runtime::{
-    ArtifactScope, ArtifactStore, Bytes, MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware,
-    MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole,
-    ModelRequestDraft, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+    ArtifactScope, ArtifactStore, Bytes, CancellationSignal, MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, ModelRequestDraft, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
 };
 use finstack_ai_tools_document::parser::{self, DocumentFormat, DocumentLimits};
 use thiserror::Error;
@@ -61,9 +56,6 @@ const INGEST_VERSION: Version = Version {
     minor: 0,
     patch: 0,
 };
-
-/// Maximum entries retained by [`AttachmentIndex`] before FIFO eviction.
-const ATTACHMENT_INDEX_CAPACITY: usize = 1024;
 
 /// Maximum entries retained by the per-instance parse memo before FIFO
 /// eviction. Sized for the handful of distinct attachments a conversation
@@ -170,49 +162,6 @@ impl<K, V, const CAP: usize> BoundedFifoMap<K, V, CAP> {
     }
 }
 
-/// Bounded blob-id -> `ArtifactRef` map populated wherever attachments are
-/// staged.
-///
-/// `ArtifactStore` implementations verify exact `ArtifactRef` identity
-/// against store-assigned state that a bare `BlobRef` cannot reproduce
-/// (spec decision 19), so this middleware cannot reconstruct an `ArtifactRef`
-/// from the `BlobRef` carried on `ContentBlock::File`. Instead, whoever
-/// staged the attachment (the run/session attachment path, or a toolset)
-/// records the exact `ArtifactRef` it received from `stage_put` here, keyed
-/// by the staged blob's id, so the ingest middleware can look it back up.
-///
-/// FIFO-capped at [`ATTACHMENT_INDEX_CAPACITY`] entries: once full, the
-/// oldest insertion is evicted to keep memory bounded for long-lived
-/// processes. Interior mutability is a plain `std::sync::Mutex` (no tokio),
-/// so this type stays usable on `wasm32` hosts.
-#[derive(Debug, Default)]
-pub struct AttachmentIndex {
-    map: BoundedFifoMap<String, ArtifactRef, ATTACHMENT_INDEX_CAPACITY>,
-}
-
-impl AttachmentIndex {
-    /// Record a staged artifact, keyed by its blob id.
-    ///
-    /// Re-inserting the same blob id refreshes the stored `ArtifactRef`
-    /// without moving it in FIFO order. Once the index holds
-    /// [`ATTACHMENT_INDEX_CAPACITY`] distinct blob ids, the oldest entry is
-    /// evicted first.
-    pub fn insert(&self, artifact: ArtifactRef) {
-        let key = artifact.blob().id().to_owned();
-        self.map.insert(key, artifact);
-    }
-
-    /// Look up the staged `ArtifactRef` for a `BlobRef`, keyed by
-    /// `blob.id()`.
-    ///
-    /// Returns `None` when the blob was never staged through
-    /// [`AttachmentIndex::insert`], or has since been evicted.
-    #[must_use]
-    pub fn lookup(&self, blob: &BlobRef) -> Option<ArtifactRef> {
-        self.map.lookup(blob.id())
-    }
-}
-
 /// Construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DocumentIngestError {
@@ -258,7 +207,6 @@ fn limits_configuration_digest(limits: &DocumentLimits) -> Result<Digest, Docume
 pub struct DocumentIngestMiddleware {
     descriptor: MiddlewareDescriptor,
     store: Arc<dyn ArtifactStore>,
-    index: Arc<AttachmentIndex>,
     limits: DocumentLimits,
     parse_cache: Arc<ParseCache>,
 }
@@ -278,15 +226,12 @@ impl DocumentIngestMiddleware {
     ///
     /// Rejects an invalid checked-in identity or limits that cannot be
     /// encoded into the descriptor configuration digest.
-    pub fn try_new(
-        store: Arc<dyn ArtifactStore>,
-        index: Arc<AttachmentIndex>,
-    ) -> Result<Self, DocumentIngestError> {
+    pub fn try_new(store: Arc<dyn ArtifactStore>) -> Result<Self, DocumentIngestError> {
         let limits = DocumentLimits {
             max_input_bytes: u64::try_from(store.limits().max_artifact_bytes).unwrap_or(u64::MAX),
             ..DocumentLimits::default()
         };
-        Self::try_with_limits(store, index, limits)
+        Self::try_with_limits(store, limits)
     }
 
     /// Construct with explicit parse limits.
@@ -297,7 +242,6 @@ impl DocumentIngestMiddleware {
     /// encoded into the descriptor configuration digest.
     pub fn try_with_limits(
         store: Arc<dyn ArtifactStore>,
-        index: Arc<AttachmentIndex>,
         limits: DocumentLimits,
     ) -> Result<Self, DocumentIngestError> {
         let configuration_digest = limits_configuration_digest(&limits)?;
@@ -324,7 +268,6 @@ impl DocumentIngestMiddleware {
                 metadata: Metadata::empty(),
             },
             store,
-            index,
             limits,
             parse_cache: Arc::new(ParseCache::default()),
         })
@@ -357,8 +300,9 @@ impl Middleware for DocumentIngestMiddleware {
             let mut messages: Vec<Message> =
                 Vec::with_capacity(before_model.request.messages.len());
             for message in before_model.request.messages.iter() {
-                let (rewritten, message_changed) =
-                    middleware.rewrite_message(message, &scope).await?;
+                let (rewritten, message_changed) = middleware
+                    .rewrite_message(message, &scope, &ctx.run.cancellation)
+                    .await?;
                 changed |= message_changed;
                 messages.push(rewritten);
             }
@@ -400,6 +344,7 @@ impl DocumentIngestMiddleware {
         &self,
         message: &Message,
         scope: &ArtifactScope,
+        cancellation: &CancellationSignal,
     ) -> Result<(Message, bool), MiddlewareError> {
         if message.role() != MessageRole::User {
             return Ok((message.clone(), false));
@@ -408,10 +353,8 @@ impl DocumentIngestMiddleware {
         let mut blocks: Vec<ContentBlock> = Vec::with_capacity(message.content().len());
         for block in message.content() {
             match block {
-                ContentBlock::File(media)
-                    if DocumentFormat::is_supported_media_type(media.blob().media_type()) =>
-                {
-                    blocks.push(self.ingest_block(media, scope).await?);
+                ContentBlock::File(media) => {
+                    blocks.push(self.ingest_block(media, scope, cancellation).await?);
                     changed = true;
                 }
                 other => blocks.push(other.clone()),
@@ -431,14 +374,16 @@ impl DocumentIngestMiddleware {
         &self,
         media: &finstack_ai_kernel::MediaRef,
         scope: &ArtifactScope,
+        cancellation: &CancellationSignal,
     ) -> Result<ContentBlock, MiddlewareError> {
         let blob = media.blob();
         let name = blob.name().unwrap_or("attachment").to_owned();
-        let Ok((bytes, digest)) = self.fetch_blob(scope, blob).await else {
+        if blob.digest().is_none() {
             return note_block(&format!(
-                "[Attached document \"{name}\" could not be read; it was skipped.]"
+                "[document_ingest:digest_required attachment=\"{name}\"]"
             ));
-        };
+        }
+        let (bytes, digest) = self.fetch_blob(scope, blob, cancellation).await?;
         // Memoize only the pure `bytes -> note text` computation. Every
         // fail-soft branch above (index miss, store failure, digest
         // mismatch) is transient and stays uncached; the branches below are
@@ -452,6 +397,9 @@ impl DocumentIngestMiddleware {
         };
         if let Some(note) = self.parse_cache.lookup(&key) {
             return note_block(&note);
+        }
+        if cancellation.is_cancelled() {
+            return Err(cancelled_error());
         }
         let note = match parser::parse(&bytes, Some(blob.media_type()), &self.limits) {
             Ok(parsed) if parsed.requires_ocr && parsed.markdown.is_empty() => format!(
@@ -469,44 +417,53 @@ impl DocumentIngestMiddleware {
                     markdown = parsed.markdown,
                 )
             }
-            Err(_) => {
-                format!("[Attached document \"{name}\" could not be parsed; it was skipped.]")
+            Err(_) if !DocumentFormat::is_supported_media_type(blob.media_type()) => {
+                format!("[document_ingest:unsupported attachment=\"{name}\"]")
             }
+            Err(_) => format!("[document_ingest:parse_failed attachment=\"{name}\"]"),
         };
+        if cancellation.is_cancelled() {
+            return Err(cancelled_error());
+        }
         self.parse_cache.insert(key, note.clone());
         note_block(&note)
     }
 
-    /// Resolve a `BlobRef` to its exact bytes via the `AttachmentIndex` and
-    /// the artifact store, verifying the fetched content against the blob's
-    /// declared digest when one is present. Also returns the fetched
+    /// Resolve a `BlobRef` to its exact reference and bytes through the
+    /// artifact store. Also returns the fetched
     /// content's digest, which doubles as the parse-memo key.
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` when the blob was never staged (index miss), the
-    /// store cannot return it, or the returned bytes do not match
-    /// `blob.digest()`. Every branch collapses to the same fail-soft
-    /// "could not be read" note at the call site, so the reason is not
-    /// distinguished further.
+    /// Returns a stable middleware error when lookup, scope, reference, or
+    /// content integrity validation fails.
     async fn fetch_blob(
         &self,
         scope: &ArtifactScope,
         blob: &BlobRef,
-    ) -> Result<(Bytes, Digest), ()> {
-        let artifact = self.index.lookup(blob).ok_or(())?;
-        let bytes = self
+        cancellation: &CancellationSignal,
+    ) -> Result<(Bytes, Digest), MiddlewareError> {
+        if cancellation.is_cancelled() {
+            return Err(cancelled_error());
+        }
+        let read = self
             .store
-            .get(scope.clone(), artifact)
+            .get_by_blob(scope.clone(), blob.clone())
             .await
-            .map_err(|_| ())?;
-        let digest = Digest::blob_content(&bytes);
+            .map_err(|_| stable_error("document ingest artifact lookup failed"))?;
+        if cancellation.is_cancelled() {
+            return Err(cancelled_error());
+        }
+        if read.reference.blob() != blob {
+            return Err(stable_error("document ingest artifact reference mismatch"));
+        }
+        let digest = Digest::blob_content(&read.content);
         if let Some(expected) = blob.digest()
             && digest != *expected
         {
-            return Err(());
+            return Err(stable_error("document ingest artifact integrity mismatch"));
         }
-        Ok((bytes, digest))
+        Ok((read.content, digest))
     }
 }
 
@@ -582,13 +539,17 @@ fn skip_note_message(message: &Message) -> Result<Message, MiddlewareError> {
     .map_err(|_| stable_error("document ingest message could not be constructed"))
 }
 
-/// Map the committed run context to the exact `ArtifactScope` used to stage
-/// and fetch attachments. Mirrors the toolset's `call_scope`.
+/// Map the committed run context to the exact pre-run attachment scope.
+///
+/// User attachments are staged before session and run ids exist. The binding
+/// contract therefore uses the tenant plus the all-zero reserved upload
+/// session and `run_id: None`. Tool-produced artifacts remain run-scoped and
+/// are not accepted through this input path.
 fn run_scope(ctx: &MiddlewareContext) -> ArtifactScope {
     ArtifactScope {
         tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
-        session_id: ctx.run.locator.session_id,
-        run_id: Some(ctx.run.locator.run_id),
+        session_id: finstack_ai_kernel::SessionId::from_bytes([0_u8; 16]),
+        run_id: None,
         sensitivity: finstack_ai_kernel::Sensitivity::Internal,
     }
 }
@@ -624,6 +585,16 @@ fn stable_error(message: &'static str) -> MiddlewareError {
         MIDDLEWARE_OUTCOME_NOT_ALLOWED,
         ErrorCategory::Middleware,
         message,
+        Metadata::empty(),
+    )
+    .unwrap_or_else(Into::into)
+}
+
+fn cancelled_error() -> MiddlewareError {
+    MiddlewareError::try_new(
+        "document_ingest_cancelled",
+        ErrorCategory::Cancellation,
+        "document ingest was cancelled",
         Metadata::empty(),
     )
     .unwrap_or_else(Into::into)

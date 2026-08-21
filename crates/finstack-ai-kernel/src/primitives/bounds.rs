@@ -9,9 +9,9 @@ use std::ops::{Deref, DerefMut};
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// V1 maximum items in a semantic array (TDD §6.5).
+/// V1 maximum items in a semantic array (contract section 6.5).
 pub const SEMANTIC_ARRAY_MAX_ITEMS: usize = 4_096;
-/// V1 maximum entries in a semantic map (TDD §6.5).
+/// V1 maximum entries in a semantic map (contract section 6.5).
 pub const SEMANTIC_MAP_MAX_ENTRIES: usize = 256;
 
 #[derive(Debug)]

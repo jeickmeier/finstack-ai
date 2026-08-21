@@ -22,4 +22,8 @@ pub fn finstack_ai_context_repository::RepositoryContextProvider::try_with_allow
 impl finstack_ai_runtime::ports::context::port::ContextProvider for finstack_ai_context_repository::RepositoryContextProvider
 pub fn finstack_ai_context_repository::RepositoryContextProvider::collect(&self, finstack_ai_runtime::ports::context::port::ContextCallContext, finstack_ai_runtime::ports::context::types::ContextRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::types::ContextContribution, finstack_ai_runtime::ports::context::error::ContextError>>
 pub fn finstack_ai_context_repository::RepositoryContextProvider::descriptor(&self) -> finstack_ai_runtime::ports::context::port::ContextProviderDescriptor
+pub const finstack_ai_context_repository::REPOSITORY_FILE_TOO_LARGE: &str
+pub const finstack_ai_context_repository::REPOSITORY_PATH_UNSAFE: &str
+pub const finstack_ai_context_repository::REPOSITORY_READ_FAILED: &str
+pub const finstack_ai_context_repository::REPOSITORY_TEXT_INVALID: &str
 pub const finstack_ai_context_repository::REPOSITORY_UNSUPPORTED: &str

@@ -166,9 +166,26 @@ test("constructs host wrappers and drives scripted model/tool DTOs", async ({
       new window.finstackTest.JsRandomSource(
         window.finstackTest.createHostRandomSource(),
       );
-      new window.finstackTest.JsArtifactStore(
-        window.finstackTest.createMemoryArtifactStore(),
+      const artifactStore = window.finstackTest.createMemoryArtifactStore({
+          storeId: "host-test",
+          maxArtifactBytes: 4 * 1024 * 1024,
+          maxArtifacts: 64,
+          maxTotalBytes: 16 * 1024 * 1024,
+          maxOwnersPerArtifact: 16,
+          orphanGraceMs: 60_000,
+          maxGcBatch: 32,
+        });
+      new window.finstackTest.JsArtifactStore(artifactStore);
+      const blob = JSON.stringify({ id: "blob-1" });
+      const artifact = JSON.stringify({ blob: JSON.parse(blob) });
+      await artifactStore.stagePut(
+        "{}",
+        new Uint8Array([1, 2, 3]),
+        "{}",
+        artifact,
+        "storage-1",
       );
+      const [, artifactBytes] = await artifactStore.getByBlob("{}", blob);
       return {
         model: await window.finstackTest.driveScriptedModelRequest(
           modelHost,
@@ -178,6 +195,7 @@ test("constructs host wrappers and drives scripted model/tool DTOs", async ({
           toolHost,
           toolOptions,
         ),
+        artifactBytes: Array.from(artifactBytes),
       };
     },
     { modelOptions: MODEL_OPTIONS, toolOptions: TOOL_OPTIONS },
@@ -194,6 +212,7 @@ test("constructs host wrappers and drives scripted model/tool DTOs", async ({
     output: { value: "hi" },
     is_error: false,
   });
+  expect(result.artifactBytes).toEqual([1, 2, 3]);
 });
 
 test("maps AbortSignal cancellation before settle and mid-stream", async ({

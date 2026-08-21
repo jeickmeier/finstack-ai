@@ -16,7 +16,7 @@ fixtures/compatibility/<family>/migrations/v<from>-to-v<to>--<slug>.{before,afte
 - `<kind>` names the schema/artifact under test
 - case kinds: `valid`, `invalid`, `roundtrip`, or migration pairs
 - README files under fixture trees are scaffolding only and do not satisfy GOV006
-- golden-trace / conformance fixtures reject unknown fields (TDD §28.4)
+- golden-trace / conformance fixtures reject unknown fields (contract section 28.4)
 
 ## Families
 

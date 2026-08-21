@@ -27,19 +27,13 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use finstack_ai_kernel::{
-    ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, Timestamp, ToolExecutionMode,
-    ToolId, ValidatedToolCall,
-};
-use finstack_ai_net_guard::{
-    NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client, read_body_bounded,
-    reject_literal_destination, resolve_and_pin,
+    ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
+    ValidatedToolCall,
 };
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
@@ -47,12 +41,19 @@ use finstack_ai_runtime::{
     ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, stage_required_artifact,
     verify_authority,
 };
-use futures_util::{StreamExt, stream};
+use futures_util::stream;
 use serde::Deserialize;
-use thiserror::Error;
 
-const DEFAULT_ENDPOINT: &str = "https://api.openai.com";
-const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
+mod config;
+mod http;
+
+use config::{DEFAULT_ENDPOINT, validate_endpoint, validate_result_cap};
+pub use config::{OpenAiMediaConfig, OpenAiMediaError};
+use http::{
+    REQUEST_TIMEOUT, check_interrupted, download_bytes, read_bounded_json, send_bytes, send_json,
+    timeout_error, validate_download_url, wait_deadline,
+};
+
 #[allow(dead_code)]
 const DEFAULT_MAX_RESULT_BYTES: usize = 256 * 1_024;
 const MAX_RESULT_BYTES_CEILING: usize = 8 * 1_048_576;
@@ -78,46 +79,6 @@ pub const OPENAI_MEDIA_TRANSPORT_FAILED: &str = "openai_media_transport_failed";
 pub const OPENAI_MEDIA_LIMIT_EXCEEDED: &str = "openai_media_limit_exceeded";
 /// Stable cancellation/deadline code.
 pub const OPENAI_MEDIA_TIMEOUT: &str = "openai_media_timeout";
-
-/// Explicit `OpenAI` media route. Never populated from the environment.
-#[derive(Clone)]
-pub struct OpenAiMediaConfig {
-    /// Explicit API key. Empty values fail closed.
-    pub api_key: String,
-    /// HTTPS endpoint, or loopback HTTP for scripted fixtures. Empty selects
-    /// `https://api.openai.com`.
-    pub endpoint: String,
-    /// Result-size cap in bytes. Images and speech come back base64, so
-    /// hosts wanting inline media raise this. Zero or above 8 MiB fails
-    /// construction; the SDK default is `262_144`.
-    pub max_result_bytes: usize,
-}
-
-impl std::fmt::Debug for OpenAiMediaConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenAiMediaConfig")
-            .field("api_key", &"[redacted]")
-            .field("endpoint", &self.endpoint)
-            .field("max_result_bytes", &self.max_result_bytes)
-            .finish()
-    }
-}
-
-/// Construction or route failure.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum OpenAiMediaError {
-    /// API key was omitted.
-    #[error(
-        "{OPENAI_MEDIA_CREDENTIAL_REQUIRED}: openai media construction requires an explicit API key"
-    )]
-    CredentialRequired,
-    /// Endpoint scheme, host, components, or result cap are invalid.
-    #[error("{OPENAI_MEDIA_ENDPOINT_INVALID}: {reason}")]
-    EndpointInvalid {
-        /// Stable non-secret reason.
-        reason: &'static str,
-    },
-}
 
 /// T1 native `OpenAI` media-generation Toolset.
 pub struct OpenAiMediaToolset {
@@ -156,11 +117,7 @@ impl OpenAiMediaToolset {
         if config.api_key.is_empty() {
             return Err(OpenAiMediaError::CredentialRequired);
         }
-        if config.max_result_bytes == 0 || config.max_result_bytes > MAX_RESULT_BYTES_CEILING {
-            return Err(OpenAiMediaError::EndpointInvalid {
-                reason: "result cap out of range",
-            });
-        }
+        validate_result_cap(config.max_result_bytes)?;
         let endpoint = if config.endpoint.is_empty() {
             DEFAULT_ENDPOINT.to_owned()
         } else {
@@ -406,7 +363,7 @@ impl Toolset for OpenAiMediaToolset {
         Box::pin(async move {
             verify_authority(&ctx)?;
             let tool_name = call.call.tool_name();
-            let value = if call.tool_id == image_tool_id && tool_name == IMAGE_TOOL_NAME {
+            let delivered = if call.tool_id == image_tool_id && tool_name == IMAGE_TOOL_NAME {
                 handle_image(
                     &client,
                     &api_key,
@@ -429,14 +386,17 @@ impl Toolset for OpenAiMediaToolset {
                 )
                 .await?
             } else if call.tool_id == transcribe_tool_id && tool_name == TRANSCRIBE_TOOL_NAME {
-                handle_transcribe(
-                    &client,
-                    &api_key,
-                    &endpoint,
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
+                MediaOutput {
+                    value: handle_transcribe(
+                        &client,
+                        &api_key,
+                        &endpoint,
+                        &ctx,
+                        call.call.arguments().as_bytes(),
+                    )
+                    .await?,
+                    artifact: None,
+                }
             } else {
                 return Err(tool_error(
                     OPENAI_MEDIA_INVALID_ARGUMENTS,
@@ -444,7 +404,7 @@ impl Toolset for OpenAiMediaToolset {
                     "openai media call identity is invalid",
                 ));
             };
-            let output_bytes = serde_json::to_vec(&value).map_err(|_| {
+            let output_bytes = serde_json::to_vec(&delivered.value).map_err(|_| {
                 tool_error(
                     OPENAI_MEDIA_TRANSPORT_FAILED,
                     ErrorCategory::Internal,
@@ -461,9 +421,12 @@ impl Toolset for OpenAiMediaToolset {
                 })?,
                 is_error: false,
             };
-            Ok(Box::pin(stream::once(async move {
-                Ok(ToolStreamItem::Completed(result))
-            })) as ToolEventStream)
+            let mut items = Vec::with_capacity(2);
+            if let Some(artifact) = delivered.artifact {
+                items.push(Ok(ToolStreamItem::Artifact(artifact)));
+            }
+            items.push(Ok(ToolStreamItem::Completed(result)));
+            Ok(Box::pin(stream::iter(items)) as ToolEventStream)
         })
     }
 }
@@ -485,6 +448,11 @@ fn base64_encoded_len(byte_length: usize) -> usize {
     byte_length.div_ceil(3).saturating_mul(4)
 }
 
+struct MediaOutput {
+    value: serde_json::Value,
+    artifact: Option<finstack_ai_kernel::ArtifactRef>,
+}
+
 /// Hand generated media back without inlining the bytes when a store is set.
 async fn deliver_media(
     bytes: Vec<u8>,
@@ -494,7 +462,7 @@ async fn deliver_media(
     store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
     max_result_bytes: usize,
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<MediaOutput, ToolError> {
     let byte_length = bytes.len();
     let Some(store) = store else {
         if base64_encoded_len(byte_length) > max_result_bytes {
@@ -504,11 +472,14 @@ async fn deliver_media(
                 "openai media result exceeds the configured byte limit",
             ));
         }
-        return Ok(serde_json::json!({
-            inline_field: BASE64_STANDARD.encode(bytes),
-            "media_type": media_type,
-            "byte_length": byte_length,
-        }));
+        return Ok(MediaOutput {
+            value: serde_json::json!({
+                inline_field: BASE64_STANDARD.encode(bytes),
+                "media_type": media_type,
+                "byte_length": byte_length,
+            }),
+            artifact: None,
+        });
     };
     let artifact = stage_required_artifact(
         store.as_ref(),
@@ -534,11 +505,14 @@ async fn deliver_media(
             "openai media artifact staging failed",
         )
     })?;
-    Ok(serde_json::json!({
-        "artifact": artifact,
-        "media_type": media_type,
-        "byte_length": byte_length,
-    }))
+    Ok(MediaOutput {
+        value: serde_json::json!({
+            "artifact": artifact,
+            "media_type": media_type,
+            "byte_length": byte_length,
+        }),
+        artifact: Some(artifact),
+    })
 }
 
 async fn handle_image(
@@ -549,7 +523,7 @@ async fn handle_image(
     store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
     arguments: &[u8],
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<MediaOutput, ToolError> {
     let arguments: ImageArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.prompt.is_empty() {
         return Err(invalid_arguments("openai media model or prompt is empty"));
@@ -590,7 +564,10 @@ async fn handle_image(
                 "openai media image result exceeds the configured byte limit",
             ));
         }
-        return Ok(value);
+        return Ok(MediaOutput {
+            value,
+            artifact: None,
+        });
     }
     let Some(b64_json) = item.b64_json else {
         return Err(tool_error(
@@ -626,7 +603,7 @@ async fn handle_speech(
     store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
     arguments: &[u8],
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<MediaOutput, ToolError> {
     let arguments: SpeechArguments = parse_arguments(arguments)?;
     if arguments.model.is_empty() || arguments.input.is_empty() {
         return Err(invalid_arguments("openai media model or input is empty"));
@@ -698,9 +675,7 @@ async fn handle_transcribe(
         .unwrap_or("audio")
         .to_owned();
 
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
+    check_interrupted(ctx)?;
     let form = reqwest::multipart::Form::new()
         .text("model", arguments.model)
         .part(
@@ -732,360 +707,15 @@ async fn handle_transcribe(
         ));
     }
     let response: TranscribeResponse =
-        read_bounded_json(response, MAX_RESULT_BYTES_CEILING).await?;
+        read_bounded_json(response, MAX_RESULT_BYTES_CEILING, ctx).await?;
     Ok(serde_json::json!({ "text": response.text }))
 }
 
-async fn send_json<T: for<'de> Deserialize<'de>>(
-    client: &reqwest::Client,
-    api_key: &str,
-    method: reqwest::Method,
-    url: &str,
-    body: Option<&serde_json::Value>,
-    ctx: &ToolCallContext,
-    cap: usize,
-) -> Result<T, ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
-    let mut request = client
-        .request(method, url)
-        .header("Authorization", format!("Bearer {api_key}"));
-    if let Some(body) = body {
-        request = request
-            .header("Content-Type", "application/json")
-            .json(body);
-    }
-    let send = request.send();
-    let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
-        result = send => result.map_err(|_| {
-            tool_error(
-                OPENAI_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openai media request failed",
-            )
-        })?,
-    };
-    let status = response.status();
-    if !status.is_success() {
-        return Err(tool_error(
-            OPENAI_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openai media endpoint rejected the request",
-        ));
-    }
-    read_bounded_json(response, cap).await
-}
-
-async fn send_bytes(
-    client: &reqwest::Client,
-    api_key: &str,
-    method: reqwest::Method,
-    url: &str,
-    body: Option<&serde_json::Value>,
-    ctx: &ToolCallContext,
-    cap: usize,
-) -> Result<(Vec<u8>, Option<String>), ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
-    let mut request = client
-        .request(method, url)
-        .header("Authorization", format!("Bearer {api_key}"));
-    if let Some(body) = body {
-        request = request
-            .header("Content-Type", "application/json")
-            .json(body);
-    }
-    let send = request.send();
-    let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
-        result = send => result.map_err(|_| {
-            tool_error(
-                OPENAI_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openai media request failed",
-            )
-        })?,
-    };
-    let status = response.status();
-    if !status.is_success() {
-        return Err(tool_error(
-            OPENAI_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openai media endpoint rejected the request",
-        ));
-    }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let bytes = fetch_bytes_bounded(response, cap).await?;
-    Ok((bytes, content_type))
-}
-
-/// Address-pinned, vetted download of a caller-supplied `audio_url`.
-///
-/// Backed by `finstack-ai-net-guard`: `parse_and_vet_url` (scheme/component
-/// vetting) &rarr; `resolve_and_pin` (DNS resolve-and-pin, private/loopback
-/// deny) &rarr; `pinned_client` (address-pinned, redirect-disabled,
-/// proxy-disabled). Unlike the crate's former unpinned `client.get(url)`
-/// download (which reused the shared, unpinned `OpenAI` API client and
-/// performed no destination vetting at all beyond the URL-string checks in
-/// `validate_download_url`), this closes the DNS-rebinding/SSRF gap: a
-/// hostname that resolves to a private or loopback address is now rejected
-/// even when the URL string itself looked like a public HTTPS host.
-async fn download_bytes(
-    url: &str,
-    ctx: &ToolCallContext,
-    cap: usize,
-) -> Result<Vec<u8>, ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
-    let policy = download_url_policy();
-    let vetted = parse_and_vet_url(url, &policy).map_err(map_net_guard_error)?;
-    reject_literal_destination(&vetted, &policy).map_err(map_net_guard_error)?;
-    let addr = resolve_and_pin(&vetted, &SystemResolver)
-        .await
-        .map_err(map_net_guard_error)?;
-    let client = pinned_client(&vetted, addr, REQUEST_TIMEOUT).map_err(map_net_guard_error)?;
-    let send = client.get(vetted.url.as_str()).send();
-    let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
-        result = send => result.map_err(|_| {
-            tool_error(
-                OPENAI_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openai media audio download failed",
-            )
-        })?,
-    };
-    let status = response.status();
-    if !status.is_success() {
-        return Err(tool_error(
-            OPENAI_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openai media audio host rejected the request",
-        ));
-    }
-    read_body_bounded(response, cap)
-        .await
-        .map_err(map_net_guard_error)
-}
-
-/// Loopback-http policy for caller-supplied download URLs: production is
-/// HTTPS-only with no loopback exception, and the loopback allowance for
-/// scripted `http://127.0.0.1` fixtures is compiled in only for
-/// `#[cfg(test)]` builds, so that branch does not exist in a release
-/// binary (same property the crate's former `validate_download_url` had).
-/// Loopback-http policy for caller-supplied download URLs: production is
-/// HTTPS-only with no loopback exception, and the loopback allowance for
-/// scripted `http://127.0.0.1` fixtures is compiled in only for
-/// `#[cfg(test)]` builds, so that branch does not exist in a release
-/// binary (same property the crate's former `validate_download_url` had).
-///
-/// `allow_nonstandard_https_port: true` restores the crate's prior
-/// any-port behavior: net-guard's own default is 443-only (right for a
-/// model-supplied URL), but this crate's `audio_url` is a
-/// caller-supplied, potentially presigned download URL, and a
-/// self-hosted/non-standard-port host is a normal shape those take.
-#[cfg(test)]
-fn download_url_policy() -> UrlPolicy {
-    UrlPolicy {
-        allow_loopback_http: true,
-        allow_nonstandard_https_port: true,
-    }
-}
-
-#[cfg(not(test))]
-fn download_url_policy() -> UrlPolicy {
-    UrlPolicy {
-        allow_loopback_http: false,
-        allow_nonstandard_https_port: true,
-    }
-}
-
-fn invalid_download_url() -> ToolError {
-    invalid_arguments("openai media audio_url is not allowed")
-}
-
-/// Map every other net-guard failure (client construction, transport,
-/// oversize body) onto the crate's existing transport/limit codes.
-#[allow(clippy::needless_pass_by_value)] // used as a `map_err` function pointer
-fn map_net_guard_error(error: NetGuardError) -> ToolError {
-    match error {
-        NetGuardError::InvalidUrl { .. }
-        | NetGuardError::DestinationBlocked { .. }
-        | NetGuardError::ResolutionFailed => invalid_download_url(),
-        NetGuardError::ClientBuildFailed | NetGuardError::TransportFailed => tool_error(
-            OPENAI_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openai media audio download failed",
-        ),
-        NetGuardError::LimitExceeded => tool_error(
-            OPENAI_MEDIA_LIMIT_EXCEEDED,
-            ErrorCategory::Limit,
-            "openai media response exceeds the configured byte limit",
-        ),
-    }
-}
-
-async fn fetch_bytes_bounded(
-    response: reqwest::Response,
-    cap: usize,
-) -> Result<Vec<u8>, ToolError> {
-    let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| {
-            tool_error(
-                OPENAI_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openai media response is invalid",
-            )
-        })?;
-        if body.len().saturating_add(chunk.len()) > cap {
-            return Err(tool_error(
-                OPENAI_MEDIA_LIMIT_EXCEEDED,
-                ErrorCategory::Limit,
-                "openai media response exceeds the configured byte limit",
-            ));
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
-}
-
-async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
-    response: reqwest::Response,
-    cap: usize,
-) -> Result<T, ToolError> {
-    let body = fetch_bytes_bounded(response, cap).await?;
-    serde_json::from_slice(&body).map_err(|_| {
-        tool_error(
-            OPENAI_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openai media response is invalid",
-        )
-    })
-}
-
-fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
-    let Some(deadline) = deadline else {
-        return false;
-    };
-    now_unix_ms() >= deadline.as_unix_ms()
-}
-
-async fn wait_deadline(deadline: Option<Timestamp>) {
-    let Some(deadline) = deadline else {
-        std::future::pending::<()>().await;
-        return;
-    };
-    let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms());
-    let millis = u64::try_from(remaining).unwrap_or(0);
-    if millis == 0 {
-        return;
-    }
-    tokio::time::sleep(Duration::from_millis(millis)).await;
-}
-
-fn now_unix_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis()),
-    )
-    .unwrap_or(i64::MAX)
-}
-
-fn timeout_error() -> ToolError {
-    tool_error(
-        OPENAI_MEDIA_TIMEOUT,
-        ErrorCategory::Deadline,
-        "openai media request was cancelled or exceeded its deadline",
-    )
-}
-
-fn validate_endpoint(value: &str) -> Result<(), OpenAiMediaError> {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "endpoint must be an http or https URL",
-        });
-    };
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "endpoint must be an http or https URL",
-        });
-    }
-    if rest.contains('@') || rest.contains('?') || rest.contains('#') {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "endpoint contains forbidden components",
-        });
-    }
-    let host = endpoint_host(rest).ok_or(OpenAiMediaError::EndpointInvalid {
-        reason: "endpoint host is missing",
-    })?;
-    if scheme.eq_ignore_ascii_case("http") && !is_loopback_host(host) {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "plaintext HTTP is allowed only for loopback endpoints",
-        });
-    }
-    Ok(())
-}
-
-/// Validates the audio-download URL for `openai_transcribe_audio`.
-///
-/// Backed by `finstack-ai-net-guard`'s `parse_and_vet_url` plus its
-/// synchronous literal-destination check
-/// ([`reject_literal_destination`]). Production behavior is HTTPS-only,
-/// with no loopback exception — unlike the toolset's own configured
-/// `endpoint` (which may be loopback HTTP for scripted fixtures), the
-/// *download* target must always be HTTPS. The one exception is compiled
-/// in only for `#[cfg(test)]` builds (see [`download_url_policy`]), where
-/// scripted fixtures need to serve audio bytes over `http://127.0.0.1`;
-/// that branch does not exist in a release binary.
-///
-/// Net-guard tightening beyond the crate's former checks, both strictly
-/// narrowing and controller-ruled safe: literal or resolved unspecified
-/// (`0.0.0.0`), broadcast, and multicast addresses are denied (no
-/// legitimate media host is one of these), and a private/loopback literal
-/// destination is now rejected for `https` URLs too, not only `http` —
-/// the crate's former check permitted `https://127.0.0.1/...` unconditionally
-/// in every build, since it never inspected the host once the scheme was
-/// `https`. Non-standard `https` ports remain accepted
-/// (`allow_nonstandard_https_port: true` in [`download_url_policy`]),
-/// matching the crate's prior any-port behavior.
-fn validate_download_url(value: &str) -> Result<(), ToolError> {
-    let policy = download_url_policy();
-    let vetted = parse_and_vet_url(value, &policy).map_err(|_| invalid_download_url())?;
-    reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())
-}
-
-fn endpoint_host(rest: &str) -> Option<&str> {
-    if let Some(rest) = rest.strip_prefix('[') {
-        return rest.split(']').next().filter(|host| !host.is_empty());
-    }
-    rest.split(['/', ':'])
-        .next()
-        .filter(|host| !host.is_empty())
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    let host = host
-        .strip_prefix('[')
-        .map_or(host, |rest| rest.strip_suffix(']').unwrap_or(rest));
-    host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
-}
-
-fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
+pub(crate) fn tool_error(
+    code: &'static str,
+    category: ErrorCategory,
+    message: &'static str,
+) -> ToolError {
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
@@ -1373,6 +1003,10 @@ mod tests {
             .await
             .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Artifact(staged) = item else {
+            panic!("expected staged artifact");
+        };
+        let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
@@ -1384,6 +1018,10 @@ mod tests {
         );
         assert_eq!(value["byte_length"], 8_192);
         assert!(value.get("artifact").is_some());
+        assert_eq!(
+            value["artifact"],
+            serde_json::to_value(staged).expect("artifact json")
+        );
         server.await.expect("server");
     }
 

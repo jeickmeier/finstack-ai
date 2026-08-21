@@ -1,11 +1,11 @@
-//! Shared 4-byte big-endian length prefix (ADR-021 / TDD §28.2).
+//! Shared 4-byte big-endian length prefix (ADR-021 / contract section 28.2).
 //!
 //! The declared length is untrusted and is rejected before a payload buffer
 //! is allocated.
 
 use crate::error::ProtocolError;
 
-/// Pre-authentication frame ceiling (TDD §28.2).
+/// Pre-authentication frame ceiling (contract section 28.2).
 pub const PRE_AUTH_FRAME_MAX_BYTES: usize = 16 * 1024;
 /// Default post-authentication frame ceiling. Still checked before allocation.
 ///

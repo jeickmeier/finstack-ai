@@ -2,10 +2,11 @@
 
 Native `AgentInvoker` for `RemoteChildSession` over  remote framing.
 
-Construction takes an explicit loopback TCP or Unix-socket route plus optional
+Construction takes an explicit loopback TCP or absolute Unix-socket route plus optional
 Bearer credentials. The invoker never reads environment variables and never
 discovers peers. Non-loopback plaintext is rejected. `start_or_attach` is
-idempotent for an equal request digest. `cancel` sends a durable remote
+idempotent for an equal complete locator and request digest; concurrent equal
+starts share one exchange. Capacity is reserved before network I/O. `cancel` sends a durable remote
 `Cancel` command and does not no-op.
 
 This crate is a T1 native adapter. It is not compiled into `wasm-host`.

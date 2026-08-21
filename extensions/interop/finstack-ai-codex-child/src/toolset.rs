@@ -1,19 +1,16 @@
 //! Codex toolset: start / status / cancel over the frozen exec invoker.
 
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, Digest, ErrorCategory, LaneTag,
-    Metadata, OperationLocator, RawJson, RemoteRouteRef, RetrySafety, RunTag, SessionTag,
-    TextBlock, ToolExecutionMode, ToolId, ValidatedToolCall,
+    BudgetRequest, ChildPlacement, ContentBlock, ErrorCategory, Metadata, RawJson, RemoteRouteRef,
+    RetrySafety, RunId, TextBlock, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
 use finstack_ai_runtime::{
-    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata,
-    ApprovalRequirement, ChildRunContext, ChildRunHandle, ChildRunRequest, IdGenerationError,
-    OsRandomSource, PortFuture, SideEffectClass, SystemClock, ToolCallContext, ToolDeferralSupport,
-    ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    UuidV7Generator, verify_authority,
+    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentRef, ApprovalMetadata,
+    ApprovalRequirement, ChildRunStartRequest, ChildRunStarter, PortFuture, SideEffectClass,
+    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec,
+    ToolStreamItem, Toolset, ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -39,29 +36,20 @@ pub struct CodexToolset {
     invoker: Arc<CodexChildInvoker>,
     agent: AgentRef,
     remote: RemoteRouteRef,
-    children: Arc<Mutex<BTreeMap<ChildKey, StartedChild>>>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct ChildKey {
-    tenant_scope: Arc<str>,
-    session_id: Arc<str>,
-    run_id: Arc<str>,
-}
-
-#[derive(Clone)]
-struct StartedChild {
-    handle: ChildRunHandle,
+    starter: Arc<ChildRunStarter>,
 }
 
 impl CodexToolset {
-    /// Construct the toolset over a frozen invoker.
+    /// Construct the toolset over one host-bound starter and frozen invoker.
     ///
     /// # Errors
     ///
     /// Returns [`CodexChildError::Configuration`] when a checked-in tool
     /// specification or the peer identity cannot be built.
-    pub fn try_new(invoker: Arc<CodexChildInvoker>) -> Result<Self, CodexChildError> {
+    pub fn try_new(
+        starter: Arc<ChildRunStarter>,
+        invoker: Arc<CodexChildInvoker>,
+    ) -> Result<Self, CodexChildError> {
         let agent = codex_agent_ref()?;
         let remote = codex_route_ref()?;
         let tools = Arc::from([
@@ -93,7 +81,7 @@ impl CodexToolset {
             invoker,
             agent,
             remote,
-            children: Arc::new(Mutex::new(BTreeMap::new())),
+            starter,
         })
     }
 }
@@ -126,9 +114,9 @@ impl Toolset for CodexToolset {
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let invoker = Arc::clone(&self.invoker);
+        let starter = Arc::clone(&self.starter);
         let agent = self.agent.clone();
         let remote = self.remote.clone();
-        let table = Arc::clone(&self.children);
         Box::pin(async move {
             verify_authority(&ctx)?;
             let name = call.call.tool_name();
@@ -140,26 +128,12 @@ impl Toolset for CodexToolset {
                 ));
             }
             let result = if name == START_NAME {
-                start_child(&invoker, &agent, remote, &ctx, &call).await
+                Box::pin(start_child(&starter, &agent, remote, &ctx, &call)).await
+            } else if name == STATUS_NAME {
+                status_child(&invoker, &ctx, &call)
             } else {
-                // Only status/cancel read the table; start never does.
-                let snapshot = table.lock().map(|guard| guard.clone()).unwrap_or_default();
-                if name == STATUS_NAME {
-                    status_child(&invoker, &snapshot, &ctx, &call)
-                } else {
-                    cancel_child(&invoker, &snapshot, &ctx, &call).await
-                }
+                cancel_child(&starter, &invoker, &ctx, &call).await
             }?;
-            if let Some(started) = result.started
-                && let Ok(mut children) = table.lock()
-            {
-                children.insert(started.key, started.child);
-            }
-            if let Some(key) = result.forget
-                && let Ok(mut children) = table.lock()
-            {
-                children.remove(&key);
-            }
             Ok(completed(result.output, result.is_error))
         })
     }
@@ -168,19 +142,10 @@ impl Toolset for CodexToolset {
 struct CallOutcome {
     output: RawJson,
     is_error: bool,
-    started: Option<StartedRecord>,
-    // A child the table should forget: its run was evicted from the
-    // invoker (status `unknown`), so later lookups would never improve.
-    forget: Option<ChildKey>,
-}
-
-struct StartedRecord {
-    key: ChildKey,
-    child: StartedChild,
 }
 
 async fn start_child(
-    invoker: &Arc<CodexChildInvoker>,
+    starter: &Arc<ChildRunStarter>,
     agent: &AgentRef,
     remote: RemoteRouteRef,
     ctx: &ToolCallContext,
@@ -193,13 +158,6 @@ async fn start_child(
             "prompt must not be blank",
         ));
     }
-    let locator = child_locator(&ctx.run.locator, remote).map_err(|_| {
-        tool_error(
-            CODEX_INVALID_ARGUMENTS,
-            ErrorCategory::Internal,
-            "codex locator allocation failed",
-        )
-    })?;
     let input: Arc<[ContentBlock]> = Arc::from([ContentBlock::Text(
         TextBlock::try_new(arguments.prompt.as_ref()).map_err(|_| {
             tool_error(
@@ -209,47 +167,27 @@ async fn start_child(
             )
         })?,
     )]);
-    let request_digest = request_digest(agent, &input, &locator)?;
-    let request = ChildRunRequest {
+    let request = ChildRunStartRequest {
         agent: agent.clone(),
         input,
         placement: ChildPlacement::RemoteChildSession,
-        locator,
+        remote: Some(remote),
         requested_deadline: ctx.run.deadline,
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest,
     };
-    if let Err(error) = request.validate() {
-        return Ok(invoke_error_result(&error));
-    }
-    let context = ChildRunContext {
-        parent: ctx.run.locator.clone(),
-        parent_effect_id: ctx.run.effect_id,
-        authorization: ctx.run.authorization.clone(),
-    };
-    match AgentInvoker::start_or_attach(invoker.as_ref(), context, request).await {
+    match Box::pin(starter.start_or_attach(ctx, request)).await {
         Ok(handle) => {
             let run_id = Arc::<str>::from(handle.locator.operation.run_id.to_string());
-            let key = ChildKey {
-                tenant_scope: Arc::clone(&handle.locator.operation.tenant_scope),
-                session_id: Arc::<str>::from(handle.locator.operation.session_id.to_string()),
-                run_id: Arc::clone(&run_id),
-            };
             let output = result_json(&serde_json::json!({
                 "run_id": run_id.as_ref(),
-                "session_id": key.session_id.as_ref(),
+                "session_id": handle.locator.operation.session_id.to_string(),
                 "status": "accepted",
             }))?;
             Ok(CallOutcome {
                 output,
                 is_error: false,
-                started: Some(StartedRecord {
-                    key,
-                    child: StartedChild { handle },
-                }),
-                forget: None,
             })
         }
         Err(error) => Ok(invoke_error_result(&error)),
@@ -258,7 +196,6 @@ async fn start_child(
 
 fn status_child(
     invoker: &Arc<CodexChildInvoker>,
-    children: &BTreeMap<ChildKey, StartedChild>,
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
@@ -269,26 +206,26 @@ fn status_child(
             "status requires run_id",
         ));
     };
-    let Some((key, child)) = lookup_child(children, ctx.run.locator.tenant_scope.as_ref(), run_id)
-    else {
+    let Ok(run_id) = RunId::parse(run_id.as_ref()) else {
         return Ok(error_result(
             CODEX_CHILD_NOT_FOUND,
             "no started child matches run_id",
         ));
     };
-    let Some(report) = invoker.run_status(&child.handle.locator.operation.run_id) else {
+    let Some(locator) = invoker.accepted_locator(&ctx.run.locator, &run_id) else {
+        return Ok(error_result(
+            CODEX_CHILD_NOT_FOUND,
+            "no started child matches run_id",
+        ));
+    };
+    let Some(report) = invoker.run_status(&locator) else {
         let output = result_json(&serde_json::json!({
-            "run_id": key.run_id.as_ref(),
+            "run_id": run_id.to_string(),
             "status": "unknown",
         }))?;
-        // The invoker no longer knows this run (host restart or eviction
-        // of a settled run); later lookups can never improve, so the
-        // table forgets it instead of growing without bound.
         return Ok(CallOutcome {
             output,
             is_error: false,
-            started: None,
-            forget: Some(key.clone()),
         });
     };
     let last_message = report
@@ -298,10 +235,11 @@ fn status_child(
     // Already bounded to STDERR_TAIL_BYTES at write time in `append_stderr`.
     let stderr_tail = report.stderr_tail.as_deref();
     let output = result_json(&serde_json::json!({
-        "run_id": key.run_id.as_ref(),
+        "run_id": run_id.to_string(),
         "status": status_name(report.status),
         "thread_id": report.thread_id,
         "last_message": last_message,
+        "failure_message": report.failure_message,
         "usage": report.usage,
         "exit_code": report.exit_code,
         "stderr_tail": stderr_tail,
@@ -309,24 +247,12 @@ fn status_child(
     Ok(CallOutcome {
         output,
         is_error: false,
-        started: None,
-        forget: None,
     })
 }
 
-fn lookup_child<'a>(
-    children: &'a BTreeMap<ChildKey, StartedChild>,
-    tenant_scope: &str,
-    run_id: &str,
-) -> Option<(&'a ChildKey, &'a StartedChild)> {
-    children
-        .iter()
-        .find(|(key, _)| key.tenant_scope.as_ref() == tenant_scope && key.run_id.as_ref() == run_id)
-}
-
 async fn cancel_child(
+    starter: &Arc<ChildRunStarter>,
     invoker: &Arc<CodexChildInvoker>,
-    children: &BTreeMap<ChildKey, StartedChild>,
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
@@ -337,15 +263,19 @@ async fn cancel_child(
             "cancel requires run_id",
         ));
     };
-    let Some((key, child)) = lookup_child(children, ctx.run.locator.tenant_scope.as_ref(), run_id)
-    else {
+    let Ok(parsed_run_id) = RunId::parse(run_id.as_ref()) else {
         return Ok(error_result(
             CODEX_CHILD_NOT_FOUND,
             "no started child matches run_id",
         ));
     };
-    let run_id = &key.run_id;
-    if let Err(error) = AgentInvoker::cancel(invoker.as_ref(), &child.handle.locator).await {
+    let Some(locator) = invoker.accepted_locator(&ctx.run.locator, &parsed_run_id) else {
+        return Ok(error_result(
+            CODEX_CHILD_NOT_FOUND,
+            "no started child matches run_id",
+        ));
+    };
+    if let Err(error) = starter.cancel(&locator).await {
         return Ok(invoke_error_result(&error));
     }
     let output = result_json(&serde_json::json!({
@@ -356,63 +286,7 @@ async fn cancel_child(
     Ok(CallOutcome {
         output,
         is_error: false,
-        started: None,
-        forget: None,
     })
-}
-
-fn child_locator(
-    parent: &OperationLocator,
-    remote: RemoteRouteRef,
-) -> Result<ChildRunLocator, IdGenerationError> {
-    let generator = UuidV7Generator::new(SystemClock, OsRandomSource);
-    let run_id = generator.generate::<RunTag>()?;
-    let lane_id = generator.generate::<LaneTag>()?;
-    let session_id = generator.generate::<SessionTag>()?;
-    Ok(ChildRunLocator {
-        operation: OperationLocator::try_new(
-            parent.tenant_scope.as_ref(),
-            session_id,
-            lane_id,
-            run_id,
-        )
-        .map_err(|_| IdGenerationError::Source("codex child locator is invalid".into()))?,
-        remote: Some(remote),
-    })
-}
-
-fn request_digest(
-    agent: &AgentRef,
-    input: &[ContentBlock],
-    locator: &ChildRunLocator,
-) -> Result<Digest, ToolError> {
-    let canonical = serde_json::to_vec(&serde_json::json!({
-        "agent_id": agent.id.to_string(),
-        "input": input.iter().map(content_text).collect::<Vec<_>>(),
-        "placement": "remote_child_session",
-        "run_id": locator.operation.run_id.to_string(),
-    }))
-    .map_err(|_| {
-        tool_error(
-            CODEX_INVALID_ARGUMENTS,
-            ErrorCategory::Internal,
-            "codex request digest serialization failed",
-        )
-    })?;
-    Digest::domain_separated("child-run-request", 1, &canonical).map_err(|_| {
-        tool_error(
-            CODEX_INVALID_ARGUMENTS,
-            ErrorCategory::Internal,
-            "codex request digest failed",
-        )
-    })
-}
-
-fn content_text(block: &ContentBlock) -> String {
-    match block {
-        ContentBlock::Text(text) => text.text().to_string(),
-        _ => String::new(),
-    }
 }
 
 fn status_name(status: crate::state::CodexRunStatus) -> &'static str {
@@ -462,8 +336,6 @@ fn error_result(code: &'static str, message: &'static str) -> CallOutcome {
         output: result_json(&serde_json::json!({ "code": code, "message": message }))
             .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
         is_error: true,
-        started: None,
-        forget: None,
     }
 }
 

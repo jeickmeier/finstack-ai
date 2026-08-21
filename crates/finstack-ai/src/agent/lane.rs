@@ -264,7 +264,6 @@ mod native {
             lane.session().journal_store(),
             locator,
             ExternalClock::new(now),
-            u64::try_from(now.as_unix_ms()).unwrap_or(1),
         )
         .await
         .map_err(|error| workflow_error(&error))

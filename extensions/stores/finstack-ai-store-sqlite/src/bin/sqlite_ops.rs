@@ -21,7 +21,6 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::env;
-use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -36,7 +35,7 @@ use finstack_ai_runtime::{
 use finstack_ai_store_sqlite::{
     SCHEMA_USER_VERSION, SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags, backup::Backup};
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -68,7 +67,7 @@ fn main() -> ExitCode {
 fn backup(src: Option<String>, dest: Option<String>) -> Result<(), String> {
     let src = PathBuf::from(src.ok_or("backup <src-db> <dest-db>")?);
     let dest = PathBuf::from(dest.ok_or("backup <src-db> <dest-db>")?);
-    copy_trio(&src, &dest, false)
+    online_copy(&src, &dest, false)
 }
 
 fn restore(src: Option<String>, dest: Option<String>) -> Result<(), String> {
@@ -77,7 +76,7 @@ fn restore(src: Option<String>, dest: Option<String>) -> Result<(), String> {
     if dest.exists() {
         return Err("restore_dest_exists".into());
     }
-    copy_trio(&src, &dest, true)
+    online_copy(&src, &dest, true)
 }
 
 fn export(db: Option<String>, session: Option<String>) -> Result<(), String> {
@@ -238,37 +237,41 @@ fn migrate(db: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_trio(src: &Path, dest: &Path, refuse_partial: bool) -> Result<(), String> {
+fn online_copy(src: &Path, dest: &Path, refuse_existing: bool) -> Result<(), String> {
     if !src.exists() {
         return Err("source_db_missing".into());
     }
-    let src_wal = sidecar(src, "-wal");
-    let src_shm = sidecar(src, "-shm");
-    let dest_wal = sidecar(dest, "-wal");
-    let dest_shm = sidecar(dest, "-shm");
-    if refuse_partial && (dest_wal.exists() || dest_shm.exists()) {
-        return Err("restore_partial_set".into());
+    if refuse_existing && dest.exists() {
+        return Err("restore_dest_exists".into());
     }
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let parent = dest
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temp = tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
+    let source = Connection::open_with_flags(src, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| error.to_string())?;
+    let mut target = Connection::open(temp.path()).map_err(|error| error.to_string())?;
+    {
+        let backup = Backup::new(&source, &mut target).map_err(|error| error.to_string())?;
+        backup
+            .run_to_completion(128, Duration::from_millis(5), None)
+            .map_err(|error| error.to_string())?;
     }
-    fs::copy(src, dest).map_err(|error| error.to_string())?;
-    if src_wal.exists() {
-        fs::copy(&src_wal, &dest_wal).map_err(|error| error.to_string())?;
+    let check: String = target
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    if check != "ok" {
+        return Err("sqlite_quick_check".into());
     }
-    if src_shm.exists() {
-        fs::copy(&src_shm, &dest_shm).map_err(|error| error.to_string())?;
-    }
+    drop(target);
+    drop(source);
+    temp.as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    temp.persist(dest).map_err(|error| error.to_string())?;
     Ok(())
-}
-
-fn sidecar(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = match path.file_name() {
-        Some(name) => name.to_os_string(),
-        None => "db".into(),
-    };
-    name.push(suffix);
-    path.with_file_name(name)
 }
 
 fn open_store(path: PathBuf) -> Result<SqliteJournalStore, String> {

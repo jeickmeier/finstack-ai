@@ -5,14 +5,18 @@ use std::time::{Duration, Instant};
 
 use finstack_ai_codex_child::{CodexChildInvoker, CodexExecConfig, CodexSandboxMode, CodexToolset};
 use finstack_ai_kernel::{
-    EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata, OperationLocator,
-    PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
-    ToolFailurePolicy, ValidatedToolCall,
+    AllocatedIds, AppendBatchId, BudgetPropagation, CancellationPropagation, DeadlinePropagation,
+    Digest, EffectId, EffectOutputContract, EffectOutputKind, EventId, LaneId, Metadata,
+    OperationLocator, PrincipalPropagation, PrincipalRef, RawJson, RecordId, RunAccepted, RunId,
+    RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, SessionId, Timestamp,
+    ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy, TransitionEnv, ValidatedToolCall,
 };
 use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, ToolStreamItem,
-    Toolset,
+    AgentInvoker, AuthorizationContext, CancellationSignal, ChildRunPolicy, ChildRunStarter,
+    JournalStore, RunCallContext, SessionCreateIds, SessionRuntime, ToolCallContext,
+    ToolStreamItem, Toolset,
 };
+use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use futures_util::StreamExt;
 
 fn fake_invoker(mode: &str, workspace: &std::path::Path) -> CodexChildInvoker {
@@ -24,6 +28,92 @@ fn fake_invoker(mode: &str, workspace: &std::path::Path) -> CodexChildInvoker {
         extra_args: vec!["--fake-mode".to_string(), mode.to_string()],
     })
     .expect("invoker")
+}
+
+async fn test_toolset(mode: &str, workspace: &std::path::Path) -> CodexToolset {
+    let invoker = Arc::new(fake_invoker(mode, workspace));
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 256,
+            snapshot_bytes: 64 * 1_024,
+        })
+        .expect("store"),
+    );
+    let locator = context().run.locator;
+    let session = SessionRuntime::create(
+        Arc::clone(&store),
+        Arc::clone(&locator.tenant_scope),
+        SessionCreateIds {
+            session_id: locator.session_id,
+            main_lane_id: locator.lane_id,
+            session_created_record_id: RecordId::from_bytes([10; 16]),
+            lane_created_record_id: RecordId::from_bytes([11; 16]),
+            batch_id: AppendBatchId::from_bytes([12; 16]),
+            now: Timestamp::from_unix_ms(1).expect("time"),
+        },
+    )
+    .await
+    .expect("session");
+    session
+        .try_acquire_run(locator.lane_id, locator.run_id)
+        .expect("guard");
+    let accepted = RunAccepted::try_new(
+        locator.run_id,
+        RunRelation::root(locator.run_id).expect("relation"),
+        RunSecurityContext::try_new(
+            "tenant-a",
+            context().run.authorization.principal,
+            "test",
+            "test",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .expect("security"),
+        None,
+        RunLimits::empty(),
+        RunPropagationPolicy {
+            cancellation: CancellationPropagation::Cascade,
+            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+            budget: BudgetPropagation::SharedScope,
+            principal: PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(b"{}"),
+        None,
+    )
+    .expect("accepted");
+    session
+        .accept_run(
+            locator.lane_id,
+            accepted,
+            TransitionEnv {
+                now: Timestamp::from_unix_ms(2).expect("time"),
+                ids: AllocatedIds::try_new(
+                    vec![RecordId::from_bytes([13; 16])],
+                    vec![EventId::from_bytes([14; 16])],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    vec![AppendBatchId::from_bytes([15; 16])],
+                    Vec::new(),
+                )
+                .expect("ids"),
+            },
+        )
+        .await
+        .expect("accept");
+    let starter = Arc::new(ChildRunStarter::new(
+        store,
+        ChildRunPolicy::Allow { max_depth: 1 },
+        Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+    ));
+    CodexToolset::try_new(starter, invoker).expect("toolset")
 }
 
 fn context() -> ToolCallContext {
@@ -122,8 +212,7 @@ async fn poll_status(toolset: &CodexToolset, run_id: &str) -> serde_json::Value 
 #[tokio::test]
 async fn start_then_status_reports_completion() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let invoker = Arc::new(fake_invoker("success", dir.path()));
-    let toolset = CodexToolset::try_new(Arc::clone(&invoker)).expect("toolset");
+    let toolset = test_toolset("success", dir.path()).await;
     let output = call_tool(
         &toolset,
         "codex_start",
@@ -143,8 +232,7 @@ async fn start_then_status_reports_completion() {
 #[tokio::test]
 async fn status_of_unknown_run_is_child_not_found() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let toolset =
-        CodexToolset::try_new(Arc::new(fake_invoker("success", dir.path()))).expect("toolset");
+    let toolset = test_toolset("success", dir.path()).await;
     let output = call_tool(&toolset, "codex_status", r#"{"run_id":"not-a-run"}"#).await;
     assert_eq!(output["code"], "codex_child_not_found");
 }
@@ -152,8 +240,7 @@ async fn status_of_unknown_run_is_child_not_found() {
 #[tokio::test]
 async fn start_rejects_empty_prompt() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let toolset =
-        CodexToolset::try_new(Arc::new(fake_invoker("success", dir.path()))).expect("toolset");
+    let toolset = test_toolset("success", dir.path()).await;
     let output = call_tool(&toolset, "codex_start", r#"{"prompt":"   "}"#).await;
     assert_eq!(output["code"], "codex_invalid_arguments");
 }
@@ -161,8 +248,7 @@ async fn start_rejects_empty_prompt() {
 #[tokio::test]
 async fn cancel_stops_a_hanging_run() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let toolset =
-        CodexToolset::try_new(Arc::new(fake_invoker("hang", dir.path()))).expect("toolset");
+    let toolset = test_toolset("hang", dir.path()).await;
     let output = call_tool(&toolset, "codex_start", r#"{"prompt":"never finish"}"#).await;
     let run_id = output["run_id"].as_str().expect("run_id").to_string();
     let cancel = call_tool(

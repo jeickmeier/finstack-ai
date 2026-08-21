@@ -101,7 +101,8 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
     .clock(clock.clone())
     .drive_timeout(Duration::from_secs(5))
     .register_ports("research", Arc::new(BindPorts { model }))
-    .build();
+    .build()
+    .expect("worker");
 
     let report = tokio::time::timeout(Duration::from_secs(5), Box::pin(worker.tick()))
         .await
@@ -130,7 +131,7 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
     );
     assert!(
         store
-            .load_due(timestamp(2_200))
+            .load_due(timestamp(2_200), 10)
             .expect("due")
             .iter()
             .all(|row| row.session_id != id(99)),
@@ -170,7 +171,7 @@ async fn a_stale_wake_row_is_corrected_by_the_journal() {
     // so `drive_until_wait` times out there; a bare `CommitCoordinator`
     // stands in for that missing facade to reach Terminal.
     clock.jump(60_000).expect("past due");
-    let mut oob = finstack_ai_runtime::WorkflowSession::trusted(
+    let mut oob = finstack_ai_runtime::WorkflowSession::trusted_seeded(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
         locator(),
         clock.clone(),
@@ -212,7 +213,8 @@ async fn a_stale_wake_row_is_corrected_by_the_journal() {
     .clock(clock.clone())
     .drive_timeout(Duration::from_secs(5))
     .register_ports("research", Arc::new(BindPorts { model }))
-    .build();
+    .build()
+    .expect("worker");
 
     let report = tokio::time::timeout(Duration::from_secs(5), Box::pin(worker.tick()))
         .await
@@ -273,7 +275,7 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
     // fixture needed): the worker's `require_locator` rejection is about the
     // *resolve* path, not about how the interaction was requested.
     let interaction_id = crate::helpers::request_interaction(&journal, timestamp(2_000)).await;
-    let mut session = finstack_ai_runtime::WorkflowSession::trusted(
+    let mut session = finstack_ai_runtime::WorkflowSession::trusted_seeded(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
         locator(),
         clock.clone(),
@@ -296,14 +298,17 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
     let command = cross_tenant_resolution_command(interaction_id);
     let payload = serde_json::to_vec(&command).expect("payload");
     store
-        .insert(&InboxRow {
-            tenant_scope: Arc::clone(&row.tenant_scope),
-            session_id: row.session_id,
-            pending_id: Arc::clone(&row.pending_id),
-            kind: InboxKind::Interaction,
-            payload: Arc::from(payload.as_slice()),
-            received_at: timestamp(2_000),
-        })
+        .insert(
+            &InboxRow::try_new(
+                Arc::clone(&row.tenant_scope),
+                row.session_id,
+                Arc::clone(&row.pending_id),
+                InboxKind::Interaction,
+                Arc::from(payload.into_boxed_slice()),
+                timestamp(2_000),
+            )
+            .expect("row"),
+        )
         .expect("poisoned inbox row");
 
     let worker = WorkerBuilder::new(
@@ -316,13 +321,15 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
     .clock(clock.clone())
     .drive_timeout(Duration::from_secs(5))
     .register_ports("research", Arc::new(BindPorts { model }))
-    .build();
+    .build()
+    .expect("worker");
 
     let report = Box::pin(worker.tick()).await.expect("tick");
 
+    assert_eq!(report.failures, 0, "report: {report:?}");
     assert_eq!(
-        report.failures, 1,
-        "the cross-tenant delivery is rejected at resolve time"
+        report.responses_rejected, 1,
+        "the cross-tenant delivery is a durable ingress rejection"
     );
     assert_eq!(
         report.sessions_resumed, 0,
@@ -337,8 +344,13 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
         "the run is still parked on its original interaction wait"
     );
     assert!(
-        store.load_all().expect("inbox").is_empty(),
-        "the poisoned inbox row is deleted so it cannot wedge the loop forever"
+        store.load_batch(10).expect("inbox").is_empty(),
+        "the rejected response leaves the active inbox"
+    );
+    assert_eq!(
+        store.load_dead_letters(10).expect("dead letters").len(),
+        1,
+        "operators retain the rejected command and reason"
     );
 
     let recovered = CommitCoordinator::recover(
@@ -366,11 +378,17 @@ fn wake_claim_defaults_fail_closed() {
         fn delete(&self, _: &str, _: SessionId) -> Result<(), WorkerError> {
             Ok(())
         }
-        fn load_due(&self, _: Timestamp) -> Result<Vec<WakeRow>, WorkerError> {
+        fn load_due(&self, _: Timestamp, _: usize) -> Result<Vec<WakeRow>, WorkerError> {
             Ok(Vec::new())
         }
         fn load_tenant(&self, _: &str) -> Result<Vec<WakeRow>, WorkerError> {
             Ok(Vec::new())
+        }
+        fn contains_interaction(&self, _: &str, _: &str) -> Result<bool, WorkerError> {
+            Ok(false)
+        }
+        fn release(&self, _: &str, _: SessionId, _: &str) -> Result<bool, WorkerError> {
+            Ok(false)
         }
         fn record_failure(&self, _: &str, _: SessionId, _: Timestamp) -> Result<(), WorkerError> {
             Ok(())

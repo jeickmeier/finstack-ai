@@ -38,9 +38,8 @@ use finstack_ai::runtime::{ArtifactStore, ContextProvider, Observer, Toolset};
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
 use finstack_ai_memory::store::SqliteMemoryStore;
 use finstack_ai_memory::{
-    InProcessArtifactStore, InProcessMemoryStore, MemoryContextProvider, MemoryObserver,
-    MemoryPolicy, MemoryScope, MemoryStore, MemoryToolset, RecallConfig, RuleBasedExtractor,
-    system_clock,
+    InProcessMemoryStore, MemoryContextProvider, MemoryObserver, MemoryPolicy, MemoryScope,
+    MemoryStore, MemoryToolset, RecallConfig, RuleBasedExtractor, system_clock,
 };
 use pyo3::prelude::*;
 
@@ -52,6 +51,7 @@ const DEFAULT_TENANT: &str = "python-local";
 
 /// Registered component identity of the native memory toolset.
 const MEMORY_TOOLSET_COMPONENT: &str = "finstack.tools.memory";
+const MEMORY_CONTEXT_COMPONENT: &str = "finstack.context.memory";
 const MEMORY_COMPONENT_VERSION: Version = Version {
     major: 0,
     minor: 1,
@@ -69,6 +69,12 @@ fn memory_toolset_component(py: Python<'_>) -> PyResult<ComponentRef> {
         .map_err(|error| memory_py_error(py, &error))
 }
 
+fn memory_context_component(py: Python<'_>) -> PyResult<ComponentRef> {
+    ComponentId::parse(MEMORY_CONTEXT_COMPONENT)
+        .map(|id| ComponentRef::new(id, Some(MEMORY_COMPONENT_VERSION)))
+        .map_err(|error| memory_py_error(py, &error))
+}
+
 fn build_scope(
     py: Python<'_>,
     tenant: &str,
@@ -78,13 +84,19 @@ fn build_scope(
 ) -> PyResult<MemoryScope> {
     let mut scope = MemoryScope::try_new(tenant).map_err(|error| memory_py_error(py, &error))?;
     if let Some(user) = user {
-        scope = scope.with_user(&user);
+        scope = scope
+            .try_with_user(&user)
+            .map_err(|error| memory_py_error(py, &error))?;
     }
     if let Some(agent) = agent {
-        scope = scope.with_agent(&agent);
+        scope = scope
+            .try_with_agent(&agent)
+            .map_err(|error| memory_py_error(py, &error))?;
     }
     if let Some(workspace) = workspace {
-        scope = scope.with_workspace(&workspace);
+        scope = scope
+            .try_with_workspace(&workspace)
+            .map_err(|error| memory_py_error(py, &error))?;
     }
     Ok(scope)
 }
@@ -94,8 +106,6 @@ fn build_policy(read: bool, write: bool, manage: bool) -> MemoryPolicy {
         read,
         write,
         manage,
-        consolidate: false,
-        profile: false,
     }
 }
 
@@ -198,26 +208,22 @@ impl PyMemoryExtension {
 
     /// Recall context provider handle for `context_providers=[...]`.
     ///
-    /// `max_hits` bounds one recall; `stable_prefix` is how many leading
-    /// items keep their order across consecutive collects on the same
-    /// provider instance.
-    #[pyo3(signature = (*, max_hits = None, stable_prefix = None))]
+    /// `max_hits` bounds one recall.
+    #[pyo3(signature = (*, max_hits = None))]
     fn context_provider(
         &self,
         py: Python<'_>,
         max_hits: Option<usize>,
-        stable_prefix: Option<usize>,
     ) -> PyResult<PyMemoryContextProvider> {
         let defaults = RecallConfig::default();
         let config = RecallConfig {
             max_hits: max_hits.unwrap_or(defaults.max_hits),
-            stable_prefix: stable_prefix.unwrap_or(defaults.stable_prefix),
         };
-        let provider =
-            MemoryContextProvider::try_new(Arc::clone(&self.store), self.scope.clone(), config)
-                .map_err(|error| memory_py_error(py, &error))?;
         Ok(PyMemoryContextProvider {
-            inner: Arc::new(provider),
+            component: memory_context_component(py)?,
+            store: Arc::clone(&self.store),
+            scope: self.scope.clone(),
+            config,
         })
     }
 
@@ -257,7 +263,10 @@ impl PyMemoryExtension {
     skip_from_py_object
 )]
 pub(crate) struct PyMemoryContextProvider {
-    inner: Arc<MemoryContextProvider>,
+    component: ComponentRef,
+    store: Arc<dyn MemoryStore>,
+    scope: MemoryScope,
+    config: RecallConfig,
 }
 
 #[pymethods]
@@ -265,20 +274,27 @@ impl PyMemoryContextProvider {
     /// Exact registered component identity.
     #[getter]
     fn component(&self) -> String {
-        self.inner.descriptor().invocation.component.to_string()
+        self.component.id().to_string()
     }
 }
 
 impl PyMemoryContextProvider {
-    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn ContextProvider>) {
-        let descriptor = self.inner.descriptor();
-        (
-            ComponentRef::new(
-                descriptor.invocation.component.clone(),
-                Some(descriptor.invocation.version),
-            ),
-            Arc::clone(&self.inner) as Arc<dyn ContextProvider>,
+    pub(crate) fn registration(
+        &self,
+        py: Python<'_>,
+        artifact_store: Arc<dyn ArtifactStore>,
+    ) -> PyResult<(ComponentRef, Arc<dyn ContextProvider>)> {
+        let provider = MemoryContextProvider::try_new(
+            Arc::clone(&self.store),
+            artifact_store,
+            self.scope.clone(),
+            self.config,
         )
+        .map_err(|error| memory_py_error(py, &error))?;
+        Ok((
+            self.component.clone(),
+            Arc::new(provider) as Arc<dyn ContextProvider>,
+        ))
     }
 }
 
@@ -309,9 +325,10 @@ impl PyMemoryToolset {
 
     /// Number of memory tools the configured policy exposes.
     #[getter]
-    fn tool_count(&self, py: Python<'_>) -> PyResult<usize> {
-        let probe = Arc::new(InProcessArtifactStore::default()) as Arc<dyn ArtifactStore>;
-        Ok(self.build(py, probe)?.tools().len())
+    fn tool_count(&self) -> usize {
+        usize::from(self.policy.read) * 2
+            + usize::from(self.policy.write)
+            + usize::from(self.policy.manage) * 2
     }
 }
 

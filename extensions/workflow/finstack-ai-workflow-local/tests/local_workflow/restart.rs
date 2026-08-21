@@ -280,7 +280,7 @@ async fn interaction_survives_worker_restart() {
     .await;
     drop(owner);
 
-    let mut driver = WorkflowSession::trusted(store.clone(), locator(), clock.clone(), 700)
+    let mut driver = WorkflowSession::trusted_seeded(store.clone(), locator(), clock.clone(), 700)
         .await
         .expect("attach")
         .with_ports(Arc::clone(&model), locked_profile(), Some(catalog));
@@ -290,7 +290,7 @@ async fn interaction_survives_worker_restart() {
         panic!("expected interaction");
     };
     driver.abort_owner();
-    let mut resumed = WorkflowSession::trusted(store.clone(), locator(), clock.clone(), 701)
+    let mut resumed = WorkflowSession::trusted_seeded(store.clone(), locator(), clock.clone(), 701)
         .await
         .expect("resume")
         .with_ports(model, locked_profile(), None);
@@ -374,7 +374,7 @@ async fn cron_schedule_survives_worker_restart() {
         let store = open_sqlite_journal(&path);
         seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 810).await;
         let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
-        let driver = LocalWorkflowDriver::attach(store, locator(), clock.clone(), 810, cron)
+        let driver = LocalWorkflowDriver::attach_seeded(store, locator(), clock.clone(), 810, cron)
             .await
             .expect("attach")
             .with_ports(Arc::clone(&model), locked_profile(), None);
@@ -388,7 +388,7 @@ async fn cron_schedule_survives_worker_restart() {
 
     let store = open_sqlite_journal(&path);
     let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
-    let resumed = LocalWorkflowDriver::attach(store, locator(), clock, 811, cron)
+    let resumed = LocalWorkflowDriver::attach_seeded(store, locator(), clock, 811, cron)
         .await
         .expect("resume")
         .with_ports(model, locked_profile(), None);
@@ -412,7 +412,7 @@ async fn cron_catch_up_fires_once_then_advances() {
         let store = open_sqlite_journal(&path);
         seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 820).await;
         let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
-        let driver = LocalWorkflowDriver::attach(store, locator(), clock.clone(), 820, cron)
+        let driver = LocalWorkflowDriver::attach_seeded(store, locator(), clock.clone(), 820, cron)
             .await
             .expect("attach")
             .with_ports(Arc::clone(&model), locked_profile(), None);
@@ -425,7 +425,7 @@ async fn cron_catch_up_fires_once_then_advances() {
     let now = clock.now().expect("now");
     let store = open_sqlite_journal(&path);
     let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
-    let resumed = LocalWorkflowDriver::attach(store, locator(), clock.clone(), 821, cron)
+    let resumed = LocalWorkflowDriver::attach_seeded(store, locator(), clock.clone(), 821, cron)
         .await
         .expect("catch-up")
         .with_ports(Arc::clone(&model), locked_profile(), None);
@@ -449,7 +449,7 @@ async fn cron_second_attach_does_not_catch_up_again() {
         let store = open_sqlite_journal(&path);
         seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 830).await;
         let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
-        let driver = LocalWorkflowDriver::attach(store, locator(), clock.clone(), 830, cron)
+        let driver = LocalWorkflowDriver::attach_seeded(store, locator(), clock.clone(), 830, cron)
             .await
             .expect("attach")
             .with_ports(Arc::clone(&model), locked_profile(), None);
@@ -461,7 +461,7 @@ async fn cron_second_attach_does_not_catch_up_again() {
     {
         let store = open_sqlite_journal(&path);
         let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
-        let first = LocalWorkflowDriver::attach(store, locator(), clock.clone(), 831, cron)
+        let first = LocalWorkflowDriver::attach_seeded(store, locator(), clock.clone(), 831, cron)
             .await
             .expect("first catch-up")
             .with_ports(Arc::clone(&model), locked_profile(), None);
@@ -471,7 +471,7 @@ async fn cron_second_attach_does_not_catch_up_again() {
 
     let store = open_sqlite_journal(&path);
     let cron = Arc::new(SqliteCronStore::open(&path).expect("second reopen"));
-    let second = LocalWorkflowDriver::attach(store, locator(), clock, 832, cron)
+    let second = LocalWorkflowDriver::attach_seeded(store, locator(), clock, 832, cron)
         .await
         .expect("second attach")
         .with_ports(model, locked_profile(), None);
@@ -494,7 +494,7 @@ async fn cron_catch_up_is_tenant_scoped() {
         let store = open_sqlite_journal(&path);
         seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 840).await;
         let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
-        let driver = LocalWorkflowDriver::attach(
+        let driver = LocalWorkflowDriver::attach_seeded(
             store,
             locator(),
             clock.clone(),
@@ -524,7 +524,7 @@ async fn cron_catch_up_is_tenant_scoped() {
     clock.jump(25).expect("jump");
     let store = open_sqlite_journal(&path);
     let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
-    let resumed = LocalWorkflowDriver::attach(
+    let resumed = LocalWorkflowDriver::attach_seeded(
         store,
         locator(),
         clock,

@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::Timestamp;
+use finstack_ai_kernel::{AuthorizationEvidence, PrincipalRef, Timestamp};
 use finstack_ai_workflow_hitl::{
-    HitlError, HitlInboxStore, InteractionRow, InteractionStatus, MemoryHitlStore,
+    HitlError, HitlInboxStore, InteractionRow, InteractionStatus, InteractionTransition,
+    MemoryHitlStore,
 };
 
 fn ts(ms: i64) -> Timestamp {
@@ -30,8 +31,13 @@ fn row(tenant: &str, interaction: &str, session: u64, requested_ms: i64) -> Inte
         requested_at: ts(requested_ms),
         expires_at: None,
         request: Arc::from(&br#"{"prompt":"approve?"}"#[..]),
+        accepted_principal: PrincipalRef::try_new("issuer", "subject", Some(tenant))
+            .expect("principal"),
+        accepted_evidence: AuthorizationEvidence::try_new("policy-v1", "decision-v1")
+            .expect("evidence"),
         status: InteractionStatus::Open,
         resolved_by: None,
+        outcome_code: None,
         updated_at: ts(requested_ms),
     }
 }
@@ -51,7 +57,7 @@ pub(crate) fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
 
     // load_open returns only that tenant's Open rows, ordered by
     // requested_at then interaction_id.
-    let open_a = store.load_open("tenant-a").expect("load_open a");
+    let open_a = store.load_open("tenant-a", 10).expect("load_open a");
     assert_eq!(
         open_a
             .iter()
@@ -59,7 +65,7 @@ pub(crate) fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
             .collect::<Vec<_>>(),
         vec!["int-a1", "int-a2"]
     );
-    let open_b = store.load_open("tenant-b").expect("load_open b");
+    let open_b = store.load_open("tenant-b", 10).expect("load_open b");
     assert_eq!(
         open_b
             .iter()
@@ -76,26 +82,30 @@ pub(crate) fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
         .expect("present");
     assert_eq!(loaded, a1);
 
-    // set_status(.., Delivered, Some("alice"), ts) is visible on reload,
+    // transition(.., Buffered, Some("alice"), ts) is visible on reload,
     // drops the row from load_open, but keeps it in load_active.
     store
-        .set_status(
+        .transition(
             "tenant-a",
             "int-a1",
-            InteractionStatus::Delivered,
-            Some("alice"),
-            ts(9_000),
+            InteractionTransition {
+                expected: InteractionStatus::Open,
+                next: InteractionStatus::Buffered,
+                resolved_by: Some("alice"),
+                outcome_code: Some("buffered"),
+                updated_at: ts(9_000),
+            },
         )
         .expect("set_status");
     let reloaded = store
         .load("tenant-a", "int-a1")
         .expect("load")
         .expect("present");
-    assert_eq!(reloaded.status, InteractionStatus::Delivered);
+    assert_eq!(reloaded.status, InteractionStatus::Buffered);
     assert_eq!(reloaded.resolved_by, Some(Arc::from("alice")));
     assert_eq!(reloaded.updated_at, ts(9_000));
 
-    let open_a_after = store.load_open("tenant-a").expect("load_open a after");
+    let open_a_after = store.load_open("tenant-a", 10).expect("load_open a after");
     assert_eq!(
         open_a_after
             .iter()
@@ -105,7 +115,7 @@ pub(crate) fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
         "delivered row drops out of load_open"
     );
 
-    let active = store.load_active().expect("load_active");
+    let active = store.load_active(10).expect("load_active");
     let active_ids: Vec<&str> = active.iter().map(|r| r.interaction_id.as_ref()).collect();
     assert!(
         active_ids.contains(&"int-a1"),
@@ -117,29 +127,33 @@ pub(crate) fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
 
     // set_status on an unknown id errors unknown_interaction.
     let err = store
-        .set_status(
+        .transition(
             "tenant-a",
             "does-not-exist",
-            InteractionStatus::Closed,
-            None,
-            ts(10_000),
+            InteractionTransition {
+                expected: InteractionStatus::Open,
+                next: InteractionStatus::Closed,
+                resolved_by: None,
+                outcome_code: Some("test"),
+                updated_at: ts(10_000),
+            },
         )
         .expect_err("unknown interaction");
     assert!(matches!(err, HitlError::UnknownInteraction));
     assert_eq!(err.code(), "unknown_interaction");
 
     assert_load_open_breaks_ties_by_interaction_id(store);
-    assert_expired_and_closed_rows_absent_from_load_active(store);
+    assert_terminal_rows_absent_from_load_active(store);
 
-    let summaries = store.load_active_summaries().expect("summaries");
-    let active = store.load_active().expect("active");
+    let summaries = store.load_active_summaries(20).expect("summaries");
+    let active = store.load_active(20).expect("active");
     assert_eq!(summaries.len(), active.len());
     for (summary, row) in summaries.iter().zip(&active) {
         assert_eq!(summary.tenant_scope, row.tenant_scope);
         assert_eq!(summary.interaction_id, row.interaction_id);
         assert_eq!(summary.status, row.status);
         assert_eq!(summary.resolved_by, row.resolved_by);
-        assert_eq!(summary.expires_at, row.expires_at);
+        assert_eq!(summary.outcome_code, row.outcome_code);
     }
 }
 
@@ -151,7 +165,7 @@ fn assert_load_open_breaks_ties_by_interaction_id(store: &dyn HitlInboxStore) {
     for r in [&c1, &c2] {
         store.upsert(r).expect("upsert tie");
     }
-    let open_c = store.load_open("tenant-c").expect("load_open c");
+    let open_c = store.load_open("tenant-c", 10).expect("load_open c");
     assert_eq!(
         open_c
             .iter()
@@ -162,40 +176,48 @@ fn assert_load_open_breaks_ties_by_interaction_id(store: &dyn HitlInboxStore) {
     );
 }
 
-/// Coverage gap (b): rows set to `Expired` or `Closed` must be absent from
+/// Rows set to `Accepted` or `Closed` must be absent from
 /// `load_active`.
-fn assert_expired_and_closed_rows_absent_from_load_active(store: &dyn HitlInboxStore) {
+fn assert_terminal_rows_absent_from_load_active(store: &dyn HitlInboxStore) {
     let d1 = row("tenant-d", "int-d1", 7, 8_000);
     let d2 = row("tenant-d", "int-d2", 8, 8_500);
     for r in [&d1, &d2] {
         store.upsert(r).expect("upsert active gap");
     }
     store
-        .set_status(
+        .transition(
             "tenant-d",
             "int-d1",
-            InteractionStatus::Expired,
-            None,
-            ts(9_500),
+            InteractionTransition {
+                expected: InteractionStatus::Open,
+                next: InteractionStatus::Accepted,
+                resolved_by: None,
+                outcome_code: Some("accepted"),
+                updated_at: ts(9_500),
+            },
         )
-        .expect("set_status expired");
+        .expect("accept");
     store
-        .set_status(
+        .transition(
             "tenant-d",
             "int-d2",
-            InteractionStatus::Closed,
-            None,
-            ts(9_500),
+            InteractionTransition {
+                expected: InteractionStatus::Open,
+                next: InteractionStatus::Closed,
+                resolved_by: None,
+                outcome_code: Some("wake_reconciled"),
+                updated_at: ts(9_500),
+            },
         )
-        .expect("set_status closed");
-    let active_after = store.load_active().expect("load_active after");
+        .expect("close");
+    let active_after = store.load_active(20).expect("load_active after");
     let active_ids_after: Vec<&str> = active_after
         .iter()
         .map(|r| r.interaction_id.as_ref())
         .collect();
     assert!(
         !active_ids_after.contains(&"int-d1"),
-        "expired row absent from load_active"
+        "accepted row absent from load_active"
     );
     assert!(
         !active_ids_after.contains(&"int-d2"),

@@ -1,5 +1,10 @@
 //! local-workflow contract reference-driver proofs (A01, A02, A04, TM-19).
 
+#![allow(
+    clippy::large_futures,
+    reason = "contract tests keep driver setup inline for readable state-machine scenarios"
+)]
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

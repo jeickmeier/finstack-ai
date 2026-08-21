@@ -40,7 +40,7 @@ Four independent rules can be combined:
 | Stage | Behavior |
 | --- | --- |
 | `before_model` | All four rules apply. Narrows the tool universe from `input.request.tools`. Returns `Continue` when nothing narrows, `FilterTools(retain)` when a rule narrows, or `Fail` when a jailbreak trigger with `JailbreakAction::Fail` matches. |
-| `before_tool_batch` | Role allowlist and child-depth gate apply, narrowed against the **real carried universe** (`input.tools`, the resolved catalog for this run) via the same `narrow_universe` rules `before_model` uses — a depth-only or role-only config now narrows here just as it would at `before_model`. Write budget and jailbreak scan do not run at this stage: both need message history (prior tool-call blocks, user/tool text) that `BeforeToolBatchInput` deliberately does not carry, and the narrowed `before_model` request is not retained in kernel state for this stage to re-read. Returns `Continue` when the narrowed retain set equals the carried universe, otherwise `FilterTools(retain)`. |
+| `before_tool_batch` | Role allowlist and child-depth gate apply against the resolved catalog. The write budget uses the runtime-supplied count of previously committed executable write calls plus the current batch; a batch that would exceed the cap fails with `tool_policy_write_budget_exceeded` before dispatch. Jailbreak scanning remains `before_model`-only because it needs user/tool message text. Returns `Continue` when unchanged, `FilterTools(retain)` when narrowed, or the stable budget failure. |
 
 This stage exists as a backstop against a provider emitting calls to tools the
 model was never shown: `before_model` already hid ineligible tools from the
@@ -139,7 +139,8 @@ with a stable `reason: &'static str`. These errors occur in the builder chain
 - `too_many_tools` — exceeds 1,024 tools per set
 - `too_many_patterns` — exceeds 64 jailbreak patterns
 - `empty_role_name`, `role_name_too_long`, `role_name_contains_nul` — role validation
-- `empty_pattern`, `pattern_too_long`, `pattern_contains_nul` — pattern validation
+- `empty_pattern`, `pattern_too_long`, `pattern_contains_nul` — normalized pattern validation
+- `empty_restricted_tools` — child-depth restriction must do real work
 - `depth_exceeds_kernel_cap` — depth exceeds kernel run-relation cap (16)
 - `empty_policy` — zero rules configured (no-op policy rejected)
 - `invalid_configuration_encoding`, `invalid_component_id` — serialization or identity errors

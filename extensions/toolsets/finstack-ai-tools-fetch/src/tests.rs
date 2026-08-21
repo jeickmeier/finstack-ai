@@ -130,14 +130,19 @@ async fn drive_to_success(
     call: ValidatedToolCall,
 ) -> serde_json::Value {
     let mut stream = toolset.call(ctx, call).await.expect("call succeeded");
-    let item = stream
-        .next()
-        .await
-        .expect("stream item")
-        .expect("expected success");
-    let finstack_ai_runtime::ToolStreamItem::Completed(result) = item else {
-        panic!("expected a completed result");
+    let result = loop {
+        match stream
+            .next()
+            .await
+            .expect("stream item")
+            .expect("expected success")
+        {
+            finstack_ai_runtime::ToolStreamItem::Artifact(_) => {}
+            finstack_ai_runtime::ToolStreamItem::Completed(result) => break result,
+            _ => panic!("unexpected fetch tool stream item"),
+        }
     };
+    assert!(stream.next().await.is_none());
     assert!(!result.is_error);
     serde_json::from_slice(result.output.as_bytes()).expect("json output")
 }

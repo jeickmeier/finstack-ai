@@ -13,9 +13,9 @@ use finstack_ai_runtime::{
 use finstack_ai_tools_document::parser::DocumentLimits;
 
 use crate::{
-    ATTACHMENT_INDEX_CAPACITY, AttachmentIndex, DocumentIngestMiddleware, FALLBACK_NOTE_TEXT,
-    LIMITS_IDENTITY_VERSION, PARSE_CACHE_CAPACITY, ParseCache, ParseCacheKey, fallback_text_block,
-    limits_identity_bytes, note_block, rebuild_message, skip_note_message,
+    DocumentIngestMiddleware, FALLBACK_NOTE_TEXT, LIMITS_IDENTITY_VERSION, PARSE_CACHE_CAPACITY,
+    ParseCache, ParseCacheKey, fallback_text_block, limits_identity_bytes, note_block,
+    rebuild_message, skip_note_message,
 };
 
 #[path = "test_support.rs"]
@@ -167,8 +167,7 @@ fn parse_key(ordinal: usize) -> ParseCacheKey {
 #[test]
 fn descriptor_declares_before_model_context_mutation() {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     let descriptor = middleware.descriptor();
     assert!(
         descriptor
@@ -184,11 +183,8 @@ fn descriptor_declares_before_model_context_mutation() {
 #[test]
 fn replaces_supported_file_block_with_markdown_text() {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    index.insert(artifact.clone());
-    let middleware =
-        DocumentIngestMiddleware::try_new(store, Arc::clone(&index)).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     let input = before_model_input_with_file(&artifact);
     let outcome = block_on(middleware.invoke(middleware_context(), input)).expect("outcome");
     let StageOutcome::Replace(json) = outcome else {
@@ -204,10 +200,8 @@ fn replaces_supported_file_block_with_markdown_text() {
 #[test]
 fn scanned_pdf_gets_ocr_note() {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), SCANNED_PDF, "application/pdf", "scan.pdf");
-    index.insert(artifact.clone());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     let outcome = block_on(middleware.invoke(
         middleware_context(),
         before_model_input_with_file(&artifact),
@@ -221,47 +215,43 @@ fn scanned_pdf_gets_ocr_note() {
 }
 
 #[test]
-fn unresolvable_artifact_is_fail_soft_note() {
+fn unresolvable_artifact_fails_closed() {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     // Blob references an artifact that was never staged into the index.
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
-    let outcome = block_on(middleware.invoke(
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
+    let error = block_on(middleware.invoke(
         middleware_context(),
         before_model_input_with_dangling_file(),
     ))
-    .expect("fail-soft outcome is Ok");
-    let StageOutcome::Replace(json) = outcome else {
-        panic!("expected Replace");
-    };
-    let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
-    assert!(all_text(&draft).contains("could not be read"));
-    assert!(!has_file_blocks(&draft));
+    .expect_err("missing artifact must fail closed");
+    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
 }
 
 #[test]
 fn no_file_blocks_means_continue() {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     let outcome = block_on(middleware.invoke(middleware_context(), before_model_input_text_only()))
         .expect("outcome");
     assert!(matches!(outcome, StageOutcome::Continue));
 }
 
 #[test]
-fn unsupported_media_type_file_block_is_left_alone() {
+fn unsupported_media_type_becomes_coded_note() {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), b"\x89PNG\r\n", "image/png", "chart.png");
-    index.insert(artifact.clone());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     let outcome = block_on(middleware.invoke(
         middleware_context(),
         before_model_input_with_file(&artifact),
     ))
     .expect("outcome");
-    assert!(matches!(outcome, StageOutcome::Continue));
+    let StageOutcome::Replace(json) = outcome else {
+        panic!("expected Replace");
+    };
+    let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
+    assert!(all_text(&draft).contains("document_ingest:unsupported"));
+    assert!(!has_file_blocks(&draft));
 }
 
 #[test]
@@ -272,10 +262,8 @@ fn non_user_role_message_is_left_untouched() {
     // unchanged and the middleware must report no change (`Continue`),
     // proving it never even inspects non-User content.
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    index.insert(artifact.clone());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     let input = before_model_input(vec![message(
         1,
         MessageRole::Assistant,
@@ -289,7 +277,7 @@ fn non_user_role_message_is_left_untouched() {
 }
 
 #[test]
-fn digest_mismatch_is_fail_soft_note() {
+fn digest_mismatch_fails_closed() {
     // The staged artifact resolves fine (index hit, store returns bytes),
     // but the wire `BlobRef` on the message's `ContentBlock::File` declares
     // a digest that does not match the actual stored content — e.g. a
@@ -298,10 +286,8 @@ fn digest_mismatch_is_fail_soft_note() {
     // fail-soft note used for an unresolvable artifact, rather than
     // feeding wrongly-attributed bytes to the parser.
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    index.insert(artifact.clone());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
 
     // Same blob id as the staged artifact (so the index lookup and store
     // fetch both succeed), but a digest that belongs to different content.
@@ -323,24 +309,17 @@ fn digest_mismatch_is_fail_soft_note() {
         ],
     )]);
 
-    let outcome =
-        block_on(middleware.invoke(middleware_context(), input)).expect("fail-soft outcome is Ok");
-    let StageOutcome::Replace(json) = outcome else {
-        panic!("expected Replace");
-    };
-    let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
-    assert!(all_text(&draft).contains("could not be read"));
-    assert!(!has_file_blocks(&draft));
+    let error = block_on(middleware.invoke(middleware_context(), input))
+        .expect_err("digest mismatch must fail closed");
+    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
 }
 
 #[test]
-fn store_fetch_failure_is_fail_soft_and_must_strip() {
+fn store_fetch_failure_fails_closed() {
     let store = Arc::new(FailingGetStore);
-    let index = Arc::new(AttachmentIndex::default());
-    let (blob, artifact) = indexed_artifact(1);
-    index.insert(artifact);
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
-    let outcome = block_on(middleware.invoke(
+    let (blob, _artifact) = indexed_artifact(1);
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
+    let error = block_on(middleware.invoke(
         middleware_context(),
         before_model_input(vec![message(
             1,
@@ -348,24 +327,16 @@ fn store_fetch_failure_is_fail_soft_and_must_strip() {
             vec![text("please review the attachment"), file_block(blob)],
         )]),
     ))
-    .expect("fail-soft outcome is Ok");
-    let StageOutcome::Replace(json) = outcome else {
-        panic!("expected Replace");
-    };
-    let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
-    assert!(all_text(&draft).contains("could not be read"));
-    assert!(!has_file_blocks(&draft));
+    .expect_err("store failure must fail closed");
+    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
 }
 
 #[test]
 fn parser_failure_is_fail_soft_and_must_strip() {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    index.insert(artifact.clone());
     let middleware = DocumentIngestMiddleware::try_with_limits(
         store,
-        index,
         DocumentLimits {
             max_input_bytes: 1,
             ..DocumentLimits::default()
@@ -381,7 +352,7 @@ fn parser_failure_is_fail_soft_and_must_strip() {
         panic!("expected Replace");
     };
     let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
-    assert!(all_text(&draft).contains("could not be parsed"));
+    assert!(all_text(&draft).contains("document_ingest:parse_failed"));
     assert!(!has_file_blocks(&draft));
 }
 
@@ -448,10 +419,8 @@ fn repeated_invocations_are_byte_identical() {
     // the parse memo must keep every invocation's Replace JSON
     // byte-identical to the first (cached note == recomputed note).
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    index.insert(artifact.clone());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     let mut outputs = Vec::new();
     for _ in 0..3 {
         let outcome = block_on(middleware.invoke(
@@ -469,16 +438,14 @@ fn repeated_invocations_are_byte_identical() {
 }
 
 #[test]
-fn parse_memo_keys_on_declared_name() {
+fn mismatched_declared_name_fails_reference_validation() {
     // Two File blocks carrying the same bytes under different declared
     // names must each get a note carrying their own name — the memo key
     // includes the name, so a cached "a.csv" note must never surface for
     // "b.csv".
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "a.csv");
-    index.insert(artifact.clone());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
 
     let renamed_blob = BlobRef::try_new(
         artifact.blob().id(),
@@ -488,33 +455,21 @@ fn parse_memo_keys_on_declared_name() {
         Some("b.csv"),
     )
     .expect("blob");
-    for (blob, expected_name, absent_name) in [
-        (blob_of(&artifact), "a.csv", "b.csv"),
-        (renamed_blob, "b.csv", "a.csv"),
-    ] {
-        let input = before_model_input(vec![message(
-            1,
-            MessageRole::User,
-            vec![text("please review the attachment"), file_block(blob)],
-        )]);
-        let outcome = block_on(middleware.invoke(middleware_context(), input)).expect("outcome");
-        let StageOutcome::Replace(json) = outcome else {
-            panic!("expected Replace");
-        };
-        let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
-        let all = all_text(&draft);
-        assert!(all.contains(expected_name), "note must carry its own name");
-        assert!(!all.contains(absent_name), "cached note must not leak");
-    }
+    let input = before_model_input(vec![message(
+        1,
+        MessageRole::User,
+        vec![
+            text("please review the attachment"),
+            file_block(renamed_blob),
+        ],
+    )]);
+    block_on(middleware.invoke(middleware_context(), input))
+        .expect_err("renamed reference must fail closed");
 }
 
 fn ingest_with_limits(limits: DocumentLimits) -> DocumentIngestMiddleware {
-    DocumentIngestMiddleware::try_with_limits(
-        Arc::new(CaptureArtifactStore::default()),
-        Arc::new(AttachmentIndex::default()),
-        limits,
-    )
-    .expect("middleware")
+    DocumentIngestMiddleware::try_with_limits(Arc::new(CaptureArtifactStore::default()), limits)
+        .expect("middleware")
 }
 
 fn configuration_digest_of(limits: DocumentLimits) -> Digest {
@@ -556,12 +511,9 @@ fn try_new_digest_matches_equivalent_explicit_store_limits() {
     let max_artifact_bytes = 64 * 1024 * 1024;
     let store: Arc<dyn ArtifactStore> =
         Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(max_artifact_bytes));
-    let derived =
-        DocumentIngestMiddleware::try_new(Arc::clone(&store), Arc::new(AttachmentIndex::default()))
-            .expect("try_new");
+    let derived = DocumentIngestMiddleware::try_new(Arc::clone(&store)).expect("try_new");
     let explicit = DocumentIngestMiddleware::try_with_limits(
         store,
-        Arc::new(AttachmentIndex::default()),
         DocumentLimits {
             max_input_bytes: u64::try_from(max_artifact_bytes).expect("fits u64"),
             ..DocumentLimits::default()
@@ -589,7 +541,6 @@ fn configuration_identity_pins_canonical_bytes_and_version_tag() {
 
     let middleware = DocumentIngestMiddleware::try_with_limits(
         Arc::new(CaptureArtifactStore::default()),
-        Arc::new(AttachmentIndex::default()),
         defaults,
     )
     .expect("middleware");
@@ -607,84 +558,8 @@ fn configuration_identity_pins_canonical_bytes_and_version_tag() {
 fn ingest_limit_follows_the_store_ceiling() {
     let store: Arc<dyn ArtifactStore> =
         Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(64 * 1024 * 1024));
-    let index = Arc::new(AttachmentIndex::default());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
     assert_eq!(middleware.limits().max_input_bytes, 64 * 1024 * 1024);
-}
-
-#[test]
-fn attachment_index_fifo_evicts_oldest_entry_at_capacity() {
-    let index = AttachmentIndex::default();
-    let mut last = None;
-    for ordinal in 0..=ATTACHMENT_INDEX_CAPACITY {
-        let (blob, artifact) = indexed_artifact(ordinal);
-        index.insert(artifact);
-        last = Some(blob);
-    }
-    let (first_blob, _) = indexed_artifact(0);
-    assert!(
-        index.lookup(&first_blob).is_none(),
-        "oldest entry must be evicted"
-    );
-    let last_blob = last.expect("at least one insert");
-    assert!(
-        index.lookup(&last_blob).is_some(),
-        "most recent entry must remain"
-    );
-}
-
-#[test]
-fn attachment_index_reinsert_refreshes_value_without_changing_fifo_order() {
-    let index = AttachmentIndex::default();
-    for ordinal in 0..ATTACHMENT_INDEX_CAPACITY {
-        let (_, artifact) = indexed_artifact(ordinal);
-        index.insert(artifact);
-    }
-    let (first_blob, refreshed) = indexed_artifact(0);
-    let refreshed = ArtifactRef::try_new(
-        ArtifactId::from_bytes([2; 16]),
-        "attachment",
-        refreshed.blob().clone(),
-        Digest::blob_content(b"refreshed"),
-        Digest::raw_json(b"scope"),
-        Metadata::empty(),
-    )
-    .expect("refreshed artifact");
-    index.insert(refreshed.clone());
-    assert_eq!(
-        index.lookup(&first_blob).expect("still present").id(),
-        refreshed.id(),
-        "reinsert must refresh the stored ArtifactRef"
-    );
-
-    let overflow = ATTACHMENT_INDEX_CAPACITY;
-    let (overflow_blob, overflow_artifact) = indexed_artifact(overflow);
-    index.insert(overflow_artifact);
-    assert!(
-        index.lookup(&first_blob).is_none(),
-        "reinsert must not move the oldest key in FIFO order"
-    );
-    assert!(index.lookup(&overflow_blob).is_some());
-    let (second_blob, _) = indexed_artifact(1);
-    assert!(
-        index.lookup(&second_blob).is_some(),
-        "the next-oldest key must survive the overflow insert"
-    );
-}
-
-#[test]
-fn attachment_index_recovers_from_poison() {
-    let index = AttachmentIndex::default();
-    let (blob, artifact) = indexed_artifact(0);
-    index.insert(artifact);
-    index.map.poison();
-    assert!(
-        index.lookup(&blob).is_some(),
-        "poison recovery must keep existing entries"
-    );
-    let (next_blob, next_artifact) = indexed_artifact(1);
-    index.insert(next_artifact);
-    assert!(index.lookup(&next_blob).is_some());
 }
 
 #[test]

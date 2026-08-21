@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use finstack_ai_kernel::{
     AcceptRun, BudgetPropagation, CancelRequested, CancellationInitiator, CancellationPropagation,
     ChildPlacement, ChildRunLocator, DeadlinePropagation, Digest, PrincipalPropagation,
-    RunAccepted, RunId, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
+    RunAccepted, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
 };
 use finstack_ai_protocol::{RemoteAgentRef, RemoteCommandPayload, RemoteStartRequest};
 use finstack_ai_runtime::{
@@ -14,16 +14,15 @@ use finstack_ai_runtime::{
     child_relation_digest,
 };
 
-use crate::route::{RemoteChildRoute, invalid, parse_endpoint, route_ref, unavailable};
+use crate::route::{RemoteChildRoute, ResolvedRemoteRoute, invalid, resolve_route, unavailable};
 use crate::transport::exchange;
 
 const MAX_ACCEPTED: usize = 1_024;
 
 /// Remote child invoker bound to one explicit route.
 pub struct RemoteChildInvoker {
-    route: RemoteChildRoute,
-    accepted: Arc<Mutex<BTreeMap<RunId, AcceptedChild>>>,
-    command_ids: Arc<Mutex<BTreeMap<RunId, LogicalCommandIds>>>,
+    route: ResolvedRemoteRoute,
+    entries: Arc<Mutex<BTreeMap<Digest, ChildEntry>>>,
 }
 
 #[derive(Clone)]
@@ -33,9 +32,17 @@ struct AcceptedChild {
 }
 
 #[derive(Clone)]
-struct LogicalCommandIds {
-    start: String,
-    cancel: Option<String>,
+enum ChildEntry {
+    Pending {
+        request_digest: Digest,
+        shared: Arc<PendingResult>,
+    },
+    Accepted(AcceptedChild),
+}
+
+struct PendingResult {
+    result: Mutex<Option<Result<ChildRunHandle, AgentInvokeError>>>,
+    notify: tokio::sync::Notify,
 }
 
 impl RemoteChildInvoker {
@@ -49,19 +56,9 @@ impl RemoteChildInvoker {
     /// or route handle is invalid, or when plaintext targets a non-loopback
     /// address.
     pub fn try_new(route: RemoteChildRoute) -> Result<Self, AgentInvokeError> {
-        parse_endpoint(&route.endpoint)?;
-        let _ = route_ref(&route)?;
-        if route
-            .token
-            .as_deref()
-            .is_some_and(|token| token.is_empty() || token.as_bytes().contains(&0))
-        {
-            return Err(invalid("remote child token is invalid"));
-        }
         Ok(Self {
-            route,
-            accepted: Arc::new(Mutex::new(BTreeMap::new())),
-            command_ids: Arc::new(Mutex::new(BTreeMap::new())),
+            route: resolve_route(route)?,
+            entries: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
 
@@ -72,7 +69,7 @@ impl RemoteChildInvoker {
     /// Returns [`AgentInvokeError::InvalidRequest`] when the service or route
     /// handle is invalid.
     pub fn route_ref(&self) -> Result<finstack_ai_kernel::RemoteRouteRef, AgentInvokeError> {
-        route_ref(&self.route)
+        Ok(self.route.reference.clone())
     }
 }
 
@@ -83,8 +80,7 @@ impl AgentInvoker for RemoteChildInvoker {
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
         let route = self.route.clone();
-        let accepted = Arc::clone(&self.accepted);
-        let command_ids = Arc::clone(&self.command_ids);
+        let entries = Arc::clone(&self.entries);
         Box::pin(async move {
             request.validate()?;
             if request.placement != ChildPlacement::RemoteChildSession {
@@ -92,28 +88,11 @@ impl AgentInvoker for RemoteChildInvoker {
                     "remote child invoker only accepts remote_child_session",
                 ));
             }
-            if request.locator.remote.is_none() {
-                return Err(invalid("remote child locator is missing a route"));
+            if request.locator.remote.as_ref() != Some(&route.reference) {
+                return Err(invalid("remote child locator route does not match"));
             }
-            if let Some(existing) = lookup(&accepted, request.locator.operation.run_id)? {
-                if existing.request_digest == request.request_digest {
-                    return Ok(existing.handle);
-                }
-                return Err(AgentInvokeError::Conflict {
-                    existing: existing.request_digest,
-                    submitted: request.request_digest,
-                });
-            }
-            let command_id = start_command_id(&command_ids, request.locator.operation.run_id)?;
+            let key = locator_key(&request.locator)?;
             let payload = start_payload(&ctx, &request)?;
-            let result = exchange(&route, &request.locator, payload, &command_id).await?;
-            if !result.accepted() {
-                return Err(unavailable(
-                    result
-                        .reason_code()
-                        .unwrap_or("remote child start was rejected"),
-                ));
-            }
             let handle = ChildRunHandle {
                 locator: request.locator.clone(),
                 relation_digest: child_relation_digest(&ctx, &request).map_err(|error| {
@@ -122,28 +101,67 @@ impl AgentInvoker for RemoteChildInvoker {
                     }
                 })?,
             };
-            insert_accepted(
-                &accepted,
-                request.locator.operation.run_id,
-                AcceptedChild {
-                    request_digest: request.request_digest,
-                    handle: handle.clone(),
-                },
-            )?;
-            Ok(handle)
+            let (shared, initiator) = reserve_entry(&entries, key, &request)?;
+            if initiator {
+                let command_id =
+                    deterministic_command_id("remote-child-start", request.request_digest)?;
+                let worker_entries = Arc::clone(&entries);
+                let worker_shared = Arc::clone(&shared);
+                let locator = request.locator.clone();
+                let request_digest = request.request_digest;
+                let worker_handle = handle.clone();
+                tokio::spawn(async move {
+                    let mut result = async {
+                        let result = exchange(&route, &locator, payload, &command_id).await?;
+                        if !result.accepted() {
+                            return Err(unavailable(
+                                result
+                                    .reason_code()
+                                    .unwrap_or("remote child start was rejected"),
+                            ));
+                        }
+                        Ok(worker_handle.clone())
+                    }
+                    .await;
+                    match worker_entries.lock() {
+                        Ok(mut entries) if result.is_ok() => {
+                            entries.insert(
+                                key,
+                                ChildEntry::Accepted(AcceptedChild {
+                                    request_digest,
+                                    handle: worker_handle,
+                                }),
+                            );
+                        }
+                        Ok(mut entries) => {
+                            entries.remove(&key);
+                        }
+                        Err(_) => {
+                            result = Err(unavailable("remote child entry lock is poisoned"));
+                        }
+                    }
+                    if let Ok(mut slot) = worker_shared.result.lock() {
+                        *slot = Some(result);
+                    }
+                    worker_shared.notify.notify_waiters();
+                });
+            }
+            wait_pending(shared).await
         })
     }
 
     fn cancel(&self, locator: &ChildRunLocator) -> PortFuture<Result<(), AgentInvokeError>> {
         let route = self.route.clone();
         let locator = locator.clone();
-        let accepted = Arc::clone(&self.accepted);
-        let command_ids = Arc::clone(&self.command_ids);
+        let entries = Arc::clone(&self.entries);
         Box::pin(async move {
-            if lookup(&accepted, locator.operation.run_id)?.is_none() {
-                return Err(invalid("remote child locator was never accepted"));
+            if locator.remote.as_ref() != Some(&route.reference) {
+                return Err(invalid("remote child locator route does not match"));
             }
-            let command_id = cancel_command_id(&command_ids, locator.operation.run_id)?;
+            let key = locator_key(&locator)?;
+            let accepted = lookup_accepted(&entries, key, &locator)?;
+            let command_id =
+                deterministic_command_id("remote-child-cancel", accepted.request_digest)?;
             let payload = RemoteCommandPayload::Cancel(Box::new(CancelRequested {
                 initiator: CancellationInitiator::RuntimeShutdown,
                 reason: None,
@@ -159,6 +177,111 @@ impl AgentInvoker for RemoteChildInvoker {
                 ))
             }
         })
+    }
+}
+
+fn locator_key(locator: &ChildRunLocator) -> Result<Digest, AgentInvokeError> {
+    let canonical = serde_json_canonicalizer::to_vec(locator)
+        .map_err(|_| invalid("remote child locator is not serializable"))?;
+    Digest::domain_separated("remote-child-locator", 1, &canonical)
+        .map_err(|_| invalid("remote child locator digest failed"))
+}
+
+fn deterministic_command_id(domain: &str, digest: Digest) -> Result<String, AgentInvokeError> {
+    let derived = Digest::domain_separated(domain, 1, digest.as_bytes())
+        .map_err(|_| invalid("remote child command identity failed"))?;
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&derived.as_bytes()[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(uuid::Uuid::from_bytes(bytes).to_string())
+}
+
+fn reserve_entry(
+    entries: &Mutex<BTreeMap<Digest, ChildEntry>>,
+    key: Digest,
+    request: &ChildRunRequest,
+) -> Result<(Arc<PendingResult>, bool), AgentInvokeError> {
+    let mut entries = entries
+        .lock()
+        .map_err(|_| unavailable("remote child entry lock is poisoned"))?;
+    match entries.get(&key) {
+        Some(ChildEntry::Accepted(existing)) => {
+            if existing.handle.locator != request.locator {
+                return Err(invalid("remote child locator digest collision"));
+            }
+            if existing.request_digest != request.request_digest {
+                return Err(AgentInvokeError::Conflict {
+                    existing: existing.request_digest,
+                    submitted: request.request_digest,
+                });
+            }
+            let shared = Arc::new(PendingResult {
+                result: Mutex::new(Some(Ok(existing.handle.clone()))),
+                notify: tokio::sync::Notify::new(),
+            });
+            Ok((shared, false))
+        }
+        Some(ChildEntry::Pending {
+            request_digest,
+            shared,
+        }) => {
+            if *request_digest != request.request_digest {
+                return Err(AgentInvokeError::Conflict {
+                    existing: *request_digest,
+                    submitted: request.request_digest,
+                });
+            }
+            Ok((Arc::clone(shared), false))
+        }
+        None => {
+            if entries.len() >= MAX_ACCEPTED {
+                return Err(unavailable("remote child entry map is full"));
+            }
+            let shared = Arc::new(PendingResult {
+                result: Mutex::new(None),
+                notify: tokio::sync::Notify::new(),
+            });
+            entries.insert(
+                key,
+                ChildEntry::Pending {
+                    request_digest: request.request_digest,
+                    shared: Arc::clone(&shared),
+                },
+            );
+            Ok((shared, true))
+        }
+    }
+}
+
+async fn wait_pending(shared: Arc<PendingResult>) -> Result<ChildRunHandle, AgentInvokeError> {
+    loop {
+        let notified = shared.notify.notified();
+        if let Some(result) = shared
+            .result
+            .lock()
+            .map_err(|_| unavailable("remote child pending result is poisoned"))?
+            .clone()
+        {
+            return result;
+        }
+        notified.await;
+    }
+}
+
+fn lookup_accepted(
+    entries: &Mutex<BTreeMap<Digest, ChildEntry>>,
+    key: Digest,
+    locator: &ChildRunLocator,
+) -> Result<AcceptedChild, AgentInvokeError> {
+    let entries = entries
+        .lock()
+        .map_err(|_| unavailable("remote child entry lock is poisoned"))?;
+    match entries.get(&key) {
+        Some(ChildEntry::Accepted(accepted)) if accepted.handle.locator == *locator => {
+            Ok(accepted.clone())
+        }
+        _ => Err(invalid("remote child locator was never accepted")),
     }
 }
 
@@ -222,63 +345,4 @@ fn start_payload(
     )
     .map_err(|_| invalid("remote child start payload is invalid"))?;
     Ok(RemoteCommandPayload::Start(Box::new(start)))
-}
-
-fn start_command_id(
-    ids: &Mutex<BTreeMap<RunId, LogicalCommandIds>>,
-    run_id: RunId,
-) -> Result<String, AgentInvokeError> {
-    let mut ids = ids
-        .lock()
-        .map_err(|_| unavailable("remote child command-id lock is poisoned"))?;
-    Ok(ids
-        .entry(run_id)
-        .or_insert_with(|| LogicalCommandIds {
-            start: uuid::Uuid::now_v7().to_string(),
-            cancel: None,
-        })
-        .start
-        .clone())
-}
-
-fn cancel_command_id(
-    ids: &Mutex<BTreeMap<RunId, LogicalCommandIds>>,
-    run_id: RunId,
-) -> Result<String, AgentInvokeError> {
-    let mut ids = ids
-        .lock()
-        .map_err(|_| unavailable("remote child command-id lock is poisoned"))?;
-    let logical = ids.entry(run_id).or_insert_with(|| LogicalCommandIds {
-        start: uuid::Uuid::now_v7().to_string(),
-        cancel: None,
-    });
-    Ok(logical
-        .cancel
-        .get_or_insert_with(|| uuid::Uuid::now_v7().to_string())
-        .clone())
-}
-
-fn lookup(
-    accepted: &Mutex<BTreeMap<RunId, AcceptedChild>>,
-    run_id: RunId,
-) -> Result<Option<AcceptedChild>, AgentInvokeError> {
-    let accepted = accepted
-        .lock()
-        .map_err(|_| unavailable("remote child acceptance lock is poisoned"))?;
-    Ok(accepted.get(&run_id).cloned())
-}
-
-fn insert_accepted(
-    accepted: &Mutex<BTreeMap<RunId, AcceptedChild>>,
-    run_id: RunId,
-    child: AcceptedChild,
-) -> Result<(), AgentInvokeError> {
-    let mut accepted = accepted
-        .lock()
-        .map_err(|_| unavailable("remote child acceptance lock is poisoned"))?;
-    if accepted.len() >= MAX_ACCEPTED && !accepted.contains_key(&run_id) {
-        return Err(unavailable("remote child accepted map is full"));
-    }
-    accepted.insert(run_id, child);
-    Ok(())
 }

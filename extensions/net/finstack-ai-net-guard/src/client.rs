@@ -1,5 +1,6 @@
 //! Address-pinned client construction and bounded body reads.
 
+use std::future::Future;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -7,6 +8,23 @@ use futures_util::StreamExt;
 
 use crate::NetGuardError;
 use crate::vet::VettedUrl;
+
+/// Caller-provided cancellation and deadline futures for one body read.
+pub struct BodyReadInterrupt<C, D> {
+    cancellation: C,
+    deadline: D,
+}
+
+impl<C, D> BodyReadInterrupt<C, D> {
+    /// Bind the futures that interrupt the response body stream.
+    #[must_use]
+    pub const fn new(cancellation: C, deadline: D) -> Self {
+        Self {
+            cancellation,
+            deadline,
+        }
+    }
+}
 
 /// Build a reqwest client pinned to the vetted address. Redirects are
 /// disabled; callers follow them manually so every hop is re-vetted.
@@ -65,9 +83,48 @@ pub async fn read_body_bounded(
     response: reqwest::Response,
     cap: usize,
 ) -> Result<Vec<u8>, NetGuardError> {
+    read_body_bounded_interruptible(
+        response,
+        cap,
+        BodyReadInterrupt::new(std::future::pending::<()>(), std::future::pending::<()>()),
+    )
+    .await
+}
+
+/// Stream a bounded body while racing caller cancellation and deadline.
+///
+/// # Errors
+///
+/// Returns [`NetGuardError::Cancelled`] or
+/// [`NetGuardError::DeadlineExceeded`] when the corresponding interrupt wins,
+/// in addition to the transport and limit failures of [`read_body_bounded`].
+pub async fn read_body_bounded_interruptible<C, D>(
+    response: reqwest::Response,
+    cap: usize,
+    interrupt: BodyReadInterrupt<C, D>,
+) -> Result<Vec<u8>, NetGuardError>
+where
+    C: Future<Output = ()>,
+    D: Future<Output = ()>,
+{
+    let BodyReadInterrupt {
+        cancellation,
+        deadline,
+    } = interrupt;
+    tokio::pin!(cancellation);
+    tokio::pin!(deadline);
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next = tokio::select! {
+            biased;
+            () = &mut cancellation => return Err(NetGuardError::Cancelled),
+            () = &mut deadline => return Err(NetGuardError::DeadlineExceeded),
+            chunk = stream.next() => chunk,
+        };
+        let Some(chunk) = next else {
+            break;
+        };
         let chunk = chunk.map_err(|_| NetGuardError::TransportFailed)?;
         if body.len().saturating_add(chunk.len()) > cap {
             return Err(NetGuardError::LimitExceeded);

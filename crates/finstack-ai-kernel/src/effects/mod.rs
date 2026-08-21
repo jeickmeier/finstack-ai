@@ -1,4 +1,4 @@
-//! Effect and interaction envelopes (TDD §12.3–§12.4).
+//! Effect and interaction envelopes (contract section 12.3).
 
 mod error;
 mod interaction;

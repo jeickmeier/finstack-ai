@@ -18,7 +18,7 @@ vendored-tls = ["reqwest/native-tls-vendored"]
 futures-util = { workspace = true }
 reqwest = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["macros", "net"] }
 url = { workspace = true }
 
 [dev-dependencies]

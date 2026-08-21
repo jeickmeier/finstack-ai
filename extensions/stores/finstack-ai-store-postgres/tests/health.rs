@@ -55,6 +55,7 @@ async fn relaxed_durability_reports_not_durable() {
     };
     let schema = helpers::fresh_schema_name();
     let mut config = PostgresStoreConfig::new(url.clone(), limits());
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.durability = PostgresDurability::Relaxed;
     config.schema = Arc::from(schema.as_str());
 
@@ -80,6 +81,7 @@ async fn relaxed_durability_reports_not_durable() {
 #[tokio::test]
 async fn unroutable_url_fails_open_as_unavailable() {
     let mut config = PostgresStoreConfig::new("postgres://127.0.0.1:1@/x", limits());
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.connect_timeout = Duration::from_millis(200);
 
     let result = PostgresJournalStore::try_open(config).await;

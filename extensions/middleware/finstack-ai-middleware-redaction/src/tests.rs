@@ -757,20 +757,18 @@ fn wrapper_passes_through_inner_terminal_outcomes() {
 }
 
 #[test]
-fn wrapper_passes_through_unparsable_inner_replace() {
+fn wrapper_rejects_unparsable_inner_replace() {
     let inner = StubInner::before_model(StageOutcome::Replace(
         RawJson::parse(b"{\"not\":\"a draft\"}").expect("raw"),
     ));
     let wrapper =
         RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
-    let outcome = invoke(
+    let error = invoke_result(
         &wrapper,
         before_model_input(vec![message(1, MessageRole::User, vec![text("clean")])]),
-    );
-    let StageOutcome::Replace(raw) = outcome else {
-        panic!("expected passthrough Replace, got {outcome:?}");
-    };
-    assert_eq!(raw.as_bytes(), b"{\"not\":\"a draft\"}");
+    )
+    .expect_err("malformed replacement must fail closed");
+    assert_eq!(error.code(), super::REDACTION_REWRITE_CODE);
 }
 
 #[test]
@@ -806,6 +804,23 @@ fn wrapper_rejects_non_standard_inner_role() {
 }
 
 #[test]
+fn wrapper_rejects_non_recompute_safe_inner() {
+    let mut inner = StubInner::new(
+        StageMask::from_stages([Stage::BeforeModel]),
+        MiddlewareRole::Standard,
+        StageOutcome::Continue,
+    );
+    inner.descriptor.invocation.recovery = InvocationRecovery::Reconcile;
+    let result = RedactionMiddleware::try_wrapping(Arc::new(inner), RedactionConfig::default());
+    assert_eq!(
+        result.err(),
+        Some(RedactionError::Configuration {
+            reason: "wrapped_middleware_not_recompute_safe",
+        })
+    );
+}
+
+#[test]
 fn wrapper_descriptor_adopts_inner_order() {
     let inner = StubInner::before_model(StageOutcome::Continue);
     let wrapper =
@@ -833,7 +848,7 @@ const STANDALONE_DEFAULT_DIGEST_HEX: &str =
 const STANDALONE_FAIL_DIGEST_HEX: &str =
     "302f9002bc942153f2ce5182eac2ae46058a632002ac95509939cf3b21097e99";
 const WRAPPING_DEFAULT_STUB_DIGEST_HEX: &str =
-    "fa4386b15dd87d3a2ad1c0e4d5f849a5ae533fa04a4c47f4fa01313b4f01decf";
+    "01289ce99a47a939279f326ab90c3d4f98815e7a5fe7b6557d8cf6a60dfd43be";
 
 fn expected_configuration_digest(
     config: RedactionConfig,
@@ -845,6 +860,7 @@ fn expected_configuration_digest(
             "component": invocation.component,
             "version": invocation.version,
             "configuration_digest": invocation.configuration_digest,
+            "recovery": invocation.recovery,
         })),
     });
     let bytes = serde_json_canonicalizer::to_vec(&value).expect("canonical");
@@ -968,10 +984,10 @@ fn wrapping_constructor_pins_order_mask_validation_and_digest_bytes() {
 }
 
 #[test]
-fn oversized_rewrite_fails_soft_to_original_text() {
+fn oversized_rewrite_uses_bounded_marker() {
     // The marker for this email is longer than the email itself, so the
-    // rewritten text would exceed TextBlock's byte ceiling; the block must
-    // be passed through unchanged, leaving the draft unmodified.
+    // rewritten text would exceed TextBlock's byte ceiling; the detected
+    // content must be replaced by the bounded oversize marker.
     let secret = "a@b.co";
     let filler = "!".repeat(finstack_ai_kernel::TEXT_MAX_BYTES - secret.len() - 1);
     let oversized = format!("{filler} {secret}");
@@ -980,5 +996,9 @@ fn oversized_rewrite_fails_soft_to_original_text() {
         &middleware,
         before_model_input(vec![message(1, MessageRole::User, vec![text(&oversized)])]),
     );
-    assert_eq!(outcome, StageOutcome::Continue);
+    let draft = replaced_draft(&outcome);
+    let ContentBlock::Text(block) = &draft.messages[0].content()[0] else {
+        panic!("expected text block");
+    };
+    assert_eq!(block.text(), super::OVERSIZED_MARKER);
 }

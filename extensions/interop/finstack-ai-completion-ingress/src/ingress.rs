@@ -98,6 +98,12 @@ impl CompletionIngress {
         self
     }
 
+    /// Return operator-visible readiness of the required audit path.
+    #[must_use]
+    pub fn health(&self) -> finstack_ai_runtime::SecurityAuditGateHealth {
+        self.audit.operational_health()
+    }
+
     /// Mint one signed callback token for one deferred effect.
     ///
     /// # Errors

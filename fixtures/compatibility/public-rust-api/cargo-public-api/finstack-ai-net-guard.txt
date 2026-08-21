@@ -1,6 +1,8 @@
 pub mod finstack_ai_net_guard
 pub enum finstack_ai_net_guard::NetGuardError
+pub finstack_ai_net_guard::NetGuardError::Cancelled
 pub finstack_ai_net_guard::NetGuardError::ClientBuildFailed
+pub finstack_ai_net_guard::NetGuardError::DeadlineExceeded
 pub finstack_ai_net_guard::NetGuardError::DestinationBlocked
 pub finstack_ai_net_guard::NetGuardError::DestinationBlocked::reason: &'static str
 pub finstack_ai_net_guard::NetGuardError::InvalidUrl
@@ -19,6 +21,9 @@ pub fn finstack_ai_net_guard::NetGuardError::fmt(&self, &mut core::fmt::Formatte
 impl core::fmt::Display for finstack_ai_net_guard::NetGuardError
 pub fn finstack_ai_net_guard::NetGuardError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_net_guard::NetGuardError
+pub struct finstack_ai_net_guard::BodyReadInterrupt<C, D>
+impl<C, D> finstack_ai_net_guard::BodyReadInterrupt<C, D>
+pub const fn finstack_ai_net_guard::BodyReadInterrupt<C, D>::new(C, D) -> Self
 pub struct finstack_ai_net_guard::SystemResolver
 impl core::clone::Clone for finstack_ai_net_guard::SystemResolver
 pub fn finstack_ai_net_guard::SystemResolver::clone(&self) -> finstack_ai_net_guard::SystemResolver
@@ -57,5 +62,6 @@ pub fn finstack_ai_net_guard::is_loopback_host(&str) -> bool
 pub fn finstack_ai_net_guard::parse_and_vet_url(&str, &finstack_ai_net_guard::UrlPolicy) -> core::result::Result<finstack_ai_net_guard::VettedUrl, finstack_ai_net_guard::NetGuardError>
 pub fn finstack_ai_net_guard::pinned_client(&finstack_ai_net_guard::VettedUrl, core::net::socket_addr::SocketAddr, core::time::Duration) -> core::result::Result<reqwest::async_impl::client::Client, finstack_ai_net_guard::NetGuardError>
 pub async fn finstack_ai_net_guard::read_body_bounded(reqwest::async_impl::response::Response, usize) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_net_guard::NetGuardError>
+pub async fn finstack_ai_net_guard::read_body_bounded_interruptible<C, D>(reqwest::async_impl::response::Response, usize, finstack_ai_net_guard::BodyReadInterrupt<C, D>) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_net_guard::NetGuardError> where C: core::future::future::Future<Output = ()>, D: core::future::future::Future<Output = ()>
 pub fn finstack_ai_net_guard::reject_literal_destination(&finstack_ai_net_guard::VettedUrl, &finstack_ai_net_guard::UrlPolicy) -> core::result::Result<(), finstack_ai_net_guard::NetGuardError>
 pub async fn finstack_ai_net_guard::resolve_and_pin(&finstack_ai_net_guard::VettedUrl, &dyn finstack_ai_net_guard::HostResolver) -> core::result::Result<core::net::socket_addr::SocketAddr, finstack_ai_net_guard::NetGuardError>

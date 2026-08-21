@@ -1,4 +1,4 @@
-//! Immutable conversation tree (TDD §24.1). Session-level, not `KernelState`.
+//! Immutable conversation tree (contract section 24.1). Session-level, not `KernelState`.
 
 use std::collections::{BTreeMap, BTreeSet};
 

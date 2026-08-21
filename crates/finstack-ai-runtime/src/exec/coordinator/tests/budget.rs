@@ -138,7 +138,7 @@ fn budget_charge_and_release_are_post_commit_and_idempotent() {
             decision_id: Arc::from("decision-v1"),
         },
     };
-    let child_request = ChildRunRequest {
+    let mut child_request = ChildRunRequest {
         agent: AgentRef {
             id: crate::AgentId::parse("finstack.agent.budget-child").expect("agent id"),
             bundle: None,
@@ -153,8 +153,9 @@ fn budget_charge_and_release_are_post_commit_and_idempotent() {
         requested_budget: budget,
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br#"{"request":"budget-child"}"#),
+        request_digest: Digest::raw_json(b"null"),
     };
+    child_request.request_digest = child_request.canonical_digest().expect("digest");
     block_on(child_coordinator.start_or_attach(
         &mut commit,
         child_context,

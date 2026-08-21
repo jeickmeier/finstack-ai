@@ -211,7 +211,7 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 
 [[package]]
 name = "finstack-ai"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -220,6 +220,7 @@ dependencies = [
  "serde_json_canonicalizer",
  "serde_path_to_error",
  "thiserror",
+ "url",
 ]
 
 [[package]]
@@ -236,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-kernel"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "serde",
@@ -248,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-protocol"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "half",
@@ -259,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-runtime"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "finstack-ai-kernel",
@@ -275,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-wit"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-kernel",
@@ -302,6 +303,15 @@ name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
+name = "form_urlencoded"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+dependencies = [
+ "percent-encoding",
+]
 
 [[package]]
 name = "fraction"
@@ -1061,6 +1071,18 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "url"
+version = "2.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+dependencies = [
+ "form_urlencoded",
+ "idna",
+ "percent-encoding",
+ "serde",
+]
 
 [[package]]
 name = "utf8_iter"

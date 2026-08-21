@@ -1,4 +1,4 @@
-//! Content blocks and blob references (TDD §7.1–§7.2).
+//! Content blocks and blob references (contract section 7.1).
 
 mod blob;
 mod content_block;

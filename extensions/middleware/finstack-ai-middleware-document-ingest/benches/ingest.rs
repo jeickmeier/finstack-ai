@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use finstack_ai_kernel::MessageRole;
-use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
+use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_runtime::{Middleware as _, StageOutcome};
 
 #[path = "../src/test_support.rs"]
@@ -47,13 +47,10 @@ fn invoke_replaces(middleware: &DocumentIngestMiddleware, input: finstack_ai_run
 
 fn middleware_benches(criterion: &mut Criterion) {
     let store = Arc::new(CaptureArtifactStore::default());
-    let index = Arc::new(AttachmentIndex::default());
     let csv_artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    index.insert(csv_artifact.clone());
     let big = large_csv();
     let big_artifact = stage(store.as_ref(), &big, "text/csv", "big.csv");
-    index.insert(big_artifact.clone());
-    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
 
     criterion.bench_function("middleware_invoke_csv_file_block", |bencher| {
         bencher.iter(|| invoke_replaces(&middleware, before_model_input_with_file(&csv_artifact)));

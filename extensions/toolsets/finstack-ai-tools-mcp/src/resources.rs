@@ -19,7 +19,7 @@ use crate::protocol::{
     ListResourceTemplatesResult, ListResourcesResult, ReadResourceResult, Resource,
     ResourceContents, ResourceTemplate, ResultType,
 };
-use crate::transport::McpTransport;
+use crate::transport::{McpTransport, RequestControl};
 use crate::{
     CONTEXT_PROVIDER_COMPONENT, MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED,
     MCP_SUBSCRIBE_UNKNOWN, McpConfig, McpError,
@@ -208,7 +208,7 @@ impl ContextProvider for McpContextProvider {
 
     fn collect(
         &self,
-        _ctx: ContextCallContext,
+        ctx: ContextCallContext,
         request: ContextRequest,
     ) -> PortFuture<Result<ContextContribution, ContextError>> {
         let transport = Arc::clone(&self.transport);
@@ -219,8 +219,17 @@ impl ContextProvider for McpContextProvider {
             .map(|names| names.clone())
             .unwrap_or_default();
         let max_bytes = self.inline_result_bytes;
+        let control = RequestControl::new(ctx.run.cancellation.clone(), ctx.run.deadline);
         Box::pin(async move {
-            collect_frozen(&transport, &snapshot, &subscribed, &request, max_bytes).await
+            collect_frozen(
+                &transport,
+                &snapshot,
+                &subscribed,
+                &request,
+                max_bytes,
+                control,
+            )
+            .await
         })
     }
 
@@ -400,6 +409,7 @@ async fn collect_frozen(
     subscribed: &BTreeSet<Arc<str>>,
     request: &ContextRequest,
     max_bytes: u64,
+    control: RequestControl,
 ) -> Result<ContextContribution, ContextError> {
     let selected: Vec<&FrozenResource> = if subscribed.is_empty() {
         snapshot.iter().collect()
@@ -430,12 +440,13 @@ async fn collect_frozen(
             return apply_overflow(items, request);
         }
         let value = transport
-            .request(
+            .request_controlled(
                 "resources/read",
                 serde_json::json!({
                     "uri": resource.uri(),
                     "name": resource.name(),
                 }),
+                control.clone(),
             )
             .await
             .map_err(|error| context_error_from_mcp(&error))?;

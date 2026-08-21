@@ -58,6 +58,9 @@ const VERIFY_VERSION: Version = Version {
     minor: 0,
     patch: 0,
 };
+const MAX_FINDINGS: usize = 64;
+const MAX_FINDING_NOTE_BYTES: usize = 4 * 1024;
+const MAX_FINDINGS_TOTAL_BYTES: usize = 64 * 1024;
 
 /// Evidence category a finding refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +89,7 @@ impl EvidenceKind {
 pub struct EvidenceFinding {
     /// Evidence category this finding refers to.
     pub kind: EvidenceKind,
-    /// Human-readable, non-secret note. Capped at the kernel text bound.
+    /// Human-readable, non-secret note. Capped at 4 KiB.
     pub note: Arc<str>,
 }
 
@@ -105,8 +108,50 @@ impl EvidenceFinding {
         }
         Ok(Self {
             kind,
-            note: Arc::from(truncate_to_bytes(note, TEXT_MAX_BYTES)),
+            note: Arc::from(truncate_to_bytes(note, MAX_FINDING_NOTE_BYTES)),
         })
+    }
+}
+
+/// Bounded collection of verifier findings.
+#[derive(Debug, Clone, Default)]
+pub struct EvidenceFindings {
+    findings: Arc<[EvidenceFinding]>,
+}
+
+impl EvidenceFindings {
+    /// Construct at most 64 findings with at most 64 KiB of note text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VerifyError`] when the count or aggregate note bytes exceed
+    /// the public bounds.
+    pub fn try_new(findings: Vec<EvidenceFinding>) -> Result<Self, VerifyError> {
+        let total_bytes = findings.iter().try_fold(0_usize, |total, finding| {
+            total.checked_add(finding.note.len())
+        });
+        if findings.len() > MAX_FINDINGS
+            || total_bytes.is_none_or(|total| total > MAX_FINDINGS_TOTAL_BYTES)
+        {
+            return Err(VerifyError::Configuration {
+                reason: "findings_exceed_bounds",
+            });
+        }
+        Ok(Self {
+            findings: findings.into(),
+        })
+    }
+
+    /// Borrow the findings in verifier order.
+    #[must_use]
+    pub fn as_slice(&self) -> &[EvidenceFinding] {
+        &self.findings
+    }
+
+    /// Whether no findings are present.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.findings.is_empty()
     }
 }
 
@@ -117,10 +162,10 @@ pub enum Verdict {
     Accept,
     /// Bounce it back to the model with feedback (maps to `Retry` at
     /// `before_finalize`, `AddContext` at `before_model`).
-    Bounce(Vec<EvidenceFinding>),
+    Bounce(EvidenceFindings),
     /// Fail the run (maps to `Fail` with code `verify_rejected`,
     /// non-retryable).
-    Reject(Vec<EvidenceFinding>),
+    Reject(EvidenceFindings),
 }
 
 /// Pure, deterministic content check.
@@ -328,7 +373,7 @@ fn assistant_message_raw_json(message: &Message) -> Result<RawJson, MiddlewareEr
 /// middleware), so the item states the verifier's current findings about
 /// the answer being retried rather than asserting that evidence
 /// verification caused the retry.
-fn feedback_item(findings: &[EvidenceFinding]) -> Result<ContextItem, MiddlewareError> {
+fn feedback_item(findings: &EvidenceFindings) -> Result<ContextItem, MiddlewareError> {
     let text = verdict_message(
         "Evidence verification found issues with the previous assistant answer",
         findings,
@@ -364,30 +409,43 @@ fn feedback_item(findings: &[EvidenceFinding]) -> Result<ContextItem, Middleware
 }
 
 /// Bounded failure message for a `Reject` verdict.
-fn reject_message(findings: &[EvidenceFinding]) -> String {
+fn reject_message(findings: &EvidenceFindings) -> String {
     verdict_message("evidence verification rejected the candidate", findings)
 }
 
 /// Shared verdict renderer: `intro` alone when there are no findings,
 /// otherwise `intro:` followed by one finding line each, bounded to the
 /// kernel text limit.
-fn verdict_message(intro: &str, findings: &[EvidenceFinding]) -> String {
-    let lines = findings_lines(findings);
-    let message = if lines.is_empty() {
-        intro.to_owned()
-    } else {
-        format!("{intro}:\n{lines}")
-    };
-    truncate_to_bytes(&message, TEXT_MAX_BYTES).to_owned()
+fn verdict_message(intro: &str, findings: &EvidenceFindings) -> String {
+    let mut message = String::with_capacity(
+        intro
+            .len()
+            .saturating_add(MAX_FINDINGS_TOTAL_BYTES)
+            .min(TEXT_MAX_BYTES),
+    );
+    append_bounded(&mut message, intro, TEXT_MAX_BYTES);
+    if findings.is_empty() {
+        return message;
+    }
+    append_bounded(&mut message, ":\n", TEXT_MAX_BYTES);
+    for (index, finding) in findings.as_slice().iter().enumerate() {
+        if index > 0 {
+            append_bounded(&mut message, "\n", TEXT_MAX_BYTES);
+        }
+        append_bounded(&mut message, "- [", TEXT_MAX_BYTES);
+        append_bounded(&mut message, finding.kind.tag(), TEXT_MAX_BYTES);
+        append_bounded(&mut message, "] ", TEXT_MAX_BYTES);
+        append_bounded(&mut message, &finding.note, TEXT_MAX_BYTES);
+        if message.len() == TEXT_MAX_BYTES {
+            break;
+        }
+    }
+    message
 }
 
-/// One `- [kind] note` line per finding, newline-joined.
-fn findings_lines(findings: &[EvidenceFinding]) -> String {
-    findings
-        .iter()
-        .map(|finding| format!("- [{}] {}", finding.kind.tag(), finding.note))
-        .collect::<Vec<_>>()
-        .join("\n")
+fn append_bounded(output: &mut String, value: &str, max_bytes: usize) {
+    let remaining = max_bytes.saturating_sub(output.len());
+    output.push_str(truncate_to_bytes(value, remaining));
 }
 
 /// Conservative token estimate for already-bounded feedback text.

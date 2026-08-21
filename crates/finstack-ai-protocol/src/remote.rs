@@ -19,7 +19,7 @@ const DOMAIN_REMOTE_COMMAND: &str = "remote-command";
 /// Schema version embedded in the remote-command digest domain.
 const REMOTE_COMMAND_DIGEST_SCHEMA_VERSION: u32 = 1;
 
-/// Bounded pre-authentication remote messages (TDD §28.2).
+/// Bounded pre-authentication remote messages (contract section 28.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemotePreAuth {

@@ -18,7 +18,7 @@ mod validate;
 #[cfg(test)]
 mod tests;
 
-/// V1 atomic append batch record-count ceiling (TDD §6.5).
+/// V1 atomic append batch record-count ceiling (contract section 6.5).
 pub const APPEND_BATCH_MAX_RECORDS: usize = 256;
 /// Current record envelope format version.
 pub const RECORD_FORMAT_VERSION: u16 = 1;

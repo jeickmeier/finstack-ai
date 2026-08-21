@@ -16,6 +16,10 @@ use futures_core::Stream;
 
 /// One fully expressive scripted tool-stream action.
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "boxing the primary test action would make every scripted fixture noisier"
+)]
 pub enum ScriptedToolAction {
     /// Emit one normalized stream item or adapter error.
     Emit(Result<ToolStreamItem, ToolError>),

@@ -11,6 +11,20 @@ impl core::fmt::Debug for finstack_ai_store_postgres::PostgresDurability
 pub fn finstack_ai_store_postgres::PostgresDurability::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_store_postgres::PostgresDurability
 impl core::marker::StructuralPartialEq for finstack_ai_store_postgres::PostgresDurability
+pub enum finstack_ai_store_postgres::PostgresTlsMode
+pub finstack_ai_store_postgres::PostgresTlsMode::Disable
+pub finstack_ai_store_postgres::PostgresTlsMode::Require
+impl core::clone::Clone for finstack_ai_store_postgres::PostgresTlsMode
+pub fn finstack_ai_store_postgres::PostgresTlsMode::clone(&self) -> finstack_ai_store_postgres::PostgresTlsMode
+impl core::cmp::Eq for finstack_ai_store_postgres::PostgresTlsMode
+impl core::cmp::PartialEq for finstack_ai_store_postgres::PostgresTlsMode
+pub fn finstack_ai_store_postgres::PostgresTlsMode::eq(&self, &finstack_ai_store_postgres::PostgresTlsMode) -> bool
+impl core::default::Default for finstack_ai_store_postgres::PostgresTlsMode
+pub fn finstack_ai_store_postgres::PostgresTlsMode::default() -> finstack_ai_store_postgres::PostgresTlsMode
+impl core::fmt::Debug for finstack_ai_store_postgres::PostgresTlsMode
+pub fn finstack_ai_store_postgres::PostgresTlsMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_postgres::PostgresTlsMode
+impl core::marker::StructuralPartialEq for finstack_ai_store_postgres::PostgresTlsMode
 pub enum finstack_ai_store_postgres::SchemaPolicy
 pub finstack_ai_store_postgres::SchemaPolicy::Manage
 pub finstack_ai_store_postgres::SchemaPolicy::Require
@@ -37,12 +51,16 @@ pub fn finstack_ai_store_postgres::PostgresJournalStore::write_metadata(&self, f
 pub fn finstack_ai_store_postgres::PostgresJournalStore::write_snapshot(&self, finstack_ai_runtime::ports::journal::SnapshotRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::SnapshotReceipt, finstack_ai_runtime::ports::journal::StoreError>>
 pub fn finstack_ai_store_postgres::PostgresJournalStore::write_state_snapshot(&self, finstack_ai_runtime::ports::journal::StateSnapshotRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::SnapshotReceipt, finstack_ai_runtime::ports::journal::StoreError>>
 pub struct finstack_ai_store_postgres::PostgresStoreConfig
+pub finstack_ai_store_postgres::PostgresStoreConfig::checkout_timeout: core::time::Duration
 pub finstack_ai_store_postgres::PostgresStoreConfig::connect_timeout: core::time::Duration
 pub finstack_ai_store_postgres::PostgresStoreConfig::durability: finstack_ai_store_postgres::PostgresDurability
 pub finstack_ai_store_postgres::PostgresStoreConfig::limits: finstack_ai_runtime::ports::journal::StoreLimits
+pub finstack_ai_store_postgres::PostgresStoreConfig::operation_timeout: core::time::Duration
 pub finstack_ai_store_postgres::PostgresStoreConfig::pool_size: usize
 pub finstack_ai_store_postgres::PostgresStoreConfig::schema: alloc::sync::Arc<str>
 pub finstack_ai_store_postgres::PostgresStoreConfig::schema_policy: finstack_ai_store_postgres::SchemaPolicy
+pub finstack_ai_store_postgres::PostgresStoreConfig::tls_ca_pem: core::option::Option<alloc::sync::Arc<[u8]>>
+pub finstack_ai_store_postgres::PostgresStoreConfig::tls_mode: finstack_ai_store_postgres::PostgresTlsMode
 pub finstack_ai_store_postgres::PostgresStoreConfig::url: alloc::sync::Arc<str>
 impl finstack_ai_store_postgres::PostgresStoreConfig
 pub fn finstack_ai_store_postgres::PostgresStoreConfig::new(impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_runtime::ports::journal::StoreLimits) -> Self
@@ -51,6 +69,8 @@ impl core::clone::Clone for finstack_ai_store_postgres::PostgresStoreConfig
 pub fn finstack_ai_store_postgres::PostgresStoreConfig::clone(&self) -> finstack_ai_store_postgres::PostgresStoreConfig
 impl core::fmt::Debug for finstack_ai_store_postgres::PostgresStoreConfig
 pub fn finstack_ai_store_postgres::PostgresStoreConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const finstack_ai_store_postgres::DEFAULT_CHECKOUT_TIMEOUT: core::time::Duration
 pub const finstack_ai_store_postgres::DEFAULT_CONNECT_TIMEOUT: core::time::Duration
+pub const finstack_ai_store_postgres::DEFAULT_OPERATION_TIMEOUT: core::time::Duration
 pub const finstack_ai_store_postgres::DEFAULT_POOL_SIZE: usize
 pub const finstack_ai_store_postgres::DEFAULT_SCHEMA: &str

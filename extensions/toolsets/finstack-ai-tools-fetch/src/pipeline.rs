@@ -10,8 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, Timestamp};
 use finstack_ai_net_guard::{
-    HostResolver, NetGuardError, SystemResolver, UrlPolicy, VettedUrl, parse_and_vet_url,
-    pinned_client, read_body_bounded, resolve_and_pin,
+    BodyReadInterrupt, HostResolver, NetGuardError, SystemResolver, UrlPolicy, VettedUrl,
+    parse_and_vet_url, pinned_client, read_body_bounded_interruptible, resolve_and_pin,
 };
 use finstack_ai_runtime::{ArtifactStore, ToolCallContext, ToolError};
 use futures_util::StreamExt;
@@ -19,6 +19,11 @@ use reqwest::header::{HeaderName, HeaderValue};
 
 use crate::config::HostPattern;
 use crate::deliver::{DeliveredContent, deliver};
+
+pub(crate) struct FetchOutput {
+    pub(crate) value: serde_json::Value,
+    pub(crate) artifact: Option<finstack_ai_kernel::ArtifactRef>,
+}
 use crate::toolset::FetchArguments;
 use crate::{
     FETCH_DESTINATION_BLOCKED, FETCH_HOST_NOT_ALLOWLISTED, FETCH_INVALID_ARGUMENTS,
@@ -144,6 +149,7 @@ fn map_vet_error(error: &NetGuardError) -> ToolError {
             ErrorCategory::Limit,
             "http fetch response exceeds the configured byte limit",
         ),
+        NetGuardError::Cancelled | NetGuardError::DeadlineExceeded => timeout_error(),
     }
 }
 
@@ -173,10 +179,18 @@ pub(crate) fn host_allowed(
 }
 
 /// Reduce a non-2xx response body to one bounded, whitespace-collapsed line.
-async fn rejection_detail(response: reqwest::Response) -> Option<String> {
+async fn rejection_detail(response: reqwest::Response, ctx: &ToolCallContext) -> Option<String> {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
-    while let Some(Ok(chunk)) = stream.next().await {
+    loop {
+        let next = tokio::select! {
+            () = ctx.run.cancellation.cancelled() => break,
+            () = wait_deadline(ctx.run.deadline) => break,
+            chunk = stream.next() => chunk,
+        };
+        let Some(Ok(chunk)) = next else {
+            break;
+        };
         let remaining = ERROR_BODY_CAP.saturating_sub(body.len());
         if remaining == 0 {
             break;
@@ -214,8 +228,12 @@ fn truncate_chars(text: &str, max: usize) -> String {
 /// is ours.
 const REMOTE_DETAIL_PREFIX: &str = "remote endpoint said: ";
 
-async fn endpoint_rejected(status: reqwest::StatusCode, response: reqwest::Response) -> ToolError {
-    let message = match rejection_detail(response).await {
+async fn endpoint_rejected(
+    status: reqwest::StatusCode,
+    response: reqwest::Response,
+    ctx: &ToolCallContext,
+) -> ToolError {
+    let message = match rejection_detail(response, ctx).await {
         Some(detail) => format!(
             "http fetch endpoint rejected the request with HTTP {status}: {REMOTE_DETAIL_PREFIX}{detail}"
         ),
@@ -260,9 +278,12 @@ async fn send_hop(
         ));
     }
 
-    let addr = resolve_and_pin(current, state.resolver.as_ref())
-        .await
-        .map_err(|e| map_vet_error(&e))?;
+    let resolve = resolve_and_pin(current, state.resolver.as_ref());
+    let addr = tokio::select! {
+        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
+        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        result = resolve => result.map_err(|e| map_vet_error(&e))?,
+    };
     let client = pinned_client(current, addr, state.config.request_timeout)
         .map_err(|e| map_vet_error(&e))?;
 
@@ -352,7 +373,7 @@ pub(crate) async fn execute_fetch(
     ctx: &ToolCallContext,
     args: FetchArguments,
     artifact_store: Option<&Arc<dyn ArtifactStore>>,
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<FetchOutput, ToolError> {
     let policy = UrlPolicy {
         allow_loopback_http: state.config.allow_loopback_http,
         // Model-supplied URLs stay 443-only: a non-standard https port on
@@ -406,7 +427,7 @@ pub(crate) async fn execute_fetch(
     };
 
     if !status.is_success() {
-        return Err(endpoint_rejected(status, response).await);
+        return Err(endpoint_rejected(status, response, ctx).await);
     }
 
     let media_type = media_type_of(&response);
@@ -415,9 +436,17 @@ pub(crate) async fn execute_fetch(
         .config
         .max_response_bytes
         .min(args.max_bytes.unwrap_or(usize::MAX));
-    let body = read_body_bounded(response, effective_cap)
-        .await
-        .map_err(|e| map_vet_error(&e))?;
+    let cancellation = ctx.run.cancellation.clone();
+    let body = read_body_bounded_interruptible(
+        response,
+        effective_cap,
+        BodyReadInterrupt::new(
+            async move { cancellation.cancelled().await },
+            wait_deadline(ctx.run.deadline),
+        ),
+    )
+    .await
+    .map_err(|e| map_vet_error(&e))?;
     let byte_length = body.len();
 
     // The inline-result budget is the same effective cap already enforced
@@ -440,13 +469,24 @@ pub(crate) async fn execute_fetch(
         "media_type": media_type,
         "byte_length": byte_length,
     });
-    match delivered {
+    let artifact = match delivered {
         DeliveredContent::Inline(text) => {
             output["content"] = serde_json::Value::String(text);
+            None
         }
         DeliveredContent::Artifact(artifact) => {
-            output["artifact"] = artifact;
+            output["artifact"] = serde_json::to_value(&artifact).map_err(|_| {
+                tool_error(
+                    FETCH_TRANSPORT_FAILED,
+                    ErrorCategory::Internal,
+                    "fetch artifact serialization failed",
+                )
+            })?;
+            Some(artifact)
         }
-    }
-    Ok(output)
+    };
+    Ok(FetchOutput {
+        value: output,
+        artifact,
+    })
 }

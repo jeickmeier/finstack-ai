@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ExternalHandleRef, Metadata, RawJson, ReconciliationPolicy, Timestamp, ToolBatchId, ToolCallId,
-    ToolProgress, ValidatedToolCall,
+    ArtifactRef, ExternalHandleRef, Metadata, RawJson, ReconciliationPolicy, Timestamp,
+    ToolBatchId, ToolCallId, ToolProgress, ValidatedToolCall,
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +62,8 @@ pub enum ToolStreamItem {
     Progress(ToolProgress),
     /// Cumulative usage snapshot.
     Usage(UsageDelta),
+    /// Artifact staged before terminal settlement and owned by this completion.
+    Artifact(ArtifactRef),
     /// Exactly one terminal result.
     Completed(ToolResult),
     /// Externally deferred terminal result.

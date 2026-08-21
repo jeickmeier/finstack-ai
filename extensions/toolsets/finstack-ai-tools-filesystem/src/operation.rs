@@ -77,13 +77,18 @@ impl OperationOutput {
 
 #[cfg(unix)]
 impl FileOperation {
+    pub(crate) const fn is_search(&self) -> bool {
+        matches!(self, Self::Search { .. })
+    }
+
     pub(crate) fn execute(
         self,
         root: &crate::unix::Root,
         ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
+        deadline: Option<std::time::Instant>,
     ) -> Result<OperationOutput, ToolError> {
-        root.execute(self, ceilings, protected, cancellation)
+        root.execute(self, ceilings, protected, cancellation, deadline)
     }
 }

@@ -353,6 +353,7 @@ mod middleware_tests {
         )
         .expect("call");
         let input = StageInput::BeforeToolBatch(Box::new(BeforeToolBatchInput {
+            prior_write_tool_calls: 0,
             calls: Arc::from([call]),
             tools: Arc::from([read_tool(), write_tool()]),
         }));
@@ -400,7 +401,8 @@ mod eval_tests {
     use crate::{JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, ToolPolicyConfig};
 
     use super::{
-        assistant_text_message, draft, read_tool, tool_call_message, user_text_message, write_tool,
+        assistant_text_message, draft, id, read_tool, tool_call_message, user_text_message,
+        write_tool,
     };
 
     fn tid(s: &str) -> ToolId {
@@ -438,6 +440,7 @@ mod eval_tests {
     /// Batch-stage input fixture: no calls, an explicit tool universe.
     fn batch_input(tools: &[&str]) -> BeforeToolBatchInput {
         BeforeToolBatchInput {
+            prior_write_tool_calls: 0,
             calls: Arc::from([] as [ToolCallBlock; 0]),
             tools: tools.iter().map(|id| spec(id)).collect(),
         }
@@ -527,6 +530,27 @@ mod eval_tests {
         assert_eq!(
             evaluate_before_model(&cfg, &input, &[], 0),
             PolicyVerdict::Identity
+        );
+    }
+
+    #[test]
+    fn batch_write_budget_uses_committed_prior_count_and_current_batch() {
+        let cfg = ToolPolicyConfig::new()
+            .with_write_budget(1)
+            .expect("budget");
+        let call =
+            ToolCallBlock::try_new(id(44), "write", RawJson::parse(b"{}").expect("arguments"))
+                .expect("call");
+        let input = BeforeToolBatchInput {
+            prior_write_tool_calls: 1,
+            calls: Arc::from([call]),
+            tools: Arc::from([read_tool(), write_tool()]),
+        };
+        assert_eq!(
+            evaluate_before_tool_batch(&cfg, &input, &[], 0),
+            PolicyVerdict::Fail {
+                reason: crate::TOOL_POLICY_WRITE_BUDGET_EXCEEDED,
+            }
         );
     }
 

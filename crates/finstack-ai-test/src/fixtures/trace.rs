@@ -57,7 +57,7 @@ impl std::fmt::Display for TraceError {
 
 impl std::error::Error for TraceError {}
 
-/// Declared payload ceilings checked by fixture schemas (TDD §6.5).
+/// Declared payload ceilings checked by fixture schemas (contract section 6.5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PayloadDeclaration {
     /// Canonical record envelope bytes.

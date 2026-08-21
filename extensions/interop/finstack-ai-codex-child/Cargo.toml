@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
 
 [dev-dependencies]
+finstack-ai-store-memory = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

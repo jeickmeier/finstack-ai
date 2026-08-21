@@ -1,21 +1,24 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, ComponentId, Digest,
-    EffectDeferred, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind,
-    EffectRequested, ErrorCategory, ErrorDescriptor, ExternalHandleRef, Id, IdTag, KernelState,
-    Metadata, OperationLocator, PrincipalRef, RawJson, ReconciliationPolicy, RetrySafety,
-    SyntheticToolClosure, Timestamp, ToolBatchContinuation, ToolBatchOpened, ToolCallBlock,
-    ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolSettlementFingerprint,
-    ToolSettlementKind, ValidatedToolCall,
+    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, ArtifactRef, AssignedToolCall,
+    ComponentId, Digest, EffectDeferred, EffectInput, EffectKind, EffectOutputContract,
+    EffectOutputKind, EffectRequested, ErrorCategory, ErrorDescriptor, ExternalHandleRef, Id,
+    IdTag, KernelState, Metadata, OperationLocator, PrincipalRef, RawJson, ReconciliationPolicy,
+    RetrySafety, RunId, Sensitivity, SessionId, SyntheticToolClosure, Timestamp,
+    ToolBatchContinuation, ToolBatchOpened, ToolCallBlock, ToolCallPlan, ToolExecutionMode,
+    ToolFailurePolicy, ToolId, ToolSettlementFingerprint, ToolSettlementKind, ValidatedToolCall,
 };
 use futures_util::stream;
 
 use crate::{
-    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal,
-    RunCallContext, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolSpec,
+    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStoreLimits,
+    AuthorizationContext, CancellationSignal, RunCallContext, SideEffectClass, ToolCallContext,
+    ToolDeferralSupport, ToolSpec, build_artifact_ref,
 };
 
+use super::error::TOOL_STREAM_LIMIT_EXCEEDED;
+use super::stream::MAX_TOOL_RESULT_ARTIFACTS;
 use super::*;
 
 fn id<T: IdTag>(ordinal: u64) -> Id<T> {
@@ -42,6 +45,26 @@ fn tool_deferral(next_poll_at: Option<Timestamp>, expires_at: Option<Timestamp>)
 
 fn tool_stream(items: Vec<Result<ToolStreamItem, ToolError>>) -> ToolEventStream {
     Box::pin(stream::iter(items))
+}
+
+fn artifact(ordinal: u8) -> ArtifactRef {
+    build_artifact_ref(
+        &ArtifactScope {
+            tenant_scope: Arc::from("tenant-a"),
+            session_id: SessionId::from_bytes([1; 16]),
+            run_id: Some(RunId::from_bytes([2; 16])),
+            sensitivity: Sensitivity::Internal,
+        },
+        &[ordinal],
+        &ArtifactMetadata {
+            kind: Arc::from("tool-output"),
+            media_type: Arc::from("application/octet-stream"),
+            name: None,
+            attributes: Metadata::empty(),
+        },
+        &ArtifactStoreLimits::default(),
+    )
+    .expect("artifact")
 }
 
 fn tool_call() -> ToolCallBlock {
@@ -252,6 +275,48 @@ async fn tool_stream_accepts_declared_deferral() {
         .expect("declared deferral");
 
     assert_eq!(assembled.terminal, ToolTerminal::Deferred(deferral));
+}
+
+#[tokio::test]
+async fn tool_stream_preserves_unique_artifact_references() {
+    let first = artifact(1);
+    let second = artifact(2);
+    let assembled = ToolStreamAssembler::default()
+        .assemble(
+            tool_stream(vec![
+                Ok(ToolStreamItem::Artifact(first.clone())),
+                Ok(ToolStreamItem::Artifact(first.clone())),
+                Ok(ToolStreamItem::Artifact(second.clone())),
+                Ok(ToolStreamItem::Completed(ToolResult {
+                    output: RawJson::parse(br#"{"ok":true}"#).expect("output"),
+                    is_error: false,
+                })),
+            ]),
+            None,
+            1_024,
+            ToolDeferralSupport::Never,
+        )
+        .await
+        .expect("assembled stream");
+
+    assert_eq!(assembled.artifacts.as_ref(), &[first, second]);
+}
+
+#[tokio::test]
+async fn tool_stream_rejects_too_many_unique_artifacts() {
+    let mut items = (0..=u8::try_from(MAX_TOOL_RESULT_ARTIFACTS).expect("bounded"))
+        .map(|ordinal| Ok(ToolStreamItem::Artifact(artifact(ordinal))))
+        .collect::<Vec<_>>();
+    items.push(Ok(ToolStreamItem::Completed(ToolResult {
+        output: RawJson::parse(br#"{"ok":true}"#).expect("output"),
+        is_error: false,
+    })));
+    let error = ToolStreamAssembler::default()
+        .assemble(tool_stream(items), None, 1_024, ToolDeferralSupport::Never)
+        .await
+        .expect_err("artifact limit");
+
+    assert_eq!(error.code(), TOOL_STREAM_LIMIT_EXCEEDED);
 }
 
 #[test]

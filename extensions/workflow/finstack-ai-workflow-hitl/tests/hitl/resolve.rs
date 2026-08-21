@@ -21,7 +21,7 @@ use finstack_ai_workflow_worker::{
     WorkflowWorker,
 };
 
-use crate::capture::{approval_request, checkpoint, id, memory_store, timestamp};
+use crate::capture::{accepted, approval_request, checkpoint, id, memory_store, timestamp};
 
 struct Harness {
     inbox: Arc<MemoryHitlStore>,
@@ -51,7 +51,16 @@ fn harness() -> Harness {
         interaction_id,
         request: approval_request(interaction_id, id(51), None),
     };
-    assert!(capture(inbox.as_ref(), &checkpoint(), &wait, timestamp(2_000)).expect("capture"));
+    assert!(
+        capture(
+            inbox.as_ref(),
+            &checkpoint(),
+            &wait,
+            accepted().security(),
+            timestamp(2_000),
+        )
+        .expect("capture")
+    );
 
     let worker_store = Arc::new(MemoryWorkerStore::new());
     let worker = Arc::new(
@@ -62,7 +71,8 @@ fn harness() -> Harness {
             Arc::clone(&worker_store) as Arc<dyn FireStore>,
             Arc::clone(&worker_store) as Arc<dyn InboxStore>,
         )
-        .build(),
+        .build()
+        .expect("worker"),
     );
     let router = HitlRouter::new(
         Arc::clone(&inbox) as Arc<dyn HitlInboxStore>,
@@ -103,7 +113,7 @@ fn resolve_delivers_to_the_worker_and_marks_the_row_delivered() {
         )
         .expect("resolve");
 
-    let delivered = harness.worker_store.load_all().expect("worker inbox");
+    let delivered = harness.worker_store.load_batch(10).expect("worker inbox");
     assert_eq!(delivered.len(), 1);
     assert_eq!(delivered[0].kind, InboxKind::Interaction);
     assert_eq!(delivered[0].pending_id, harness.interaction_id);
@@ -115,7 +125,7 @@ fn resolve_delivers_to_the_worker_and_marks_the_row_delivered() {
         .load("tenant-a", &harness.interaction_id)
         .expect("load")
         .expect("row");
-    assert_eq!(row.status, InteractionStatus::Delivered);
+    assert_eq!(row.status, InteractionStatus::Buffered);
     assert_eq!(row.resolved_by.as_deref(), Some("subject"));
     assert_eq!(row.updated_at, timestamp(3_000));
 
@@ -150,11 +160,11 @@ fn resolve_refuses_a_principal_from_another_tenant() {
         .expect_err("tenant mismatch");
 
     assert!(matches!(error, HitlError::Unauthorized { .. }));
-    assert_eq!(error.code(), "tenant_mismatch");
+    assert_eq!(error.code(), "accepted_context_mismatch");
     assert!(
         harness
             .worker_store
-            .load_all()
+            .load_batch(10)
             .expect("worker inbox")
             .is_empty(),
         "a refused resolution delivers nothing"
@@ -169,6 +179,36 @@ fn resolve_refuses_a_principal_from_another_tenant() {
     assert_eq!(
         harness.router.pending("tenant-a").expect("pending").len(),
         1
+    );
+}
+
+#[test]
+fn resolve_refuses_evidence_that_differs_from_the_accepted_run() {
+    let harness = harness();
+    let error = harness
+        .router
+        .resolve(
+            "tenant-a",
+            &harness.interaction_id,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-1"),
+                principal: principal("tenant-a"),
+                evidence: AuthorizationEvidence::try_new("policy-v1", "different-decision")
+                    .expect("evidence"),
+                payload: payload(),
+                note: None,
+            },
+            timestamp(3_000),
+        )
+        .expect_err("accepted evidence mismatch");
+
+    assert_eq!(error.code(), "accepted_context_mismatch");
+    assert!(
+        harness
+            .worker_store
+            .load_batch(10)
+            .expect("worker inbox")
+            .is_empty()
     );
 }
 
@@ -208,7 +248,7 @@ fn a_custom_authorizer_replaces_the_tenant_default() {
     assert!(
         harness
             .worker_store
-            .load_all()
+            .load_batch(10)
             .expect("worker inbox")
             .is_empty()
     );
@@ -238,7 +278,7 @@ fn resolve_rejects_an_unknown_interaction() {
     assert!(
         harness
             .worker_store
-            .load_all()
+            .load_batch(10)
             .expect("worker inbox")
             .is_empty()
     );
@@ -281,7 +321,11 @@ fn resolve_is_not_repeatable_once_delivered() {
 
     assert_eq!(error.code(), "not_open");
     assert_eq!(
-        harness.worker_store.load_all().expect("worker inbox").len(),
+        harness
+            .worker_store
+            .load_batch(10)
+            .expect("worker inbox")
+            .len(),
         1,
         "the second attempt delivered nothing"
     );

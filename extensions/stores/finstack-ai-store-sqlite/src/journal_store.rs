@@ -30,10 +30,13 @@ impl JournalStore for SqliteJournalStore {
     }
 
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
-        let ready = true;
         let durable = self.durable;
         let detail = Arc::from(self.detail);
-        Box::pin(async move {
+        self.worker.submit(move |ctx| {
+            let ready = ctx
+                .connection
+                .query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
+                .is_ok();
             Ok(StoreHealth {
                 ready,
                 durable,

@@ -17,7 +17,9 @@ use reqwest::redirect::Policy;
 use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
-use crate::error::{CANCELLED, HTTP_ERROR, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error};
+use crate::error::{
+    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR, error,
+};
 use crate::request::{ResponsesRequest, serialize_request};
 use crate::sse::SseParser;
 use crate::stream::CompletionAssembly;
@@ -127,8 +129,7 @@ impl OpenAiProvider {
         let configured = models
             .get_mut(model)
             .ok_or_else(|| crate::error::request_error("requested model is not configured"))?;
-        configured.apply_capabilities(&update);
-        Ok(())
+        configured.apply_capabilities(&update)
     }
 
     fn model_config(&self, name: &ModelName) -> Result<OpenAiModelConfig, ModelError> {
@@ -146,6 +147,7 @@ fn catalog_from_models(
 ) -> Result<BTreeMap<ModelName, OpenAiModelConfig>, ModelError> {
     let mut by_name = BTreeMap::new();
     for model in models {
+        model.validate()?;
         if by_name.insert(model.name.clone(), model).is_some() {
             return Err(crate::error::config_error(
                 "provider contains a duplicate model name",
@@ -241,11 +243,16 @@ impl Model for OpenAiProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let resolver = self.config.media_resolver();
         Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            let cancellation = request.call.run.cancellation.clone();
             let model = model?;
-            let resolved_media =
-                resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes)
-                    .await
-                    .map_err(map_draft_media)?;
+            let resolved_media = tokio::select! {
+                () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
+                media_result = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes) => {
+                    media_result.map_err(map_draft_media)?
+                }
+            };
             let wire = ResponsesRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -253,8 +260,10 @@ impl Model for OpenAiProvider {
                 &resolved_media,
             )?;
             let payload = serialize_request(&wire)?;
+            if payload.len() > max_stream_bytes {
+                return Err(request_limit_error());
+            }
             let request_id = request.call.request_id.to_string();
-            let cancellation = request.call.run.cancellation;
             let send = client
                 .post(endpoint)
                 .header("x-client-request-id", &request_id)
@@ -264,6 +273,7 @@ impl Model for OpenAiProvider {
                 .send();
             let response = tokio::select! {
                 () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
@@ -285,6 +295,7 @@ impl Model for OpenAiProvider {
                 structured,
                 max_event_bytes,
                 max_stream_bytes,
+                deadline,
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
@@ -318,6 +329,10 @@ impl Drop for ReceiverModelStream {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "stream driver keeps request identity, limits, cancellation, and deadline together"
+)]
 async fn drive_response(
     response: reqwest::Response,
     sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
@@ -326,6 +341,7 @@ async fn drive_response(
     structured: bool,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    deadline: tokio::time::Instant,
 ) {
     let mut body = response.bytes_stream();
     let mut parser = SseParser::new(max_event_bytes, max_stream_bytes);
@@ -334,6 +350,10 @@ async fn drive_response(
         let chunk = tokio::select! {
             () = cancellation.cancelled() => {
                 let _ = sender.send(Err(cancelled_error())).await;
+                return;
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                let _ = sender.send(Err(timeout_error())).await;
                 return;
             }
             () = sender.closed() => return,
@@ -419,14 +439,27 @@ fn cancelled_error() -> ModelError {
     )
 }
 
+fn timeout_error() -> ModelError {
+    error(
+        TIMEOUT,
+        ErrorCategory::Deadline,
+        true,
+        "OpenAI request timed out",
+    )
+}
+
+fn request_limit_error() -> ModelError {
+    error(
+        STREAM_LIMIT_EXCEEDED,
+        ErrorCategory::Limit,
+        false,
+        "OpenAI request exceeded the configured byte limit",
+    )
+}
+
 fn transport_error(source: &reqwest::Error) -> ModelError {
     if source.is_timeout() {
-        error(
-            TIMEOUT,
-            ErrorCategory::Deadline,
-            true,
-            "OpenAI request timed out",
-        )
+        timeout_error()
     } else {
         error(
             TRANSPORT_ERROR,
@@ -486,6 +519,37 @@ mod tests {
         assert!(provider.capabilities(&name).input.images);
     }
 
+    #[test]
+    fn invalid_public_profiles_are_rejected_atomically() {
+        let config = OpenAiConfig::try_new("http://127.0.0.1:9").expect("config");
+        let mut invalid =
+            OpenAiModelConfig::try_new("gpt-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        invalid.max_output_tokens = 0;
+        assert_eq!(
+            OpenAiProvider::try_new(config.clone(), vec![invalid])
+                .expect_err("invalid public fields")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+
+        let model = OpenAiModelConfig::try_new("gpt-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model");
+        let provider = OpenAiProvider::try_new(config, vec![model]).expect("provider");
+        let name = ModelName::try_new("gpt-test").expect("name");
+        let before = provider.capabilities(&name);
+        let mut update = before.clone();
+        update.context_profile.max_output_tokens = 0;
+        assert_eq!(
+            provider
+                .refresh_model_metadata(&name, update)
+                .expect_err("invalid refresh")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+        assert_eq!(provider.capabilities(&name), before);
+    }
+
     #[derive(Debug)]
     struct OversizedResolver;
 
@@ -497,6 +561,15 @@ mod tests {
                     bytes: Arc::from(vec![0_u8; 9 * 1_048_576]),
                 })
             })
+        }
+    }
+
+    #[derive(Debug)]
+    struct PendingResolver;
+
+    impl MediaResolver for PendingResolver {
+        fn resolve(&self, _blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+            Box::pin(std::future::pending())
         }
     }
 
@@ -581,6 +654,57 @@ mod tests {
 
         let Err(error) = provider.request(request).await else {
             panic!("oversized media must fail closed");
+        };
+        assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
+    }
+
+    #[tokio::test]
+    async fn media_resolution_honors_cancellation_and_request_deadline() {
+        let model = OpenAiModelConfig::try_new("gpt-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model")
+            .with_input_images(true);
+        let blob = BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>).expect("blob");
+
+        let cancelled_config = OpenAiConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_media_resolver(Arc::new(PendingResolver));
+        let cancelled_provider =
+            OpenAiProvider::try_new(cancelled_config, vec![model.clone()]).expect("provider");
+        let cancelled_request = fixture_request(ContentBlock::Image(MediaRef::new(blob.clone())));
+        cancelled_request.call.run.cancellation.cancel();
+        let Err(error) = cancelled_provider.request(cancelled_request).await else {
+            panic!("cancelled resolution must fail");
+        };
+        assert_eq!(error.code(), crate::error::CANCELLED);
+
+        let timeout_config = OpenAiConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_request_timeout(std::time::Duration::from_millis(1))
+            .expect("timeout")
+            .with_media_resolver(Arc::new(PendingResolver));
+        let timeout_provider =
+            OpenAiProvider::try_new(timeout_config, vec![model]).expect("provider");
+        let timeout_request = fixture_request(ContentBlock::Image(MediaRef::new(blob)));
+        let Err(error) = timeout_provider.request(timeout_request).await else {
+            panic!("timed out resolution must fail");
+        };
+        assert_eq!(error.code(), crate::error::TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn serialized_request_is_bounded_before_send() {
+        let config = OpenAiConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_stream_limits(64, 128)
+            .expect("stream limits");
+        let model = OpenAiModelConfig::try_new("gpt-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model");
+        let provider = OpenAiProvider::try_new(config, vec![model]).expect("provider");
+        let request = fixture_request(ContentBlock::Text(
+            finstack_ai_kernel::TextBlock::try_new("hello").expect("text"),
+        ));
+        let Err(error) = provider.request(request).await else {
+            panic!("oversized serialized request must fail");
         };
         assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
     }

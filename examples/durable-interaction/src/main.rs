@@ -60,7 +60,7 @@ use finstack_ai_test::{
     ScriptedToolset,
 };
 use finstack_ai_workflow_hitl::{
-    HitlInboxStore, HitlRouter, ResolutionInput, SqliteHitlStore, park,
+    HitlInboxStore, HitlLifecycle, HitlRouter, ResolutionInput, SqliteHitlStore, park,
 };
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
@@ -684,7 +684,7 @@ async fn main() -> Result<(), BoxError> {
     let adapters_path = dir.path().join("adapters.sqlite");
     let store = open_store(&path)?;
     let mut session: WorkflowSession =
-        WorkflowSession::trusted(Arc::clone(&store) as _, locator()?, clock.clone(), 701)
+        WorkflowSession::trusted_seeded(Arc::clone(&store) as _, locator()?, clock.clone(), 701)
             .await?
             .with_ports(
                 Arc::clone(&model),
@@ -731,6 +731,9 @@ async fn main() -> Result<(), BoxError> {
             Arc::clone(&adapters) as Arc<dyn InboxStore>,
         )
         .clock(clock.clone())
+        .interaction_lifecycle(Arc::new(HitlLifecycle::new(
+            Arc::clone(&inbox) as Arc<dyn HitlInboxStore>
+        )))
         .drive_timeout(StdDuration::from_millis(500))
         .register_ports(
             WORKFLOW_KIND,
@@ -740,7 +743,7 @@ async fn main() -> Result<(), BoxError> {
                 catalog: Arc::clone(&restart_catalog),
             }),
         )
-        .build(),
+        .build()?,
     );
     let router = HitlRouter::new(
         Arc::clone(&inbox) as Arc<dyn HitlInboxStore>,
@@ -774,13 +777,13 @@ async fn main() -> Result<(), BoxError> {
     // the run lands on `AfterToolBatch`, which the worker cannot advance past
     // on its own (see `drive_past_missing_facade_decisions`).
     Box::pin(worker.tick()).await?;
-    drive_past_missing_facade_decisions(
+    Box::pin(drive_past_missing_facade_decisions(
         &journal,
         Arc::clone(&restart_tools),
         Arc::clone(&model),
         Arc::clone(&restart_catalog),
         clock.clone(),
-    )
+    ))
     .await?;
 
     // Second tick: past the resume backoff, the same worker observes the run
@@ -789,7 +792,8 @@ async fn main() -> Result<(), BoxError> {
     Box::pin(worker.tick()).await?;
 
     let terminal_session =
-        WorkflowSession::trusted(Arc::clone(&journal) as _, locator()?, clock.clone(), 720).await?;
+        WorkflowSession::trusted_seeded(Arc::clone(&journal) as _, locator()?, clock.clone(), 720)
+            .await?;
     if !matches!(
         classify_wait(terminal_session.last_state()),
         Some(WorkflowWait::Terminal { .. })

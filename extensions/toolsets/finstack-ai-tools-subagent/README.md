@@ -1,6 +1,6 @@
 # finstack-ai-tools-subagent
 
-Model-facing subagent battery over the host `AgentInvoker`. It exposes
+Model-facing subagent battery over a host-bound `ChildRunStarter`. It exposes
 `subagent_start`, `subagent_status`, and `subagent_cancel` and holds no
 invocation authority of its own.
 
@@ -11,11 +11,11 @@ native adapter. It is not isolated. Remote child cancel is not asserted here.
 ```rust
 use std::sync::Arc;
 
-use finstack_ai_runtime::{AgentId, AgentRef, AgentInvoker, Digest};
+use finstack_ai_runtime::{AgentRef, ChildRunStarter};
 use finstack_ai_tools_subagent::SubagentToolset;
 
-# fn demo(invoker: Arc<dyn AgentInvoker>, allow: AgentRef) {
-let tools = SubagentToolset::try_new(invoker, Arc::from([allow])).expect("toolset");
+# fn demo(starter: Arc<ChildRunStarter>, allow: AgentRef) {
+let tools = SubagentToolset::try_new(starter, Arc::from([allow])).expect("toolset");
 # let _ = tools;
 # }
 ```

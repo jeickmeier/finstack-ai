@@ -1,4 +1,4 @@
-//! Immutable conversation tree and message values (TDD §7.3–§7.4, §24.1).
+//! Immutable conversation tree and message values (contract section 7.3, §24.1).
 //!
 //! [`Message`] is the provider-neutral content value. [`ConversationEntry`] and
 //! [`SessionProjection`] model the session-level conversation tree; they are

@@ -6,39 +6,39 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
 use thiserror::Error;
 
-/// Fixed domain name for `RawJson` / `Metadata` digests (TDD §6.4).
+/// Fixed domain name for `RawJson` / `Metadata` digests (contract section 6.4).
 pub(crate) const DOMAIN_RAW_JSON: &str = "raw-json";
 /// Schema version embedded in the current `RawJson` digest domain.
 pub(crate) const RAW_JSON_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for blob-content digests (TDD §6.4 / §7.2).
+/// Fixed domain name for blob-content digests (contract section 6.4 / §7.2).
 pub(crate) const DOMAIN_BLOB_CONTENT: &str = "blob-content";
 /// Schema version embedded in the current blob-content digest domain.
 pub(crate) const BLOB_CONTENT_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for record-payload digests (TDD §6.4).
+/// Fixed domain name for record-payload digests (contract section 6.4).
 pub const DOMAIN_RECORD_PAYLOAD: &str = "record-payload";
 /// Schema version for the `record-payload` digest domain.
 pub const RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for record-envelope checksums (TDD §12.1).
+/// Fixed domain name for record-envelope checksums (contract section 12.1).
 pub const DOMAIN_RECORD_ENVELOPE: &str = "record-envelope";
 /// Schema version for the `record-envelope` digest domain.
 pub const RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for effect-input digests (TDD §6.4 / §12.3).
+/// Fixed domain name for effect-input digests (contract section 6.4 / §12.3).
 pub(crate) const DOMAIN_EFFECT_INPUT: &str = "effect-input";
 /// Schema version for the `effect-input` digest domain.
 pub(crate) const EFFECT_INPUT_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for effect-output digests (TDD §6.4 / §12.3).
+/// Fixed domain name for effect-output digests (contract section 6.4 / §12.3).
 pub(crate) const DOMAIN_EFFECT_OUTPUT: &str = "effect-output";
 /// Schema version for the `effect-output` digest domain.
 pub(crate) const EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for snapshot-state digests (TDD §6.4).
+/// Fixed domain name for snapshot-state digests (contract section 6.4).
 pub(crate) const DOMAIN_SNAPSHOT_STATE: &str = "snapshot-state";
 /// Schema version for the `snapshot-state` digest domain.
 pub(crate) const SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for middleware-chain digests (TDD §6.4).
+/// Fixed domain name for middleware-chain digests (contract section 6.4).
 pub(crate) const DOMAIN_MIDDLEWARE_CHAIN: &str = "middleware-chain";
 /// Schema version for the `middleware-chain` digest domain.
 pub(crate) const MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for agent-spec digests (TDD §6.4).
+/// Fixed domain name for agent-spec digests (contract section 6.4).
 pub const DOMAIN_AGENT_SPEC: &str = "agent-spec";
 /// Schema version for the `agent-spec` digest domain.
 pub const AGENT_SPEC_DIGEST_SCHEMA_VERSION: u32 = 1;

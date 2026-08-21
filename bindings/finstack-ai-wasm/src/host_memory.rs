@@ -159,6 +159,13 @@ impl MemoryStore for HostMemoryStore {
         idempotency_key: Arc<str>,
         record: MemoryRecord,
     ) -> PortFuture<Result<PutOutcome, MemoryStoreError>> {
+        if invalid_new_record(&record) {
+            return Box::pin(async {
+                Err(MemoryStoreError::InvalidRecord {
+                    reason: "memory_host_record_invalid",
+                })
+            });
+        }
         let Ok(encoded) = serde_json::to_string(&PutRequestWire {
             idempotency_key,
             record,
@@ -175,11 +182,15 @@ impl MemoryStore for HostMemoryStore {
         scope: MemoryScope,
         id: MemoryId,
     ) -> PortFuture<Result<Option<MemoryRecord>, MemoryStoreError>> {
+        let expected_scope = scope.clone();
         let Ok(encoded) = serde_json::to_string(&GetRequestWire { scope, id }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.get.clone(), encoded, |body| {
-            parse_envelope::<Option<MemoryRecord>>(body)
+        self.call(self.get.clone(), encoded, move |body| {
+            let record = parse_envelope::<Option<MemoryRecord>>(body)?;
+            record
+                .map(|record| validate_host_record(record, &expected_scope))
+                .transpose()
         })
     }
 
@@ -193,6 +204,7 @@ impl MemoryStore for HostMemoryStore {
             Ok(query) => query,
             Err(error) => return Box::pin(async { Err(error) }),
         };
+        let expected_scope = scope.clone();
         let Ok(encoded) = serde_json::to_string(&SearchRequestWire {
             scope,
             query,
@@ -200,9 +212,15 @@ impl MemoryStore for HostMemoryStore {
         }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.search.clone(), encoded, |body| {
-            parse_envelope::<Vec<MemoryHitWire>>(body)
-                .map(|hits| hits.into_iter().map(Into::into).collect())
+        self.call(self.search.clone(), encoded, move |body| {
+            parse_envelope::<Vec<MemoryHitWire>>(body)?
+                .into_iter()
+                .map(|hit| {
+                    let hit: MemoryHit = hit.into();
+                    validate_host_record(hit.record.clone(), &expected_scope)?;
+                    Ok(hit)
+                })
+                .collect()
         })
     }
 
@@ -231,6 +249,13 @@ impl MemoryStore for HostMemoryStore {
         old: MemoryId,
         replacement: MemoryRecord,
     ) -> PortFuture<Result<(), MemoryStoreError>> {
+        if invalid_new_record(&replacement) || replacement.scope != scope {
+            return Box::pin(async {
+                Err(MemoryStoreError::InvalidRecord {
+                    reason: "memory_host_record_invalid",
+                })
+            });
+        }
         let Ok(encoded) = serde_json::to_string(&CorrectRequestWire {
             idempotency_key,
             scope,
@@ -249,14 +274,19 @@ impl MemoryStore for HostMemoryStore {
         scope: MemoryScope,
         page: MemoryPage,
     ) -> PortFuture<Result<MemoryListing, MemoryStoreError>> {
+        let expected_scope = scope.clone();
         let Ok(encoded) = serde_json::to_string(&ListRequestWire {
             scope,
             page: PageWire::from(page),
         }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.list.clone(), encoded, |body| {
-            parse_envelope::<MemoryListingWire>(body).map(Into::into)
+        self.call(self.list.clone(), encoded, move |body| {
+            let listing: MemoryListing = parse_envelope::<MemoryListingWire>(body)?.into();
+            for record in &listing.records {
+                validate_host_record(record.clone(), &expected_scope)?;
+            }
+            Ok(listing)
         })
     }
 }
@@ -341,6 +371,33 @@ fn unavailable(message: &str) -> MemoryStoreError {
     MemoryStoreError::Unavailable {
         message: Arc::from(message),
     }
+}
+
+fn validate_host_record(
+    record: MemoryRecord,
+    expected_scope: &MemoryScope,
+) -> Result<MemoryRecord, MemoryStoreError> {
+    record
+        .validate()
+        .map_err(|_| MemoryStoreError::InvalidRecord {
+            reason: "memory_host_record_invalid",
+        })?;
+    if &record.scope != expected_scope {
+        return Err(MemoryStoreError::ScopeMismatch);
+    }
+    if record.tombstoned || record.superseded_by.is_some() {
+        return Err(MemoryStoreError::InvalidRecord {
+            reason: "memory_host_record_not_live",
+        });
+    }
+    Ok(record)
+}
+
+fn invalid_new_record(record: &MemoryRecord) -> bool {
+    record.validate().is_err()
+        || record.tombstoned
+        || record.supersedes.is_some()
+        || record.superseded_by.is_some()
 }
 
 /// Parse a `{"ok": T} | {"error": {"code","message"}}` envelope.
@@ -576,8 +633,8 @@ mod tests {
 
     #[derive(Default)]
     struct ScriptedState {
-        records: HashMap<String, MemoryRecord>,
-        applied_keys: std::collections::HashSet<String>,
+        records: HashMap<(MemoryScope, String), MemoryRecord>,
+        applied_keys: std::collections::HashSet<(MemoryScope, String)>,
     }
 
     /// A `HashMap`-backed scripted host implementing the six `memory_*`
@@ -620,16 +677,16 @@ mod tests {
                     let record: MemoryRecord =
                         serde_json::from_value(request["record"].clone()).expect("record");
                     let mut state = put_state.lock().expect("lock");
-                    if state.applied_keys.contains(&idempotency_key) {
+                    let scoped_key = (record.scope.clone(), idempotency_key);
+                    if state.applied_keys.contains(&scoped_key) {
                         return Ok(ok_envelope(&serde_json::json!("already_applied")));
                     }
-                    // Mirrors the real stores: a put never replaces an
-                    // existing record, whatever scope owns it.
-                    if state.records.contains_key(record.id.as_str()) {
+                    let record_key = (record.scope.clone(), record.id.as_str().to_owned());
+                    if state.records.contains_key(&record_key) {
                         return Ok(error_envelope("memory_id_conflict", "id already taken"));
                     }
-                    state.applied_keys.insert(idempotency_key);
-                    state.records.insert(record.id.as_str().to_owned(), record);
+                    state.applied_keys.insert(scoped_key);
+                    state.records.insert(record_key, record);
                     Ok(ok_envelope(&serde_json::json!("inserted")))
                 },
                 move |encoded| {
@@ -639,9 +696,10 @@ mod tests {
                         serde_json::from_value(request["scope"].clone()).expect("scope");
                     let id = request["id"].as_str().expect("id").to_owned();
                     let state = get_state.lock().expect("lock");
-                    let found = state.records.get(&id).filter(|record| {
-                        !record.tombstoned && requested_scope.permits(&record.scope)
-                    });
+                    let found = state
+                        .records
+                        .get(&(requested_scope, id))
+                        .filter(|record| !record.tombstoned && record.superseded_by.is_none());
                     Ok(ok_envelope(&serde_json::to_value(found).expect("value")))
                 },
                 move |encoded| {
@@ -653,7 +711,10 @@ mod tests {
                     let state = search_state.lock().expect("lock");
                     let mut hits = Vec::new();
                     for record in state.records.values() {
-                        if record.tombstoned || !requested_scope.permits(&record.scope) {
+                        if record.tombstoned
+                            || record.superseded_by.is_some()
+                            || !requested_scope.permits(&record.scope)
+                        {
                             continue;
                         }
                         if let Some(text) = &full_text
@@ -675,12 +736,9 @@ mod tests {
                         serde_json::from_value(request["scope"].clone()).expect("scope");
                     let id = request["id"].as_str().expect("id").to_owned();
                     let mut state = forget_state.lock().expect("lock");
-                    let Some(record) = state.records.get_mut(&id) else {
+                    let Some(record) = state.records.get_mut(&(requested_scope, id)) else {
                         return Ok(error_envelope("memory_not_found", "no such record"));
                     };
-                    if !requested_scope.permits(&record.scope) {
-                        return Ok(error_envelope("memory_scope_mismatch", "scope mismatch"));
-                    }
                     record.tombstoned = true;
                     Ok(ok_envelope(&serde_json::Value::Null))
                 },
@@ -693,22 +751,19 @@ mod tests {
                     let replacement: MemoryRecord =
                         serde_json::from_value(request["replacement"].clone()).expect("record");
                     let mut state = correct_state.lock().expect("lock");
-                    let Some(old_record) = state.records.get(&old).cloned() else {
+                    let old_key = (requested_scope.clone(), old);
+                    let Some(old_record) = state.records.get(&old_key).cloned() else {
                         return Ok(error_envelope("memory_not_found", "no such record"));
                     };
-                    if !requested_scope.permits(&old_record.scope) {
-                        return Ok(error_envelope("memory_scope_mismatch", "scope mismatch"));
-                    }
                     let mut old_record = old_record;
                     old_record.superseded_by = Some(replacement.id.clone());
                     let mut replacement = replacement;
                     replacement.supersedes = Some(old_record.id.clone());
-                    state
-                        .records
-                        .insert(old_record.id.as_str().to_owned(), old_record);
-                    state
-                        .records
-                        .insert(replacement.id.as_str().to_owned(), replacement);
+                    state.records.insert(old_key, old_record);
+                    state.records.insert(
+                        (requested_scope, replacement.id.as_str().to_owned()),
+                        replacement,
+                    );
                     Ok(ok_envelope(&serde_json::Value::Null))
                 },
                 move |encoded| {
@@ -725,7 +780,11 @@ mod tests {
                     let mut matching: Vec<&MemoryRecord> = state
                         .records
                         .values()
-                        .filter(|record| requested_scope.permits(&record.scope))
+                        .filter(|record| {
+                            requested_scope.permits(&record.scope)
+                                && !record.tombstoned
+                                && record.superseded_by.is_none()
+                        })
                         .collect();
                     matching.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
                     let total = matching.len();
@@ -819,14 +878,8 @@ mod tests {
         .expect("correct");
 
         let old = block_on_ready(store.get(scope("tenant-a"), MemoryId::parse("m1").expect("id")))
-            .expect("get")
-            .expect("old record");
-        assert_eq!(
-            old.superseded_by
-                .as_ref()
-                .map(finstack_ai_memory::MemoryId::as_str),
-            Some("m2")
-        );
+            .expect("get");
+        assert!(old.is_none());
         let replacement =
             block_on_ready(store.get(scope("tenant-a"), MemoryId::parse("m2").expect("id")))
                 .expect("get")
@@ -841,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    fn native_host_memory_store_maps_not_found_and_scope_mismatch() {
+    fn native_host_memory_store_maps_not_found_without_scope_disclosure() {
         let store = ScriptedHost::default().store();
         let missing = block_on_ready(store.forget(
             Arc::from("k1"),
@@ -856,17 +909,16 @@ mod tests {
             scope("tenant-b"),
             MemoryId::parse("m1").expect("id"),
         ));
-        assert_eq!(mismatched, Err(MemoryStoreError::ScopeMismatch));
+        assert_eq!(mismatched, Err(MemoryStoreError::NotFound));
     }
 
     #[test]
-    fn native_host_memory_store_maps_id_conflict() {
+    fn native_host_memory_store_isolates_identical_ids_by_scope() {
         let store = ScriptedHost::default().store();
         block_on_ready(store.put(Arc::from("k1"), record("m1", scope("tenant-a")))).expect("put");
-        // A different tenant naming the same id under a new key must not
-        // clobber the existing record.
-        let conflict = block_on_ready(store.put(Arc::from("k2"), record("m1", scope("tenant-b"))));
-        assert_eq!(conflict, Err(MemoryStoreError::IdConflict));
+        let second = block_on_ready(store.put(Arc::from("k2"), record("m1", scope("tenant-b"))))
+            .expect("second scope");
+        assert_eq!(second, PutOutcome::Inserted);
     }
 
     #[test]

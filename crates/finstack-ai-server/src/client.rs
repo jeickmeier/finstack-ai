@@ -3,7 +3,7 @@
 use finstack_ai_protocol::{
     POST_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteAuthMethod, RemoteCommand,
     RemoteCommandResult, RemoteDurableStep, RemoteEventView, RemoteLocator, RemotePostAuth,
-    RemotePreAuth, VersionOffer, select_version,
+    RemotePreAuth, VersionOffer, require_features, select_version,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -83,6 +83,7 @@ where
                 finstack_ai_protocol::ProtocolError::codec("invalid server version selection"),
             ));
         }
+        require_features(&server_offer, &["auth"])?;
         self.protocol_version = selected_version;
         write_pre_auth(&mut self.stream, &RemotePreAuth::Authenticate { method }).await?;
         let RemotePreAuth::AuthResult { accepted: true, .. } =

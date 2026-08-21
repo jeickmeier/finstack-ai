@@ -146,6 +146,7 @@ pub async fn disposable_store(url: &str) -> (PostgresJournalStore, SchemaGuard) 
         snapshot_bytes: 1_000_000,
     };
     let mut config = PostgresStoreConfig::new(url, limits);
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.schema = Arc::from(schema.as_str());
 
     let store = PostgresJournalStore::try_open(config)

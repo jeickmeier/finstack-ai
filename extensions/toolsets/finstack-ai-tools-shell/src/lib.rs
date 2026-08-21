@@ -33,6 +33,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -49,7 +50,8 @@ use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
     ConfinedChild, ConfinementError, ConfinementProfile, PortFuture, ProcessConfinement,
     SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult,
-    ToolSpec, Toolset, ToolsetDescriptor, stage_required_artifact,
+    ToolSpec, Toolset, ToolsetDescriptor, configure_process_tree, stage_required_artifact,
+    terminate_process_tree,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -584,11 +586,14 @@ impl Toolset for ShellToolset {
                 let output = sandbox
                     .run(request, ctx.run.cancellation.clone(), ctx.run.deadline)
                     .await?;
-                let result =
+                let (result, artifact) =
                     normalize_output(output, &ctx, limits, artifact_store, sensitivity).await?;
-                Ok(Box::pin(stream::once(async move {
-                    Ok(ToolStreamItem::Completed(result))
-                })) as ToolEventStream)
+                let mut items = Vec::with_capacity(2);
+                if let Some(artifact) = artifact {
+                    items.push(Ok(ToolStreamItem::Artifact(artifact)));
+                }
+                items.push(Ok(ToolStreamItem::Completed(result)));
+                Ok(Box::pin(stream::iter(items)) as ToolEventStream)
             })
         }
     }
@@ -650,52 +655,12 @@ fn run_process(
     if cancellation.is_cancelled() || deadline_elapsed(deadline) {
         return Err(timeout_error());
     }
-    let mut command = Command::new(&request.program);
-    if request.argv.len() > 1 {
-        command.args(request.argv[1..].iter().map(AsRef::as_ref));
-    }
-    command
-        .env_clear()
-        .envs(&request.env)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    let cwd_fd = match request.cwd.as_deref() {
-        None => None,
-        Some(relative) => {
-            let root = root.ok_or_else(|| policy_error("shell cwd requires an authorized root"))?;
-            Some(unix::walk_cwd(root, relative)?)
-        }
-    };
-    let mut child = if let Some((service, profile)) = confinement {
-        let mut profile = profile.clone();
-        if let Some(relative) = &request.cwd {
-            let authorized = profile.root().join(relative);
-            profile = profile
-                .with_authorized_cwd(authorized)
-                .map_err(|error| map_confinement(&error))?;
-        }
+    let mut child = spawn_running_child(
+        request,
+        confinement,
         #[cfg(unix)]
-        drop(cwd_fd);
-        RunningChild::Confined(
-            service
-                .spawn(command, &profile)
-                .map_err(|error| map_confinement(&error))?,
-        )
-    } else {
-        #[cfg(unix)]
-        if let Some(fd) = cwd_fd {
-            apply_authorized_cwd(&mut command, fd);
-        }
-        RunningChild::Plain(command.spawn().map_err(|_| {
-            tool_error(
-                SHELL_IO_ERROR,
-                ErrorCategory::Tool,
-                "shell process could not be started",
-            )
-        })?)
-    };
+        root,
+    )?;
     let mut pumps = PipePumps::start(child.stdout(), child.stderr());
     let started = Instant::now();
     let mut stdout = Vec::new();
@@ -719,6 +684,7 @@ fn run_process(
         }
         match child.try_wait() {
             Ok(Some(status)) => {
+                let _ = child.kill();
                 pumps.finish(&mut stdout, &mut stderr);
                 if stdout.len().saturating_add(stderr.len()) > request.max_output_bytes {
                     return Err(limit_error());
@@ -743,22 +709,85 @@ fn run_process(
     }
 }
 
+fn spawn_running_child(
+    request: &SandboxedCommand,
+    confinement: Option<&(ProcessConfinement, ConfinementProfile)>,
+    #[cfg(unix)] root: Option<&rustix::fd::OwnedFd>,
+) -> Result<RunningChild, ToolError> {
+    let mut command = Command::new(&request.program);
+    if request.argv.len() > 1 {
+        command.args(request.argv[1..].iter().map(AsRef::as_ref));
+    }
+    command
+        .env_clear()
+        .envs(&request.env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    let cwd_fd = match request.cwd.as_deref() {
+        None => None,
+        Some(relative) => {
+            let root = root.ok_or_else(|| policy_error("shell cwd requires an authorized root"))?;
+            Some(unix::walk_cwd(root, relative)?)
+        }
+    };
+    if let Some((service, profile)) = confinement {
+        let mut profile = profile.clone();
+        if let Some(relative) = &request.cwd {
+            let authorized = profile.root().join(relative);
+            profile = profile
+                .with_authorized_cwd(authorized)
+                .map_err(|error| map_confinement(&error))?;
+        }
+        #[cfg(unix)]
+        drop(cwd_fd);
+        Ok(RunningChild::Confined(
+            service
+                .spawn(command, &profile)
+                .map_err(|error| map_confinement(&error))?,
+        ))
+    } else {
+        configure_process_tree(&mut command).map_err(|_| {
+            tool_error(
+                SHELL_IO_ERROR,
+                ErrorCategory::Tool,
+                "shell process tree could not be configured",
+            )
+        })?;
+        #[cfg(unix)]
+        if let Some(fd) = cwd_fd {
+            apply_authorized_cwd(&mut command, fd);
+        }
+        Ok(RunningChild::Plain(command.spawn().map_err(|_| {
+            tool_error(
+                SHELL_IO_ERROR,
+                ErrorCategory::Tool,
+                "shell process could not be started",
+            )
+        })?))
+    }
+}
+
 struct PipePumps {
     stdout_rx: Option<Receiver<Vec<u8>>>,
     stderr_rx: Option<Receiver<Vec<u8>>>,
     stdout_thread: Option<JoinHandle<()>>,
     stderr_thread: Option<JoinHandle<()>>,
+    stop: Arc<AtomicBool>,
 }
 
 impl PipePumps {
     fn start(stdout: Option<Box<dyn Read + Send>>, stderr: Option<Box<dyn Read + Send>>) -> Self {
-        let (stdout_rx, stdout_thread) = spawn_pipe_pump(stdout);
-        let (stderr_rx, stderr_thread) = spawn_pipe_pump(stderr);
+        let stop = Arc::new(AtomicBool::new(false));
+        let (stdout_rx, stdout_thread) = spawn_pipe_pump(stdout, Arc::clone(&stop));
+        let (stderr_rx, stderr_thread) = spawn_pipe_pump(stderr, Arc::clone(&stop));
         Self {
             stdout_rx: Some(stdout_rx),
             stderr_rx: Some(stderr_rx),
             stdout_thread,
             stderr_thread,
+            stop,
         }
     }
 
@@ -772,52 +801,68 @@ impl PipePumps {
     }
 
     fn finish(&mut self, stdout: &mut Vec<u8>, stderr: &mut Vec<u8>) {
-        while self
+        let cleanup_deadline = Instant::now() + Duration::from_millis(250);
+        while (self
             .stdout_thread
             .as_ref()
             .is_some_and(|thread| !thread.is_finished())
             || self
                 .stderr_thread
                 .as_ref()
-                .is_some_and(|thread| !thread.is_finished())
+                .is_some_and(|thread| !thread.is_finished()))
+            && Instant::now() < cleanup_deadline
         {
             self.drain(stdout, stderr);
             std::thread::sleep(Duration::from_millis(1));
         }
-        if let Some(thread) = self.stdout_thread.take() {
-            let _ = thread.join();
-        }
-        if let Some(thread) = self.stderr_thread.take() {
-            let _ = thread.join();
-        }
+        self.stop.store(true, Ordering::Release);
+        join_if_finished(&mut self.stdout_thread);
+        join_if_finished(&mut self.stderr_thread);
         self.drain(stdout, stderr);
     }
 
     fn abort(&mut self) {
+        self.stop.store(true, Ordering::Release);
         self.stdout_rx = None;
         self.stderr_rx = None;
-        if let Some(thread) = self.stdout_thread.take() {
-            let _ = thread.join();
+        let cleanup_deadline = Instant::now() + Duration::from_millis(250);
+        while (self
+            .stdout_thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
+            || self
+                .stderr_thread
+                .as_ref()
+                .is_some_and(|thread| !thread.is_finished()))
+            && Instant::now() < cleanup_deadline
+        {
+            std::thread::yield_now();
         }
-        if let Some(thread) = self.stderr_thread.take() {
-            let _ = thread.join();
-        }
+        join_if_finished(&mut self.stdout_thread);
+        join_if_finished(&mut self.stderr_thread);
     }
 }
 
 fn spawn_pipe_pump<R: Read + Send + 'static>(
     pipe: Option<R>,
+    stop: Arc<AtomicBool>,
 ) -> (Receiver<Vec<u8>>, Option<JoinHandle<()>>) {
     let (tx, rx) = std::sync::mpsc::sync_channel(4);
     let Some(pipe) = pipe else {
         return (rx, None);
     };
-    (rx, Some(std::thread::spawn(move || pump_pipe(pipe, &tx))))
+    (
+        rx,
+        Some(std::thread::spawn(move || pump_pipe(pipe, &tx, &stop))),
+    )
 }
 
-fn pump_pipe<R: Read>(mut pipe: R, tx: &SyncSender<Vec<u8>>) {
+fn pump_pipe<R: Read>(mut pipe: R, tx: &SyncSender<Vec<u8>>, stop: &AtomicBool) {
     let mut buf = [0_u8; 8_192];
     loop {
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
         match pipe.read(&mut buf) {
             Ok(0) | Err(_) => break,
             Ok(n) => {
@@ -826,6 +871,14 @@ fn pump_pipe<R: Read>(mut pipe: R, tx: &SyncSender<Vec<u8>>) {
                 }
             }
         }
+    }
+}
+
+fn join_if_finished(thread: &mut Option<JoinHandle<()>>) {
+    if thread.as_ref().is_some_and(JoinHandle::is_finished)
+        && let Some(thread) = thread.take()
+    {
+        let _ = thread.join();
     }
 }
 
@@ -844,7 +897,7 @@ impl RunningChild {
     fn kill(&mut self) -> std::io::Result<()> {
         match self {
             Self::Confined(child) => child.kill(),
-            Self::Plain(child) => child.kill(),
+            Self::Plain(child) => terminate_process_tree(child.id()),
         }
     }
 
@@ -924,7 +977,7 @@ async fn normalize_output(
     limits: ShellLimits,
     artifact_store: Option<Arc<dyn ArtifactStore>>,
     sensitivity: Sensitivity,
-) -> Result<ToolResult, ToolError> {
+) -> Result<(ToolResult, Option<finstack_ai_kernel::ArtifactRef>), ToolError> {
     let json = serde_json::to_vec(&serde_json::json!({
         "exit_code": output.exit_code,
         "stdout": String::from_utf8_lossy(&output.stdout),
@@ -938,16 +991,19 @@ async fn normalize_output(
         )
     })?;
     if json.len() <= limits.inline_result_bytes {
-        return Ok(ToolResult {
-            output: RawJson::parse(json).map_err(|_| {
-                tool_error(
-                    SHELL_IO_ERROR,
-                    ErrorCategory::Internal,
-                    "shell result normalization failed",
-                )
-            })?,
-            is_error: output.exit_code != 0,
-        });
+        return Ok((
+            ToolResult {
+                output: RawJson::parse(json).map_err(|_| {
+                    tool_error(
+                        SHELL_IO_ERROR,
+                        ErrorCategory::Internal,
+                        "shell result normalization failed",
+                    )
+                })?,
+                is_error: output.exit_code != 0,
+            },
+            None,
+        ));
     }
     let store = artifact_store.ok_or_else(|| {
         tool_error(
@@ -988,16 +1044,19 @@ async fn normalize_output(
                 "artifact reference serialization failed",
             )
         })?;
-    Ok(ToolResult {
-        output: RawJson::parse(reference).map_err(|_| {
-            tool_error(
-                SHELL_IO_ERROR,
-                ErrorCategory::Internal,
-                "artifact reference normalization failed",
-            )
-        })?,
-        is_error: output.exit_code != 0,
-    })
+    Ok((
+        ToolResult {
+            output: RawJson::parse(reference).map_err(|_| {
+                tool_error(
+                    SHELL_IO_ERROR,
+                    ErrorCategory::Internal,
+                    "artifact reference normalization failed",
+                )
+            })?,
+            is_error: output.exit_code != 0,
+        },
+        Some(artifact),
+    ))
 }
 
 fn build_tools() -> Result<(Arc<[ToolSpec]>, ToolId), ShellError> {

@@ -21,8 +21,19 @@ pub(crate) fn append_in_transaction(
 ) -> Result<CommittedBatch, StoreError> {
     let incoming_identity = request_identity(request)?;
     if let Some(existing) = load_batch(transaction, request.batch_id())? {
+        let Some(committed) = existing.committed else {
+            return if existing.identity == incoming_identity {
+                Err(StoreError::InvalidRequest {
+                    reason_code: "append_history_pruned",
+                })
+            } else {
+                Err(StoreError::Corruption {
+                    reason_code: "append_batch_id_reuse",
+                })
+            };
+        };
         return if existing.identity == incoming_identity {
-            Ok(existing.committed)
+            Ok(committed)
         } else {
             Err(StoreError::Corruption {
                 reason_code: "append_batch_id_reuse",
@@ -48,11 +59,16 @@ pub(crate) fn append_in_transaction(
             load_batch(transaction, original_batch_id)?.ok_or(StoreError::Integrity {
                 reason_code: "missing_record_batch_index",
             })?;
+        let Some(committed) = existing.committed else {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "append_history_pruned",
+            });
+        };
         if existing.identity.session_id == incoming_identity.session_id
             && existing.identity.expected_sequence == incoming_identity.expected_sequence
             && existing.identity.draft_cbor == incoming_identity.draft_cbor
         {
-            return Ok(existing.committed);
+            return Ok(committed);
         }
         return Err(StoreError::Corruption {
             reason_code: "record_id_reuse",

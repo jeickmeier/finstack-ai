@@ -6,6 +6,7 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   workers: process.env.CI === "true" ? 2 : undefined,
+  outputDir: "../../../test-results/playwright",
   projects: [
     { name: "chromium", use: { browserName: "chromium" } },
     { name: "firefox", use: { browserName: "firefox" } },

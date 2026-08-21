@@ -8,25 +8,31 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use finstack_ai_kernel::{Id, LaneId, RunId, SessionId, Timestamp};
-use rusqlite::{Connection, TransactionBehavior, params};
+use finstack_ai_kernel::{Digest, Id, LaneId, RunId, SessionId, Timestamp};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::error::WorkerError;
-use crate::fires::{FireRow, FireStatus, FireStore};
-use crate::inbox::{InboxKind, InboxRow, InboxStore};
+use crate::fires::{FireRow, FireStartOutcome, FireStatus, FireStore};
+use crate::inbox::{
+    DeadLetterRow, InboxInsertOutcome, InboxKind, InboxRow, InboxStore, MAX_INBOX_PAYLOAD_BYTES,
+};
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
+
+/// Current schema version owned by this adapter.
+const WORKER_SCHEMA_VERSION: i64 = 1;
 
 /// Schema for the worker's adapter tables.
 ///
-/// These tables are deliberately **versionless**: like
-/// `finstack_workflow_local_cron`, they carry no `PRAGMA user_version` guard
-/// and are not part of the kernel journal's schema version. They hold hints
-/// only, so a binary that does not understand a column simply ignores it.
-/// Future changes must therefore be **additive and nullable** — new tables,
-/// or new nullable columns with a usable meaning when absent — so that old
-/// and new binaries can share one sqlite file without a migration step.
-/// Never repurpose or drop an existing column.
+/// The worker owns an explicit metadata table rather than reusing
+/// `PRAGMA user_version`, which belongs to the journal in shared files. This
+/// release intentionally requires a fresh adapter schema: opening an
+/// unversioned historical worker table fails with a reset-required error.
 const WORKER_DDL: &str = "
+CREATE TABLE IF NOT EXISTS finstack_workflow_worker_schema (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  version INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO finstack_workflow_worker_schema (singleton, version) VALUES (1, 1);
 CREATE TABLE IF NOT EXISTS finstack_workflow_worker_wake (
   tenant_scope TEXT NOT NULL,
   session_id TEXT NOT NULL,
@@ -57,9 +63,24 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_worker_inbox (
   pending_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   payload BLOB NOT NULL,
+  payload_digest TEXT NOT NULL,
   received_unix_ms INTEGER NOT NULL,
   PRIMARY KEY (tenant_scope, session_id, pending_id)
 );
+CREATE TABLE IF NOT EXISTS finstack_workflow_worker_dead_letters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_scope TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  pending_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_digest TEXT NOT NULL,
+  received_unix_ms INTEGER NOT NULL,
+  reason_code TEXT NOT NULL,
+  rejected_unix_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS finstack_workflow_worker_dead_letters_age
+ON finstack_workflow_worker_dead_letters (rejected_unix_ms, id);
 ";
 
 /// Sqlite tables backing the workflow worker's adapter state.
@@ -96,27 +117,29 @@ impl SqliteWorkerStore {
                     code: "sqlite_worker_wal",
                 })?;
         }
+        let has_schema = table_exists(&conn, "finstack_workflow_worker_schema")?;
+        if !has_schema && has_legacy_worker_tables(&conn)? {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "workflow_schema_reset_required",
+            });
+        }
         conn.execute_batch(WORKER_DDL)
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_worker_schema",
             })?;
-        // `CREATE TABLE IF NOT EXISTS` leaves a file written by an older
-        // binary without the newer nullable columns, so each one is added
-        // here and only its "duplicate column name" failure ignored — any
-        // other failure (read-only file, full disk, a lock held past the
-        // busy timeout) is a schema problem the caller must see at open
-        // time, not as an opaque row error later. Additive and nullable,
-        // per the schema policy above: an old binary keeps reading the
-        // file, and a new binary reads a missing value as `NULL`.
-        for column in WAKE_ADDED_COLUMNS {
-            let sql = format!("ALTER TABLE finstack_workflow_worker_wake ADD COLUMN {column}");
-            if let Err(error) = conn.execute_batch(&sql)
-                && !error.to_string().contains("duplicate column name")
-            {
-                return Err(WorkerError::StoreUnavailable {
-                    code: "sqlite_worker_schema",
-                });
-            }
+        let version: i64 = conn
+            .query_row(
+                "SELECT version FROM finstack_workflow_worker_schema WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| WorkerError::StoreIntegrity {
+                code: "workflow_schema_version",
+            })?;
+        if version != WORKER_SCHEMA_VERSION {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "workflow_schema_version",
+            });
         }
         Ok(Self {
             path,
@@ -157,10 +180,31 @@ impl SqliteWorkerStore {
     }
 }
 
-/// Nullable wake columns added after the table's first release. Each is
-/// applied with `ALTER TABLE ... ADD COLUMN` on open, ignoring the failure
-/// when it is already present.
-const WAKE_ADDED_COLUMNS: &[&str] = &["expires_at_unix_ms INTEGER"];
+fn table_exists(conn: &Connection, name: &str) -> Result<bool, WorkerError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [name],
+        |row| row.get(0),
+    )
+    .map_err(|_| WorkerError::StoreUnavailable {
+        code: "sqlite_worker_schema",
+    })
+}
+
+fn has_legacy_worker_tables(conn: &Connection) -> Result<bool, WorkerError> {
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM sqlite_master
+             WHERE type = 'table'
+               AND name LIKE 'finstack_workflow_worker_%'
+         )",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|_| WorkerError::StoreUnavailable {
+        code: "sqlite_worker_schema",
+    })
+}
 
 /// Raw columns for one wake row, as read from sqlite before decoding.
 struct RawWakeRow {
@@ -348,7 +392,7 @@ impl WakeIndexStore for SqliteWorkerStore {
         })
     }
 
-    fn load_due(&self, now: Timestamp) -> Result<Vec<WakeRow>, WorkerError> {
+    fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
         self.with_conn(|conn| {
             let sql = format!(
                 "{WAKE_SELECT}
@@ -359,9 +403,14 @@ impl WakeIndexStore for SqliteWorkerStore {
                              THEN wake_at_unix_ms IS NOT NULL AND wake_at_unix_ms <= ?1
                              ELSE wake_at_unix_ms IS NULL OR wake_at_unix_ms <= ?1
                         END)
-                 ORDER BY tenant_scope, session_id"
+                 ORDER BY tenant_scope, session_id
+                 LIMIT ?2"
             );
-            query_wake_rows(conn, &sql, params![now.as_unix_ms()])
+            query_wake_rows(
+                conn,
+                &sql,
+                params![now.as_unix_ms(), i64::try_from(limit).unwrap_or(i64::MAX)],
+            )
         })
     }
 
@@ -373,6 +422,26 @@ impl WakeIndexStore for SqliteWorkerStore {
                  ORDER BY tenant_scope, session_id"
             );
             query_wake_rows(conn, &sql, params![tenant_scope])
+        })
+    }
+
+    fn contains_interaction(
+        &self,
+        tenant_scope: &str,
+        pending_id: &str,
+    ) -> Result<bool, WorkerError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM finstack_workflow_worker_wake
+                     WHERE tenant_scope = ?1 AND pending_id = ?2 AND reason = 'interaction'
+                 )",
+                params![tenant_scope, pending_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_wake_query",
+            })
         })
     }
 
@@ -454,6 +523,26 @@ impl WakeIndexStore for SqliteWorkerStore {
         })
     }
 
+    fn release(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        worker_id: &str,
+    ) -> Result<bool, WorkerError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE finstack_workflow_worker_wake
+                 SET leased_by = NULL, lease_expires_unix_ms = NULL
+                 WHERE tenant_scope = ?1 AND session_id = ?2 AND leased_by = ?3",
+                params![tenant_scope, session_id.to_canonical_string(), worker_id,],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_wake_release",
+            })?;
+            Ok(conn.changes() == 1)
+        })
+    }
+
     fn record_failure(
         &self,
         tenant_scope: &str,
@@ -513,13 +602,20 @@ fn decode_fire_row(
         Timestamp::from_unix_ms(fired_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
             code: "sqlite_fire_time",
         })?;
+    let started_session = started_session
+        .map(|value| {
+            Id::parse(&value).map_err(|_| WorkerError::StoreIntegrity {
+                code: "sqlite_fire_session_id",
+            })
+        })
+        .transpose()?;
     Ok(FireRow {
         tenant_scope: tenant_scope.into(),
         schedule_id: schedule_id.into(),
         fire_count: u64_from_fire_count(fire_count)?,
         fired_at,
         status: FireStatus::parse(status)?,
-        started_session: started_session.map(Into::into),
+        started_session,
     })
 }
 
@@ -537,7 +633,8 @@ impl FireStore for SqliteWorkerStore {
                     i64_from_fire_count(row.fire_count)?,
                     row.fired_at.as_unix_ms(),
                     row.status.as_str(),
-                    row.started_session.as_deref(),
+                    row.started_session
+                        .map(|session| session.to_canonical_string()),
                 ],
             )
             .map_err(|_| WorkerError::StoreUnavailable {
@@ -552,35 +649,87 @@ impl FireStore for SqliteWorkerStore {
         tenant_scope: &str,
         schedule_id: &str,
         fire_count: u64,
-        started_session: &str,
-    ) -> Result<(), WorkerError> {
+        started_session: SessionId,
+    ) -> Result<FireStartOutcome, WorkerError> {
         let fire_count = i64_from_fire_count(fire_count)?;
-        self.with_conn(|conn| {
-            conn.execute(
-                "UPDATE finstack_workflow_worker_fires
-                 SET status = 'started', started_session = ?4
-                 WHERE tenant_scope = ?1 AND schedule_id = ?2 AND fire_count = ?3",
-                params![tenant_scope, schedule_id, fire_count, started_session],
-            )
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_fire_start",
+        self.with_conn_mut(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_fire_begin_immediate",
+                })?;
+            let existing = tx
+                .query_row(
+                    "SELECT status, started_session
+                     FROM finstack_workflow_worker_fires
+                     WHERE tenant_scope = ?1 AND schedule_id = ?2 AND fire_count = ?3",
+                    params![tenant_scope, schedule_id, fire_count],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => WorkerError::StoreIntegrity {
+                        code: "fire_missing",
+                    },
+                    _ => WorkerError::StoreUnavailable {
+                        code: "sqlite_fire_start",
+                    },
+                })?;
+            let outcome = match (FireStatus::parse(&existing.0)?, existing.1) {
+                (FireStatus::Claimed, None) => {
+                    tx.execute(
+                        "UPDATE finstack_workflow_worker_fires
+                         SET status = 'started', started_session = ?4
+                         WHERE tenant_scope = ?1 AND schedule_id = ?2 AND fire_count = ?3",
+                        params![
+                            tenant_scope,
+                            schedule_id,
+                            fire_count,
+                            started_session.to_canonical_string(),
+                        ],
+                    )
+                    .map_err(|_| WorkerError::StoreUnavailable {
+                        code: "sqlite_fire_start",
+                    })?;
+                    FireStartOutcome::Started
+                }
+                (FireStatus::Started, Some(existing)) => {
+                    let existing: SessionId =
+                        Id::parse(&existing).map_err(|_| WorkerError::StoreIntegrity {
+                            code: "sqlite_fire_session_id",
+                        })?;
+                    if existing != started_session {
+                        return Err(WorkerError::Conflict {
+                            code: "fire_start_conflict",
+                        });
+                    }
+                    FireStartOutcome::Idempotent
+                }
+                _ => {
+                    return Err(WorkerError::StoreIntegrity {
+                        code: "sqlite_fire_status_session",
+                    });
+                }
+            };
+            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_fire_commit",
             })?;
-            Ok(())
+            Ok(outcome)
         })
     }
 
-    fn load_unstarted(&self) -> Result<Vec<FireRow>, WorkerError> {
+    fn load_unstarted(&self, limit: usize) -> Result<Vec<FireRow>, WorkerError> {
         self.with_conn(|conn| {
             let sql = format!(
                 "{FIRE_SELECT}
                  WHERE status = 'claimed'
-                 ORDER BY tenant_scope, schedule_id, fire_count"
+                 ORDER BY tenant_scope, schedule_id, fire_count
+                 LIMIT ?1"
             );
             let mut stmt = conn.prepare(&sql).map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_fire_row",
             })?;
             let rows = stmt
-                .query_map([], |row| {
+                .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -611,10 +760,32 @@ impl FireStore for SqliteWorkerStore {
             Ok(out)
         })
     }
+
+    fn purge_started(&self, before: Timestamp, limit: usize) -> Result<usize, WorkerError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM finstack_workflow_worker_fires
+                 WHERE rowid IN (
+                     SELECT rowid FROM finstack_workflow_worker_fires
+                     WHERE status = 'started' AND fired_unix_ms < ?1
+                     ORDER BY fired_unix_ms, tenant_scope, schedule_id, fire_count
+                     LIMIT ?2
+                 )",
+                params![
+                    before.as_unix_ms(),
+                    i64::try_from(limit).unwrap_or(i64::MAX),
+                ],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_fire_purge",
+            })?;
+            Ok(usize::try_from(conn.changes()).unwrap_or(usize::MAX))
+        })
+    }
 }
 
 const INBOX_SELECT: &str = "SELECT tenant_scope, session_id, pending_id, kind, payload,
-       received_unix_ms
+       payload_digest, received_unix_ms
 FROM finstack_workflow_worker_inbox";
 
 /// Decode one row from [`INBOX_SELECT`] into an [`InboxRow`].
@@ -624,6 +795,7 @@ fn decode_inbox_row(
     pending_id: String,
     kind: &str,
     payload: Vec<u8>,
+    payload_digest: &str,
     received_unix_ms: i64,
 ) -> Result<InboxRow, WorkerError> {
     let session_id: SessionId = Id::parse(session_id).map_err(|_| WorkerError::StoreIntegrity {
@@ -633,96 +805,351 @@ fn decode_inbox_row(
         Timestamp::from_unix_ms(received_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
             code: "sqlite_inbox_row",
         })?;
-    Ok(InboxRow {
+    if payload.len() > MAX_INBOX_PAYLOAD_BYTES {
+        return Err(WorkerError::StoreIntegrity {
+            code: "sqlite_inbox_payload_size",
+        });
+    }
+    let payload_digest =
+        Digest::from_hex(payload_digest).map_err(|_| WorkerError::StoreIntegrity {
+            code: "sqlite_inbox_digest",
+        })?;
+    let row = InboxRow {
         tenant_scope: tenant_scope.into(),
         session_id,
         pending_id: pending_id.into(),
         kind: InboxKind::parse(kind)?,
         payload: Arc::from(payload.into_boxed_slice()),
+        payload_digest,
         received_at,
-    })
+    };
+    if !row.digest_is_valid() {
+        return Err(WorkerError::StoreIntegrity {
+            code: "sqlite_inbox_digest",
+        });
+    }
+    Ok(row)
 }
 
 impl InboxStore for SqliteWorkerStore {
-    fn insert(&self, row: &InboxRow) -> Result<(), WorkerError> {
-        self.with_conn(|conn| {
-            conn.execute(
-                "INSERT OR REPLACE INTO finstack_workflow_worker_inbox (
-                    tenant_scope, session_id, pending_id, kind, payload, received_unix_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    fn insert(&self, row: &InboxRow) -> Result<InboxInsertOutcome, WorkerError> {
+        if !row.digest_is_valid() || row.payload.len() > MAX_INBOX_PAYLOAD_BYTES {
+            return Err(WorkerError::StoreIntegrity {
+                code: "inbox_digest",
+            });
+        }
+        self.with_conn_mut(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_begin_immediate",
+                })?;
+            tx.execute(
+                "INSERT OR IGNORE INTO finstack_workflow_worker_inbox (
+                    tenant_scope, session_id, pending_id, kind, payload, payload_digest,
+                    received_unix_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     row.tenant_scope.as_ref(),
                     row.session_id.to_canonical_string(),
                     row.pending_id.as_ref(),
                     row.kind.as_str(),
                     row.payload.as_ref(),
+                    row.payload_digest.to_hex(),
                     row.received_at.as_unix_ms(),
                 ],
             )
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_inbox_insert",
             })?;
-            Ok(())
+            let inserted = tx.changes() == 1;
+            let outcome = if inserted {
+                InboxInsertOutcome::Inserted
+            } else {
+                let existing = tx
+                    .query_row(
+                        "SELECT kind, payload_digest
+                         FROM finstack_workflow_worker_inbox
+                         WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3",
+                        params![
+                            row.tenant_scope.as_ref(),
+                            row.session_id.to_canonical_string(),
+                            row.pending_id.as_ref(),
+                        ],
+                        |stored| Ok((stored.get::<_, String>(0)?, stored.get::<_, String>(1)?)),
+                    )
+                    .map_err(|_| WorkerError::StoreUnavailable {
+                        code: "sqlite_inbox_query",
+                    })?;
+                if existing.0 != row.kind.as_str() || existing.1 != row.payload_digest.to_hex() {
+                    return Err(WorkerError::Conflict {
+                        code: "inbox_conflict",
+                    });
+                }
+                InboxInsertOutcome::Idempotent
+            };
+            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_commit",
+            })?;
+            Ok(outcome)
         })
     }
 
-    fn load_all(&self) -> Result<Vec<InboxRow>, WorkerError> {
+    fn load(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        pending_id: &str,
+    ) -> Result<Option<InboxRow>, WorkerError> {
         self.with_conn(|conn| {
-            let sql = format!("{INBOX_SELECT} ORDER BY tenant_scope, session_id, pending_id");
+            let sql = format!(
+                "{INBOX_SELECT}
+                 WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3"
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_query",
+                })?;
+            let raw = stmt
+                .query_row(
+                    params![tenant_scope, session_id.to_canonical_string(), pending_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, Vec<u8>>(4)?,
+                            row.get::<_, String>(5)?,
+                            row.get::<_, i64>(6)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_query",
+                })?;
+            raw.map(
+                |(
+                    tenant_scope,
+                    session_id,
+                    pending_id,
+                    kind,
+                    payload,
+                    payload_digest,
+                    received_unix_ms,
+                )| {
+                    decode_inbox_row(
+                        tenant_scope,
+                        &session_id,
+                        pending_id,
+                        &kind,
+                        payload,
+                        &payload_digest,
+                        received_unix_ms,
+                    )
+                },
+            )
+            .transpose()
+        })
+    }
+
+    fn load_batch(&self, limit: usize) -> Result<Vec<InboxRow>, WorkerError> {
+        self.with_conn(|conn| {
+            let sql = format!(
+                "{INBOX_SELECT}
+                 ORDER BY tenant_scope, session_id, pending_id
+                 LIMIT ?1"
+            );
             let mut stmt = conn
                 .prepare(&sql)
                 .map_err(|_| WorkerError::StoreUnavailable {
                     code: "sqlite_inbox_query",
                 })?;
             let rows = stmt
-                .query_map([], |row| {
+                .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, Vec<u8>>(4)?,
-                        row.get::<_, i64>(5)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
                     ))
                 })
                 .map_err(|_| WorkerError::StoreUnavailable {
                     code: "sqlite_inbox_query",
                 })?;
-            let mut out = Vec::new();
-            for row in rows {
-                let (tenant_scope, session_id, pending_id, kind, payload, received_unix_ms) =
+            rows.map(|row| {
+                let (tenant, session, pending, kind, payload, digest, received) =
                     row.map_err(|_| WorkerError::StoreIntegrity {
                         code: "sqlite_inbox_row",
                     })?;
-                out.push(decode_inbox_row(
-                    tenant_scope,
-                    &session_id,
-                    pending_id,
-                    &kind,
-                    payload,
-                    received_unix_ms,
-                )?);
-            }
-            Ok(out)
+                decode_inbox_row(tenant, &session, pending, &kind, payload, &digest, received)
+            })
+            .collect()
         })
     }
 
-    fn delete(
+    fn delete_if_digest(
         &self,
         tenant_scope: &str,
         session_id: SessionId,
         pending_id: &str,
-    ) -> Result<(), WorkerError> {
+        expected_digest: Digest,
+    ) -> Result<bool, WorkerError> {
         self.with_conn(|conn| {
             conn.execute(
                 "DELETE FROM finstack_workflow_worker_inbox
-                 WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3",
-                params![tenant_scope, session_id.to_canonical_string(), pending_id,],
+                 WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3
+                   AND payload_digest = ?4",
+                params![
+                    tenant_scope,
+                    session_id.to_canonical_string(),
+                    pending_id,
+                    expected_digest.to_hex(),
+                ],
             )
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_inbox_delete",
             })?;
-            Ok(())
+            Ok(conn.changes() == 1)
+        })
+    }
+
+    fn dead_letter(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        pending_id: &str,
+        expected_digest: Digest,
+        reason_code: &str,
+        rejected_at: Timestamp,
+    ) -> Result<bool, WorkerError> {
+        self.with_conn_mut(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_begin_immediate",
+                })?;
+            tx.execute(
+                "INSERT INTO finstack_workflow_worker_dead_letters (
+                    tenant_scope, session_id, pending_id, kind, payload, payload_digest,
+                    received_unix_ms, reason_code, rejected_unix_ms
+                 )
+                 SELECT tenant_scope, session_id, pending_id, kind, payload, payload_digest,
+                        received_unix_ms, ?5, ?6
+                 FROM finstack_workflow_worker_inbox
+                 WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3
+                   AND payload_digest = ?4",
+                params![
+                    tenant_scope,
+                    session_id.to_canonical_string(),
+                    pending_id,
+                    expected_digest.to_hex(),
+                    reason_code,
+                    rejected_at.as_unix_ms(),
+                ],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_dead_letter",
+            })?;
+            let moved = tx.changes() == 1;
+            if moved {
+                tx.execute(
+                    "DELETE FROM finstack_workflow_worker_inbox
+                     WHERE tenant_scope = ?1 AND session_id = ?2 AND pending_id = ?3
+                       AND payload_digest = ?4",
+                    params![
+                        tenant_scope,
+                        session_id.to_canonical_string(),
+                        pending_id,
+                        expected_digest.to_hex(),
+                    ],
+                )
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_dead_letter",
+                })?;
+            }
+            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_commit",
+            })?;
+            Ok(moved)
+        })
+    }
+
+    fn load_dead_letters(&self, limit: usize) -> Result<Vec<DeadLetterRow>, WorkerError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT tenant_scope, session_id, pending_id, kind, payload,
+                            payload_digest, received_unix_ms, reason_code, rejected_unix_ms
+                     FROM finstack_workflow_worker_dead_letters
+                     ORDER BY rejected_unix_ms, id
+                     LIMIT ?1",
+                )
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_dead_letter_query",
+                })?;
+            let rows = stmt
+                .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Vec<u8>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, i64>(8)?,
+                    ))
+                })
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_inbox_dead_letter_query",
+                })?;
+            rows.map(|row| {
+                let (tenant, session, pending, kind, payload, digest, received, reason, rejected) =
+                    row.map_err(|_| WorkerError::StoreIntegrity {
+                        code: "sqlite_inbox_dead_letter_row",
+                    })?;
+                let response =
+                    decode_inbox_row(tenant, &session, pending, &kind, payload, &digest, received)?;
+                let rejected_at =
+                    Timestamp::from_unix_ms(rejected).map_err(|_| WorkerError::StoreIntegrity {
+                        code: "sqlite_inbox_dead_letter_row",
+                    })?;
+                Ok(DeadLetterRow {
+                    response,
+                    reason_code: reason.into(),
+                    rejected_at,
+                })
+            })
+            .collect()
+        })
+    }
+
+    fn purge_dead_letters(&self, before: Timestamp, limit: usize) -> Result<usize, WorkerError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM finstack_workflow_worker_dead_letters
+                 WHERE id IN (
+                     SELECT id FROM finstack_workflow_worker_dead_letters
+                     WHERE rejected_unix_ms < ?1
+                     ORDER BY rejected_unix_ms, id
+                     LIMIT ?2
+                 )",
+                params![
+                    before.as_unix_ms(),
+                    i64::try_from(limit).unwrap_or(i64::MAX),
+                ],
+            )
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_dead_letter_purge",
+            })?;
+            Ok(usize::try_from(conn.changes()).unwrap_or(usize::MAX))
         })
     }
 }
@@ -819,7 +1246,7 @@ mod tests {
         row.expires_at = Some(ts(9_000));
         store.upsert(&row).expect("upsert");
 
-        let due = store.load_due(ts(1_000)).expect("load_due");
+        let due = store.load_due(ts(1_000), 10).expect("load_due");
         assert_eq!(
             due,
             vec![row.clone()],
@@ -832,10 +1259,10 @@ mod tests {
         );
     }
 
-    /// A file written by a binary that predates `expires_at_unix_ms` is opened
-    /// and used without a migration step.
+    /// Historical versionless adapter tables are rejected with an explicit
+    /// reset instruction instead of being guessed forward in place.
     #[test]
-    fn an_older_wake_table_gains_the_deadline_column_on_open() {
+    fn an_unversioned_worker_schema_requires_a_fresh_database() {
         let dir = tempfile::tempdir().expect("dir");
         let path = dir.path().join("old.sqlite");
         let legacy = rusqlite::Connection::open(&path).expect("open");
@@ -857,44 +1284,12 @@ mod tests {
                  );",
             )
             .expect("legacy schema");
-        let legacy_row = timer_row("tenant-a", 9, 1_000);
-        legacy
-            .execute(
-                "INSERT INTO finstack_workflow_worker_wake VALUES
-                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 0)",
-                rusqlite::params![
-                    legacy_row.tenant_scope.as_ref(),
-                    legacy_row.session_id.to_canonical_string(),
-                    legacy_row.lane_id.to_canonical_string(),
-                    legacy_row.run_id.to_canonical_string(),
-                    legacy_row.workflow_kind.as_ref(),
-                    legacy_row.reason.as_str(),
-                    legacy_row.wake_at.map(Timestamp::as_unix_ms),
-                    legacy_row.pending_id.as_ref(),
-                ],
-            )
-            .expect("legacy row");
         drop(legacy);
 
-        let store = SqliteWorkerStore::open(&path).expect("open");
-        let mut row = timer_row("tenant-a", 8, 1_000);
-        row.reason = WakeReason::Interaction;
-        row.expires_at = Some(ts(4_000));
-        store.upsert(&row).expect("upsert");
-        let loaded = store.load_tenant("tenant-a").expect("tenant");
-        let found = loaded
-            .iter()
-            .find(|candidate| candidate.session_id == row.session_id)
-            .expect("row");
-        assert_eq!(found.expires_at, Some(ts(4_000)));
-        let legacy_loaded = loaded
-            .iter()
-            .find(|candidate| candidate.session_id == legacy_row.session_id)
-            .expect("legacy row");
-        assert_eq!(
-            legacy_loaded.expires_at, None,
-            "a row written before the column reads back as deadline-less"
-        );
+        let Err(error) = SqliteWorkerStore::open(&path) else {
+            panic!("legacy schema must fail closed");
+        };
+        assert_eq!(error.code(), "workflow_schema_reset_required");
     }
 
     /// `load_due`'s SQL predicate must agree with [`crate::wake::wake_due`]
@@ -921,7 +1316,7 @@ mod tests {
         }
 
         let now = ts(2_000);
-        let due = store.load_due(now).expect("load_due");
+        let due = store.load_due(now, 10).expect("load_due");
         for row in [&fresh, &backed_off, &due_timer, &timerless] {
             assert_eq!(
                 due.contains(row),
@@ -934,7 +1329,7 @@ mod tests {
 
         // Past the backoff, the inbox-driven row rejoins the due set.
         let later = ts(6_000);
-        let due_later = store.load_due(later).expect("load_due");
+        let due_later = store.load_due(later, 10).expect("load_due");
         assert!(due_later.contains(&backed_off));
         assert!(crate::wake::wake_due(&backed_off, later));
     }

@@ -39,8 +39,8 @@
 
 use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_net_guard::{
-    NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client, read_body_bounded,
-    reject_literal_destination, resolve_and_pin,
+    BodyReadInterrupt, NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client,
+    read_body_bounded_interruptible, reject_literal_destination, resolve_and_pin,
 };
 use finstack_ai_runtime::{ToolCallContext, ToolError};
 
@@ -92,6 +92,7 @@ fn map_net_guard_error(error: NetGuardError) -> ToolError {
             ErrorCategory::Limit,
             "openrouter media response exceeds the configured byte limit",
         ),
+        NetGuardError::Cancelled | NetGuardError::DeadlineExceeded => timeout_error(),
     }
 }
 
@@ -116,9 +117,12 @@ pub(crate) async fn download_bytes(
     let policy = download_url_policy(endpoint_is_loopback);
     let vetted = parse_and_vet_url(url, &policy).map_err(map_net_guard_error)?;
     reject_literal_destination(&vetted, &policy).map_err(map_net_guard_error)?;
-    let addr = resolve_and_pin(&vetted, &SystemResolver)
-        .await
-        .map_err(map_net_guard_error)?;
+    let resolve = resolve_and_pin(&vetted, &SystemResolver);
+    let addr = tokio::select! {
+        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
+        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        result = resolve => result.map_err(map_net_guard_error)?,
+    };
     let client = pinned_client(&vetted, addr, REQUEST_TIMEOUT).map_err(map_net_guard_error)?;
     // Identify the client: hosts serving public media commonly answer an
     // anonymous request with 403 rather than the file.
@@ -139,9 +143,17 @@ pub(crate) async fn download_bytes(
     };
     let status = response.status();
     if !status.is_success() {
-        return Err(endpoint_rejected("audio host", status, response).await);
+        return Err(endpoint_rejected("audio host", status, response, ctx).await);
     }
-    read_body_bounded(response, cap)
-        .await
-        .map_err(map_net_guard_error)
+    let cancellation = ctx.run.cancellation.clone();
+    read_body_bounded_interruptible(
+        response,
+        cap,
+        BodyReadInterrupt::new(
+            async move { cancellation.cancelled().await },
+            wait_deadline(ctx.run.deadline),
+        ),
+    )
+    .await
+    .map_err(map_net_guard_error)
 }

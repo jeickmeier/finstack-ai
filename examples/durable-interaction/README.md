@@ -11,7 +11,7 @@ Trust class: driver is T1;
 journal payloads are T5.
 In-process code is not isolated.
 
-Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`).
+Workspace version is **2.0.0** unpublished (last public tag `v0.1.0`).
 
 ## Quick start
 

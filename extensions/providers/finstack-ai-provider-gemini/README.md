@@ -16,8 +16,8 @@ identical wire body; only URL construction and the credential header shape
 differ. This crate is a T1 native adapter and a leaf: neither the kernel nor
 the runtime depends on it, and it is not isolated.
 
-`Agent::gemini` (the frozen linked-constructor name, ADR-045) only reaches
-the `GenerativeLanguage` endpoint; the `Vertex` variant is reachable by
+`Agent::gemini` retains its stable linked-constructor name and only reaches the
+`GenerativeLanguage` endpoint; the `Vertex` variant is reachable by
 constructing `GeminiProvider` directly with `GeminiConfig::try_new_vertex`.
 
 ## Model-settings keys

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, ExternalHandleRef, RawJson, RemoteRouteRef, Version,
 };
-use finstack_ai_runtime::AgentInvokeError;
+use finstack_ai_runtime::{AgentInvokeError, SecretString};
 
 /// Explicit route and credential used to construct a remote invoker.
 ///
@@ -30,12 +30,41 @@ pub(crate) enum RemoteEndpoint {
     Unix(PathBuf),
 }
 
+/// Fully validated internal route used by all exchanges.
+#[derive(Clone)]
+pub(crate) struct ResolvedRemoteRoute {
+    pub(crate) endpoint: RemoteEndpoint,
+    pub(crate) reference: RemoteRouteRef,
+    pub(crate) token: Option<SecretString>,
+}
+
+pub(crate) fn resolve_route(
+    route: RemoteChildRoute,
+) -> Result<ResolvedRemoteRoute, AgentInvokeError> {
+    let endpoint = parse_endpoint(&route.endpoint)?;
+    let reference = route_ref(&route)?;
+    let token = route
+        .token
+        .map(SecretString::try_new)
+        .transpose()
+        .map_err(|_| invalid("remote child token is invalid"))?;
+    Ok(ResolvedRemoteRoute {
+        endpoint,
+        reference,
+        token,
+    })
+}
+
 pub(crate) fn parse_endpoint(endpoint: &str) -> Result<RemoteEndpoint, AgentInvokeError> {
     if let Some(path) = endpoint.strip_prefix("unix:") {
-        if path.is_empty() || path.as_bytes().contains(&0) {
+        let path = PathBuf::from(path);
+        if path.as_os_str().is_empty()
+            || path.as_os_str().as_encoded_bytes().contains(&0)
+            || !path.is_absolute()
+        {
             return Err(invalid("remote child unix endpoint is invalid"));
         }
-        return Ok(RemoteEndpoint::Unix(PathBuf::from(path)));
+        return Ok(RemoteEndpoint::Unix(path));
     }
     let addr = endpoint
         .parse::<SocketAddr>()

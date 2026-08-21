@@ -10,10 +10,15 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use finstack_ai_kernel::{ArtifactRef, Sensitivity, Timestamp};
+use finstack_ai_kernel::{ArtifactRef, Duration, Sensitivity, Timestamp};
+use finstack_ai_runtime::{ArtifactScope, validate_artifact_scope};
 
 /// Maximum byte length of a [`MemoryId`].
 pub const MEMORY_ID_MAX_BYTES: usize = 256;
+/// Maximum byte length of every memory scope dimension.
+pub const MEMORY_SCOPE_FIELD_MAX_BYTES: usize = 256;
+/// Maximum byte length of an optional provenance reference.
+pub const MEMORY_PROVENANCE_FIELD_MAX_BYTES: usize = 512;
 /// Maximum byte length of a [`MemoryRecord::preview`].
 pub const PREVIEW_MAX_BYTES: usize = 256;
 /// Maximum byte length of a single keyword.
@@ -78,17 +83,17 @@ impl MemoryId {
 
 /// Scope filter/binding for a memory record: tenant is required, the rest
 /// are optional narrowing dimensions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryScope {
     /// Tenant identifier. Always required and always matched exactly.
-    pub tenant: Arc<str>,
+    pub(crate) tenant: Arc<str>,
     /// Optional user identifier filter/binding.
-    pub user: Option<Arc<str>>,
+    pub(crate) user: Option<Arc<str>>,
     /// Optional agent identifier filter/binding.
-    pub agent: Option<Arc<str>>,
+    pub(crate) agent: Option<Arc<str>>,
     /// Optional workspace identifier filter/binding.
-    pub workspace: Option<Arc<str>>,
+    pub(crate) workspace: Option<Arc<str>>,
 }
 
 impl MemoryScope {
@@ -100,7 +105,7 @@ impl MemoryScope {
     /// Returns [`MemoryError::InvalidRecord`] when `tenant` is empty or
     /// contains a NUL byte.
     pub fn try_new(tenant: &str) -> Result<Self, MemoryError> {
-        if tenant.is_empty() || tenant.as_bytes().contains(&0) {
+        if !valid_bounded_text(tenant, MEMORY_SCOPE_FIELD_MAX_BYTES) {
             return Err(MemoryError::InvalidRecord {
                 reason: "invalid_scope_tenant",
             });
@@ -113,58 +118,123 @@ impl MemoryScope {
         })
     }
 
+    /// Validate all scope dimensions.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty, NUL-bearing, or overlong populated fields.
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        if !valid_bounded_text(&self.tenant, MEMORY_SCOPE_FIELD_MAX_BYTES) {
+            return Err(MemoryError::InvalidRecord {
+                reason: "invalid_scope_tenant",
+            });
+        }
+        for value in [
+            self.user.as_deref(),
+            self.agent.as_deref(),
+            self.workspace.as_deref(),
+        ] {
+            if value.is_some_and(|value| !valid_bounded_text(value, MEMORY_SCOPE_FIELD_MAX_BYTES)) {
+                return Err(MemoryError::InvalidRecord {
+                    reason: "invalid_scope_dimension",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Canonical digest over every scope dimension.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::InvalidRecord`] when the scope is invalid or
+    /// canonical encoding fails.
+    pub fn digest(&self) -> Result<finstack_ai_kernel::Digest, MemoryError> {
+        self.validate()?;
+        let encoded =
+            serde_json_canonicalizer::to_vec(self).map_err(|_| MemoryError::InvalidRecord {
+                reason: "invalid_memory_scope",
+            })?;
+        finstack_ai_kernel::Digest::domain_separated("memory-scope", 1, &encoded).map_err(|_| {
+            MemoryError::InvalidRecord {
+                reason: "invalid_memory_scope",
+            }
+        })
+    }
+
     /// Borrow the tenant identifier.
     #[must_use]
     pub fn tenant(&self) -> &str {
         &self.tenant
     }
 
-    /// Return a copy of this scope narrowed to `user`.
-    #[must_use]
-    pub fn with_user(mut self, user: &str) -> Self {
-        self.user = Some(Arc::from(user));
-        self
-    }
-
-    /// Return a copy of this scope narrowed to `agent`.
-    #[must_use]
-    pub fn with_agent(mut self, agent: &str) -> Self {
-        self.agent = Some(Arc::from(agent));
-        self
-    }
-
-    /// Return a copy of this scope narrowed to `workspace`.
-    #[must_use]
-    pub fn with_workspace(mut self, workspace: &str) -> Self {
-        self.workspace = Some(Arc::from(workspace));
-        self
-    }
-
-    /// Check whether `self`, used as a caller's scope filter, permits
-    /// access to a record scoped as `record_scope`.
+    /// Return this scope narrowed to a validated `user`.
     ///
-    /// The tenant must match exactly. Each optional field on `self` acts as
-    /// a filter only when set: an unset field on `self` permits any value
-    /// (including `None`) on `record_scope`, while a set field requires an
-    /// exact match.
+    /// # Errors
+    ///
+    /// Rejects an empty, NUL-bearing, or overlong user identifier.
+    pub fn try_with_user(mut self, user: &str) -> Result<Self, MemoryError> {
+        if !valid_bounded_text(user, MEMORY_SCOPE_FIELD_MAX_BYTES) {
+            return Err(MemoryError::InvalidRecord {
+                reason: "invalid_scope_dimension",
+            });
+        }
+        self.user = Some(Arc::from(user));
+        Ok(self)
+    }
+
+    /// Return this scope narrowed to a validated `agent`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty, NUL-bearing, or overlong agent identifier.
+    pub fn try_with_agent(mut self, agent: &str) -> Result<Self, MemoryError> {
+        if !valid_bounded_text(agent, MEMORY_SCOPE_FIELD_MAX_BYTES) {
+            return Err(MemoryError::InvalidRecord {
+                reason: "invalid_scope_dimension",
+            });
+        }
+        self.agent = Some(Arc::from(agent));
+        Ok(self)
+    }
+
+    /// Return this scope narrowed to a validated `workspace`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty, NUL-bearing, or overlong workspace identifier.
+    pub fn try_with_workspace(mut self, workspace: &str) -> Result<Self, MemoryError> {
+        if !valid_bounded_text(workspace, MEMORY_SCOPE_FIELD_MAX_BYTES) {
+            return Err(MemoryError::InvalidRecord {
+                reason: "invalid_scope_dimension",
+            });
+        }
+        self.workspace = Some(Arc::from(workspace));
+        Ok(self)
+    }
+
+    /// Optional user dimension.
+    #[must_use]
+    pub fn user(&self) -> Option<&str> {
+        self.user.as_deref()
+    }
+
+    /// Optional agent dimension.
+    #[must_use]
+    pub fn agent(&self) -> Option<&str> {
+        self.agent.as_deref()
+    }
+
+    /// Optional workspace dimension.
+    #[must_use]
+    pub fn workspace(&self) -> Option<&str> {
+        self.workspace.as_deref()
+    }
+
+    /// Check whether `record_scope` is the exact same complete scope.
     #[must_use]
     pub fn permits(&self, record_scope: &MemoryScope) -> bool {
-        if self.tenant.as_ref() != record_scope.tenant.as_ref() {
-            return false;
-        }
-
-        scope_field_permits(self.user.as_deref(), record_scope.user.as_deref())
-            && scope_field_permits(self.agent.as_deref(), record_scope.agent.as_deref())
-            && scope_field_permits(self.workspace.as_deref(), record_scope.workspace.as_deref())
-    }
-}
-
-/// Check one optional scope dimension: an unset `filter` permits anything,
-/// a set `filter` requires `value` to match it exactly.
-fn scope_field_permits(filter: Option<&str>, value: Option<&str>) -> bool {
-    match filter {
-        None => true,
-        Some(want) => value == Some(want),
+        self == record_scope
     }
 }
 
@@ -211,7 +281,12 @@ pub enum MemoryBody {
     /// Content stored inline as text.
     Inline(Arc<str>),
     /// Content stored out-of-line, referenced by an artifact.
-    Blob(ArtifactRef),
+    Blob {
+        /// Exact artifact scope required to retrieve and manage ownership.
+        scope: ArtifactScope,
+        /// Exact staged artifact reference.
+        artifact: ArtifactRef,
+    },
 }
 
 /// How long a memory record is retained.
@@ -278,9 +353,11 @@ impl MemoryRecord {
             });
         }
 
-        if self.preview.len() > PREVIEW_MAX_BYTES {
+        self.scope.validate()?;
+
+        if !valid_bounded_text(&self.preview, PREVIEW_MAX_BYTES) {
             return Err(MemoryError::InvalidRecord {
-                reason: "preview_too_long",
+                reason: "invalid_preview",
             });
         }
 
@@ -291,11 +368,35 @@ impl MemoryRecord {
         }
 
         for keyword in self.keywords.iter() {
-            if keyword.is_empty() || keyword.len() > KEYWORD_MAX_BYTES {
+            if !valid_bounded_text(keyword, KEYWORD_MAX_BYTES) {
                 return Err(MemoryError::InvalidRecord {
                     reason: "invalid_keyword",
                 });
             }
+        }
+
+        for (index, keyword) in self.keywords.iter().enumerate() {
+            if self.keywords[..index]
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(keyword))
+            {
+                return Err(MemoryError::InvalidRecord {
+                    reason: "duplicate_keyword",
+                });
+            }
+        }
+
+        if let MemoryBody::Inline(body) = &self.body
+            && !valid_bounded_text(body, INLINE_BODY_MAX_BYTES)
+        {
+            return Err(MemoryError::InvalidRecord {
+                reason: "invalid_inline_body",
+            });
+        }
+        if let MemoryBody::Blob { scope, artifact } = &self.body {
+            validate_artifact_scope(scope, artifact).map_err(|_| MemoryError::InvalidRecord {
+                reason: "invalid_artifact_reference",
+            })?;
         }
 
         if self.provenance.confidence > CONFIDENCE_MAX {
@@ -304,8 +405,63 @@ impl MemoryRecord {
             });
         }
 
+        for value in [
+            self.provenance.source_session.as_deref(),
+            self.provenance.source_run.as_deref(),
+            self.provenance.source_ref.as_deref(),
+        ] {
+            if value
+                .is_some_and(|value| !valid_bounded_text(value, MEMORY_PROVENANCE_FIELD_MAX_BYTES))
+            {
+                return Err(MemoryError::InvalidRecord {
+                    reason: "invalid_provenance",
+                });
+            }
+        }
+
+        if self.last_confirmed_at < self.created_at {
+            return Err(MemoryError::InvalidRecord {
+                reason: "last_confirmed_before_created",
+            });
+        }
+        if self.supersedes.as_ref() == Some(&self.id)
+            || self.superseded_by.as_ref() == Some(&self.id)
+        {
+            return Err(MemoryError::InvalidRecord {
+                reason: "memory_self_supersession",
+            });
+        }
+        if matches!(self.retention, RetentionPolicy::ExpireAfterMs(0)) {
+            return Err(MemoryError::InvalidRecord {
+                reason: "invalid_retention",
+            });
+        }
+        if let RetentionPolicy::ExpireAfterMs(duration_ms) = self.retention {
+            self.created_at
+                .checked_add(Duration::from_millis(duration_ms))
+                .map_err(|_| MemoryError::InvalidRecord {
+                    reason: "retention_overflow",
+                })?;
+        }
+
         Ok(())
     }
+
+    /// Whether this record is unavailable at `now` under its hard-retention policy.
+    #[must_use]
+    pub fn is_expired_at(&self, now: Timestamp) -> bool {
+        match self.retention {
+            RetentionPolicy::KeepUntilDeleted => false,
+            RetentionPolicy::ExpireAfterMs(duration_ms) => self
+                .created_at
+                .checked_add(Duration::from_millis(duration_ms))
+                .map_or(true, |expires_at| now >= expires_at),
+        }
+    }
+}
+
+fn valid_bounded_text(value: &str, max_bytes: usize) -> bool {
+    !value.is_empty() && value.len() <= max_bytes && !value.as_bytes().contains(&0)
 }
 
 /// Build a record preview from `body`, truncated to [`PREVIEW_MAX_BYTES`] at

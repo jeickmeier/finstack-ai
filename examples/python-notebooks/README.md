@@ -4,7 +4,7 @@ Eleven notebooks that teach `finstack_ai.Agent` as the composition root.
 There is no Python `Harness` type. A harness is the recipe: pick a
 provider factory, attach trusted Python ports, run, and inspect events.
 
-Workspace pin is `finstack-ai==1.0.0` (unpublished; last public tag
+Workspace pin is `finstack-ai==2.0.0` (unpublished; last public tag
 `v0.1.0`; not on PyPI).
 
 ## Quick start

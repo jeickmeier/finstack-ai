@@ -62,7 +62,7 @@ fn pollster_block<T>(future: impl std::future::Future<Output = T>) -> T {
     }
 }
 
-fn seed(path: &Path) {
+fn seed(path: &Path) -> SqliteJournalStore {
     let store = open(path.to_path_buf());
     let run_id = id::<RunTag>(201);
     let accepted = RunAccepted::try_new(
@@ -109,6 +109,7 @@ fn seed(path: &Path) {
         ),
     )
     .expect("append");
+    store
 }
 
 fn ops() -> Command {
@@ -119,7 +120,7 @@ fn ops() -> Command {
 fn backup_restore_diagnose_export_import_and_migrate() {
     let dir = unique_dir();
     let src = dir.join("journal.sqlite");
-    seed(&src);
+    let live_store = seed(&src);
     let backup = dir.join("backup.sqlite");
     assert!(
         ops()
@@ -132,6 +133,7 @@ fn backup_restore_diagnose_export_import_and_migrate() {
             .expect("backup")
             .success()
     );
+    drop(live_store);
     let restored = dir.join("restored.sqlite");
     assert!(
         ops()

@@ -99,7 +99,12 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
         ))
         .await;
     }
+    let locator = driver_result.seed.locator.clone();
     let settled = build_tool_settlement(driver_result)?;
+    let artifacts = match &settled.outcome {
+        ToolSettlement::Completed(completion) => completion.artifacts().to_vec(),
+        ToolSettlement::Failed(_) | ToolSettlement::Deferred(_) => Vec::new(),
+    };
     let input = KernelInput::ToolBatchSettled(settled.clone());
     let allocation = allocate_tool_settlement(coordinator.state(), &settled, sources)?;
     let env = TransitionEnv {
@@ -118,6 +123,9 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
     if let Some(fault) = outcome.fault {
         return Err(RunHandleError::Faulted { code: fault.code });
     }
+    sources
+        .pin_committed_artifacts(&locator, &artifacts)
+        .await?;
     Ok(ToolResultDisposition::Settled)
 }
 
@@ -161,6 +169,7 @@ pub(crate) async fn continue_parked_tool<C: Clock, R: RandomSource>(
             .await
             .map(|assembled| AssembledToolTerminal {
                 usage: assembled.usage,
+                artifacts: assembled.artifacts,
                 terminal: assembled.terminal,
             }),
         Err(error) => Err(error),
@@ -326,6 +335,7 @@ pub(crate) fn build_tool_settlement(
         Ok(assembled) => {
             let tool_call_id = result.seed.tool_call_id;
             let usage = assembled.usage;
+            let artifacts = assembled.artifacts;
             match assembled.terminal {
                 ToolTerminal::Completed(tool_result) => {
                     let block = normalize_tool_result(tool_call_id, tool_result)
@@ -345,7 +355,7 @@ pub(crate) fn build_tool_settlement(
                             requested.output_contract().clone(),
                             output,
                             usage,
-                            Vec::new(),
+                            artifacts.to_vec(),
                             ProviderIds::empty(),
                             None::<&str>,
                             None,
@@ -730,6 +740,7 @@ async fn settle_reconciled_tool<C: Clock, R: RandomSource>(
         seed,
         result: Ok(AssembledToolTerminal {
             usage: None,
+            artifacts: Arc::from([]),
             terminal: ToolTerminal::Completed(result),
         }),
     };
@@ -746,6 +757,7 @@ async fn settle_external_tool<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
 ) -> Result<ToolResumeAction, RunHandleError> {
     let effect_id = driver.seed.requested.effect_id();
+    let locator = driver.seed.locator.clone();
     let settled = build_tool_settlement(driver)?;
     let ToolSettlement::Completed(completion) = &settled.outcome else {
         return Err(RunHandleError::ToolSettlement {
@@ -784,6 +796,9 @@ async fn settle_external_tool<C: Clock, R: RandomSource>(
             if let Some(fault) = outcome.fault {
                 return Err(RunHandleError::Faulted { code: fault.code });
             }
+            sources
+                .pin_committed_artifacts(&locator, completion.artifacts())
+                .await?;
             Ok(ToolResumeAction::UseRecorded)
         }
         Err(CommitCoordinatorError::Decision {

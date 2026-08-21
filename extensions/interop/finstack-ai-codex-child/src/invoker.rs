@@ -9,21 +9,23 @@ use finstack_ai_runtime::{
     AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest, PortFuture,
     child_relation_digest,
 };
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 use crate::CodexChildError;
 use crate::config::CodexExecConfig;
-use crate::identity::configuration;
+use crate::identity::{codex_agent_ref, codex_route_ref, configuration};
 use crate::state::{CodexRunReport, CodexRunStatus, RunState};
 
 /// Upper bound on accepted runs held in the in-process table.
 pub(crate) const MAX_ACCEPTED: usize = 1_024;
+const MAX_JSONL_LINE_BYTES: usize = 64 * 1_024;
 
 type ChildSlot = Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>;
 
 /// One accepted child's live process state.
 #[derive(Debug, Clone)]
 pub(crate) struct CodexRun {
+    pub(crate) parent: finstack_ai_kernel::OperationLocator,
     pub(crate) request_digest: finstack_ai_kernel::Digest,
     pub(crate) handle: ChildRunHandle,
     pub(crate) state: Arc<Mutex<RunState>>,
@@ -31,6 +33,13 @@ pub(crate) struct CodexRun {
     // the child out of it once stdout reaches EOF, so `kill_on_drop` only
     // fires when both references are gone (host shutdown).
     pub(crate) child: ChildSlot,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EvictedRun {
+    pub(crate) request_digest: finstack_ai_kernel::Digest,
+    pub(crate) handle: ChildRunHandle,
+    pub(crate) parent: finstack_ai_kernel::OperationLocator,
 }
 
 /// `AgentInvoker` leaf that spawns `codex exec --json` with frozen flags.
@@ -43,7 +52,7 @@ pub struct CodexChildInvoker {
     // replayed equal request attaches (without a second spawn) and a
     // differing digest still conflicts, even after the run's state was
     // evicted. Bounded to `max_accepted` entries, oldest dropped first.
-    pub(crate) evicted: Arc<Mutex<BTreeMap<RunId, finstack_ai_kernel::Digest>>>,
+    pub(crate) evicted: Arc<Mutex<BTreeMap<RunId, EvictedRun>>>,
     pub(crate) max_accepted: usize,
 }
 
@@ -65,16 +74,16 @@ impl CodexChildInvoker {
         config: CodexExecConfig,
         max_accepted: usize,
     ) -> Result<Self, CodexChildError> {
-        if !config.binary.is_file() {
+        if !config.binary.is_absolute() || !config.binary.is_file() {
             return Err(configuration("binary_missing"));
         }
-        if !config.workspace_root.is_dir() {
+        if !config.workspace_root.is_absolute() || !config.workspace_root.is_dir() {
             return Err(configuration("workspace_root_missing"));
         }
         if config
             .extra_args
             .iter()
-            .any(|arg| arg.as_bytes().contains(&0))
+            .any(|arg| arg.as_bytes().contains(&0) || reserved_extra_arg(arg))
         {
             return Err(configuration("extra_args_invalid"));
         }
@@ -92,12 +101,49 @@ impl CodexChildInvoker {
     /// before a host restart, and settled runs evicted from a full table by
     /// [`make_room`] — the toolset reports those as `unknown`.
     #[must_use]
-    pub fn run_status(&self, run_id: &RunId) -> Option<CodexRunReport> {
+    pub fn run_status(&self, locator: &ChildRunLocator) -> Option<CodexRunReport> {
         let runs = self.runs.lock().ok()?;
-        let run = runs.get(run_id)?;
+        let run = runs.get(&locator.operation.run_id)?;
+        if run.handle.locator != *locator {
+            return None;
+        }
         let state = run.state.lock().ok()?;
         Some(state.report())
     }
+
+    /// Resolve an accepted child owned by the exact parent operation.
+    #[must_use]
+    pub fn accepted_locator(
+        &self,
+        parent: &finstack_ai_kernel::OperationLocator,
+        run_id: &RunId,
+    ) -> Option<ChildRunLocator> {
+        if let Ok(runs) = self.runs.lock()
+            && let Some(run) = runs.get(run_id)
+            && run.parent == *parent
+        {
+            return Some(run.handle.locator.clone());
+        }
+        let evicted = self.evicted.lock().ok()?;
+        let run = evicted.get(run_id)?;
+        (run.parent == *parent).then(|| run.handle.locator.clone())
+    }
+}
+
+fn reserved_extra_arg(arg: &str) -> bool {
+    matches!(
+        arg,
+        "exec"
+            | "--json"
+            | "--sandbox"
+            | "--cd"
+            | "-C"
+            | "--skip-git-repo-check"
+            | "--dangerously-bypass-approvals-and-sandbox"
+            | "--full-auto"
+            | "--"
+    ) || arg.starts_with("--sandbox=")
+        || arg.starts_with("--cd=")
 }
 
 fn invalid(message: &'static str) -> AgentInvokeError {
@@ -131,7 +177,7 @@ fn unavailable(message: &'static str) -> AgentInvokeError {
 /// Called with the run-table lock held; it never awaits.
 fn make_room(
     runs: &mut BTreeMap<RunId, CodexRun>,
-    evicted: &mut BTreeMap<RunId, finstack_ai_kernel::Digest>,
+    evicted: &mut BTreeMap<RunId, EvictedRun>,
     cap: usize,
 ) -> bool {
     if runs.len() < cap {
@@ -141,7 +187,14 @@ fn make_room(
         Ok(state) => {
             let keep = state.report().status == CodexRunStatus::Running;
             if !keep {
-                evicted.insert(*run_id, run.request_digest);
+                evicted.insert(
+                    *run_id,
+                    EvictedRun {
+                        request_digest: run.request_digest,
+                        handle: run.handle.clone(),
+                        parent: run.parent.clone(),
+                    },
+                );
             }
             keep
         }
@@ -215,9 +268,15 @@ fn spawn_codex(
 }
 
 async fn drain_stdout(stdout: tokio::process::ChildStdout, state: &Mutex<RunState>) {
-    let mut lines = tokio::io::BufReader::new(stdout).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let event = crate::events::parse_event(&line);
+    let mut reader = tokio::io::BufReader::new(stdout);
+    while let Ok(Some((line, oversized))) = read_bounded_line(&mut reader).await {
+        let event = if oversized {
+            crate::events::CodexEvent::Failed {
+                message: "codex emitted an oversized JSONL event".to_owned(),
+            }
+        } else {
+            crate::events::parse_event(&line)
+        };
         if let Ok(mut guard) = state.lock() {
             guard.apply(event);
         }
@@ -225,10 +284,54 @@ async fn drain_stdout(stdout: tokio::process::ChildStdout, state: &Mutex<RunStat
 }
 
 async fn drain_stderr(stderr: tokio::process::ChildStderr, state: &Mutex<RunState>) {
-    let mut lines = tokio::io::BufReader::new(stderr).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
+    let mut reader = tokio::io::BufReader::new(stderr);
+    while let Ok(Some((line, oversized))) = read_bounded_line(&mut reader).await {
         if let Ok(mut guard) = state.lock() {
             guard.append_stderr(&line);
+            if oversized {
+                guard.append_stderr("[oversized stderr line drained]");
+            }
+        }
+    }
+}
+
+async fn read_bounded_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+) -> std::io::Result<Option<(String, bool)>> {
+    let mut retained = Vec::with_capacity(1_024);
+    let mut oversized = false;
+    let mut saw_bytes = false;
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return if saw_bytes {
+                Ok(Some((
+                    String::from_utf8_lossy(&retained).into_owned(),
+                    oversized,
+                )))
+            } else {
+                Ok(None)
+            };
+        }
+        saw_bytes = true;
+        let consumed = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |index| index + 1);
+        let chunk = &available[..consumed];
+        let content = chunk.strip_suffix(b"\n").unwrap_or(chunk);
+        let remaining = MAX_JSONL_LINE_BYTES.saturating_sub(retained.len());
+        retained.extend_from_slice(&content[..content.len().min(remaining)]);
+        if content.len() > remaining {
+            oversized = true;
+        }
+        let finished = consumed < available.len() || chunk.ends_with(b"\n");
+        reader.consume(consumed);
+        if finished {
+            return Ok(Some((
+                String::from_utf8_lossy(&retained).into_owned(),
+                oversized,
+            )));
         }
     }
 }
@@ -267,13 +370,23 @@ impl AgentInvoker for CodexChildInvoker {
         let max_accepted = self.max_accepted;
         Box::pin(async move {
             request.validate()?;
+            let expected_agent =
+                codex_agent_ref().map_err(|_| invalid("codex peer identity is unavailable"))?;
+            if request.agent != expected_agent {
+                return Err(invalid("codex child agent identity does not match"));
+            }
             if request.placement != ChildPlacement::RemoteChildSession {
                 return Err(invalid(
                     "codex child invoker only accepts remote_child_session",
                 ));
             }
-            if request.locator.remote.is_none() {
-                return Err(invalid("codex child locator is missing a route"));
+            let expected_route =
+                codex_route_ref().map_err(|_| invalid("codex peer route is unavailable"))?;
+            if request.locator.remote.as_ref() != Some(&expected_route) {
+                return Err(invalid("codex child locator route does not match"));
+            }
+            if request.locator.operation.tenant_scope != ctx.parent.tenant_scope {
+                return Err(invalid("codex child tenant does not match parent"));
             }
             let run_id = request.locator.operation.run_id;
             let prompt = prompt_text(&request.input)?;
@@ -297,6 +410,9 @@ impl AgentInvoker for CodexChildInvoker {
                 .lock()
                 .map_err(|_| unavailable("codex run table is poisoned"))?;
             if let Some(existing) = guard.get(&run_id) {
+                if existing.handle.locator != request.locator || existing.parent != ctx.parent {
+                    return Err(invalid("codex run id is bound to a different locator"));
+                }
                 if existing.request_digest == request.request_digest {
                     return Ok(existing.handle.clone());
                 }
@@ -312,14 +428,17 @@ impl AgentInvoker for CodexChildInvoker {
                 .lock()
                 .map_err(|_| unavailable("codex eviction table is poisoned"))?;
             if let Some(prior) = evicted_guard.get(&run_id) {
-                if *prior == request.request_digest {
+                if prior.handle.locator != request.locator || prior.parent != ctx.parent {
+                    return Err(invalid("codex run id is bound to a different locator"));
+                }
+                if prior.request_digest == request.request_digest {
                     // The run settled and was evicted; the equal replay
                     // attaches to that acceptance instead of spawning a
                     // second child. State is gone, so status is `unknown`.
                     return Ok(handle);
                 }
                 return Err(AgentInvokeError::Conflict {
-                    existing: *prior,
+                    existing: prior.request_digest,
                     submitted: request.request_digest,
                 });
             }
@@ -331,6 +450,7 @@ impl AgentInvoker for CodexChildInvoker {
             guard.insert(
                 run_id,
                 CodexRun {
+                    parent: ctx.parent,
                     request_digest: request.request_digest,
                     handle: handle.clone(),
                     state,
@@ -345,6 +465,7 @@ impl AgentInvoker for CodexChildInvoker {
     fn cancel(&self, locator: &ChildRunLocator) -> PortFuture<Result<(), AgentInvokeError>> {
         let runs = Arc::clone(&self.runs);
         let run_id = locator.operation.run_id;
+        let locator = locator.clone();
         Box::pin(async move {
             let run = {
                 let guard = runs
@@ -355,14 +476,30 @@ impl AgentInvoker for CodexChildInvoker {
             let Some(run) = run else {
                 return Err(unavailable("codex child locator was never accepted"));
             };
-            if let Ok(mut state) = run.state.lock() {
-                state.mark_cancelled();
+            if run.handle.locator != locator {
+                return Err(invalid(
+                    "codex child locator does not match accepted locator",
+                ));
             }
             let mut slot = run.child.lock().await;
             if let Some(child) = slot.as_mut() {
-                let _ = child.start_kill();
+                child
+                    .start_kill()
+                    .map_err(|_| unavailable("codex child kill request failed"))?;
+                if let Ok(mut state) = run.state.lock() {
+                    state.mark_cancelled();
+                }
+                return Ok(());
             }
-            Ok(())
+            let terminal = run
+                .state
+                .lock()
+                .is_ok_and(|state| state.report().status != CodexRunStatus::Running);
+            if terminal {
+                Ok(())
+            } else {
+                Err(unavailable("codex child process handle is unavailable"))
+            }
         })
     }
 }

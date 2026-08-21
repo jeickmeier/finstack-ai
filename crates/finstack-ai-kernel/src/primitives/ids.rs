@@ -281,7 +281,7 @@ fn parse_uuid_hyphenated(input: &str) -> Option<[u8; 16]> {
 pub trait KeyTag: Send + Sync + 'static {
     /// Stable family name used in diagnostics.
     const NAME: &'static str;
-    /// Whether values must contain a `.` namespace separator (TDD §4).
+    /// Whether values must contain a `.` namespace separator (contract section 4).
     const REQUIRES_NAMESPACE: bool;
 }
 
@@ -298,7 +298,7 @@ macro_rules! define_key_tag {
 }
 
 // Local aliases are allowed for agent/bundle keys; globally registered
-// component/tool/capability identities must be namespaced (TDD §4).
+// component/tool/capability identities must be namespaced (contract section 4).
 define_key_tag!(AgentTag, "agent", false);
 define_key_tag!(BundleTag, "bundle", false);
 define_key_tag!(ComponentTag, "component", true);
@@ -307,7 +307,7 @@ define_key_tag!(ToolTag, "tool", true);
 define_key_tag!(LimitTag, "limit", true);
 define_key_tag!(EffectOutputTag, "effect-output", true);
 
-/// Maximum UTF-8 byte length for a namespaced key (TDD §4).
+/// Maximum UTF-8 byte length for a namespaced key (contract section 4).
 pub const KEY_MAX_BYTES: usize = 128;
 
 /// Validated namespaced string key for human-selected identities.
@@ -357,7 +357,7 @@ impl<T: KeyTag> Key<T> {
     /// - namespaced ids containing at least one `.` with the same character set
     ///
     /// Globally registered [`ComponentId`], [`ToolId`], and [`CapabilityId`] values
-    /// always require a `.` namespace separator (TDD §4).
+    /// always require a `.` namespace separator (contract section 4).
     ///
     /// # Errors
     ///

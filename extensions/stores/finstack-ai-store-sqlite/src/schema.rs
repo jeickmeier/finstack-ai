@@ -99,21 +99,32 @@ pub(crate) fn apply_durability(
 }
 
 pub(crate) fn apply_schema(connection: &Connection) -> Result<(), StoreError> {
-    let version: i32 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
+    connection
+        .execute_batch("BEGIN IMMEDIATE")
         .map_err(map_sqlite_error)?;
-    match version {
-        0 => {
-            connection.execute_batch(V1_DDL).map_err(map_sqlite_error)?;
-            connection
-                .pragma_update(None, "user_version", SCHEMA_USER_VERSION)
-                .map_err(map_sqlite_error)?;
-            Ok(())
+    let result = (|| {
+        let version: i32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        match version {
+            0 => {
+                connection.execute_batch(V1_DDL).map_err(map_sqlite_error)?;
+                connection
+                    .pragma_update(None, "user_version", SCHEMA_USER_VERSION)
+                    .map_err(map_sqlite_error)
+            }
+            SCHEMA_USER_VERSION => Ok(()),
+            _ => Err(StoreError::Integrity {
+                reason_code: "sqlite_schema_unsupported",
+            }),
         }
-        SCHEMA_USER_VERSION => Ok(()),
-        _ => Err(StoreError::Integrity {
-            reason_code: "sqlite_schema_unsupported",
-        }),
+    })();
+    match result {
+        Ok(()) => connection.execute_batch("COMMIT").map_err(map_sqlite_error),
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
     }
 }
 

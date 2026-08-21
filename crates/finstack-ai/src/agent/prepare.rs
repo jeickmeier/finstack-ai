@@ -303,19 +303,22 @@ impl Agent {
             .map(|spec| spec.policy.approval_grant)
             .unwrap_or_default();
         let owner = if self.tools.is_empty() {
-            Box::pin(RunTaskOwner::spawn_with_model(
+            Box::pin(RunTaskOwner::spawn_with_model_and_artifacts(
                 coordinator,
                 run_task_config(observer_count, approval_grant),
                 model_task_config(),
                 Arc::clone(&prepared.model),
                 prepared.profile.clone(),
+                self.artifact_store
+                    .clone()
+                    .map(|store| (store, prepared.locator.clone())),
                 AgentClock,
                 AgentRandom,
             ))
             .await
             .map_err(AgentRunError::runtime)
         } else {
-            Box::pin(RunTaskOwner::spawn_with_model_and_tools(
+            Box::pin(RunTaskOwner::spawn_with_model_tools_and_artifacts(
                 coordinator,
                 run_task_config(observer_count, approval_grant),
                 model_task_config(),
@@ -323,6 +326,9 @@ impl Agent {
                 Arc::clone(&prepared.model),
                 prepared.profile.clone(),
                 Arc::clone(&self.tools),
+                self.artifact_store
+                    .clone()
+                    .map(|store| (store, prepared.locator.clone())),
                 AgentClock,
                 AgentRandom,
             ))

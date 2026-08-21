@@ -156,6 +156,7 @@ fn callback_port_conformance<'py>(
             expected: AssembledToolStream {
                 progress: Arc::from([]),
                 usage: None,
+                artifacts: Arc::from([]),
                 terminal: ToolTerminal::Completed(result),
             },
             stream_limits: ToolStreamLimits::default(),

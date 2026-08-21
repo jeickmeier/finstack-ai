@@ -252,6 +252,7 @@ fn wide_limits() -> StoreLimits {
 /// append the test severs is unambiguously the connection the proxy watches.
 async fn open_store(url: &str, schema: &str) -> PostgresJournalStore {
     let mut config = PostgresStoreConfig::new(url, wide_limits());
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.schema = Arc::from(schema);
     config.pool_size = 1;
     PostgresJournalStore::try_open(config)

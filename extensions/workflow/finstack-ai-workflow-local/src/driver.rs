@@ -42,10 +42,31 @@ impl LocalWorkflowDriver {
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
         clock: ExternalClock,
+        cron: Arc<dyn CronScheduleStore>,
+    ) -> Result<Self, WorkflowDriverError> {
+        let session = WorkflowSession::trusted(store, locator, clock).await?;
+        let mut driver = Self::wrap(session, cron);
+        driver.catch_up = driver
+            .fire_due()
+            .map_err(|_| WorkflowDriverError::Recover {
+                code: "cron_catch_up",
+            })?;
+        Ok(driver)
+    }
+
+    /// Attach with deterministic entropy for tests and reproducible examples.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same failures as [`Self::attach`].
+    pub async fn attach_seeded(
+        store: Arc<dyn JournalStore>,
+        locator: OperationLocator,
+        clock: ExternalClock,
         random_seed: u64,
         cron: Arc<dyn CronScheduleStore>,
     ) -> Result<Self, WorkflowDriverError> {
-        let session = WorkflowSession::trusted(store, locator, clock, random_seed).await?;
+        let session = WorkflowSession::trusted_seeded(store, locator, clock, random_seed).await?;
         let mut driver = Self::wrap(session, cron);
         driver.catch_up = driver
             .fire_due()

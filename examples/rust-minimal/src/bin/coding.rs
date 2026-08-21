@@ -91,6 +91,7 @@ async fn main() -> Result<(), BoxError> {
     let memory = MemoryScope::try_new("preview-local").and_then(|scope| {
         MemoryContextProvider::try_new(
             Arc::new(InProcessMemoryStore::new()),
+            Arc::new(finstack_ai_memory::InProcessArtifactStore::default()),
             scope,
             RecallConfig::default(),
         )

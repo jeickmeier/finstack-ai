@@ -2,6 +2,7 @@
 
 use core::fmt;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -338,17 +339,45 @@ impl GeminiConfig {
         }
         let mut url =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
-        let path = match &self.endpoint {
-            GeminiEndpoint::GenerativeLanguage => {
-                format!("/{GENERATIVE_LANGUAGE_API_VERSION}/models/{name}:streamGenerateContent")
+        let model_action = format!("{name}:streamGenerateContent");
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|()| config_error("provider base URL cannot contain path segments"))?;
+            segments.clear();
+            match &self.endpoint {
+                GeminiEndpoint::GenerativeLanguage => {
+                    segments
+                        .push(GENERATIVE_LANGUAGE_API_VERSION)
+                        .push("models")
+                        .push(&model_action);
+                }
+                GeminiEndpoint::Vertex { project, location } => {
+                    segments
+                        .push(VERTEX_API_VERSION)
+                        .push("projects")
+                        .push(project)
+                        .push("locations")
+                        .push(location)
+                        .push("publishers")
+                        .push("google")
+                        .push("models")
+                        .push(&model_action);
+                }
             }
-            GeminiEndpoint::Vertex { project, location } => format!(
-                "/{VERTEX_API_VERSION}/projects/{project}/locations/{location}/publishers/google/models/{name}:streamGenerateContent"
-            ),
-        };
-        url.set_path(&path);
+        }
         url.set_query(Some("alt=sse"));
         Ok(url)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), ModelError> {
+        if self.request_timeout.is_zero() || self.request_timeout > Duration::from_hours(1) {
+            return Err(config_error("provider request timeout is invalid"));
+        }
+        if self.max_event_bytes == 0 || self.max_stream_bytes < self.max_event_bytes {
+            return Err(config_error("provider stream limits are invalid"));
+        }
+        Ok(())
     }
 }
 
@@ -364,11 +393,26 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
             "provider base URL contains forbidden components",
         ));
     }
+    if url.scheme() == "http"
+        && !url
+            .host_str()
+            .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
+            .is_some_and(|address| address.is_loopback())
+    {
+        return Err(config_error(
+            "plaintext provider base URL must use a loopback IP",
+        ));
+    }
     Ok(())
 }
 
 fn validate_label(value: &str) -> Result<&str, ModelError> {
-    if value.is_empty() || value.len() > MAX_LABEL_BYTES || value.as_bytes().contains(&0) {
+    if value.is_empty()
+        || value.len() > MAX_LABEL_BYTES
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
         return Err(config_error("vertex project/location is invalid"));
     }
     Ok(value)
@@ -683,6 +727,48 @@ mod tests {
     }
 
     #[test]
+    fn plaintext_http_requires_a_literal_loopback_ip() {
+        for url in [
+            "http://example.test",
+            "http://192.0.2.1",
+            "http://localhost",
+        ] {
+            assert_eq!(
+                GeminiConfig::try_new(url)
+                    .expect_err("remote plaintext")
+                    .code(),
+                crate::error::GEMINI_CONFIG_INVALID
+            );
+        }
+        for url in ["http://127.0.0.1:8080", "http://[::1]:8080"] {
+            assert!(GeminiConfig::try_new(url).is_ok());
+        }
+        assert!(GeminiConfig::try_new("https://example.test").is_ok());
+    }
+
+    #[test]
+    fn provider_limits_are_validated_before_use() {
+        let zero_timeout = GeminiConfig::try_new("https://example.test")
+            .expect("config")
+            .with_request_timeout(Duration::ZERO);
+        assert_eq!(
+            zero_timeout.validate().expect_err("zero timeout").code(),
+            crate::error::GEMINI_CONFIG_INVALID
+        );
+
+        let reversed_limits = GeminiConfig::try_new("https://example.test")
+            .expect("config")
+            .with_stream_limits(2, 1);
+        assert_eq!(
+            reversed_limits
+                .validate()
+                .expect_err("reversed stream limits")
+                .code(),
+            crate::error::GEMINI_CONFIG_INVALID
+        );
+    }
+
+    #[test]
     fn generative_language_url_shape() {
         let config =
             GeminiConfig::try_new("https://generativelanguage.googleapis.com").expect("config");
@@ -706,6 +792,18 @@ mod tests {
             config.model_url(&model).expect("url").as_str(),
             "https://us-central1-aiplatform.googleapis.com/v1/projects/proj-1/locations/us-central1/publishers/google/models/gemini-2.5-pro:streamGenerateContent?alt=sse"
         );
+    }
+
+    #[test]
+    fn vertex_labels_reject_path_shaping_characters() {
+        for label in ["proj/other", "../project", "project%2Fother", "us central1"] {
+            assert_eq!(
+                GeminiConfig::try_new_vertex("https://example.test", label, "us-central1")
+                    .expect_err("invalid project")
+                    .code(),
+                crate::error::GEMINI_CONFIG_INVALID
+            );
+        }
     }
 
     #[test]

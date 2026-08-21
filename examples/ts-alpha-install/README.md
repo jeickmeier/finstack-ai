@@ -6,7 +6,7 @@ map repository `src/` or `js/dist` paths. Do not embed provider credentials.
 Trust class: T2 when host
 adapters are registered. Not isolated.
 
-Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`; not on npm).
+Workspace version is **2.0.0** unpublished (last public tag `v0.1.0`; not on npm).
 
 ## Quick start
 

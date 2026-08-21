@@ -1,12 +1,12 @@
 # Examples
 
 Public-API examples for finstack-ai bindings. Workspace version is
-**1.0.0** unpublished (last public tag `v0.1.0`; registries unpublished).
+**2.0.0** unpublished (last public tag `v0.1.0`; registries unpublished).
 
 - [`rust-minimal/`](rust-minimal/) — T1 native binaries (`minimal`, `coding`,
   `service`, `diagnostic`).
 - [`python-minimal/`](python-minimal/) — rust-backed (T1), callback (T2),
-  and service (T2) starters pinned to `finstack-ai==1.0.0`.
+  and service (T2) starters pinned to `finstack-ai==2.0.0`.
 - [`python-notebooks/`](python-notebooks/) — the learning notebooks.
 - [`browser-minimal/`](browser-minimal/) — experimental same-origin IndexedDB
   inspect demo (T2 host / T5 content). Not crash-durable.

@@ -223,7 +223,6 @@ fn disk_full_maps_to_sqlite_disk_full() {
 }
 
 #[test]
-#[ignore = "known flake; not an A01 row (TDD §18.2 / crash-recovery contract pitfall 13)"]
 fn concurrent_readers_never_observe_a_torn_batch() {
     let dir = TempDir::new().expect("tempdir");
     let store = Arc::new(open(
@@ -254,10 +253,18 @@ fn concurrent_readers_never_observe_a_torn_batch() {
                         limit: 16,
                     }))
                     .expect("scan");
-                    assert_eq!(
-                        page.records.len(),
-                        usize::try_from(loaded.head_sequence).expect("sequence fits usize")
-                    );
+                    assert!(matches!(page.records.len(), 2 | 4));
+                    for (index, record) in page.records.iter().enumerate() {
+                        assert_eq!(record.sequence(), index as u64 + 1);
+                        if let Some(previous) = index.checked_sub(1) {
+                            assert_eq!(
+                                record.previous_checksum(),
+                                page.records
+                                    .get(previous)
+                                    .map(finstack_ai_kernel::RecordEnvelope::checksum)
+                            );
+                        }
+                    }
                 }
             })
         })

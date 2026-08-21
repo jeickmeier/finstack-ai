@@ -21,8 +21,8 @@ use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
 use crate::error::{
-    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, response_error,
-    stream_error,
+    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR,
+    error, response_error, stream_error,
 };
 use crate::ndjson::NdjsonParser;
 use crate::request::{ChatRequest, ReplayEntry, serialize_request};
@@ -132,8 +132,7 @@ impl OllamaProvider {
         let configured = models
             .get_mut(model)
             .ok_or_else(|| crate::error::request_error("requested model is not configured"))?;
-        configured.apply_capabilities(&update);
-        Ok(())
+        configured.apply_capabilities(&update)
     }
 
     fn model_config(&self, name: &ModelName) -> Result<OllamaModelConfig, ModelError> {
@@ -175,6 +174,7 @@ fn catalog_from_models(
 ) -> Result<BTreeMap<ModelName, OllamaModelConfig>, ModelError> {
     let mut by_name = BTreeMap::new();
     for model in models {
+        model.validate()?;
         if by_name.insert(model.name.clone(), model).is_some() {
             return Err(crate::error::config_error(
                 "provider contains a duplicate model name",
@@ -270,11 +270,16 @@ impl Model for OllamaProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let media_resolver = self.config.media_resolver();
         Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            let cancellation = request.call.run.cancellation.clone();
             let model = model?;
-            let resolved_media =
-                resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes)
-                    .await
-                    .map_err(map_draft_media)?;
+            let resolved_media = tokio::select! {
+                () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
+                resolved = resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes) => {
+                    resolved.map_err(map_draft_media)?
+                }
+            };
             let prepared = ChatRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -282,8 +287,10 @@ impl Model for OllamaProvider {
                 &resolved_media,
             )?;
             let payload = serialize_request(&prepared.request)?;
+            if payload.len() > max_stream_bytes {
+                return Err(request_limit_error());
+            }
             let request_id = request.call.request_id.to_string();
-            let cancellation = request.call.run.cancellation;
             let send = client
                 .post(endpoint)
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -292,6 +299,7 @@ impl Model for OllamaProvider {
                 .send();
             let response = tokio::select! {
                 () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
@@ -314,6 +322,7 @@ impl Model for OllamaProvider {
                 prepared.matched_replay,
                 max_event_bytes,
                 max_stream_bytes,
+                deadline,
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
@@ -360,6 +369,7 @@ async fn drive_response(
     matched_replay: Option<Vec<ReplayEntry>>,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    deadline: tokio::time::Instant,
 ) {
     let mut body = response.bytes_stream();
     let mut parser = NdjsonParser::new(max_event_bytes, max_stream_bytes);
@@ -368,6 +378,10 @@ async fn drive_response(
         let chunk = tokio::select! {
             () = cancellation.cancelled() => {
                 let _ = sender.send(Err(cancelled_error())).await;
+                return;
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                let _ = sender.send(Err(timeout_error())).await;
                 return;
             }
             () = sender.closed() => return,
@@ -490,14 +504,27 @@ fn cancelled_error() -> ModelError {
     )
 }
 
+fn timeout_error() -> ModelError {
+    error(
+        TIMEOUT,
+        ErrorCategory::Deadline,
+        true,
+        "Ollama request timed out",
+    )
+}
+
+fn request_limit_error() -> ModelError {
+    error(
+        STREAM_LIMIT_EXCEEDED,
+        ErrorCategory::Limit,
+        false,
+        "Ollama request exceeded the configured byte limit",
+    )
+}
+
 fn transport_error(source: &reqwest::Error) -> ModelError {
     if source.is_timeout() {
-        error(
-            TIMEOUT,
-            ErrorCategory::Deadline,
-            true,
-            "Ollama request timed out",
-        )
+        timeout_error()
     } else {
         error(
             TRANSPORT_ERROR,
@@ -597,6 +624,37 @@ mod tests {
             capabilities.structured_output,
             finstack_ai_runtime::StructuredOutputCapability::Prompted
         );
+    }
+
+    #[test]
+    fn invalid_public_profiles_are_rejected_atomically() {
+        let config = OllamaConfig::try_new("http://127.0.0.1:9").expect("config");
+        let mut invalid =
+            OllamaModelConfig::try_new("gemma3", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        invalid.max_output_tokens = 0;
+        assert_eq!(
+            OllamaProvider::try_new(config.clone(), vec![invalid])
+                .expect_err("invalid public fields")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+
+        let model = OllamaModelConfig::try_new("gemma3", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model");
+        let provider = OllamaProvider::try_new(config, vec![model]).expect("provider");
+        let name = ModelName::try_new("gemma3").expect("name");
+        let before = provider.capabilities(&name);
+        let mut update = before.clone();
+        update.context_profile.max_output_tokens = 0;
+        assert_eq!(
+            provider
+                .refresh_model_metadata(&name, update)
+                .expect_err("invalid refresh")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+        assert_eq!(provider.capabilities(&name), before);
     }
 
     #[derive(Debug)]

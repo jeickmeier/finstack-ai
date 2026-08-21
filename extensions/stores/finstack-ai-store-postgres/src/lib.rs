@@ -81,7 +81,8 @@ mod store;
 // which can see `pub(crate)` items.
 
 pub use config::{
-    DEFAULT_CONNECT_TIMEOUT, DEFAULT_POOL_SIZE, DEFAULT_SCHEMA, PostgresDurability,
-    PostgresStoreConfig, SchemaPolicy,
+    DEFAULT_CHECKOUT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_OPERATION_TIMEOUT,
+    DEFAULT_POOL_SIZE, DEFAULT_SCHEMA, PostgresDurability, PostgresStoreConfig, PostgresTlsMode,
+    SchemaPolicy,
 };
 pub use store::PostgresJournalStore;

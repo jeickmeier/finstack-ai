@@ -451,14 +451,15 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     .await;
     drop(owner);
 
-    let mut session = WorkflowSession::trusted(journal.clone(), locator(), clock.clone(), 741)
-        .await
-        .expect("attach")
-        .with_ports(
-            Arc::clone(&model),
-            locked_profile(),
-            Some(Arc::clone(&catalog)),
-        );
+    let mut session =
+        WorkflowSession::trusted_seeded(journal.clone(), locator(), clock.clone(), 741)
+            .await
+            .expect("attach")
+            .with_ports(
+                Arc::clone(&model),
+                locked_profile(),
+                Some(Arc::clone(&catalog)),
+            );
     let WorkflowWait::DeferredEffect { effect_id, .. } =
         session.drive_until_wait().await.expect("deferred")
     else {
@@ -491,7 +492,8 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
             catalog: Some(Arc::clone(&catalog)),
         }),
     )
-    .build();
+    .build()
+    .expect("worker");
 
     // No response has been delivered yet: the row is a non-timer wait, so
     // the claim gate must skip it, claiming nothing (src/worker.rs's
@@ -500,7 +502,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     assert_eq!(before.sessions_resumed, 0);
     assert_eq!(before.failures, 0);
     assert!(
-        store.load_all().expect("inbox").is_empty(),
+        store.load_batch(10).expect("inbox").is_empty(),
         "no response has been delivered yet"
     );
 
@@ -529,7 +531,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
         "the delivered completion was applied to the journal"
     );
     assert_eq!(
-        store.load_all().expect("inbox").len(),
+        store.load_batch(10).expect("inbox").len(),
         1,
         "an unparked resume keeps the delivered response for redelivery"
     );
@@ -550,7 +552,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
         "the resume is claimed and driven to completion"
     );
     assert!(
-        store.load_all().expect("inbox").is_empty(),
+        store.load_batch(10).expect("inbox").is_empty(),
         "the consumed response is drained from the inbox"
     );
     assert!(
@@ -707,14 +709,15 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
     .await;
     drop(owner);
 
-    let mut session = WorkflowSession::trusted(journal.clone(), locator(), clock.clone(), 701)
-        .await
-        .expect("attach")
-        .with_ports(
-            Arc::clone(&model),
-            locked_profile(),
-            Some(Arc::clone(&catalog)),
-        );
+    let mut session =
+        WorkflowSession::trusted_seeded(journal.clone(), locator(), clock.clone(), 701)
+            .await
+            .expect("attach")
+            .with_ports(
+                Arc::clone(&model),
+                locked_profile(),
+                Some(Arc::clone(&catalog)),
+            );
     let WorkflowWait::Interaction { interaction_id, .. } =
         session.drive_until_wait().await.expect("interaction")
     else {
@@ -740,7 +743,8 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
             catalog: Some(Arc::clone(&catalog)),
         }),
     )
-    .build();
+    .build()
+    .expect("worker");
 
     // No response has been delivered yet: the row is a non-timer wait, so
     // the claim gate must skip it, claiming nothing (src/worker.rs's
@@ -749,7 +753,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
     assert_eq!(before.sessions_resumed, 0);
     assert_eq!(before.failures, 0);
     assert!(
-        store.load_all().expect("inbox").is_empty(),
+        store.load_batch(10).expect("inbox").is_empty(),
         "no response has been delivered yet"
     );
 
@@ -787,7 +791,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
         "the delivered resolution was applied to the journal"
     );
     assert_eq!(
-        store.load_all().expect("inbox").len(),
+        store.load_batch(10).expect("inbox").len(),
         1,
         "an unparked resume keeps the delivered response for redelivery"
     );
@@ -808,7 +812,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
         "the resume is claimed and driven to completion"
     );
     assert!(
-        store.load_all().expect("inbox").is_empty(),
+        store.load_batch(10).expect("inbox").is_empty(),
         "the consumed response is drained from the inbox"
     );
     assert!(

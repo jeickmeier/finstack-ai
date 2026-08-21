@@ -3,7 +3,6 @@ use std::sync::Arc;
 use finstack_ai::Agent as FacadeAgent;
 use finstack_ai::runtime::{ArtifactStore, ModelName};
 use finstack_ai_kernel::SessionId;
-use finstack_ai_middleware_document_ingest::AttachmentIndex;
 use wasm_bindgen::prelude::*;
 
 use crate::executor;
@@ -26,9 +25,8 @@ pub struct Agent {
     /// Shared with the registered `DocumentToolset` and
     /// `DocumentIngestMiddleware`. Run attachments are staged here before
     /// submission so the middleware can resolve them back off the
-    /// `AttachmentIndex`.
+    /// the artifact store.
     pub(super) artifact_store: Arc<dyn ArtifactStore>,
-    pub(super) attachment_index: Arc<AttachmentIndex>,
 }
 
 #[wasm_bindgen(js_class = Agent)]
@@ -143,7 +141,6 @@ impl Agent {
         let agent = Arc::clone(&self.inner);
         let model = self.model.clone();
         let artifact_store = Arc::clone(&self.artifact_store);
-        let attachment_index = Arc::clone(&self.attachment_index);
         executor::drive(async move {
             agent
                 .re_resolve()
@@ -153,7 +150,6 @@ impl Agent {
                         inner: Arc::new(inner),
                         model,
                         artifact_store,
-                        attachment_index,
                     })
                 })
                 .map_err(|error| agent_error(&error, None))
@@ -233,11 +229,7 @@ impl Agent {
         capability: Option<String>,
         attachments: JsValue,
     ) -> Result<Run, JsValue> {
-        let attachments = stage_attachments(
-            self.artifact_store.as_ref(),
-            &self.attachment_index,
-            &attachments,
-        )?;
+        let attachments = stage_attachments(self.artifact_store.as_ref(), &attachments)?;
         let request = run_request(
             &self.model,
             input,
@@ -274,10 +266,8 @@ impl Agent {
         let agent = Arc::clone(&self.inner);
         let model = self.model.clone();
         let artifact_store = Arc::clone(&self.artifact_store);
-        let attachment_index = Arc::clone(&self.attachment_index);
         executor::drive(async move {
-            let attachments =
-                stage_attachments(artifact_store.as_ref(), &attachment_index, &attachments)?;
+            let attachments = stage_attachments(artifact_store.as_ref(), &attachments)?;
             let request = run_request(
                 &model,
                 input,

@@ -173,6 +173,7 @@ async fn settle_external_model<C: Clock, R: RandomSource>(
     response: ModelResponse,
     sources: &SettlementSources<C, R>,
 ) -> Result<ModelResumeAction, RunHandleError> {
+    let locator = seed.locator.clone();
     let driver = ModelDriverResult {
         seed: seed.clone(),
         draft,
@@ -226,6 +227,9 @@ async fn settle_external_model<C: Clock, R: RandomSource>(
             if let Some(fault) = outcome.fault {
                 return Err(RunHandleError::Faulted { code: fault.code });
             }
+            sources
+                .pin_committed_artifacts(&locator, completion.artifacts())
+                .await?;
             Ok(ModelResumeAction::UseRecorded)
         }
         Err(CommitCoordinatorError::Decision {
@@ -345,8 +349,13 @@ pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(
         )
         .map_err(|error| model_handle_error(&ModelError::from(error)))?);
     }
+    let locator = driver_result.seed.locator.clone();
     let allocation = allocate_settlement(&driver_result, sources)?;
     let settled = build_settlement(driver_result, now, &allocation)?;
+    let artifacts = match &settled.outcome {
+        ModelSettlement::Completed { completion, .. } => completion.artifacts().to_vec(),
+        ModelSettlement::Failed(_) | ModelSettlement::Deferred(_) => Vec::new(),
+    };
     let outcome = coordinator
         .submit(
             TransitionEnv {
@@ -360,6 +369,9 @@ pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(
     if let Some(fault) = outcome.fault {
         return Err(RunHandleError::Faulted { code: fault.code });
     }
+    sources
+        .pin_committed_artifacts(&locator, &artifacts)
+        .await?;
     Ok(())
 }
 

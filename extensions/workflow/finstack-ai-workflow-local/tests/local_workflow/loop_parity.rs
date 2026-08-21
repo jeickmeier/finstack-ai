@@ -23,7 +23,7 @@ async fn trusted_session_matches_direct_owner_journal() {
             drive.abort();
             let _ = drive.await;
             drop(owner);
-            let mut session = WorkflowSession::trusted(store.clone(), locator(), clock, 500)
+            let mut session = WorkflowSession::trusted_seeded(store.clone(), locator(), clock, 500)
                 .await
                 .expect("attach")
                 .with_ports(model, locked_profile(), None);

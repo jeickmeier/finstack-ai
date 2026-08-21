@@ -110,7 +110,7 @@ pub enum RecordBody {
     LaneMoved(LaneMoved),
     /// Disposable snapshot written.
     SnapshotWritten(SnapshotWritten),
-    /// Immutable conversation-tree entry (TDD §24.1).
+    /// Immutable conversation-tree entry (contract section 24.1).
     ConversationEntry(ConversationEntry),
 }
 

@@ -13,17 +13,20 @@ use finstack_ai_runtime::{
 };
 use futures_util::StreamExt;
 use reqwest::{Method, Response, StatusCode, Url};
-use tokio::io::AsyncReadExt;
+use serde::Deserialize;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::config::S3ObjectStoreConfig;
 use crate::request::{
-    BlobDigestHasher, ListTarget, RequestTarget, StreamingSha256, extract_tag_values, list_url,
-    map_status_error, map_transport_error, object_url, payload_sha256_hex,
+    BlobDigestHasher, ListTarget, RequestTarget, StreamingSha256, list_url, map_status_error,
+    map_transport_error, object_url, payload_sha256_hex,
 };
 use crate::sigv4::{SigningParams, UtcStamp, presign_url, sign_headers};
 
 /// 64 KiB read chunk used for both hash-pass and streaming-send file reads.
 const FILE_CHUNK_BYTES: usize = 64 * 1024;
+const LIST_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+const LIST_MAX_ENTRIES: usize = 1000;
 
 /// Header carrying the domain-separated content digest.
 const HEADER_DIGEST: &str = "x-amz-meta-fsai-digest";
@@ -109,6 +112,74 @@ impl ObjectStore for S3ObjectStore {
         let client = self.client.clone();
         let config = self.config.clone();
         Box::pin(async move { delete_impl(&client, &config, scope, key).await })
+    }
+
+    fn put_if_absent(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+        content: PutPayload,
+        metadata: ObjectMetadata,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        let client = self.client.clone();
+        let config = self.config.clone();
+        Box::pin(async move {
+            put_impl_condition(
+                &client,
+                &config,
+                scope,
+                key,
+                content,
+                metadata,
+                Some(("if-none-match", "*")),
+            )
+            .await
+        })
+    }
+
+    fn replace_if_digest(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+        expected: Digest,
+        content: PutPayload,
+        metadata: ObjectMetadata,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        let client = self.client.clone();
+        let config = self.config.clone();
+        Box::pin(async move {
+            let (current, etag) = current_digest_and_etag(&client, &config, &scope, &key).await?;
+            if current != expected {
+                return Err(ObjectError::Conflict);
+            }
+            put_impl_condition(
+                &client,
+                &config,
+                scope,
+                key,
+                content,
+                metadata,
+                Some(("if-match", etag.as_str())),
+            )
+            .await
+        })
+    }
+
+    fn delete_if_digest(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+        expected: Digest,
+    ) -> PortFuture<Result<(), ObjectError>> {
+        let client = self.client.clone();
+        let config = self.config.clone();
+        Box::pin(async move {
+            let (current, etag) = current_digest_and_etag(&client, &config, &scope, &key).await?;
+            if current != expected {
+                return Err(ObjectError::Conflict);
+            }
+            delete_impl_condition(&client, &config, scope, key, Some(etag.as_str())).await
+        })
     }
 
     fn list(
@@ -230,21 +301,20 @@ fn reject_if_content_length_exceeds(
     Ok(())
 }
 
-/// Reads a local file in two full passes: once to compute the real SHA-256
-/// payload hash, the domain-separated content digest, and total length
-/// (enforcing `max_bytes` as it goes so nothing over the ceiling is ever
-/// sent on the wire), and once — separately, in `stream_file_body` — to
-/// stream the body. The file is never materialized in memory.
-async fn hash_file(path: &Path, max_bytes: u64) -> Result<(String, Digest, u64), ObjectError> {
-    let mut file = tokio::fs::File::open(path)
+/// Copy a caller-controlled file into one private snapshot while hashing it.
+/// The request body owns this exact handle, eliminating path-reopen races.
+async fn snapshot_file(path: &Path, max_bytes: u64) -> Result<PutSource, ObjectError> {
+    let mut source = tokio::fs::File::open(path)
         .await
         .map_err(|error| io_error(&error))?;
+    let temp = tempfile::tempfile().map_err(|error| io_error(&error))?;
+    let mut file = tokio::fs::File::from_std(temp);
     let mut raw_hasher = StreamingSha256::new();
     let mut blob_hasher = BlobDigestHasher::new();
     let mut total: u64 = 0;
     let mut buffer = vec![0_u8; FILE_CHUNK_BYTES];
     loop {
-        let read = file
+        let read = source
             .read(&mut buffer)
             .await
             .map_err(|error| io_error(&error))?;
@@ -263,10 +333,22 @@ async fn hash_file(path: &Path, max_bytes: u64) -> Result<(String, Digest, u64),
                 max: max_bytes,
             });
         }
+        file.write_all(chunk)
+            .await
+            .map_err(|error| io_error(&error))?;
     }
+    file.flush().await.map_err(|error| io_error(&error))?;
+    file.seek(std::io::SeekFrom::Start(0))
+        .await
+        .map_err(|error| io_error(&error))?;
     let payload_hash = raw_hasher.finish();
     let (content_digest, _len) = blob_hasher.finish()?;
-    Ok((payload_hash, content_digest, total))
+    Ok(PutSource {
+        payload_hash,
+        content_digest,
+        length: total,
+        body: file_body_stream(file),
+    })
 }
 
 fn file_body_stream(file: tokio::fs::File) -> reqwest::Body {
@@ -312,18 +394,7 @@ async fn put_source(content: PutPayload, max_bytes: u64) -> Result<PutSource, Ob
                 body: reqwest::Body::from(bytes),
             })
         }
-        PutPayload::File(path) => {
-            let (payload_hash, content_digest, length) = hash_file(&path, max_bytes).await?;
-            let file = tokio::fs::File::open(&path)
-                .await
-                .map_err(|error| io_error(&error))?;
-            Ok(PutSource {
-                payload_hash,
-                content_digest,
-                length,
-                body: file_body_stream(file),
-            })
-        }
+        PutPayload::File(path) => snapshot_file(&path, max_bytes).await,
     }
 }
 
@@ -334,6 +405,18 @@ async fn put_impl(
     key: ObjectKey,
     content: PutPayload,
     metadata: ObjectMetadata,
+) -> Result<ObjectRef, ObjectError> {
+    put_impl_condition(client, config, scope, key, content, metadata, None).await
+}
+
+async fn put_impl_condition(
+    client: &reqwest::Client,
+    config: &S3ObjectStoreConfig,
+    scope: ObjectScope,
+    key: ObjectKey,
+    content: PutPayload,
+    metadata: ObjectMetadata,
+    condition: Option<(&str, &str)>,
 ) -> Result<ObjectRef, ObjectError> {
     validate_object_metadata(&metadata)?;
     let scope_digest = scope.digest()?;
@@ -353,6 +436,9 @@ async fn put_impl(
     if let Some(name) = &metadata.name {
         extra_headers.push((HEADER_NAME.to_owned(), crate::sigv4::uri_encode(name, true)));
     }
+    if let Some((name, value)) = condition {
+        extra_headers.push((name.to_owned(), value.to_owned()));
+    }
 
     let signed = sign_headers(
         &params,
@@ -370,6 +456,9 @@ async fn put_impl(
         .await
         .map_err(|_error| map_transport_error())?;
     let status = response.status();
+    if status == StatusCode::PRECONDITION_FAILED || status == StatusCode::CONFLICT {
+        return Err(ObjectError::Conflict);
+    }
     if !status.is_success() {
         return Err(map_status_error(status));
     }
@@ -594,11 +683,61 @@ async fn delete_impl(
     scope: ObjectScope,
     key: ObjectKey,
 ) -> Result<(), ObjectError> {
+    delete_impl_condition(client, config, scope, key, None).await
+}
+
+async fn current_digest_and_etag(
+    client: &reqwest::Client,
+    config: &S3ObjectStoreConfig,
+    scope: &ObjectScope,
+    key: &ObjectKey,
+) -> Result<(Digest, String), ObjectError> {
+    let scope_digest = scope.digest()?;
+    let physical = physical_object_key(config.key_prefix(), &scope_digest, key);
+    let target = object_url(config, &physical)?;
+    let params = signing_params(config, UtcStamp::now())?;
+    let empty_hash = payload_sha256_hex(b"");
+    let signed = sign_headers(
+        &params,
+        "HEAD",
+        &target.path,
+        "",
+        &target.host,
+        &empty_hash,
+        &[],
+    );
+    let response = send_signed(client, Method::HEAD, target.url, &signed)
+        .send()
+        .await
+        .map_err(|_error| map_transport_error())?;
+    if !response.status().is_success() {
+        return Err(map_status_error(response.status()));
+    }
+    parse_scope_digest(&header_value(&response, HEADER_SCOPE)?, scope_digest)?;
+    let digest = Digest::from_hex(&header_value(&response, HEADER_DIGEST)?).map_err(|_error| {
+        ObjectError::Integrity {
+            message: Arc::from("malformed_digest_header"),
+        }
+    })?;
+    let etag = header_value(&response, "etag")?;
+    Ok((digest, etag))
+}
+
+async fn delete_impl_condition(
+    client: &reqwest::Client,
+    config: &S3ObjectStoreConfig,
+    scope: ObjectScope,
+    key: ObjectKey,
+    etag: Option<&str>,
+) -> Result<(), ObjectError> {
     let scope_digest = scope.digest()?;
     let physical = physical_object_key(config.key_prefix(), &scope_digest, &key);
     let target = object_url(config, &physical)?;
     let params = signing_params(config, UtcStamp::now())?;
     let empty_hash = payload_sha256_hex(b"");
+    let extra_headers = etag
+        .map(|value| vec![("if-match".to_owned(), value.to_owned())])
+        .unwrap_or_default();
     let signed = sign_headers(
         &params,
         "DELETE",
@@ -606,7 +745,7 @@ async fn delete_impl(
         "",
         &target.host,
         &empty_hash,
-        &[],
+        &extra_headers,
     );
 
     let response = send_signed(client, Method::DELETE, target.url, &signed)
@@ -614,7 +753,10 @@ async fn delete_impl(
         .await
         .map_err(|_error| map_transport_error())?;
     let status = response.status();
-    if status.is_success() || status == StatusCode::NOT_FOUND {
+    if status == StatusCode::PRECONDITION_FAILED || status == StatusCode::CONFLICT {
+        return Err(ObjectError::Conflict);
+    }
+    if status.is_success() || (status == StatusCode::NOT_FOUND && etag.is_none()) {
         return Ok(());
     }
     Err(map_status_error(status))
@@ -622,10 +764,9 @@ async fn delete_impl(
 
 fn scope_prefix(config: &S3ObjectStoreConfig, scope_digest: &Digest) -> String {
     let hex = scope_digest.to_hex();
-    let hex16 = hex.get(..16).unwrap_or(&hex);
     match config.key_prefix() {
-        Some(prefix) if !prefix.is_empty() => format!("{prefix}/{hex16}/"),
-        _ => format!("{hex16}/"),
+        Some(prefix) if !prefix.is_empty() => format!("{prefix}/{hex}/"),
+        _ => format!("{hex}/"),
     }
 }
 
@@ -669,43 +810,58 @@ async fn list_impl(
     if !status.is_success() {
         return Err(map_status_error(status));
     }
-    let body = response
-        .text()
-        .await
-        .map_err(|_error| map_transport_error())?;
+    reject_if_content_length_exceeds(&response, LIST_RESPONSE_MAX_BYTES)?;
+    let mut body = Vec::new();
+    let mut total = 0_u64;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_error| map_transport_error())?;
+        total = total.saturating_add(chunk.len() as u64);
+        if total > LIST_RESPONSE_MAX_BYTES {
+            return Err(ObjectError::TooLarge {
+                len: total,
+                max: LIST_RESPONSE_MAX_BYTES,
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let parsed: ListBucketResult =
+        quick_xml::de::from_reader(body.as_slice()).map_err(|_error| ObjectError::Integrity {
+            message: Arc::from("malformed_list_xml"),
+        })?;
+    if parsed.contents.len() > LIST_MAX_ENTRIES
+        || (parsed.is_truncated
+            && parsed
+                .next_continuation_token
+                .as_deref()
+                .is_none_or(str::is_empty))
+        || (!parsed.is_truncated && parsed.next_continuation_token.is_some())
+    {
+        return Err(ObjectError::Integrity {
+            message: Arc::from("invalid_list_pagination"),
+        });
+    }
 
-    let keys = extract_tag_values(&body, "Key");
-    let sizes = extract_tag_values(&body, "Size");
-    let truncated = extract_tag_values(&body, "IsTruncated")
-        .first()
-        .is_some_and(|value| value == "true");
-    let next_token = extract_tag_values(&body, "NextContinuationToken")
-        .into_iter()
-        .next();
-
-    let mut entries = Vec::with_capacity(keys.len());
-    for (raw_key, raw_size) in keys.iter().zip(sizes.iter()) {
+    let mut entries = Vec::with_capacity(parsed.contents.len());
+    for content in parsed.contents {
         // Fail closed: a key outside the caller's scope prefix means the
         // endpoint ignored `prefix=` (compromised or buggy). Surfacing it
         // anyway would leak another tenant's physical key (including their
         // scope digest) as a valid in-scope entry.
-        let Some(logical) = raw_key.strip_prefix(&base_prefix) else {
+        let Some(logical) = content.key.strip_prefix(&base_prefix) else {
             return Err(ObjectError::Integrity {
                 message: Arc::from("list_key_outside_scope"),
             });
         };
         let object_key = ObjectKey::try_new(logical)?;
-        let length: u64 = raw_size.parse().map_err(|_error| ObjectError::Io {
-            message: Arc::from("invalid_list_size"),
-        })?;
         entries.push(ObjectEntry {
             key: object_key,
-            length,
+            length: content.size,
         });
     }
 
-    let next = if truncated {
-        next_token.map(PageToken::opaque)
+    let next = if parsed.is_truncated {
+        parsed.next_continuation_token.map(PageToken::opaque)
     } else {
         None
     };
@@ -721,7 +877,11 @@ fn presign_get_impl(
     let scope_digest = scope.digest()?;
     let physical = physical_object_key(config.key_prefix(), &scope_digest, key);
     let target: RequestTarget = object_url(config, &physical)?;
-    let clamped = expiry.min(config.presign_expiry_max());
+    if expiry.is_zero() || expiry.subsec_nanos() != 0 || expiry > config.presign_expiry_max() {
+        return Err(ObjectError::InvalidMetadata {
+            message: Arc::from("invalid_presign_expiry"),
+        });
+    }
     let params = signing_params(config, UtcStamp::now())?;
     let url = presign_url(
         &params,
@@ -729,10 +889,28 @@ fn presign_get_impl(
         &target.path,
         &target.host,
         &target.scheme,
-        clamped.as_secs(),
+        expiry.as_secs(),
     );
     Ok(PresignedUrl {
         url: Arc::from(url),
-        expires_in_secs: clamped.as_secs(),
+        expires_in_secs: expiry.as_secs(),
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ListBucketResult {
+    #[serde(rename = "Contents", default)]
+    contents: Vec<ListContent>,
+    #[serde(default)]
+    is_truncated: bool,
+    #[serde(default)]
+    next_continuation_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ListContent {
+    key: String,
+    size: u64,
 }

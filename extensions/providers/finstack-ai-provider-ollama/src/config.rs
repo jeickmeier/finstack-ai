@@ -2,6 +2,7 @@
 
 use core::fmt;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -220,6 +221,37 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
             "provider base URL contains forbidden components",
         ));
     }
+    if url.scheme() == "http"
+        && !url
+            .host_str()
+            .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
+            .is_some_and(|address| address.is_loopback())
+    {
+        return Err(config_error(
+            "plaintext provider base URL must use a loopback IP",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_context_profile(
+    hard_input_bytes: u64,
+    context_window_tokens: u64,
+    max_output_tokens: u64,
+    reserved_output_tokens: u64,
+    provider_overhead_tokens: u64,
+) -> Result<(), ModelError> {
+    if hard_input_bytes == 0
+        || context_window_tokens == 0
+        || max_output_tokens == 0
+        || reserved_output_tokens == 0
+        || max_output_tokens > context_window_tokens
+        || reserved_output_tokens
+            .checked_add(provider_overhead_tokens)
+            .is_none_or(|total| total > context_window_tokens)
+    {
+        return Err(config_error("provider model context profile is invalid"));
+    }
     Ok(())
 }
 
@@ -276,17 +308,13 @@ impl OllamaModelConfig {
         provider_overhead_tokens: u64,
     ) -> Result<Self, ModelError> {
         let name = ModelName::try_new(name)?;
-        if hard_input_bytes == 0
-            || context_window_tokens == 0
-            || max_output_tokens == 0
-            || reserved_output_tokens == 0
-            || max_output_tokens > context_window_tokens
-            || reserved_output_tokens
-                .checked_add(provider_overhead_tokens)
-                .is_none_or(|total| total > context_window_tokens)
-        {
-            return Err(config_error("provider model context profile is invalid"));
-        }
+        validate_context_profile(
+            hard_input_bytes,
+            context_window_tokens,
+            max_output_tokens,
+            reserved_output_tokens,
+            provider_overhead_tokens,
+        )?;
         Ok(Self {
             name,
             hard_input_bytes,
@@ -343,7 +371,27 @@ impl OllamaModelConfig {
         }
     }
 
-    pub(crate) fn apply_capabilities(&mut self, update: &ModelCapabilities) {
+    pub(crate) fn validate(&self) -> Result<(), ModelError> {
+        validate_context_profile(
+            self.hard_input_bytes,
+            self.context_window_tokens,
+            self.max_output_tokens,
+            self.reserved_output_tokens,
+            self.provider_overhead_tokens,
+        )
+    }
+
+    pub(crate) fn apply_capabilities(
+        &mut self,
+        update: &ModelCapabilities,
+    ) -> Result<(), ModelError> {
+        validate_context_profile(
+            update.context_profile.hard_input_bytes,
+            update.context_profile.context_window_tokens,
+            update.context_profile.max_output_tokens,
+            update.context_profile.reserved_output_tokens,
+            update.context_profile.provider_overhead_tokens,
+        )?;
         self.reasoning = update.reasoning;
         self.input_images = update.input.images;
         self.hard_input_bytes = update.context_profile.hard_input_bytes;
@@ -351,6 +399,7 @@ impl OllamaModelConfig {
         self.max_output_tokens = update.context_profile.max_output_tokens;
         self.reserved_output_tokens = update.context_profile.reserved_output_tokens;
         self.provider_overhead_tokens = update.context_profile.provider_overhead_tokens;
+        Ok(())
     }
 }
 
@@ -430,7 +479,9 @@ mod tests {
             OllamaModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
                 .expect("model");
         assert!(!refreshed.capabilities().input.images);
-        refreshed.apply_capabilities(&model.capabilities());
+        refreshed
+            .apply_capabilities(&model.capabilities())
+            .expect("apply");
         assert!(refreshed.capabilities().input.images);
     }
 
@@ -460,5 +511,23 @@ mod tests {
             with_key.header_map().expect_err("HTTP credential").code(),
             crate::error::CONFIG_INVALID
         );
+    }
+
+    #[test]
+    fn plaintext_http_rejects_non_loopback_hosts() {
+        for url in [
+            "http://example.test",
+            "http://192.0.2.1",
+            "http://localhost",
+        ] {
+            assert_eq!(
+                OllamaConfig::try_new(url)
+                    .expect_err("remote plaintext")
+                    .code(),
+                crate::error::CONFIG_INVALID
+            );
+        }
+        assert!(OllamaConfig::try_new("http://[::1]:11434").is_ok());
+        assert!(OllamaConfig::try_new("https://example.test").is_ok());
     }
 }

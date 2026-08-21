@@ -13,8 +13,8 @@ test("loads health, metadata, port fixtures, and the no-op trace", async ({
   expect(health).toBe("ok");
 
   const metadata = await page.evaluate(() => window.finstackTest.buildMetadata());
-  expect(metadata.version).toBe("1.0.0");
-  expect(metadata.engineVersion).toBe("1.0.0");
+  expect(metadata.version).toBe("2.0.0");
+  expect(metadata.engineVersion).toBe("2.0.0");
   expect(metadata.implementation).toBe("wasm");
   expect(metadata.target).toBe("wasm32-unknown-unknown");
 

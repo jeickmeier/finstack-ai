@@ -27,6 +27,8 @@ pub const OBJECT_INVALID_METADATA: &str = "object_invalid_metadata";
 pub const OBJECT_UNSUPPORTED: &str = "object_unsupported";
 /// Stable code for a local I/O failure.
 pub const OBJECT_IO_FAILURE: &str = "object_io_failure";
+/// Stable code for a failed conditional object mutation.
+pub const OBJECT_CONFLICT: &str = "object_conflict";
 
 /// Maximum logical key length in bytes.
 pub const MAX_OBJECT_KEY_BYTES: usize = 512;
@@ -271,6 +273,51 @@ pub trait ObjectStore: PortObject {
     /// Delete one object; deleting a missing object is not an error.
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>>;
 
+    /// Store only when no object exists at the exact scoped key.
+    fn put_if_absent(
+        &self,
+        _scope: ObjectScope,
+        _key: ObjectKey,
+        _content: PutPayload,
+        _metadata: ObjectMetadata,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        Box::pin(async {
+            Err(ObjectError::Unsupported {
+                operation: Arc::from("put_if_absent"),
+            })
+        })
+    }
+
+    /// Replace only when the currently stored content digest equals `expected`.
+    fn replace_if_digest(
+        &self,
+        _scope: ObjectScope,
+        _key: ObjectKey,
+        _expected: Digest,
+        _content: PutPayload,
+        _metadata: ObjectMetadata,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        Box::pin(async {
+            Err(ObjectError::Unsupported {
+                operation: Arc::from("replace_if_digest"),
+            })
+        })
+    }
+
+    /// Delete only when the currently stored content digest equals `expected`.
+    fn delete_if_digest(
+        &self,
+        _scope: ObjectScope,
+        _key: ObjectKey,
+        _expected: Digest,
+    ) -> PortFuture<Result<(), ObjectError>> {
+        Box::pin(async {
+            Err(ObjectError::Unsupported {
+                operation: Arc::from("delete_if_digest"),
+            })
+        })
+    }
+
     /// List keys within the caller's scope, optionally under a prefix.
     fn list(
         &self,
@@ -293,7 +340,7 @@ pub trait ObjectStore: PortObject {
     }
 }
 
-/// Compose the physical backend key: `{prefix}/{scope-digest-16-hex}/{key}`.
+/// Compose the physical backend key: `{prefix}/{scope-digest-hex}/{key}`.
 #[must_use]
 pub fn physical_object_key(
     key_prefix: Option<&str>,
@@ -301,10 +348,9 @@ pub fn physical_object_key(
     key: &ObjectKey,
 ) -> String {
     let hex = scope_digest.to_hex();
-    let hex16 = hex.get(..16).unwrap_or(&hex);
     match key_prefix {
-        Some(prefix) if !prefix.is_empty() => format!("{prefix}/{hex16}/{}", key.as_str()),
-        _ => format!("{hex16}/{}", key.as_str()),
+        Some(prefix) if !prefix.is_empty() => format!("{prefix}/{hex}/{}", key.as_str()),
+        _ => format!("{hex}/{}", key.as_str()),
     }
 }
 
@@ -340,6 +386,9 @@ pub enum ObjectError {
     /// Object is missing.
     #[error("{}: object is missing", OBJECT_NOT_FOUND)]
     NotFound,
+    /// A conditional mutation observed a different current object.
+    #[error("{}: conditional mutation precondition failed", OBJECT_CONFLICT)]
+    Conflict,
     /// Requested scope differs from the object's frozen binding.
     #[error(
         "{}: expected scope {expected}, actual scope {actual}",
@@ -398,6 +447,7 @@ impl ObjectError {
         match self {
             Self::Unavailable { .. } => OBJECT_UNAVAILABLE,
             Self::NotFound => OBJECT_NOT_FOUND,
+            Self::Conflict => OBJECT_CONFLICT,
             Self::ScopeMismatch { .. } => OBJECT_SCOPE_MISMATCH,
             Self::Integrity { .. } => OBJECT_INTEGRITY_FAILURE,
             Self::TooLarge { .. } => OBJECT_TOO_LARGE,
@@ -476,11 +526,11 @@ mod tests {
         let digest = scope().digest().expect("digest");
         let key = ObjectKey::try_new("doc.pdf").expect("key");
         let physical = physical_object_key(Some("finstack"), &digest, &key);
-        let hex16: String = digest.to_hex().chars().take(16).collect();
-        assert_eq!(physical, format!("finstack/{hex16}/doc.pdf"));
+        let hex = digest.to_hex();
+        assert_eq!(physical, format!("finstack/{hex}/doc.pdf"));
         assert_eq!(
             physical_object_key(None, &digest, &key),
-            format!("{hex16}/doc.pdf")
+            format!("{hex}/doc.pdf")
         );
     }
 

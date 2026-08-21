@@ -12,7 +12,7 @@ Trust class: JS host adapters are T2.
 They are not isolated. Stored prompts and results are
 T5.
 
-Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`; not on npm).
+Workspace version is **2.0.0** unpublished (last public tag `v0.1.0`; not on npm).
 
 ## Quick start
 

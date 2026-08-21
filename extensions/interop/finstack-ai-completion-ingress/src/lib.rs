@@ -25,6 +25,8 @@ mod config;
 mod ingress;
 mod token;
 
-pub use config::{CompletionIngressConfig, CompletionIngressConfigError, MIN_KEY_BYTES};
+pub use config::{
+    CompletionIngressConfig, CompletionIngressConfigError, MAX_VERIFICATION_KEYS, MIN_KEY_BYTES,
+};
 pub use ingress::{CompletionGrant, CompletionIngress, IngressError, MAX_BODY_BYTES, MintError};
 pub use token::{CallbackToken, MAX_TOKEN_BYTES};

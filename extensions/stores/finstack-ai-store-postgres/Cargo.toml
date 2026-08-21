@@ -17,6 +17,9 @@ finstack-ai-runtime = { workspace = true, default-features = false, features = [
 finstack-ai-store-common = { workspace = true }
 tokio = { workspace = true }
 tokio-postgres = { workspace = true }
+tokio-postgres-rustls = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
 
 [dev-dependencies]
 finstack-ai-test = { workspace = true }

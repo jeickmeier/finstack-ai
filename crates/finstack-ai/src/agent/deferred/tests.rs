@@ -299,7 +299,7 @@ async fn isolated_child_request(
         .expect("child locator"),
         remote: None,
     };
-    ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: AgentRef {
             id: AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
@@ -314,8 +314,10 @@ async fn isolated_child_request(
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
-    }
+        request_digest: Digest::raw_json(b"null"),
+    };
+    request.request_digest = request.canonical_digest().expect("digest");
+    request
 }
 
 #[tokio::test]

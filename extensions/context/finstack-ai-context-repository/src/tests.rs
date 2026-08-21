@@ -132,3 +132,110 @@ async fn budget_truncate_omits_overflow_items() {
     assert!(!contribution.items.is_empty());
     assert!(contribution.estimated_tokens <= 8);
 }
+
+#[cfg(unix)]
+#[test]
+fn configuration_identity_includes_root_and_allowlist() {
+    let first = TempDir::new().expect("first root");
+    let second = TempDir::new().expect("second root");
+    let first_provider = RepositoryContextProvider::try_new(first.path()).expect("first provider");
+    let same_provider = RepositoryContextProvider::try_new(first.path()).expect("same provider");
+    let second_provider =
+        RepositoryContextProvider::try_new(second.path()).expect("second provider");
+    let narrowed = RepositoryContextProvider::try_with_allowlist(first.path(), ["README.md"])
+        .expect("narrowed provider");
+
+    assert_eq!(
+        first_provider.descriptor().invocation.configuration_digest,
+        same_provider.descriptor().invocation.configuration_digest
+    );
+    assert_ne!(
+        first_provider.descriptor().invocation.configuration_digest,
+        second_provider.descriptor().invocation.configuration_digest
+    );
+    assert_ne!(
+        first_provider.descriptor().invocation.configuration_digest,
+        narrowed.descriptor().invocation.configuration_digest
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cache_identity_tracks_ordered_file_content() {
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join("README.md"), "first").expect("readme");
+    let provider = RepositoryContextProvider::try_with_allowlist(root.path(), ["README.md"])
+        .expect("provider");
+    let first = provider
+        .collect(context(), request(ContextOverflowPolicy::Reject, 1_000))
+        .await
+        .expect("first collect");
+
+    std::fs::write(root.path().join("README.md"), "second").expect("readme update");
+    let second = provider
+        .collect(context(), request(ContextOverflowPolicy::Reject, 1_000))
+        .await
+        .expect("second collect");
+
+    assert_ne!(first.cache_key, second.cache_key);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn oversized_and_invalid_text_files_fail_closed() {
+    let oversized_root = TempDir::new().expect("oversized root");
+    std::fs::write(
+        oversized_root.path().join("README.md"),
+        vec![b'x'; MAX_FILE_BYTES + 1],
+    )
+    .expect("oversized file");
+    let oversized =
+        RepositoryContextProvider::try_with_allowlist(oversized_root.path(), ["README.md"])
+            .expect("oversized provider")
+            .collect(context(), request(ContextOverflowPolicy::Reject, 100_000))
+            .await
+            .expect_err("oversized file must fail");
+    assert_eq!(oversized.code(), REPOSITORY_FILE_TOO_LARGE);
+
+    let invalid_root = TempDir::new().expect("invalid root");
+    std::fs::write(invalid_root.path().join("README.md"), [0xff, 0xfe]).expect("invalid file");
+    let invalid = RepositoryContextProvider::try_with_allowlist(invalid_root.path(), ["README.md"])
+        .expect("invalid provider")
+        .collect(context(), request(ContextOverflowPolicy::Reject, 1_000))
+        .await
+        .expect_err("invalid text must fail");
+    assert_eq!(invalid.code(), REPOSITORY_TEXT_INVALID);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinked_allowlisted_file_fails_closed() {
+    use std::os::unix::fs::symlink;
+
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join("actual.md"), "secret").expect("actual");
+    symlink("actual.md", root.path().join("README.md")).expect("symlink");
+    let error = RepositoryContextProvider::try_with_allowlist(root.path(), ["README.md"])
+        .expect("provider")
+        .collect(context(), request(ContextOverflowPolicy::Reject, 1_000))
+        .await
+        .expect_err("symlink must fail");
+    assert_eq!(error.code(), REPOSITORY_PATH_UNSAFE);
+}
+
+#[cfg(unix)]
+#[test]
+fn malformed_allowlists_are_rejected() {
+    let root = TempDir::new().expect("root");
+    for allowlist in [
+        vec!["README.md", "README.md"],
+        vec!["./README.md"],
+        vec!["nested//README.md"],
+        vec!["nested/../README.md"],
+    ] {
+        assert!(
+            RepositoryContextProvider::try_with_allowlist(root.path(), allowlist).is_err(),
+            "allowlist should be rejected"
+        );
+    }
+}

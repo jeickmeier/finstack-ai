@@ -5,9 +5,10 @@ request draft before it leaves the process. The canonical, journaled
 conversation is never touched: only the `ModelRequestDraft` is rewritten, via
 `StageOutcome::Replace`, exactly like the sibling document-ingest middleware.
 Every detected secret is replaced by a stable `[REDACTED:<kind>]` marker
-carrying nothing recoverable. Redaction is deterministic, idempotent, and
-fail-soft — an internal failure passes the affected content through
-unmodified rather than aborting the run.
+carrying nothing recoverable. Redaction is deterministic and idempotent. If a
+detected rewrite would exceed the text ceiling, the whole affected block is
+replaced with `[REDACTED:oversized]`; malformed wrapped replacements and
+unexpected reconstruction failures abort with a stable, non-secret error.
 
 ## Detectors
 
@@ -45,7 +46,8 @@ rewrite is silently discarded. Therefore:
   registered. The wrapper takes the inner middleware's chain slot (its
   ordering), invokes it first, and redacts whatever draft it produces — so
   Markdown extracted from attached documents is redacted too. Register the
-  wrapper *instead of* the inner middleware, never both.
+  wrapper *instead of* the inner middleware, never both. The inner middleware
+  must be `BeforeModel`-only, `Standard`, and `RecomputeSafe`.
 - **Context compactors**: do not register this middleware together with a
   `ContextCompactor`-role middleware (e.g. finstack-ai-middleware-compaction).
   The settlement applier lands the compaction projection — validated against
@@ -68,5 +70,4 @@ in place:
 
 Entropy/heuristic detection, custom patterns, allowlists, reversible
 tokenization, structured-JSON redaction, SSN/phone/address detection, and
-bindings exposure (follow-up). See
-`docs/superpowers/specs/2026-08-20-redaction-design.md`.
+bindings exposure.

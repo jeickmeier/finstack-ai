@@ -19,6 +19,21 @@ pub enum WorkerError {
         /// Stable reason code.
         code: &'static str,
     },
+    /// A durable key was reused with different immutable content.
+    #[error("worker conflict: {code}")]
+    Conflict {
+        /// Stable reason code.
+        code: &'static str,
+    },
+    /// Worker construction or loop configuration is invalid.
+    #[error("invalid worker configuration: {code}")]
+    InvalidConfiguration {
+        /// Stable reason code.
+        code: &'static str,
+    },
+    /// The worker no longer owns the lease guarding an in-flight resume.
+    #[error("worker lease lost")]
+    LeaseLost,
     /// Clock or lease arithmetic left the representable range.
     #[error("worker time overflow")]
     TimeOverflow,
@@ -44,7 +59,11 @@ impl WorkerError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::StoreUnavailable { code } | Self::StoreIntegrity { code } => code,
+            Self::StoreUnavailable { code }
+            | Self::StoreIntegrity { code }
+            | Self::Conflict { code }
+            | Self::InvalidConfiguration { code } => code,
+            Self::LeaseLost => "lease_lost",
             Self::TimeOverflow => "time_overflow",
             Self::UnknownKind { .. } => "unknown_workflow_kind",
             Self::NotParked => "not_parked",

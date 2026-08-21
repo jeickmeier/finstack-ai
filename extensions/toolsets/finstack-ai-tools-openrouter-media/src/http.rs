@@ -5,7 +5,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 pub(crate) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use finstack_ai_kernel::{ErrorCategory, Metadata, Sensitivity, Timestamp};
+use finstack_ai_kernel::{ArtifactRef, ErrorCategory, Metadata, Sensitivity, Timestamp};
+use finstack_ai_net_guard::{BodyReadInterrupt, NetGuardError, read_body_bounded_interruptible};
 use finstack_ai_runtime::{
     ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ToolCallContext, ToolError,
     stage_required_artifact,
@@ -33,6 +34,11 @@ pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// Exact standard-base64 length of `byte_length` raw bytes (`4 * n.div_ceil(3)`).
 pub(crate) fn base64_encoded_len(byte_length: usize) -> usize {
     byte_length.div_ceil(3).saturating_mul(4)
+}
+
+pub(crate) struct DeliveredMedia {
+    pub(crate) value: serde_json::Value,
+    pub(crate) artifact: Option<ArtifactRef>,
 }
 
 /// Max raw bytes whose standard-base64 encoding still fits `max_result_bytes`.
@@ -91,7 +97,7 @@ pub(crate) async fn deliver_media(
     store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
     max_result_bytes: usize,
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<DeliveredMedia, ToolError> {
     let byte_length = bytes.len();
     let Some(store) = store else {
         if base64_encoded_len(byte_length) > max_result_bytes {
@@ -101,11 +107,14 @@ pub(crate) async fn deliver_media(
                 "openrouter media result exceeds the configured byte limit",
             ));
         }
-        return Ok(serde_json::json!({
-            "b64_data": BASE64_STANDARD.encode(bytes),
-            "media_type": media_type,
-            "byte_length": byte_length,
-        }));
+        return Ok(DeliveredMedia {
+            value: serde_json::json!({
+                "b64_data": BASE64_STANDARD.encode(bytes),
+                "media_type": media_type,
+                "byte_length": byte_length,
+            }),
+            artifact: None,
+        });
     };
     let artifact = stage_required_artifact(
         store.as_ref(),
@@ -131,11 +140,14 @@ pub(crate) async fn deliver_media(
             "openrouter media artifact staging failed",
         )
     })?;
-    Ok(serde_json::json!({
-        "artifact": artifact,
-        "media_type": media_type,
-        "byte_length": byte_length,
-    }))
+    Ok(DeliveredMedia {
+        value: serde_json::json!({
+            "artifact": artifact,
+            "media_type": media_type,
+            "byte_length": byte_length,
+        }),
+        artifact: Some(artifact),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -180,7 +192,7 @@ async fn dispatch(
     };
     let status = response.status();
     if !status.is_success() {
-        return Err(endpoint_rejected("endpoint", status, response).await);
+        return Err(endpoint_rejected("endpoint", status, response, ctx).await);
     }
     Ok(response)
 }
@@ -213,7 +225,7 @@ pub(crate) async fn send_bytes(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    let bytes = fetch_bytes_bounded(response, cap).await?;
+    let bytes = fetch_bytes_bounded(response, cap, ctx).await?;
     Ok((bytes, content_type))
 }
 
@@ -240,40 +252,45 @@ pub(crate) async fn send_json<T: for<'de> Deserialize<'de>>(
         ctx,
     )
     .await?;
-    read_bounded_json(response, cap).await
+    read_bounded_json(response, cap, ctx).await
 }
 
 pub(crate) async fn fetch_bytes_bounded(
     response: reqwest::Response,
     cap: usize,
+    ctx: &ToolCallContext,
 ) -> Result<Vec<u8>, ToolError> {
-    let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| {
-            tool_error(
-                OPENROUTER_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openrouter media response is invalid",
-            )
-        })?;
-        if body.len().saturating_add(chunk.len()) > cap {
-            return Err(tool_error(
-                OPENROUTER_MEDIA_LIMIT_EXCEEDED,
-                ErrorCategory::Limit,
-                "openrouter media response exceeds the configured byte limit",
-            ));
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+    let cancellation = ctx.run.cancellation.clone();
+    read_body_bounded_interruptible(
+        response,
+        cap,
+        BodyReadInterrupt::new(
+            async move { cancellation.cancelled().await },
+            wait_deadline(ctx.run.deadline),
+        ),
+    )
+    .await
+    .map_err(|error| match error {
+        NetGuardError::Cancelled | NetGuardError::DeadlineExceeded => timeout_error(),
+        NetGuardError::LimitExceeded => tool_error(
+            OPENROUTER_MEDIA_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "openrouter media response exceeds the configured byte limit",
+        ),
+        _ => tool_error(
+            OPENROUTER_MEDIA_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "openrouter media response is invalid",
+        ),
+    })
 }
 
 async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
     response: reqwest::Response,
     cap: usize,
+    ctx: &ToolCallContext,
 ) -> Result<T, ToolError> {
-    let body = fetch_bytes_bounded(response, cap).await?;
+    let body = fetch_bytes_bounded(response, cap, ctx).await?;
     serde_json::from_slice(&body).map_err(|_| {
         tool_error(
             OPENROUTER_MEDIA_TRANSPORT_FAILED,
@@ -331,8 +348,9 @@ pub(crate) async fn endpoint_rejected(
     what: &'static str,
     status: reqwest::StatusCode,
     response: reqwest::Response,
+    ctx: &ToolCallContext,
 ) -> ToolError {
-    let message = match rejection_detail(response).await {
+    let message = match rejection_detail(response, ctx).await {
         Some(detail) => {
             format!("openrouter media {what} rejected the request with HTTP {status}: {detail}")
         }
@@ -352,10 +370,18 @@ pub(crate) async fn endpoint_rejected(
 ///
 /// Reads at most [`ERROR_BODY_CAP`] bytes so a hostile or malformed endpoint
 /// cannot stream an unbounded body into an error message.
-async fn rejection_detail(response: reqwest::Response) -> Option<String> {
+async fn rejection_detail(response: reqwest::Response, ctx: &ToolCallContext) -> Option<String> {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
-    while let Some(Ok(chunk)) = stream.next().await {
+    loop {
+        let next = tokio::select! {
+            () = ctx.run.cancellation.cancelled() => break,
+            () = wait_deadline(ctx.run.deadline) => break,
+            chunk = stream.next() => chunk,
+        };
+        let Some(Ok(chunk)) = next else {
+            break;
+        };
         let remaining = ERROR_BODY_CAP.saturating_sub(body.len());
         if remaining == 0 {
             break;

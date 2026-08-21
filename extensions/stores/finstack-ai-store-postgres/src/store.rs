@@ -1,40 +1,24 @@
 //! Store handle: [`PostgresJournalStore::try_open`] and the shared
-//! per-connection setup every pooled connection runs (spec D2/D6/D8).
+//! per-connection setup every pooled connection runs.
 //!
 //! ## TLS
 //!
-//! This crate's v1 posture is plaintext-only: every pooled connection is
-//! opened with `tokio_postgres::NoTls`, and the crate depends on neither
-//! `rustls` nor `tokio-postgres-rustls`. Building a working
-//! `rustls::ClientConfig` requires a trust root store; the offline,
-//! reproducible option (bundling `webpki-roots`) and the "use the platform
-//! roots" option both add real complexity and a dependency decision that
-//! belongs to its own change, not this one. The plan's TLS risk note
-//! pre-authorizes deferring this: any connection URL whose `sslmode`
-//! demands TLS (`require`, `verify-ca`, `verify-full`) is rejected up front
-//! in [`PostgresJournalStore::try_open`] with
-//! `StoreError::InvalidRequest{reason_code: "postgres_tls_unsupported"}`
-//! rather than silently connecting in plaintext. Wiring TLS support
-//! (`tokio-postgres-rustls` + `rustls`, or an equivalent) is follow-up work.
+//! TLS is required by default. The store verifies server hostnames against
+//! the bundled `WebPKI` roots plus any caller-provided PEM trust anchors.
+//! Plaintext transport is available only through the explicit
+//! [`PostgresTlsMode::Disable`] setting.
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use finstack_ai_runtime::StoreError;
 use finstack_ai_store_common::VerifiedHeadCache;
+use rustls::pki_types::{CertificateDer, pem::PemObject};
 
-use crate::config::{PostgresDurability, PostgresStoreConfig};
+use crate::config::{PostgresDurability, PostgresStoreConfig, PostgresTlsMode};
 use crate::error::map_postgres_error;
 use crate::pool::Pool;
 use crate::schema::ensure_schema;
-
-/// `sslmode` values that require a TLS connection. Anything else (`disable`,
-/// `allow`, `prefer`, or an absent `sslmode`) is compatible with the
-/// plaintext-only [`connect_and_prepare`] below.
-const TLS_REQUIRED_SSLMODES: [&str; 3] = [
-    "sslmode=require",
-    "sslmode=verify-ca",
-    "sslmode=verify-full",
-];
 
 /// Human-readable, stable [`finstack_ai_runtime::StoreHealth::detail`] text
 /// for each durability mode (spec D6).
@@ -80,14 +64,15 @@ impl PostgresJournalStore {
     /// from [`ensure_schema`] otherwise.
     pub async fn try_open(config: PostgresStoreConfig) -> Result<Self, StoreError> {
         config.validate()?;
-        if url_requires_tls(&config.url) {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "postgres_tls_unsupported",
-            });
-        }
-
         let client = connect_and_prepare(&config).await?;
-        ensure_schema(&client, &config.schema, config.schema_policy).await?;
+        tokio::time::timeout(
+            config.operation_timeout,
+            ensure_schema(&client, &config.schema, config.schema_policy),
+        )
+        .await
+        .map_err(|_| StoreError::Unavailable {
+            reason_code: "postgres_operation_timeout",
+        })??;
 
         let pool_config = config.clone();
         let pool = Pool::new(
@@ -112,19 +97,6 @@ impl PostgresJournalStore {
     }
 }
 
-/// Returns `true` if `url` sets an `sslmode` that requires TLS.
-///
-/// A plain substring check is sufficient here (rather than parsing the URL
-/// as a full connection string): `sslmode` only ever appears as a
-/// `key=value` query/keyword pair, and every value that requires TLS is
-/// checked verbatim.
-fn url_requires_tls(url: &str) -> bool {
-    let lower = url.to_ascii_lowercase();
-    TLS_REQUIRED_SSLMODES
-        .iter()
-        .any(|needle| lower.contains(needle))
-}
-
 /// Open one physical connection, apply its session-scoped setup (spec D6),
 /// and spawn its driving task.
 ///
@@ -137,42 +109,102 @@ fn url_requires_tls(url: &str) -> bool {
 pub(crate) async fn connect_and_prepare(
     config: &PostgresStoreConfig,
 ) -> Result<tokio_postgres::Client, StoreError> {
-    let connect = tokio_postgres::connect(&config.url, tokio_postgres::NoTls);
-    let (client, connection) = tokio::time::timeout(config.connect_timeout, connect)
-        .await
-        .map_err(|_elapsed| StoreError::Unavailable {
-            reason_code: "postgres_unavailable",
-        })?
-        .map_err(|error| map_postgres_error(&error))?;
-
-    // `tokio_postgres::connect` returns a `Connection` future that must be
-    // polled for the client to make any progress; drive it on its own task
-    // for the lifetime of the connection (mirrors the crate's own test
-    // helper and the driver's documented usage pattern).
-    tokio::spawn(async move {
-        // Best-effort: once this errors, subsequent uses of `client` will
-        // themselves start failing, which existing callers already handle
-        // through `map_postgres_error`.
-        let _ = connection.await;
-    });
-
-    let synchronous_commit = match config.durability {
-        PostgresDurability::Durable => "on",
-        PostgresDurability::Relaxed => "off",
+    let mut postgres =
+        tokio_postgres::Config::from_str(&config.url).map_err(|_| StoreError::InvalidRequest {
+            reason_code: "postgres_url_invalid",
+        })?;
+    let client = match config.tls_mode {
+        PostgresTlsMode::Disable => {
+            postgres.ssl_mode(tokio_postgres::config::SslMode::Disable);
+            let connect = postgres.connect(tokio_postgres::NoTls);
+            let (client, connection) = tokio::time::timeout(config.connect_timeout, connect)
+                .await
+                .map_err(|_| StoreError::Unavailable {
+                    reason_code: "postgres_unavailable",
+                })?
+                .map_err(|error| map_postgres_error(&error))?;
+            tokio::spawn(async move {
+                let _ = connection.await;
+            });
+            client
+        }
+        PostgresTlsMode::Require => {
+            postgres.ssl_mode(tokio_postgres::config::SslMode::Require);
+            let tls = postgres_tls(config)?;
+            let connect = postgres.connect(tls);
+            let (client, connection) = tokio::time::timeout(config.connect_timeout, connect)
+                .await
+                .map_err(|_| StoreError::Unavailable {
+                    reason_code: "postgres_unavailable",
+                })?
+                .map_err(|error| map_postgres_error(&error))?;
+            tokio::spawn(async move {
+                let _ = connection.await;
+            });
+            client
+        }
     };
-    client
-        .batch_execute(&format!("SET synchronous_commit = {synchronous_commit}"))
+
+    let setup = async {
+        let synchronous_commit = match config.durability {
+            PostgresDurability::Durable => "on",
+            PostgresDurability::Relaxed => "off",
+        };
+        let statement_timeout = config.operation_timeout.as_millis().max(1);
+        client
+            .batch_execute(&format!(
+                "SET synchronous_commit = {synchronous_commit}; SET statement_timeout = {statement_timeout}"
+            ))
+            .await
+            .map_err(|error| map_postgres_error(&error))?;
+        client
+            .batch_execute(&format!("SET search_path = {}", config.schema))
+            .await
+            .map_err(|error| map_postgres_error(&error))?;
+        Ok::<(), StoreError>(())
+    };
+    tokio::time::timeout(config.operation_timeout, setup)
         .await
-        .map_err(|error| map_postgres_error(&error))?;
-    // `config.validate()` (called before any connection is opened) already
-    // enforced the identifier grammar on `schema`, so interpolating it here
-    // is safe for the same reason `ensure_schema`'s DDL interpolation is.
-    client
-        .batch_execute(&format!("SET search_path = {}", config.schema))
-        .await
-        .map_err(|error| map_postgres_error(&error))?;
+        .map_err(|_| StoreError::Unavailable {
+            reason_code: "postgres_operation_timeout",
+        })??;
 
     Ok(client)
+}
+
+fn postgres_tls(
+    config: &PostgresStoreConfig,
+) -> Result<tokio_postgres_rustls::MakeRustlsConnect, StoreError> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(pem) = &config.tls_ca_pem {
+        let mut certificate_count = 0_usize;
+        for certificate in CertificateDer::pem_slice_iter(pem.as_ref()) {
+            let certificate = certificate.map_err(|_| StoreError::InvalidRequest {
+                reason_code: "postgres_tls_ca_invalid",
+            })?;
+            certificate_count += 1;
+            roots
+                .add(certificate)
+                .map_err(|_| StoreError::InvalidRequest {
+                    reason_code: "postgres_tls_ca_invalid",
+                })?;
+        }
+        if certificate_count == 0 {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "postgres_tls_ca_invalid",
+            });
+        }
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let client = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|_| StoreError::InvalidRequest {
+            reason_code: "postgres_tls_config_invalid",
+        })?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(client))
 }
 
 #[cfg(test)]
@@ -180,30 +212,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_sslmode_require() {
-        assert!(url_requires_tls(
-            "postgres://user:pass@host/db?sslmode=require"
-        ));
-        assert!(url_requires_tls(
-            "postgres://user:pass@host/db?sslmode=verify-ca"
-        ));
-        assert!(url_requires_tls(
-            "postgres://user:pass@host/db?sslmode=verify-full"
-        ));
-        assert!(url_requires_tls(
-            "postgres://user:pass@host/db?sslmode=REQUIRE"
-        ));
-    }
-
-    #[test]
-    fn tolerates_non_tls_sslmodes() {
-        for url in [
-            "postgres://user:pass@host/db",
-            "postgres://user:pass@host/db?sslmode=disable",
-            "postgres://user:pass@host/db?sslmode=allow",
-            "postgres://user:pass@host/db?sslmode=prefer",
-        ] {
-            assert!(!url_requires_tls(url), "{url} should not require TLS");
-        }
+    fn tls_builder_accepts_public_roots() {
+        let config = PostgresStoreConfig::new(
+            "postgres://localhost/db",
+            finstack_ai_runtime::StoreLimits {
+                sessions: 1,
+                batches_per_session: 1,
+                records_per_session: 1,
+                snapshot_bytes: 1,
+            },
+        );
+        assert!(postgres_tls(&config).is_ok());
     }
 }

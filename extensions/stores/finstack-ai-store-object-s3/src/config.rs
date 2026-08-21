@@ -90,11 +90,27 @@ impl S3ObjectStoreConfig {
         })
     }
 
-    /// Set a physical key prefix prepended ahead of the scope digest.
-    #[must_use]
-    pub fn with_key_prefix(mut self, key_prefix: impl AsRef<str>) -> Self {
-        self.key_prefix = Some(Arc::from(key_prefix.as_ref()));
-        self
+    /// Set a validated physical key prefix ahead of the scope digest.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty, oversized, relative, or otherwise unsafe segments.
+    pub fn try_with_key_prefix(mut self, key_prefix: impl AsRef<str>) -> Result<Self, ObjectError> {
+        let key_prefix = key_prefix.as_ref();
+        if key_prefix.is_empty()
+            || key_prefix.len() > 447
+            || key_prefix.split('/').any(|segment| {
+                segment.is_empty()
+                    || matches!(segment, "." | "..")
+                    || !segment.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
+                    })
+            })
+        {
+            return Err(invalid("invalid_key_prefix"));
+        }
+        self.key_prefix = Some(Arc::from(key_prefix));
+        Ok(self)
     }
 
     /// Select path-style or virtual-host-style addressing.
@@ -226,6 +242,7 @@ fn validate_endpoint(value: &str) -> Result<(), ObjectError> {
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
+        || !matches!(url.path(), "" | "/")
         || url.query().is_some()
         || url.fragment().is_some()
     {

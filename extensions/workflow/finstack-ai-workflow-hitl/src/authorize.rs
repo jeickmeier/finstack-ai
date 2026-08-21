@@ -31,15 +31,9 @@ pub trait ResolveAuthorizer: Send + Sync {
 /// An unscoped principal is denied — the kernel treats `None` as
 /// "inherit", which is not a claim this battery can verify.
 ///
-/// Tenant equality is a floor, not a sufficient check. The runtime's
-/// interaction ingress admits a resolution only from the run's **accepted
-/// principal**, with matching authorization evidence, so a resolution this
-/// authorizer allows on tenant alone can still be rejected on every tick as
-/// `scope_mismatch` while its row reads `Delivered` — see
-/// [`crate::HitlRouter::resolve`]. Hosts that can reach the run's
-/// `RunAccepted` security context should authorize against that principal,
-/// via [`crate::HitlRouter::with_authorizer`], rather than against the
-/// tenant alone.
+/// Exact accepted principal and authorization-evidence equality is enforced
+/// by [`crate::HitlRouter::resolve`] before this additional hook runs. This
+/// default retains the tenant boundary as a separate fail-closed invariant.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TenantAuthorizer;
 

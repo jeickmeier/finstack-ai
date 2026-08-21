@@ -1,6 +1,18 @@
 use crate::record::*;
 use crate::store::*;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+
+use finstack_ai_kernel::{Metadata, RunId, Sensitivity, SessionId, TIMESTAMP_MAX_MS, Timestamp};
+use finstack_ai_runtime::{ArtifactMetadata, ArtifactScope, Bytes, stage_required_artifact};
+
+fn controlled_sqlite(now: Arc<AtomicI64>, limits: MemoryStoreLimits) -> SqliteMemoryStore {
+    SqliteMemoryStore::open_in_memory_with(
+        Arc::new(move || Timestamp::from_unix_ms(now.load(Ordering::SeqCst)).unwrap()),
+        limits,
+    )
+    .unwrap()
+}
 
 #[tokio::test]
 async fn put_is_idempotent_by_key() {
@@ -13,17 +25,18 @@ async fn put_is_idempotent_by_key() {
 }
 
 #[tokio::test]
-async fn put_rejects_cross_tenant_id_clobber() {
+async fn sqlite_identical_ids_are_isolated_by_exact_scope() {
     let store = SqliteMemoryStore::open_in_memory().unwrap();
     store
         .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
         .await
         .unwrap();
 
-    let intruder = store
+    let other_scope = store
         .put(Arc::from("k2"), crate::tests::sample_record("m1", "t2"))
-        .await;
-    assert_eq!(intruder, Err(MemoryStoreError::IdConflict));
+        .await
+        .unwrap();
+    assert_eq!(other_scope, PutOutcome::Inserted);
 
     let survivor = store
         .get(
@@ -34,6 +47,73 @@ async fn put_rejects_cross_tenant_id_clobber() {
         .unwrap()
         .unwrap();
     assert_eq!(survivor.scope.tenant(), "t1");
+    assert!(
+        store
+            .get(
+                MemoryScope::try_new("t2").unwrap(),
+                MemoryId::parse("m1").unwrap(),
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn sqlite_store_identity_is_path_specific_and_persisted() {
+    let directory = tempfile::tempdir().unwrap();
+    let first_path = directory.path().join("first.sqlite");
+    let second_path = directory.path().join("second.sqlite");
+
+    let first = SqliteMemoryStore::open(&first_path).unwrap();
+    let first_id = first.descriptor().store_id;
+    assert!(first.descriptor().manages_artifact_ownership);
+    drop(first);
+
+    let reopened_id = SqliteMemoryStore::open(&first_path)
+        .unwrap()
+        .descriptor()
+        .store_id;
+    let second_id = SqliteMemoryStore::open(&second_path)
+        .unwrap()
+        .descriptor()
+        .store_id;
+    assert_eq!(first_id, reopened_id);
+    assert_ne!(first_id, second_id);
+}
+
+#[tokio::test]
+async fn sqlite_and_in_process_full_text_normalization_match() {
+    let sqlite = SqliteMemoryStore::open_in_memory().unwrap();
+    let in_process = InProcessMemoryStore::new();
+    let mut record = crate::tests::sample_record("m1", "t1");
+    record.preview = Arc::from("Café-risk, portfolio");
+    record.body = MemoryBody::Inline(Arc::from("Café-risk, portfolio"));
+    sqlite
+        .put(Arc::from("sqlite-put"), record.clone())
+        .await
+        .unwrap();
+    in_process
+        .put(Arc::from("in-process-put"), record)
+        .await
+        .unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let query = MemoryQuery::FullText(Arc::from("CAFÉ-ris"));
+    let sqlite_ids = sqlite
+        .search(scope.clone(), query.clone(), 8)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|hit| hit.record.id)
+        .collect::<Vec<_>>();
+    let in_process_ids = in_process
+        .search(scope, query, 8)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|hit| hit.record.id)
+        .collect::<Vec<_>>();
+    assert_eq!(sqlite_ids, in_process_ids);
 }
 
 #[tokio::test]
@@ -160,9 +240,8 @@ async fn correct_links_supersession_and_hides_old() {
     let old = store
         .get(scope.clone(), MemoryId::parse("m1").unwrap())
         .await
-        .unwrap()
         .unwrap();
-    assert_eq!(old.superseded_by, Some(MemoryId::parse("m2").unwrap()));
+    assert!(old.is_none());
     let new = store
         .get(scope.clone(), MemoryId::parse("m2").unwrap())
         .await
@@ -231,9 +310,8 @@ async fn forget_missing_record_does_not_burn_the_idempotency_key() {
     let record = store
         .get(scope, MemoryId::parse("m1").unwrap())
         .await
-        .unwrap()
         .unwrap();
-    assert!(record.tombstoned);
+    assert!(record.is_none());
 }
 
 #[tokio::test]
@@ -272,9 +350,8 @@ async fn correct_missing_old_record_does_not_burn_the_idempotency_key() {
     let old = store
         .get(scope.clone(), MemoryId::parse("m1").unwrap())
         .await
-        .unwrap()
         .unwrap();
-    assert_eq!(old.superseded_by, Some(MemoryId::parse("m2").unwrap()));
+    assert!(old.is_none());
     let new = store
         .get(scope, MemoryId::parse("m2").unwrap())
         .await
@@ -402,7 +479,7 @@ async fn sqlite_forgotten_id_can_be_remembered_again_by_the_same_scope() {
 }
 
 #[tokio::test]
-async fn sqlite_put_rejects_reviving_another_scopes_tombstone() {
+async fn sqlite_other_scope_can_use_the_same_id_as_a_tombstone() {
     let store = SqliteMemoryStore::open_in_memory().unwrap();
     store
         .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
@@ -418,12 +495,13 @@ async fn sqlite_put_rejects_reviving_another_scopes_tombstone() {
         .unwrap();
     let outcome = store
         .put(Arc::from("k3"), crate::tests::sample_record("m1", "t2"))
-        .await;
-    assert_eq!(outcome, Err(MemoryStoreError::IdConflict));
+        .await
+        .unwrap();
+    assert_eq!(outcome, PutOutcome::Inserted);
 }
 
 #[tokio::test]
-async fn sqlite_correct_rejects_a_replacement_id_owned_by_another_scope() {
+async fn sqlite_correction_can_reuse_an_id_owned_by_another_scope() {
     let store = SqliteMemoryStore::open_in_memory().unwrap();
     store
         .put(Arc::from("k1"), crate::tests::sample_record("victim", "t2"))
@@ -441,7 +519,7 @@ async fn sqlite_correct_rejects_a_replacement_id_owned_by_another_scope() {
             crate::tests::sample_record("victim", "t1"),
         )
         .await;
-    assert_eq!(result, Err(MemoryStoreError::IdConflict));
+    assert_eq!(result, Ok(()));
 
     let victim = store
         .get(
@@ -451,7 +529,7 @@ async fn sqlite_correct_rejects_a_replacement_id_owned_by_another_scope() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(victim.scope.tenant.as_ref(), "t2");
+    assert_eq!(victim.scope.tenant(), "t2");
 }
 
 #[tokio::test]
@@ -474,4 +552,238 @@ async fn sqlite_full_text_matches_a_partial_query() {
         .await
         .unwrap();
     assert_eq!(hits.len(), 1);
+}
+
+#[tokio::test]
+async fn sqlite_enforces_exact_idempotency_and_hard_expiry() {
+    let now = Arc::new(AtomicI64::new(0));
+    let store = controlled_sqlite(Arc::clone(&now), MemoryStoreLimits::default());
+    let mut record = crate::tests::sample_record("m1", "t1");
+    record.retention = RetentionPolicy::ExpireAfterMs(10);
+    store
+        .put(Arc::from("shared"), record.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .put(Arc::from("shared"), crate::tests::sample_record("m2", "t1"))
+            .await,
+        Err(MemoryStoreError::IdempotencyConflict)
+    );
+
+    now.store(10, Ordering::SeqCst);
+    let scope = MemoryScope::try_new("t1").unwrap();
+    assert!(
+        store
+            .get(scope.clone(), MemoryId::parse("m1").unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .forget(
+                Arc::from("forget-expired"),
+                scope,
+                MemoryId::parse("m1").unwrap(),
+            )
+            .await,
+        Err(MemoryStoreError::NotFound)
+    );
+}
+
+#[tokio::test]
+async fn sqlite_enforces_finite_capacity_and_request_limits() {
+    let limits = MemoryStoreLimits {
+        max_records: 1,
+        max_idempotency_keys: 1,
+        max_inline_bytes: 64,
+        max_search_results: 1,
+        max_page_size: 1,
+        max_artifact_actions: 1,
+    };
+    let store = controlled_sqlite(Arc::new(AtomicI64::new(0)), limits);
+    assert!(store.descriptor().durable);
+    assert_eq!(store.descriptor().limits, limits);
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+            .await,
+        Err(MemoryStoreError::CapacityExceeded {
+            resource: "idempotency_keys",
+            limit: 1,
+        })
+    );
+    assert_eq!(
+        store
+            .search(
+                MemoryScope::try_new("t1").unwrap(),
+                MemoryQuery::FullText(Arc::from("body")),
+                2,
+            )
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_search_limit_exceeded",
+        })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_correction_requires_exact_scope_and_clean_links() {
+    let store = SqliteMemoryStore::open_in_memory().unwrap();
+    let exact = MemoryScope::try_new("t1")
+        .unwrap()
+        .try_with_user("u1")
+        .unwrap();
+    let mut original = crate::tests::sample_record("m1", "t1");
+    original.scope = exact.clone();
+    store.put(Arc::from("put"), original).await.unwrap();
+
+    let mut replacement = crate::tests::sample_record("m2", "t1");
+    replacement.scope = exact.clone();
+    assert_eq!(
+        store
+            .correct(
+                Arc::from("broad"),
+                MemoryScope::try_new("t1").unwrap(),
+                MemoryId::parse("m1").unwrap(),
+                replacement.clone(),
+            )
+            .await,
+        Err(MemoryStoreError::NotFound)
+    );
+
+    replacement.supersedes = Some(MemoryId::parse("m0").unwrap());
+    assert_eq!(
+        store
+            .correct(
+                Arc::from("linked"),
+                exact,
+                MemoryId::parse("m1").unwrap(),
+                replacement,
+            )
+            .await,
+        Err(MemoryStoreError::InvalidRecord {
+            reason: "memory_replacement_already_linked",
+        })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_v1_schema_migrates_to_v2() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-v1.sqlite");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE memory_records (
+               id TEXT PRIMARY KEY, tenant TEXT NOT NULL,
+               user TEXT, agent TEXT, workspace TEXT,
+               body_inline TEXT, blob_ref_json TEXT, preview TEXT NOT NULL,
+               sensitivity TEXT NOT NULL, keywords_json TEXT NOT NULL,
+               provenance_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+               last_confirmed_at INTEGER NOT NULL, supersedes TEXT,
+               superseded_by TEXT, retention_json TEXT NOT NULL,
+               tombstoned INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE INDEX memory_records_tenant ON memory_records(tenant);
+             CREATE VIRTUAL TABLE memory_fts USING fts5(
+               id UNINDEXED, preview, body, keywords
+             );
+             CREATE TABLE memory_idempotency (
+               key TEXT PRIMARY KEY, applied_at INTEGER NOT NULL
+             );
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    drop(connection);
+
+    let store = SqliteMemoryStore::open(&path).unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    drop(store);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let version: i32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+}
+
+#[tokio::test]
+async fn sqlite_decode_fails_closed_on_corrupt_timestamps() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-corrupt.sqlite");
+    let store = SqliteMemoryStore::open(&path).unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    drop(store);
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "UPDATE memory_records SET created_at = ?1 WHERE id = 'm1'",
+            [TIMESTAMP_MAX_MS + 1],
+        )
+        .unwrap();
+    drop(connection);
+
+    let store = SqliteMemoryStore::open(&path).unwrap();
+    assert_eq!(
+        store
+            .get(
+                MemoryScope::try_new("t1").unwrap(),
+                MemoryId::parse("m1").unwrap(),
+            )
+            .await,
+        Err(MemoryStoreError::Unavailable {
+            message: Arc::from("memory_store_sqlite_unavailable"),
+        })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_artifact_outbox_survives_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-outbox.sqlite");
+    let artifacts = InProcessArtifactStore::default();
+    let artifact_scope = ArtifactScope {
+        tenant_scope: Arc::from("t1"),
+        session_id: SessionId::from_bytes([1; 16]),
+        run_id: Some(RunId::from_bytes([2; 16])),
+        sensitivity: Sensitivity::Internal,
+    };
+    let artifact = stage_required_artifact(
+        &artifacts,
+        artifact_scope.clone(),
+        Bytes::from_static(b"durable memory blob"),
+        ArtifactMetadata {
+            kind: Arc::from("memory-record"),
+            media_type: Arc::from("text/plain"),
+            name: Some(Arc::from("m1")),
+            attributes: Metadata::empty(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut record = crate::tests::sample_record("m1", "t1");
+    record.body = MemoryBody::Blob {
+        scope: artifact_scope,
+        artifact,
+    };
+    let store = SqliteMemoryStore::open(&path).unwrap();
+    store.put(Arc::from("put"), record).await.unwrap();
+    let before = store.pending_artifact_actions(8).await.unwrap();
+    assert_eq!(before.len(), 1);
+    drop(store);
+
+    let reopened = SqliteMemoryStore::open(&path).unwrap();
+    assert_eq!(reopened.pending_artifact_actions(8).await.unwrap(), before);
 }

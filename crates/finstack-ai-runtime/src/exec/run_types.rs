@@ -331,6 +331,12 @@ pub enum RunHandleError {
         /// Stable runtime code.
         code: &'static str,
     },
+    /// Committed artifact ownership could not be reconciled.
+    #[error("artifact ownership reconciliation failed: {code}")]
+    Artifact {
+        /// Stable artifact error code.
+        code: &'static str,
+    },
     /// Runtime could not construct a valid interaction request or settlement.
     #[error("interaction settlement construction failed: {code}")]
     InteractionSettlement {
@@ -383,6 +389,7 @@ pub(crate) fn result_fault_code(
             RunHandleError::Faulted { code }
             | RunHandleError::ModelSettlement { code }
             | RunHandleError::ToolSettlement { code }
+            | RunHandleError::Artifact { code }
             | RunHandleError::InteractionSettlement { code }
             | RunHandleError::EventDelivery { code }
             | RunHandleError::Coordinator(

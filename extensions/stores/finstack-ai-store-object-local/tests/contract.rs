@@ -73,7 +73,7 @@ async fn local_store_rejects_an_oversize_bytes_put_over_a_small_ceiling() {
     assert_eq!(get_error.code(), finstack_ai_runtime::OBJECT_NOT_FOUND);
     assert!(
         walk_root_files(dir.path()).is_empty(),
-        "no content or sidecar file must have been left behind: {:?}",
+        "no envelope or temporary file must have been left behind: {:?}",
         walk_root_files(dir.path())
     );
 }
@@ -121,13 +121,13 @@ async fn local_store_rejects_an_oversize_file_put_over_a_small_ceiling() {
     assert_eq!(get_error.code(), finstack_ai_runtime::OBJECT_NOT_FOUND);
     assert!(
         walk_root_files(dir.path()).is_empty(),
-        "no content or sidecar file must have been left behind: {:?}",
+        "no envelope or temporary file must have been left behind: {:?}",
         walk_root_files(dir.path())
     );
 }
 
 /// List every regular file under `root`, recursively — used to assert a
-/// rejected put left no content file and no sidecar behind.
+/// rejected put left no envelope or temporary file behind.
 fn walk_root_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];

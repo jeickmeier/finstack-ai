@@ -19,7 +19,9 @@ pub struct finstack_ai_tools_filesystem::FileSystemLimits
 pub finstack_ai_tools_filesystem::FileSystemLimits::file_bytes: usize
 pub finstack_ai_tools_filesystem::FileSystemLimits::inline_result_bytes: usize
 pub finstack_ai_tools_filesystem::FileSystemLimits::recursion_depth: usize
+pub finstack_ai_tools_filesystem::FileSystemLimits::scan_bytes: usize
 pub finstack_ai_tools_filesystem::FileSystemLimits::search_matches: usize
+pub finstack_ai_tools_filesystem::FileSystemLimits::search_timeout: core::time::Duration
 pub finstack_ai_tools_filesystem::FileSystemLimits::visited_entries: usize
 impl core::clone::Clone for finstack_ai_tools_filesystem::FileSystemLimits
 pub fn finstack_ai_tools_filesystem::FileSystemLimits::clone(&self) -> finstack_ai_tools_filesystem::FileSystemLimits
@@ -50,4 +52,5 @@ pub const finstack_ai_tools_filesystem::FILESYSTEM_IO_ERROR: &str
 pub const finstack_ai_tools_filesystem::FILESYSTEM_LIMIT_EXCEEDED: &str
 pub const finstack_ai_tools_filesystem::FILESYSTEM_NOT_FOUND: &str
 pub const finstack_ai_tools_filesystem::FILESYSTEM_POLICY_DENIED: &str
+pub const finstack_ai_tools_filesystem::FILESYSTEM_TIMEOUT: &str
 pub const finstack_ai_tools_filesystem::FILESYSTEM_UNSUPPORTED: &str

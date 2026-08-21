@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use finstack_ai_kernel::OperationLocator;
+
 use crate::context::CONTEXT_RECOVERY_UNCERTAIN;
 use crate::coordinator::{CommitCoordinator, PostCommitDispatcher};
 use crate::event_hub::event_hub;
@@ -99,6 +101,42 @@ impl RunTaskOwner {
         C: Clock + crate::PortObject,
         R: RandomSource + crate::PortObject,
     {
+        Self::spawn_with_model_and_artifacts(
+            coordinator,
+            run_config,
+            model_config,
+            ready_model,
+            profile,
+            None,
+            clock,
+            random,
+        )
+        .await
+    }
+
+    /// Start the sequential model owner with optional artifact ownership.
+    ///
+    /// # Errors
+    ///
+    /// Returns configuration errors before publishing a run handle.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the constructor receives explicit model, artifact, and identity dependencies"
+    )]
+    pub async fn spawn_with_model_and_artifacts<C, R>(
+        coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        ready_model: Arc<ReadyModel>,
+        profile: LockedModelContextProfile,
+        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + crate::PortObject,
+        R: RandomSource + crate::PortObject,
+    {
         Self::spawn_inner(
             coordinator,
             run_config,
@@ -107,6 +145,7 @@ impl RunTaskOwner {
             ready_model,
             profile,
             None,
+            artifact_store,
             clock,
             random,
         )
@@ -140,6 +179,46 @@ impl RunTaskOwner {
         C: Clock + crate::PortObject,
         R: RandomSource + crate::PortObject,
     {
+        Self::spawn_with_model_tools_and_artifacts(
+            coordinator,
+            run_config,
+            model_config,
+            tool_config,
+            ready_model,
+            profile,
+            catalog,
+            None,
+            clock,
+            random,
+        )
+        .await
+    }
+
+    /// Start the model/tool owner with optional artifact ownership.
+    ///
+    /// # Errors
+    ///
+    /// Returns configuration or binding errors before publishing a run handle.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the constructor receives explicit model, tool, artifact, and identity dependencies"
+    )]
+    pub async fn spawn_with_model_tools_and_artifacts<C, R>(
+        coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        tool_config: ToolTaskConfig,
+        ready_model: Arc<ReadyModel>,
+        profile: LockedModelContextProfile,
+        catalog: Arc<ResolvedToolCatalog>,
+        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + crate::PortObject,
+        R: RandomSource + crate::PortObject,
+    {
         Self::spawn_inner(
             coordinator,
             run_config,
@@ -148,6 +227,7 @@ impl RunTaskOwner {
             ready_model,
             profile,
             Some(catalog),
+            artifact_store,
             clock,
             random,
         )
@@ -167,6 +247,7 @@ impl RunTaskOwner {
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Option<Arc<ResolvedToolCatalog>>,
+        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
@@ -195,6 +276,10 @@ impl RunTaskOwner {
         let model = ready_model.shared_model();
         validate_model_binding(model.as_ref(), &profile)?;
         let mut sources = SettlementSources::try_new(clock, random)?;
+        if let Some((store, locator)) = artifact_store {
+            sources.attach_artifact_store(store, locator);
+        }
+        sources.reconcile_recovered_artifacts(&coordinator).await?;
         sources.set_approval_grant(run_config.approval_grant);
         let run_cancellation = CancellationSignal::new();
         let parent = run_cancellation.child();

@@ -113,7 +113,7 @@ pub trait WakeIndexStore: Send + Sync {
     /// # Errors
     ///
     /// Returns store-unavailable or integrity failures.
-    fn load_due(&self, now: Timestamp) -> Result<Vec<WakeRow>, WorkerError>;
+    fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError>;
 
     /// Every row for one tenant, regardless of lease or due state.
     ///
@@ -121,6 +121,17 @@ pub trait WakeIndexStore: Send + Sync {
     ///
     /// Returns store-unavailable or integrity failures.
     fn load_tenant(&self, tenant_scope: &str) -> Result<Vec<WakeRow>, WorkerError>;
+
+    /// Whether one tenant currently has an interaction wake for `pending_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns store-unavailable or integrity failures.
+    fn contains_interaction(
+        &self,
+        tenant_scope: &str,
+        pending_id: &str,
+    ) -> Result<bool, WorkerError>;
 
     /// Attempt to claim one session for `worker_id`, winning only when the
     /// existing lease is absent or expired. Third-party stores fail closed
@@ -163,6 +174,18 @@ pub trait WakeIndexStore: Send + Sync {
             code: "wake_renew_unsupported",
         })
     }
+
+    /// Release a lease held by `worker_id` without modifying retry state.
+    ///
+    /// # Errors
+    ///
+    /// Returns store-unavailable or integrity failures.
+    fn release(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        worker_id: &str,
+    ) -> Result<bool, WorkerError>;
 
     /// Record a failed resume attempt: clears the lease, increments
     /// `attempts`, and schedules the next attempt at `retry_at`.

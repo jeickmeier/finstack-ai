@@ -20,7 +20,8 @@ use tokio::sync::mpsc;
 
 use crate::config::config_error;
 use crate::error::{
-    GEMINI_HTTP_ERROR, GEMINI_RESPONSE_INVALID, GEMINI_TIMEOUT, GEMINI_TRANSPORT_ERROR, error,
+    GEMINI_HTTP_ERROR, GEMINI_RESPONSE_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED, GEMINI_TIMEOUT,
+    GEMINI_TRANSPORT_ERROR, error,
 };
 use crate::request::{GenerateContentRequest, request_error};
 use crate::sse::{GeminiSse, stream_error, stream_limit_error};
@@ -78,6 +79,7 @@ impl GeminiProvider {
         config: GeminiConfig,
         models: Vec<GeminiModelConfig>,
     ) -> Result<Self, ModelError> {
+        config.validate()?;
         let headers = config.header_map()?;
         let by_name = catalog_from_models(models)?;
         let client = reqwest::Client::builder()
@@ -251,11 +253,17 @@ impl Model for GeminiProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let resolver = self.config.media_resolver();
         Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            let cancellation = request.call.run.cancellation.clone();
             let model = model?;
             let endpoint = endpoint?;
-            let resolved = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes)
-                .await
-                .map_err(map_draft_media)?;
+            let resolved = tokio::select! {
+                () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
+                resolved = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes) => {
+                    resolved.map_err(map_draft_media)?
+                }
+            };
             let wire = GenerateContentRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -263,8 +271,10 @@ impl Model for GeminiProvider {
                 &resolved,
             )?;
             let payload = wire.serialize()?;
+            if payload.len() > max_stream_bytes {
+                return Err(request_limit_error());
+            }
             let request_id = request.call.request_id.to_string();
-            let cancellation = request.call.run.cancellation;
             let send = client
                 .post(endpoint)
                 .header("x-client-request-id", &request_id)
@@ -274,6 +284,7 @@ impl Model for GeminiProvider {
                 .send();
             let response = tokio::select! {
                 () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
@@ -295,6 +306,7 @@ impl Model for GeminiProvider {
                 structured,
                 max_event_bytes,
                 max_stream_bytes,
+                deadline,
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
@@ -328,6 +340,10 @@ impl Drop for ReceiverModelStream {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "stream driver keeps request identity, limits, cancellation, and deadline together"
+)]
 async fn drive_response(
     response: reqwest::Response,
     sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
@@ -336,6 +352,7 @@ async fn drive_response(
     structured: bool,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    deadline: tokio::time::Instant,
 ) {
     let mut body = response.bytes_stream();
     let mut parser = GeminiSse::new(max_event_bytes, max_stream_bytes);
@@ -345,6 +362,10 @@ async fn drive_response(
         let chunk = tokio::select! {
             () = cancellation.cancelled() => {
                 let _ = sender.send(Err(cancelled_error())).await;
+                return;
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                let _ = sender.send(Err(timeout_error())).await;
                 return;
             }
             () = sender.closed() => return,
@@ -437,14 +458,27 @@ fn cancelled_error() -> ModelError {
     )
 }
 
+fn timeout_error() -> ModelError {
+    error(
+        GEMINI_TIMEOUT,
+        ErrorCategory::Deadline,
+        true,
+        "Gemini request timed out",
+    )
+}
+
+fn request_limit_error() -> ModelError {
+    error(
+        GEMINI_STREAM_LIMIT_EXCEEDED,
+        ErrorCategory::Limit,
+        false,
+        "Gemini request exceeded the configured byte limit",
+    )
+}
+
 fn transport_error(source: &reqwest::Error) -> ModelError {
     if source.is_timeout() {
-        error(
-            GEMINI_TIMEOUT,
-            ErrorCategory::Deadline,
-            true,
-            "Gemini request timed out",
-        )
+        timeout_error()
     } else {
         error(
             GEMINI_TRANSPORT_ERROR,

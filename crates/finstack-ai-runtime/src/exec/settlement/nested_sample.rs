@@ -161,6 +161,7 @@ async fn complete_parent_tool(
             .await
             .map(|assembled| AssembledToolTerminal {
                 usage: assembled.usage,
+                artifacts: assembled.artifacts,
                 terminal: assembled.terminal,
             }),
         Err(error) => Err(error),

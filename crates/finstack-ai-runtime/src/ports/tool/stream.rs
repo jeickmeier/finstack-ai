@@ -2,7 +2,8 @@ use core::future::{Future, poll_fn, ready};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ContentBlock, JsonBlock, ToolCallId, ToolProgress, ToolResultBlock, Usage, ValidationOutcome,
+    ArtifactRef, ContentBlock, JsonBlock, ToolCallId, ToolProgress, ToolResultBlock, Usage,
+    ValidationOutcome,
 };
 
 use super::error::{
@@ -12,6 +13,9 @@ use super::error::{
 use super::types::{ToolDeferral, ToolEventStream, ToolResult, ToolStreamItem};
 use super::validator::ToolValidator;
 use crate::ToolDeferralSupport;
+
+/// Maximum exact artifact references accepted before one tool terminal.
+pub const MAX_TOOL_RESULT_ARTIFACTS: usize = 64;
 
 /// Target-neutral stream limits applied before durable settlement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +51,8 @@ pub struct AssembledToolStream {
     pub progress: Arc<[ToolProgress]>,
     /// Final cumulative usage, when supplied.
     pub usage: Option<Usage>,
+    /// Exact staged artifacts owned by the terminal completion.
+    pub artifacts: Arc<[ArtifactRef]>,
     /// Exactly one validated terminal.
     pub terminal: ToolTerminal,
 }
@@ -54,6 +60,7 @@ pub struct AssembledToolStream {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AssembledToolTerminal {
     pub(crate) usage: Option<Usage>,
+    pub(crate) artifacts: Arc<[ArtifactRef]>,
     pub(crate) terminal: ToolTerminal,
 }
 
@@ -100,6 +107,7 @@ impl ToolStreamAssembler {
         Ok(AssembledToolStream {
             progress: progress.into(),
             usage: terminal.usage,
+            artifacts: terminal.artifacts,
             terminal: terminal.terminal,
         })
     }
@@ -119,6 +127,7 @@ impl ToolStreamAssembler {
         let mut count = 0_usize;
         let mut stream_bytes = 0_usize;
         let mut usage: Option<Usage> = None;
+        let mut artifacts = Vec::new();
         let mut terminal = None;
         while let Some(item) = poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
             if terminal.is_some() {
@@ -158,47 +167,23 @@ impl ToolStreamAssembler {
                     )?;
                     usage = Some(value.usage);
                 }
+                ToolStreamItem::Artifact(value) => {
+                    if !artifacts.contains(&value) {
+                        if artifacts.len() >= MAX_TOOL_RESULT_ARTIFACTS {
+                            return Err(stream_limit());
+                        }
+                        artifacts.push(value);
+                    }
+                }
                 ToolStreamItem::Completed(value) => {
-                    if value.output.as_bytes().len() as u64 > max_result_bytes {
-                        return Err(ToolError::stable(
-                            TOOL_RESULT_LIMIT_EXCEEDED,
-                            "tool result exceeds the registered byte limit",
-                        ));
-                    }
-                    if !value.is_error
-                        && output_validator.is_some_and(|validator| {
-                            matches!(
-                                validator.validate(&value.output),
-                                ValidationOutcome::Invalid { .. }
-                            )
-                        })
-                    {
-                        return Err(ToolError::stable(
-                            TOOL_OUTPUT_INVALID,
-                            "successful tool output does not satisfy the registered schema",
-                        ));
-                    }
-                    terminal = Some(ToolTerminal::Completed(value));
+                    terminal = Some(validate_completed(
+                        value,
+                        output_validator,
+                        max_result_bytes,
+                    )?);
                 }
                 ToolStreamItem::Deferred(value) => {
-                    if deferral == ToolDeferralSupport::Never {
-                        return Err(ToolError::stable(
-                            TOOL_DEFERRAL_NOT_DECLARED,
-                            "tool returned an undeclared deferral",
-                        ));
-                    }
-                    if value.handle.handle().is_empty()
-                        || matches!(
-                            (value.next_poll_at, value.expires_at),
-                            (Some(next_poll_at), Some(expires_at)) if next_poll_at > expires_at
-                        )
-                    {
-                        return Err(ToolError::stable(
-                            TOOL_DEFERRAL_INVALID,
-                            "tool returned an invalid deferral",
-                        ));
-                    }
-                    terminal = Some(ToolTerminal::Deferred(value));
+                    terminal = Some(validate_deferral(value, deferral)?);
                 }
             }
         }
@@ -208,8 +193,63 @@ impl ToolStreamAssembler {
                 "tool stream ended without a terminal item",
             )
         })?;
-        Ok(AssembledToolTerminal { usage, terminal })
+        Ok(AssembledToolTerminal {
+            usage,
+            artifacts: artifacts.into(),
+            terminal,
+        })
     }
+}
+
+fn validate_completed(
+    value: ToolResult,
+    output_validator: Option<&dyn ToolValidator>,
+    max_result_bytes: u64,
+) -> Result<ToolTerminal, ToolError> {
+    if value.output.as_bytes().len() as u64 > max_result_bytes {
+        return Err(ToolError::stable(
+            TOOL_RESULT_LIMIT_EXCEEDED,
+            "tool result exceeds the registered byte limit",
+        ));
+    }
+    if !value.is_error
+        && output_validator.is_some_and(|validator| {
+            matches!(
+                validator.validate(&value.output),
+                ValidationOutcome::Invalid { .. }
+            )
+        })
+    {
+        return Err(ToolError::stable(
+            TOOL_OUTPUT_INVALID,
+            "successful tool output does not satisfy the registered schema",
+        ));
+    }
+    Ok(ToolTerminal::Completed(value))
+}
+
+fn validate_deferral(
+    value: ToolDeferral,
+    support: ToolDeferralSupport,
+) -> Result<ToolTerminal, ToolError> {
+    if support == ToolDeferralSupport::Never {
+        return Err(ToolError::stable(
+            TOOL_DEFERRAL_NOT_DECLARED,
+            "tool returned an undeclared deferral",
+        ));
+    }
+    if value.handle.handle().is_empty()
+        || matches!(
+            (value.next_poll_at, value.expires_at),
+            (Some(next_poll_at), Some(expires_at)) if next_poll_at > expires_at
+        )
+    {
+        return Err(ToolError::stable(
+            TOOL_DEFERRAL_INVALID,
+            "tool returned an invalid deferral",
+        ));
+    }
+    Ok(ToolTerminal::Deferred(value))
 }
 
 impl Default for ToolStreamAssembler {

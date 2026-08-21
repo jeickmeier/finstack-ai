@@ -38,6 +38,7 @@ fn wide_limits() -> StoreLimits {
 /// tight ceilings, multi-writer tests need two stores over *one* schema).
 async fn open_store(url: &str, schema: &str, limits: StoreLimits) -> PostgresJournalStore {
     let mut config = PostgresStoreConfig::new(url, limits);
+    config.tls_mode = finstack_ai_store_postgres::PostgresTlsMode::Disable;
     config.schema = Arc::from(schema);
     PostgresJournalStore::try_open(config)
         .await

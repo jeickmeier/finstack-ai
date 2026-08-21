@@ -29,9 +29,9 @@ pub(crate) const CLASSIFY_NAME: &str = "pdf_classify";
 /// properties nullable. Providers that send tools with `strict: true` (the
 /// OpenAI/OpenRouter Responses endpoints) reject any object schema whose
 /// `required` array omits a declared property.
-const PARSE_INPUT_SCHEMA: &[u8] = br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference JSON for the document bytes.","type":["object","null"]},"path":{"description":"Absolute filesystem path (native hosts only).","type":["string","null"]},"media_type_hint":{"type":["string","null"]},"page_range":{"description":"1-based inclusive page range, PDFs only.","items":{"minimum":1,"type":"integer"},"maxItems":2,"minItems":2,"type":["array","null"]},"max_output_bytes":{"description":"Per-call output ceiling, clamped to the configured limit.","minimum":1,"type":["integer","null"]}},"required":["artifact","path","media_type_hint","page_range","max_output_bytes"],"type":"object"}"#;
+const PARSE_INPUT_SCHEMA: &[u8] = br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference JSON for the document bytes.","type":"object"},"media_type_hint":{"type":["string","null"]},"page_range":{"description":"1-based inclusive page range, PDFs only.","items":{"minimum":1,"type":"integer"},"maxItems":2,"minItems":2,"type":["array","null"]},"max_output_bytes":{"description":"Per-call output ceiling, clamped to the configured limit.","minimum":1,"type":["integer","null"]}},"required":["artifact","media_type_hint","page_range","max_output_bytes"],"type":"object"}"#;
 const PARSE_OUTPUT_SCHEMA: &[u8] = br#"{"additionalProperties":false,"properties":{"markdown":{"type":"string"},"format":{"type":"string"},"page_count":{"type":["integer","null"]},"classification":{"type":["string","null"]},"requires_ocr":{"type":"boolean"},"truncated":{"type":"boolean"},"spilled_artifact":{"type":["object","null"]}},"required":["markdown","format","requires_ocr","truncated"],"type":"object"}"#;
-const CLASSIFY_INPUT_SCHEMA: &[u8] = br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference JSON for the PDF bytes.","type":["object","null"]},"path":{"description":"Absolute filesystem path (native hosts only).","type":["string","null"]}},"required":["artifact","path"],"type":"object"}"#;
+const CLASSIFY_INPUT_SCHEMA: &[u8] = br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference JSON for the PDF bytes.","type":"object"}},"required":["artifact"],"type":"object"}"#;
 const CLASSIFY_OUTPUT_SCHEMA: &[u8] = br#"{"additionalProperties":false,"properties":{"classification":{"enum":["text","scanned","mixed","image"],"type":"string"},"page_count":{"type":"integer"},"page_stats":{"description":"Optional per-page text-coverage stats when the classifier exposes them.","items":{"type":"object"},"type":["array","null"]}},"required":["classification","page_count"],"type":"object"}"#;
 
 /// Document toolset construction failure.
@@ -51,7 +51,7 @@ pub struct DocumentToolset {
     pub(crate) descriptor: ToolsetDescriptor,
     pub(crate) tools: Arc<[ToolSpec]>,
     pub(crate) limits: DocumentLimits,
-    pub(crate) artifact_store: Option<Arc<dyn ArtifactStore>>,
+    pub(crate) artifact_store: Arc<dyn ArtifactStore>,
 }
 
 impl std::fmt::Debug for DocumentToolset {
@@ -63,14 +63,14 @@ impl std::fmt::Debug for DocumentToolset {
 }
 
 impl DocumentToolset {
-    /// Construct the toolset with default limits and no artifact store.
+    /// Construct the toolset with default limits over the required artifact store.
     ///
     /// # Errors
     ///
     /// Returns a configuration error only if a checked-in identity or schema
     /// constant is invalid.
-    pub fn try_new() -> Result<Self, DocumentError> {
-        Self::try_with_limits(DocumentLimits::default())
+    pub fn try_new(artifact_store: Arc<dyn ArtifactStore>) -> Result<Self, DocumentError> {
+        Self::try_with_limits(artifact_store, DocumentLimits::default())
     }
 
     /// Construct with explicit limits.
@@ -79,7 +79,10 @@ impl DocumentToolset {
     ///
     /// Returns a configuration error only if a checked-in identity or schema
     /// constant is invalid.
-    pub fn try_with_limits(limits: DocumentLimits) -> Result<Self, DocumentError> {
+    pub fn try_with_limits(
+        artifact_store: Arc<dyn ArtifactStore>,
+        limits: DocumentLimits,
+    ) -> Result<Self, DocumentError> {
         let parse_id = ToolId::parse(PARSE_TOOL_ID).map_err(|_| DocumentError::Configuration {
             reason: "invalid_tool_id",
         })?;
@@ -112,15 +115,8 @@ impl DocumentToolset {
             },
             tools: Arc::from([parse_spec, classify_spec]),
             limits,
-            artifact_store: None,
+            artifact_store,
         })
-    }
-
-    /// Attach the artifact store used for `artifact` sources and output spill.
-    #[must_use]
-    pub fn with_artifact_store(mut self, store: Arc<dyn ArtifactStore>) -> Self {
-        self.artifact_store = Some(store);
-        self
     }
 }
 
@@ -155,9 +151,9 @@ impl Toolset for DocumentToolset {
                 return Err(invalid_arguments("page_range is reversed or zero-based"));
             }
             let resolved = crate::source::resolve(
-                &args.source,
+                &args.artifact,
                 &ctx,
-                toolset.artifact_store.as_ref(),
+                &toolset.artifact_store,
                 &toolset.limits,
             )
             .await
@@ -181,10 +177,13 @@ impl Toolset for DocumentToolset {
                     )
                     .await?
                 }
-                CLASSIFY_NAME => build_classify_result(&bytes)?,
+                CLASSIFY_NAME => DocumentOutput {
+                    value: build_classify_result(bytes).await?,
+                    artifact: None,
+                },
                 _ => return Err(invalid_arguments("unknown document tool name")),
             };
-            completed_stream(&output)
+            completed_stream(output)
         })
     }
 
@@ -200,10 +199,7 @@ impl Toolset for DocumentToolset {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ParseArguments {
-    #[serde(default)]
-    artifact: Option<serde_json::Value>,
-    #[serde(default)]
-    path: Option<String>,
+    artifact: serde_json::Value,
     #[serde(default)]
     media_type_hint: Option<String>,
     #[serde(default)]
@@ -215,10 +211,7 @@ struct ParseArguments {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ClassifyArguments {
-    #[serde(default)]
-    artifact: Option<serde_json::Value>,
-    #[serde(default)]
-    path: Option<String>,
+    artifact: serde_json::Value,
 }
 
 fn validate_call_context(
@@ -246,10 +239,15 @@ fn validate_call_context(
 
 /// Arguments common to both tools after per-tool JSON deserialization.
 struct CallArguments {
-    source: crate::DocumentSource,
+    artifact: serde_json::Value,
     media_type_hint: Option<String>,
     page_range: Option<(u32, u32)>,
     max_output_bytes: Option<u64>,
+}
+
+struct DocumentOutput {
+    value: serde_json::Value,
+    artifact: Option<finstack_ai_kernel::ArtifactRef>,
 }
 
 fn parse_call_arguments(name: &str, arguments: &[u8]) -> Result<CallArguments, ToolError> {
@@ -258,10 +256,7 @@ fn parse_call_arguments(name: &str, arguments: &[u8]) -> Result<CallArguments, T
             let arguments: ParseArguments = serde_json::from_slice(arguments)
                 .map_err(|_| invalid_arguments("document_parse arguments are invalid"))?;
             Ok(CallArguments {
-                source: crate::DocumentSource {
-                    artifact: arguments.artifact,
-                    path: arguments.path,
-                },
+                artifact: arguments.artifact,
                 media_type_hint: arguments.media_type_hint,
                 page_range: arguments.page_range,
                 max_output_bytes: arguments.max_output_bytes,
@@ -271,10 +266,7 @@ fn parse_call_arguments(name: &str, arguments: &[u8]) -> Result<CallArguments, T
             let arguments: ClassifyArguments = serde_json::from_slice(arguments)
                 .map_err(|_| invalid_arguments("pdf_classify arguments are invalid"))?;
             Ok(CallArguments {
-                source: crate::DocumentSource {
-                    artifact: arguments.artifact,
-                    path: arguments.path,
-                },
+                artifact: arguments.artifact,
                 media_type_hint: None,
                 page_range: None,
                 max_output_bytes: None,
@@ -293,7 +285,7 @@ async fn build_parse_result(
     media_type_hint: Option<&str>,
     page_range: Option<(u32, u32)>,
     max_output_bytes: Option<u64>,
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<DocumentOutput, ToolError> {
     let mut limits = toolset.limits.clone();
     if let Some(requested) = max_output_bytes {
         limits.max_output_bytes = limits.max_output_bytes.min(requested);
@@ -303,29 +295,25 @@ async fn build_parse_result(
             "page_range is only valid for PDF documents",
         ));
     }
-    let parsed = match page_range {
-        Some(range) => crate::parser::parse_pages(bytes, range, &limits)
-            .map_err(|error| parse_error(&error))?,
-        None => crate::parser::parse(bytes, media_type_hint, &limits)
-            .map_err(|error| parse_error(&error))?,
-    };
+    let parsed = parse_document(bytes, media_type_hint, page_range, limits).await?;
     let max_result_bytes = toolset
         .tools
         .iter()
         .find(|spec| spec.model_name.as_ref() == PARSE_NAME)
         .map_or(1_048_576, |spec| spec.max_result_bytes);
-    build_parse_output(
-        parsed,
-        ctx,
-        toolset.artifact_store.as_ref(),
-        max_result_bytes,
-    )
-    .await
+    build_parse_output(parsed, ctx, &toolset.artifact_store, max_result_bytes).await
 }
 
-fn build_classify_result(bytes: &[u8]) -> Result<serde_json::Value, ToolError> {
+async fn build_classify_result(bytes: Bytes) -> Result<serde_json::Value, ToolError> {
+    #[cfg(not(target_arch = "wasm32"))]
     let (classification, page_count) =
-        crate::parser::classify_pdf(bytes).map_err(|error| parse_error(&error))?;
+        tokio::task::spawn_blocking(move || crate::parser::classify_pdf(&bytes))
+            .await
+            .map_err(|_| parse_worker_error())?
+            .map_err(|error| parse_error(&error))?;
+    #[cfg(target_arch = "wasm32")]
+    let (classification, page_count) =
+        crate::parser::classify_pdf(&bytes).map_err(|error| parse_error(&error))?;
     Ok(serde_json::json!({
         "classification": classification,
         "page_count": page_count,
@@ -359,12 +347,42 @@ fn source_error(error: &crate::source::SourceError) -> ToolError {
             ErrorCategory::Validation,
             "document input exceeds the byte ceiling",
         ),
-        SourceError::PathUnsupported => tool_error(
-            crate::DOCUMENT_PATH_UNSUPPORTED,
-            ErrorCategory::Tool,
-            "path sources are unsupported on this target",
-        ),
     }
+}
+
+async fn parse_document(
+    bytes: &[u8],
+    media_type_hint: Option<&str>,
+    page_range: Option<(u32, u32)>,
+    limits: DocumentLimits,
+) -> Result<crate::parser::ParsedDocument, ToolError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let bytes = Bytes::copy_from_slice(bytes);
+        let media_type_hint = media_type_hint.map(str::to_owned);
+        tokio::task::spawn_blocking(move || match page_range {
+            Some(range) => crate::parser::parse_pages(&bytes, range, &limits),
+            None => crate::parser::parse(&bytes, media_type_hint.as_deref(), &limits),
+        })
+        .await
+        .map_err(|_| parse_worker_error())?
+        .map_err(|error| parse_error(&error))
+    }
+    #[cfg(target_arch = "wasm32")]
+    match page_range {
+        Some(range) => crate::parser::parse_pages(bytes, range, &limits),
+        None => crate::parser::parse(bytes, media_type_hint, &limits),
+    }
+    .map_err(|error| parse_error(&error))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_worker_error() -> ToolError {
+    tool_error(
+        crate::DOCUMENT_PARSE_FAILED,
+        ErrorCategory::Internal,
+        "document parser worker failed",
+    )
 }
 
 fn parse_error(error: &crate::parser::DocumentParseError) -> ToolError {
@@ -394,9 +412,9 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
 async fn build_parse_output(
     parsed: crate::parser::ParsedDocument,
     ctx: &ToolCallContext,
-    store: Option<&Arc<dyn ArtifactStore>>,
+    store: &Arc<dyn ArtifactStore>,
     max_result_bytes: u64,
-) -> Result<serde_json::Value, ToolError> {
+) -> Result<DocumentOutput, ToolError> {
     let base = serde_json::json!({
         "markdown": parsed.markdown,
         "format": parsed.format,
@@ -408,15 +426,11 @@ async fn build_parse_output(
     });
     let size = serde_json::to_vec(&base).map_or(u64::MAX, |bytes| bytes.len() as u64);
     if size <= max_result_bytes {
-        return Ok(base);
+        return Ok(DocumentOutput {
+            value: base,
+            artifact: None,
+        });
     }
-    let store = store.ok_or_else(|| {
-        tool_error(
-            crate::DOCUMENT_TOO_LARGE,
-            ErrorCategory::Limit,
-            "document result requires an artifact store for spill",
-        )
-    })?;
     let scope = crate::source::call_scope(ctx);
     let artifact = stage_required_artifact(
         store.as_ref(),
@@ -444,11 +458,10 @@ async fn build_parse_output(
             "spilled artifact reference serialization failed",
         )
     })?;
-    Ok(spilled_parse_output(
-        &parsed,
-        &spilled_artifact,
-        max_result_bytes,
-    ))
+    Ok(DocumentOutput {
+        value: spilled_parse_output(&parsed, &spilled_artifact, max_result_bytes),
+        artifact: Some(artifact),
+    })
 }
 
 /// Build the final spilled `document_parse` JSON with inline `markdown`
@@ -501,8 +514,8 @@ fn spilled_parse_output(
     build("")
 }
 
-fn completed_stream(output: &serde_json::Value) -> Result<ToolEventStream, ToolError> {
-    let bytes = serde_json::to_vec(output).map_err(|_| {
+fn completed_stream(output: DocumentOutput) -> Result<ToolEventStream, ToolError> {
+    let bytes = serde_json::to_vec(&output.value).map_err(|_| {
         tool_error(
             crate::DOCUMENT_PARSE_FAILED,
             ErrorCategory::Internal,
@@ -519,9 +532,12 @@ fn completed_stream(output: &serde_json::Value) -> Result<ToolEventStream, ToolE
         })?,
         is_error: false,
     };
-    Ok(Box::pin(futures_util::stream::once(async move {
-        Ok(ToolStreamItem::Completed(result))
-    })) as ToolEventStream)
+    let mut items = Vec::with_capacity(2);
+    if let Some(artifact) = output.artifact {
+        items.push(Ok(ToolStreamItem::Artifact(artifact)));
+    }
+    items.push(Ok(ToolStreamItem::Completed(result)));
+    Ok(Box::pin(futures_util::stream::iter(items)) as ToolEventStream)
 }
 
 fn spec(

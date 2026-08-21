@@ -310,6 +310,52 @@ async fn body_over_cap_is_an_error_not_a_truncation() {
 }
 
 #[tokio::test]
+async fn bounded_body_read_reports_the_winning_interrupt() {
+    async fn response() -> reqwest::Response {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        tokio::spawn(serve_once(listener, 200, "", b"hello"));
+        let policy = super::UrlPolicy {
+            allow_loopback_http: true,
+            allow_nonstandard_https_port: false,
+        };
+        let vetted =
+            super::parse_and_vet_url(&format!("http://127.0.0.1:{}/x", addr.port()), &policy)
+                .expect("url");
+        let pinned = super::resolve_and_pin(&vetted, &super::SystemResolver)
+            .await
+            .expect("pin");
+        let client = super::pinned_client(&vetted, pinned, std::time::Duration::from_secs(5))
+            .expect("client");
+        client
+            .get(vetted.url.as_str())
+            .send()
+            .await
+            .expect("response")
+    }
+
+    let cancelled = super::read_body_bounded_interruptible(
+        response().await,
+        5,
+        super::BodyReadInterrupt::new(std::future::ready(()), std::future::pending::<()>()),
+    )
+    .await
+    .expect_err("cancelled");
+    assert_eq!(cancelled, super::NetGuardError::Cancelled);
+
+    let deadline = super::read_body_bounded_interruptible(
+        response().await,
+        5,
+        super::BodyReadInterrupt::new(std::future::pending::<()>(), std::future::ready(())),
+    )
+    .await
+    .expect_err("deadline");
+    assert_eq!(deadline, super::NetGuardError::DeadlineExceeded);
+}
+
+#[tokio::test]
 async fn pinned_client_does_not_follow_redirects() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

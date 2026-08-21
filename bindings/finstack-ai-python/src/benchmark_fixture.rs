@@ -11,7 +11,6 @@ use finstack_ai::runtime::{
 use finstack_ai::{Agent, AgentRunError};
 use finstack_ai_kernel::{AgentId, BundleId, ContentBlock, ProviderIds, TextBlock, Usage};
 use finstack_ai_memory::InProcessArtifactStore;
-use finstack_ai_middleware_document_ingest::AttachmentIndex;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,
@@ -172,7 +171,6 @@ async fn build_agent(
             // middleware, so these are unused, dedicated instances rather
             // than the shared ones a real agent factory wires up.
             artifact_store: Arc::new(InProcessArtifactStore::default()),
-            attachment_index: Arc::new(AttachmentIndex::default()),
         },
         PyBenchmarkControl { model, control },
     ))

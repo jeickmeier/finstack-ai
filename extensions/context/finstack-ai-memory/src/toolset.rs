@@ -13,10 +13,11 @@ use finstack_ai_kernel::{
     ValidatedToolCall,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore,
-    PendingToolEffect, PortFuture, ReconcileContext, RunCallContext, SideEffectClass,
-    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolReconcileResult,
-    ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, stage_required_artifact,
+    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactPersistence, ArtifactScope,
+    ArtifactStore, PendingToolEffect, PortFuture, ReconcileContext, RunCallContext,
+    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
+    ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    stage_required_artifact,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -25,7 +26,10 @@ use crate::record::{
     ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
     MemoryRecord, MemoryScope, RetentionPolicy, preview_of,
 };
-use crate::store::{MatchEvidence, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome};
+use crate::store::{
+    MatchEvidence, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
+    reconcile_memory_artifacts,
+};
 
 /// Inline-vs-blob threshold for a memory record body, in bytes.
 ///
@@ -59,27 +63,27 @@ pub const MEMORY_TOOL_ID_CONFLICT: &str = "memory_id_conflict";
 /// Stable self-supersession code, raised when `correct_memory`'s replacement
 /// body would derive the identifier it is meant to supersede.
 pub const MEMORY_TOOL_SELF_SUPERSESSION: &str = "memory_self_supersession";
+/// Stable policy-denied error code.
+pub const MEMORY_TOOL_POLICY_DENIED: &str = "memory_policy_denied";
 
-const REMEMBER_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"body":{"type":"string"},"sensitivity":{"type":"string"}},"required":["keywords","body"]}"#;
+const REMEMBER_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256},"keywords":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1,"maxLength":128}},"body":{"type":"string","minLength":1,"maxLength":4194304},"sensitivity":{"type":"string"}},"required":["keywords","body"]}"#;
 const REMEMBER_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"outcome":{"type":"string","enum":["inserted","already_applied"]}},"required":["id","outcome"]}"#;
 
-const SEARCH_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"text":{"type":"string","minLength":1},"limit":{"type":"integer","minimum":1,"maximum":25}},"required":[]}"#;
+const SEARCH_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256},"keywords":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","minLength":1,"maxLength":128}},"text":{"type":"string","minLength":1,"maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":25}},"required":[]}"#;
 const SEARCH_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"hits":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"preview":{"type":"string"},"score":{"type":"integer"},"matched":{"type":"string"}},"required":["id","preview","score","matched"]}}},"required":["hits"]}"#;
 
 const INSPECT_INPUT_SCHEMA: &[u8] =
-    br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"]}"#;
+    br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256}},"required":["id"]}"#;
 
 const FORGET_INPUT_SCHEMA: &[u8] =
-    br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"}},"required":["id"]}"#;
+    br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256}},"required":["id"]}"#;
 const FORGET_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"tombstoned":{"type":"boolean"}},"required":["id","tombstoned"]}"#;
 
-const CORRECT_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"old_id":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"body":{"type":"string"},"sensitivity":{"type":"string"}},"required":["old_id","keywords","body"]}"#;
+const CORRECT_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"old_id":{"type":"string","minLength":1,"maxLength":256},"keywords":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1,"maxLength":128}},"body":{"type":"string","minLength":1,"maxLength":4194304},"sensitivity":{"type":"string"}},"required":["old_id","keywords","body"]}"#;
 const CORRECT_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"old_id":{"type":"string"},"new_id":{"type":"string"}},"required":["old_id","new_id"]}"#;
 
 /// Which memory tools a [`MemoryToolset`] exposes.
 ///
-/// `consolidate` and `profile` are reserved for later capabilities: they are
-/// accepted here but currently gate nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct MemoryPolicy {
@@ -89,10 +93,6 @@ pub struct MemoryPolicy {
     pub write: bool,
     /// Gates `forget_memory` and `correct_memory`.
     pub manage: bool,
-    /// Reserved; gates nothing yet.
-    pub consolidate: bool,
-    /// Reserved; gates nothing yet.
-    pub profile: bool,
 }
 
 impl Default for MemoryPolicy {
@@ -101,8 +101,6 @@ impl Default for MemoryPolicy {
             read: true,
             write: true,
             manage: false,
-            consolidate: false,
-            profile: false,
         }
     }
 }
@@ -280,6 +278,12 @@ impl Toolset for MemoryToolset {
                 .find(|spec| spec.model_name.as_ref() == name)
                 .map(|spec| spec.id.clone())
                 .ok_or_else(|| invalid_arguments("unknown memory tool name"))?;
+            if !toolset.tool_permitted(&name) {
+                return Err(invalid_arguments_code(
+                    MEMORY_TOOL_POLICY_DENIED,
+                    "memory tool is disabled by policy",
+                ));
+            }
             toolset.validate_call_context(&ctx, &call, &expected_id)?;
             let arguments = call.call.arguments().as_bytes().to_vec();
             let result = toolset.dispatch(&ctx.run, &name, &arguments).await?;
@@ -299,6 +303,12 @@ impl Toolset for MemoryToolset {
             let name = effect.call.call.tool_name().to_owned();
             if !matches!(name.as_str(), REMEMBER_NAME | FORGET_NAME | CORRECT_NAME) {
                 return Ok(ToolReconcileResult::Unknown);
+            }
+            if !toolset.tool_permitted(&name) {
+                return Err(invalid_arguments_code(
+                    MEMORY_TOOL_POLICY_DENIED,
+                    "memory tool is disabled by policy",
+                ));
             }
             // Reconciliation replays a committed effect, so the configured
             // tenant is re-checked against the committed context here exactly
@@ -350,16 +360,30 @@ impl MemoryToolset {
         Arc::from(format!("tool:{}", run.effect_id.to_canonical_string()))
     }
 
+    async fn reconcile_artifacts(&self) -> Result<(), ToolError> {
+        let limit = self.store.descriptor().limits.max_artifact_actions.min(256);
+        reconcile_memory_artifacts(self.store.as_ref(), self.artifact_store.as_ref(), limit)
+            .await
+            .map(|_| ())
+            .map_err(|error| map_store_error(&error))
+    }
+
     async fn remember(
         &self,
         run: &RunCallContext,
         arguments: &[u8],
     ) -> Result<ToolResult, ToolError> {
         let args: RememberArguments = parse_arguments(arguments)?;
+        validate_memory_body(
+            &args.body,
+            self.artifact_store.descriptor().limits.max_artifact_bytes,
+        )?;
+        validate_memory_keywords(&args.keywords)?;
         let sensitivity = parse_sensitivity(args.sensitivity.as_deref())?;
-        let id = args
-            .id
-            .unwrap_or_else(|| derive_id(self.scope.tenant(), &args.body));
+        let id = match args.id {
+            Some(id) => id,
+            None => derive_id(&self.scope, &args.body)?,
+        };
         let memory_id =
             MemoryId::parse(&id).map_err(|_| invalid_arguments("memory id is invalid"))?;
         let (body, preview) = self
@@ -401,6 +425,7 @@ impl MemoryToolset {
             Err(MemoryStoreError::IdConflict) => return id_conflict_result(),
             Err(error) => return Err(map_store_error(&error)),
         };
+        self.reconcile_artifacts().await?;
         let outcome_str = match outcome {
             PutOutcome::Inserted => "inserted",
             PutOutcome::AlreadyApplied => "already_applied",
@@ -419,14 +444,33 @@ impl MemoryToolset {
         if body.len() <= INLINE_BODY_MAX_BYTES {
             return Ok((MemoryBody::Inline(Arc::from(body)), preview));
         }
+        if !self.store.descriptor().manages_artifact_ownership {
+            return Err(tool_error(
+                MEMORY_TOOL_UNAVAILABLE,
+                ErrorCategory::Validation,
+                false,
+                "memory store does not support blob artifact ownership",
+            ));
+        }
+        if self.store.descriptor().durable
+            && self.artifact_store.descriptor().persistence != ArtifactPersistence::Durable
+        {
+            return Err(tool_error(
+                MEMORY_TOOL_UNAVAILABLE,
+                ErrorCategory::Validation,
+                false,
+                "durable memory requires a durable artifact store for blob bodies",
+            ));
+        }
+        let artifact_scope = ArtifactScope {
+            tenant_scope: Arc::clone(&self.scope.tenant),
+            session_id: run.locator.session_id,
+            run_id: Some(run.locator.run_id),
+            sensitivity,
+        };
         let artifact = stage_required_artifact(
             self.artifact_store.as_ref(),
-            ArtifactScope {
-                tenant_scope: Arc::clone(&self.scope.tenant),
-                session_id: run.locator.session_id,
-                run_id: Some(run.locator.run_id),
-                sensitivity,
-            },
+            artifact_scope.clone(),
             finstack_ai_runtime::Bytes::copy_from_slice(body.as_bytes()),
             ArtifactMetadata {
                 kind: Arc::from("memory-record"),
@@ -444,7 +488,13 @@ impl MemoryToolset {
                 "memory artifact staging failed",
             )
         })?;
-        Ok((MemoryBody::Blob(artifact), preview))
+        Ok((
+            MemoryBody::Blob {
+                scope: artifact_scope,
+                artifact,
+            },
+            preview,
+        ))
     }
 
     async fn search(
@@ -502,6 +552,7 @@ impl MemoryToolset {
             .search(self.scope.clone(), query, limit)
             .await
             .map_err(|error| map_store_error(&error))?;
+        self.reconcile_artifacts().await?;
         let hits_json: Vec<serde_json::Value> = hits
             .iter()
             .map(|hit| {
@@ -529,6 +580,7 @@ impl MemoryToolset {
             .get(self.scope.clone(), memory_id)
             .await
             .map_err(|error| map_store_error(&error))?;
+        self.reconcile_artifacts().await?;
         match record {
             Some(record) => {
                 let mut value = serde_json::to_value(&record).map_err(|_| {
@@ -542,7 +594,7 @@ impl MemoryToolset {
                 if let serde_json::Value::Object(ref mut map) = value {
                     let body_value = match &record.body {
                         MemoryBody::Inline(text) => serde_json::json!({ "inline": text.as_ref() }),
-                        MemoryBody::Blob(artifact) => serde_json::json!({
+                        MemoryBody::Blob { artifact, .. } => serde_json::json!({
                             "blob_name": artifact.blob().name().unwrap_or_else(|| artifact.blob().id()),
                         }),
                     };
@@ -572,6 +624,7 @@ impl MemoryToolset {
             .await
         {
             Ok(()) => {
+                self.reconcile_artifacts().await?;
                 ok_result(&serde_json::json!({ "id": memory_id.as_str(), "tombstoned": true }))
             }
             Err(MemoryStoreError::NotFound | MemoryStoreError::ScopeMismatch) => not_found_result(),
@@ -585,10 +638,15 @@ impl MemoryToolset {
         arguments: &[u8],
     ) -> Result<ToolResult, ToolError> {
         let args: CorrectArguments = parse_arguments(arguments)?;
+        validate_memory_body(
+            &args.body,
+            self.artifact_store.descriptor().limits.max_artifact_bytes,
+        )?;
+        validate_memory_keywords(&args.keywords)?;
         let old_id = MemoryId::parse(&args.old_id)
             .map_err(|_| invalid_arguments("memory old_id is invalid"))?;
         let sensitivity = parse_sensitivity(args.sensitivity.as_deref())?;
-        let new_id_str = derive_id(self.scope.tenant(), &args.body);
+        let new_id_str = derive_id(&self.scope, &args.body)?;
         let new_id =
             MemoryId::parse(&new_id_str).map_err(|_| invalid_arguments("memory id is invalid"))?;
         // The replacement id is derived from the replacement body, so an
@@ -639,10 +697,13 @@ impl MemoryToolset {
             )
             .await
         {
-            Ok(()) => ok_result(&serde_json::json!({
-                "old_id": old_id.as_str(),
-                "new_id": new_id.as_str(),
-            })),
+            Ok(()) => {
+                self.reconcile_artifacts().await?;
+                ok_result(&serde_json::json!({
+                    "old_id": old_id.as_str(),
+                    "new_id": new_id.as_str(),
+                }))
+            }
             Err(MemoryStoreError::NotFound | MemoryStoreError::ScopeMismatch) => not_found_result(),
             Err(error) => Err(map_store_error(&error)),
         }
@@ -657,20 +718,33 @@ fn matched_str(matched: &MatchEvidence) -> String {
     }
 }
 
-/// Derive a content-addressed id for `body` within `tenant`.
+/// Derive a content-addressed id for `body` within the complete scope.
 ///
 /// The tenant is part of the digest domain so two tenants storing identical
 /// text land on distinct ids: a shared store must not turn one tenant's
 /// first write into a conflict with another tenant's record, nor let the
 /// conflict reveal that some other scope holds that exact body.
-fn derive_id(tenant: &str, body: &str) -> String {
-    let digest = finstack_ai_kernel::fixed_domain_digest!(
-        "memory-tool-derived-id",
-        1,
-        format!("{tenant}\0{body}").as_bytes(),
-    );
+fn derive_id(scope: &MemoryScope, body: &str) -> Result<String, ToolError> {
+    let encoded = serde_json_canonicalizer::to_vec(&(scope, body)).map_err(|_| {
+        tool_error(
+            MEMORY_TOOL_UNAVAILABLE,
+            ErrorCategory::Internal,
+            false,
+            "memory identity encoding failed",
+        )
+    })?;
+    let digest =
+        finstack_ai_kernel::Digest::domain_separated("memory-tool-derived-id", 1, &encoded)
+            .map_err(|_| {
+                tool_error(
+                    MEMORY_TOOL_UNAVAILABLE,
+                    ErrorCategory::Internal,
+                    false,
+                    "memory identity derivation failed",
+                )
+            })?;
     let hex = digest.to_hex();
-    format!("mem-{}", &hex[..16.min(hex.len())])
+    Ok(format!("mem-{}", &hex[..16.min(hex.len())]))
 }
 
 fn parse_sensitivity(value: Option<&str>) -> Result<Sensitivity, ToolError> {
@@ -679,6 +753,37 @@ fn parse_sensitivity(value: Option<&str>) -> Result<Sensitivity, ToolError> {
         Some(raw) => serde_json::from_value(serde_json::Value::String(raw.to_owned()))
             .map_err(|_| invalid_arguments("memory sensitivity is invalid")),
     }
+}
+
+fn validate_memory_body(body: &str, max_bytes: usize) -> Result<(), ToolError> {
+    if body.is_empty()
+        || (body.len() > INLINE_BODY_MAX_BYTES && body.len() > max_bytes)
+        || body.as_bytes().contains(&0)
+    {
+        return Err(invalid_arguments("memory body is invalid"));
+    }
+    Ok(())
+}
+
+fn validate_memory_keywords(keywords: &[String]) -> Result<(), ToolError> {
+    if keywords.len() > crate::record::KEYWORDS_MAX_COUNT
+        || keywords.iter().any(|keyword| {
+            keyword.is_empty()
+                || keyword.len() > crate::record::KEYWORD_MAX_BYTES
+                || keyword.as_bytes().contains(&0)
+        })
+    {
+        return Err(invalid_arguments("memory keywords are invalid"));
+    }
+    for (index, keyword) in keywords.iter().enumerate() {
+        if keywords[..index]
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(keyword))
+        {
+            return Err(invalid_arguments("memory keywords are invalid"));
+        }
+    }
+    Ok(())
 }
 
 fn parse_arguments<T: for<'de> Deserialize<'de>>(arguments: &[u8]) -> Result<T, ToolError> {
@@ -750,6 +855,17 @@ fn map_store_error(error: &MemoryStoreError) -> ToolError {
             MEMORY_TOOL_ID_CONFLICT,
             "a memory record already exists under this id",
         ),
+        MemoryStoreError::IdempotencyConflict => invalid_arguments_code(
+            "memory_idempotency_conflict",
+            "the idempotency key was already used for another operation",
+        ),
+        MemoryStoreError::CapacityExceeded { .. } => tool_error(
+            "memory_capacity_exceeded",
+            ErrorCategory::Limit,
+            false,
+            "memory store capacity is exhausted",
+        ),
+        MemoryStoreError::InvalidRequest { .. } => invalid_arguments("memory request is invalid"),
         MemoryStoreError::NotFound | MemoryStoreError::ScopeMismatch => tool_error(
             MEMORY_TOOL_NOT_FOUND,
             ErrorCategory::Tool,

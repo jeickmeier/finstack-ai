@@ -76,6 +76,10 @@ fn message_raw_json(text: &str) -> RawJson {
     RawJson::parse(format!(r#"{{"role":"assistant","text":"{text}"}}"#)).expect("raw message")
 }
 
+fn findings(values: Vec<EvidenceFinding>) -> EvidenceFindings {
+    EvidenceFindings::try_new(values).expect("bounded findings")
+}
+
 fn policy() -> VerifyPolicy {
     VerifyPolicy::try_new(finstack_ai_kernel::Duration::from_millis(250), "policy-v1")
         .expect("policy")
@@ -138,14 +142,14 @@ impl EvidenceVerifier for ScriptedVerifier {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let text = message.as_str();
         if text.contains("bounce") {
-            Verdict::Bounce(vec![
+            Verdict::Bounce(findings(vec![
                 EvidenceFinding::try_new(EvidenceKind::Citation, "missing citation")
                     .expect("finding"),
-            ])
+            ]))
         } else if text.contains("reject") {
-            Verdict::Reject(vec![
+            Verdict::Reject(findings(vec![
                 EvidenceFinding::try_new(EvidenceKind::Test, "failing test").expect("finding"),
-            ])
+            ]))
         } else {
             Verdict::Accept
         }
@@ -379,7 +383,7 @@ fn feedback_token_estimates_pin_truncated_byte_boundaries() {
 fn emitted_feedback_token_estimate_is_never_zero() {
     let finding =
         EvidenceFinding::try_new(EvidenceKind::Citation, "missing citation").expect("finding");
-    let item = feedback_item(&[finding]).expect("feedback");
+    let item = feedback_item(&findings(vec![finding])).expect("feedback");
     let ContentBlock::Text(block) = &item.content[0] else {
         panic!("expected text");
     };
@@ -392,7 +396,7 @@ fn emitted_feedback_token_estimate_is_never_zero() {
         "emitted feedback must never report a zero token estimate"
     );
 
-    let empty = feedback_item(&[]).expect("intro-only feedback");
+    let empty = feedback_item(&EvidenceFindings::default()).expect("intro-only feedback");
     assert!(
         empty.estimated_tokens >= 1,
         "intro-only feedback must never report a zero token estimate"
@@ -401,11 +405,23 @@ fn emitted_feedback_token_estimate_is_never_zero() {
 
 #[tokio::test]
 async fn oversized_finding_note_is_truncated_not_rejected() {
-    let oversized = "x".repeat(TEXT_MAX_BYTES + 16);
+    let oversized = "x".repeat(MAX_FINDING_NOTE_BYTES + 16);
     let finding =
         EvidenceFinding::try_new(EvidenceKind::Artifact, &oversized).expect("truncated finding");
-    assert!(finding.note.len() <= TEXT_MAX_BYTES);
+    assert!(finding.note.len() <= MAX_FINDING_NOTE_BYTES);
     assert!(finding.note.len() < oversized.len());
+}
+
+#[test]
+fn findings_reject_more_than_the_public_count_bound() {
+    let finding = EvidenceFinding::try_new(EvidenceKind::Citation, "missing").expect("finding");
+    let values = vec![finding; MAX_FINDINGS + 1];
+    assert_eq!(
+        EvidenceFindings::try_new(values).expect_err("count bound"),
+        VerifyError::Configuration {
+            reason: "findings_exceed_bounds",
+        }
+    );
 }
 
 #[tokio::test]

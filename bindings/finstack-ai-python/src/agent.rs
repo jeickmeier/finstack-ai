@@ -17,7 +17,7 @@ use finstack_ai_kernel::{
     SessionId, Version,
 };
 use finstack_ai_memory::InProcessArtifactStore;
-use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
+use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_tools_document::DocumentToolset;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -88,10 +88,14 @@ impl PyContextProviderArg {
     fn registration(
         &self,
         py: Python<'_>,
-    ) -> (ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>) {
+        artifact_store: &Arc<dyn ArtifactStore>,
+    ) -> PyResult<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)> {
         match self {
-            Self::Python(provider) => provider.bind(py).borrow().registration(),
-            Self::Memory(provider) => provider.bind(py).borrow().registration(),
+            Self::Python(provider) => Ok(provider.bind(py).borrow().registration()),
+            Self::Memory(provider) => provider
+                .bind(py)
+                .borrow()
+                .registration(py, Arc::clone(artifact_store)),
         }
     }
 }
@@ -136,9 +140,8 @@ pub(crate) struct PyAgent {
     /// Shared with the registered `DocumentToolset` and
     /// `DocumentIngestMiddleware`. Run attachments are staged here before
     /// submission so the middleware can resolve them back off the
-    /// `AttachmentIndex`.
+    /// the artifact store.
     pub(crate) artifact_store: Arc<InProcessArtifactStore>,
-    pub(crate) attachment_index: Arc<AttachmentIndex>,
 }
 
 #[pymethods]
@@ -182,7 +185,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store, attachment_index) = linked_ports(
+        let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -211,9 +214,7 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| {
-                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
-            })
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
     }
 
@@ -223,7 +224,8 @@ impl PyAgent {
     /// `https://openrouter.ai/api/v1/responses` and does not read environment
     /// variables. `referer` and `title` set the non-secret attribution
     /// headers. Does not attach a `MediaResolver`; vision, file, and audio
-    /// input require a host-built provider. ADR-049 rejected FFI resolvers.
+    /// input require a host-built provider because Python factories do not
+    /// accept host callback resolvers across FFI.
     /// `media_tools` registers outbound media-generation tools only.
     #[staticmethod]
     #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
@@ -253,7 +255,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let (ports, artifact_store, attachment_index) = linked_ports(
+        let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -283,9 +285,7 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| {
-                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
-            })
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
     }
 
@@ -326,7 +326,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store, attachment_index) = linked_ports(
+        let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -353,9 +353,7 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| {
-                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
-            })
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
     }
 
@@ -397,7 +395,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store, attachment_index) = linked_ports(
+        let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -424,9 +422,7 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| {
-                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
-            })
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
     }
 
@@ -465,7 +461,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store, attachment_index) = linked_ports(
+        let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -491,9 +487,7 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| {
-                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
-            })
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
     }
 
@@ -530,7 +524,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let (ports, artifact_store, attachment_index) = linked_ports(
+        let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -560,9 +554,7 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| {
-                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
-            })
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
     }
 
@@ -592,7 +584,7 @@ impl PyAgent {
         let model = model.borrow();
         let model_name = model.model_name();
         let model = model.registration();
-        let (ports, artifact_store, attachment_index) = linked_ports(
+        let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -616,7 +608,6 @@ impl PyAgent {
                 approval_grant,
                 (sqlite_path, sqlite_durability),
                 artifact_store,
-                attachment_index,
             )
             .await;
             Python::attach(|py| match built {
@@ -658,7 +649,6 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
-        let attachment_index = Arc::clone(&self.attachment_index);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             match agent.re_resolve().await {
                 Ok(inner) => Python::attach(|py| {
@@ -671,7 +661,6 @@ impl PyAgent {
                             settings,
                             default_timeout_seconds,
                             artifact_store,
-                            attachment_index,
                         },
                     )
                 }),
@@ -740,14 +729,12 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
-        let attachment_index = Arc::clone(&self.attachment_index);
         let attachments = collect_attachments(py, attachments);
         py.detach(move || {
             let runtime = pyo3_async_runtimes::tokio::get_runtime();
             let _guard = runtime.enter();
             let staged = runtime.block_on(stage_attachments(
                 artifact_store.as_ref(),
-                attachment_index.as_ref(),
                 "python-local",
                 attachments,
             ))?;
@@ -833,20 +820,14 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
-        let attachment_index = Arc::clone(&self.attachment_index);
         let attachments = collect_attachments(py, attachments);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let staged = match stage_attachments(
-                artifact_store.as_ref(),
-                attachment_index.as_ref(),
-                "python-local",
-                attachments,
-            )
-            .await
-            {
-                Ok(staged) => staged,
-                Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
-            };
+            let staged =
+                match stage_attachments(artifact_store.as_ref(), "python-local", attachments).await
+                {
+                    Ok(staged) => staged,
+                    Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
+                };
             let request = match run_request(
                 &model,
                 input,
@@ -903,7 +884,6 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
-        let attachment_index = Arc::clone(&self.attachment_index);
         let attachments = collect_attachments(py, attachments);
         let lane = lane.clone();
         let tenant_scope = lane.session().tenant_scope().to_string();
@@ -912,7 +892,6 @@ impl PyAgent {
             let _guard = runtime.enter();
             let staged = runtime.block_on(stage_attachments(
                 artifact_store.as_ref(),
-                attachment_index.as_ref(),
                 &tenant_scope,
                 attachments,
             ))?;
@@ -955,7 +934,6 @@ fn wrap_linked_agent(
     built: Result<LinkedAgent, AgentRunError>,
     output_adapter: Option<Py<PyAny>>,
     artifact_store: Arc<InProcessArtifactStore>,
-    attachment_index: Arc<AttachmentIndex>,
 ) -> PyResult<Py<PyAgent>> {
     match built {
         Ok(value) => Py::new(
@@ -967,7 +945,6 @@ fn wrap_linked_agent(
                 settings: value.settings,
                 default_timeout_seconds: value.default_timeout.as_secs_f64(),
                 artifact_store,
-                attachment_index,
             },
         ),
         Err(error) => Err(agent_error(py, &error, None)),
@@ -983,18 +960,16 @@ struct LinkedPorts {
     output: Option<PreparedPydanticOutput>,
 }
 
-/// Build a fresh, dedicated `InProcessArtifactStore` + `AttachmentIndex`
-/// pair plus the `DocumentToolset`/`DocumentIngestMiddleware` registrations
-/// that share them.
+/// Build a fresh, dedicated `InProcessArtifactStore` plus the
+/// `DocumentToolset`/`DocumentIngestMiddleware` registrations that share it.
 ///
 /// Every agent factory registers these unconditionally (mirroring the
 /// document-ingest lane test's wiring) so `Agent.run`/`start` can stage
-/// `Attachment` inputs against the exact store/index instances the
-/// toolset and middleware read from.
-/// `(artifact_store, attachment_index, toolset registration, middleware registration)`.
+/// `Attachment` inputs against the exact store instance the toolset and
+/// middleware read from.
+/// `(artifact_store, toolset registration, middleware registration)`.
 type DocumentIngestPorts = (
     Arc<InProcessArtifactStore>,
-    Arc<AttachmentIndex>,
     (ComponentRef, Arc<dyn Toolset>),
     (ComponentRef, Arc<dyn Middleware>),
 );
@@ -1022,17 +997,13 @@ fn document_ingest_component(id: &str) -> Result<ComponentRef, AgentRunError> {
 
 fn document_ingest_ports() -> Result<DocumentIngestPorts, AgentRunError> {
     let artifact_store = Arc::new(InProcessArtifactStore::default());
-    let attachment_index = Arc::new(AttachmentIndex::default());
     let dyn_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>;
-    let toolset = DocumentToolset::try_new()
-        .map_err(|error| configuration_error(error.to_string()))?
-        .with_artifact_store(Arc::clone(&dyn_store));
-    let middleware =
-        DocumentIngestMiddleware::try_new(Arc::clone(&dyn_store), Arc::clone(&attachment_index))
-            .map_err(|error| configuration_error(error.to_string()))?;
+    let toolset = DocumentToolset::try_new(Arc::clone(&dyn_store))
+        .map_err(|error| configuration_error(error.to_string()))?;
+    let middleware = DocumentIngestMiddleware::try_new(Arc::clone(&dyn_store))
+        .map_err(|error| configuration_error(error.to_string()))?;
     Ok((
         artifact_store,
-        attachment_index,
         (
             document_ingest_component("finstack.tools.document")?,
             Arc::new(toolset) as Arc<dyn Toolset>,
@@ -1051,12 +1022,8 @@ fn linked_ports(
     middleware: Option<Vec<Py<PyPythonMiddleware>>>,
     observers: Option<Vec<PyObserverArg>>,
     output_type: Option<Py<PyAny>>,
-) -> PyResult<(
-    LinkedPorts,
-    Arc<InProcessArtifactStore>,
-    Arc<AttachmentIndex>,
-)> {
-    let (artifact_store, attachment_index, document_toolset, document_middleware) =
+) -> PyResult<(LinkedPorts, Arc<InProcessArtifactStore>)> {
+    let (artifact_store, document_toolset, document_middleware) =
         document_ingest_ports().map_err(|error| agent_error(py, &error, None))?;
     let dyn_artifact_store: Arc<dyn ArtifactStore> =
         Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>;
@@ -1079,8 +1046,8 @@ fn linked_ports(
             context_providers: context_providers
                 .unwrap_or_default()
                 .into_iter()
-                .map(|provider| provider.registration(py))
-                .collect(),
+                .map(|provider| provider.registration(py, &dyn_artifact_store))
+                .collect::<PyResult<Vec<_>>>()?,
             middleware,
             observers: observers
                 .unwrap_or_default()
@@ -1092,7 +1059,6 @@ fn linked_ports(
                 .transpose()?,
         },
         artifact_store,
-        attachment_index,
     ))
 }
 
@@ -1111,7 +1077,6 @@ async fn build_python_agent(
     approval_grant: ApprovalGrantMode,
     sqlite: (Option<String>, Option<PySqliteDurability>),
     artifact_store: Arc<InProcessArtifactStore>,
-    attachment_index: Arc<AttachmentIndex>,
 ) -> Result<PyAgent, AgentRunError> {
     let store_component = if sqlite.0.is_some() {
         "python.store.sqlite"
@@ -1156,7 +1121,6 @@ async fn build_python_agent(
         settings: built.settings,
         default_timeout_seconds: built.default_timeout.as_secs_f64(),
         artifact_store,
-        attachment_index,
     })
 }
 

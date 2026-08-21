@@ -207,6 +207,16 @@ async fn observer_skips_candidates_over_the_inline_body_cap() {
         .expect("list");
     assert_eq!(listing.total, 1);
     assert_eq!(listing.records[0].preview.as_ref(), "a normal sized memory");
+    assert_eq!(
+        observer.diagnostics(),
+        crate::MemoryObserverDiagnostics {
+            attempted: 2,
+            stored: 1,
+            dropped: 1,
+            failed: 0,
+            last_diagnostic: Some("memory_capture_body_too_large"),
+        }
+    );
 }
 
 struct FailingStore;
@@ -282,11 +292,21 @@ async fn observer_swallows_store_failures() {
     let observer =
         MemoryObserver::try_new(store, scope, extractor, system_clock()).expect("observer");
 
-    let batch: Arc<[RunEvent]> = Arc::from([text_event("[[remember]] this will fail to store")]);
+    let batch: Arc<[RunEvent]> = Arc::from([text_event("[[remember]] this will fail to store\n")]);
     observer
         .observe(batch)
         .await
         .expect("observe swallows put failure");
+    assert_eq!(
+        observer.diagnostics(),
+        crate::MemoryObserverDiagnostics {
+            attempted: 1,
+            stored: 0,
+            dropped: 0,
+            failed: 1,
+            last_diagnostic: Some("memory_capture_store_failed"),
+        }
+    );
 }
 
 /// Guards against `MemoryExtractor` being read-only over its input: an

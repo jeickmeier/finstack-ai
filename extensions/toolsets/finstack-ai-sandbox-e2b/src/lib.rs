@@ -33,12 +33,13 @@ use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Timestamp, ToolExecutionMode, ToolId,
     ValidatedToolCall,
 };
+use finstack_ai_net_guard::{BodyReadInterrupt, NetGuardError, read_body_bounded_interruptible};
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, ToolCallContext,
     ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
     ToolsetDescriptor, verify_authority,
 };
-use futures_util::{StreamExt, stream};
+use futures_util::stream;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -179,6 +180,7 @@ impl E2bSandboxToolset {
             })?;
         let client = reqwest::Client::builder()
             .http1_only()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|_| E2bSandboxError::EndpointInvalid {
@@ -346,31 +348,36 @@ async fn post_json<T: for<'de> Deserialize<'de>>(
             "e2b endpoint rejected the request",
         ));
     }
-    read_bounded_json(response).await
+    read_bounded_json(response, ctx).await
 }
 
 async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
     response: reqwest::Response,
+    ctx: &ToolCallContext,
 ) -> Result<T, ToolError> {
-    let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| {
-            tool_error(
-                E2B_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "e2b response is invalid",
-            )
-        })?;
-        if body.len().saturating_add(chunk.len()) > MAX_RESULT_BYTES {
-            return Err(tool_error(
-                E2B_LIMIT_EXCEEDED,
-                ErrorCategory::Limit,
-                "e2b response exceeds the configured byte limit",
-            ));
-        }
-        body.extend_from_slice(&chunk);
-    }
+    let cancellation = ctx.run.cancellation.clone();
+    let body = read_body_bounded_interruptible(
+        response,
+        MAX_RESULT_BYTES,
+        BodyReadInterrupt::new(
+            async move { cancellation.cancelled().await },
+            wait_deadline(ctx.run.deadline),
+        ),
+    )
+    .await
+    .map_err(|error| match error {
+        NetGuardError::Cancelled | NetGuardError::DeadlineExceeded => timeout_error(),
+        NetGuardError::LimitExceeded => tool_error(
+            E2B_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "e2b response exceeds the configured byte limit",
+        ),
+        _ => tool_error(
+            E2B_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "e2b response is invalid",
+        ),
+    })?;
     serde_json::from_slice(&body).map_err(|_| {
         tool_error(
             E2B_TRANSPORT_FAILED,

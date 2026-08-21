@@ -107,7 +107,7 @@ incremental = true
 strip = false
 
 [workspace.package]
-version = "1.0.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
@@ -120,72 +120,73 @@ description = "Deterministic agent microkernel, runtime, and bindings"
 license-files = ["licenses/LICENSE-MIT", "licenses/LICENSE-APACHE"]
 
 [workspace.dependencies]
-finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "1.0.0" }
-finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "1.0.0", default-features = false }
-finstack-ai = { path = "crates/finstack-ai", version = "1.0.0", default-features = false }
-finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "1.0.0" }
-finstack-ai-server = { path = "crates/finstack-ai-server", version = "1.0.0" }
+finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "2.0.0" }
+finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "2.0.0", default-features = false }
+finstack-ai = { path = "crates/finstack-ai", version = "2.0.0", default-features = false }
+finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "2.0.0" }
+finstack-ai-server = { path = "crates/finstack-ai-server", version = "2.0.0" }
 rustls = { version = "0.23.31", default-features = false, features = ["std", "ring"] }
 tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring"] }
-finstack-ai-test = { path = "crates/finstack-ai-test", version = "1.0.0" }
-finstack-ai-store-common = { path = "extensions/stores/finstack-ai-store-common", version = "1.0.0" }
-finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "1.0.0" }
-finstack-ai-store-postgres = { path = "extensions/stores/finstack-ai-store-postgres", version = "1.0.0" }
-finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "1.0.0" }
+finstack-ai-test = { path = "crates/finstack-ai-test", version = "2.0.0" }
+finstack-ai-store-common = { path = "extensions/stores/finstack-ai-store-common", version = "2.0.0" }
+finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "2.0.0" }
+finstack-ai-store-postgres = { path = "extensions/stores/finstack-ai-store-postgres", version = "2.0.0" }
+finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "2.0.0" }
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 tokio-postgres-rustls = "0.13"
-finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-object-s3", version = "1.0.0" }
-finstack-ai-store-object-local = { path = "extensions/stores/finstack-ai-store-object-local", version = "1.0.0" }
-finstack-ai-store-artifact-object = { path = "extensions/stores/finstack-ai-store-artifact-object", version = "1.0.0" }
-rusqlite = { version = "0.37.0", default-features = false, features = ["bundled"] }
-finstack-ai-provider-wire = { path = "extensions/providers/finstack-ai-provider-wire", version = "1.0.0" }
-finstack-ai-provider-openai = { path = "extensions/providers/finstack-ai-provider-openai", version = "1.0.0" }
-finstack-ai-provider-ollama = { path = "extensions/providers/finstack-ai-provider-ollama", version = "1.0.0" }
-finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "1.0.0" }
-finstack-ai-provider-openrouter = { path = "extensions/providers/finstack-ai-provider-openrouter", version = "1.0.0" }
-finstack-ai-provider-gemini = { path = "extensions/providers/finstack-ai-provider-gemini", version = "1.0.0" }
-finstack-ai-sandbox-e2b = { path = "extensions/toolsets/finstack-ai-sandbox-e2b", version = "1.0.0" }
-finstack-ai-tools-openrouter-media = { path = "extensions/toolsets/finstack-ai-tools-openrouter-media", version = "1.0.0" }
-finstack-ai-tools-fetch = { path = "extensions/toolsets/finstack-ai-tools-fetch", version = "1.0.0" }
-finstack-ai-tools-openai-media = { path = "extensions/toolsets/finstack-ai-tools-openai-media", version = "1.0.0" }
-finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "1.0.0" }
-finstack-ai-tools-elicitation = { path = "extensions/toolsets/finstack-ai-tools-elicitation", version = "1.0.0" }
-finstack-ai-tools-document = { path = "extensions/toolsets/finstack-ai-tools-document", version = "1.0.0" }
+webpki-roots = "1"
+finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-object-s3", version = "2.0.0" }
+finstack-ai-store-object-local = { path = "extensions/stores/finstack-ai-store-object-local", version = "2.0.0" }
+finstack-ai-store-artifact-object = { path = "extensions/stores/finstack-ai-store-artifact-object", version = "2.0.0" }
+rusqlite = { version = "0.37.0", default-features = false, features = ["backup", "bundled"] }
+finstack-ai-provider-wire = { path = "extensions/providers/finstack-ai-provider-wire", version = "2.0.0" }
+finstack-ai-provider-openai = { path = "extensions/providers/finstack-ai-provider-openai", version = "2.0.0" }
+finstack-ai-provider-ollama = { path = "extensions/providers/finstack-ai-provider-ollama", version = "2.0.0" }
+finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "2.0.0" }
+finstack-ai-provider-openrouter = { path = "extensions/providers/finstack-ai-provider-openrouter", version = "2.0.0" }
+finstack-ai-provider-gemini = { path = "extensions/providers/finstack-ai-provider-gemini", version = "2.0.0" }
+finstack-ai-sandbox-e2b = { path = "extensions/toolsets/finstack-ai-sandbox-e2b", version = "2.0.0" }
+finstack-ai-tools-openrouter-media = { path = "extensions/toolsets/finstack-ai-tools-openrouter-media", version = "2.0.0" }
+finstack-ai-tools-fetch = { path = "extensions/toolsets/finstack-ai-tools-fetch", version = "2.0.0" }
+finstack-ai-tools-openai-media = { path = "extensions/toolsets/finstack-ai-tools-openai-media", version = "2.0.0" }
+finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "2.0.0" }
+finstack-ai-tools-elicitation = { path = "extensions/toolsets/finstack-ai-tools-elicitation", version = "2.0.0" }
+finstack-ai-tools-document = { path = "extensions/toolsets/finstack-ai-tools-document", version = "2.0.0" }
 anydoc = "0.1"
 pdf-inspector = { version = "1.14", default-features = false }
-finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "1.0.0" }
-finstack-ai-tools-mcp = { path = "extensions/toolsets/finstack-ai-tools-mcp", version = "1.0.0" }
-finstack-ai-tools-shell = { path = "extensions/toolsets/finstack-ai-tools-shell", version = "1.0.0" }
-finstack-ai-tools-subagent = { path = "extensions/toolsets/finstack-ai-tools-subagent", version = "1.0.0" }
-finstack-ai-tools-skills = { path = "extensions/toolsets/finstack-ai-tools-skills", version = "1.0.0" }
-finstack-ai-tools-skill-import = { path = "extensions/toolsets/finstack-ai-tools-skill-import", version = "1.0.0" }
-finstack-ai-memory = { path = "extensions/context/finstack-ai-memory", version = "1.0.0" }
+finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "2.0.0" }
+finstack-ai-tools-mcp = { path = "extensions/toolsets/finstack-ai-tools-mcp", version = "2.0.0" }
+finstack-ai-tools-shell = { path = "extensions/toolsets/finstack-ai-tools-shell", version = "2.0.0" }
+finstack-ai-tools-subagent = { path = "extensions/toolsets/finstack-ai-tools-subagent", version = "2.0.0" }
+finstack-ai-tools-skills = { path = "extensions/toolsets/finstack-ai-tools-skills", version = "2.0.0" }
+finstack-ai-tools-skill-import = { path = "extensions/toolsets/finstack-ai-tools-skill-import", version = "2.0.0" }
+finstack-ai-memory = { path = "extensions/context/finstack-ai-memory", version = "2.0.0" }
 # Non-ASCII MCP `Mcp-Name` header sentinel encoding (`=?base64?…?=`).
-finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "1.0.0" }
-finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "1.0.0" }
-finstack-ai-middleware-instructions = { path = "extensions/middleware/finstack-ai-middleware-instructions", version = "1.0.0" }
-finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "1.0.0" }
-finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstack-ai-middleware-document-ingest", version = "1.0.0" }
-finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "1.0.0" }
+finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "2.0.0" }
+finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "2.0.0" }
+finstack-ai-middleware-instructions = { path = "extensions/middleware/finstack-ai-middleware-instructions", version = "2.0.0" }
+finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "2.0.0" }
+finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstack-ai-middleware-document-ingest", version = "2.0.0" }
+finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "2.0.0" }
 # ASCII-only patterns; no unicode-* features needed. Already in-tree transitively.
 regex = { version = "1.13", default-features = false, features = ["std", "perf"] }
-finstack-ai-middleware-tool-policy = { path = "extensions/middleware/finstack-ai-middleware-tool-policy", version = "1.0.0" }
-finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "1.0.0" }
-finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "1.0.0" }
-finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "1.0.0" }
-finstack-ai-observer-notify = { path = "extensions/observers/finstack-ai-observer-notify", version = "1.0.0" }
-finstack-ai-observer-billing = { path = "extensions/observers/finstack-ai-observer-billing", version = "1.0.0" }
-finstack-ai-completion-ingress = { path = "extensions/interop/finstack-ai-completion-ingress", version = "1.0.0" }
-finstack-ai-remote-child = { path = "extensions/interop/finstack-ai-remote-child", version = "1.0.0" }
-finstack-ai-net-guard = { path = "extensions/net/finstack-ai-net-guard", version = "1.0.0" }
-finstack-ai-workflow-hitl = { path = "extensions/workflow/finstack-ai-workflow-hitl", version = "1.0.0" }
-finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "1.0.0" }
-finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "1.0.0" }
+finstack-ai-middleware-tool-policy = { path = "extensions/middleware/finstack-ai-middleware-tool-policy", version = "2.0.0" }
+finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "2.0.0" }
+finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "2.0.0" }
+finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "2.0.0" }
+finstack-ai-observer-notify = { path = "extensions/observers/finstack-ai-observer-notify", version = "2.0.0" }
+finstack-ai-observer-billing = { path = "extensions/observers/finstack-ai-observer-billing", version = "2.0.0" }
+finstack-ai-completion-ingress = { path = "extensions/interop/finstack-ai-completion-ingress", version = "2.0.0" }
+finstack-ai-remote-child = { path = "extensions/interop/finstack-ai-remote-child", version = "2.0.0" }
+finstack-ai-net-guard = { path = "extensions/net/finstack-ai-net-guard", version = "2.0.0" }
+finstack-ai-workflow-hitl = { path = "extensions/workflow/finstack-ai-workflow-hitl", version = "2.0.0" }
+finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "2.0.0" }
+finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "2.0.0" }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
-finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "1.0.0" }
-finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = "1.0.0" }
-finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "1.0.0" }
+finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "2.0.0" }
+finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = "2.0.0" }
+finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "2.0.0" }
 # Guest-only; do not add to kernel/runtime/SDK/host. Pin matches fixture guests.
 wit-bindgen = { version = "0.57.1", default-features = false, features = ["macros", "realloc"] }
 # Newest crates.io release whose MSRV is ≤ 1.97.1. Do not enable the implicit
@@ -199,11 +200,11 @@ serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 serde_path_to_error = "0.1.20"
 # Offline draft 2020-12 validation only; keep default features off to avoid
-# network resolvers (TDD §15.3 /  fixture harness).
+# network resolvers (contract section 15.3 /  fixture harness).
 jsonschema = { version = "0.40.2", default-features = false }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 flamegraph = "0.6.13"
-# Kernel value-type dependencies ( / TDD §3.3). The kernel stores UUID
+# Kernel value-type dependencies ( / contract section 3.3). The kernel stores UUID
 # bytes without depending on `uuid` (keeps wasm-bindgen out of ARCH001). Runtime
 # owns UUIDv7 generation via injected clock/random and the `uuid` crate.
 bytes = "1.12.1"
@@ -219,6 +220,7 @@ futures-core = "0.3.31"
 futures-util = "0.3.31"
 base64 = { version = "0.22.1", default-features = false, features = ["std", "alloc"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["http2", "json", "native-tls", "stream"] }
+quick-xml = { version = "0.41.0", features = ["serialize"] }
 url = "2"
 # HTML→markdown conversion for the fetch toolset (spec §4.5). License-gated
 # via `cargo deny check licenses` before use; fallback is a hand-rolled

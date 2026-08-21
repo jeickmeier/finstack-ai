@@ -1,4 +1,4 @@
-//! TDD §6.5 payload ceilings enforced before allocation.
+//! contract section 6.5 payload ceilings enforced before allocation.
 
 use crate::error::WitMapError;
 

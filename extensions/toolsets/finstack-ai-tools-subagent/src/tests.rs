@@ -2,15 +2,21 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use finstack_ai_kernel::{
-    AgentId, ChildPlacement, ChildRunLocator, Digest, EffectId, EffectOutputContract,
-    EffectOutputKind, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, SessionId,
-    ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
+    AgentId, AllocatedIds, AppendBatchId, BudgetPropagation, CancellationPropagation,
+    ChildPlacement, ChildRunLocator, DeadlinePropagation, Digest, EffectId, EffectOutputContract,
+    EffectOutputKind, EventId, LaneId, Metadata, OperationLocator, PrincipalPropagation,
+    PrincipalRef, RawJson, RecordId, RunAccepted, RunId, RunLimits, RunPropagationPolicy,
+    RunRelation, RunSecurityContext, SessionId, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
+    ToolFailurePolicy, TransitionEnv, ValidatedToolCall,
 };
 use finstack_ai_runtime::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
-    AuthorizationContext, CancellationSignal, ChildRunContext, ChildRunHandle, ChildRunRequest,
-    PortFuture, RunCallContext, SideEffectClass, ToolStreamItem, Toolset, child_relation_digest,
+    AuthorizationContext, CancellationSignal, ChildRunContext, ChildRunHandle, ChildRunPolicy,
+    ChildRunRequest, ChildRunStarter, ChildRunStatus, JournalStore, PortFuture, RunCallContext,
+    SessionCreateIds, SessionRuntime, SideEffectClass, ToolStreamItem, Toolset,
+    child_relation_digest,
 };
+use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use futures_util::StreamExt;
 
 use super::*;
@@ -18,7 +24,9 @@ use super::*;
 struct RecordingInvoker {
     starts: AtomicUsize,
     cancels: AtomicUsize,
+    statuses: AtomicUsize,
     error: Option<AgentInvokeError>,
+    status: ChildRunStatus,
 }
 
 impl AgentInvoker for RecordingInvoker {
@@ -55,6 +63,16 @@ impl AgentInvoker for RecordingInvoker {
         self.cancels.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(()) })
     }
+
+    fn status(
+        &self,
+        locator: &ChildRunLocator,
+    ) -> PortFuture<Result<ChildRunStatus, AgentInvokeError>> {
+        let _ = locator;
+        self.statuses.fetch_add(1, Ordering::SeqCst);
+        let status = self.status;
+        Box::pin(async move { Ok(status) })
+    }
 }
 
 fn allow_list() -> Arc<[AgentRef]> {
@@ -63,6 +81,107 @@ fn allow_list() -> Arc<[AgentRef]> {
         bundle: None,
         spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
     }])
+}
+
+fn starter(invoker: Arc<dyn AgentInvoker>) -> Arc<ChildRunStarter> {
+    let store = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 256,
+            snapshot_bytes: 64 * 1_024,
+        })
+        .expect("store"),
+    );
+    Arc::new(ChildRunStarter::new(
+        store,
+        ChildRunPolicy::Allow { max_depth: 1 },
+        invoker,
+    ))
+}
+
+async fn seeded_starter(invoker: Arc<dyn AgentInvoker>) -> Arc<ChildRunStarter> {
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 256,
+            snapshot_bytes: 64 * 1_024,
+        })
+        .expect("store"),
+    );
+    let locator = context().run.locator;
+    let session = SessionRuntime::create(
+        Arc::clone(&store),
+        Arc::clone(&locator.tenant_scope),
+        SessionCreateIds {
+            session_id: locator.session_id,
+            main_lane_id: locator.lane_id,
+            session_created_record_id: RecordId::from_bytes([10; 16]),
+            lane_created_record_id: RecordId::from_bytes([11; 16]),
+            batch_id: AppendBatchId::from_bytes([12; 16]),
+            now: Timestamp::from_unix_ms(1).expect("time"),
+        },
+    )
+    .await
+    .expect("session");
+    session
+        .try_acquire_run(locator.lane_id, locator.run_id)
+        .expect("guard");
+    let accepted = RunAccepted::try_new(
+        locator.run_id,
+        RunRelation::root(locator.run_id).expect("relation"),
+        RunSecurityContext::try_new(
+            "tenant-a",
+            context().run.authorization.principal,
+            "test",
+            "test",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .expect("security"),
+        None,
+        RunLimits::empty(),
+        RunPropagationPolicy {
+            cancellation: CancellationPropagation::Cascade,
+            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+            budget: BudgetPropagation::SharedScope,
+            principal: PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(b"{}"),
+        None,
+    )
+    .expect("accepted");
+    session
+        .accept_run(
+            locator.lane_id,
+            accepted,
+            TransitionEnv {
+                now: Timestamp::from_unix_ms(2).expect("time"),
+                ids: AllocatedIds::try_new(
+                    vec![RecordId::from_bytes([13; 16])],
+                    vec![EventId::from_bytes([14; 16])],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    vec![AppendBatchId::from_bytes([15; 16])],
+                    Vec::new(),
+                )
+                .expect("ids"),
+            },
+        )
+        .await
+        .expect("accept");
+    Arc::new(ChildRunStarter::new(
+        store,
+        ChildRunPolicy::Allow { max_depth: 1 },
+        invoker,
+    ))
 }
 
 fn context() -> ToolCallContext {
@@ -152,9 +271,12 @@ fn subagent_toolset_exposes_exactly_three_tools() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: None,
+        status: ChildRunStatus::Running,
     });
-    let toolset = SubagentToolset::try_new(invoker, allow_list()).expect("toolset");
+    let toolset = SubagentToolset::try_new(starter(invoker as Arc<dyn AgentInvoker>), allow_list())
+        .expect("toolset");
     let tools = toolset.tools();
     let names: Vec<_> = tools.iter().map(|tool| tool.model_name.as_ref()).collect();
     assert_eq!(
@@ -173,9 +295,11 @@ fn try_new_rejects_empty_allow_list() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: None,
+        status: ChildRunStatus::Running,
     });
-    let error = SubagentToolset::try_new(invoker, Arc::from([]))
+    let error = SubagentToolset::try_new(starter(invoker as Arc<dyn AgentInvoker>), Arc::from([]))
         .err()
         .expect("empty");
     assert!(matches!(
@@ -191,11 +315,15 @@ async fn unknown_agent_id_is_a_tool_result_not_a_run_abort() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: None,
+        status: ChildRunStatus::Running,
     });
-    let toolset =
-        SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
-            .expect("toolset");
+    let toolset = SubagentToolset::try_new(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+    )
+    .expect("toolset");
     let result = invoke(&toolset, START_NAME, start_args("finstack.agent.other"))
         .await
         .expect("tool result");
@@ -211,13 +339,17 @@ async fn policy_and_budget_failures_surface_as_tool_results() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: Some(AgentInvokeError::InvalidRequest {
             message: Arc::from("child run policy denies child invocation"),
         }),
+        status: ChildRunStatus::Running,
     });
-    let toolset =
-        SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
-            .expect("toolset");
+    let toolset = SubagentToolset::try_new(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+    )
+    .expect("toolset");
     let result = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
         .await
         .expect("tool result");
@@ -233,11 +365,15 @@ async fn start_await_and_cancel_track_compatible_and_isolated_only() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: None,
+        status: ChildRunStatus::Running,
     });
-    let toolset =
-        SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
-            .expect("toolset");
+    let toolset = SubagentToolset::try_new(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+    )
+    .expect("toolset");
     let started = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
         .await
         .expect("start");
@@ -294,7 +430,7 @@ async fn remote_cancel_is_forwarded_to_the_invoker() {
     children.insert(
         ChildKey {
             tenant_scope: Arc::from("tenant-a"),
-            session_id: Arc::from(SessionId::from_bytes([8; 16]).to_string()),
+            owner_session_id: Arc::from(context().run.locator.session_id.to_string()),
             run_id: Arc::from("remote-1"),
         },
         child,
@@ -302,26 +438,26 @@ async fn remote_cancel_is_forwarded_to_the_invoker() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: None,
+        status: ChildRunStatus::Running,
     });
     let call = {
-        let toolset =
-            SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
-                .expect("toolset");
+        let toolset = SubagentToolset::try_new(
+            seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+            allow_list(),
+        )
+        .expect("toolset");
         call(
             &toolset,
             CANCEL_NAME,
             &serde_json::json!({ "run_id": "remote-1" }),
         )
     };
-    let outcome = cancel_child(
-        &(Arc::clone(&invoker) as Arc<dyn AgentInvoker>),
-        &children,
-        &context(),
-        &call,
-    )
-    .await
-    .expect("cancel");
+    let cancel_starter = starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>);
+    let outcome = cancel_child(&cancel_starter, &children, &context(), &call)
+        .await
+        .expect("cancel");
     assert!(!outcome.is_error);
     assert_eq!(invoker.cancels.load(Ordering::SeqCst), 1);
 }
@@ -358,11 +494,15 @@ async fn cross_tenant_status_and_cancel_are_not_found() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: None,
+        status: ChildRunStatus::Running,
     });
-    let toolset =
-        SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
-            .expect("toolset");
+    let toolset = SubagentToolset::try_new(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+    )
+    .expect("toolset");
     let started = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
         .await
         .expect("start");
@@ -402,11 +542,15 @@ async fn status_without_run_id_is_invalid_arguments() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
         cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
         error: None,
+        status: ChildRunStatus::Running,
     });
-    let toolset =
-        SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
-            .expect("toolset");
+    let toolset = SubagentToolset::try_new(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+    )
+    .expect("toolset");
     let _ = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
         .await
         .expect("start");
@@ -423,4 +567,106 @@ async fn status_without_run_id_is_invalid_arguments() {
             .unwrap_or_default()
             .contains(SessionId::from_bytes([1; 16]).to_string().as_str())
     );
+}
+
+fn result_payload(result: &ToolResult) -> serde_json::Value {
+    serde_json::from_slice(result.output.as_bytes()).expect("result json")
+}
+
+#[tokio::test]
+async fn tracking_limit_releases_its_slot_after_cancel() {
+    let invoker = Arc::new(RecordingInvoker {
+        starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
+        error: None,
+        status: ChildRunStatus::Running,
+    });
+    let toolset = SubagentToolset::try_with_max_tracked_children(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+        1,
+    )
+    .expect("toolset");
+    let first = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
+        .await
+        .expect("first start");
+    let run_id = result_payload(&first)["run_id"]
+        .as_str()
+        .expect("run id")
+        .to_owned();
+
+    let limited = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
+        .await
+        .expect("limited start");
+    assert!(limited.is_error);
+    assert_eq!(result_payload(&limited)["code"], SUBAGENT_LIMIT_EXCEEDED);
+
+    let cancelled = invoke(&toolset, CANCEL_NAME, serde_json::json!({"run_id": run_id}))
+        .await
+        .expect("cancel");
+    assert!(!cancelled.is_error);
+    let restarted = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
+        .await
+        .expect("restart");
+    assert!(!restarted.is_error);
+}
+
+#[tokio::test]
+async fn terminal_status_reports_and_evicts_the_child() {
+    let invoker = Arc::new(RecordingInvoker {
+        starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
+        error: None,
+        status: ChildRunStatus::Completed,
+    });
+    let toolset = SubagentToolset::try_with_max_tracked_children(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+        1,
+    )
+    .expect("toolset");
+    let started = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
+        .await
+        .expect("start");
+    let run_id = result_payload(&started)["run_id"]
+        .as_str()
+        .expect("run id")
+        .to_owned();
+    let status = invoke(&toolset, STATUS_NAME, serde_json::json!({"run_id": run_id}))
+        .await
+        .expect("status");
+    assert_eq!(result_payload(&status)["status"], "completed");
+
+    let restarted = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
+        .await
+        .expect("restart");
+    assert!(!restarted.is_error);
+}
+
+#[test]
+fn explicit_tracking_limit_is_bounded() {
+    let invoker = Arc::new(RecordingInvoker {
+        starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
+        error: None,
+        status: ChildRunStatus::Running,
+    });
+    for invalid in [0, MAX_TRACKED_CHILDREN + 1] {
+        let error = SubagentToolset::try_with_max_tracked_children(
+            starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>),
+            allow_list(),
+            invalid,
+        )
+        .err()
+        .expect("invalid bound");
+        assert!(matches!(
+            error,
+            SubagentError::Configuration {
+                reason: "invalid_max_tracked_children"
+            }
+        ));
+    }
 }

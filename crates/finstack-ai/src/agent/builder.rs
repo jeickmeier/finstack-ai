@@ -10,7 +10,11 @@ use crate::{
 use finstack_ai_kernel::{
     AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, MiddlewareRef,
 };
-use finstack_ai_runtime::{ContextProvider, Middleware, Model, Observer, Toolset};
+#[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::{AgentInvoker, ChildRunStarter};
+use finstack_ai_runtime::{
+    ArtifactStore, ChildRunPolicy, ContextProvider, Middleware, Model, Observer, Toolset,
+};
 
 use super::PREVIEW_ENGINE_VERSION;
 use super::handle::{Agent, ModelCapabilityVariant};
@@ -73,10 +77,12 @@ pub struct NativeAgentBuilder {
     context_providers: Vec<PortHandle<dyn ContextProvider>>,
     middleware: Vec<PortHandle<dyn Middleware>>,
     observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
+    artifact_store: Option<Arc<dyn ArtifactStore>>,
     instructions: Vec<InstructionSpec>,
     capabilities: Vec<CapabilitySpec>,
     active_application: BTreeSet<CapabilityId>,
     policy: RunPolicy,
+    child_policy_binding: Option<ChildRunPolicy>,
     activation_host: Option<Arc<super::activation::NativeCapabilityHost>>,
 }
 
@@ -96,12 +102,21 @@ impl NativeAgentBuilder {
             context_providers: Vec::new(),
             middleware: Vec::new(),
             observers: Vec::new(),
+            artifact_store: None,
             instructions: Vec::new(),
             capabilities: Vec::new(),
             active_application: BTreeSet::new(),
             policy: RunPolicy::default(),
+            child_policy_binding: None,
             activation_host: None,
         }
+    }
+
+    /// Bind the artifact store used for staging and committed-reference ownership.
+    #[must_use]
+    pub fn artifact_store(mut self, store: Arc<dyn ArtifactStore>) -> Self {
+        self.artifact_store = Some(store);
+        self
     }
 
     /// Add one ordered model instruction.
@@ -129,6 +144,49 @@ impl NativeAgentBuilder {
     pub fn toolset(mut self, component: ComponentRef, toolset: Arc<dyn Toolset>) -> Self {
         self.toolsets.push(PortHandle::base(component, toolset));
         self
+    }
+
+    /// Atomically bind a child toolset to this builder's journal and policy.
+    ///
+    /// The resulting build fails closed if [`Self::policy`] is subsequently
+    /// changed to a different child-run policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration error when the toolset factory rejects its
+    /// host-bound starter.
+    #[cfg(feature = "native-tokio")]
+    pub fn try_child_toolset<F, E>(
+        mut self,
+        component: ComponentRef,
+        invoker: Arc<dyn AgentInvoker>,
+        factory: F,
+    ) -> Result<Self, AgentRunError>
+    where
+        F: FnOnce(Arc<ChildRunStarter>) -> Result<Arc<dyn Toolset>, E>,
+        E: std::fmt::Display,
+    {
+        let child_policy = self.policy.child_runs;
+        if self
+            .child_policy_binding
+            .is_some_and(|bound| bound != child_policy)
+        {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "child toolsets must share one frozen ChildRunPolicy",
+            ));
+        }
+        let starter = Arc::new(ChildRunStarter::new(
+            Arc::clone(&self.store.1),
+            child_policy,
+            invoker,
+        ));
+        let toolset = factory(starter).map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        self.child_policy_binding = Some(child_policy);
+        self.toolsets.push(PortHandle::base(component, toolset));
+        Ok(self)
     }
 
     /// Add one ordered direct [`ContextProvider`] handle.
@@ -329,6 +387,7 @@ impl NativeAgentBuilder {
             resolve_model_variants(&self.capabilities, &bundle_resolver, &mut registry, &agent)
                 .await?
                 .into();
+        agent.artifact_store = self.artifact_store.clone();
         agent.rebuild = Some(Arc::new(self));
         Ok(agent)
     }
@@ -433,6 +492,15 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
 }
 
 fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), AgentRunError> {
+    if builder
+        .child_policy_binding
+        .is_some_and(|bound| bound != builder.policy.child_runs)
+    {
+        return Err(AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "child toolset policy drifted after binding",
+        ));
+    }
     validate_exact_component(&builder.model.0)?;
     validate_exact_component(&builder.store.0)?;
     for port in &builder.toolsets {

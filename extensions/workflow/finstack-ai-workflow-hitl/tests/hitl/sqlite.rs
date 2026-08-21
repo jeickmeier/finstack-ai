@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::Timestamp;
+use finstack_ai_kernel::{AuthorizationEvidence, PrincipalRef, Timestamp};
 use finstack_ai_workflow_hitl::{
-    HitlInboxStore, InteractionRow, InteractionStatus, SqliteHitlStore,
+    HitlInboxStore, InteractionRow, InteractionStatus, InteractionTransition, SqliteHitlStore,
 };
 use finstack_ai_workflow_worker::SqliteWorkerStore;
 
@@ -34,8 +34,13 @@ fn row(tenant: &str, interaction: &str, session: u64, requested_ms: i64) -> Inte
         requested_at: ts(requested_ms),
         expires_at: None,
         request: Arc::from(&br#"{"prompt":"approve?"}"#[..]),
+        accepted_principal: PrincipalRef::try_new("issuer", "subject", Some(tenant))
+            .expect("principal"),
+        accepted_evidence: AuthorizationEvidence::try_new("policy-v1", "decision-v1")
+            .expect("evidence"),
         status: InteractionStatus::Open,
         resolved_by: None,
+        outcome_code: None,
         updated_at: ts(requested_ms),
     }
 }
@@ -58,12 +63,16 @@ fn rows_and_statuses_survive_reopen() {
             .upsert(&row("tenant-a", "int-a1", 1, 1_000))
             .expect("upsert");
         store
-            .set_status(
+            .transition(
                 "tenant-a",
                 "int-a1",
-                InteractionStatus::Delivered,
-                Some("alice"),
-                ts(2_000),
+                InteractionTransition {
+                    expected: InteractionStatus::Open,
+                    next: InteractionStatus::Buffered,
+                    resolved_by: Some("alice"),
+                    outcome_code: Some("buffered"),
+                    updated_at: ts(2_000),
+                },
             )
             .expect("set_status");
     }
@@ -73,7 +82,7 @@ fn rows_and_statuses_survive_reopen() {
         .load("tenant-a", "int-a1")
         .expect("load")
         .expect("present after reopen");
-    assert_eq!(loaded.status, InteractionStatus::Delivered);
+    assert_eq!(loaded.status, InteractionStatus::Buffered);
     assert_eq!(loaded.resolved_by, Some(Arc::from("alice")));
     assert_eq!(loaded.updated_at, ts(2_000));
 }
@@ -100,4 +109,26 @@ fn worker_and_hitl_stores_share_one_file() {
     // same file.
     assert_eq!(worker_store.path(), path);
     assert_eq!(hitl_store.path(), path);
+}
+
+#[test]
+fn unversioned_hitl_table_requires_a_fresh_adapter_database() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("legacy.sqlite");
+    let legacy = rusqlite::Connection::open(&path).expect("legacy");
+    legacy
+        .execute_batch(
+            "CREATE TABLE finstack_workflow_hitl_inbox (
+                tenant_scope TEXT NOT NULL,
+                interaction_id TEXT NOT NULL,
+                PRIMARY KEY (tenant_scope, interaction_id)
+            );",
+        )
+        .expect("schema");
+    drop(legacy);
+
+    let Err(error) = SqliteHitlStore::open(&path) else {
+        panic!("unversioned schema must fail closed");
+    };
+    assert_eq!(error.code(), "hitl_schema_reset_required");
 }

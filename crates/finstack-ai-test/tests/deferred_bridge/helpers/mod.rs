@@ -399,7 +399,7 @@ pub(crate) async fn isolated_child_request(
     let lane = session.lane("main").await.expect("child lane");
     let run_id = finstack_ai_kernel::RunId::parse("01234567-89ab-7cde-89ab-0123456789ad")
         .expect("child run");
-    ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: AgentRef {
             id: AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
@@ -423,8 +423,10 @@ pub(crate) async fn isolated_child_request(
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
-    }
+        request_digest: Digest::raw_json(b"null"),
+    };
+    request.request_digest = request.canonical_digest().expect("child request digest");
+    request
 }
 
 pub(crate) fn failed_command(

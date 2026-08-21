@@ -35,6 +35,7 @@ mod unix;
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
@@ -67,6 +68,8 @@ pub const FILESYSTEM_NOT_FOUND: &str = "filesystem_not_found";
 pub const FILESYSTEM_IO_ERROR: &str = "filesystem_io_error";
 /// Stable resource-bound code.
 pub const FILESYSTEM_LIMIT_EXCEEDED: &str = "filesystem_limit_exceeded";
+/// Stable operation-timeout code.
+pub const FILESYSTEM_TIMEOUT: &str = "filesystem_timeout";
 /// Stable required-artifact-service code.
 pub const FILESYSTEM_ARTIFACT_REQUIRED: &str = "filesystem_artifact_required";
 
@@ -89,6 +92,10 @@ pub struct FileSystemLimits {
     pub search_matches: usize,
     /// Maximum recursion depth for glob/search.
     pub recursion_depth: usize,
+    /// Maximum aggregate file content scanned by one search.
+    pub scan_bytes: usize,
+    /// Maximum duration of one search, further bounded by the call deadline.
+    pub search_timeout: Duration,
     /// Maximum successful JSON result retained inline.
     pub inline_result_bytes: usize,
 }
@@ -100,6 +107,8 @@ impl Default for FileSystemLimits {
             visited_entries: 16_384,
             search_matches: 2_048,
             recursion_depth: 64,
+            scan_bytes: 64 * 1024 * 1024,
+            search_timeout: Duration::from_secs(10),
             inline_result_bytes: 64 * 1024,
         }
     }
@@ -115,6 +124,10 @@ impl FileSystemLimits {
             || self.search_matches > self.visited_entries
             || self.recursion_depth == 0
             || self.recursion_depth > 256
+            || self.scan_bytes == 0
+            || self.scan_bytes > 1024 * 1024 * 1024
+            || self.search_timeout.is_zero()
+            || self.search_timeout > Duration::from_mins(5)
             || self.inline_result_bytes == 0
             || self.inline_result_bytes > MAX_INLINE_RESULT_BYTES
         {
@@ -301,8 +314,12 @@ impl Toolset for FileSystemToolset {
                 verify_authority(&ctx)?;
                 let operation = decode_operation(&call, &tool_ids, &protected, limits)?;
                 let cancellation = ctx.run.cancellation.clone();
+                let deadline = operation_deadline(
+                    ctx.run.deadline,
+                    operation.is_search().then_some(limits.search_timeout),
+                )?;
                 let output = tokio::task::spawn_blocking(move || {
-                    operation.execute(&root, ceilings, &protected, &cancellation)
+                    operation.execute(&root, ceilings, &protected, &cancellation, deadline)
                 })
                 .await
                 .map_err(|_| {
@@ -313,14 +330,49 @@ impl Toolset for FileSystemToolset {
                     )
                 })??;
 
-                let result =
+                let (result, artifact) =
                     normalize_output(output, &ctx, limits, artifact_store, sensitivity).await?;
-                Ok(Box::pin(stream::once(async move {
-                    Ok(ToolStreamItem::Completed(result))
-                })) as ToolEventStream)
+                let mut items = Vec::with_capacity(2);
+                if let Some(artifact) = artifact {
+                    items.push(Ok(ToolStreamItem::Artifact(artifact)));
+                }
+                items.push(Ok(ToolStreamItem::Completed(result)));
+                Ok(Box::pin(stream::iter(items)) as ToolEventStream)
             })
         }
     }
+}
+
+#[cfg(unix)]
+fn operation_deadline(
+    call_deadline: Option<finstack_ai_kernel::Timestamp>,
+    operation_timeout: Option<Duration>,
+) -> Result<Option<Instant>, ToolError> {
+    let now = Instant::now();
+    let configured = operation_timeout.and_then(|timeout| now.checked_add(timeout));
+    let persisted = call_deadline.map(|deadline| {
+        let wall_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let wall_now_ms = i64::try_from(wall_now.as_millis()).unwrap_or(i64::MAX);
+        let remaining_ms =
+            u64::try_from(deadline.as_unix_ms().saturating_sub(wall_now_ms).max(0)).unwrap_or(0);
+        now.checked_add(Duration::from_millis(remaining_ms))
+            .unwrap_or(now)
+    });
+    let deadline = match (configured, persisted) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    };
+    if deadline.is_some_and(|value| value <= now) {
+        return Err(fs_tool_error(
+            FILESYSTEM_TIMEOUT,
+            ErrorCategory::Deadline,
+            "filesystem operation timed out",
+        ));
+    }
+    Ok(deadline)
 }
 
 async fn normalize_output(
@@ -329,18 +381,21 @@ async fn normalize_output(
     limits: FileSystemLimits,
     artifact_store: Option<Arc<dyn ArtifactStore>>,
     sensitivity: Sensitivity,
-) -> Result<ToolResult, ToolError> {
+) -> Result<(ToolResult, Option<finstack_ai_kernel::ArtifactRef>), ToolError> {
     if output.json.len() <= limits.inline_result_bytes {
-        return Ok(ToolResult {
-            output: RawJson::parse(output.json).map_err(|_| {
-                fs_tool_error(
-                    FILESYSTEM_IO_ERROR,
-                    ErrorCategory::Internal,
-                    "filesystem result normalization failed",
-                )
-            })?,
-            is_error: false,
-        });
+        return Ok((
+            ToolResult {
+                output: RawJson::parse(output.json).map_err(|_| {
+                    fs_tool_error(
+                        FILESYSTEM_IO_ERROR,
+                        ErrorCategory::Internal,
+                        "filesystem result normalization failed",
+                    )
+                })?,
+                is_error: false,
+            },
+            None,
+        ));
     }
     let store = artifact_store.ok_or_else(|| {
         fs_tool_error(
@@ -400,16 +455,19 @@ async fn normalize_output(
                 "artifact reference serialization failed",
             )
         })?;
-    Ok(ToolResult {
-        output: RawJson::parse(reference).map_err(|_| {
-            fs_tool_error(
-                FILESYSTEM_IO_ERROR,
-                ErrorCategory::Internal,
-                "artifact reference normalization failed",
-            )
-        })?,
-        is_error: false,
-    })
+    Ok((
+        ToolResult {
+            output: RawJson::parse(reference).map_err(|_| {
+                fs_tool_error(
+                    FILESYSTEM_IO_ERROR,
+                    ErrorCategory::Internal,
+                    "artifact reference normalization failed",
+                )
+            })?,
+            is_error: false,
+        },
+        Some(artifact),
+    ))
 }
 
 #[derive(Deserialize)]

@@ -51,7 +51,7 @@ and [`../finstack-ai-guest-sdk/MIGRATION.md`](../finstack-ai-guest-sdk/MIGRATION
 
 ## Payload ceilings
 
-TDD §6.5 ceilings are enforced before allocation:
+contract section 6.5 ceilings are enforced before allocation:
 
 - 4 MiB individual text or byte string
 - 1 MiB `RawJson` / catalog JSON / args-json / result JSON

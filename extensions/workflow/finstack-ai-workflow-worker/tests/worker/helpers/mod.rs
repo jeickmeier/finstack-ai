@@ -444,7 +444,7 @@ pub(crate) async fn attach_session(
     clock: ExternalClock,
     seed: u64,
 ) -> WorkflowSession {
-    WorkflowSession::trusted(store, locator(), clock, seed)
+    WorkflowSession::trusted_seeded(store, locator(), clock, seed)
         .await
         .expect("attach")
         .with_ports(model, locked_profile(), None)

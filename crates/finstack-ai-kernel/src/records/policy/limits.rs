@@ -1,4 +1,4 @@
-//! Value-only run limits and cost policy (TDD §22.1).
+//! Value-only run limits and cost policy (contract section 22.1).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

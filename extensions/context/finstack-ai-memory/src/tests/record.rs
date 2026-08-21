@@ -1,6 +1,6 @@
 use crate::record::*;
 use crate::tests::sample_record;
-use finstack_ai_kernel::{Timestamp, UNIX_EPOCH};
+use finstack_ai_kernel::{TIMESTAMP_MAX_MS, Timestamp, UNIX_EPOCH};
 use std::sync::Arc;
 
 #[test]
@@ -26,13 +26,22 @@ fn scope_try_new_rejects_empty_and_nul_tenant() {
 }
 
 #[test]
-fn scope_permits_filters_by_optional_fields() {
-    let record_scope = MemoryScope::try_new("t1").unwrap().with_user("u1");
+fn scope_permits_requires_every_dimension_to_match() {
+    let record_scope = MemoryScope::try_new("t1")
+        .unwrap()
+        .try_with_user("u1")
+        .unwrap();
     let tenant_only = MemoryScope::try_new("t1").unwrap();
     let wrong_tenant = MemoryScope::try_new("t2").unwrap();
-    let matching_user = MemoryScope::try_new("t1").unwrap().with_user("u1");
-    let other_user = MemoryScope::try_new("t1").unwrap().with_user("u2");
-    assert!(tenant_only.permits(&record_scope));
+    let matching_user = MemoryScope::try_new("t1")
+        .unwrap()
+        .try_with_user("u1")
+        .unwrap();
+    let other_user = MemoryScope::try_new("t1")
+        .unwrap()
+        .try_with_user("u2")
+        .unwrap();
+    assert!(!tenant_only.permits(&record_scope));
     assert!(matching_user.permits(&record_scope));
     assert!(!other_user.permits(&record_scope));
     assert!(!wrong_tenant.permits(&record_scope));
@@ -42,14 +51,24 @@ fn scope_permits_filters_by_optional_fields() {
 fn scope_permits_filters_by_agent_and_workspace() {
     let record_scope = MemoryScope::try_new("t1")
         .unwrap()
-        .with_agent("a1")
-        .with_workspace("w1");
+        .try_with_agent("a1")
+        .unwrap()
+        .try_with_workspace("w1")
+        .unwrap();
     let matching = MemoryScope::try_new("t1")
         .unwrap()
-        .with_agent("a1")
-        .with_workspace("w1");
-    let wrong_agent = MemoryScope::try_new("t1").unwrap().with_agent("a2");
-    let wrong_workspace = MemoryScope::try_new("t1").unwrap().with_workspace("w2");
+        .try_with_agent("a1")
+        .unwrap()
+        .try_with_workspace("w1")
+        .unwrap();
+    let wrong_agent = MemoryScope::try_new("t1")
+        .unwrap()
+        .try_with_agent("a2")
+        .unwrap();
+    let wrong_workspace = MemoryScope::try_new("t1")
+        .unwrap()
+        .try_with_workspace("w2")
+        .unwrap();
     assert!(matching.permits(&record_scope));
     assert!(!wrong_agent.permits(&record_scope));
     assert!(!wrong_workspace.permits(&record_scope));
@@ -123,4 +142,103 @@ fn preview_of_respects_the_byte_budget_validate_enforces() {
     record.preview = preview;
     record.body = MemoryBody::Inline(Arc::from(body.as_str()));
     assert!(record.validate().is_ok());
+}
+
+#[test]
+fn scope_validation_covers_every_dimension() {
+    let overlong = "x".repeat(MEMORY_SCOPE_FIELD_MAX_BYTES + 1);
+    assert!(MemoryScope::try_new(&overlong).is_err());
+
+    for invalid in ["", "bad\0value", overlong.as_str()] {
+        let scope = MemoryScope::try_new("t1").unwrap().try_with_user(invalid);
+        assert_eq!(
+            scope,
+            Err(MemoryError::InvalidRecord {
+                reason: "invalid_scope_dimension"
+            })
+        );
+    }
+}
+
+#[test]
+fn record_validation_rejects_malformed_text_and_links() {
+    let mut record = sample_record("m1", "t1");
+    record.preview = Arc::from("bad\0preview");
+    assert!(record.validate().is_err());
+
+    let mut record = sample_record("m1", "t1");
+    record.keywords = Arc::from([Arc::<str>::from("Alpha"), Arc::from("alpha")]);
+    assert_eq!(
+        record.validate(),
+        Err(MemoryError::InvalidRecord {
+            reason: "duplicate_keyword"
+        })
+    );
+
+    let mut record = sample_record("m1", "t1");
+    record.body = MemoryBody::Inline(Arc::from("x".repeat(INLINE_BODY_MAX_BYTES + 1)));
+    assert_eq!(
+        record.validate(),
+        Err(MemoryError::InvalidRecord {
+            reason: "invalid_inline_body"
+        })
+    );
+
+    let mut record = sample_record("m1", "t1");
+    record.provenance.source_ref = Some(Arc::from("bad\0source"));
+    assert_eq!(
+        record.validate(),
+        Err(MemoryError::InvalidRecord {
+            reason: "invalid_provenance"
+        })
+    );
+
+    let mut record = sample_record("m1", "t1");
+    record.superseded_by = Some(record.id.clone());
+    assert_eq!(
+        record.validate(),
+        Err(MemoryError::InvalidRecord {
+            reason: "memory_self_supersession"
+        })
+    );
+}
+
+#[test]
+fn record_validation_enforces_time_and_retention_invariants() {
+    let mut record = sample_record("m1", "t1");
+    record.created_at = Timestamp::from_unix_ms(1).unwrap();
+    assert_eq!(
+        record.validate(),
+        Err(MemoryError::InvalidRecord {
+            reason: "last_confirmed_before_created"
+        })
+    );
+
+    let mut record = sample_record("m1", "t1");
+    record.retention = RetentionPolicy::ExpireAfterMs(0);
+    assert_eq!(
+        record.validate(),
+        Err(MemoryError::InvalidRecord {
+            reason: "invalid_retention"
+        })
+    );
+
+    let mut record = sample_record("m1", "t1");
+    record.created_at = Timestamp::from_unix_ms(TIMESTAMP_MAX_MS).unwrap();
+    record.last_confirmed_at = record.created_at;
+    record.retention = RetentionPolicy::ExpireAfterMs(1);
+    assert_eq!(
+        record.validate(),
+        Err(MemoryError::InvalidRecord {
+            reason: "retention_overflow"
+        })
+    );
+}
+
+#[test]
+fn hard_expiry_is_inclusive_at_the_deadline() {
+    let mut record = sample_record("m1", "t1");
+    record.retention = RetentionPolicy::ExpireAfterMs(10);
+    assert!(!record.is_expired_at(Timestamp::from_unix_ms(9).unwrap()));
+    assert!(record.is_expired_at(Timestamp::from_unix_ms(10).unwrap()));
 }

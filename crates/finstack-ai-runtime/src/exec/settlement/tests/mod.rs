@@ -29,3 +29,4 @@ include!("tool_batch.rs");
 include!("approval.rs");
 include!("deferral.rs");
 include!("poll.rs");
+mod artifact_ownership;

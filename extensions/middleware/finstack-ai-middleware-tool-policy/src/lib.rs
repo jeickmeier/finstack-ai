@@ -47,6 +47,8 @@ const TOOL_POLICY_VERSION: Version = Version {
 
 /// Stable code for a `before_model` jailbreak trigger fail outcome.
 pub const TOOL_POLICY_JAILBREAK_TRIGGERED: &str = "tool_policy_jailbreak_triggered";
+/// Stable code when a batch would exceed the committed write-call budget.
+pub const TOOL_POLICY_WRITE_BUDGET_EXCEEDED: &str = "tool_policy_write_budget_exceeded";
 
 /// Policy filter middleware that narrows the model-visible tool set at
 /// `before_model` and `before_tool_batch`.
@@ -152,7 +154,11 @@ fn verdict_to_outcome(verdict: PolicyVerdict) -> Result<StageOutcome, Middleware
         PolicyVerdict::Fail { reason } => Ok(StageOutcome::Fail(Box::new(
             ErrorDescriptor::new(
                 reason,
-                "tool policy jailbreak trigger matched",
+                if reason == TOOL_POLICY_WRITE_BUDGET_EXCEEDED {
+                    "tool policy write-call budget would be exceeded"
+                } else {
+                    "tool policy jailbreak trigger matched"
+                },
                 ErrorCategory::Validation,
                 false,
             )
@@ -160,7 +166,7 @@ fn verdict_to_outcome(verdict: PolicyVerdict) -> Result<StageOutcome, Middleware
                 MiddlewareError::try_new(
                     reason,
                     ErrorCategory::Validation,
-                    "tool policy jailbreak trigger matched",
+                    "tool policy rejected the request",
                     Metadata::empty(),
                 )
                 .unwrap_or_else(Into::into)

@@ -8,8 +8,9 @@ use finstack_ai_kernel::{
     JsonSchemaDraft, RawJson, SchemaRef,
 };
 use finstack_ai_runtime::{
-    JsonSchemaToolValidatorCompiler, Model, ResolvedToolCatalog, ToolExecutionPolicy,
-    ToolPolicyDecision, ToolValidator, ToolValidatorCompiler, ToolsetRegistration,
+    ArtifactStore, JsonSchemaToolValidatorCompiler, Model, ResolvedToolCatalog,
+    ToolExecutionPolicy, ToolPolicyDecision, ToolValidator, ToolValidatorCompiler,
+    ToolsetRegistration,
 };
 
 use super::activation::NativeCapabilityHost;
@@ -48,6 +49,7 @@ pub struct Agent {
     pub(super) capability_specs: Arc<[CapabilitySpec]>,
     pub(super) capability_index: CapabilityContributionIndex,
     pub(super) activation_host: Option<Arc<NativeCapabilityHost>>,
+    pub(super) artifact_store: Option<Arc<dyn ArtifactStore>>,
     pub(super) rebuild: Option<Arc<NativeAgentBuilder>>,
 }
 
@@ -198,6 +200,7 @@ impl Agent {
             capability_specs: Arc::from([]),
             capability_index: CapabilityContributionIndex::default(),
             activation_host: None,
+            artifact_store: None,
             rebuild: None,
         })
     }

@@ -44,9 +44,20 @@ use thiserror::Error;
 
 /// Stable unsupported-platform code.
 pub const REPOSITORY_UNSUPPORTED: &str = "repository_unsupported";
+/// Stable unsafe-path error code.
+pub const REPOSITORY_PATH_UNSAFE: &str = "repository_path_unsafe";
+/// Stable file-read error code.
+pub const REPOSITORY_READ_FAILED: &str = "repository_read_failed";
+/// Stable oversized-file error code.
+pub const REPOSITORY_FILE_TOO_LARGE: &str = "repository_file_too_large";
+/// Stable invalid-text error code.
+pub const REPOSITORY_TEXT_INVALID: &str = "repository_text_invalid";
 
 const DEFAULT_FILES: [&str; 3] = ["AGENTS.md", "README.md", ".finstack/instructions.md"];
 const MAX_FILE_BYTES: usize = 64 * 1024;
+const MAX_ALLOWLIST_FILES: usize = 32;
+const MAX_ALLOWLIST_NAME_BYTES: usize = 256;
+const MAX_ALLOWLIST_DEPTH: usize = 16;
 
 /// Repository provider construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -116,20 +127,29 @@ impl RepositoryContextProvider {
             .map(|value| Arc::<str>::from(value.as_ref()))
             .collect::<Vec<_>>();
         if allowlist.is_empty()
+            || allowlist.len() > MAX_ALLOWLIST_FILES
             || allowlist.iter().any(|value| {
                 value.is_empty()
+                    || value.len() > MAX_ALLOWLIST_NAME_BYTES
                     || value.starts_with('/')
                     || value.contains('\\')
-                    || value.contains("//")
                     || value.as_bytes().contains(&0)
-                    || value.split('/').any(|component| component == "..")
+                    || value.split('/').count() > MAX_ALLOWLIST_DEPTH
+                    || value.split('/').any(|component| {
+                        component.is_empty() || component == "." || component == ".."
+                    })
             })
+            || allowlist
+                .iter()
+                .enumerate()
+                .any(|(index, value)| allowlist[..index].contains(value))
         {
             return Err(RepositoryError::Configuration {
                 reason: "invalid_repository_allowlist",
             });
         }
-        let configuration = Digest::raw_json(allowlist.join("\n").as_bytes());
+        let root = unix::Root::open(root.as_ref())?;
+        let configuration = configuration_digest(&root, &allowlist)?;
         Ok(Self {
             descriptor: ContextProviderDescriptor {
                 invocation: ComponentInvocation {
@@ -150,9 +170,29 @@ impl RepositoryContextProvider {
                 metadata: Metadata::empty(),
             },
             allowlist: allowlist.into(),
-            root: unix::Root::open(root.as_ref())?,
+            root,
         })
     }
+}
+
+#[cfg(unix)]
+fn configuration_digest(
+    root: &unix::Root,
+    allowlist: &[Arc<str>],
+) -> Result<Digest, RepositoryError> {
+    let mut bytes = root.identity()?;
+    for name in allowlist {
+        let length = u64::try_from(name.len()).map_err(|_| RepositoryError::Configuration {
+            reason: "invalid_repository_allowlist",
+        })?;
+        bytes.extend_from_slice(&length.to_be_bytes());
+        bytes.extend_from_slice(name.as_bytes());
+    }
+    Digest::domain_separated("repository-provider", 1, &bytes).map_err(|_| {
+        RepositoryError::Configuration {
+            reason: "invalid_repository_configuration",
+        }
+    })
 }
 
 impl ContextProvider for RepositoryContextProvider {
@@ -196,9 +236,12 @@ fn collect_files(
 ) -> Result<ContextContribution, ContextError> {
     let mut items = Vec::new();
     for (index, name) in allowlist.iter().enumerate() {
-        let Some(text) = root.read_file(name).ok().flatten() else {
-            continue;
+        let text = match root.read_file(name) {
+            Ok(Some(text)) => text,
+            Ok(None) => continue,
+            Err(error) => return Err(repository_read_error(error)),
         };
+        let content_digest = Digest::raw_json(text.as_bytes());
         let estimated = estimate_tokens(&text);
         let item = ContextItem::try_new(
             ContextItemKind::QuotedSource,
@@ -216,21 +259,34 @@ fn collect_files(
             Sensitivity::Internal,
             false,
         )?;
-        items.push(item);
+        items.push(RepositoryItem {
+            name: Arc::clone(name),
+            content_digest,
+            item,
+        });
     }
     apply_budget(items, request)
 }
 
+#[cfg(unix)]
+struct RepositoryItem {
+    name: Arc<str>,
+    content_digest: Digest,
+    item: ContextItem,
+}
+
+#[cfg(unix)]
 fn apply_budget(
-    items: Vec<ContextItem>,
+    items: Vec<RepositoryItem>,
     request: &ContextRequest,
 ) -> Result<ContextContribution, ContextError> {
     let mut accepted = Vec::new();
+    let mut cache_material = Vec::new();
     let mut tokens = 0_u64;
     let mut bytes = 0_u64;
-    for item in items {
-        let next_tokens = tokens.saturating_add(item.estimated_tokens);
-        let next_bytes = bytes.saturating_add(item.bytes);
+    for entry in items {
+        let next_tokens = tokens.saturating_add(entry.item.estimated_tokens);
+        let next_bytes = bytes.saturating_add(entry.item.bytes);
         let exceeds = accepted.len() >= request.budget.max_items
             || next_tokens > request.budget.max_tokens
             || next_bytes > request.budget.max_bytes;
@@ -250,10 +306,19 @@ fn apply_budget(
         }
         tokens = next_tokens;
         bytes = next_bytes;
-        accepted.push(item);
+        cache_material.extend_from_slice(
+            &u64::try_from(entry.name.len())
+                .unwrap_or(u64::MAX)
+                .to_be_bytes(),
+        );
+        cache_material.extend_from_slice(entry.name.as_bytes());
+        cache_material.extend_from_slice(entry.content_digest.as_bytes());
+        accepted.push(entry.item);
     }
-    let _ = (tokens, bytes);
-    ContextContribution::try_new(accepted, Some("finstack.context.repository"))
+    let cache_key = Digest::domain_separated("repository-content", 1, &cache_material)
+        .map_err(|_| contribution_invalid())?
+        .to_hex();
+    ContextContribution::try_new(accepted, Some(cache_key))
 }
 
 fn estimate_tokens(text: &str) -> u64 {
@@ -271,12 +336,39 @@ fn contribution_invalid() -> ContextError {
 }
 
 #[cfg(unix)]
+fn repository_read_error(error: unix::ReadError) -> ContextError {
+    let (code, category, message) = match error {
+        unix::ReadError::UnsafePath => (
+            REPOSITORY_PATH_UNSAFE,
+            finstack_ai_kernel::ErrorCategory::Context,
+            "repository path is not a safe regular file",
+        ),
+        unix::ReadError::TooLarge => (
+            REPOSITORY_FILE_TOO_LARGE,
+            finstack_ai_kernel::ErrorCategory::Limit,
+            "repository file exceeds the size limit",
+        ),
+        unix::ReadError::InvalidText => (
+            REPOSITORY_TEXT_INVALID,
+            finstack_ai_kernel::ErrorCategory::Validation,
+            "repository file is not valid text",
+        ),
+        unix::ReadError::ReadFailed => (
+            REPOSITORY_READ_FAILED,
+            finstack_ai_kernel::ErrorCategory::Context,
+            "repository file could not be read",
+        ),
+    };
+    ContextError::try_new(code, category, message, Metadata::empty()).unwrap_or_else(Into::into)
+}
+
+#[cfg(unix)]
 mod unix {
     use std::path::Path;
     use std::sync::Arc;
 
     use rustix::fd::OwnedFd;
-    use rustix::fs::{Mode, OFlags, open, openat};
+    use rustix::fs::{Mode, OFlags, fstat, open, openat};
 
     use super::{MAX_FILE_BYTES, RepositoryError};
 
@@ -293,6 +385,14 @@ mod unix {
         fd: Arc<OwnedFd>,
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum ReadError {
+        UnsafePath,
+        TooLarge,
+        InvalidText,
+        ReadFailed,
+    }
+
     impl Root {
         pub(super) fn open(path: &Path) -> Result<Self, RepositoryError> {
             let fd = open(path, DIRECTORY_FLAGS, Mode::empty())
@@ -300,17 +400,29 @@ mod unix {
             Ok(Self { fd: Arc::new(fd) })
         }
 
-        pub(super) fn read_file(&self, relative: &str) -> Result<Option<String>, RepositoryError> {
-            let mut current =
-                rustix::io::dup(&self.fd).map_err(|_| RepositoryError::RootUnavailable)?;
+        pub(super) fn identity(&self) -> Result<Vec<u8>, RepositoryError> {
+            let stat = fstat(&self.fd).map_err(|_| RepositoryError::RootUnavailable)?;
+            let mut identity = stat.st_dev.to_be_bytes().to_vec();
+            identity.extend_from_slice(&stat.st_ino.to_be_bytes());
+            Ok(identity)
+        }
+
+        pub(super) fn read_file(&self, relative: &str) -> Result<Option<String>, ReadError> {
+            let mut current = rustix::io::dup(&self.fd).map_err(|_| ReadError::ReadFailed)?;
             let mut components = relative.split('/').peekable();
             while let Some(component) = components.next() {
                 let last = components.peek().is_none();
                 let flags = if last { FILE_FLAGS } else { DIRECTORY_FLAGS };
                 current = match openat(&current, component, flags, Mode::empty()) {
                     Ok(fd) => fd,
-                    Err(_) if last => return Ok(None),
-                    Err(_) => return Ok(None),
+                    Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
+                    Err(error)
+                        if error == rustix::io::Errno::LOOP
+                            || error == rustix::io::Errno::NOTDIR =>
+                    {
+                        return Err(ReadError::UnsafePath);
+                    }
+                    Err(_) => return Err(ReadError::ReadFailed),
                 };
                 if last {
                     let mut bytes = vec![0_u8; MAX_FILE_BYTES.saturating_add(1)];
@@ -321,17 +433,19 @@ mod unix {
                             Ok(count) => {
                                 read = read.saturating_add(count);
                                 if read > MAX_FILE_BYTES {
-                                    return Ok(None);
+                                    return Err(ReadError::TooLarge);
                                 }
                             }
-                            Err(_) => return Ok(None),
+                            Err(_) => return Err(ReadError::ReadFailed),
                         }
                     }
                     bytes.truncate(read);
                     if bytes.contains(&0) {
-                        return Ok(None);
+                        return Err(ReadError::InvalidText);
                     }
-                    return Ok(String::from_utf8(bytes).ok());
+                    return String::from_utf8(bytes)
+                        .map(Some)
+                        .map_err(|_| ReadError::InvalidText);
                 }
             }
             Ok(None)

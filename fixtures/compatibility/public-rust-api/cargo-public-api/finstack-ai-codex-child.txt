@@ -44,7 +44,8 @@ impl core::marker::Copy for finstack_ai_codex_child::CodexSandboxMode
 impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexSandboxMode
 pub struct finstack_ai_codex_child::CodexChildInvoker
 impl finstack_ai_codex_child::CodexChildInvoker
-pub fn finstack_ai_codex_child::CodexChildInvoker::run_status(&self, &finstack_ai_kernel::primitives::ids::RunId) -> core::option::Option<finstack_ai_codex_child::CodexRunReport>
+pub fn finstack_ai_codex_child::CodexChildInvoker::accepted_locator(&self, &finstack_ai_kernel::records::run::external::OperationLocator, &finstack_ai_kernel::primitives::ids::RunId) -> core::option::Option<finstack_ai_kernel::records::run::child::ChildRunLocator>
+pub fn finstack_ai_codex_child::CodexChildInvoker::run_status(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> core::option::Option<finstack_ai_codex_child::CodexRunReport>
 pub fn finstack_ai_codex_child::CodexChildInvoker::try_new(finstack_ai_codex_child::CodexExecConfig) -> core::result::Result<Self, finstack_ai_codex_child::CodexChildError>
 impl core::fmt::Debug for finstack_ai_codex_child::CodexChildInvoker
 pub fn finstack_ai_codex_child::CodexChildInvoker::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -67,6 +68,7 @@ pub fn finstack_ai_codex_child::CodexExecConfig::fmt(&self, &mut core::fmt::Form
 impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexExecConfig
 pub struct finstack_ai_codex_child::CodexRunReport
 pub finstack_ai_codex_child::CodexRunReport::exit_code: core::option::Option<i32>
+pub finstack_ai_codex_child::CodexRunReport::failure_message: core::option::Option<alloc::string::String>
 pub finstack_ai_codex_child::CodexRunReport::last_message: core::option::Option<alloc::string::String>
 pub finstack_ai_codex_child::CodexRunReport::status: finstack_ai_codex_child::CodexRunStatus
 pub finstack_ai_codex_child::CodexRunReport::stderr_tail: core::option::Option<alloc::string::String>
@@ -82,7 +84,7 @@ pub fn finstack_ai_codex_child::CodexRunReport::fmt(&self, &mut core::fmt::Forma
 impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexRunReport
 pub struct finstack_ai_codex_child::CodexToolset
 impl finstack_ai_codex_child::CodexToolset
-pub fn finstack_ai_codex_child::CodexToolset::try_new(alloc::sync::Arc<finstack_ai_codex_child::CodexChildInvoker>) -> core::result::Result<Self, finstack_ai_codex_child::CodexChildError>
+pub fn finstack_ai_codex_child::CodexToolset::try_new(alloc::sync::Arc<finstack_ai_runtime::services::child_starter::ChildRunStarter>, alloc::sync::Arc<finstack_ai_codex_child::CodexChildInvoker>) -> core::result::Result<Self, finstack_ai_codex_child::CodexChildError>
 impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_codex_child::CodexToolset
 pub fn finstack_ai_codex_child::CodexToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
 pub fn finstack_ai_codex_child::CodexToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor

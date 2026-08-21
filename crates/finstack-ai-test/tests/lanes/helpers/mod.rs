@@ -244,7 +244,7 @@ pub(crate) fn child_request(
     lane: u64,
     run: u64,
 ) -> ChildRunRequest {
-    ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: finstack_ai_runtime::AgentRef {
             id: finstack_ai_kernel::AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
@@ -267,8 +267,10 @@ pub(crate) fn child_request(
         requested_budget: finstack_ai_kernel::BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
-    }
+        request_digest: Digest::raw_json(br"null"),
+    };
+    request.request_digest = request.canonical_digest().expect("child request digest");
+    request
 }
 
 pub(crate) fn scripted_profile() -> finstack_ai_runtime::ModelContextProfile {

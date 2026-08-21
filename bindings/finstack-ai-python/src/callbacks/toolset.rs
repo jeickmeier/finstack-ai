@@ -4,7 +4,7 @@ use finstack_ai::runtime::{
     PortFuture, ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem,
     Toolset, ToolsetDescriptor,
 };
-use finstack_ai_kernel::{ComponentRef, ErrorCategory, Metadata, RawJson};
+use finstack_ai_kernel::{ArtifactRef, ComponentRef, ErrorCategory, Metadata, RawJson};
 use futures_util::stream;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -20,6 +20,8 @@ struct PythonToolOutput {
     output: serde_json::Value,
     #[serde(default)]
     is_error: bool,
+    #[serde(default)]
+    artifacts: Vec<ArtifactRef>,
 }
 
 struct PythonToolsetAdapter {
@@ -57,7 +59,14 @@ impl Toolset for PythonToolsetAdapter {
                     .map_err(|_| tool_failure(CallbackFailure::InvalidResult))?,
                 is_error: output.is_error,
             };
-            Ok(Box::pin(stream::iter([Ok(ToolStreamItem::Completed(result))])) as ToolEventStream)
+            let items = output
+                .artifacts
+                .into_iter()
+                .map(ToolStreamItem::Artifact)
+                .chain(core::iter::once(ToolStreamItem::Completed(result)))
+                .map(Ok)
+                .collect::<Vec<_>>();
+            Ok(Box::pin(stream::iter(items)) as ToolEventStream)
         })
     }
 }

@@ -62,7 +62,7 @@ use reqwest::header::HeaderValue;
 use crate::config::{
     DEFAULT_ENDPOINT, MAX_RESULT_BYTES_CEILING, endpoint_host, is_loopback_host, validate_endpoint,
 };
-use crate::http::{REQUEST_TIMEOUT, tool_error};
+use crate::http::{DeliveredMedia, REQUEST_TIMEOUT, tool_error};
 use crate::image::{IMAGE_TOOL_ID, IMAGE_TOOL_NAME, handle_image};
 use crate::speech::{SPEECH_TOOL_ID, SPEECH_TOOL_NAME, handle_speech};
 use crate::transcribe::{TRANSCRIBE_TOOL_ID, TRANSCRIBE_TOOL_NAME, handle_transcribe};
@@ -444,7 +444,7 @@ impl Toolset for OpenRouterMediaToolset {
         Box::pin(async move {
             verify_authority(&ctx)?;
             let tool_name = call.call.tool_name();
-            let value = if call.tool_id == image_tool_id && tool_name == IMAGE_TOOL_NAME {
+            let delivered = if call.tool_id == image_tool_id && tool_name == IMAGE_TOOL_NAME {
                 handle_image(
                     &client,
                     &authorization,
@@ -458,27 +458,33 @@ impl Toolset for OpenRouterMediaToolset {
                 )
                 .await?
             } else if call.tool_id == video_tool_id && tool_name == VIDEO_TOOL_NAME {
-                handle_video_submit(
-                    &client,
-                    &authorization,
-                    referer.as_deref(),
-                    title.as_deref(),
-                    &endpoint,
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
+                DeliveredMedia {
+                    value: handle_video_submit(
+                        &client,
+                        &authorization,
+                        referer.as_deref(),
+                        title.as_deref(),
+                        &endpoint,
+                        &ctx,
+                        call.call.arguments().as_bytes(),
+                    )
+                    .await?,
+                    artifact: None,
+                }
             } else if call.tool_id == video_status_tool_id && tool_name == VIDEO_STATUS_TOOL_NAME {
-                handle_video_status(
-                    &client,
-                    &authorization,
-                    referer.as_deref(),
-                    title.as_deref(),
-                    &endpoint,
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
+                DeliveredMedia {
+                    value: handle_video_status(
+                        &client,
+                        &authorization,
+                        referer.as_deref(),
+                        title.as_deref(),
+                        &endpoint,
+                        &ctx,
+                        call.call.arguments().as_bytes(),
+                    )
+                    .await?,
+                    artifact: None,
+                }
             } else if call.tool_id == speech_tool_id && tool_name == SPEECH_TOOL_NAME {
                 handle_speech(
                     &client,
@@ -493,17 +499,20 @@ impl Toolset for OpenRouterMediaToolset {
                 )
                 .await?
             } else if call.tool_id == transcribe_tool_id && tool_name == TRANSCRIBE_TOOL_NAME {
-                handle_transcribe(
-                    &client,
-                    &authorization,
-                    referer.as_deref(),
-                    title.as_deref(),
-                    &endpoint,
-                    endpoint_is_loopback,
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
+                DeliveredMedia {
+                    value: handle_transcribe(
+                        &client,
+                        &authorization,
+                        referer.as_deref(),
+                        title.as_deref(),
+                        &endpoint,
+                        endpoint_is_loopback,
+                        &ctx,
+                        call.call.arguments().as_bytes(),
+                    )
+                    .await?,
+                    artifact: None,
+                }
             } else {
                 return Err(tool_error(
                     OPENROUTER_MEDIA_INVALID_ARGUMENTS,
@@ -511,7 +520,7 @@ impl Toolset for OpenRouterMediaToolset {
                     "openrouter media call identity is invalid",
                 ));
             };
-            let output_bytes = serde_json::to_vec(&value).map_err(|_| {
+            let output_bytes = serde_json::to_vec(&delivered.value).map_err(|_| {
                 tool_error(
                     OPENROUTER_MEDIA_TRANSPORT_FAILED,
                     ErrorCategory::Internal,
@@ -528,9 +537,12 @@ impl Toolset for OpenRouterMediaToolset {
                 })?,
                 is_error: false,
             };
-            Ok(Box::pin(stream::once(async move {
-                Ok(ToolStreamItem::Completed(result))
-            })) as ToolEventStream)
+            let mut items = Vec::with_capacity(2);
+            if let Some(artifact) = delivered.artifact {
+                items.push(Ok(ToolStreamItem::Artifact(artifact)));
+            }
+            items.push(Ok(ToolStreamItem::Completed(result)));
+            Ok(Box::pin(stream::iter(items)) as ToolEventStream)
         })
     }
 }
@@ -826,6 +838,10 @@ mod tests {
             .await
             .expect("call started");
         let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Artifact(staged) = item else {
+            panic!("expected staged artifact");
+        };
+        let item = stream.next().await.expect("item").expect("ok");
         let crate::ToolStreamItem::Completed(result) = item else {
             panic!("expected completion");
         };
@@ -847,6 +863,7 @@ mod tests {
         );
         let artifact: finstack_ai_kernel::ArtifactRef =
             serde_json::from_value(value["artifact"].clone()).expect("artifact reference");
+        assert_eq!(artifact, staged);
         assert_eq!(artifact.blob().media_type(), "image/png");
         server.await.expect("server");
     }

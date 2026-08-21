@@ -3,13 +3,13 @@
  *
  * Persistence is origin-scoped and not crash-durable. `health().detail` stays
  * `js_indexeddb_experimental` and does not claim crash durability.
- * Schema version remains 1.
+ * Schema version 2 stores exact scoped artifact references.
  */
 import { FinstackError } from "../errors.js";
 /** Default experimental database name. */
 export const INDEXED_DB_NAME = "finstack-ai-experimental";
 /** Provisional IndexedDB schema version. */
-export const INDEXED_DB_SCHEMA_VERSION = 1;
+export const INDEXED_DB_SCHEMA_VERSION = 2;
 const ZERO_DIGEST = "0".repeat(64);
 const DEFAULT_MAX_SNAPSHOT_BYTES = 65_536;
 const DEFAULT_MAX_BATCHES = 256;
@@ -17,6 +17,10 @@ const DEFAULT_MAX_RECORDS = 4_096;
 const DEFAULT_MAX_SESSIONS = 64;
 const DEFAULT_MAX_BLOB_BYTES = 262_144;
 const DEFAULT_MAX_BLOBS = 32;
+const DEFAULT_MAX_TOTAL_BLOB_BYTES = 8_388_608;
+const DEFAULT_MAX_ARTIFACT_OWNERS = 128;
+const DEFAULT_ARTIFACT_ORPHAN_GRACE_MS = 300_000;
+const DEFAULT_MAX_ARTIFACT_GC_BATCH = 128;
 /**
  * Create an experimental IndexedDB journal store.
  *
@@ -59,7 +63,7 @@ export function createMapJournalStore(options = {}) {
  */
 export function createIndexedDbArtifactStore(options = {}) {
     const resolved = resolveOptions(options);
-    return createArtifactStore(resolved.dbName, resolved.maxBlobBytes, resolved.maxBlobs);
+    return createArtifactStore(resolved.dbName, resolved.maxBlobBytes, resolved.maxBlobs, resolved.maxTotalBlobBytes, resolved.maxArtifactOwners, resolved.artifactOrphanGraceMs, resolved.maxArtifactGcBatch);
 }
 /**
  * Delete the experimental IndexedDB database for this origin.
@@ -86,6 +90,10 @@ function resolveOptions(options) {
         },
         maxBlobBytes: options.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES,
         maxBlobs: options.maxBlobs ?? DEFAULT_MAX_BLOBS,
+        maxTotalBlobBytes: options.maxTotalBlobBytes ?? DEFAULT_MAX_TOTAL_BLOB_BYTES,
+        maxArtifactOwners: options.maxArtifactOwners ?? DEFAULT_MAX_ARTIFACT_OWNERS,
+        artifactOrphanGraceMs: options.artifactOrphanGraceMs ?? DEFAULT_ARTIFACT_ORPHAN_GRACE_MS,
+        maxArtifactGcBatch: options.maxArtifactGcBatch ?? DEFAULT_MAX_ARTIFACT_GC_BATCH,
     };
 }
 function createJournalStore(persistence, limits, detail) {
@@ -552,10 +560,10 @@ function createIndexedDbPersistence(dbName) {
         },
     };
 }
-function createArtifactStore(dbName, maxBlobBytes, maxBlobs) {
+function createArtifactStore(dbName, maxBlobBytes, maxBlobs, maxTotalBlobBytes, maxArtifactOwners, artifactOrphanGraceMs, maxArtifactGcBatch) {
     const opened = openExperimentalDb(dbName);
     return {
-        async stagePut(_scope, content, _metadata, id) {
+        async stagePut(scope, content, _metadata, artifact, storageKey) {
             const db = await opened;
             await readSchemaVersion(db);
             if (content.byteLength > maxBlobBytes) {
@@ -566,33 +574,63 @@ function createArtifactStore(dbName, maxBlobBytes, maxBlobs) {
                     message: `store limit exceeded for blob_bytes: ${maxBlobBytes}`,
                 });
             }
-            const existing = await idbGetAll(db, "artifacts");
-            const key = String(id ?? "");
-            if (key.length === 0) {
+            const key = String(storageKey ?? "");
+            const scopeJson = String(scope ?? "");
+            const artifactJson = String(artifact ?? "");
+            if (key.length === 0 || scopeJson.length === 0 || artifactJson.length === 0) {
                 throwStoreError({
                     code: "invalid_store_request",
-                    reasonCode: "artifact_id_missing",
-                    message: "invalid store request: artifact_id_missing",
+                    reasonCode: "artifact_identity_missing",
+                    message: "invalid store request: artifact_identity_missing",
                 });
             }
-            if (!existing.some((row) => row.id === key) && existing.length >= maxBlobs) {
-                throwStoreError({
-                    code: "store_limit_exceeded",
-                    resource: "blobs",
-                    limit: maxBlobs,
-                    message: `store limit exceeded for blobs: ${maxBlobs}`,
+            await mutateArtifactRows(db, (store, rows) => {
+                const existing = rows.find((row) => row.storageKey === key);
+                if (existing !== undefined) {
+                    const bytesMatch = existing.bytes.length === content.byteLength &&
+                        existing.bytes.every((value, index) => value === content[index]);
+                    if (existing.scope !== scopeJson ||
+                        existing.artifact !== artifactJson ||
+                        !bytesMatch) {
+                        throwStoreError({
+                            code: "store_corruption",
+                            reasonCode: "artifact_identity_collision",
+                            message: "store corruption: artifact_identity_collision",
+                        });
+                    }
+                    return;
+                }
+                if (rows.length >= maxBlobs) {
+                    throwStoreError({
+                        code: "store_limit_exceeded",
+                        resource: "blobs",
+                        limit: maxBlobs,
+                        message: `store limit exceeded for blobs: ${maxBlobs}`,
+                    });
+                }
+                const totalBytes = rows.reduce((total, row) => total + row.byteLength, 0);
+                if (totalBytes + content.byteLength > maxTotalBlobBytes) {
+                    throwStoreError({
+                        code: "store_limit_exceeded",
+                        resource: "total_blob_bytes",
+                        limit: maxTotalBlobBytes,
+                        message: `store limit exceeded for total_blob_bytes: ${maxTotalBlobBytes}`,
+                    });
+                }
+                store.put({
+                    storageKey: key,
+                    scope: scopeJson,
+                    artifact: artifactJson,
+                    bytes: Array.from(content),
+                    byteLength: content.byteLength,
+                    owners: [],
                 });
-            }
-            await idbPut(db, "artifacts", {
-                id: key,
-                bytes: Array.from(content),
-                byteLength: content.byteLength,
             });
         },
-        async get(key) {
+        async get(scope, artifact, storageKey) {
             const db = await opened;
             await readSchemaVersion(db);
-            const row = await idbGet(db, "artifacts", String(key));
+            const row = await idbGet(db, "artifacts", String(storageKey));
             if (row === undefined) {
                 throwStoreError({
                     code: "invalid_store_request",
@@ -600,9 +638,138 @@ function createArtifactStore(dbName, maxBlobBytes, maxBlobs) {
                     message: "invalid store request: artifact_uncorrelated",
                 });
             }
+            if (row.scope !== String(scope) || row.artifact !== String(artifact)) {
+                throwStoreError({
+                    code: "store_corruption",
+                    reasonCode: "artifact_scope_or_reference_mismatch",
+                    message: "store corruption: artifact_scope_or_reference_mismatch",
+                });
+            }
             return Uint8Array.from(row.bytes);
         },
+        async getByBlob(scope, blob) {
+            const db = await opened;
+            await readSchemaVersion(db);
+            const scopeJson = String(scope ?? "");
+            const blobJson = String(blob ?? "");
+            const rows = await idbGetAll(db, "artifacts");
+            for (const row of rows) {
+                if (row.scope !== scopeJson)
+                    continue;
+                let artifact;
+                try {
+                    artifact = JSON.parse(row.artifact);
+                }
+                catch {
+                    throwStoreError({
+                        code: "store_corruption",
+                        reasonCode: "artifact_reference_invalid",
+                        message: "store corruption: artifact_reference_invalid",
+                    });
+                }
+                if (JSON.stringify(artifact.blob) === blobJson) {
+                    return [row.artifact, Uint8Array.from(row.bytes)];
+                }
+            }
+            throwStoreError({
+                code: "invalid_store_request",
+                reasonCode: "artifact_uncorrelated",
+                message: "invalid store request: artifact_uncorrelated",
+            });
+        },
+        async pin(scope, artifact, storageKey, owner) {
+            const db = await opened;
+            await readSchemaVersion(db);
+            await mutateArtifactRows(db, (store, rows) => {
+                const row = requireArtifactRow(rows, scope, artifact, storageKey);
+                const ownerId = String(owner ?? "");
+                if (ownerId.length === 0) {
+                    throwStoreError({
+                        code: "invalid_store_request",
+                        reasonCode: "artifact_owner_missing",
+                        message: "invalid store request: artifact_owner_missing",
+                    });
+                }
+                if (!row.owners.includes(ownerId) && row.owners.length >= maxArtifactOwners) {
+                    throwStoreError({
+                        code: "store_limit_exceeded",
+                        resource: "artifact_owners",
+                        limit: maxArtifactOwners,
+                        message: `store limit exceeded for artifact_owners: ${maxArtifactOwners}`,
+                    });
+                }
+                if (!row.owners.includes(ownerId))
+                    row.owners.push(ownerId);
+                delete row.unreferencedSince;
+                store.put(row);
+            });
+        },
+        async unpin(scope, artifact, storageKey, owner, nowUnixMs) {
+            const db = await opened;
+            await readSchemaVersion(db);
+            await mutateArtifactRows(db, (store, rows) => {
+                const row = requireArtifactRow(rows, scope, artifact, storageKey);
+                const ownerId = String(owner);
+                const nextOwners = row.owners.filter((value) => value !== ownerId);
+                if (nextOwners.length !== row.owners.length) {
+                    row.owners = nextOwners;
+                    if (nextOwners.length === 0)
+                        row.unreferencedSince = Number(nowUnixMs);
+                    store.put(row);
+                }
+            });
+        },
+        async collectOrphans(scope, nowUnixMs, limit) {
+            const db = await opened;
+            await readSchemaVersion(db);
+            return mutateArtifactRows(db, (store, rows) => {
+                const scopeJson = String(scope);
+                const now = Number(nowUnixMs);
+                const boundedLimit = Math.min(Number(limit), maxArtifactGcBatch);
+                let examined = 0;
+                let deleted = 0;
+                let bytesDeleted = 0;
+                for (const row of rows) {
+                    if (examined >= boundedLimit)
+                        break;
+                    if (row.scope !== scopeJson)
+                        continue;
+                    examined += 1;
+                    if (row.owners.length > 0)
+                        continue;
+                    if (row.unreferencedSince === undefined) {
+                        row.unreferencedSince = now;
+                        store.put(row);
+                        continue;
+                    }
+                    if (now - row.unreferencedSince >= artifactOrphanGraceMs) {
+                        store.delete(row.storageKey);
+                        deleted += 1;
+                        bytesDeleted += row.byteLength;
+                    }
+                }
+                return { examined, deleted, bytes_deleted: bytesDeleted };
+            });
+        },
     };
+}
+function requireArtifactRow(rows, scope, artifact, storageKey) {
+    const row = rows.find((candidate) => candidate.storageKey === String(storageKey));
+    if (row === undefined) {
+        throwStoreError({
+            code: "invalid_store_request",
+            reasonCode: "artifact_uncorrelated",
+            message: "invalid store request: artifact_uncorrelated",
+        });
+    }
+    if (row.scope !== String(scope) || row.artifact !== String(artifact)) {
+        throwStoreError({
+            code: "store_corruption",
+            reasonCode: "artifact_scope_or_reference_mismatch",
+            message: "store corruption: artifact_scope_or_reference_mismatch",
+        });
+    }
+    return row;
 }
 function openExperimentalDb(dbName) {
     return new Promise((resolve, reject) => {
@@ -639,9 +806,16 @@ function openExperimentalDb(dbName) {
             if (!db.objectStoreNames.contains("snapshots")) {
                 db.createObjectStore("snapshots", { keyPath: "sessionId" });
             }
-            if (!db.objectStoreNames.contains("artifacts")) {
-                db.createObjectStore("artifacts", { keyPath: "id" });
+            if (event.oldVersion < 2 && db.objectStoreNames.contains("artifacts")) {
+                db.deleteObjectStore("artifacts");
             }
+            if (!db.objectStoreNames.contains("artifacts")) {
+                db.createObjectStore("artifacts", { keyPath: "storageKey" });
+            }
+            request.transaction?.objectStore("meta").put({
+                key: "schemaVersion",
+                value: INDEXED_DB_SCHEMA_VERSION,
+            });
         };
         request.onsuccess = () => {
             const db = request.result;
@@ -723,6 +897,31 @@ function idbGetAll(db, store) {
 function idbPut(db, store, value) {
     return idbWrite(db, [store], (txn) => {
         txn.objectStore(store).put(value);
+    });
+}
+function mutateArtifactRows(db, mutate) {
+    return new Promise((resolve, reject) => {
+        const txn = db.transaction("artifacts", "readwrite");
+        const store = txn.objectStore("artifacts");
+        const request = store.getAll();
+        let result;
+        let operationError;
+        request.onsuccess = () => {
+            try {
+                result = mutate(store, request.result ?? []);
+            }
+            catch (error) {
+                operationError = error;
+                txn.abort();
+            }
+        };
+        request.onerror = () => {
+            operationError = request.error ?? new Error("indexeddb artifact read failed");
+            txn.abort();
+        };
+        txn.oncomplete = () => resolve(result);
+        txn.onerror = () => reject(operationError ?? txn.error ?? new Error("indexeddb write failed"));
+        txn.onabort = () => reject(operationError ?? txn.error ?? new Error("indexeddb write aborted"));
     });
 }
 function idbWrite(db, stores, mutate) {

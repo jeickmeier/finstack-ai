@@ -10,27 +10,13 @@ use finstack_ai_kernel::{
     EffectOutputContract, EffectOutputKind, InteractionKind, ProviderIds, Usage, Version,
 };
 use finstack_ai_kernel::{
-    ChildRunLocator,
-    Digest,
-    RawJson,
-    ToolCallBlock,
-    ToolFailurePolicy,
+    ChildRunLocator, ChildRunPrepared, Digest, RawJson, ToolCallBlock, ToolFailurePolicy,
     ValidatedToolCall,
 };
 use finstack_ai_runtime::{
-    AgentInvokeError,
-    AgentInvoker,
-    AgentRef,
-    ChildRunHandle,
-    ChildRunRequest,
-    Model,
-    ModelResponse,
-    ModelStreamItem,
-    ModelToolCall,
-    PortFuture,
-    ToolCallDelta,
-    ToolStreamItem,
-    child_relation_digest,
+    AgentInvokeError, AgentInvoker, AgentRef, ChildRunHandle, ChildRunRequest, ChildRunStarter,
+    ChildRunStatus, Model, ModelResponse, ModelStreamItem, ModelToolCall, PortFuture,
+    ToolCallDelta, ToolStreamItem, child_relation_digest,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction};
@@ -72,8 +58,16 @@ impl AgentInvoker for ParentStartInvoker {
                     _ => None,
                 })
                 .unwrap_or_default();
+            let prepared = ChildRunPrepared {
+                parent_run_id: context.parent.run_id,
+                parent_effect_id: context.parent_effect_id,
+                child: request.locator.clone(),
+                request_digest: request.request_digest,
+                placement: request.placement,
+                budget_reservation_id: None,
+            };
             let run = parent
-                .start_child(&child, agent_request(&input), request.placement, None)
+                .accept_child(&prepared, &child, agent_request(&input))
                 .await
                 .map_err(|error| AgentInvokeError::InvalidRequest {
                     message: Arc::from(error.to_string()),
@@ -88,10 +82,7 @@ impl AgentInvoker for ParentStartInvoker {
                 }
             })?;
             Ok(ChildRunHandle {
-                locator: ChildRunLocator {
-                    operation: run.locator().clone(),
-                    remote: None,
-                },
+                locator: request.locator,
                 relation_digest,
             })
         })
@@ -105,7 +96,7 @@ impl AgentInvoker for ParentStartInvoker {
                 .lock()
                 .expect("started")
                 .iter()
-                .find(|run| run.locator().run_id == locator.operation.run_id)
+                .find(|run| run.locator() == &locator.operation)
                 .cloned()
                 .ok_or_else(|| AgentInvokeError::Unavailable {
                     message: Arc::from("started child is not attached"),
@@ -114,6 +105,25 @@ impl AgentInvoker for ParentStartInvoker {
                 .await
                 .map_err(|error| AgentInvokeError::InvalidRequest {
                     message: Arc::from(error.to_string()),
+                })
+        })
+    }
+
+    fn status(
+        &self,
+        locator: &ChildRunLocator,
+    ) -> PortFuture<Result<ChildRunStatus, AgentInvokeError>> {
+        let started = Arc::clone(&self.started);
+        let locator = locator.clone();
+        Box::pin(async move {
+            started
+                .lock()
+                .expect("started")
+                .iter()
+                .any(|run| run.locator() == &locator.operation)
+                .then_some(ChildRunStatus::Completed)
+                .ok_or_else(|| AgentInvokeError::Unavailable {
+                    message: Arc::from("started child is not attached"),
                 })
         })
     }
@@ -246,6 +256,10 @@ async fn invoke(
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the lane contract keeps the complete parent-child transition in one scenario"
+)]
 async fn subagent_start_await_incorporates_child_text() {
     let store = memory_journal();
     let store_port: Arc<dyn JournalStore> = store.clone();
@@ -266,7 +280,11 @@ async fn subagent_start_await_incorporates_child_text() {
         started: Arc::new(Mutex::new(Vec::new())),
     });
     let toolset = SubagentToolset::try_new(
-        Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+        Arc::new(ChildRunStarter::new(
+            Arc::clone(&store_port),
+            ChildRunPolicy::Allow { max_depth: 1 },
+            Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+        )),
         Arc::from([child_ref()]),
     )
     .expect("toolset");
@@ -370,7 +388,11 @@ async fn subagent_deny_leaves_no_child_records() {
         started: Arc::new(Mutex::new(Vec::new())),
     });
     let toolset = SubagentToolset::try_new(
-        Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+        Arc::new(ChildRunStarter::new(
+            Arc::clone(&store_port),
+            ChildRunPolicy::Deny,
+            Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+        )),
         Arc::from([child_ref()]),
     )
     .expect("toolset");
@@ -600,7 +622,11 @@ async fn subagent_start_approval_loop_resolves_durable_interaction() {
         starts: AtomicUsize::new(0),
     });
     let toolset = SubagentToolset::try_new(
-        Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+        Arc::new(ChildRunStarter::new(
+            Arc::clone(&store_port),
+            ChildRunPolicy::Allow { max_depth: 1 },
+            Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+        )),
         Arc::from([child_ref()]),
     )
     .expect("toolset");

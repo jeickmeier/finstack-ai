@@ -231,7 +231,7 @@ macro_rules! static_error_code {
     }};
 }
 
-/// Stable error category (TDD §30.2).
+/// Stable error category (contract section 30.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCategory {

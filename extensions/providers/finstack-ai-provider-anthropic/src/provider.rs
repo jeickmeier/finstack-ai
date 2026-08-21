@@ -19,8 +19,8 @@ use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
 use crate::error::{
-    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, response_error,
-    stream_error,
+    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR,
+    error, response_error, stream_error,
 };
 use crate::request::{MessagesRequest, serialize_request};
 use crate::sse::SseParser;
@@ -135,8 +135,7 @@ impl AnthropicProvider {
         let configured = models
             .get_mut(model)
             .ok_or_else(|| crate::error::request_error("requested model is not configured"))?;
-        configured.apply_capabilities(&update);
-        Ok(())
+        configured.apply_capabilities(&update)
     }
 
     fn model_config(&self, name: &ModelName) -> Result<AnthropicModelConfig, ModelError> {
@@ -177,6 +176,7 @@ fn catalog_from_models(
 ) -> Result<BTreeMap<ModelName, AnthropicModelConfig>, ModelError> {
     let mut by_name = BTreeMap::new();
     for model in models {
+        model.validate()?;
         if by_name.insert(model.name.clone(), model).is_some() {
             return Err(crate::error::config_error(
                 "provider contains a duplicate model name",
@@ -276,14 +276,22 @@ impl Model for AnthropicProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let resolver = self.config.media_resolver();
         Box::pin(async move {
+            let deadline = tokio::time::Instant::now() + timeout;
+            let cancellation = request.call.run.cancellation.clone();
             let model = model?;
-            let resolved = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes)
-                .await
-                .map_err(map_draft_media)?;
+            let resolved = tokio::select! {
+                () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
+                resolved = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes) => {
+                    resolved.map_err(map_draft_media)?
+                }
+            };
             let wire = MessagesRequest::try_from_draft(&request.draft, &model, &resolved)?;
             let payload = serialize_request(&wire)?;
+            if payload.len() > max_stream_bytes {
+                return Err(request_limit_error());
+            }
             let request_id = request.call.request_id.to_string();
-            let cancellation = request.call.run.cancellation;
             let send = client
                 .post(endpoint)
                 .header("x-client-request-id", &request_id)
@@ -293,6 +301,7 @@ impl Model for AnthropicProvider {
                 .send();
             let response = tokio::select! {
                 () = cancellation.cancelled() => return Err(cancelled_error()),
+                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
@@ -314,6 +323,7 @@ impl Model for AnthropicProvider {
                 structured,
                 max_event_bytes,
                 max_stream_bytes,
+                deadline,
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
@@ -347,6 +357,10 @@ impl Drop for ReceiverModelStream {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "stream driver keeps request identity, limits, cancellation, and deadline together"
+)]
 async fn drive_response(
     response: reqwest::Response,
     sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
@@ -355,6 +369,7 @@ async fn drive_response(
     structured: bool,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    deadline: tokio::time::Instant,
 ) {
     let mut body = response.bytes_stream();
     let mut parser = SseParser::new(max_event_bytes, max_stream_bytes);
@@ -363,6 +378,10 @@ async fn drive_response(
         let chunk = tokio::select! {
             () = cancellation.cancelled() => {
                 let _ = sender.send(Err(cancelled_error())).await;
+                return;
+            }
+            () = tokio::time::sleep_until(deadline) => {
+                let _ = sender.send(Err(timeout_error())).await;
                 return;
             }
             () = sender.closed() => return,
@@ -434,14 +453,27 @@ fn cancelled_error() -> ModelError {
     )
 }
 
+fn timeout_error() -> ModelError {
+    error(
+        TIMEOUT,
+        ErrorCategory::Deadline,
+        true,
+        "Anthropic request timed out",
+    )
+}
+
+fn request_limit_error() -> ModelError {
+    error(
+        STREAM_LIMIT_EXCEEDED,
+        ErrorCategory::Limit,
+        false,
+        "Anthropic request exceeded the configured byte limit",
+    )
+}
+
 fn transport_error(source: &reqwest::Error) -> ModelError {
     if source.is_timeout() {
-        error(
-            TIMEOUT,
-            ErrorCategory::Deadline,
-            true,
-            "Anthropic request timed out",
-        )
+        timeout_error()
     } else {
         error(
             TRANSPORT_ERROR,
@@ -639,6 +671,38 @@ mod tests {
 
         assert!(provider.capabilities(&name).input.images);
         assert!(provider.capabilities(&name).input.files);
+    }
+
+    #[test]
+    fn invalid_public_profiles_are_rejected_atomically() {
+        let config = AnthropicConfig::try_new("http://127.0.0.1:9").expect("config");
+        let mut invalid =
+            AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        invalid.max_output_tokens = 0;
+        assert_eq!(
+            AnthropicProvider::try_new(config.clone(), vec![invalid])
+                .expect_err("invalid public fields")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+
+        let model =
+            AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        let provider = AnthropicProvider::try_new(config, vec![model]).expect("provider");
+        let name = ModelName::try_new("claude-test").expect("name");
+        let before = provider.capabilities(&name);
+        let mut update = before.clone();
+        update.context_profile.max_output_tokens = 0;
+        assert_eq!(
+            provider
+                .refresh_model_metadata(&name, update)
+                .expect_err("invalid refresh")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
+        assert_eq!(provider.capabilities(&name), before);
     }
 
     #[derive(Debug)]

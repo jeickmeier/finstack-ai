@@ -25,7 +25,7 @@ use crate::error::{
 
 pub(crate) struct LoadedBatch {
     pub(crate) identity: AppendIdentity,
-    pub(crate) committed: CommittedBatch,
+    pub(crate) committed: Option<CommittedBatch>,
 }
 
 pub(crate) struct SessionRow {
@@ -66,15 +66,25 @@ pub(crate) fn load_batch(
     };
     let identity = decode::<AppendIdentity>(&request_cbor).map_err(protocol_error)?;
     let records = load_batch_records(connection, batch_id)?;
-    let committed = CommittedBatch::try_new(
-        batch_id,
-        u64_from_i64(first_sequence, "first_sequence")?,
-        u64_from_i64(last_sequence, "last_sequence")?,
-        records,
-    )
-    .map_err(|_| StoreError::Integrity {
-        reason_code: "committed_batch_invalid",
-    })?;
+    let first_sequence = u64_from_i64(first_sequence, "first_sequence")?;
+    let last_sequence = u64_from_i64(last_sequence, "last_sequence")?;
+    let committed = if records
+        .first()
+        .is_some_and(|record| record.sequence() > first_sequence)
+        && records
+            .last()
+            .is_some_and(|record| record.sequence() == last_sequence)
+    {
+        None
+    } else {
+        Some(
+            CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records).map_err(
+                |_| StoreError::Integrity {
+                    reason_code: "committed_batch_invalid",
+                },
+            )?,
+        )
+    };
     Ok(Some(LoadedBatch {
         identity,
         committed,
@@ -330,7 +340,7 @@ pub(crate) fn load_session(
             cached,
         )?
     };
-    let committed_batches = group_batches(&stored)?;
+    let committed_batches = group_batches(connection, &stored)?;
     Ok(LoadedSession {
         session_id,
         head_sequence,
@@ -452,7 +462,7 @@ fn loaded_tail(
         stored_head,
         codes,
     )?;
-    let committed_batches = group_batches(stored)?;
+    let committed_batches = group_batches(connection, stored)?;
     Ok(LoadedSession {
         session_id,
         head_sequence,
@@ -601,10 +611,12 @@ pub(crate) fn scan_session(
         .take(limit)
         .map(|row| row.envelope.clone())
         .collect::<Vec<_>>();
-    if records
-        .first()
-        .is_some_and(|record| record.sequence() < start)
-    {
+    if records.first().is_some_and(|record| {
+        record.sequence() != start
+            && !session
+                .snapshot_sequence
+                .is_some_and(|boundary| start < boundary && record.sequence() == boundary)
+    }) {
         return Err(StoreError::Integrity {
             reason_code: "scan_sequence_gap",
         });
@@ -631,16 +643,23 @@ fn verify_scan_page(
         None
     } else {
         let checkpoint = first.sequence().saturating_sub(1);
-        match load_envelope_checksum(connection, session_id, checkpoint)? {
-            Some(stored) => {
-                if first.previous_checksum() != Some(stored) {
-                    return Err(StoreError::Integrity {
-                        reason_code: "scan_checkpoint_mismatch",
-                    });
-                }
-                Some(stored)
+        if let Some(stored) = load_envelope_checksum(connection, session_id, checkpoint)? {
+            if first.previous_checksum() != Some(stored) {
+                return Err(StoreError::Integrity {
+                    reason_code: "scan_checkpoint_mismatch",
+                });
             }
-            None => first.previous_checksum(),
+            Some(stored)
+        } else {
+            if session
+                .snapshot_sequence
+                .is_none_or(|boundary| checkpoint >= boundary)
+            {
+                return Err(StoreError::Integrity {
+                    reason_code: "scan_checkpoint_mismatch",
+                });
+            }
+            first.previous_checksum()
         }
     };
     let anchor =
@@ -658,7 +677,10 @@ fn verify_scan_page(
     Ok(())
 }
 
-fn group_batches(stored: &[StoredRecord]) -> Result<Vec<CommittedBatch>, StoreError> {
+fn group_batches(
+    connection: &Connection,
+    stored: &[StoredRecord],
+) -> Result<Vec<CommittedBatch>, StoreError> {
     let mut batches = Vec::new();
     let mut index = 0;
     while index < stored.len() {
@@ -672,8 +694,25 @@ fn group_batches(stored: &[StoredRecord]) -> Result<Vec<CommittedBatch>, StoreEr
         let last_sequence = records
             .last()
             .map_or(first_sequence, RecordEnvelope::sequence);
+        let (declared_first, declared_last) = connection
+            .query_row(
+                "SELECT first_sequence, last_sequence FROM batches WHERE batch_id = ?1",
+                params![batch_id.as_bytes().as_slice()],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .map_err(map_sqlite_error)?;
+        let declared_first = u64_from_i64(declared_first, "first_sequence")?;
+        let declared_last = u64_from_i64(declared_last, "last_sequence")?;
+        if first_sequence > declared_first && last_sequence == declared_last {
+            continue;
+        }
+        if first_sequence != declared_first || last_sequence != declared_last {
+            return Err(StoreError::Integrity {
+                reason_code: "committed_batch_invalid",
+            });
+        }
         batches.push(
-            CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records).map_err(
+            CommittedBatch::try_new(batch_id, declared_first, declared_last, records).map_err(
                 |_| StoreError::Integrity {
                     reason_code: "committed_batch_invalid",
                 },

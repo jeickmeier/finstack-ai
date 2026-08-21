@@ -1597,7 +1597,7 @@ async fn isolated_child_request(
         .expect("child locator"),
         remote: None,
     };
-    ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: AgentRef {
             id: AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
@@ -1612,8 +1612,10 @@ async fn isolated_child_request(
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
-    }
+        request_digest: Digest::raw_json(b"null"),
+    };
+    request.request_digest = request.canonical_digest().expect("digest");
+    request
 }
 
 fn echo_tool_spec() -> ToolSpec {
@@ -1762,7 +1764,8 @@ async fn start_or_attach_child_rejects_a_conflicting_digest() {
         .await
         .expect("first start_or_attach_child");
     let mut conflicting = child_request;
-    conflicting.request_digest = Digest::raw_json(br#"{"request":"child-b"}"#);
+    conflicting.delegation_id = Some(Arc::from("different-delegation"));
+    conflicting.request_digest = conflicting.canonical_digest().expect("digest");
     let error = parent
         .start_or_attach_child(invoker, effect_id, conflicting)
         .await

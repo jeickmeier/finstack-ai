@@ -207,6 +207,7 @@ mod tests {
         let expected = AssembledToolStream {
             progress: Arc::from([]),
             usage: None,
+            artifacts: Arc::from([]),
             terminal: ToolTerminal::Completed(LeafToolset::result()),
         };
         let assembled = check_toolset_conformance(

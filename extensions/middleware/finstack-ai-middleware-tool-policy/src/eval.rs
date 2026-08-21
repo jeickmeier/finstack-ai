@@ -6,7 +6,10 @@ use std::sync::Arc;
 use finstack_ai_kernel::{ContentBlock, MessageRole, ToolId};
 use finstack_ai_runtime::{BeforeModelInput, BeforeToolBatchInput, SideEffectClass};
 
-use crate::{JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, ToolPolicyConfig};
+use crate::{
+    JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, TOOL_POLICY_WRITE_BUDGET_EXCEEDED,
+    ToolPolicyConfig,
+};
 
 /// Outcome of evaluating the policy against one stage's facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,53 +180,32 @@ pub(crate) fn evaluate_before_model(
     }
 
     if let Some(jailbreak) = config.jailbreak() {
-        let lowered_patterns: Vec<String> = jailbreak
-            .patterns()
-            .iter()
-            .map(|pattern| pattern.to_lowercase())
-            .collect();
         'scan: for message in input.request.messages.iter() {
-            let texts: Vec<&str> = match message.role() {
-                MessageRole::User => message
-                    .content()
-                    .iter()
-                    .filter_map(|block| match block {
-                        ContentBlock::Text(text) => Some(text.text()),
-                        _ => None,
-                    })
-                    .collect(),
-                MessageRole::Tool => message
-                    .content()
-                    .iter()
-                    .filter_map(|block| match block {
-                        ContentBlock::ToolResult(result) => Some(result.content().iter()),
-                        _ => None,
-                    })
-                    .flatten()
-                    .filter_map(|block| match block {
-                        ContentBlock::Text(text) => Some(text.text()),
-                        _ => None,
-                    })
-                    .collect(),
-                MessageRole::System | MessageRole::Developer | MessageRole::Assistant => Vec::new(),
+            let triggered = match message.role() {
+                MessageRole::User => message.content().iter().any(|block| match block {
+                    ContentBlock::Text(text) => contains_pattern(text.text(), jailbreak.patterns()),
+                    _ => false,
+                }),
+                MessageRole::Tool => message.content().iter().any(|block| match block {
+                    ContentBlock::ToolResult(result) => result.content().iter().any(|block| {
+                        matches!(block, ContentBlock::Text(text) if contains_pattern(text.text(), jailbreak.patterns()))
+                    }),
+                    _ => false,
+                }),
+                MessageRole::System | MessageRole::Developer | MessageRole::Assistant => false,
             };
-            for text in &texts {
-                let lowered = text.to_lowercase();
-                for pattern in &lowered_patterns {
-                    if lowered.contains(pattern.as_str()) {
-                        match jailbreak.action() {
-                            JailbreakAction::Fail => {
-                                return PolicyVerdict::Fail {
-                                    reason: TOOL_POLICY_JAILBREAK_TRIGGERED,
-                                };
-                            }
-                            JailbreakAction::RestrictTo(safe) => {
-                                retain = retain.intersection(safe).cloned().collect();
-                            }
-                        }
-                        break 'scan;
+            if triggered {
+                match jailbreak.action() {
+                    JailbreakAction::Fail => {
+                        return PolicyVerdict::Fail {
+                            reason: TOOL_POLICY_JAILBREAK_TRIGGERED,
+                        };
+                    }
+                    JailbreakAction::RestrictTo(safe) => {
+                        retain = retain.intersection(safe).cloned().collect();
                     }
                 }
+                break 'scan;
             }
         }
     }
@@ -233,6 +215,13 @@ pub(crate) fn evaluate_before_model(
     } else {
         PolicyVerdict::Retain(retain)
     }
+}
+
+fn contains_pattern(text: &str, patterns: &[Arc<str>]) -> bool {
+    let lowered = text.to_lowercase();
+    patterns
+        .iter()
+        .any(|pattern| lowered.contains(pattern.as_ref()))
 }
 
 /// Evaluate the `before_tool_batch` defense-in-depth policy.
@@ -259,17 +248,12 @@ pub(crate) fn evaluate_before_model(
 /// universe) no longer applies: a depth-only config now narrows the real
 /// carried universe too.
 ///
-/// # Why write budget and jailbreak stay `before_model`-only
-///
-/// Both rules need message history: the write budget counts prior
-/// assistant tool-call blocks in `input.request.messages`, and the
-/// jailbreak scan inspects user/tool text in the same array. `
-/// BeforeToolBatchInput` deliberately does not carry the message history —
-/// only `calls` (the batch itself) and `tools` (the universe) — and the
-/// narrowed request built by `before_model` is not retained in kernel state
-/// for the batch stage to re-read. There is nothing at this stage these two
-/// rules could evaluate against, so they are skipped here; `before_model`
-/// already applied them to shrink what the model was shown.
+/// The write budget is authoritative at this stage: the runtime supplies the
+/// count of previously committed executable write calls, and this evaluator
+/// adds write-class calls in the current batch. Unknown call names are treated
+/// conservatively as writes. A batch that would exceed the cap fails before
+/// dispatch. Jailbreak scanning stays `before_model`-only because this input
+/// deliberately carries no user/tool message text.
 ///
 /// Returns `PolicyVerdict::Identity` when the narrowed retain set equals the
 /// carried universe (keeps the fold identity-clean); otherwise
@@ -282,6 +266,27 @@ pub(crate) fn evaluate_before_tool_batch(
 ) -> PolicyVerdict {
     let universe: BTreeSet<ToolId> = input.tools.iter().map(|tool| tool.id.clone()).collect();
     let retain = narrow_universe(config, &universe, granted_roles, relation_depth);
+    if let Some(budget) = config.write_budget() {
+        let read_only_names = input
+            .tools
+            .iter()
+            .filter(|tool| tool.side_effect == SideEffectClass::ReadOnly)
+            .map(|tool| tool.model_name.as_ref())
+            .collect::<BTreeSet<_>>();
+        let current_writes = input
+            .calls
+            .iter()
+            .filter(|call| !read_only_names.contains(call.tool_name()))
+            .count();
+        let attempted = input
+            .prior_write_tool_calls
+            .saturating_add(u64::try_from(current_writes).unwrap_or(u64::MAX));
+        if attempted > u64::from(budget.max_write_calls()) {
+            return PolicyVerdict::Fail {
+                reason: TOOL_POLICY_WRITE_BUDGET_EXCEEDED,
+            };
+        }
+    }
     if retain == universe {
         PolicyVerdict::Identity
     } else {

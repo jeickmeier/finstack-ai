@@ -3,7 +3,7 @@
 //! `attachments` arrives from JS as `[{ data, mediaType, name? }]`
 //! (`data: Uint8Array`, `mediaType`/`name: string`). Each entry is staged
 //! into the agent's internal [`crate::document_store::DocumentArtifactStore`]
-//! and recorded in the [`AttachmentIndex`] shared with `DocumentToolset` and
+//! and recorded in the [the artifact store] shared with `DocumentToolset` and
 //! `DocumentIngestMiddleware`, mirroring `finstack-ai-python`'s
 //! `stage_attachments`.
 
@@ -14,7 +14,6 @@ use finstack_ai::runtime::{
 };
 use finstack_ai::{AttachmentInput, MAX_RUN_ATTACHMENTS};
 use finstack_ai_kernel::{Metadata, Sensitivity, SessionId};
-use finstack_ai_middleware_document_ingest::AttachmentIndex;
 use wasm_bindgen::prelude::*;
 
 use super::errors::{agent_error, configuration_error};
@@ -25,12 +24,9 @@ struct RawAttachment {
     name: Option<String>,
 }
 
-/// Deterministic placeholder scope used to stage run attachments ahead of
-/// the run's real session/run identity, which is unknown until the request
-/// is accepted. The internal document store resolves `get` purely by
-/// content-derived `ArtifactId` and ignores the passed scope, so a stable
-/// placeholder session id is sufficient here; `stage_required_artifact` only
-/// checks the staged artifact against the *same* scope passed to it.
+/// Canonical tenant-bound pre-run upload scope. The session/run identity is
+/// unknown until acceptance, so the all-zero session plus `run_id: None` is
+/// the exact scope the document-ingest middleware later resolves.
 fn attachment_scope() -> ArtifactScope {
     ArtifactScope {
         tenant_scope: Arc::from("js-local"),
@@ -82,7 +78,6 @@ fn parse_attachments(value: &JsValue) -> Result<Vec<RawAttachment>, JsValue> {
 /// journaled `File` block back to the exact staged `ArtifactRef`.
 pub(super) fn stage_attachments(
     store: &dyn ArtifactStore,
-    index: &AttachmentIndex,
     attachments: &JsValue,
 ) -> Result<Vec<AttachmentInput>, JsValue> {
     let attachments = parse_attachments(attachments)?;
@@ -108,7 +103,6 @@ pub(super) fn stage_attachments(
         );
         let artifact = block_on_ready(future)?
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
-        index.insert(artifact.clone());
         staged.push(AttachmentInput { artifact });
     }
     Ok(staged)

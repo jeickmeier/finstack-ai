@@ -137,11 +137,33 @@ unpublished.
   retaining attribution through `candidate_rejected` and `policy_version`,
   and a `Reject` fails the run with the stable, non-retryable
   `verify_rejected` code.
-- `finstack-ai-workflow-hitl`: new HITL router battery (UC-05) — interaction
-  inbox, authorized resolve, expiry sweep (fail-closed default).
+- `finstack-ai-workflow-hitl`: interaction inbox, exact accepted-context
+  authorization, durable worker lifecycle outcomes, and wake reconciliation.
 
 ### Changed
 
+- **Breaking workflow hardening (workspace 2.0):** production workflow
+  attachment now uses operating-system entropy; deterministic attachment is
+  explicit through `*_seeded` constructors. Workflow scheduler reads are
+  bounded, worker configuration fails closed, response keys reject conflicting
+  bytes, fire starts use typed session identities, and rejected commands move
+  to a retained dead-letter queue. The local, worker, and HITL SQLite adapters
+  now own version-1 metadata tables and intentionally require a fresh adapter
+  database when an unversioned historical table is present. HITL captures the
+  accepted run principal/evidence, replaces `Delivered`/`Expired` with
+  `Buffered`/`Accepted`/`Rejected`, exposes `HitlLifecycle` for worker re-park
+  capture and ingress outcomes, and removes the redundant expiry-policy hook.
+- Provider adapters now enforce one cancellation-aware request deadline across
+  media resolution, request preparation, HTTP send, and response streaming;
+  serialized request bodies share the configured stream-byte ceiling.
+- OpenAI preserves caller-supplied prompt cache keys, Anthropic validates
+  thinking budgets against the effective request limit, and Ollama indexes
+  tool-call names once when mapping results.
+- Plaintext OpenAI, Gemini, and Ollama endpoints now require literal loopback
+  IP hosts. Gemini also validates Vertex path labels and provider limits.
+- OpenRouter HTTP failures retain safe status metadata without copying
+  untrusted response bodies into durable errors. Its benchmark now exercises
+  the public provider API without a benchmark-only feature or public module.
 - `finstack-ai-middleware-compaction` `CompactionConfig` fields are private.
   Construct with `sliding_window`, `large_tool_output`, or `summarize`.
   Leaf configuration cannot self-authorize a secondary model. Serialized keys
@@ -193,7 +215,7 @@ unpublished.
 - `UnknownUsagePolicy::AllowWithinReservedMaximum` records no fabricated
   observed cost. A costless completion fails only when accrued cost is
   already at or above the configured maximum (`unknown_cost_usage`).
-  Exact observed equality still does not terminate. TDD 0.20.
+  Exact observed equality still does not terminate. legacy design 0.20.
 - `BudgetRequest.extension_counters` is a `BoundedMap` (32-entry
   deserialize ceiling). Source-breaking; 1.0.0 pre-publication; no ADR;
   no major bump.

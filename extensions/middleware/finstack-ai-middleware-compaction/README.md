@@ -16,11 +16,17 @@ configuration, not by registering a second compactor:
   (`finstack.compaction.summarize`)
 
 Deterministic strategies complete as `CompactContext`. Summarize never
-depends on a `Model` handle or a middleware-owned child effect. A first
-summarize invoke without resume fails closed
-(`COMPACTION_MODEL_NOT_AUTHORIZED`). Configuration cannot self-authorize
-secondary-model dispatch; the runtime owns authorization.
+depends on a `Model` handle or a middleware-owned child effect. Above its
+threshold, the first invocation returns `RequestCompactionModel`; the runtime
+authorizes and fulfills the related child effect, then reinvokes the same leaf
+with `compaction_resume`. Configuration cannot self-authorize secondary-model
+dispatch; the runtime owns authorization.
 Canonical history is not mutated.
+
+Evidence accounts for the complete rebuilt request plus derived summaries.
+Large tool-output previews enforce the byte limit across the whole result,
+truncate text only at UTF-8 boundaries, and replace oversized non-text blocks
+with a bounded marker.
 
 ## Landing
 

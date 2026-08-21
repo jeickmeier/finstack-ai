@@ -85,10 +85,33 @@ fn keyworded_record(id: &str, tenant: &str, keywords: &[&str], preview: &str) ->
 fn provider_for(store: Arc<InProcessMemoryStore>, tenant: &str) -> MemoryContextProvider {
     MemoryContextProvider::try_new(
         store,
+        Arc::new(InProcessArtifactStore::default()),
         MemoryScope::try_new(tenant).expect("scope"),
         RecallConfig::default(),
     )
     .expect("provider")
+}
+
+#[test]
+fn provider_configuration_identity_covers_scope_and_recall_config() {
+    let store = Arc::new(InProcessMemoryStore::new());
+    let artifacts = Arc::new(InProcessArtifactStore::default());
+    let build = |tenant: &str, max_hits: usize| {
+        MemoryContextProvider::try_new(
+            store.clone(),
+            artifacts.clone(),
+            MemoryScope::try_new(tenant).expect("scope"),
+            RecallConfig { max_hits },
+        )
+        .expect("provider")
+        .descriptor()
+        .invocation
+        .configuration_digest
+    };
+
+    assert_eq!(build("tenant-a", 8), build("tenant-a", 8));
+    assert_ne!(build("tenant-a", 8), build("tenant-b", 8));
+    assert_ne!(build("tenant-a", 8), build("tenant-a", 4));
 }
 
 #[tokio::test]

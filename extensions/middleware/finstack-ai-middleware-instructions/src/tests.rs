@@ -201,6 +201,16 @@ async fn invoke_adds_protected_instruction_items_in_entry_order() {
         assert_eq!(item.authority, ContextAuthority::TrustedApplication);
         assert!(item.protected);
         assert!(!item.provenance.external);
+        let ContentBlock::Text(text) = &item.content[0] else {
+            panic!("expected instruction text");
+        };
+        assert_eq!(
+            item.estimated_tokens,
+            u64::try_from(text.text().len())
+                .expect("length")
+                .div_ceil(4)
+                .max(1)
+        );
     }
     validate_stage_outcome(&middleware.descriptor(), &prepare_input(), &outcome)
         .expect("allowed at prepare_context");

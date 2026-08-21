@@ -1,4 +1,4 @@
-//! Runtime events with durable-derived vs transient class safety (TDD §20).
+//! Runtime events with durable-derived vs transient class safety (contract section 20).
 
 use serde::{Deserialize, Serialize};
 

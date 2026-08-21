@@ -373,7 +373,7 @@ impl Serialize for Metadata {
     where
         S: serde::Serializer,
     {
-        // TDD §6.2: human JSON emits the object; canonical CBOR carries JCS bytes.
+        // contract section 6.2: human JSON emits the object; canonical CBOR carries JCS bytes.
         self.0.serialize(serializer)
     }
 }

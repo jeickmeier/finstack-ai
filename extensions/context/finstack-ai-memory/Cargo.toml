@@ -13,7 +13,7 @@ publish = false
 
 [features]
 default = []
-sqlite = ["dep:rusqlite"]
+sqlite = ["dep:rusqlite", "dep:tokio"]
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
@@ -22,7 +22,9 @@ futures-util = { workspace = true }
 rusqlite = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_json_canonicalizer = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

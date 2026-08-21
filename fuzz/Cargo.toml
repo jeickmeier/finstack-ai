@@ -13,9 +13,9 @@ license = "MIT OR Apache-2.0"
 cargo-fuzz = true
 
 [dependencies]
-finstack-ai-kernel = { path = "../crates/finstack-ai-kernel", version = "1.0.0" }
-finstack-ai-protocol = { path = "../crates/finstack-ai-protocol", version = "1.0.0" }
-finstack-ai-wit = { path = "../plugins/finstack-ai-wit", version = "1.0.0" }
+finstack-ai-kernel = { path = "../crates/finstack-ai-kernel", version = "2.0.0" }
+finstack-ai-protocol = { path = "../crates/finstack-ai-protocol", version = "2.0.0" }
+finstack-ai-wit = { path = "../plugins/finstack-ai-wit", version = "2.0.0" }
 libfuzzer-sys = "0.4.10"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

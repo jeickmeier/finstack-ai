@@ -92,17 +92,22 @@ impl ChildRunCoordinator {
             });
         }
         validate_reservation_shape(&request, reservation.as_ref(), ids)?;
-        if let Some(existing) = commit
+        let mapping_exists = if let Some(existing) = commit
             .session()
             .child_mapping(context.parent.run_id, context.parent_effect_id)
-            && (existing.child != request.locator
-                || existing.request_digest != request.request_digest
-                || existing.placement != request.placement)
         {
-            return Err(CompositionError::Commit(
-                CommitCoordinatorError::SidecarConflict,
-            ));
-        }
+            if existing.child != request.locator
+                || existing.request_digest != request.request_digest
+                || existing.placement != request.placement
+            {
+                return Err(CompositionError::Commit(
+                    CommitCoordinatorError::SidecarConflict,
+                ));
+            }
+            true
+        } else {
+            false
+        };
 
         let prepared = ChildRunPrepared {
             parent_run_id: context.parent.run_id,
@@ -118,29 +123,31 @@ impl ChildRunCoordinator {
                 code: "child_preparation_invalid",
             })?;
 
-        let mut records = vec![record_draft(
-            &context.parent,
-            ids.preparation_record_id,
-            timestamp,
-            RecordBody::ChildRunPrepared(prepared),
-        )?];
-        if let Some(reserve) = reservation.as_ref() {
-            records.push(record_draft(
+        if !mapping_exists {
+            let mut records = vec![record_draft(
                 &context.parent,
-                ids.reservation_request_record_id
-                    .ok_or(CompositionError::InvalidRequest {
-                        code: "reservation_request_record_id_missing",
-                    })?,
+                ids.preparation_record_id,
                 timestamp,
-                RecordBody::BudgetReservationRequested(BudgetReservationRequested {
-                    request: reserve.clone(),
-                }),
-            )?);
+                RecordBody::ChildRunPrepared(prepared),
+            )?];
+            if let Some(reserve) = reservation.as_ref() {
+                records.push(record_draft(
+                    &context.parent,
+                    ids.reservation_request_record_id
+                        .ok_or(CompositionError::InvalidRequest {
+                            code: "reservation_request_record_id_missing",
+                        })?,
+                    timestamp,
+                    RecordBody::BudgetReservationRequested(BudgetReservationRequested {
+                        request: reserve.clone(),
+                    }),
+                )?);
+            }
+            commit
+                .commit_composition_records(ids.preparation_batch_id, records)
+                .await
+                .map_err(CompositionError::Commit)?;
         }
-        commit
-            .commit_composition_records(ids.preparation_batch_id, records)
-            .await
-            .map_err(CompositionError::Commit)?;
 
         if let Some(reserve) = reservation {
             self.settle_reservation(commit, &context.parent, reserve, ids, timestamp)

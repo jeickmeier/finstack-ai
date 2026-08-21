@@ -250,11 +250,7 @@ impl Lane {
         capability: Option<String>,
         attachments: JsValue,
     ) -> Result<Run, JsValue> {
-        let attachments = stage_attachments(
-            agent.artifact_store.as_ref(),
-            &agent.attachment_index,
-            &attachments,
-        )?;
+        let attachments = stage_attachments(agent.artifact_store.as_ref(), &attachments)?;
         let request = run_request(
             &agent.model,
             input,

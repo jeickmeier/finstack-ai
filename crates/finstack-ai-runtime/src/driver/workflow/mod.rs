@@ -22,9 +22,10 @@ use crate::{
     ApprovalGrantMode, CommitCoordinator, ContextProvider, EventHubConfig, ExternalClock,
     ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, IdGenerationError,
     InteractionRouter, JournalStore, LockedModelContextProfile, Model, ModelCapabilities,
-    ModelTaskConfig, ModelWarmupContext, RandomSource, ReadyModel, ResolvedMiddlewareChain,
-    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditGate,
-    ToolSpec, ToolStreamLimits, ToolTaskConfig, model_retry_allowed, tool_retry_allowed,
+    ModelTaskConfig, ModelWarmupContext, OsRandomSource, RandomSource, ReadyModel,
+    ResolvedMiddlewareChain, ResolvedToolCatalog, RunTaskConfig, RunTaskOwner,
+    SameIdentityRetryPolicy, SecurityAuditGate, ToolSpec, ToolStreamLimits, ToolTaskConfig,
+    model_retry_allowed, tool_retry_allowed,
 };
 
 /// Stable deny codes for [`retry_decision`].
@@ -359,6 +360,24 @@ impl RandomSource for SeededRandom {
     }
 }
 
+/// Entropy policy retained by an attached workflow session.
+#[derive(Debug, Clone)]
+enum WorkflowRandom {
+    /// Cryptographic-quality entropy for production attachments.
+    Native(OsRandomSource),
+    /// Reproducible entropy for explicitly deterministic tests and examples.
+    Seeded(SeededRandom),
+}
+
+impl RandomSource for WorkflowRandom {
+    fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), IdGenerationError> {
+        match self {
+            Self::Native(source) => source.fill_bytes(buf),
+            Self::Seeded(source) => source.fill_bytes(buf),
+        }
+    }
+}
+
 /// Native workflow driver over one recovered run.
 ///
 /// The driver never plans model or tool batches. It spawns [`RunTaskOwner`]
@@ -368,7 +387,7 @@ pub struct WorkflowSession {
     tenant_scope: Arc<str>,
     locator: OperationLocator,
     clock: ExternalClock,
-    random: SeededRandom,
+    random: WorkflowRandom,
     audit: Arc<SecurityAuditGate>,
     model: Option<WorkflowModel>,
     catalog: Option<Arc<ResolvedToolCatalog>>,
@@ -401,8 +420,49 @@ impl WorkflowSession {
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
         clock: ExternalClock,
+        audit: Arc<SecurityAuditGate>,
+    ) -> Result<Self, WorkflowDriverError> {
+        Self::attach_with_random(
+            store,
+            locator,
+            clock,
+            audit,
+            WorkflowRandom::Native(OsRandomSource),
+        )
+        .await
+    }
+
+    /// Attach with deterministic entropy for tests and reproducible examples.
+    ///
+    /// Production hosts should use [`Self::attach`], which draws entropy from
+    /// the operating system.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same failures as [`Self::attach`].
+    pub async fn attach_seeded(
+        store: Arc<dyn JournalStore>,
+        locator: OperationLocator,
+        clock: ExternalClock,
         random_seed: u64,
         audit: Arc<SecurityAuditGate>,
+    ) -> Result<Self, WorkflowDriverError> {
+        Self::attach_with_random(
+            store,
+            locator,
+            clock,
+            audit,
+            WorkflowRandom::Seeded(SeededRandom::new(random_seed)),
+        )
+        .await
+    }
+
+    async fn attach_with_random(
+        store: Arc<dyn JournalStore>,
+        locator: OperationLocator,
+        clock: ExternalClock,
+        audit: Arc<SecurityAuditGate>,
+        random: WorkflowRandom,
     ) -> Result<Self, WorkflowDriverError> {
         let coordinator = CommitCoordinator::recover(Arc::clone(&store), locator.session_id)
             .await
@@ -424,7 +484,7 @@ impl WorkflowSession {
             tenant_scope: Arc::from(accepted.security().tenant_scope()),
             locator,
             clock,
-            random: SeededRandom::new(random_seed),
+            random,
             audit,
             model: None,
             catalog: None,
@@ -449,12 +509,29 @@ impl WorkflowSession {
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
         clock: ExternalClock,
+    ) -> Result<Self, WorkflowDriverError> {
+        let audit = SecurityAuditGate::enable_noop()
+            .await
+            .map_err(|_| WorkflowDriverError::AuditNotReady)?;
+        Self::attach(store, locator, clock, audit).await
+    }
+
+    /// Attach with deterministic entropy and an in-process no-op audit gate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowDriverError::AuditNotReady`] when the gate cannot be
+    /// enabled, and the same failures as [`Self::attach_seeded`].
+    pub async fn trusted_seeded(
+        store: Arc<dyn JournalStore>,
+        locator: OperationLocator,
+        clock: ExternalClock,
         random_seed: u64,
     ) -> Result<Self, WorkflowDriverError> {
         let audit = SecurityAuditGate::enable_noop()
             .await
             .map_err(|_| WorkflowDriverError::AuditNotReady)?;
-        Self::attach(store, locator, clock, random_seed, audit).await
+        Self::attach_seeded(store, locator, clock, random_seed, audit).await
     }
 
     /// Bind model/tool ports used when the driver must spawn [`RunTaskOwner`].
@@ -571,7 +648,7 @@ impl WorkflowSession {
                     return Ok(wait);
                 }
                 if self.owner.is_none() {
-                    self.spawn_owner().await?;
+                    Box::pin(self.spawn_owner()).await?;
                 }
                 tokio::task::yield_now().await;
             }
@@ -593,11 +670,32 @@ impl WorkflowSession {
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
         clock: ExternalClock,
+        audit: Arc<SecurityAuditGate>,
+        hint: Option<&WorkflowCheckpoint>,
+    ) -> Result<Self, WorkflowDriverError> {
+        let session = Self::attach(store, locator, clock, audit).await?;
+        let journal_seq = session.last_state.last_applied_sequence;
+        let _ = resolve_checkpoint_sequence(
+            journal_seq,
+            hint.map(|checkpoint| checkpoint.last_applied_seq),
+        );
+        Ok(session)
+    }
+
+    /// Resume with deterministic entropy for tests and reproducible examples.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same failures as [`Self::resume`].
+    pub async fn resume_seeded(
+        store: Arc<dyn JournalStore>,
+        locator: OperationLocator,
+        clock: ExternalClock,
         random_seed: u64,
         audit: Arc<SecurityAuditGate>,
         hint: Option<&WorkflowCheckpoint>,
     ) -> Result<Self, WorkflowDriverError> {
-        let session = Self::attach(store, locator, clock, random_seed, audit).await?;
+        let session = Self::attach_seeded(store, locator, clock, random_seed, audit).await?;
         let journal_seq = session.last_state.last_applied_sequence;
         let _ = resolve_checkpoint_sequence(
             journal_seq,
@@ -729,7 +827,7 @@ impl WorkflowSession {
     pub async fn ensure_owner(&mut self) -> Result<(), WorkflowDriverError> {
         self.refresh_state().await?;
         if self.owner.is_none() && classify_wait(&self.last_state).is_none() {
-            self.spawn_owner().await?;
+            Box::pin(self.spawn_owner()).await?;
         }
         Ok(())
     }
@@ -746,7 +844,7 @@ impl WorkflowSession {
     pub async fn respawn_owner(&mut self) -> Result<(), WorkflowDriverError> {
         self.refresh_state().await?;
         if self.owner.is_none() {
-            self.spawn_owner().await?;
+            Box::pin(self.spawn_owner()).await?;
         }
         Ok(())
     }
@@ -894,6 +992,7 @@ fn spawn_code(error: &crate::RunHandleError) -> &'static str {
         crate::RunHandleError::CancellationSettlement { .. } => "cancellation",
         crate::RunHandleError::EventDelivery { .. } => "event_delivery",
         crate::RunHandleError::Middleware { .. } => "middleware",
+        crate::RunHandleError::Artifact { .. } => "artifact",
     }
 }
 

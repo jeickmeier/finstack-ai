@@ -36,11 +36,11 @@ pub const WIT_PACKAGE_VERSION: &str = "0.0.4";
 /// Frozen WIT package version for guests that retarget to `@1.0.0`.
 pub const WIT_PACKAGE_VERSION_V1: &str = "1.0.0";
 
-/// Individual text or byte-string ceiling (TDD §6.5).
+/// Individual text or byte-string ceiling (contract section 6.5).
 pub const MAX_STRING_BYTES: usize = 4 * 1024 * 1024;
-/// `RawJson` / args / result / catalog ceiling (TDD §6.5).
+/// `RawJson` / args / result / catalog ceiling (contract section 6.5).
 pub const MAX_RAW_JSON_BYTES: usize = 1_048_576;
-/// Metadata object ceiling (TDD §6.5).
+/// Metadata object ceiling (contract section 6.5).
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
 
 /// Stable guest-side failure. Map into the generated WIT `plugin-error`.

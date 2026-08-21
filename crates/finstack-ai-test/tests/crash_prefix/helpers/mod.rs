@@ -796,7 +796,7 @@ pub(crate) fn child_request(
     lane: u64,
     run: u64,
 ) -> ChildRunRequest {
-    ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: AgentRef {
             id: finstack_ai_kernel::AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
@@ -819,14 +819,18 @@ pub(crate) fn child_request(
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
-    }
+        request_digest: Digest::raw_json(b"null"),
+    };
+    request.request_digest = request.canonical_digest().expect("child request digest");
+    request
 }
 
 pub(crate) fn budget_child_request() -> ChildRunRequest {
     let mut request = child_request(ChildPlacement::CompatibleLaneInParentSession, 1, 50, 51);
     request.requested_budget = reserve_request().amount;
-    request.request_digest = Digest::raw_json(br#"{"request":"budget-child"}"#);
+    request.request_digest = request
+        .canonical_digest()
+        .expect("budget child request digest");
     request
 }
 

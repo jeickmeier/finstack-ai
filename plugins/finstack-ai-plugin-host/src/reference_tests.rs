@@ -348,6 +348,7 @@ async fn load_enabled_reference_lock_passes_published_conformance() {
             expected: AssembledToolStream {
                 progress: Arc::from([]),
                 usage: None,
+                artifacts: Arc::from([]),
                 terminal: ToolTerminal::Completed(ToolResult {
                     output: completed_result(&native_add).output.clone(),
                     is_error: false,
@@ -394,6 +395,7 @@ async fn calculator_matches_native_evaluate_and_conformance() {
             expected: AssembledToolStream {
                 progress: Arc::from([]),
                 usage: None,
+                artifacts: Arc::from([]),
                 terminal: ToolTerminal::Completed(ToolResult {
                     output: completed_result(&native_add).output.clone(),
                     is_error: false,

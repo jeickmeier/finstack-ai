@@ -3,6 +3,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_runtime::{CancellationSignal, TOOL_CANCELLED, ToolError};
@@ -25,6 +26,13 @@ const READ_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::NOFOLLOW)
     .union(OFlags::CLOEXEC)
     .union(OFlags::NONBLOCK);
+
+#[derive(Clone, Copy)]
+struct SearchControl<'a> {
+    protected: &'a ProtectedPaths,
+    cancellation: &'a CancellationSignal,
+    deadline: Option<Instant>,
+}
 
 #[derive(Clone)]
 pub(crate) struct Root {
@@ -57,9 +65,10 @@ impl Root {
         ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
+        deadline: Option<Instant>,
     ) -> Result<OperationOutput, ToolError> {
-        check_cancelled(cancellation)?;
-        match operation {
+        check_interrupted(cancellation, deadline)?;
+        let output = match operation {
             FileOperation::Read(path) => self.read(&path, ceilings, cancellation),
             FileOperation::Write { path, content } => {
                 self.write(&path, &content, ceilings, cancellation)
@@ -72,17 +81,22 @@ impl Root {
             } => self.edit(&path, &old, &new, replace_all, ceilings, cancellation),
             FileOperation::List(path) => self.list(&path, ceilings, protected, cancellation),
             FileOperation::Glob { pattern } => {
-                self.glob(&pattern, ceilings, protected, cancellation)
+                self.glob(&pattern, ceilings, protected, cancellation, deadline)
             }
             FileOperation::Search { path, query, glob } => self.search(
                 &path,
                 &query,
                 glob.as_deref(),
                 ceilings,
-                protected,
-                cancellation,
+                SearchControl {
+                    protected,
+                    cancellation,
+                    deadline,
+                },
             ),
-        }
+        }?;
+        check_interrupted(cancellation, deadline)?;
+        Ok(output)
     }
 
     fn read(
@@ -241,9 +255,10 @@ impl Root {
         ceilings: FileSystemCeilings,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
+        deadline: Option<Instant>,
     ) -> Result<OperationOutput, ToolError> {
         let base = ValidatedPath::try_directory("", protected)?;
-        let entries = self.walk(&base, ceilings.limits, protected, cancellation)?;
+        let entries = self.walk(&base, ceilings.limits, protected, cancellation, deadline)?;
         let paths = entries
             .into_iter()
             .filter(|entry| glob_matches(pattern, &entry.path))
@@ -262,30 +277,53 @@ impl Root {
         query: &str,
         glob: Option<&str>,
         ceilings: FileSystemCeilings,
-        protected: &ProtectedPaths,
-        cancellation: &CancellationSignal,
+        control: SearchControl<'_>,
     ) -> Result<OperationOutput, ToolError> {
-        let entries = self.walk(base, ceilings.limits, protected, cancellation)?;
+        let entries = self.walk(
+            base,
+            ceilings.limits,
+            control.protected,
+            control.cancellation,
+            control.deadline,
+        )?;
         let mut matches = Vec::new();
+        let mut scanned_bytes = 0_usize;
         for entry in entries {
-            check_cancelled(cancellation)?;
+            check_interrupted(control.cancellation, control.deadline)?;
             if entry.kind != EntryKind::File
                 || glob.is_some_and(|pattern| !glob_matches(pattern, &entry.path))
             {
                 continue;
             }
-            let path = ValidatedPath::try_file(&entry.path, protected)?;
+            let path = ValidatedPath::try_file(&entry.path, control.protected)?;
             let Ok(fd) = self.open_leaf(&path, READ_FLAGS, Mode::empty()) else {
                 continue;
             };
             if ensure_regular(&fd).is_err() {
                 continue;
             }
-            let bytes = read_bounded(fd, ceilings.limits.file_bytes, cancellation)?;
+            let remaining = ceilings.limits.scan_bytes.saturating_sub(scanned_bytes);
+            if remaining == 0 {
+                return Err(limit_error(
+                    "filesystem search exceeds the aggregate scan byte limit",
+                ));
+            }
+            let file_size = fstat(&fd)
+                .ok()
+                .and_then(|stat| usize::try_from(stat.st_size).ok())
+                .unwrap_or(usize::MAX);
+            if file_size > remaining {
+                return Err(limit_error(
+                    "filesystem search exceeds the aggregate scan byte limit",
+                ));
+            }
+            let bytes = read_bounded(fd, ceilings.limits.file_bytes, control.cancellation)?;
+            scanned_bytes = scanned_bytes.saturating_add(bytes.len());
             let Ok(content) = String::from_utf8(bytes) else {
                 continue;
             };
             for (line_index, line) in content.lines().enumerate() {
+                check_interrupted(control.cancellation, control.deadline)?;
                 if !line.contains(query) {
                     continue;
                 }
@@ -314,16 +352,18 @@ impl Root {
         limits: FileSystemLimits,
         protected: &ProtectedPaths,
         cancellation: &CancellationSignal,
+        deadline: Option<Instant>,
     ) -> Result<Vec<TreeEntry>, ToolError> {
         let base_fd = self.open_directory(base)?;
         let mut stack = vec![(base_fd, base.normalized().to_owned(), 0_usize)];
         let mut output = Vec::new();
         while let Some((fd, relative, depth)) = stack.pop() {
-            check_cancelled(cancellation)?;
+            check_interrupted(cancellation, deadline)?;
             let mut directory = Dir::read_from(&fd)
                 .map_err(|_| io_error("filesystem directory could not be read"))?;
             let mut children = Vec::new();
             for entry in &mut directory {
+                check_interrupted(cancellation, deadline)?;
                 let entry = entry.map_err(|_| io_error("filesystem directory entry failed"))?;
                 let name = entry_name(&entry)?;
                 if name == "." || name == ".." {
@@ -529,6 +569,21 @@ fn check_cancelled(cancellation: &CancellationSignal) -> Result<(), ToolError> {
     } else {
         Ok(())
     }
+}
+
+fn check_interrupted(
+    cancellation: &CancellationSignal,
+    deadline: Option<Instant>,
+) -> Result<(), ToolError> {
+    check_cancelled(cancellation)?;
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(fs_tool_error(
+            crate::FILESYSTEM_TIMEOUT,
+            ErrorCategory::Deadline,
+            "filesystem operation timed out",
+        ));
+    }
+    Ok(())
 }
 
 fn entry_name(entry: &rustix::fs::DirEntry) -> Result<&str, ToolError> {

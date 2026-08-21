@@ -1,4 +1,4 @@
-//! Message roles and immutable message values (TDD §7.3–§7.4).
+//! Message roles and immutable message values (contract section 7.3).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -243,7 +243,7 @@ impl<'de> Deserialize<'de> for ModelRef {
 
 /// Opaque provider correlation identifiers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Default)]
-#[allow(clippy::struct_field_names)] // TDD §5.2 names are `*_id`.
+#[allow(clippy::struct_field_names)] // contract section 5.2 names are `*_id`.
 pub struct ProviderIds {
     #[serde(skip_serializing_if = "Option::is_none")]
     request_id: Option<Arc<str>>,

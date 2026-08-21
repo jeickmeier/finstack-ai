@@ -115,6 +115,7 @@ pub const finstack_ai_tools_mcp::MCP_PROTOCOL_VIOLATION: &str
 pub const finstack_ai_tools_mcp::MCP_RESULT_UNSUPPORTED: &str
 pub const finstack_ai_tools_mcp::MCP_SERVER_NOT_ALLOWLISTED: &str
 pub const finstack_ai_tools_mcp::MCP_SUBSCRIBE_UNKNOWN: &str
+pub const finstack_ai_tools_mcp::MCP_TIMEOUT: &str
 pub const finstack_ai_tools_mcp::MCP_TRANSPORT_ERROR: &str
 pub trait finstack_ai_tools_mcp::McpListChangedObserver: core::marker::Send + core::marker::Sync
 pub fn finstack_ai_tools_mcp::McpListChangedObserver::on_list_changed(&self, &str)

@@ -823,14 +823,7 @@ fn child_run_request(
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?,
     )]);
-    let request_digest = child_request_digest(
-        &agent,
-        &input,
-        placement,
-        &locator,
-        request.security.tenant_scope(),
-    )?;
-    let child_request = ChildRunRequest {
+    let mut child_request = ChildRunRequest {
         agent,
         input,
         placement,
@@ -839,33 +832,15 @@ fn child_run_request(
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest,
+        request_digest: Digest::raw_json(b"null"),
     };
+    child_request.request_digest = child_request
+        .canonical_digest()
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
     child_request
         .validate()
         .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
     Ok(child_request)
-}
-
-fn child_request_digest(
-    agent: &AgentRef,
-    input: &[ContentBlock],
-    placement: ChildPlacement,
-    locator: &ChildRunLocator,
-    tenant_scope: &str,
-) -> Result<Digest, AgentRunError> {
-    let canonical = serde_json_canonicalizer::to_vec(&(
-        &agent.id,
-        &agent.bundle,
-        &agent.spec_digest,
-        input,
-        placement,
-        locator,
-        tenant_scope,
-    ))
-    .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-    Digest::domain_separated("child-run-request", 1, &canonical)
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))
 }
 
 fn child_run_context(

@@ -7,13 +7,19 @@ use std::sync::{Arc, Mutex};
 use finstack_ai_kernel::{SessionId, Timestamp};
 
 use crate::error::WorkerError;
-use crate::fires::{FireRow, FireStatus, FireStore};
-use crate::inbox::{InboxRow, InboxStore};
+use crate::fires::{FireRow, FireStartOutcome, FireStatus, FireStore};
+use crate::inbox::{DeadLetterRow, InboxInsertOutcome, InboxRow, InboxStore};
 use crate::wake::{WakeIndexStore, WakeRow, lease_deadline, lease_open, wake_due};
 
 type WakeRows = BTreeMap<(Arc<str>, SessionId), WakeRow>;
 type FireRows = BTreeMap<(Arc<str>, Arc<str>, u64), FireRow>;
 type InboxRows = BTreeMap<(Arc<str>, SessionId, Arc<str>), InboxRow>;
+
+#[derive(Debug, Default)]
+struct MemoryInboxState {
+    active: InboxRows,
+    dead_letters: Vec<DeadLetterRow>,
+}
 
 /// In-memory worker store. Implements the wake index, cron-fire, and inbox
 /// tables behind a single mutex per table.
@@ -21,7 +27,7 @@ type InboxRows = BTreeMap<(Arc<str>, SessionId, Arc<str>), InboxRow>;
 pub struct MemoryWorkerStore {
     wake: Mutex<WakeRows>,
     fires: Mutex<FireRows>,
-    inbox: Mutex<InboxRows>,
+    inbox: Mutex<MemoryInboxState>,
 }
 
 impl MemoryWorkerStore {
@@ -55,7 +61,7 @@ impl WakeIndexStore for MemoryWorkerStore {
         Ok(())
     }
 
-    fn load_due(&self, now: Timestamp) -> Result<Vec<WakeRow>, WorkerError> {
+    fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
         let wake = self
             .wake
             .lock()
@@ -65,6 +71,7 @@ impl WakeIndexStore for MemoryWorkerStore {
         Ok(wake
             .values()
             .filter(|row| lease_open(row, now) && wake_due(row, now))
+            .take(limit)
             .cloned()
             .collect())
     }
@@ -81,6 +88,24 @@ impl WakeIndexStore for MemoryWorkerStore {
             .filter(|row| row.tenant_scope.as_ref() == tenant_scope)
             .cloned()
             .collect())
+    }
+
+    fn contains_interaction(
+        &self,
+        tenant_scope: &str,
+        pending_id: &str,
+    ) -> Result<bool, WorkerError> {
+        let wake = self
+            .wake
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        Ok(wake.values().any(|row| {
+            row.tenant_scope.as_ref() == tenant_scope
+                && row.reason == crate::wake::WakeReason::Interaction
+                && row.pending_id.as_ref() == pending_id
+        }))
     }
 
     fn try_claim(
@@ -132,6 +157,29 @@ impl WakeIndexStore for MemoryWorkerStore {
         Ok(true)
     }
 
+    fn release(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        worker_id: &str,
+    ) -> Result<bool, WorkerError> {
+        let mut wake = self
+            .wake
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
+            return Ok(false);
+        };
+        if row.leased_by.as_deref() != Some(worker_id) {
+            return Ok(false);
+        }
+        row.leased_by = None;
+        row.lease_expires_at = None;
+        Ok(true)
+    }
+
     fn record_failure(
         &self,
         tenant_scope: &str,
@@ -177,8 +225,8 @@ impl FireStore for MemoryWorkerStore {
         tenant_scope: &str,
         schedule_id: &str,
         fire_count: u64,
-        started_session: &str,
-    ) -> Result<(), WorkerError> {
+        started_session: SessionId,
+    ) -> Result<FireStartOutcome, WorkerError> {
         let mut fires = self
             .fires
             .lock()
@@ -186,14 +234,25 @@ impl FireStore for MemoryWorkerStore {
                 code: "memory_worker_lock_poisoned",
             })?;
         let key = (Arc::from(tenant_scope), Arc::from(schedule_id), fire_count);
-        if let Some(row) = fires.get_mut(&key) {
-            row.status = FireStatus::Started;
-            row.started_session = Some(Arc::from(started_session));
+        let row = fires.get_mut(&key).ok_or(WorkerError::StoreIntegrity {
+            code: "fire_missing",
+        })?;
+        match (row.status, row.started_session) {
+            (FireStatus::Claimed, None) => {
+                row.status = FireStatus::Started;
+                row.started_session = Some(started_session);
+                Ok(FireStartOutcome::Started)
+            }
+            (FireStatus::Started, Some(existing)) if existing == started_session => {
+                Ok(FireStartOutcome::Idempotent)
+            }
+            _ => Err(WorkerError::Conflict {
+                code: "fire_start_conflict",
+            }),
         }
-        Ok(())
     }
 
-    fn load_unstarted(&self) -> Result<Vec<FireRow>, WorkerError> {
+    fn load_unstarted(&self, limit: usize) -> Result<Vec<FireRow>, WorkerError> {
         let fires = self
             .fires
             .lock()
@@ -203,13 +262,38 @@ impl FireStore for MemoryWorkerStore {
         Ok(fires
             .values()
             .filter(|row| row.status == FireStatus::Claimed)
+            .take(limit)
             .cloned()
             .collect())
+    }
+
+    fn purge_started(&self, before: Timestamp, limit: usize) -> Result<usize, WorkerError> {
+        let mut fires = self
+            .fires
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        let keys: Vec<_> = fires
+            .iter()
+            .filter(|(_, row)| row.status == FireStatus::Started && row.fired_at < before)
+            .take(limit)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in &keys {
+            fires.remove(key);
+        }
+        Ok(keys.len())
     }
 }
 
 impl InboxStore for MemoryWorkerStore {
-    fn insert(&self, row: &InboxRow) -> Result<(), WorkerError> {
+    fn insert(&self, row: &InboxRow) -> Result<InboxInsertOutcome, WorkerError> {
+        if !row.digest_is_valid() {
+            return Err(WorkerError::StoreIntegrity {
+                code: "inbox_digest",
+            });
+        }
         let mut inbox = self
             .inbox
             .lock()
@@ -221,34 +305,144 @@ impl InboxStore for MemoryWorkerStore {
             row.session_id,
             Arc::clone(&row.pending_id),
         );
-        inbox.insert(key, row.clone());
-        Ok(())
+        match inbox.active.get(&key) {
+            Some(existing)
+                if existing.kind == row.kind && existing.payload_digest == row.payload_digest =>
+            {
+                Ok(InboxInsertOutcome::Idempotent)
+            }
+            Some(_) => Err(WorkerError::Conflict {
+                code: "inbox_conflict",
+            }),
+            None => {
+                inbox.active.insert(key, row.clone());
+                Ok(InboxInsertOutcome::Inserted)
+            }
+        }
     }
 
-    fn load_all(&self) -> Result<Vec<InboxRow>, WorkerError> {
+    fn load(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        pending_id: &str,
+    ) -> Result<Option<InboxRow>, WorkerError> {
         let inbox = self
             .inbox
             .lock()
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "memory_worker_lock_poisoned",
             })?;
-        Ok(inbox.values().cloned().collect())
+        Ok(inbox
+            .active
+            .get(&(Arc::from(tenant_scope), session_id, Arc::from(pending_id)))
+            .cloned())
     }
 
-    fn delete(
+    fn load_batch(&self, limit: usize) -> Result<Vec<InboxRow>, WorkerError> {
+        let inbox = self
+            .inbox
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        Ok(inbox.active.values().take(limit).cloned().collect())
+    }
+
+    fn delete_if_digest(
         &self,
         tenant_scope: &str,
         session_id: SessionId,
         pending_id: &str,
-    ) -> Result<(), WorkerError> {
+        expected_digest: finstack_ai_kernel::Digest,
+    ) -> Result<bool, WorkerError> {
         let mut inbox = self
             .inbox
             .lock()
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "memory_worker_lock_poisoned",
             })?;
-        inbox.remove(&(Arc::from(tenant_scope), session_id, Arc::from(pending_id)));
-        Ok(())
+        let key = (Arc::from(tenant_scope), session_id, Arc::from(pending_id));
+        if inbox
+            .active
+            .get(&key)
+            .is_none_or(|row| row.payload_digest != expected_digest)
+        {
+            return Ok(false);
+        }
+        inbox.active.remove(&key);
+        Ok(true)
+    }
+
+    fn dead_letter(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        pending_id: &str,
+        expected_digest: finstack_ai_kernel::Digest,
+        reason_code: &str,
+        rejected_at: Timestamp,
+    ) -> Result<bool, WorkerError> {
+        let key = (Arc::from(tenant_scope), session_id, Arc::from(pending_id));
+        let mut inbox = self
+            .inbox
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        if inbox
+            .active
+            .get(&key)
+            .is_none_or(|row| row.payload_digest != expected_digest)
+        {
+            return Ok(false);
+        }
+        let response = inbox.active.remove(&key);
+        let Some(response) = response else {
+            return Ok(false);
+        };
+        inbox.dead_letters.push(DeadLetterRow {
+            response,
+            reason_code: Arc::from(reason_code),
+            rejected_at,
+        });
+        inbox.dead_letters.sort_by(|left, right| {
+            left.rejected_at
+                .cmp(&right.rejected_at)
+                .then_with(|| left.response.tenant_scope.cmp(&right.response.tenant_scope))
+                .then_with(|| left.response.session_id.cmp(&right.response.session_id))
+                .then_with(|| left.response.pending_id.cmp(&right.response.pending_id))
+        });
+        Ok(true)
+    }
+
+    fn load_dead_letters(&self, limit: usize) -> Result<Vec<DeadLetterRow>, WorkerError> {
+        let inbox = self
+            .inbox
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        Ok(inbox.dead_letters.iter().take(limit).cloned().collect())
+    }
+
+    fn purge_dead_letters(&self, before: Timestamp, limit: usize) -> Result<usize, WorkerError> {
+        let mut inbox = self
+            .inbox
+            .lock()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "memory_worker_lock_poisoned",
+            })?;
+        let mut removed = 0_usize;
+        inbox.dead_letters.retain(|row| {
+            if removed < limit && row.rejected_at < before {
+                removed += 1;
+                false
+            } else {
+                true
+            }
+        });
+        Ok(removed)
     }
 }
 
@@ -296,8 +490,8 @@ mod tests {
         store
             .upsert(&timer_row("tenant-a", 1, 2_000))
             .expect("upsert");
-        assert!(store.load_due(ts(1_999)).expect("early").is_empty());
-        assert_eq!(store.load_due(ts(2_000)).expect("due").len(), 1);
+        assert!(store.load_due(ts(1_999), 10).expect("early").is_empty());
+        assert_eq!(store.load_due(ts(2_000), 10).expect("due").len(), 1);
     }
 
     #[test]
@@ -307,7 +501,7 @@ mod tests {
         row.reason = WakeReason::Interaction;
         row.wake_at = None;
         store.upsert(&row).expect("upsert");
-        assert_eq!(store.load_due(ts(0)).expect("due").len(), 1);
+        assert_eq!(store.load_due(ts(0), 10).expect("due").len(), 1);
     }
 
     #[test]
@@ -326,7 +520,7 @@ mod tests {
                 .try_claim("tenant-a", id(1), "worker-b", ts(1_600), 1_000)
                 .expect("held")
         );
-        assert!(store.load_due(ts(1_600)).expect("hidden").is_empty());
+        assert!(store.load_due(ts(1_600), 10).expect("hidden").is_empty());
         assert!(
             store
                 .try_claim("tenant-a", id(1), "worker-b", ts(2_600), 1_000)
@@ -351,8 +545,8 @@ mod tests {
         let rows = store.load_tenant("tenant-a").expect("load");
         assert_eq!(rows[0].attempts, 1);
         assert_eq!(rows[0].leased_by, None);
-        assert!(store.load_due(ts(4_999)).expect("backoff").is_empty());
-        assert_eq!(store.load_due(ts(5_000)).expect("retry").len(), 1);
+        assert!(store.load_due(ts(4_999), 10).expect("backoff").is_empty());
+        assert_eq!(store.load_due(ts(5_000), 10).expect("retry").len(), 1);
     }
 
     #[test]

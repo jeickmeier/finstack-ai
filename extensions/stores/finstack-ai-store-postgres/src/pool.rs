@@ -193,6 +193,18 @@ impl<C: Send + 'static> Pool<C> {
             discarded: false,
         })
     }
+
+    /// Check out a connection within `timeout`.
+    pub(crate) async fn get_with_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<PooledClient<C>, StoreError> {
+        tokio::time::timeout(timeout, self.get())
+            .await
+            .map_err(|_| StoreError::Unavailable {
+                reason_code: "postgres_pool_timeout",
+            })?
+    }
 }
 
 /// A checked-out connection.

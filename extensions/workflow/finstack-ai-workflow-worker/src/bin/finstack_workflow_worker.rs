@@ -66,7 +66,8 @@ async fn main() {
             Arc::clone(&store) as _,
             Arc::clone(&store) as _,
         )
-        .build(),
+        .build()
+        .expect("worker"),
     );
     let handle = worker.spawn(POLL_INTERVAL);
     tokio::signal::ctrl_c().await.expect("signal");

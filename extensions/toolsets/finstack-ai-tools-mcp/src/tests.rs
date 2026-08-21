@@ -357,6 +357,7 @@ async fn toolset_satisfies_the_published_port_conformance_suite() {
     let expected = AssembledToolStream {
         progress: Arc::from([]),
         usage: None,
+        artifacts: Arc::from([]),
         terminal: ToolTerminal::Completed(finstack_ai_runtime::ToolResult {
             output: expected_output,
             is_error: false,

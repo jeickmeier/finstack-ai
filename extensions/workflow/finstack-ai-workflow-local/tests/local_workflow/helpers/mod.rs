@@ -459,7 +459,7 @@ pub(crate) async fn attach_driver(
     seed: u64,
 ) -> LocalWorkflowDriver {
     LocalWorkflowDriver::wrap(
-        WorkflowSession::trusted(store, locator(), clock, seed)
+        WorkflowSession::trusted_seeded(store, locator(), clock, seed)
             .await
             .expect("attach")
             .with_ports(model, locked_profile(), None),

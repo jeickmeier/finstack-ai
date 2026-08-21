@@ -123,7 +123,8 @@ use finstack_ai_runtime::Toolset as _;
 
 #[test]
 fn toolset_exposes_two_validated_tools() {
-    let toolset = DocumentToolset::try_new().expect("toolset");
+    let toolset =
+        DocumentToolset::try_new(Arc::new(CaptureArtifactStore::default())).expect("toolset");
     let tools = toolset.tools();
     assert_eq!(tools.len(), 2);
     let names: Vec<&str> = tools.iter().map(|spec| spec.model_name.as_ref()).collect();
@@ -143,7 +144,6 @@ fn toolset_exposes_two_validated_tools() {
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
 
 use finstack_ai_kernel::{
     ArtifactId, ArtifactRef, BlobRef, Digest, EffectId, EffectOutputContract, EffectOutputKind,
@@ -158,14 +158,10 @@ use finstack_ai_runtime::{
 use futures_util::StreamExt;
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {
-    let mut context = Context::from_waker(Waker::noop());
-    let mut future = std::pin::pin!(future);
-    loop {
-        match future.as_mut().poll(&mut context) {
-            Poll::Ready(value) => return value,
-            Poll::Pending => std::thread::yield_now(),
-        }
-    }
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("test runtime")
+        .block_on(future)
 }
 
 fn test_scope() -> ArtifactScope {
@@ -288,12 +284,17 @@ fn call_tool(
     let mut stream =
         block_on(toolset.call(call_context(), validated_call(toolset, name, arguments)))
             .expect("call succeeds");
-    let item = block_on(stream.next())
-        .expect("stream item")
-        .expect("stream ok");
-    let ToolStreamItem::Completed(result) = item else {
-        panic!("expected a completed tool result");
+    let result = loop {
+        match block_on(stream.next())
+            .expect("stream item")
+            .expect("stream ok")
+        {
+            ToolStreamItem::Artifact(_) => {}
+            ToolStreamItem::Completed(result) => break result,
+            _ => panic!("unexpected document tool stream item"),
+        }
     };
+    assert!(block_on(stream.next()).is_none());
     assert!(!result.is_error);
     serde_json::from_slice(result.output.as_bytes()).expect("json output")
 }
@@ -371,9 +372,7 @@ impl ArtifactStore for CaptureArtifactStore {
 fn document_parse_via_artifact_source_returns_markdown() {
     let store = Arc::new(CaptureArtifactStore::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "sample.csv");
-    let toolset = DocumentToolset::try_new()
-        .expect("toolset")
-        .with_artifact_store(store);
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
     let arguments = serde_json::json!({
         "artifact": serde_json::to_value(&artifact).expect("artifact json"),
     });
@@ -389,45 +388,32 @@ fn document_parse_via_artifact_source_returns_markdown() {
 }
 
 #[test]
-fn document_parse_without_store_rejects_artifact_source() {
-    let toolset = DocumentToolset::try_new().expect("toolset");
+fn document_parse_rejects_invalid_artifact_reference() {
+    let toolset =
+        DocumentToolset::try_new(Arc::new(CaptureArtifactStore::default())).expect("toolset");
     let arguments = serde_json::json!({"artifact": {}});
     let error = call_tool_err(&toolset, "document_parse", &arguments);
-    assert_eq!(error.code(), crate::DOCUMENT_SOURCE_UNAVAILABLE);
+    assert_eq!(error.code(), crate::DOCUMENT_INVALID_ARGUMENTS);
 }
 
 #[test]
 fn pdf_classify_via_artifact_source() {
     let store = Arc::new(CaptureArtifactStore::default());
     let artifact = stage(store.as_ref(), SCANNED_PDF, "application/pdf", "scan.pdf");
-    let toolset = DocumentToolset::try_new()
-        .expect("toolset")
-        .with_artifact_store(store);
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
     let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
     let output = call_tool(&toolset, "pdf_classify", &arguments);
     assert_eq!(output["classification"], "scanned");
     assert_eq!(output["page_count"], 1);
 }
 
-#[cfg(unix)]
 #[test]
-fn document_parse_via_path_source() {
-    let dir = std::env::temp_dir().join("finstack-tools-document-test");
-    std::fs::create_dir_all(&dir).expect("dir");
-    let path = dir.join("sample.csv");
-    std::fs::write(&path, SAMPLE_CSV).expect("write");
-    let toolset = DocumentToolset::try_new().expect("toolset");
-    let arguments = serde_json::json!({"path": path.to_string_lossy()});
-    let output = call_tool(&toolset, "document_parse", &arguments);
-    assert_eq!(output["format"], "csv");
-}
-
-#[test]
-fn both_or_neither_source_is_invalid() {
-    let toolset = DocumentToolset::try_new().expect("toolset");
+fn missing_artifact_or_path_property_is_invalid() {
+    let toolset =
+        DocumentToolset::try_new(Arc::new(CaptureArtifactStore::default())).expect("toolset");
     for arguments in [
         serde_json::json!({}),
-        serde_json::json!({"artifact": {}, "path": "/tmp/x.pdf"}),
+        serde_json::json!({"path": "/tmp/x.pdf"}),
     ] {
         let error = call_tool_err(&toolset, "document_parse", &arguments);
         assert_eq!(error.code(), crate::DOCUMENT_INVALID_ARGUMENTS);
@@ -438,9 +424,7 @@ fn both_or_neither_source_is_invalid() {
 fn unsupported_format_maps_to_stable_code() {
     let store = Arc::new(CaptureArtifactStore::default());
     let artifact = stage(store.as_ref(), CORRUPT, "application/octet-stream", "x.bin");
-    let toolset = DocumentToolset::try_new()
-        .expect("toolset")
-        .with_artifact_store(store);
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
     let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
     let error = call_tool_err(&toolset, "document_parse", &arguments);
     assert!(matches!(
@@ -453,9 +437,7 @@ fn unsupported_format_maps_to_stable_code() {
 fn page_range_is_rejected_for_non_pdf_sources() {
     let store = Arc::new(CaptureArtifactStore::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "sample.csv");
-    let toolset = DocumentToolset::try_new()
-        .expect("toolset")
-        .with_artifact_store(store);
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
     let arguments = serde_json::json!({
         "artifact": serde_json::to_value(&artifact).expect("json"),
         "page_range": [1, 1],
@@ -469,9 +451,7 @@ fn page_range_rejects_zero_based_and_reversed_ranges() {
     for range in [(0u32, 1u32), (2, 1)] {
         let store = Arc::new(CaptureArtifactStore::default());
         let artifact = stage(store.as_ref(), TEXT_PDF, "application/pdf", "text.pdf");
-        let toolset = DocumentToolset::try_new()
-            .expect("toolset")
-            .with_artifact_store(store);
+        let toolset = DocumentToolset::try_new(store).expect("toolset");
         let arguments = serde_json::json!({
             "artifact": serde_json::to_value(&artifact).expect("json"),
             "page_range": [range.0, range.1],
@@ -485,9 +465,7 @@ fn page_range_rejects_zero_based_and_reversed_ranges() {
 fn page_range_extracts_a_pdf_page() {
     let store = Arc::new(CaptureArtifactStore::default());
     let artifact = stage(store.as_ref(), TEXT_PDF, "application/pdf", "text.pdf");
-    let toolset = DocumentToolset::try_new()
-        .expect("toolset")
-        .with_artifact_store(store);
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
     let arguments = serde_json::json!({
         "artifact": serde_json::to_value(&artifact).expect("json"),
         "page_range": [1, 1],
@@ -520,9 +498,7 @@ fn document_parse_spills_oversized_output_to_artifact() {
 
     let store: Arc<dyn ArtifactStore> = Arc::new(CaptureArtifactStore::default());
     let artifact = stage(store.as_ref(), &big_csv, "text/csv", "big.csv");
-    let toolset = DocumentToolset::try_new()
-        .expect("toolset")
-        .with_artifact_store(Arc::clone(&store));
+    let toolset = DocumentToolset::try_new(Arc::clone(&store)).expect("toolset");
     let toolset = with_max_result_bytes(toolset, "document_parse", SPILL_TEST_MAX_RESULT_BYTES);
     let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
     let output = call_tool(&toolset, "document_parse", &arguments);

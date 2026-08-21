@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use finstack_ai_kernel::{ErrorDescriptor, Stage, StageCursor, ToolCallBlock, ToolId};
 
@@ -10,7 +11,7 @@ use crate::middleware_driver::{
 };
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
-use crate::{Clock, RandomSource};
+use crate::{Clock, RandomSource, SideEffectClass};
 
 use super::driver::run_stage_chain;
 use super::stage_error;
@@ -69,6 +70,7 @@ pub(crate) async fn run_tool_batch_chain<C: Clock, R: RandomSource>(
         return Ok(ToolBatchPolicy::Unchanged);
     };
     let input = StageInput::BeforeToolBatch(Box::new(BeforeToolBatchInput {
+        prior_write_tool_calls: prior_write_tool_calls(coordinator, catalog),
         calls: calls.to_vec().into(),
         tools: catalog
             .tools()
@@ -78,6 +80,23 @@ pub(crate) async fn run_tool_batch_chain<C: Clock, R: RandomSource>(
     }));
     let fold = run_stage_chain(coordinator, Some(driver), sources, cursor, input).await?;
     tool_batch_policy(&fold)
+}
+
+fn prior_write_tool_calls(coordinator: &CommitCoordinator, catalog: &ResolvedToolCatalog) -> u64 {
+    let read_only = catalog
+        .tools()
+        .filter(|tool| tool.spec.side_effect == SideEffectClass::ReadOnly)
+        .map(|tool| Arc::clone(&tool.spec.model_name))
+        .collect::<BTreeSet<_>>();
+    u64::try_from(
+        coordinator
+            .state()
+            .tool_calls
+            .values()
+            .filter(|identity| !read_only.contains(identity.call.tool_name()))
+            .count(),
+    )
+    .unwrap_or(u64::MAX)
 }
 
 /// Reduce a `BeforeToolBatch` fold to the policy tool planning consumes.

@@ -19,7 +19,7 @@ pub enum HitlError {
     /// No inbox row for the requested interaction.
     #[error("unknown interaction")]
     UnknownInteraction,
-    /// Row exists but is not resolvable (already delivered/expired/closed).
+    /// Row exists but is not resolvable (buffered, accepted, or closed).
     #[error("interaction is not open")]
     NotOpen,
     /// Authorizer refused the principal.

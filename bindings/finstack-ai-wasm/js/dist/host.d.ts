@@ -50,6 +50,8 @@ export interface HostToolResult {
     output: object;
     /** Application-level error flag. */
     is_error?: boolean;
+    /** Exact artifact references staged before returning this result. */
+    artifacts?: object[];
 }
 /**
  * Trusted toolset host.
@@ -162,15 +164,30 @@ export interface HostArtifactStore {
      * @param scope - JSON string of the artifact scope.
      * @param content - Exact bytes.
      * @param metadata - JSON string of artifact metadata.
-     * @param id - Artifact identity string assigned by Rust.
+     * @param artifact - Exact serialized artifact reference assigned by Rust.
+     * @param storageKey - Full scoped-reference storage identity assigned by Rust.
      */
-    stagePut(scope: unknown, content: Uint8Array, metadata: unknown, id?: unknown): Promise<void>;
+    stagePut(scope: unknown, content: Uint8Array, metadata: unknown, artifact: unknown, storageKey: unknown): Promise<void>;
     /**
      * Read exact bytes for a previously staged artifact.
      *
-     * @param key - Artifact identity string.
+     * @param scope - Exact serialized artifact scope.
+     * @param artifact - Exact serialized artifact reference.
+     * @param storageKey - Full scoped-reference storage identity.
      */
-    get(key: unknown): Promise<Uint8Array>;
+    get(scope: unknown, artifact: unknown, storageKey: unknown): Promise<Uint8Array>;
+    /** Resolve an exact digest-bearing blob inside the supplied scope. */
+    getByBlob(scope: unknown, blob: unknown): Promise<[string, Uint8Array]>;
+    /** Idempotently retain an exact artifact for one stable owner. */
+    pin(scope: unknown, artifact: unknown, storageKey: unknown, owner: unknown): Promise<void>;
+    /** Idempotently release one stable owner at an injected Unix-ms instant. */
+    unpin(scope: unknown, artifact: unknown, storageKey: unknown, owner: unknown, nowUnixMs: unknown): Promise<void>;
+    /** Collect a bounded number of grace-expired, unowned artifacts in scope. */
+    collectOrphans(scope: unknown, nowUnixMs: unknown, limit: unknown): Promise<{
+        examined: number;
+        deleted: number;
+        bytes_deleted: number;
+    }>;
 }
 /**
  * Supported pre-beta command kinds.

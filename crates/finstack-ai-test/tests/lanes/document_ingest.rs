@@ -1,16 +1,16 @@
 // Attach → auto-ingest → model-visible Markdown lane.
 //
 // Exercises the full public path: stage an attachment into a real
-// `ArtifactStore`, record it in the shared `AttachmentIndex`, run an agent
+// `ArtifactStore`, run an agent
 // with `DocumentIngestMiddleware` and `DocumentToolset` registered, and
 // assert that (a) the run completes, (b) the model only ever sees the
 // extracted Markdown (no `File` block), and (c) the canonical journaled
 // conversation still carries the original `File` block.
 
 use finstack_ai::{AgentRunRequest, AttachmentInput};
-use finstack_ai_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{EntryBody, Sensitivity};
-use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
+use finstack_ai_memory::InProcessArtifactStore;
+use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_runtime::{ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes};
 use finstack_ai_tools_document::DocumentToolset;
 
@@ -22,15 +22,12 @@ const COMPONENT_VERSION: Version = Version {
     patch: 0,
 };
 
-/// Any consistent scope works for staging: [`InProcessArtifactStore::get`]
-/// resolves purely by content-derived `ArtifactId`, ignoring the scope
-/// passed to `get`. The middleware resolves the `BlobRef` back to this
-/// exact `ArtifactRef` via the shared `AttachmentIndex` (spec decision 19),
-/// not via scope matching.
+/// Canonical tenant-bound pre-run upload scope used by the bindings and
+/// document-ingest middleware before session/run ids exist.
 fn staging_scope() -> ArtifactScope {
     ArtifactScope {
-        tenant_scope: Arc::from("tenant-lanes"),
-        session_id: id(9_000),
+        tenant_scope: Arc::from("tenant-a"),
+        session_id: finstack_ai_kernel::SessionId::from_bytes([0_u8; 16]),
         run_id: None,
         sensitivity: Sensitivity::Internal,
     }
@@ -48,7 +45,6 @@ async fn document_ingest_agent_with_store(
     Agent,
     Arc<dyn finstack_ai_runtime::JournalStore>,
     Arc<ScriptedModel>,
-    Arc<AttachmentIndex>,
 ) {
     use finstack_ai_kernel::{AgentId, BundleId};
 
@@ -65,20 +61,13 @@ async fn document_ingest_agent_with_store(
         scripted_profile(),
         vec![completed_plan("acknowledged")],
     ));
-    let attachment_index = Arc::new(AttachmentIndex::default());
 
     let middleware = Arc::new(
-        DocumentIngestMiddleware::try_new(
-            Arc::clone(&artifact_store),
-            Arc::clone(&attachment_index),
-        )
-        .expect("document ingest middleware"),
+        DocumentIngestMiddleware::try_new(Arc::clone(&artifact_store))
+            .expect("document ingest middleware"),
     );
-    let toolset = Arc::new(
-        DocumentToolset::try_new()
-            .expect("document toolset")
-            .with_artifact_store(Arc::clone(&artifact_store)),
-    );
+    let toolset =
+        Arc::new(DocumentToolset::try_new(Arc::clone(&artifact_store)).expect("document toolset"));
 
     let agent = Agent::builder(
         AgentId::parse(format!("test.agent.document-ingest-{label}")).expect("agent id"),
@@ -119,7 +108,7 @@ async fn document_ingest_agent_with_store(
     .await
     .expect("agent");
 
-    (agent, store, model, attachment_index)
+    (agent, store, model)
 }
 
 async fn document_ingest_agent() -> (
@@ -127,17 +116,16 @@ async fn document_ingest_agent() -> (
     Arc<dyn finstack_ai_runtime::JournalStore>,
     Arc<ScriptedModel>,
     Arc<dyn ArtifactStore>,
-    Arc<AttachmentIndex>,
 ) {
     let artifact_store: Arc<dyn ArtifactStore> = Arc::new(InProcessArtifactStore::default());
-    let (agent, store, model, attachment_index) =
+    let (agent, store, model) =
         document_ingest_agent_with_store("csv", Arc::clone(&artifact_store)).await;
-    (agent, store, model, artifact_store, attachment_index)
+    (agent, store, model, artifact_store)
 }
 
 #[tokio::test]
 async fn document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_file_block() {
-    let (agent, store, model, artifact_store, attachment_index) = document_ingest_agent().await;
+    let (agent, store, model, artifact_store) = document_ingest_agent().await;
 
     // Stage the fixture into the real artifact store and record it in the
     // shared index, exactly as the run/session attachment path would.
@@ -154,7 +142,6 @@ async fn document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_fil
         )
         .await
         .expect("staged artifact");
-    attachment_index.insert(artifact.clone());
 
     let mut request = AgentRunRequest::try_new(
         finstack_ai_runtime::ModelName::try_new("lanes-1").expect("model name"),
@@ -243,10 +230,9 @@ async fn large_attachment_stages_through_the_object_backed_artifact_store() {
     const SIX_MIB: usize = 6 * 1024 * 1024;
 
     let object_store = Arc::new(FakeObjectStore::default());
-    let artifact_store: Arc<dyn ArtifactStore> =
-        Arc::new(ObjectArtifactStore::new(object_store));
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(ObjectArtifactStore::new(object_store));
 
-    let (agent, _store, _model, attachment_index) =
+    let (agent, _store, _model) =
         document_ingest_agent_with_store("large", Arc::clone(&artifact_store)).await;
 
     let artifact = artifact_store
@@ -267,7 +253,6 @@ async fn large_attachment_stages_through_the_object_backed_artifact_store() {
         6_291_456,
         "staged ArtifactRef length must be exactly 6 MiB"
     );
-    attachment_index.insert(artifact.clone());
 
     let mut request = AgentRunRequest::try_new(
         finstack_ai_runtime::ModelName::try_new("lanes-1").expect("model name"),

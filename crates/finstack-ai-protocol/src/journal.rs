@@ -10,7 +10,7 @@ use serde::Serialize;
 use crate::error::ProtocolError;
 use crate::{APPEND_BATCH_MAX_BYTES, encode};
 
-/// Replay fields hashed into the envelope checksum (TDD §12.1).
+/// Replay fields hashed into the envelope checksum (contract section 12.1).
 ///
 /// Excludes diagnostic `committed_at` and the checksum field itself.
 /// Field names and serde order are the hashed input; do not rename or reorder

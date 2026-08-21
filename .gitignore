@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+/test-results/
 wheels/
 *.egg-info
 /bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.*.so

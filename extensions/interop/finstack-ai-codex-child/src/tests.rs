@@ -267,7 +267,7 @@ fn test_request(run_byte: u8) -> ChildRunRequest {
     let input: Arc<[ContentBlock]> = Arc::from([ContentBlock::Text(
         TextBlock::try_new("evict me").expect("text"),
     )]);
-    ChildRunRequest {
+    let mut request = ChildRunRequest {
         agent: codex_agent_ref().expect("agent"),
         input,
         placement: ChildPlacement::RemoteChildSession,
@@ -276,9 +276,10 @@ fn test_request(run_byte: u8) -> ChildRunRequest {
         requested_budget: BudgetRequest::default(),
         delegation_id: None,
         metadata: Metadata::empty(),
-        request_digest: Digest::domain_separated("child-run-request", 1, b"unit-test")
-            .expect("digest"),
-    }
+        request_digest: Digest::raw_json(b"null"),
+    };
+    request.request_digest = request.canonical_digest().expect("digest");
+    request
 }
 
 /// Fill the run table with synthetic entries in a chosen state. The entries
@@ -291,12 +292,13 @@ fn fill_runs(invoker: &CodexChildInvoker, count: u8, settled: bool) {
         if settled {
             state.record_exit(Some(0));
         }
-        let locator = test_locator(200 + index);
+        let filler = test_request(200 + index);
+        let locator = filler.locator.clone();
         guard.insert(
             locator.operation.run_id,
             CodexRun {
-                request_digest: Digest::domain_separated("child-run-request", 1, b"filler")
-                    .expect("digest"),
+                parent: test_context().parent,
+                request_digest: filler.request_digest,
                 handle: ChildRunHandle {
                     locator,
                     relation_digest: Digest::domain_separated("child-relation", 1, b"filler")
@@ -347,9 +349,7 @@ async fn evicted_run_replay_attaches_and_conflicts_without_respawn() {
         .expect("settled runs make room");
     assert_eq!(invoker.runs.lock().expect("run table").len(), 1);
 
-    let mut replay = test_request(200);
-    replay.request_digest =
-        Digest::domain_separated("child-run-request", 1, b"filler").expect("digest");
+    let replay = test_request(200);
     invoker
         .start_or_attach(test_context(), replay)
         .await
@@ -360,8 +360,13 @@ async fn evicted_run_replay_attaches_and_conflicts_without_respawn() {
         "the attach did not spawn or insert a second run"
     );
 
+    let mut conflicting = test_request(201);
+    conflicting.input = Arc::from([ContentBlock::Text(
+        TextBlock::try_new("different request").expect("text"),
+    )]);
+    conflicting.request_digest = conflicting.canonical_digest().expect("digest");
     let error = invoker
-        .start_or_attach(test_context(), test_request(201))
+        .start_or_attach(test_context(), conflicting)
         .await
         .expect_err("differing digest for an evicted run conflicts");
     assert!(matches!(error, AgentInvokeError::Conflict { .. }));

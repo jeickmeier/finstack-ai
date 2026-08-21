@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use finstack_ai::runtime::{ModelError, ModelResponse, ModelToolCall};
 use finstack_ai_kernel::{
-    ContentBlock, ErrorCategory, JsonBlock, Metadata, ProviderIds, RawJson, TextBlock, Usage,
+    ArtifactRef, ContentBlock, ErrorCategory, JsonBlock, Metadata, ProviderIds, RawJson, TextBlock,
+    Usage,
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -127,6 +128,9 @@ pub struct HostToolOutput {
     output: serde_json::Value,
     #[serde(default)]
     is_error: bool,
+    /// Exact references staged by the trusted host before completion.
+    #[serde(default)]
+    pub artifacts: Vec<ArtifactRef>,
 }
 
 /// Constructor options shared by JS model wrappers.

@@ -6,13 +6,16 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::{InteractionKind, Timestamp};
+use finstack_ai_kernel::{AuthorizationEvidence, InteractionKind, RunSecurityContext, Timestamp};
 use finstack_ai_runtime::{WorkflowCheckpoint, WorkflowSession, WorkflowWait, classify_wait};
 use finstack_ai_workflow_worker::{WakeIndexStore, park as worker_park};
 
 use crate::error::HitlError;
 use crate::row::{InteractionRow, InteractionStatus};
 use crate::store::HitlInboxStore;
+
+/// Maximum serialized interaction request retained by the HITL adapter.
+pub const MAX_HITL_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 
 /// Stable filter token for an interaction kind, matching the `kind` tag
 /// `InteractionKind` serializes with.
@@ -39,7 +42,7 @@ fn kind_token(kind: &InteractionKind) -> Arc<str> {
 /// same interaction upserts the same key.
 ///
 /// Re-capture preserves a still-meaningful settlement: an existing
-/// `Delivered` or `Expired` row keeps its status and `resolved_by`, because
+/// `Buffered`, `Accepted`, or `Rejected` row keeps its disposition, because
 /// a worker restart re-parks an unresolved session on the same interaction
 /// and must not revive a row whose decision is already buffered. A `Closed`
 /// row is **not** preserved: `capture` only runs for an interaction the
@@ -55,11 +58,12 @@ fn kind_token(kind: &InteractionKind) -> Arc<str> {
 ///
 /// Returns [`HitlError::StoreIntegrity`] with code `"hitl_request_encode"`
 /// when the request envelope fails to serialize, and store failures from
-/// [`HitlInboxStore::load`] or [`HitlInboxStore::upsert`].
+/// [`HitlInboxStore::upsert`].
 pub fn capture(
     store: &dyn HitlInboxStore,
     checkpoint: &WorkflowCheckpoint,
     wait: &WorkflowWait,
+    security: &RunSecurityContext,
     now: Timestamp,
 ) -> Result<bool, HitlError> {
     let WorkflowWait::Interaction { request, .. } = wait else {
@@ -68,18 +72,19 @@ pub fn capture(
     let encoded = serde_json::to_vec(request).map_err(|_| HitlError::StoreIntegrity {
         code: "hitl_request_encode",
     })?;
-    let interaction_id: Arc<str> = Arc::from(request.interaction_id().to_canonical_string());
-    let settled = store
-        .load(checkpoint.tenant_scope.as_ref(), interaction_id.as_ref())?
-        .filter(|existing| {
-            matches!(
-                existing.status,
-                InteractionStatus::Delivered | InteractionStatus::Expired
-            )
+    if encoded.len() > MAX_HITL_REQUEST_BYTES {
+        return Err(HitlError::StoreIntegrity {
+            code: "hitl_request_too_large",
         });
-    let (status, resolved_by) = settled.map_or((InteractionStatus::Open, None), |existing| {
-        (existing.status, existing.resolved_by)
-    });
+    }
+    let interaction_id: Arc<str> = Arc::from(request.interaction_id().to_canonical_string());
+    let accepted_evidence = AuthorizationEvidence::try_new(
+        security.authorization_policy_version(),
+        security.authorization_decision_id(),
+    )
+    .map_err(|_| HitlError::StoreIntegrity {
+        code: "hitl_security_context",
+    })?;
     store.upsert(&InteractionRow {
         tenant_scope: Arc::clone(&checkpoint.tenant_scope),
         session_id: checkpoint.session_id,
@@ -90,8 +95,11 @@ pub fn capture(
         requested_at: now,
         expires_at: request.expires_at(),
         request: Arc::from(encoded),
-        status,
-        resolved_by,
+        accepted_principal: security.principal().clone(),
+        accepted_evidence,
+        status: InteractionStatus::Open,
+        resolved_by: None,
+        outcome_code: None,
         updated_at: now,
     })?;
     Ok(true)
@@ -116,9 +124,18 @@ pub fn park(
     now: Timestamp,
 ) -> Result<WorkflowCheckpoint, HitlError> {
     let wait = classify_wait(session.last_state());
+    let security = session
+        .last_state()
+        .accepted
+        .as_ref()
+        .ok_or(HitlError::StoreIntegrity {
+            code: "hitl_security_context",
+        })?
+        .security()
+        .clone();
     let checkpoint = worker_park(session, wake, workflow_kind)?;
     if let Some(wait) = wait {
-        capture(inbox, &checkpoint, &wait, now)?;
+        capture(inbox, &checkpoint, &wait, &security, now)?;
     }
     Ok(checkpoint)
 }

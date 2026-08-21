@@ -123,8 +123,11 @@ pub fn list_url(
         ),
     };
 
-    let mut query_params: Vec<(&str, String)> =
-        vec![("list-type", "2".to_owned()), ("prefix", prefix.to_owned())];
+    let mut query_params: Vec<(&str, String)> = vec![
+        ("list-type", "2".to_owned()),
+        ("max-keys", "1000".to_owned()),
+        ("prefix", prefix.to_owned()),
+    ];
     if let Some(token) = continuation_token {
         query_params.push(("continuation-token", token.to_owned()));
     }

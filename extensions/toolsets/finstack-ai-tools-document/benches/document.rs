@@ -265,9 +265,7 @@ fn toolset_benches(criterion: &mut Criterion) {
     let big = large_csv();
     let big_artifact = stage(store.as_ref(), &big, "text/csv", "big.csv");
     let pdf_artifact = stage(store.as_ref(), TEXT_PDF, "application/pdf", "text.pdf");
-    let toolset = DocumentToolset::try_new()
-        .expect("toolset")
-        .with_artifact_store(store);
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
 
     let csv_args = serde_json::json!({
         "artifact": serde_json::to_value(&csv_artifact).expect("json"),
