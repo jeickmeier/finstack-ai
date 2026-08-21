@@ -513,7 +513,7 @@ fn retry_limit_covers_below_exact_and_above_boundaries() {
 }
 
 #[test]
-fn security_validation_precedes_limit_and_hard_deadline_precedes_explicit_cancel() {
+fn security_validation_precedes_limit_and_deadline_allows_authorized_cancel() {
     let mut harness = Harness::default();
     accept_with(&mut harness, RunLimits::empty(), Some(timestamp(1_500)));
     let unauthorized = harness
@@ -543,24 +543,16 @@ fn security_validation_precedes_limit_and_hard_deadline_precedes_explicit_cancel
     ));
 
     let decision = harness.apply_input(
-        transition_env(1_500, &[2, 3], &[2, 3], &[], &[], &[], &[]),
+        cancellation_env(1_500, &[2], &[], &[700]),
         KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
-            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            initiator: finstack_ai_kernel::CancellationInitiator::Deadline,
             reason: None,
         }),
     );
     assert!(matches!(
         decision.records[0].body(),
-        RecordBody::LimitReached(finstack_ai_kernel::LimitReached {
-            dimension: finstack_ai_kernel::LimitDimension::WallTime,
-            ..
-        })
+        RecordBody::CancellationRequested(_)
     ));
-    let RecordBody::RunFailed(failed) = decision.records[1].body() else {
-        panic!("deadline must terminate before explicit cancellation");
-    };
-    assert_eq!(failed.error.code.as_str(), "deadline_exceeded");
-    assert_eq!(failed.error.category, ErrorCategory::Deadline);
     assert!(decision.actions.is_empty());
 }
 

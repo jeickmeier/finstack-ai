@@ -349,6 +349,68 @@ fn run_request_rejects_more_than_max_attachments() {
     assert!(run_request.validate().is_err());
 }
 
+#[test]
+fn request_limits_only_attenuate_agent_limits_and_parent_deadline() {
+    let mut configured = finstack_ai_kernel::RunLimits::empty();
+    configured.max_model_requests = Some(2);
+    configured.max_wall_time = Some(finstack_ai_kernel::Duration::from_millis(50));
+    let mut run_request = request("unused");
+    run_request.max_cycles = 10;
+    run_request.timeout = Duration::from_secs(2);
+
+    let limits = super::prepare::attenuated_run_limits(&configured, &run_request)
+        .expect("attenuated limits");
+    assert_eq!(limits.max_model_requests, Some(2));
+    assert_eq!(
+        limits.max_wall_time,
+        Some(finstack_ai_kernel::Duration::from_millis(50))
+    );
+
+    let started = finstack_ai_kernel::Timestamp::from_unix_ms(1_000).expect("timestamp");
+    let parent = finstack_ai_kernel::Timestamp::from_unix_ms(1_025).expect("parent deadline");
+    assert_eq!(
+        super::prepare::request_deadline(started, Duration::from_millis(50), Some(parent))
+            .expect("deadline"),
+        Some(parent)
+    );
+}
+
+#[tokio::test]
+async fn timeout_commits_deadline_cancellation_before_returning() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![ScriptedModelPlan {
+            actions: vec![ScriptedModelAction::AwaitCancellation],
+        }],
+    ));
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let mut run_request = request("time out durably");
+    run_request.timeout = Duration::from_millis(25);
+    let run = agent.start(run_request).expect("start");
+    let session_id = run.locator().session_id;
+
+    let error = tokio::time::timeout(Duration::from_secs(3), run.result())
+        .await
+        .expect("facade timeout returned")
+        .expect_err("run must time out");
+    assert_eq!(error.code(), AGENT_RUN_TIMEOUT);
+    assert_eq!(model.cancellation_acknowledgement_count(), 1);
+
+    let loaded = store
+        .load(LoadRequest { session_id })
+        .await
+        .expect("load timed-out run");
+    let kinds = loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .map(|record| record.body().kind_name())
+        .collect::<Vec<_>>();
+    assert!(kinds.contains(&"cancellation_requested"));
+    assert!(kinds.contains(&"cancellation_reconciled"));
+    assert!(kinds.contains(&"run_cancelled"));
+}
+
 #[tokio::test]
 async fn prepared_user_message_carries_file_blocks_for_attachments() {
     let model = Arc::new(ScriptedModel::from_plans(

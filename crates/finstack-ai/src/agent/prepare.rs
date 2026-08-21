@@ -2,14 +2,14 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation, CancellationInitiator,
-    CancellationPropagation, CancellationRequestTag, ContentBlock, DeadlinePropagation, Digest,
-    EffectOutputContract, EffectOutputKind, EventTag, KernelInput, LaneId, LaneTag, MediaRef,
-    Message, MessageId, MessageRole, MessageTag, Metadata, ModelRequestTag, OperationLocator,
-    OutputSpec, PrincipalPropagation, ProviderIds, RawJson, RecordTag, ReducerStageOutcome,
-    RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunTag, Sensitivity, SessionId,
-    SessionTag, Stage, StageCursor, StageSettled, StructuredResultSource, TerminalState, TextBlock,
-    Timestamp, TransitionEnv, TurnTag,
+    AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation, CancelRequested,
+    CancellationInitiator, CancellationPropagation, CancellationRequestTag, ContentBlock,
+    DeadlinePropagation, Digest, EffectOutputContract, EffectOutputKind, EventTag, KernelInput,
+    LaneId, LaneTag, MediaRef, Message, MessageId, MessageRole, MessageTag, Metadata,
+    ModelRequestTag, OperationLocator, OutputSpec, PrincipalPropagation, ProviderIds, RawJson,
+    RecordTag, ReducerStageOutcome, RunAccepted, RunPhase, RunPropagationPolicy, RunRelation,
+    RunTag, Sensitivity, SessionId, SessionTag, Stage, StageCursor, StageSettled,
+    StructuredResultSource, TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag,
 };
 use finstack_ai_runtime::{
     ApprovalGrantMode, ContextProvider, EventBatchConfig, EventFilter, EventHubConfig,
@@ -32,6 +32,7 @@ use finstack_ai_runtime::native_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
 
+use super::drive::output_from_live_state;
 use super::handle::Agent;
 use super::run::{AgentRunInner, publish_start_failure, publish_started};
 use super::types::{
@@ -58,6 +59,8 @@ pub(super) struct RunContextSeed {
     pub(super) journal_sequence: u64,
     pub(super) head_checksum: Option<Digest>,
 }
+
+const OWNER_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 impl PreparedAgentRun {
     pub(super) fn cancellation_initiator(&self) -> Result<CancellationInitiator, AgentRunError> {
@@ -122,7 +125,7 @@ impl Agent {
                 .map_err(|error| {
                     AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
                 })?;
-        let mut limits = spec.limits.clone();
+        let mut limits = attenuated_run_limits(&spec.limits, &request)?;
         if self.structured_output.is_some() {
             limits.max_retries = Some(
                 limits
@@ -132,13 +135,15 @@ impl Agent {
                     }),
             );
         }
+        let accepted_at = NativeIds::now()?;
+        let effective_deadline = request_deadline(accepted_at, request.timeout, None)?;
         let accepted = RunAccepted::try_new(
             run_id,
             RunRelation::root(run_id).map_err(|error| {
                 AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
             })?,
             request.security.clone(),
-            None,
+            effective_deadline,
             limits,
             RunPropagationPolicy {
                 cancellation: CancellationPropagation::Cascade,
@@ -375,6 +380,8 @@ impl Agent {
         attach_plan_observers(&mut owner, self.resolved.run_plan().observers()).await;
         publish_started(execution, handle.clone(), subscription);
         let timeout = prepared.request.timeout;
+        let locator = prepared.locator.clone();
+        let effective_deadline = prepared.accepted.effective_deadline();
         let result = driver::timeout(
             timeout,
             Box::pin(self.drive(
@@ -389,9 +396,30 @@ impl Agent {
             )),
         )
         .await;
+        let result = match result {
+            Ok(Ok(output)) => Ok(output),
+            Ok(Err(error)) => {
+                let state = handle.live_state();
+                if state.terminal.is_none() {
+                    match settle_controller_cancellation(
+                        &handle,
+                        CancellationInitiator::RuntimeShutdown,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(_) => Err(error),
+                        Err(uncertain) => Err(uncertain),
+                    }
+                } else {
+                    Err(error)
+                }
+            }
+            Err(_) => settle_deadline_timeout(&handle, locator, timeout, effective_deadline).await,
+        };
         let _shutdown = owner.shutdown().await;
         if let Some((runtime, lane_id, run_id)) = acquired_lane {
-            if let Ok(Ok(output)) = &result {
+            if let Ok(output) = &result {
                 if let Err(error) = runtime.refresh().await {
                     runtime.release_run(lane_id, run_id);
                     return Err(session_error(&error));
@@ -415,10 +443,7 @@ impl Agent {
             }
             runtime.release_run(lane_id, run_id);
         }
-        match result {
-            Ok(value) => value,
-            Err(_) => Err(AgentRunError::Timeout { timeout }),
-        }
+        result
     }
     pub(super) fn context_messages(
         &self,
@@ -640,6 +665,109 @@ pub(super) async fn submit(
     Ok(())
 }
 
+async fn settle_deadline_timeout(
+    handle: &RunHandle,
+    locator: OperationLocator,
+    timeout: Duration,
+    effective_deadline: Option<Timestamp>,
+) -> Result<AgentRunOutput, AgentRunError> {
+    let state = handle.live_state();
+    if state.terminal.is_some() {
+        return output_from_live_state(handle, locator, &state, timeout);
+    }
+    let terminal =
+        settle_controller_cancellation(handle, CancellationInitiator::Deadline, effective_deadline)
+            .await?;
+    match terminal.terminal.as_ref() {
+        Some(TerminalState::Completed(_)) => {
+            output_from_live_state(handle, locator, &terminal, timeout)
+        }
+        Some(TerminalState::Cancelled(_)) => Err(AgentRunError::Timeout { timeout }),
+        Some(TerminalState::Failed(failed))
+            if failed.error.code.as_ref() == "deadline_exceeded" =>
+        {
+            Err(AgentRunError::Timeout { timeout })
+        }
+        Some(TerminalState::Failed(_)) => {
+            output_from_live_state(handle, locator, &terminal, timeout)
+        }
+        None => Err(runtime_uncertainty(
+            "deadline cancellation settled without a terminal state",
+        )),
+    }
+}
+
+async fn settle_controller_cancellation(
+    handle: &RunHandle,
+    initiator: CancellationInitiator,
+    not_before: Option<Timestamp>,
+) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+    let state = handle.live_state();
+    if state.terminal.is_some() {
+        return Ok(state);
+    }
+    if matches!(state.status, finstack_ai_runtime::RunStatus::Faulted { .. }) {
+        return Err(runtime_uncertainty(
+            "runtime faulted before cancellation acknowledgement became certain",
+        ));
+    }
+    let mut env = NativeIds::cancellation_environment()?;
+    if let Some(not_before) = not_before {
+        env.now = env.now.max(not_before);
+    }
+    submit(
+        handle,
+        env,
+        KernelInput::CancelRequested(CancelRequested {
+            initiator,
+            reason: None,
+        }),
+    )
+    .await
+    .map_err(|error| {
+        runtime_uncertainty(format!(
+            "cancellation acknowledgement is uncertain: {error}"
+        ))
+    })?;
+    driver::timeout(OWNER_SHUTDOWN_GRACE, Box::pin(wait_for_terminal(handle)))
+        .await
+        .map_err(|_| {
+            runtime_uncertainty("cancellation did not reach a durable terminal state within grace")
+        })?
+}
+
+async fn wait_for_terminal(
+    handle: &RunHandle,
+) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+    loop {
+        let state = handle.live_state();
+        if state.terminal.is_some() {
+            return Ok(state);
+        }
+        if matches!(
+            state.status,
+            finstack_ai_runtime::RunStatus::Faulted { .. }
+                | finstack_ai_runtime::RunStatus::Stopped
+        ) {
+            return Err(runtime_uncertainty(
+                "runtime stopped before cancellation reached a durable terminal state",
+            ));
+        }
+        handle
+            .wait_for_live_state(state.revision)
+            .await
+            .map_err(|error| {
+                runtime_uncertainty(format!(
+                    "live-state wait failed during cancellation settlement: {error}"
+                ))
+            })?;
+    }
+}
+
+fn runtime_uncertainty(message: impl Into<String>) -> AgentRunError {
+    AgentRunError::runtime_message(format!("runtime boundary uncertainty: {}", message.into()))
+}
+
 pub(super) async fn wait_for_phase(
     handle: &RunHandle,
     phases: &[RunPhase],
@@ -684,8 +812,14 @@ pub(super) async fn wait_for_cycle(
 
 pub(super) fn ensure_nonterminal_failure(
     state: &finstack_ai_runtime::LiveRunState,
+    timeout: Duration,
 ) -> Result<(), AgentRunError> {
     match state.terminal.as_ref() {
+        Some(TerminalState::Failed(failed))
+            if failed.error.code.as_ref() == "deadline_exceeded" =>
+        {
+            Err(AgentRunError::Timeout { timeout })
+        }
         Some(TerminalState::Failed(failed)) => Err(AgentRunError::runtime_message(format!(
             "run failed: {}: {}",
             failed.error.code, failed.error.message
@@ -783,6 +917,48 @@ fn session_error(error: &SessionError) -> AgentRunError {
     AgentRunError::configuration(error.code(), error.to_string())
 }
 
+pub(super) fn attenuated_run_limits(
+    configured: &finstack_ai_kernel::RunLimits,
+    request: &AgentRunRequest,
+) -> Result<finstack_ai_kernel::RunLimits, AgentRunError> {
+    let mut limits = configured.clone();
+    limits.max_model_requests = Some(
+        limits
+            .max_model_requests
+            .map_or(request.max_cycles, |value| value.min(request.max_cycles)),
+    );
+    let request_wall_time = kernel_duration(request.timeout)?;
+    limits.max_wall_time = Some(
+        limits
+            .max_wall_time
+            .map_or(request_wall_time, |value| value.min(request_wall_time)),
+    );
+    Ok(limits)
+}
+
+pub(super) fn request_deadline(
+    started_at: Timestamp,
+    timeout: Duration,
+    parent_deadline: Option<Timestamp>,
+) -> Result<Option<Timestamp>, AgentRunError> {
+    let request_deadline = started_at
+        .checked_add(kernel_duration(timeout)?)
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+    Ok(Some(parent_deadline.map_or(request_deadline, |parent| {
+        parent.min(request_deadline)
+    })))
+}
+
+fn kernel_duration(timeout: Duration) -> Result<finstack_ai_kernel::Duration, AgentRunError> {
+    let millis = u64::try_from(timeout.as_millis()).map_err(|_| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "run timeout exceeds the durable duration range",
+        )
+    })?;
+    Ok(finstack_ai_kernel::Duration::from_millis(millis))
+}
+
 async fn append_lane_input(
     runtime: &SessionRuntime,
     lane_id: LaneId,
@@ -878,7 +1054,7 @@ fn run_task_config(observer_count: usize, approval_grant: ApprovalGrantMode) -> 
             // One interactive consumer plus one short-lived internal phase waiter.
             max_subscribers: observer_count.checked_add(2).unwrap_or(0),
         },
-        shutdown_deadline: Duration::from_secs(2),
+        shutdown_deadline: OWNER_SHUTDOWN_GRACE,
         approval_grant,
     }
 }

@@ -183,7 +183,7 @@ impl Agent {
                 ],
             )
             .await?;
-            ensure_nonterminal_failure(&after_model)?;
+            ensure_nonterminal_failure(&after_model, request.timeout)?;
             if after_model.phase == Some(RunPhase::AfterToolBatch) {
                 self.submit_pending_activation(handle, locator.run_id)
                     .await?;
@@ -242,7 +242,7 @@ impl Agent {
                 )
                 .await?
             };
-            ensure_nonterminal_failure(&next)?;
+            ensure_nonterminal_failure(&next, request.timeout)?;
             if next.phase == Some(RunPhase::AfterToolBatch) {
                 self.submit_pending_activation(handle, locator.run_id)
                     .await?;
@@ -277,7 +277,7 @@ impl Agent {
                     StageIds::retry(),
                 )
                 .await?;
-                await_retry_cycle(handle, next.cycle).await?;
+                await_retry_cycle(handle, next.cycle, request.timeout).await?;
                 continue;
             }
 
@@ -307,7 +307,7 @@ impl Agent {
                     // through exactly `Sleeping` then `PreparingContext`. A new
                     // phase on that path must be added here too; the error
                     // below names the phase so a mismatch is diagnosable.
-                    await_retry_cycle(handle, terminal.cycle).await?;
+                    await_retry_cycle(handle, terminal.cycle, request.timeout).await?;
                     continue;
                 }
                 return Err(AgentRunError::runtime_message(format!(
@@ -315,33 +315,7 @@ impl Agent {
                     terminal.phase
                 )));
             }
-            let completed = match terminal
-                .terminal
-                .as_ref()
-                .ok_or_else(|| AgentRunError::runtime_message("terminal state is missing"))?
-            {
-                TerminalState::Completed(completed) => completed,
-                TerminalState::Failed(failed) => {
-                    return Err(AgentRunError::runtime_message(format!(
-                        "run failed: {}: {}",
-                        failed.error.code, failed.error.message
-                    )));
-                }
-                TerminalState::Cancelled(_) => return Err(AgentRunError::Cancelled),
-            };
-            let message = terminal
-                .committed_run_messages
-                .iter()
-                .find(|message| message.id() == &completed.result_message_id)
-                .cloned()
-                .ok_or_else(|| AgentRunError::runtime_message("result message is missing"))?;
-            return Ok(AgentRunOutput {
-                locator,
-                message,
-                retry_attempts: terminal.retry_attempts,
-                active_capabilities: terminal.active_capabilities.clone(),
-                record_kinds: handle.record_kinds(),
-            });
+            return output_from_live_state(handle, locator, &terminal, request.timeout);
         }
     }
 
@@ -404,7 +378,49 @@ impl Agent {
 /// takes another cycle. Shared by the structured-output validation retry
 /// and the middleware-superseded finalize paths so their wait semantics
 /// cannot drift.
-async fn await_retry_cycle(handle: &RunHandle, prior_cycle: u64) -> Result<(), AgentRunError> {
+async fn await_retry_cycle(
+    handle: &RunHandle,
+    prior_cycle: u64,
+    timeout: std::time::Duration,
+) -> Result<(), AgentRunError> {
     let retry = wait_for_cycle(handle, prior_cycle).await?;
-    ensure_nonterminal_failure(&retry)
+    ensure_nonterminal_failure(&retry, timeout)
+}
+
+pub(super) fn output_from_live_state(
+    handle: &RunHandle,
+    locator: OperationLocator,
+    state: &finstack_ai_runtime::LiveRunState,
+    timeout: std::time::Duration,
+) -> Result<AgentRunOutput, AgentRunError> {
+    let completed = match state
+        .terminal
+        .as_ref()
+        .ok_or_else(|| AgentRunError::runtime_message("terminal state is missing"))?
+    {
+        TerminalState::Completed(completed) => completed,
+        TerminalState::Failed(failed) if failed.error.code.as_ref() == "deadline_exceeded" => {
+            return Err(AgentRunError::Timeout { timeout });
+        }
+        TerminalState::Failed(failed) => {
+            return Err(AgentRunError::runtime_message(format!(
+                "run failed: {}: {}",
+                failed.error.code, failed.error.message
+            )));
+        }
+        TerminalState::Cancelled(_) => return Err(AgentRunError::Cancelled),
+    };
+    let message = state
+        .committed_run_messages
+        .iter()
+        .find(|message| message.id() == &completed.result_message_id)
+        .cloned()
+        .ok_or_else(|| AgentRunError::runtime_message("result message is missing"))?;
+    Ok(AgentRunOutput {
+        locator,
+        message,
+        retry_attempts: state.retry_attempts,
+        active_capabilities: state.active_capabilities.clone(),
+        record_kinds: handle.record_kinds(),
+    })
 }

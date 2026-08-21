@@ -896,12 +896,18 @@ fn child_acceptance(
     .map_err(|error| {
         AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
     })?;
+    let limits = super::prepare::attenuated_run_limits(&spec.limits, request)?;
+    let effective_deadline = super::prepare::request_deadline(
+        super::prepare::NativeIds::now()?,
+        request.timeout,
+        parent.effective_deadline(),
+    )?;
     RunAccepted::try_new(
         prepared.child.operation.run_id,
         relation,
         request.security.clone(),
-        None,
-        spec.limits.clone(),
+        effective_deadline,
+        limits,
         RunPropagationPolicy {
             cancellation: CancellationPropagation::Cascade,
             deadline: DeadlinePropagation::MinimumOfParentAndChild,

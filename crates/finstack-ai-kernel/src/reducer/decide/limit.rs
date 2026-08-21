@@ -34,7 +34,9 @@ pub(super) fn decide_limit(
     // and fail apply with `pending_interaction` still set.
     if matches!(
         input,
-        KernelInput::AcceptRun(_) | KernelInput::InteractionSettled(_)
+        KernelInput::AcceptRun(_)
+            | KernelInput::InteractionSettled(_)
+            | KernelInput::CancelRequested(_)
     ) || state.accepted.is_none()
         || state.cancellation.is_some()
         || state.terminal.is_some()
