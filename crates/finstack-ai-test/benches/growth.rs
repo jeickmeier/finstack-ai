@@ -658,7 +658,11 @@ fn tool_settlement_width(c: &mut Criterion) {
     let widths = if bench_quick() {
         vec![1_usize, 16]
     } else {
-        vec![1, 16, 64, 256]
+        // The parallel batch-open decision emits two lifecycle records plus
+        // one effect record per tool, so 254 is the largest width that stays
+        // within the 256-record append bound (and also remains below the
+        // completion-identity bound once the model completion is included).
+        vec![1, 16, 64, 254]
     };
     for width in widths {
         for (mode, execution, reverse) in [

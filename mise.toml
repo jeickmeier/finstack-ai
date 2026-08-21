@@ -384,7 +384,7 @@ mise run bench-wasm
 """
 
 [tasks.bench-rust]
-description = "Run Criterion groups plus native idle-session allocation/RSS profiles"
+description = "Run routine Criterion groups plus native idle-session allocation/RSS profiles"
 run = """
 set -euo pipefail
 CONFORMANCE='kernel_micro|resolved_dispatch|scripted_model_reducer|state_scaling'
@@ -394,6 +394,13 @@ cargo bench -p finstack-ai-test --offline --locked --bench conformance -- "${CON
 cargo bench -p finstack-ai-test --offline --locked --bench growth -- "${GROWTH}"
 cargo bench -p finstack-ai-store-sqlite --offline --locked --bench restore_growth -- "${SQLITE}"
 cargo bench -p finstack-ai-test --offline --locked --bench native_runtime -- --mode idle --sessions 128
+"""
+
+[tasks.bench-rust-full]
+description = "Run Rust benchmarks including opt-in 100,000-record SQLite paging profiles"
+run = """
+set -euo pipefail
+FINSTACK_AI_BENCH_FULL=1 mise run bench-rust
 """
 
 [tasks.bench-python]

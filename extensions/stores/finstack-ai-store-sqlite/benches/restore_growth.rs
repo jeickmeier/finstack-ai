@@ -271,11 +271,17 @@ fn bench_quick() -> bool {
     std::env::args().any(|argument| argument == "--quick")
 }
 
+fn bench_full_scale() -> bool {
+    std::env::var("FINSTACK_AI_BENCH_FULL").is_ok_and(|value| value == "1")
+}
+
 fn scan_record_counts() -> &'static [u64] {
     if bench_quick() {
         &[256, 1_024]
-    } else {
+    } else if bench_full_scale() {
         &[10_000, 100_000]
+    } else {
+        &[10_000]
     }
 }
 
