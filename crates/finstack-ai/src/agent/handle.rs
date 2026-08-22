@@ -189,9 +189,19 @@ impl Agent {
 
     /// Validate and retain one resolved, no-lookup execution plan.
     ///
+    /// This is the bridge from the registry and bundle path to a runnable
+    /// agent: [`Registry::resolve`](crate::registry::Registry::resolve) and
+    /// [`BundleResolver::resolve_agent`](crate::BundleResolver::resolve_agent)
+    /// both yield a [`ResolvedAgent`], which is inspection-only until it is
+    /// turned into an [`Agent`] here.
+    ///
     /// Supports direct model, Toolset, context-provider, middleware, and
     /// observer handles. Observer failures are isolated from run semantics.
-    pub(crate) fn try_from_resolved(resolved: Arc<ResolvedAgent>) -> Result<Self, AgentRunError> {
+    ///
+    /// # Errors
+    ///
+    /// Fails closed when the resolved value carries no specification or lock.
+    pub fn try_from_resolved(resolved: Arc<ResolvedAgent>) -> Result<Self, AgentRunError> {
         if resolved.spec().is_none() || resolved.lock().is_none() {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
@@ -464,7 +474,12 @@ impl Agent {
     /// # Errors
     ///
     /// Returns a busy-lane or configuration/runtime failure.
-    pub fn start_on_lane(
+    ///
+    /// Internal on purpose: it starts the run without the lane registration
+    /// that [`Lane::run`](crate::Lane::run) performs, so a run started here
+    /// would leave `Lane::suspend` silently parking nothing. Callers use
+    /// `Lane::run`.
+    pub(crate) fn start_on_lane(
         &self,
         lane: &crate::Lane,
         request: AgentRunRequest,

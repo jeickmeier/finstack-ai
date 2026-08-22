@@ -75,8 +75,10 @@ pub use bundle::{
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use finstack_ai_kernel::{
-    ActiveCapability, CapabilityActivationSource, CompactionAuthorization, InteractionRequest,
-    InteractionResolution, OperationLocator, PrincipalRef, RunSecurityContext, SessionId,
+    ActiveCapability, AgentId, BundleId, CapabilityActivationSource, CapabilityId,
+    CompactionAuthorization, ComponentId, ComponentRef, CostLimit, InteractionRequest,
+    InteractionResolution, OperationLocator, PrincipalRef, RunLimits, RunSecurityContext,
+    SessionId, Version,
 };
 /// Runtime port contracts and drivers (`finstack-ai-runtime`).
 ///

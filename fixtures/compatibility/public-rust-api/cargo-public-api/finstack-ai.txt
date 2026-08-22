@@ -1,9 +1,15 @@
 pub mod finstack_ai
 pub use finstack_ai::ActiveCapability
+pub use finstack_ai::AgentId
 pub use finstack_ai::ApprovalGrantMode
+pub use finstack_ai::BundleId
 pub use finstack_ai::CapabilityActivationSource
+pub use finstack_ai::CapabilityId
 pub use finstack_ai::ChildRunPolicy
 pub use finstack_ai::CompactionAuthorization
+pub use finstack_ai::ComponentId
+pub use finstack_ai::ComponentRef
+pub use finstack_ai::CostLimit
 pub use finstack_ai::ExternalIdentityKey
 pub use finstack_ai::ExternalIdentityMap
 pub use finstack_ai::IdentityMapError
@@ -13,9 +19,11 @@ pub use finstack_ai::LaneInspect
 pub use finstack_ai::MemoryExternalIdentityMap
 pub use finstack_ai::OperationLocator
 pub use finstack_ai::PrincipalRef
+pub use finstack_ai::RunLimits
 pub use finstack_ai::RunSecurityContext
 pub use finstack_ai::SessionError
 pub use finstack_ai::SessionId
+pub use finstack_ai::Version
 pub use finstack_ai::runtime
 pub mod finstack_ai::registry
 pub enum finstack_ai::registry::AgentBuildError
@@ -1014,7 +1022,7 @@ pub async fn finstack_ai::Agent::re_resolve(&self) -> core::result::Result<Self,
 pub fn finstack_ai::Agent::resolved(&self) -> &alloc::sync::Arc<finstack_ai::ResolvedAgent>
 pub async fn finstack_ai::Agent::run(&self, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRunOutput, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::start(&self, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
-pub fn finstack_ai::Agent::start_on_lane(&self, &finstack_ai::Lane, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
+pub fn finstack_ai::Agent::try_from_resolved(alloc::sync::Arc<finstack_ai::ResolvedAgent>) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::try_with_output_schema(self, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::with_history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
 impl core::clone::Clone for finstack_ai::Agent
@@ -1507,6 +1515,7 @@ pub fn finstack_ai::NativeAgentBuilder::capability_middleware(self, finstack_ai_
 pub fn finstack_ai::NativeAgentBuilder::capability_toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::context_provider(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
+pub fn finstack_ai::NativeAgentBuilder::limits(self, finstack_ai_kernel::records::policy::limits::RunLimits) -> Self
 pub fn finstack_ai::NativeAgentBuilder::middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::observer(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::policy(self, finstack_ai::RunPolicy) -> Self

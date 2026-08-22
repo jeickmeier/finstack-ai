@@ -8,7 +8,7 @@ use crate::{
     Registrar, RegistrationError, RegistrationMetadata, Registry, RunPolicy, RuntimeServices,
 };
 use finstack_ai_kernel::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, MiddlewareRef,
+    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, MiddlewareRef, RunLimits,
 };
 use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::child::ChildRunPolicy;
@@ -93,6 +93,7 @@ pub struct NativeAgentBuilder {
     child_policy_binding: Option<ChildRunPolicy>,
     activation_host: Option<Arc<super::activation::NativeCapabilityHost>>,
     history_cache_policy: HistoryCachePolicy,
+    limits: RunLimits,
 }
 
 impl NativeAgentBuilder {
@@ -122,6 +123,7 @@ impl NativeAgentBuilder {
             child_policy_binding: None,
             activation_host: None,
             history_cache_policy: HistoryCachePolicy::default(),
+            limits: RunLimits::empty(),
         }
     }
 
@@ -341,6 +343,21 @@ impl NativeAgentBuilder {
         self
     }
 
+    /// Set the run ceilings frozen into the agent specification.
+    ///
+    /// Token, cost, tool-call and extension-counter limits are enforced for
+    /// every run this agent starts. Without this the agent runs under
+    /// [`RunLimits::empty`], which sets no ceiling at all.
+    ///
+    /// # Arguments
+    ///
+    /// * `limits` - Ceilings frozen into the specification and its lock.
+    #[must_use]
+    pub fn limits(mut self, limits: RunLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
     /// Resolve, warm, lock, and construct one native [`Agent`].
     ///
     /// # Errors
@@ -513,6 +530,7 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
     )
     .capabilities(capability_refs)
     .policy(builder.policy.clone())
+    .limits(builder.limits.clone())
     .build()
     .map_err(invalid_config)
 }
