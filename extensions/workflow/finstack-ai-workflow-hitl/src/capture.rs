@@ -132,8 +132,7 @@ pub fn park_for_interaction(
     let wait = classify_wait(session.last_state());
     let security = session
         .last_state()
-        .accepted
-        .as_ref()
+        .accepted()
         .ok_or(HitlError::StoreIntegrity {
             code: "hitl_security_context",
         })?

@@ -17,7 +17,7 @@ async fn timer_survives_worker_restart() {
     .await;
     drive_to_active_model_request(&owner.handle()).await;
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::BeforeFinalize)
+        state.phase() == Some(RunPhase::BeforeFinalize)
     })
     .await;
     owner
@@ -38,7 +38,7 @@ async fn timer_survives_worker_restart() {
         )
         .await
         .expect("schedule retry");
-    wait_state(&store, |state| state.phase == Some(RunPhase::Sleeping)).await;
+    wait_state(&store, |state| state.phase() == Some(RunPhase::Sleeping)).await;
     drop(owner);
 
     let mut driver = attach_driver(store.clone(), Arc::clone(&model), clock.clone(), 800).await;
@@ -93,7 +93,7 @@ async fn deferred_survives_worker_restart() {
     .await;
     drive_to_active_model_request(&owner.handle()).await;
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     drop(owner);
@@ -275,7 +275,7 @@ async fn interaction_survives_worker_restart() {
         .await
         .expect("after model");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingInteraction)
+        state.phase() == Some(RunPhase::AwaitingInteraction)
     })
     .await;
     drop(owner);
@@ -355,7 +355,7 @@ async fn seed_accepted_run(
     let owner = spawn_model_owner(CommitCoordinator::new(store.clone()), model, clock, seed).await;
     drive_to_active_model_request(&owner.handle()).await;
     wait_state_on(store as Arc<dyn JournalStore>, |state| {
-        state.accepted.is_some()
+        state.accepted().is_some()
     })
     .await;
     drop(owner);

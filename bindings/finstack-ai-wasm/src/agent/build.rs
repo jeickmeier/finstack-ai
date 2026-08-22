@@ -204,16 +204,16 @@ pub(super) async fn inspect_session_inner(
         .await
         .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
     let state = recovered.state();
-    let phase = match state.terminal.as_ref() {
+    let phase = match state.terminal() {
         Some(TerminalState::Completed(_)) => "completed",
         Some(TerminalState::Failed(_)) => "failed",
         Some(TerminalState::Cancelled(_)) => "cancelled",
-        None if state.phase.is_none() && loaded.head_sequence == 0 => "empty",
+        None if state.phase().is_none() && loaded.head_sequence == 0 => "empty",
         None => "in_progress",
     };
-    let result_text = match state.terminal.as_ref() {
+    let result_text = match state.terminal() {
         Some(TerminalState::Completed(completed)) => state
-            .messages
+            .messages()
             .iter()
             .find(|message| message.id() == &completed.result_message_id)
             .map(message_text),

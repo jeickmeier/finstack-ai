@@ -15,7 +15,7 @@ impl CommitCoordinator {
     #[cfg(feature = "native-tokio")]
     pub(crate) fn pending_timer_seed(&self) -> Option<TimerDispatchSeed> {
         Some(TimerDispatchSeed {
-            scheduled: self.kernel.state().retry.pending.clone()?,
+            scheduled: self.kernel.state().retry().pending.clone()?,
             scheduled_at: self.pending_timer_scheduled_at?,
         })
     }
@@ -23,15 +23,15 @@ impl CommitCoordinator {
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn pending_model_seed(&self) -> Option<ModelDispatchSeed> {
         let state = self.kernel.state();
-        let pending = state.pending_model_effect.clone()?;
+        let pending = state.pending_model_effect().cloned()?;
         let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
         Some(ModelDispatchSeed {
             pending,
             locator,
             authorization,
             budget_scope_id,
-            attempt: state.retry.attempts.checked_add(1)?,
-            requested_at: state.accepted_at?,
+            attempt: state.retry().attempts.checked_add(1)?,
+            requested_at: state.accepted_at()?,
             continuation_state: self.last_model_continuation.clone(),
             relation_depth: relation_depth_from_state(state),
         })
@@ -40,14 +40,14 @@ impl CommitCoordinator {
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn pending_tool_seeds(&self) -> Vec<ToolDispatchSeed> {
         let state = self.kernel.state();
-        let Some(batch) = state.active_tool_batch.as_ref() else {
+        let Some(batch) = state.active_tool_batch() else {
             return Vec::new();
         };
         let Some((locator, authorization, budget_scope_id)) = dispatch_security_context(state)
         else {
             return Vec::new();
         };
-        let Some(requested_at) = state.accepted_at else {
+        let Some(requested_at) = state.accepted_at() else {
             return Vec::new();
         };
         let relation_depth = relation_depth_from_state(state);
@@ -95,8 +95,7 @@ impl CommitCoordinator {
         let state = self.kernel.state();
         let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
         let compaction_authorization = state
-            .accepted
-            .as_ref()?
+            .accepted()?
             .security()
             .compaction_authorization()
             .cloned();
@@ -104,9 +103,9 @@ impl CommitCoordinator {
             locator,
             authorization,
             budget_scope_id,
-            attempt: state.retry.attempts.checked_add(1)?,
-            deadline: state.accepted.as_ref()?.effective_deadline(),
-            relation_depth: state.accepted.as_ref()?.relation().depth(),
+            attempt: state.retry().attempts.checked_add(1)?,
+            deadline: state.accepted()?.effective_deadline(),
+            relation_depth: state.accepted()?.relation().depth(),
             compaction_authorization,
         })
     }
@@ -128,8 +127,7 @@ impl CommitCoordinator {
 /// same way.
 fn relation_depth_from_state(state: &KernelState) -> u16 {
     state
-        .accepted
-        .as_ref()
+        .accepted()
         .map_or(0, |accepted| accepted.relation().depth())
 }
 
@@ -139,7 +137,7 @@ pub(super) fn action_is_authorized(
     now: Timestamp,
     committed: &CommittedBatch,
 ) -> bool {
-    if state.terminal.is_some() {
+    if state.terminal().is_some() {
         return false;
     }
     let effect_id = match action {
@@ -148,7 +146,7 @@ pub(super) fn action_is_authorized(
     };
     match action {
         PostCommitAction::ExecuteEffect { .. } => {
-            if state.cancellation.is_some() {
+            if state.cancellation().is_some() {
                 return false;
             }
             committed_effect_request(committed, effect_id)
@@ -156,8 +154,7 @@ pub(super) fn action_is_authorized(
                 .is_some_and(|request| request.deadline().is_none_or(|deadline| deadline > now))
         }
         PostCommitAction::CancelEffect { .. } => state
-            .cancellation
-            .as_ref()
+            .cancellation()
             .is_some_and(|value| value.outstanding_effects.contains(&effect_id)),
     }
 }
@@ -178,13 +175,13 @@ fn pending_effect_request(
     state: &KernelState,
     effect_id: EffectId,
 ) -> Option<&finstack_ai_kernel::EffectRequested> {
-    if let Some(pending) = &state.pending_model_effect
+    if let Some(pending) = &state.pending_model_effect()
         && pending.requested.effect_id() == effect_id
         && pending.deferred.is_none()
     {
         return Some(&pending.requested);
     }
-    state.active_tool_batch.as_ref().and_then(|batch| {
+    state.active_tool_batch().and_then(|batch| {
         batch.calls.iter().find_map(|call| {
             let finstack_ai_kernel::ActiveToolCallStatus::Requested {
                 requested,
@@ -313,7 +310,7 @@ pub(super) fn model_dispatch_seed(
     let PostCommitAction::ExecuteEffect { effect_id } = action else {
         return None;
     };
-    let pending = state.pending_model_effect.as_ref()?;
+    let pending = state.pending_model_effect()?;
     if pending.requested.effect_id() != effect_id || pending.deferred.is_some() {
         return None;
     }
@@ -323,7 +320,7 @@ pub(super) fn model_dispatch_seed(
         locator,
         authorization,
         budget_scope_id,
-        attempt: state.retry.attempts.checked_add(1)?,
+        attempt: state.retry().attempts.checked_add(1)?,
         requested_at: effect_requested_at(committed, effect_id)?,
         continuation_state,
         relation_depth: relation_depth_from_state(state),
@@ -338,7 +335,7 @@ pub(super) fn tool_dispatch_seed(
     let PostCommitAction::ExecuteEffect { effect_id } = action else {
         return None;
     };
-    let batch = state.active_tool_batch.as_ref()?;
+    let batch = state.active_tool_batch()?;
     let active = batch.calls.iter().find(|call| {
         call.assigned.effect_id == effect_id
             && matches!(
@@ -375,7 +372,7 @@ pub(super) fn timer_dispatch_seed(
     let PostCommitAction::ExecuteEffect { effect_id } = action else {
         return None;
     };
-    let scheduled = state.retry.pending.as_ref()?;
+    let scheduled = state.retry().pending.as_ref()?;
     let scheduled_at = scheduled_at?;
     (scheduled.timer_effect_id == effect_id).then(|| TimerDispatchSeed {
         scheduled: scheduled.clone(),
@@ -408,7 +405,7 @@ pub(super) fn context_dispatch_seed(
         locator,
         authorization,
         budget_scope_id,
-        attempt: state.retry.attempts.checked_add(1)?,
+        attempt: state.retry().attempts.checked_add(1)?,
         relation_depth: relation_depth_from_state(state),
     })
 }
@@ -427,12 +424,12 @@ fn dispatch_security_context(
     AuthorizationContext,
     Option<finstack_ai_kernel::BudgetScopeId>,
 )> {
-    let accepted = state.accepted.as_ref()?;
+    let accepted = state.accepted()?;
     let security = accepted.security();
     let locator = OperationLocator::try_new(
         security.tenant_scope(),
-        state.session_id?,
-        state.lane_id?,
+        state.session_id()?,
+        state.lane_id()?,
         accepted.run_id(),
     )
     .ok()?;

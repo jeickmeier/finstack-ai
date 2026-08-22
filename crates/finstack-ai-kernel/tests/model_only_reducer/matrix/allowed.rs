@@ -62,8 +62,8 @@ fn assert_allowed_case(case: AllowedCase) {
             .collect::<Vec<_>>(),
         "{case:?}"
     );
-    assert_eq!(harness.kernel.state().phase, Some(phase), "{case:?}");
-    assert_eq!(harness.kernel.state().cycle, cycle, "{case:?}");
+    assert_eq!(harness.kernel.state().phase(), Some(phase), "{case:?}");
+    assert_eq!(harness.kernel.state().cycle(), cycle, "{case:?}");
     assert_eq!(
         decision.expected_sequence,
         expected_sequence(case),
@@ -85,8 +85,7 @@ fn assert_allowed_state(case: AllowedCase, harness: &Harness, decision: &Decisio
                 harness
                     .kernel
                     .state()
-                    .current_turn
-                    .as_ref()
+                    .current_turn()
                     .map(|turn| turn.turn_id),
                 Some(id::<finstack_ai_kernel::TurnTag>(301))
             );
@@ -95,8 +94,7 @@ fn assert_allowed_state(case: AllowedCase, harness: &Harness, decision: &Decisio
             let pending = harness
                 .kernel
                 .state()
-                .pending_model_effect
-                .as_ref()
+                .pending_model_effect()
                 .expect("pending model");
             assert_eq!(
                 pending.model_request_id,
@@ -118,25 +116,25 @@ fn assert_allowed_state(case: AllowedCase, harness: &Harness, decision: &Decisio
         | AllowedCase::BeforeModelFail
         | AllowedCase::AfterModelFail => {
             assert!(matches!(
-                harness.kernel.state().terminal_candidate.as_ref(),
+                harness.kernel.state().terminal_candidate(),
                 Some(TerminalCandidate::Failed { .. })
             ));
         }
         AllowedCase::BeforeFinalizeAccepted => {
             assert!(matches!(
-                harness.kernel.state().terminal.as_ref(),
+                harness.kernel.state().terminal(),
                 Some(TerminalState::Completed(_))
             ));
         }
         AllowedCase::BeforeFinalizeFail => {
             assert!(matches!(
-                harness.kernel.state().terminal.as_ref(),
+                harness.kernel.state().terminal(),
                 Some(TerminalState::Failed(_))
             ));
         }
         AllowedCase::BeforeFinalizeContinueModel => {
-            assert!(harness.kernel.state().pending_model_effect.is_none());
-            assert!(harness.kernel.state().terminal_candidate.is_none());
+            assert!(harness.kernel.state().pending_model_effect().is_none());
+            assert!(harness.kernel.state().terminal_candidate().is_none());
         }
         AllowedCase::BeforeRunContinue | AllowedCase::AfterModelContinue => {}
     }

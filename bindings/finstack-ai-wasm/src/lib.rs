@@ -793,7 +793,7 @@ mod tests {
 
     use finstack_ai::{
         AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec,
-        LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+        LinkedCommon, LinkedProviderSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
     };
 
     use super::{health, parse_document_markdown};
@@ -855,61 +855,67 @@ mod tests {
         if finstack_ai::native_tokio_enabled() {
             return;
         }
-        let openai = ready(Agent::openai(OpenAiAgentSpec {
+        let openai = ready(Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-unused".into(),
             reasoning_effort: None,
             reasoning_summary: None,
             media_tools: false,
             common: LinkedCommon::default(),
-        }))
+        })))
         .err()
         .expect("openai");
-        let openrouter = ready(Agent::openrouter(OpenRouterAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-unused".into(),
-            referer: None,
-            title: None,
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon::default(),
-        }))
+        let openrouter = ready(Agent::linked(LinkedProviderSpec::OpenRouter(
+            OpenRouterAgentSpec {
+                model: "fixture-model".into(),
+                api_key: "sk-unused".into(),
+                referer: None,
+                title: None,
+                reasoning_effort: None,
+                reasoning_summary: None,
+                media_tools: false,
+                common: LinkedCommon::default(),
+            },
+        )))
         .err()
         .expect("openrouter");
-        let anthropic = ready(Agent::anthropic(AnthropicAgentSpec {
-            base_url: "https://api.anthropic.com".into(),
-            model: "fixture-model".into(),
-            api_key: None,
-            common: LinkedCommon::default(),
-        }))
+        let anthropic = ready(Agent::linked(LinkedProviderSpec::Anthropic(
+            AnthropicAgentSpec {
+                base_url: "https://api.anthropic.com".into(),
+                model: "fixture-model".into(),
+                api_key: None,
+                common: LinkedCommon::default(),
+            },
+        )))
         .err()
         .expect("anthropic");
-        let gemini = ready(Agent::gemini(GeminiAgentSpec {
+        let gemini = ready(Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
             endpoint: "https://generativelanguage.googleapis.com".into(),
             model: "fixture-model".into(),
             api_key: None,
             common: LinkedCommon::default(),
-        }))
+        })))
         .err()
         .expect("gemini");
-        let ollama = ready(Agent::ollama(OllamaAgentSpec {
+        let ollama = ready(Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
             common: LinkedCommon::default(),
-        }))
+        })))
         .err()
         .expect("ollama");
-        let gateway = ready(Agent::gateway(GatewayAgentSpec {
-            endpoint: "https://api.example.test/v1/responses".into(),
-            model: "fixture-model".into(),
-            wire_protocol: "openai_responses".into(),
-            credential_name: "prod".into(),
-            hard_input_bytes: Some(1_000_000),
-            auth_kind: Some("bearer".into()),
-            api_key: Some("sk-unused".into()),
-            common: LinkedCommon::default(),
-        }))
+        let gateway = ready(Agent::linked(LinkedProviderSpec::Gateway(
+            GatewayAgentSpec {
+                endpoint: "https://api.example.test/v1/responses".into(),
+                model: "fixture-model".into(),
+                wire_protocol: "openai_responses".into(),
+                credential_name: "prod".into(),
+                hard_input_bytes: Some(1_000_000),
+                auth_kind: Some("bearer".into()),
+                api_key: Some("sk-unused".into()),
+                common: LinkedCommon::default(),
+            },
+        )))
         .err()
         .expect("gateway");
         assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);

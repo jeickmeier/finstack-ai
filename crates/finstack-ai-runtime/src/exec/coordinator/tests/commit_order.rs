@@ -11,7 +11,7 @@ fn append_and_apply_precede_test_dispatch() {
     assert_eq!(store.append_calls(), 4);
     assert_eq!(dispatcher.actions.lock().expect("lock").len(), 1);
     assert_eq!(
-        coordinator.state().phase,
+        coordinator.state().phase(),
         Some(finstack_ai_kernel::RunPhase::AwaitingModel)
     );
 }
@@ -41,10 +41,10 @@ async fn manual_drive_exposes_a_recoverable_committed_prefix_before_dispatch() {
         .await
         .expect("recover committed prefix");
     assert_eq!(
-        recovered.state().phase,
+        recovered.state().phase(),
         Some(finstack_ai_kernel::RunPhase::AwaitingModel)
     );
-    assert!(recovered.state().pending_model_effect.is_some());
+    assert!(recovered.state().pending_model_effect().is_some());
 
     blocked.abort();
     assert!(matches!(blocked.await, Err(error) if error.is_cancelled()));

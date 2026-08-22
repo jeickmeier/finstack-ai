@@ -126,8 +126,7 @@ fn before_model_env() -> TransitionEnv {
 fn committed_model_request(coordinator: &CommitCoordinator) -> crate::ports::model::ModelRequestDraft {
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending model effect");
     let finstack_ai_kernel::EffectInput::Model { request } = pending.requested.input() else {
         panic!("the pending model effect must carry a model input");

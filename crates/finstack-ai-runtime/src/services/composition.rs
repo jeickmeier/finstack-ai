@@ -182,7 +182,7 @@ impl ChildRunCoordinator {
     ) -> Result<(), CompositionError> {
         if commit
             .state()
-            .budget_reservations
+            .budget_reservations()
             .get(&request.reservation_id)
             .and_then(|value| value.settlement.as_ref())
             .is_some()
@@ -276,18 +276,18 @@ impl BudgetCoordinator {
         }
         if !commit
             .state()
-            .model_settlements
+            .model_settlements()
             .contains_key(&request.effect_id)
             && !commit
                 .state()
-                .tool_settlements
+                .tool_settlements()
                 .contains_key(&request.effect_id)
         {
             return Err(CompositionError::InvalidRequest {
                 code: "effect_usage_not_committed",
             });
         }
-        if let Some(existing) = commit.state().budget_charges.get(&request.effect_id) {
+        if let Some(existing) = commit.state().budget_charges().get(&request.effect_id) {
             validate_charge_receipt(&request, existing)?;
             return Ok(existing.clone());
         }
@@ -332,11 +332,10 @@ impl BudgetCoordinator {
                 code: "budget_release_request_invalid",
             })?;
         validate_parent(commit, operation)?;
-        if commit.state().terminal.is_none()
+        if commit.state().terminal().is_none()
             || commit
                 .state()
-                .accepted
-                .as_ref()
+                .accepted()
                 .is_none_or(|accepted| accepted.run_id() != request.terminal_run_id)
         {
             return Err(CompositionError::InvalidRequest {
@@ -399,12 +398,11 @@ fn validate_parent(
     commit: &CommitCoordinator,
     operation: &OperationLocator,
 ) -> Result<(), CompositionError> {
-    if commit.state().session_id != Some(operation.session_id)
-        || commit.state().lane_id != Some(operation.lane_id)
+    if commit.state().session_id() != Some(operation.session_id)
+        || commit.state().lane_id() != Some(operation.lane_id)
         || commit
             .state()
-            .accepted
-            .as_ref()
+            .accepted()
             .is_none_or(|accepted| accepted.run_id() != operation.run_id)
     {
         return Err(CompositionError::InvalidRequest {
@@ -473,7 +471,7 @@ fn ensure_prepared_for_invoke(
 ) -> Result<(), CompositionError> {
     let prepared = commit
         .state()
-        .child_preparations
+        .child_preparations()
         .get(&context.parent_effect_id)
         .ok_or(CompositionError::InvalidRequest {
             code: "child_preparation_not_committed",
@@ -490,7 +488,7 @@ fn ensure_prepared_for_invoke(
     if let Some(reservation_id) = prepared.budget_reservation_id
         && commit
             .state()
-            .budget_reservations
+            .budget_reservations()
             .get(&reservation_id)
             .and_then(|value| value.settlement.as_ref())
             .is_none()
@@ -509,7 +507,7 @@ fn settled_reservation(
 ) -> Result<&crate::BudgetReservationReplay, CompositionError> {
     let reservation = commit
         .state()
-        .budget_reservations
+        .budget_reservations()
         .get(&reservation_id)
         .ok_or(CompositionError::InvalidRequest {
             code: "reservation_not_committed",

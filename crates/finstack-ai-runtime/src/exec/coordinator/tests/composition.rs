@@ -332,7 +332,7 @@ fn every_child_placement_converges_and_rejects_conflicting_digest() {
         assert_eq!(
             commit
                 .state()
-                .child_preparations
+                .child_preparations()
                 .get(&context.parent_effect_id)
                 .map(|prepared| &prepared.child),
             Some(&request.locator)

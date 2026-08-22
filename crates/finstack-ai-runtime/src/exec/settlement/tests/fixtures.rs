@@ -524,7 +524,7 @@ fn coordinator_at_before_tool_batch_calls(
     ))
     .expect("after model");
     assert_eq!(
-        coordinator.state().phase,
+        coordinator.state().phase(),
         Some(RunPhase::BeforeToolBatch),
         "the fixture must park the run exactly at the BeforeToolBatch cursor"
     );
@@ -536,8 +536,7 @@ fn coordinator_at_before_tool_batch_calls(
 fn settle_model_with_tool_calls(coordinator: &mut CommitCoordinator, calls: &[(&str, &[u8])]) {
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending model effect")
         .clone();
     let call_ordinals = (0..calls.len())

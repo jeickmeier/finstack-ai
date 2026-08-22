@@ -73,12 +73,11 @@
 //! - **Build and run an agent** — [`Agent::builder`] then
 //!   [`Agent::run`]; [`AgentRunRequest`], [`AgentRunOutput`],
 //!   [`AgentRunError`]
-//! - **Provider shortcuts** — [`Agent::openai`], [`Agent::anthropic`],
-//!   [`Agent::gemini`], [`Agent::ollama`], [`Agent::openrouter`],
-//!   [`Agent::gateway`], each taking one `*AgentSpec` plus [`LinkedCommon`].
-//!   Providers are off by default: enable `linked-providers` (or
-//!   `linked-all`), otherwise these constructors return
-//!   [`AGENT_RUN_UNSUPPORTED_PLAN`]
+//! - **Linked providers** — [`Agent::linked`] with one
+//!   [`LinkedProviderSpec`] variant per wire protocol, each wrapping one
+//!   `*AgentSpec` plus [`LinkedCommon`]. Providers are off by default:
+//!   enable `linked-providers` (or `linked-all`), otherwise construction
+//!   returns [`AGENT_RUN_UNSUPPORTED_PLAN`]
 //! - **Declarative form** — [`AgentSpec::builder`], [`AgentSpec`],
 //!   [`RunPolicy`], [`CapabilitySpec`]
 //! - **Journaled handles** — [`Session`], [`Lane`]
@@ -123,9 +122,9 @@ pub use agent::{
     AgentRunError, AgentRunOutput, AgentRunRequest, AnthropicAgentSpec, AttachmentInput,
     CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
     GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS, NativeAgentBuilder,
-    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
-    OpenRouterMediaToolsSpec, RemoteChildRouteSpec,
+    LinkedCommon, LinkedProviderSpec, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS,
+    NativeAgentBuilder, NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec,
+    OpenRouterAgentSpec, OpenRouterMediaToolsSpec, RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]
 pub use agent::{

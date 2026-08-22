@@ -255,7 +255,7 @@ async fn apply_context_providers<C: Clock, R: RandomSource>(
         ReducerStageOutcome::ModelRequestPrepared { request, .. } => {
             parse_draft(request)?.messages.to_vec()
         }
-        _ => coordinator.state().messages.to_vec(),
+        _ => coordinator.state().messages().to_vec(),
     };
     let plan = collect_context_stage(
         coordinator,
@@ -459,8 +459,7 @@ async fn invoke_middleware_component<C: Clock, R: RandomSource>(
     }
     let pending = coordinator
         .state()
-        .pending_extension_effect
-        .as_ref()
+        .pending_extension_effect()
         .filter(|pending| {
             pending.cursor == invocation.cursor
                 && pending.requested.component() == Some(&resolved.descriptor.invocation)

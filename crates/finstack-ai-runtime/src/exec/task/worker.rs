@@ -410,15 +410,14 @@ async fn process_timer_result<C: Clock, R: RandomSource>(
         input,
         diagnostic: _,
     } = result;
-    if coordinator.state().terminal.is_some() {
+    if coordinator.state().terminal().is_some() {
         return Ok(());
     }
-    if coordinator.state().cancellation.is_some() {
+    if coordinator.state().cancellation().is_some() {
         let effect_id = input.effect_id;
         let outstanding = coordinator
             .state()
-            .cancellation
-            .as_ref()
+            .cancellation()
             .is_some_and(|cancellation| cancellation.outstanding_effects.contains(&effect_id));
         if outstanding {
             return reconcile_cancelled_effect(coordinator, effect_id, true, sources).await;

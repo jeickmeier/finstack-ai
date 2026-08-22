@@ -954,7 +954,7 @@ fn parallel_tool_group_runs_concurrently_and_settles_through_the_owner() {
         host_driver::drive_local();
         let recovered =
             block_on(CommitCoordinator::recover(store.clone(), session_id)).expect("recover model");
-        if recovered.state().phase == Some(RunPhase::AfterModel) {
+        if recovered.state().phase() == Some(RunPhase::AfterModel) {
             break;
         }
     }
@@ -984,12 +984,12 @@ fn parallel_tool_group_runs_concurrently_and_settles_through_the_owner() {
         host_driver::drive_local();
         let recovered =
             block_on(CommitCoordinator::recover(store.clone(), session_id)).expect("recover tools");
-        if recovered.state().phase == Some(RunPhase::AfterToolBatch) {
+        if recovered.state().phase() == Some(RunPhase::AfterToolBatch) {
             break;
         }
     }
     let recovered = block_on(CommitCoordinator::recover(store, session_id)).expect("recover final");
-    assert_eq!(recovered.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AfterToolBatch));
     assert_eq!(toolset.active.load(Ordering::Acquire), 0);
     let _ = block_on(owner.shutdown());
 }

@@ -166,10 +166,10 @@ async fn malformed_stream_settles_as_failure_without_partial_durable_success() {
         let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
             .await
             .expect("recover");
-        if recovered.state().model_settlements.len() == 1 {
-            assert!(recovered.state().pending_model_effect.is_none());
-            assert!(recovered.state().messages.is_empty());
-            assert!(recovered.state().completion_identities.is_empty());
+        if recovered.state().model_settlements().len() == 1 {
+            assert!(recovered.state().pending_model_effect().is_none());
+            assert!(recovered.state().messages().is_empty());
+            assert!(recovered.state().completion_identities().is_empty());
             break;
         }
         tokio::task::yield_now().await;
@@ -231,10 +231,10 @@ async fn an_expired_committed_deadline_prevents_provider_execution() {
         let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
             .await
             .expect("recover");
-        if recovered.state().model_settlements.len() == 1 {
-            assert!(recovered.state().pending_model_effect.is_none());
-            assert!(recovered.state().messages.is_empty());
-            assert!(recovered.state().completion_identities.is_empty());
+        if recovered.state().model_settlements().len() == 1 {
+            assert!(recovered.state().pending_model_effect().is_none());
+            assert!(recovered.state().messages().is_empty());
+            assert!(recovered.state().completion_identities().is_empty());
             break;
         }
         tokio::task::yield_now().await;

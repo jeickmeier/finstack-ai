@@ -259,7 +259,7 @@ pub(crate) async fn journal_has_rejection(store: &Arc<MemoryJournalStore>) -> bo
 }
 
 pub(crate) fn requested_execute(state: &KernelState) -> (EffectId, ToolCallId, ValidatedToolCall) {
-    let batch = state.active_tool_batch.as_ref().expect("batch");
+    let batch = state.active_tool_batch().expect("batch");
     let call = batch
         .calls
         .iter()
@@ -282,7 +282,7 @@ pub(crate) fn requested_execute(state: &KernelState) -> (EffectId, ToolCallId, V
 
 pub(crate) fn tool_result_call_ids(state: &KernelState) -> Vec<ToolCallId> {
     state
-        .messages
+        .messages()
         .iter()
         .filter_map(|message| match message.content() {
             [ContentBlock::ToolResult(result)] => Some(*result.tool_call_id()),
@@ -293,7 +293,7 @@ pub(crate) fn tool_result_call_ids(state: &KernelState) -> Vec<ToolCallId> {
 
 pub(crate) fn source_tool_call_ids(state: &KernelState) -> Vec<ToolCallId> {
     state
-        .messages
+        .messages()
         .iter()
         .flat_map(|message| {
             message.content().iter().filter_map(|block| match block {

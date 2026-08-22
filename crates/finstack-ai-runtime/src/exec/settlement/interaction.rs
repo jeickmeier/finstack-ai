@@ -64,7 +64,7 @@ fn tool_opening_counts(plans: &[ToolCallPlan]) -> Result<ToolOpeningCounts, RunH
 
 pub(super) fn approval_cursor(state: &finstack_ai_kernel::KernelState) -> StageCursor {
     StageCursor {
-        cycle: state.cycle,
+        cycle: state.cycle(),
         stage: Stage::BeforeToolBatch,
     }
 }
@@ -96,8 +96,7 @@ pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
     let effect_id = generate_tool_id::<EffectTag, _, _>(sources)?;
     let expires_at = coordinator
         .state()
-        .accepted
-        .as_ref()
+        .accepted()
         .and_then(finstack_ai_kernel::RunAccepted::effective_deadline);
     let request = InteractionRequest::try_new(
         1,
@@ -221,7 +220,7 @@ fn approval_metadata(subjects: &[ApprovalSubject]) -> Result<Metadata, RunHandle
 pub(super) async fn journaled_approval_outcomes(
     coordinator: &CommitCoordinator,
 ) -> Vec<(ToolCallId, InteractionTerminalOutcome)> {
-    let Some(session_id) = coordinator.state().session_id else {
+    let Some(session_id) = coordinator.state().session_id() else {
         return Vec::new();
     };
     let Ok(loaded) = coordinator
@@ -306,8 +305,7 @@ pub(crate) async fn request_tool_interaction<C: Clock, R: RandomSource>(
     let expires_at = template.expires_at().or_else(|| {
         coordinator
             .state()
-            .accepted
-            .as_ref()
+            .accepted()
             .and_then(finstack_ai_kernel::RunAccepted::effective_deadline)
     });
     let request = InteractionRequest::try_new(
@@ -375,7 +373,7 @@ pub(crate) async fn apply_interaction_resume<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
 ) -> Result<InteractionResumeAction, RunHandleError> {
-    if coordinator.state().cancellation.is_some() {
+    if coordinator.state().cancellation().is_some() {
         return Ok(InteractionResumeAction::WaitResolution);
     }
     let now = sources.now()?;
@@ -383,11 +381,13 @@ pub(crate) async fn apply_interaction_resume<C: Clock, R: RandomSource>(
     if action != InteractionResumeAction::ExpireIfDue {
         return Ok(action);
     }
-    let pending = coordinator.state().pending_interaction.as_ref().ok_or(
-        RunHandleError::InteractionSettlement {
-            code: "interaction_pending_missing",
-        },
-    )?;
+    let pending =
+        coordinator
+            .state()
+            .pending_interaction()
+            .ok_or(RunHandleError::InteractionSettlement {
+                code: "interaction_pending_missing",
+            })?;
     let input = KernelInput::InteractionSettled(InteractionSettled::Expired(InteractionExpired {
         interaction_id: pending.request.interaction_id(),
         expired_at: now,

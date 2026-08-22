@@ -8,8 +8,8 @@ fn assert_wrong_inputs(
     for (family, input) in family_inputs(stage, identity_seed) {
         if family != allowed {
             let expected = if family == InputFamily::Tool
-                && kernel.state().phase == Some(RunPhase::AwaitingExternal)
-                && kernel.state().active_tool_batch.is_none()
+                && kernel.state().phase() == Some(RunPhase::AwaitingExternal)
+                && kernel.state().active_tool_batch().is_none()
             {
                 "tool_settlement_mismatch"
             } else {

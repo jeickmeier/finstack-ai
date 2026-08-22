@@ -50,7 +50,7 @@ async fn repeated_model_runs_settle_and_shutdown_without_stream_or_task_leaks() 
                 let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
                     .await
                     .expect("recover");
-                if recovered.state().model_settlements.len() == 1 {
+                if recovered.state().model_settlements().len() == 1 {
                     break;
                 }
                 tokio::task::yield_now().await;

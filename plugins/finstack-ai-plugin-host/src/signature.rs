@@ -10,10 +10,13 @@ use crate::error::PluginHostError;
 /// Host signature policy. This is not kernel behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SignaturePolicy {
-    /// Unsigned packages are allowed. Malformed metadata still fails parse.
-    #[default]
+    /// Unsigned packages are allowed. Development/fixtures only; this is an
+    /// explicit opt-in, never a production posture. Malformed metadata still
+    /// fails parse.
     Permissive,
     /// A present signature must verify against a configured trust root.
+    /// This is the default.
+    #[default]
     Strict,
 }
 
@@ -146,6 +149,11 @@ mod tests {
         }))
         .expect("json");
         parse_manifest(&bytes).expect("manifest")
+    }
+
+    #[test]
+    fn default_policy_is_strict() {
+        assert_eq!(SignaturePolicy::default(), SignaturePolicy::Strict);
     }
 
     #[test]

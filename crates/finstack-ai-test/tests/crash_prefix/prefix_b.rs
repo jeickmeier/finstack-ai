@@ -47,11 +47,11 @@ async fn prefix_b1_through_b4() {
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     let replay = recovered
         .state()
-        .budget_reservations
+        .budget_reservations()
         .get(&reserve.reservation_id)
         .expect("B1 requested");
     assert!(replay.settlement.is_none());
-    assert_legal("B1", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("B1", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let mut parent = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -94,7 +94,7 @@ async fn prefix_b1_through_b4() {
     assert!(
         recovered
             .state()
-            .budget_reservations
+            .budget_reservations()
             .get(&reserve.reservation_id)
             .expect("settled")
             .settlement
@@ -112,7 +112,7 @@ async fn prefix_b1_through_b4() {
         .await
         .expect("equal reserve");
     assert_eq!(ledger.reserve_calls(), 1, "B2 no double-allocate");
-    assert_legal("B2", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("B2", recovered.state().phase(), LegalRestore::Retryable);
 
     drop(recovered);
     let mut recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -153,7 +153,7 @@ async fn prefix_b1_through_b4() {
         .await
         .expect("equal charge");
     assert_eq!(ledger.charge_calls(), 1, "B4 no double-charge");
-    assert_legal("B4", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("B4", recovered.state().phase(), LegalRestore::Retryable);
 
     drop(recovered);
     let mut recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -200,5 +200,5 @@ async fn prefix_b1_through_b4() {
         .await
         .expect("equal release");
     assert_eq!(ledger.release_calls(), 1, "B3 release idempotent");
-    assert_legal("B3", recovered.state().phase, LegalRestore::Completed);
+    assert_legal("B3", recovered.state().phase(), LegalRestore::Completed);
 }

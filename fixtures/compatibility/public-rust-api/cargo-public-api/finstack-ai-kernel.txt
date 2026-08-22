@@ -3510,6 +3510,7 @@ impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::JsonBlock
 pub fn finstack_ai_kernel::JsonBlock::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::Kernel
 impl finstack_ai_kernel::Kernel
+pub fn finstack_ai_kernel::Kernel::adopt_session_head(&mut self, u64) -> core::result::Result<(), finstack_ai_kernel::KernelError>
 pub fn finstack_ai_kernel::Kernel::apply(&mut self, &finstack_ai_kernel::CommittedBatch, u64) -> core::result::Result<alloc::sync::Arc<[finstack_ai_kernel::RunEvent]>, finstack_ai_kernel::KernelError>
 pub fn finstack_ai_kernel::Kernel::decide(&self, &finstack_ai_kernel::TransitionEnv, finstack_ai_kernel::KernelInput) -> core::result::Result<finstack_ai_kernel::Decision, finstack_ai_kernel::KernelError>
 pub const fn finstack_ai_kernel::Kernel::state(&self) -> &finstack_ai_kernel::KernelState
@@ -3521,44 +3522,45 @@ pub fn finstack_ai_kernel::Kernel::default() -> finstack_ai_kernel::Kernel
 impl core::fmt::Debug for finstack_ai_kernel::Kernel
 pub fn finstack_ai_kernel::Kernel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai_kernel::KernelState
-pub finstack_ai_kernel::KernelState::accepted: core::option::Option<finstack_ai_kernel::RunAccepted>
-pub finstack_ai_kernel::KernelState::accepted_at: core::option::Option<finstack_ai_kernel::Timestamp>
-pub finstack_ai_kernel::KernelState::active_capabilities: alloc::sync::Arc<[finstack_ai_kernel::ActiveCapability]>
-pub finstack_ai_kernel::KernelState::active_tool_batch: core::option::Option<finstack_ai_kernel::ActiveToolBatch>
-pub finstack_ai_kernel::KernelState::budget_charges: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::BudgetChargeReceipt>
-pub finstack_ai_kernel::KernelState::budget_reservations: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::BudgetReservationId, finstack_ai_kernel::BudgetReservationReplay>
-pub finstack_ai_kernel::KernelState::cancellation: core::option::Option<finstack_ai_kernel::CancellationState>
-pub finstack_ai_kernel::KernelState::child_preparations: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ChildRunPrepared>
-pub finstack_ai_kernel::KernelState::completion_identities: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::CompletionIdentity>
-pub finstack_ai_kernel::KernelState::current_turn: core::option::Option<finstack_ai_kernel::CurrentTurn>
-pub finstack_ai_kernel::KernelState::cycle: u64
-pub finstack_ai_kernel::KernelState::extension_settlements: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ExtensionSettlementFingerprint>
-pub finstack_ai_kernel::KernelState::final_result: core::option::Option<finstack_ai_kernel::FinalResultRecorded>
-pub finstack_ai_kernel::KernelState::lane_id: core::option::Option<finstack_ai_kernel::LaneId>
-pub finstack_ai_kernel::KernelState::last_applied_sequence: u64
-pub finstack_ai_kernel::KernelState::last_interaction_terminal: core::option::Option<finstack_ai_kernel::InteractionTerminal>
-pub finstack_ai_kernel::KernelState::last_limit: core::option::Option<finstack_ai_kernel::LimitReached>
-pub finstack_ai_kernel::KernelState::last_tool_batch: core::option::Option<finstack_ai_kernel::ToolBatchClosed>
-pub finstack_ai_kernel::KernelState::limit_usage: finstack_ai_kernel::LimitUsage
-pub finstack_ai_kernel::KernelState::messages: alloc::sync::Arc<alloc::vec::Vec<finstack_ai_kernel::Message>>
-pub finstack_ai_kernel::KernelState::model_settlements: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ModelSettlementFingerprint>
-pub finstack_ai_kernel::KernelState::output_configuration: core::option::Option<finstack_ai_kernel::OutputConfiguration>
-pub finstack_ai_kernel::KernelState::pending_extension_effect: core::option::Option<finstack_ai_kernel::PendingExtensionEffect>
-pub finstack_ai_kernel::KernelState::pending_interaction: core::option::Option<finstack_ai_kernel::PendingInteraction>
-pub finstack_ai_kernel::KernelState::pending_model_effect: core::option::Option<finstack_ai_kernel::PendingModelEffect>
-pub finstack_ai_kernel::KernelState::phase: core::option::Option<finstack_ai_kernel::RunPhase>
-pub finstack_ai_kernel::KernelState::resolution_identities: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::ResolutionIdentity>
-pub finstack_ai_kernel::KernelState::resolved_plan_digest: core::option::Option<finstack_ai_kernel::Digest>
-pub finstack_ai_kernel::KernelState::retry: finstack_ai_kernel::RetryState
-pub finstack_ai_kernel::KernelState::session_id: core::option::Option<finstack_ai_kernel::SessionId>
-pub finstack_ai_kernel::KernelState::stage_settlements: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::StageCursor, finstack_ai_kernel::Digest>
-pub finstack_ai_kernel::KernelState::state_version: u16
-pub finstack_ai_kernel::KernelState::suspension: core::option::Option<finstack_ai_kernel::RunSuspended>
-pub finstack_ai_kernel::KernelState::terminal: core::option::Option<finstack_ai_kernel::TerminalState>
-pub finstack_ai_kernel::KernelState::terminal_candidate: core::option::Option<finstack_ai_kernel::TerminalCandidate>
-pub finstack_ai_kernel::KernelState::tool_calls: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::ToolCallId, finstack_ai_kernel::ToolCallIdentity>
-pub finstack_ai_kernel::KernelState::tool_settlements: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ToolSettlementFingerprint>
-pub finstack_ai_kernel::KernelState::validation_failure: core::option::Option<finstack_ai_kernel::OutputValidationFailed>
+impl finstack_ai_kernel::KernelState
+pub fn finstack_ai_kernel::KernelState::accepted(&self) -> core::option::Option<&finstack_ai_kernel::RunAccepted>
+pub const fn finstack_ai_kernel::KernelState::accepted_at(&self) -> core::option::Option<finstack_ai_kernel::Timestamp>
+pub const fn finstack_ai_kernel::KernelState::active_capabilities(&self) -> &alloc::sync::Arc<[finstack_ai_kernel::ActiveCapability]>
+pub fn finstack_ai_kernel::KernelState::active_tool_batch(&self) -> core::option::Option<&finstack_ai_kernel::ActiveToolBatch>
+pub const fn finstack_ai_kernel::KernelState::budget_charges(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::BudgetChargeReceipt>
+pub const fn finstack_ai_kernel::KernelState::budget_reservations(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::BudgetReservationId, finstack_ai_kernel::BudgetReservationReplay>
+pub fn finstack_ai_kernel::KernelState::cancellation(&self) -> core::option::Option<&finstack_ai_kernel::CancellationState>
+pub const fn finstack_ai_kernel::KernelState::child_preparations(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ChildRunPrepared>
+pub const fn finstack_ai_kernel::KernelState::completion_identities(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::CompletionIdentity>
+pub fn finstack_ai_kernel::KernelState::current_turn(&self) -> core::option::Option<&finstack_ai_kernel::CurrentTurn>
+pub const fn finstack_ai_kernel::KernelState::cycle(&self) -> u64
+pub const fn finstack_ai_kernel::KernelState::extension_settlements(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ExtensionSettlementFingerprint>
+pub fn finstack_ai_kernel::KernelState::final_result(&self) -> core::option::Option<&finstack_ai_kernel::FinalResultRecorded>
+pub const fn finstack_ai_kernel::KernelState::lane_id(&self) -> core::option::Option<finstack_ai_kernel::LaneId>
+pub const fn finstack_ai_kernel::KernelState::last_applied_sequence(&self) -> u64
+pub fn finstack_ai_kernel::KernelState::last_interaction_terminal(&self) -> core::option::Option<&finstack_ai_kernel::InteractionTerminal>
+pub fn finstack_ai_kernel::KernelState::last_limit(&self) -> core::option::Option<&finstack_ai_kernel::LimitReached>
+pub fn finstack_ai_kernel::KernelState::last_tool_batch(&self) -> core::option::Option<&finstack_ai_kernel::ToolBatchClosed>
+pub const fn finstack_ai_kernel::KernelState::limit_usage(&self) -> &finstack_ai_kernel::LimitUsage
+pub const fn finstack_ai_kernel::KernelState::messages(&self) -> &alloc::sync::Arc<alloc::vec::Vec<finstack_ai_kernel::Message>>
+pub const fn finstack_ai_kernel::KernelState::model_settlements(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ModelSettlementFingerprint>
+pub fn finstack_ai_kernel::KernelState::output_configuration(&self) -> core::option::Option<&finstack_ai_kernel::OutputConfiguration>
+pub fn finstack_ai_kernel::KernelState::pending_extension_effect(&self) -> core::option::Option<&finstack_ai_kernel::PendingExtensionEffect>
+pub fn finstack_ai_kernel::KernelState::pending_interaction(&self) -> core::option::Option<&finstack_ai_kernel::PendingInteraction>
+pub fn finstack_ai_kernel::KernelState::pending_model_effect(&self) -> core::option::Option<&finstack_ai_kernel::PendingModelEffect>
+pub const fn finstack_ai_kernel::KernelState::phase(&self) -> core::option::Option<finstack_ai_kernel::RunPhase>
+pub const fn finstack_ai_kernel::KernelState::resolution_identities(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::ResolutionIdentity>
+pub const fn finstack_ai_kernel::KernelState::resolved_plan_digest(&self) -> core::option::Option<finstack_ai_kernel::Digest>
+pub const fn finstack_ai_kernel::KernelState::retry(&self) -> &finstack_ai_kernel::RetryState
+pub const fn finstack_ai_kernel::KernelState::session_id(&self) -> core::option::Option<finstack_ai_kernel::SessionId>
+pub const fn finstack_ai_kernel::KernelState::stage_settlements(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::StageCursor, finstack_ai_kernel::Digest>
+pub const fn finstack_ai_kernel::KernelState::state_version(&self) -> u16
+pub fn finstack_ai_kernel::KernelState::suspension(&self) -> core::option::Option<&finstack_ai_kernel::RunSuspended>
+pub fn finstack_ai_kernel::KernelState::terminal(&self) -> core::option::Option<&finstack_ai_kernel::TerminalState>
+pub fn finstack_ai_kernel::KernelState::terminal_candidate(&self) -> core::option::Option<&finstack_ai_kernel::TerminalCandidate>
+pub const fn finstack_ai_kernel::KernelState::tool_calls(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::ToolCallId, finstack_ai_kernel::ToolCallIdentity>
+pub const fn finstack_ai_kernel::KernelState::tool_settlements(&self) -> &alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EffectId, finstack_ai_kernel::ToolSettlementFingerprint>
+pub fn finstack_ai_kernel::KernelState::validation_failure(&self) -> core::option::Option<&finstack_ai_kernel::OutputValidationFailed>
 impl finstack_ai_kernel::KernelState
 pub fn finstack_ai_kernel::KernelState::state_hash(&self) -> core::result::Result<finstack_ai_kernel::Digest, finstack_ai_kernel::KernelError>
 impl finstack_ai_kernel::KernelState

@@ -106,17 +106,12 @@ impl ExternalCompletionRouter {
                 .await;
         };
 
-        let identity_valid = coordinator.state().session_id == Some(command.locator.session_id)
-            && coordinator.state().lane_id == Some(command.locator.lane_id)
-            && coordinator
-                .state()
-                .accepted
-                .as_ref()
-                .is_some_and(|accepted| {
-                    accepted.run_id() == command.locator.run_id
-                        && accepted.security().tenant_scope()
-                            == command.locator.tenant_scope.as_ref()
-                });
+        let identity_valid = coordinator.state().session_id() == Some(command.locator.session_id)
+            && coordinator.state().lane_id() == Some(command.locator.lane_id)
+            && coordinator.state().accepted().is_some_and(|accepted| {
+                accepted.run_id() == command.locator.run_id
+                    && accepted.security().tenant_scope() == command.locator.tenant_scope.as_ref()
+            });
         if !identity_valid {
             return self
                 .reject_unknown(
@@ -151,7 +146,7 @@ impl ExternalCompletionRouter {
         let effect_id = command.completion.effect_id;
         let accepted_digest = coordinator
             .state()
-            .completion_identities
+            .completion_identities()
             .get(command.completion.completion_id.as_ref())
             .map(|identity| identity.settlement_digest);
         if !known_effect(coordinator.state(), effect_id) {

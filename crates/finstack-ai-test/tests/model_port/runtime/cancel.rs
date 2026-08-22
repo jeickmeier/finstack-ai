@@ -145,7 +145,7 @@ async fn runtime_routes_cancel_effect_to_only_the_active_model_task() {
         let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
             .await
             .expect("recover cancellation reconciliation");
-        if recovered.state().phase == Some(RunPhase::Cancelled) {
+        if recovered.state().phase() == Some(RunPhase::Cancelled) {
             break;
         }
         tokio::task::yield_now().await;
@@ -160,6 +160,6 @@ async fn runtime_routes_cancel_effect_to_only_the_active_model_task() {
     let recovered = CommitCoordinator::recover(store, id::<SessionTag>(1))
         .await
         .expect("recover cancelled run");
-    assert!(recovered.state().messages.is_empty());
-    assert!(recovered.state().completion_identities.is_empty());
+    assert!(recovered.state().messages().is_empty());
+    assert!(recovered.state().completion_identities().is_empty());
 }

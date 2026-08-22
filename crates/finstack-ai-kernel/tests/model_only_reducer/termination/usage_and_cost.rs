@@ -43,11 +43,11 @@ fn missing_cost_usage_obeys_fail_closed_and_suspend_policies() {
                 "hello",
             ),
         );
-        assert_eq!(harness.kernel.state().phase, Some(expected_phase));
+        assert_eq!(harness.kernel.state().phase(), Some(expected_phase));
         assert_eq!(decision.records[0].body().kind_name(), expected_kind);
         assert!(decision.actions.is_empty());
         if policy == finstack_ai_kernel::UnknownUsagePolicy::AllowWithinReservedMaximum {
-            assert!(harness.kernel.state().limit_usage.cost.is_none());
+            assert!(harness.kernel.state().limit_usage().cost.is_none());
             assert!(
                 !decision
                     .records
@@ -304,12 +304,12 @@ fn structural_apply_does_not_charge_completed_usage() {
             "hello",
         ),
     );
-    let before_cost = harness.kernel.state().limit_usage.cost.clone();
+    let before_cost = harness.kernel.state().limit_usage().cost.clone();
     assert!(before_cost.is_none());
     let next = harness
         .kernel
         .state()
-        .last_applied_sequence
+        .last_applied_sequence()
         .checked_add(1)
         .expect("next sequence");
     let record = RecordEnvelope::try_new(
@@ -342,7 +342,7 @@ fn structural_apply_does_not_charge_completed_usage() {
         .apply(&batch, first_transient)
         .expect("structural apply");
     harness.batches.push(batch);
-    assert_eq!(harness.kernel.state().limit_usage.cost, before_cost);
+    assert_eq!(harness.kernel.state().limit_usage().cost, before_cost);
     let replayed = replay(&harness.batches);
     assert_eq!(replayed.state(), harness.kernel.state());
     assert_eq!(
@@ -384,11 +384,11 @@ fn costless_allow_fails_when_accrued_already_equals_maximum() {
             exact,
         ),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterModel));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterModel));
     let accrued = harness
         .kernel
         .state()
-        .limit_usage
+        .limit_usage()
         .cost
         .as_ref()
         .expect("observed cost");

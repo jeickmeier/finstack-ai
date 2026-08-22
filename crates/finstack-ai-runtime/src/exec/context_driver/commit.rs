@@ -54,14 +54,12 @@ pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
     };
     let recovering = coordinator
         .state()
-        .pending_extension_effect
-        .as_ref()
+        .pending_extension_effect()
         .is_some_and(|pending| pending.requested.effect_id() == invocation.run.effect_id);
     let (requested, envelope) = if recovering {
         let pending = coordinator
             .state()
-            .pending_extension_effect
-            .as_ref()
+            .pending_extension_effect()
             .ok_or_else(|| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?;
         let envelope = coordinator
             .replayed_extension_envelope(invocation.run.effect_id)

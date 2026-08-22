@@ -177,7 +177,7 @@ fn a_fail_settled_at_before_model_passes_through_the_chain() {
         "the failure must reuse the facade's own pre-minted record id"
     );
     assert!(
-        coordinator.state().pending_model_effect.is_none(),
+        coordinator.state().pending_model_effect().is_none(),
         "a failed BeforeModel must not have opened a model effect"
     );
 }

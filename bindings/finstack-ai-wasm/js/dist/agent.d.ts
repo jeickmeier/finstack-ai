@@ -535,6 +535,11 @@ export declare class Session {
 }
 /**
  * Live handle for one lane in a session.
+ *
+ * Durable lane park/respawn (`suspend`/`resume`) and direct interaction
+ * management (`listInteractions`/`resolveInteraction`) are native-only.
+ * Browser WASM has no truthful respawn path; use the host session/inbox
+ * path instead.
  */
 export declare class Lane {
     #private;
@@ -579,19 +584,6 @@ export declare class Lane {
      * ```
      */
     run(agent: Agent, input: string, options?: RunOptions): Run;
-    /**
-     * Park is unsupported on wasm-host.
-     *
-     * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
-     */
-    suspend(): Promise<void>;
-    /**
-     * Resume is unsupported on wasm-host.
-     *
-     * @param _agent - Accepted for API parity with native `Lane.resume`.
-     * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
-     */
-    resume(_agent: Agent): Promise<void>;
 }
 /**
  * In-process external identity map.

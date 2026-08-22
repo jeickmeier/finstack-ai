@@ -28,14 +28,13 @@ fn kernel_state_digest(schema_version: u16, projection: &Value) -> Digest {
 }
 
 fn representative_state(state_version: u16) -> KernelState {
-    KernelState {
-        state_version,
-        session_id: Some(id::<finstack_ai_kernel::SessionTag>(SESSION)),
-        lane_id: Some(id::<finstack_ai_kernel::LaneTag>(LANE)),
-        accepted: Some(root_acceptance()),
-        accepted_at: (state_version >= 3).then(|| timestamp(ACCEPTED_AT_MS)),
-        ..KernelState::default()
-    }
+    let mut state = KernelState::default();
+    state.set_state_version(state_version);
+    state.set_session_id(Some(id::<finstack_ai_kernel::SessionTag>(SESSION)));
+    state.set_lane_id(Some(id::<finstack_ai_kernel::LaneTag>(LANE)));
+    state.set_accepted(Some(root_acceptance()));
+    state.set_accepted_at((state_version >= 3).then(|| timestamp(ACCEPTED_AT_MS)));
+    state
 }
 
 fn accepted_projection() -> Value {
@@ -246,12 +245,11 @@ fn tool_call_bearing_state() -> KernelState {
         Metadata::empty(),
     )
     .expect("message");
-    KernelState {
-        state_version: 2,
-        messages: Arc::new(vec![message]),
-        tool_calls: [(*call.tool_call_id(), identity)].into_iter().collect(),
-        ..KernelState::default()
-    }
+    let mut state = KernelState::default();
+    state.set_state_version(2);
+    state.set_messages(Arc::new(vec![message]));
+    state.set_tool_calls([(*call.tool_call_id(), identity)].into_iter().collect());
+    state
 }
 
 fn tool_call_independent_projection() -> Value {

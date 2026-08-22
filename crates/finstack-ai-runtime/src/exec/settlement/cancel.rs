@@ -45,8 +45,7 @@ async fn reconcile_classified_effect<C: Clock, R: RandomSource>(
 ) -> Result<(), RunHandleError> {
     let request_id = coordinator
         .state()
-        .cancellation
-        .as_ref()
+        .cancellation()
         .ok_or(RunHandleError::CancellationSettlement {
             code: "cancellation_request_missing",
         })?
@@ -94,11 +93,11 @@ pub(crate) async fn drain_idle_cancellation<C: Clock, R: RandomSource>(
     force_all: bool,
 ) -> Result<(), RunHandleError> {
     loop {
-        let Some(cancellation) = coordinator.state().cancellation.clone() else {
+        let Some(cancellation) = coordinator.state().cancellation() else {
             return Ok(());
         };
-        if coordinator.state().terminal.is_some()
-            || coordinator.state().phase == Some(RunPhase::Suspended)
+        if coordinator.state().terminal().is_some()
+            || coordinator.state().phase() == Some(RunPhase::Suspended)
         {
             return Ok(());
         }
@@ -139,21 +138,20 @@ fn idle_cancellation_class(
     force_all: bool,
 ) -> Option<IdleCancelClass> {
     if state
-        .pending_interaction
-        .as_ref()
+        .pending_interaction()
         .is_some_and(|pending| pending.request.effect_id() == effect_id)
     {
         return Some(IdleCancelClass::Cancelled);
     }
     if state
-        .retry
+        .retry()
         .pending
         .as_ref()
         .is_some_and(|pending| pending.timer_effect_id == effect_id)
     {
         return Some(IdleCancelClass::Cancelled);
     }
-    if let Some(pending) = state.pending_model_effect.as_ref()
+    if let Some(pending) = state.pending_model_effect()
         && pending.requested.effect_id() == effect_id
     {
         return effect_idle_class(
@@ -162,7 +160,7 @@ fn idle_cancellation_class(
             force_all,
         );
     }
-    if let Some(pending) = state.pending_extension_effect.as_ref()
+    if let Some(pending) = state.pending_extension_effect()
         && pending.requested.effect_id() == effect_id
     {
         // Extension calls execute inline with the command worker. A later
@@ -171,7 +169,7 @@ fn idle_cancellation_class(
         // classified from the committed retry-safety contract.
         return effect_idle_class(pending.requested.retry_safety(), true, force_all);
     }
-    state.active_tool_batch.as_ref().and_then(|batch| {
+    state.active_tool_batch().and_then(|batch| {
         batch.calls.iter().find_map(|call| {
             if call.assigned.effect_id != effect_id {
                 return None;

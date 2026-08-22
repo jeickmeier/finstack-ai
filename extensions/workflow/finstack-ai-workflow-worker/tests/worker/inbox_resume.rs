@@ -139,11 +139,11 @@ async fn drive_past_missing_facade_decisions(
         .await
         .expect("recover");
     assert_eq!(
-        before_facade.state().phase,
+        before_facade.state().phase(),
         Some(RunPhase::AfterToolBatch),
         "the facade only needs to unblock AfterToolBatch"
     );
-    let cycle = before_facade.state().cycle;
+    let cycle = before_facade.state().cycle();
 
     facade
         .handle()
@@ -154,7 +154,7 @@ async fn drive_past_missing_facade_decisions(
         .await
         .expect("after tool batch");
     wait_state(journal, |state| {
-        state.phase == Some(RunPhase::PreparingContext)
+        state.phase() == Some(RunPhase::PreparingContext)
     })
     .await;
 
@@ -164,7 +164,7 @@ async fn drive_past_missing_facade_decisions(
             .await
             .expect("recover")
             .state()
-            .messages
+            .messages()
             .as_slice(),
     );
     facade
@@ -210,7 +210,7 @@ async fn drive_past_missing_facade_decisions(
         )
         .await
         .expect("model request");
-    wait_state(journal, |state| state.phase == Some(RunPhase::AfterModel)).await;
+    wait_state(journal, |state| state.phase() == Some(RunPhase::AfterModel)).await;
 
     facade
         .handle()
@@ -221,7 +221,7 @@ async fn drive_past_missing_facade_decisions(
         .await
         .expect("after model, cycle 2");
     wait_state(journal, |state| {
-        state.phase == Some(RunPhase::BeforeFinalize)
+        state.phase() == Some(RunPhase::BeforeFinalize)
     })
     .await;
 
@@ -237,7 +237,7 @@ async fn drive_past_missing_facade_decisions(
         )
         .await
         .expect("finalize");
-    wait_state(journal, |state| state.terminal.is_some()).await;
+    wait_state(journal, |state| state.terminal().is_some()).await;
     drop(facade);
 }
 
@@ -454,7 +454,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
         .await
         .expect("after model");
     wait_state(&journal, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     drop(owner);
@@ -475,7 +475,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     };
     let tool_call_id = *session
         .last_state()
-        .tool_calls
+        .tool_calls()
         .iter()
         .find(|(_, identity)| identity.effect_id == Some(effect_id))
         .map(|(id, _)| id)
@@ -535,7 +535,10 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     .await
     .expect("recover");
     assert!(
-        recovered.state().tool_settlements.contains_key(&effect_id),
+        recovered
+            .state()
+            .tool_settlements()
+            .contains_key(&effect_id),
         "the delivered completion was applied to the journal"
     );
     assert_eq!(
@@ -712,7 +715,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
         .await
         .expect("after model");
     wait_state(&journal, |state| {
-        state.phase == Some(RunPhase::AwaitingInteraction)
+        state.phase() == Some(RunPhase::AwaitingInteraction)
     })
     .await;
     drop(owner);
@@ -795,7 +798,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
     .await
     .expect("recover");
     assert!(
-        recovered.state().pending_interaction.is_none(),
+        recovered.state().pending_interaction().is_none(),
         "the delivered resolution was applied to the journal"
     );
     assert_eq!(

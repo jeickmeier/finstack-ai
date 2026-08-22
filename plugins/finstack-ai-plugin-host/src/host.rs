@@ -20,10 +20,10 @@ use crate::cache::{
 use crate::error::PluginHostError;
 use crate::grants::{
     FilesystemPreopen, GrantResources, default_application_grants, require_offered,
-    validate_application_grants,
+    validate_application_grants, validate_preopen_host_path,
 };
 use crate::instantiate::HostState;
-use crate::limits::EffectiveLimits;
+use crate::limits::{EffectiveLimits, effective_limits};
 use crate::lockfile::{LockedPlugin, resolve_lockfile, world_from_manifest};
 use crate::signature::{SignaturePolicy, verify_manifest};
 
@@ -77,7 +77,9 @@ impl PluginHostConfig {
     /// mode is host-owned and does not use Wasmtime's implicit global cache.
     /// A writable cache directory is not an authentication boundary: `load`
     /// never deserializes directory artifacts (FIND-064-001 / TM-08).
-    /// Default grants are `{logging, blobs}`. Signature policy is Permissive.
+    /// Default grants are `{logging, blobs}`. Signature policy defaults to
+    /// Strict; [`SignaturePolicy::Permissive`] is an explicit opt-in via
+    /// [`Self::with_signature_policy`] for development/fixtures only.
     ///
     /// # Errors
     ///
@@ -98,7 +100,7 @@ impl PluginHostConfig {
             instance_policy,
             max_concurrent_instances,
             application_grants: default_application_grants(),
-            signature_policy: SignaturePolicy::Permissive,
+            signature_policy: SignaturePolicy::Strict,
             trust_roots: BTreeMap::new(),
             resources: GrantResources::default(),
             default_limits: EffectiveLimits::default(),
@@ -134,10 +136,21 @@ impl PluginHostConfig {
     }
 
     /// Replace filesystem preopens. An empty list does not link `wasi:filesystem`.
-    #[must_use]
-    pub fn with_filesystem_preopens(mut self, preopens: Vec<FilesystemPreopen>) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginHostError::ConfigInvalid`] when a preopen host path is
+    /// empty, contains `..`, or names a sensitive root such as `/etc` or the
+    /// user's home directory.
+    pub fn with_filesystem_preopens(
+        mut self,
+        preopens: Vec<FilesystemPreopen>,
+    ) -> Result<Self, PluginHostError> {
+        for preopen in &preopens {
+            validate_preopen_host_path(&preopen.host_path)?;
+        }
         self.resources.filesystem = preopens;
-        self
+        Ok(self)
     }
 
     /// Replace the HTTP hostname allowlist. Empty does not link `wasi:http`.
@@ -369,9 +382,10 @@ impl PluginHost {
         let granted = require_offered(&manifest.permissions, &self.application_grants)?;
         verify_manifest(&manifest, self.signature_policy, &self.trust_roots)?;
         let digest = component_digest(bytes);
+        let limits = effective_limits(&manifest, self.default_limits);
         let key = cache_key(&CacheKeyParts {
             digest: digest.clone(),
-            engine: engine_fingerprint(),
+            engine: engine_fingerprint(&limits),
             target: host_target(),
             abi: abi_identity(world.as_str(), &manifest.version),
         });
@@ -570,6 +584,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sensitive_preopen_is_rejected_at_config() {
+        use crate::grants::FilesystemPreopen;
+
+        let error = PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 1)
+            .expect("cfg")
+            .with_filesystem_preopens(vec![FilesystemPreopen {
+                guest_path: "/data".into(),
+                host_path: "/etc".into(),
+                read: true,
+                write: false,
+            }])
+            .expect_err("sensitive root");
+        assert_eq!(error.code(), "plugin_registration_invalid");
+    }
+
     fn tiny_component() -> Vec<u8> {
         wat::parse_str(
             r#"
@@ -592,9 +622,10 @@ mod tests {
     #[test]
     fn compiled_cache_invalidates_on_each_key_field() {
         use crate::cache::{
-            CONFIG_FINGERPRINT, CacheKeyParts, abi_identity, component_digest, engine_fingerprint,
-            engine_fingerprint_parts, host_target,
+            CacheKeyParts, ENGINE_FEATURE_FLAGS, abi_identity, component_digest,
+            engine_fingerprint, engine_fingerprint_parts, host_target,
         };
+        use crate::limits::EffectiveLimits;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let host = PluginHost::try_new(
@@ -605,7 +636,7 @@ mod tests {
         let bytes = tiny_component();
         let base = CacheKeyParts {
             digest: component_digest(&bytes),
-            engine: engine_fingerprint(),
+            engine: engine_fingerprint(&EffectiveLimits::default()),
             target: host_target(),
             abi: abi_identity("toolset-plugin", "0.0.4"),
         };
@@ -619,7 +650,7 @@ mod tests {
             ..base.clone()
         }));
         assert!(!host.cache_hit(&CacheKeyParts {
-            engine: engine_fingerprint_parts("0.0.0-test", CONFIG_FINGERPRINT),
+            engine: engine_fingerprint_parts("0.0.0-test", ENGINE_FEATURE_FLAGS),
             ..base.clone()
         }));
         assert!(!host.cache_hit(&CacheKeyParts {
@@ -642,18 +673,21 @@ mod tests {
             CacheKeyParts, abi_identity, cache_key, component_digest, engine_fingerprint,
             host_target,
         };
+        use crate::limits::EffectiveLimits;
+        use crate::signature::SignaturePolicy;
         use finstack_ai_wit::{manifest_digest_hex, parse_manifest};
 
         let dir = tempfile::tempdir().expect("tempdir");
         let host = PluginHost::try_new(
             PluginHostConfig::try_new(Some(dir.path().to_path_buf()), InstancePolicy::Exclusive, 2)
-                .expect("cfg"),
+                .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Permissive),
         )
         .expect("host");
         let bytes = tiny_component();
         let parts = CacheKeyParts {
             digest: component_digest(&bytes),
-            engine: engine_fingerprint(),
+            engine: engine_fingerprint(&EffectiveLimits::default()),
             target: host_target(),
             abi: abi_identity("toolset-plugin", "0.0.4"),
         };

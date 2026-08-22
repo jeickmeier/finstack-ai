@@ -24,18 +24,17 @@ async fn deferred_tool_first_pass_preserves_requested_effect() {
     let mut status = owner.handle().observe_status();
     let recovered = tokio::select! {
         recovered = wait_state(&store, |state| {
-            state.phase == Some(RunPhase::AwaitingExternal)
+            state.phase() == Some(RunPhase::AwaitingExternal)
         }) => recovered,
         changed = status.changed() => {
             changed.expect("owner status");
             panic!("owner stopped before deferral committed: {:?}", *status.borrow());
         }
     };
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingExternal));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingExternal));
     let batch = recovered
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("active tool batch");
     let call = batch.calls.first().expect("deferred tool call");
     let effect_id = call.assigned.effect_id;
@@ -46,7 +45,7 @@ async fn deferred_tool_first_pass_preserves_requested_effect() {
             ..
         } if deferred.effect_id == effect_id
     ));
-    assert!(!recovered.state().tool_settlements.contains_key(&effect_id));
+    assert!(!recovered.state().tool_settlements().contains_key(&effect_id));
 
     owner.shutdown().await;
 }

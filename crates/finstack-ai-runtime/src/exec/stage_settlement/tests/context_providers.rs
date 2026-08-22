@@ -181,8 +181,7 @@ fn an_in_flight_turn_keeps_the_prompt_ahead_of_its_own_tool_messages() {
 
     let committed = coordinator
         .state()
-        .current_turn
-        .as_ref()
+        .current_turn()
         .expect("current turn");
     let texts: Vec<String> = committed
         .context
@@ -233,8 +232,7 @@ fn prepare_context_invokes_committed_providers_and_projects_protected() {
     assert_eq!(calls.load(Ordering::Acquire), 1, "CommittedContextCall must invoke the provider");
     let committed = coordinator
         .state()
-        .current_turn
-        .as_ref()
+        .current_turn()
         .expect("current turn");
     let texts: Vec<String> = committed.context.messages.iter().map(message_text).collect();
     assert!(
@@ -297,8 +295,7 @@ fn settle_prepare_context(
 fn committed_context_texts(coordinator: &CommitCoordinator) -> Vec<String> {
     coordinator
         .state()
-        .current_turn
-        .as_ref()
+        .current_turn()
         .expect("current turn")
         .context
         .messages

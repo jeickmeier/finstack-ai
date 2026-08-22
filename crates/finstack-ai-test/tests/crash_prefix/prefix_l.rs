@@ -42,7 +42,7 @@ async fn prefix_l1_through_l3() {
         .expect("L1 mapping")
         .clone();
     assert_eq!(mapping.child.operation.run_id, id(51));
-    assert_legal("L1", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("L1", recovered.state().phase(), LegalRestore::Retryable);
     let attached = children
         .start_or_attach(
             &mut recovered,
@@ -56,13 +56,13 @@ async fn prefix_l1_through_l3() {
         .expect("retry attaches");
     assert_eq!(attached.locator.operation.run_id, id(51));
 
-    let accepted = child_accepted(51, 44, recovered.state().accepted.as_ref().expect("parent"));
+    let accepted = child_accepted(51, 44, recovered.state().accepted().expect("parent"));
     store
         .append(
             AppendRequest::try_new(
                 id(212),
                 id::<SessionTag>(1),
-                recovered.state().last_applied_sequence + 1,
+                recovered.state().last_applied_sequence() + 1,
                 vec![
                     RecordDraft::try_new(
                         RECORD_FORMAT_VERSION,
@@ -104,7 +104,7 @@ async fn prefix_l1_through_l3() {
             .parent_effect_id(),
         Some(id(44))
     );
-    assert_legal("L2", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("L2", recovered.state().phase(), LegalRestore::Retryable);
 
     let mut recovered = recovered;
     recovered
@@ -119,5 +119,5 @@ async fn prefix_l1_through_l3() {
         .expect("parent cancel");
     drop(recovered);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_legal("L3", recovered.state().phase, LegalRestore::Cancelled);
+    assert_legal("L3", recovered.state().phase(), LegalRestore::Cancelled);
 }

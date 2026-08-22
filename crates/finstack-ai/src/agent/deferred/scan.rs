@@ -12,7 +12,7 @@ pub struct OutstandingDeferral {
 /// Collect first-pass deferred tool calls still requested on `state`.
 #[must_use]
 pub fn outstanding_deferrals(state: &KernelState) -> Vec<OutstandingDeferral> {
-    let Some(batch) = state.active_tool_batch.as_ref() else {
+    let Some(batch) = state.active_tool_batch() else {
         return Vec::new();
     };
     batch

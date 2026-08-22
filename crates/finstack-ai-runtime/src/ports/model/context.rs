@@ -242,16 +242,16 @@ pub enum ModelResumeAction {
 /// pending, no settlement) and classify as [`ModelResumeAction::Reconcile`].
 #[must_use]
 pub fn model_resume_action(state: &KernelState) -> ModelResumeAction {
-    let Some(pending) = state.pending_model_effect.as_ref() else {
+    let Some(pending) = state.pending_model_effect() else {
         return ModelResumeAction::NoOutstanding;
     };
     if state
-        .model_settlements
+        .model_settlements()
         .contains_key(&pending.requested.effect_id())
     {
         return ModelResumeAction::UseRecorded;
     }
-    match state.phase {
+    match state.phase() {
         Some(RunPhase::AwaitingExternal) => match pending
             .deferred
             .as_ref()
@@ -306,17 +306,17 @@ pub fn map_model_reconcile_result(
     result: &ModelReconcileResult,
     retry_allowed: bool,
 ) -> ModelResumeAction {
-    let Some(pending) = state.pending_model_effect.as_ref() else {
+    let Some(pending) = state.pending_model_effect() else {
         return ModelResumeAction::NoOutstanding;
     };
     if state
-        .model_settlements
+        .model_settlements()
         .contains_key(&pending.requested.effect_id())
     {
         return ModelResumeAction::UseRecorded;
     }
     let awaiting_external =
-        state.phase == Some(RunPhase::AwaitingExternal) || pending.deferred.is_some();
+        state.phase() == Some(RunPhase::AwaitingExternal) || pending.deferred.is_some();
     match result {
         ModelReconcileResult::Completed(_) => ModelResumeAction::UseRecorded,
         ModelReconcileResult::Deferred(_) | ModelReconcileResult::StillRunning(_) => {

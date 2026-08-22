@@ -880,7 +880,7 @@ async fn dropping_last_handle_detaches_without_cancelling_execution() {
             let state = CommitCoordinator::recover(journal, session_id)
                 .await
                 .expect("recover detached run");
-            if matches!(state.state().terminal, Some(TerminalState::Completed(_))) {
+            if matches!(state.state().terminal(), Some(TerminalState::Completed(_))) {
                 break;
             }
             tokio::task::yield_now().await;
@@ -1603,7 +1603,7 @@ async fn complete_external_routes_a_deferred_parent_effect() {
         loop {
             if let Ok(commit) =
                 CommitCoordinator::recover(agent.journal_store(), parent.locator().session_id).await
-                && let Some(pending) = commit.state().pending_model_effect.as_ref()
+                && let Some(pending) = commit.state().pending_model_effect()
                 && let Some(deferred) = pending.deferred.as_ref()
             {
                 return deferred.effect_id;
@@ -1821,8 +1821,7 @@ async fn wait_accepted(store: &Arc<dyn JournalStore>, parent: &AgentRun) {
                 CommitCoordinator::recover(Arc::clone(store), parent.locator().session_id).await
                 && commit
                     .state()
-                    .accepted
-                    .as_ref()
+                    .accepted()
                     .is_some_and(|accepted| accepted.run_id() == parent.locator().run_id)
             {
                 return;
@@ -1935,8 +1934,8 @@ async fn wait_deferred_tool_effect(store: &Arc<dyn JournalStore>, parent: &Agent
         loop {
             if let Ok(commit) =
                 CommitCoordinator::recover(Arc::clone(store), parent.locator().session_id).await
-                && commit.state().phase == Some(RunPhase::AwaitingExternal)
-                && let Some(batch) = commit.state().active_tool_batch.as_ref()
+                && commit.state().phase() == Some(RunPhase::AwaitingExternal)
+                && let Some(batch) = commit.state().active_tool_batch()
                 && let Some(call) = batch.calls.first()
                 && matches!(
                     &call.status,

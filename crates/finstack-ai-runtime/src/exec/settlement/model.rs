@@ -31,8 +31,7 @@ pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
 ) -> Result<ModelResumeAction, RunHandleError> {
     if coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .is_some_and(|pending| pending.requested.is_compaction_summary())
     {
         return Ok(ModelResumeAction::NoOutstanding);
@@ -116,12 +115,12 @@ async fn settle_reconciled_completion<C: Clock, R: RandomSource>(
 ) -> Result<ModelResumeAction, RunHandleError> {
     if coordinator
         .state()
-        .model_settlements
+        .model_settlements()
         .contains_key(&seed.pending.requested.effect_id())
     {
         return Ok(ModelResumeAction::UseRecorded);
     }
-    if coordinator.state().phase == Some(RunPhase::AwaitingExternal) {
+    if coordinator.state().phase() == Some(RunPhase::AwaitingExternal) {
         return settle_external_model(coordinator, model, seed, draft, response, sources).await;
     }
     let driver = ModelDriverResult {
@@ -256,19 +255,17 @@ async fn submit_fail_closed<C: Clock, R: RandomSource>(
     reason_code: &'static str,
     sources: &SettlementSources<C, R>,
 ) -> Result<ModelResumeAction, RunHandleError> {
-    let accepted =
-        coordinator
-            .state()
-            .accepted
-            .as_ref()
-            .ok_or(RunHandleError::ModelSettlement {
-                code: "model_resume_accepted_missing",
-            })?;
+    let accepted = coordinator
+        .state()
+        .accepted()
+        .ok_or(RunHandleError::ModelSettlement {
+            code: "model_resume_accepted_missing",
+        })?;
     let security = accepted.security();
     let effect_id = seed.pending.requested.effect_id();
     let accepted_digest = coordinator
         .state()
-        .model_settlements
+        .model_settlements()
         .get(&effect_id)
         .map(|fingerprint| fingerprint.digest);
     let rejection = ExternalCommandRejected::try_new(
@@ -315,10 +312,10 @@ pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(
 ) -> Result<(), RunHandleError> {
     let effect_id = driver_result.seed.pending.requested.effect_id();
     let state = coordinator.state();
-    let Some(pending) = state.pending_model_effect.as_ref() else {
+    let Some(pending) = state.pending_model_effect() else {
         return Ok(());
     };
-    if let Some(cancellation) = state.cancellation.as_ref()
+    if let Some(cancellation) = state.cancellation()
         && cancellation.outstanding_effects.contains(&effect_id)
     {
         let cancelled = driver_result
@@ -330,7 +327,7 @@ pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(
     if pending.requested.effect_id() != effect_id
         || pending.model_request_id != driver_result.seed.pending.model_request_id
         || pending.deferred.is_some()
-        || state.terminal.is_some()
+        || state.terminal().is_some()
     {
         return Ok(());
     }
@@ -383,13 +380,13 @@ pub(crate) async fn process_model_progress<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
 ) -> Result<(), RunHandleError> {
     let state = coordinator.state();
-    let Some(pending) = state.pending_model_effect.as_ref() else {
+    let Some(pending) = state.pending_model_effect() else {
         return Ok(());
     };
     if pending.requested.effect_id() != effect_id
         || pending.deferred.is_some()
-        || state.terminal.is_some()
-        || state.cancellation.is_some()
+        || state.terminal().is_some()
+        || state.cancellation().is_some()
     {
         return Ok(());
     }

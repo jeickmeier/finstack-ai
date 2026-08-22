@@ -11,7 +11,7 @@ async fn retry_scheduled_before_crash_fires_once_and_second_respawn_is_idempoten
     let sleeping = recover_session(&store).await;
     let pending = sleeping
         .state()
-        .retry
+        .retry()
         .pending
         .as_ref()
         .expect("pending timer")
@@ -24,16 +24,16 @@ async fn retry_scheduled_before_crash_fires_once_and_second_respawn_is_idempoten
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::PreparingContext)
+        state.phase() == Some(RunPhase::PreparingContext)
     })
     .await;
     let fired = recover_session(&store).await;
-    assert_eq!(fired.state().retry.attempts, 1);
-    assert!(fired.state().retry.pending.is_none());
-    assert_eq!(fired.state().retry.timer_firings.len(), 1);
+    assert_eq!(fired.state().retry().attempts, 1);
+    assert!(fired.state().retry().pending.is_none());
+    assert_eq!(fired.state().retry().timer_firings.len(), 1);
     let firing = fired
         .state()
-        .retry
+        .retry()
         .timer_firings
         .get(&pending.timer_effect_id)
         .expect("same timer");
@@ -47,9 +47,9 @@ async fn retry_scheduled_before_crash_fires_once_and_second_respawn_is_idempoten
         .expect("second respawn");
     tokio::task::yield_now().await;
     let again = recover_session(&store).await;
-    assert_eq!(again.state().phase, Some(RunPhase::PreparingContext));
-    assert_eq!(again.state().retry.timer_firings.len(), 1);
-    assert_eq!(again.state().retry.attempts, 1);
+    assert_eq!(again.state().phase(), Some(RunPhase::PreparingContext));
+    assert_eq!(again.state().retry().timer_firings.len(), 1);
+    assert_eq!(again.state().retry().attempts, 1);
     second.shutdown().await;
 }
 
@@ -74,10 +74,10 @@ async fn cancel_while_sleeping_closes_without_firing_the_timer() {
         )
         .await
         .expect("cancel");
-    wait_state(&store, |state| state.phase == Some(RunPhase::Cancelled)).await;
+    wait_state(&store, |state| state.phase() == Some(RunPhase::Cancelled)).await;
     let cancelled = recover_session(&store).await;
-    assert!(cancelled.state().retry.pending.is_none());
-    assert!(cancelled.state().retry.timer_firings.is_empty());
+    assert!(cancelled.state().retry().pending.is_none());
+    assert!(cancelled.state().retry().timer_firings.is_empty());
     owner.shutdown().await;
 }
 
@@ -98,7 +98,7 @@ async fn cancel_while_deferred_model_does_not_issue_a_second_request() {
     .expect("owner");
     drive_to_active_model_request(&owner.handle()).await;
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     assert_eq!(model.request_count(), 1);
@@ -114,7 +114,7 @@ async fn cancel_while_deferred_model_does_not_issue_a_second_request() {
         .await
         .expect("cancel");
     wait_state(&store, |state| {
-        matches!(state.phase, Some(RunPhase::Cancelled | RunPhase::Suspended))
+        matches!(state.phase(), Some(RunPhase::Cancelled | RunPhase::Suspended))
     })
     .await;
     assert_eq!(model.request_count(), 1);
@@ -138,7 +138,7 @@ async fn cancel_unknown_deferred_model_suspends_without_fabricating_success() {
     .expect("owner");
     drive_to_active_model_request_with(&owner.handle(), RetrySafety::Unknown).await;
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     owner
@@ -152,10 +152,10 @@ async fn cancel_unknown_deferred_model_suspends_without_fabricating_success() {
         )
         .await
         .expect("cancel");
-    wait_state(&store, |state| state.phase == Some(RunPhase::Suspended)).await;
+    wait_state(&store, |state| state.phase() == Some(RunPhase::Suspended)).await;
     let suspended = recover_session(&store).await;
-    assert!(suspended.state().terminal.is_none());
-    assert!(suspended.state().messages.is_empty());
+    assert!(suspended.state().terminal().is_none());
+    assert!(suspended.state().messages().is_empty());
     assert_eq!(model.request_count(), 1);
     owner.shutdown().await;
 }
@@ -178,7 +178,7 @@ async fn overdue_and_backward_clock_restart_are_bounded() {
         .await
         .expect("overdue respawn");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::PreparingContext)
+        state.phase() == Some(RunPhase::PreparingContext)
     })
     .await;
     assert!(replacement.handle().timer_diagnostics().already_due >= 1);
@@ -199,7 +199,7 @@ async fn overdue_and_backward_clock_restart_are_bounded() {
         .await
         .expect("backward respawn");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::PreparingContext)
+        state.phase() == Some(RunPhase::PreparingContext)
             || replacement
                 .handle()
                 .timer_diagnostics()
@@ -213,7 +213,7 @@ async fn overdue_and_backward_clock_restart_are_bounded() {
             .timer_diagnostics()
             .backward_clock_clamped
             >= 1
-            || recover_session(&store).await.state().phase == Some(RunPhase::PreparingContext)
+            || recover_session(&store).await.state().phase() == Some(RunPhase::PreparingContext)
     );
     replacement.shutdown().await;
 }

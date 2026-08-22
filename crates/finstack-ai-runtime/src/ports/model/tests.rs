@@ -437,20 +437,20 @@ fn state_with(
     pending_effect: Option<finstack_ai_kernel::PendingModelEffect>,
     settled: bool,
 ) -> KernelState {
-    let mut state = KernelState {
-        phase,
-        pending_model_effect: pending_effect,
-        ..KernelState::default()
-    };
-    if settled && let Some(pending) = state.pending_model_effect.as_ref() {
+    let mut state = KernelState::default();
+    state.set_phase(phase);
+    state.set_pending_model_effect(pending_effect);
+    if settled && let Some(pending) = state.pending_model_effect() {
         let effect_id = pending.requested.effect_id();
-        state.model_settlements.insert(
+        let mut settlements = state.model_settlements().clone();
+        settlements.insert(
             effect_id,
             finstack_ai_kernel::ModelSettlementFingerprint {
                 kind: finstack_ai_kernel::ModelSettlementKind::Completed,
                 digest: Digest::raw_json(b"settled"),
             },
         );
+        state.set_model_settlements(settlements);
     }
     state
 }

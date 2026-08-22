@@ -118,9 +118,9 @@ async fn run_runtime_chunks(count: usize, response_text: &str) -> RuntimeProject
         let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
             .await
             .expect("recover");
-        if recovered.state().messages.len() == 1 {
-            assert!(recovered.state().pending_model_effect.is_none());
-            let message = &recovered.state().messages[0];
+        if recovered.state().messages().len() == 1 {
+            assert!(recovered.state().pending_model_effect().is_none());
+            let message = &recovered.state().messages()[0];
             assert_eq!(
                 message
                     .content()

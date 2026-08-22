@@ -59,8 +59,8 @@ async fn runtime_publishes_tool_progress_before_tool_settlement() {
     let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
         .await
         .expect("recover before terminal");
-    assert!(recovered.state().active_tool_batch.is_some());
-    assert!(recovered.state().tool_settlements.is_empty());
+    assert!(recovered.state().active_tool_batch().is_some());
+    assert!(recovered.state().tool_settlements().is_empty());
 
     control.release("terminal-gate");
     wait_for_phase(&store, RunPhase::AfterToolBatch).await;
@@ -389,19 +389,18 @@ async fn fail_run_closes_undispatched_calls_and_matches_exact_kernel_id_requirem
     let recovered = CommitCoordinator::recover(store, id::<SessionTag>(1))
         .await
         .expect("recover failed run");
-    assert_eq!(recovered.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AfterToolBatch));
     assert!(matches!(
         recovered
             .state()
-            .last_tool_batch
-            .as_ref()
+            .last_tool_batch()
             .map(|batch| &batch.outcome),
         Some(finstack_ai_kernel::ToolBatchOutcome::Failed { error })
             if error.code.as_str() == "fixture_fail_run"
     ));
     let tool_results = recovered
         .state()
-        .messages
+        .messages()
         .iter()
         .flat_map(Message::content)
         .filter(|content| matches!(content, ContentBlock::ToolResult(_)))
@@ -460,7 +459,7 @@ async fn reverse_completion_commits_arrivals_but_finalizes_tool_messages_in_sour
         .expect("recover");
     let finalized = recovered
         .state()
-        .messages
+        .messages()
         .iter()
         .skip(1)
         .filter_map(|message| match message.content() {
@@ -468,7 +467,7 @@ async fn reverse_completion_commits_arrivals_but_finalizes_tool_messages_in_sour
             _ => None,
         })
         .collect::<Vec<_>>();
-    let source = recovered.state().messages[0]
+    let source = recovered.state().messages()[0]
         .content()
         .iter()
         .filter_map(|block| match block {

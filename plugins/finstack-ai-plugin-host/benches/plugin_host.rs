@@ -11,8 +11,8 @@ use finstack_ai_kernel::{
     ToolCallBlock, ToolExecutionMode, ToolFailurePolicy, ToolId, ValidatedToolCall, Version,
 };
 use finstack_ai_plugin_host::{
-    CacheKeyParts, InstancePolicy, PluginHost, PluginHostConfig, WasmToolsetAdapter, abi_identity,
-    cache_key, component_digest, engine_fingerprint, host_target,
+    CacheKeyParts, EffectiveLimits, InstancePolicy, PluginHost, PluginHostConfig, SignaturePolicy,
+    WasmToolsetAdapter, abi_identity, cache_key, component_digest, engine_fingerprint, host_target,
 };
 use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
 use finstack_ai_runtime::ports::tool::{ToolCallContext, Toolset};
@@ -58,7 +58,9 @@ fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
 fn host() -> Arc<PluginHost> {
     Arc::new(
         PluginHost::try_new(
-            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2).expect("cfg"),
+            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
+                .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Permissive),
         )
         .expect("host"),
     )
@@ -142,7 +144,7 @@ fn compile_cache(criterion: &mut Criterion) {
             .expect("host");
             let parts = CacheKeyParts {
                 digest: component_digest(&bytes),
-                engine: engine_fingerprint(),
+                engine: engine_fingerprint(&EffectiveLimits::default()),
                 target: host_target(),
                 abi: abi_identity("toolset-plugin", "0.0.4"),
             };

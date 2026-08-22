@@ -17,7 +17,7 @@ async fn adapter_matches_direct_owner_journal() {
             .expect("pause bound")
             .expect("paused execute");
         assert_eq!(permit.effect().action, ManualDriveAction::Execute);
-        wait_state(&store, |state| state.pending_model_effect.is_some()).await;
+        wait_state(&store, |state| state.pending_model_effect().is_some()).await;
         if through_adapter {
             drop(permit);
             drive.abort();
@@ -25,11 +25,11 @@ async fn adapter_matches_direct_owner_journal() {
             drop(owner);
             let mut driver = attach_driver(store.clone(), model, clock, 500).await;
             driver.ensure_owner().await.expect("spawn");
-            wait_state(&store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+            wait_state(&store, |state| state.phase() == Some(RunPhase::AfterModel)).await;
         } else {
             permit.continue_dispatch();
             drive.await.expect("drive");
-            wait_state(&store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+            wait_state(&store, |state| state.phase() == Some(RunPhase::AfterModel)).await;
             drop(owner);
         }
         journal_trace(&store).await
@@ -65,7 +65,7 @@ async fn conflicting_checkpoint_sequence_is_ignored() {
     )
     .await;
     drive_to_active_model_request(&owner.handle()).await;
-    wait_state(&store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+    wait_state(&store, |state| state.phase() == Some(RunPhase::AfterModel)).await;
     drop(owner);
     let driver = attach_driver(store.clone(), Arc::clone(&model), clock.clone(), 501).await;
     let mut hint = driver.persist_handoff().expect("handoff");

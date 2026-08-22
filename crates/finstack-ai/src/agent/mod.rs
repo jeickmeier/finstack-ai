@@ -50,7 +50,8 @@ pub use history::HistoryCachePolicy;
 pub(crate) use lane::{LaneLive, live_run};
 pub use linked::{
     AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
+    LinkedCommon, LinkedProviderSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+    OpenRouterMediaToolsSpec,
 };
 pub use run::AgentRun;
 pub use types::{

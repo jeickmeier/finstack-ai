@@ -23,7 +23,7 @@ async fn prefix_c1_through_c5() {
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(
-        recovered.state().phase,
+        recovered.state().phase(),
         Some(RunPhase::BeforeRun),
         "C1 missing StageOutcomeRecorded leaves the BeforeRun cursor open"
     );
@@ -33,7 +33,7 @@ async fn prefix_c1_through_c5() {
             .is_empty(),
         "C1 journal has no StageOutcomeRecorded; chain re-run is asserted in runtime recovery tests"
     );
-    assert_legal("C1", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("C1", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let mut coordinator = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -52,11 +52,11 @@ async fn prefix_c1_through_c5() {
         "C2 journal has a recorded BeforeRun"
     );
     assert_eq!(
-        recovered.state().phase,
+        recovered.state().phase(),
         Some(RunPhase::PreparingContext),
         "C2 recover advances past the recorded stage"
     );
-    assert_legal("C2", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("C2", recovered.state().phase(), LegalRestore::Retryable);
 
     let content = b"required-summary";
     let scope = ArtifactScope {
@@ -123,9 +123,9 @@ async fn prefix_c1_through_c5() {
         "C5 journal has no PrepareContext StageOutcomeRecorded"
     );
     assert_eq!(
-        recovered.state().phase,
+        recovered.state().phase(),
         Some(RunPhase::PreparingContext),
         "C5 missing PrepareContext record leaves the PrepareContext cursor open"
     );
-    assert_legal("C5", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("C5", recovered.state().phase(), LegalRestore::Retryable);
 }

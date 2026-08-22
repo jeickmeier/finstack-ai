@@ -450,7 +450,7 @@ impl SessionRuntime {
         let Some(head) = inner.head.as_mut() else {
             return Ok(());
         };
-        let current_sequence = head.state().last_applied_sequence;
+        let current_sequence = head.state().last_applied_sequence();
         if update.last_applied_sequence < current_sequence {
             return Ok(());
         }
@@ -756,7 +756,7 @@ impl SessionRuntime {
         Ok(LaneRunContext {
             messages: history.into(),
             source_leaf_id: entry_id,
-            journal_sequence: head.state().last_applied_sequence,
+            journal_sequence: head.state().last_applied_sequence(),
             head_checksum: head.head_checksum(),
         })
     }
@@ -1113,7 +1113,7 @@ impl SessionRuntime {
         if let Some(head) = inner.head.as_mut() {
             head.adopt_live_session(
                 foreign.session().clone(),
-                foreign.state().last_applied_sequence,
+                foreign.state().last_applied_sequence(),
                 foreign.head_checksum(),
             )
             .map_err(|error| SessionError::recover(&error))?;
@@ -1378,7 +1378,7 @@ mod tests {
         {
             let inner = runtime.lock().expect("lock");
             let head = inner.head.as_ref().expect("cached head");
-            assert_eq!(head.state().last_applied_sequence, 12);
+            assert_eq!(head.state().last_applied_sequence(), 12);
             assert_eq!(head.head_checksum(), newer_checksum);
         }
         let cached = runtime
@@ -1413,7 +1413,7 @@ mod tests {
                 .as_ref()
                 .expect("cached head")
                 .state()
-                .last_applied_sequence,
+                .last_applied_sequence(),
             12
         );
 

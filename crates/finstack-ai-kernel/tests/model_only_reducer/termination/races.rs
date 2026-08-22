@@ -31,14 +31,14 @@ fn terminal_race_permutations_follow_committed_journal_precedence() {
         }),
     );
     assert_eq!(
-        cancellation_first.kernel.state().phase,
+        cancellation_first.kernel.state().phase(),
         Some(RunPhase::Cancelled)
     );
     assert!(
         cancellation_first
             .kernel
             .state()
-            .messages
+            .messages()
             .iter()
             .all(|message| message.role() != MessageRole::Assistant)
     );
@@ -60,8 +60,8 @@ fn terminal_race_permutations_follow_committed_journal_precedence() {
             uncertain_effects: Arc::from([id::<finstack_ai_kernel::EffectTag>(EFFECT_ONE)]),
         }),
     );
-    assert_eq!(uncertain.kernel.state().phase, Some(RunPhase::Suspended));
-    assert!(uncertain.kernel.state().terminal.is_none());
+    assert_eq!(uncertain.kernel.state().phase(), Some(RunPhase::Suspended));
+    assert!(uncertain.kernel.state().terminal().is_none());
 
     for harness in [&cancellation_first, &uncertain] {
         let replayed = replay(&harness.batches);

@@ -93,8 +93,8 @@ async fn prefix_n1_through_n4() {
         .accept_run(id(50), acceptance(4), simple_env(1_100, 20, 21, 22))
         .await
         .expect("accept sibling");
-    assert_eq!(main.state().phase, Some(RunPhase::BeforeRun));
-    assert_eq!(sibling.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(main.state().phase(), Some(RunPhase::BeforeRun));
+    assert_eq!(sibling.state().phase(), Some(RunPhase::BeforeRun));
     drop(main);
     drop(sibling);
     drop(restored);
@@ -109,8 +109,8 @@ async fn prefix_n1_through_n4() {
         .coordinator_for_run(Some(id(4)))
         .await
         .expect("sibling run");
-    assert_eq!(main.state().phase, Some(RunPhase::BeforeRun));
-    assert_eq!(sibling.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(main.state().phase(), Some(RunPhase::BeforeRun));
+    assert_eq!(sibling.state().phase(), Some(RunPhase::BeforeRun));
     assert_eq!(
         restored.try_acquire_run(id(2), id(30)),
         Err(SessionError::LaneBusy),

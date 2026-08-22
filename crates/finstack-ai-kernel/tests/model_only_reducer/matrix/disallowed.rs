@@ -53,7 +53,7 @@ fn disallowed_stage_outcomes_and_cursor_mismatches_use_frozen_codes() {
         ),
     ];
     assert_eq!(
-        awaiting_tools.kernel.state().phase,
+        awaiting_tools.kernel.state().phase(),
         Some(RunPhase::AwaitingTools)
     );
     let stages = [
@@ -67,7 +67,7 @@ fn disallowed_stage_outcomes_and_cursor_mismatches_use_frozen_codes() {
     ];
 
     for (kernel, expected_stage, allowed) in cases {
-        let wrong_cycle = kernel.state().cycle + 1;
+        let wrong_cycle = kernel.state().cycle() + 1;
         for (name, outcome) in outcome_cases() {
             if !allowed.contains(&name) {
                 assert_error_code(

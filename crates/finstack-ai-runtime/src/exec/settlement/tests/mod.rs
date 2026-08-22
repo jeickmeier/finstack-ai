@@ -77,7 +77,7 @@ async fn cancellation_without_outstanding_effects_reaches_a_durable_terminal() {
         .expect("reconcile cancellation");
 
     assert!(matches!(
-        coordinator.state().terminal,
+        coordinator.state().terminal(),
         Some(finstack_ai_kernel::TerminalState::Cancelled(_))
     ));
 }

@@ -72,7 +72,7 @@ fn terminal_state_rejects_later_committed_mutation_without_state_change() {
         }),
     )
     .expect("terminal mutation draft");
-    let next = terminal.kernel.state().last_applied_sequence + 1;
+    let next = terminal.kernel.state().last_applied_sequence() + 1;
     let batch = commit_records(next, &[draft], None, IdentityOverride::default(), 29_999);
     assert_apply_rejected_without_mutation(
         &mut terminal.kernel,

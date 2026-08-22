@@ -323,8 +323,7 @@ pub(crate) async fn drive_to_model_request(coordinator: &mut CommitCoordinator) 
 pub(crate) async fn settle_model_completed(coordinator: &mut CommitCoordinator) {
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending")
         .clone();
     let completion = EffectCompleted::try_new(
@@ -371,8 +370,7 @@ pub(crate) async fn drive_to_pending_tool(store: Arc<dyn JournalStore>) -> Commi
     let mut coordinator = drive_to_pending_model(store).await;
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending model effect")
         .clone();
     let tool_call = ToolCallBlock::try_new(id(301), "alpha", RawJson::parse("{}").expect("args"))
@@ -431,7 +429,7 @@ pub(crate) async fn drive_to_pending_tool(store: Arc<dyn JournalStore>) -> Commi
         )
         .await
         .expect("after model tools");
-    assert_eq!(coordinator.state().phase, Some(RunPhase::BeforeToolBatch));
+    assert_eq!(coordinator.state().phase(), Some(RunPhase::BeforeToolBatch));
     coordinator
         .submit(
             env_tools(

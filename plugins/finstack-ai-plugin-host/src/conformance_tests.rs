@@ -19,7 +19,7 @@ use futures_util::StreamExt;
 
 use crate::adapters::WasmToolsetAdapter;
 use crate::cache::{
-    CONFIG_FINGERPRINT, CacheKeyParts, abi_identity, component_digest, engine_fingerprint,
+    CacheKeyParts, ENGINE_FEATURE_FLAGS, abi_identity, component_digest, engine_fingerprint,
     engine_fingerprint_parts, host_target,
 };
 use crate::host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld};
@@ -93,6 +93,7 @@ fn default_host() -> Arc<PluginHost> {
         PluginHost::try_new(
             PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
                 .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Permissive)
                 .with_default_limits(EffectiveLimits::for_tests()),
         )
         .expect("host"),
@@ -292,6 +293,7 @@ async fn ungranted_wasi_instantiate_fails_closed() {
         PluginHost::try_new(
             PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
                 .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Permissive)
                 .with_application_grants(grants)
                 .expect("grants")
                 .with_default_limits(limits),
@@ -592,7 +594,9 @@ fn lockfile_registry_url_path_is_invalid() {
 #[test]
 fn disabled_sandbox_is_absent_from_load_enabled() {
     let host = PluginHost::try_new(
-        PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2).expect("cfg"),
+        PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
+            .expect("cfg")
+            .with_signature_policy(SignaturePolicy::Permissive),
     )
     .expect("host");
     let loaded = host.load_enabled(&reference_lock()).expect("load_enabled");
@@ -619,7 +623,7 @@ fn cache_abi_field_still_distinguishes_worlds() {
     let bytes = fixture_wasm("echo-toolset");
     let base = CacheKeyParts {
         digest: component_digest(&bytes),
-        engine: engine_fingerprint(),
+        engine: engine_fingerprint(&EffectiveLimits::default()),
         target: host_target(),
         abi: abi_identity("toolset-plugin", "0.0.4"),
     };
@@ -630,7 +634,7 @@ fn cache_abi_field_still_distinguishes_worlds() {
         ..base.clone()
     }));
     assert!(!host.cache_hit(&CacheKeyParts {
-        engine: engine_fingerprint_parts("0.0.0-test", CONFIG_FINGERPRINT),
+        engine: engine_fingerprint_parts("0.0.0-test", ENGINE_FEATURE_FLAGS),
         ..base
     }));
 }

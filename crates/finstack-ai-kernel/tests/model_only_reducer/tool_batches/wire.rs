@@ -116,7 +116,7 @@ fn tool_wire_contracts_state_v2_and_event_ordinals_are_strict() {
     assert!(RunEvent::try_from_record(settled_envelope, 2, 2).is_err());
 
     let state = harness.kernel.state();
-    assert_eq!(state.state_version, 2);
+    assert_eq!(state.state_version(), 2);
     assert_json_round_trip_and_unknown_fields(state);
     let state_json = serde_json::to_value(state).expect("state v2 JSON");
     for required in [

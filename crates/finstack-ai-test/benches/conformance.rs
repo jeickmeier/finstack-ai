@@ -156,10 +156,9 @@ fn filler_message(ordinal: usize) -> Message {
 }
 
 fn state_with_messages(count: usize) -> KernelState {
-    KernelState {
-        messages: (0..count).map(filler_message).collect::<Vec<_>>().into(),
-        ..KernelState::default()
-    }
+    let mut state = KernelState::default();
+    state.set_messages((0..count).map(filler_message).collect::<Vec<_>>().into());
+    state
 }
 
 fn tool_call_block(ordinal: u64) -> ToolCallBlock {
@@ -206,15 +205,16 @@ fn activated_state(tool_count: usize, total_message_count: usize) -> KernelState
             .expect("authored"),
         );
     }
-    KernelState {
-        state_version: 2,
-        messages: messages.into(),
-        tool_calls: tools
+    let mut state = KernelState::default();
+    state.set_state_version(2);
+    state.set_messages(messages.into());
+    state.set_tool_calls(
+        tools
             .into_iter()
             .map(|(call, identity)| (*call.tool_call_id(), identity))
             .collect(),
-        ..KernelState::default()
-    }
+    );
+    state
 }
 
 fn prove_activated_fixture(state: &KernelState, accept_batch: &CommittedBatch) -> KernelState {
@@ -232,7 +232,7 @@ fn prove_activated_fixture(state: &KernelState, accept_batch: &CommittedBatch) -
         .expect("accepted fixture result must validate");
 
     let mut rejected = state.clone();
-    rejected.last_applied_sequence = 32;
+    rejected.set_last_applied_sequence(32);
     let mut rejected_kernel =
         Kernel::try_restore(rejected.clone()).expect("rejected fixture must restore");
     let rejected_hash = rejected_kernel
@@ -587,7 +587,7 @@ fn kernel_micro(c: &mut Criterion) {
         let state = state_with_messages(128);
         bencher.iter(|| {
             let view: usize = state
-                .messages
+                .messages()
                 .iter()
                 .map(|message| message.content().len())
                 .sum();

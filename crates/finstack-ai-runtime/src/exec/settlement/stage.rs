@@ -57,17 +57,16 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     driver: Option<&StageDriver>,
 ) -> Result<bool, RunHandleError> {
-    if coordinator.state().phase != Some(RunPhase::BeforeToolBatch) {
+    if coordinator.state().phase() != Some(RunPhase::BeforeToolBatch) {
         return Ok(false);
     }
     let now = sources.now()?;
-    if coordinator.state().cancellation.is_some() {
+    if coordinator.state().cancellation().is_some() {
         return Ok(false);
     }
     if coordinator
         .state()
-        .accepted
-        .as_ref()
+        .accepted()
         .and_then(finstack_ai_kernel::RunAccepted::effective_deadline)
         .is_some_and(|deadline| now >= deadline)
     {
@@ -76,7 +75,7 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     }
     let state = coordinator.state();
     let source = state
-        .messages
+        .messages()
         .last()
         .ok_or(RunHandleError::ToolSettlement {
             code: "tool_source_message_missing",
@@ -99,26 +98,24 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         });
     }
     let deadline = state
-        .accepted
-        .as_ref()
+        .accepted()
         .and_then(finstack_ai_kernel::RunAccepted::effective_deadline);
-    let continuation = if state.final_result.is_some() {
+    let continuation = if state.final_result().is_some() {
         ToolBatchContinuation::Finalize
     } else {
         ToolBatchContinuation::ContinueModel
     };
     let cursor = approval_cursor(state);
-    let terminal = state.last_interaction_terminal.clone();
+    let terminal = state.last_interaction_terminal();
     sources.prepare_approval_cursor(cursor);
     let remaining_paid = paid_unpaid_ids(catalog, &calls, None);
     let journaled =
-        if sources.needs_journaled_approval_absorb(remaining_paid.len(), terminal.as_ref(), cursor)
-        {
+        if sources.needs_journaled_approval_absorb(remaining_paid.len(), terminal, cursor) {
             journaled_approval_outcomes(coordinator).await
         } else {
             Vec::new()
         };
-    sources.absorb_approval_terminal(terminal.as_ref(), cursor, &remaining_paid, &journaled);
+    sources.absorb_approval_terminal(terminal, cursor, &remaining_paid, &journaled);
     let retained =
         match run_tool_batch_chain(coordinator, catalog, driver, sources, cursor, &calls).await? {
             ToolBatchPolicy::Unchanged => None,
@@ -372,7 +369,7 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
     now: finstack_ai_kernel::Timestamp,
 ) -> Result<(), RunHandleError> {
     let cursor = StageCursor {
-        cycle: coordinator.state().cycle,
+        cycle: coordinator.state().cycle(),
         stage: Stage::BeforeToolBatch,
     };
     let stage_outcome = run_deadline_outcome()?;
@@ -465,14 +462,14 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
         {
             if cursor.stage == Stage::AfterModel
                 && matches!(
-                    state.output_configuration,
+                    state.output_configuration(),
                     Some(OutputConfiguration {
                         output: OutputSpec::JsonSchema { .. },
                         ..
                     })
                 )
-                && state.final_result.is_none()
-                && state.validation_failure.is_none()
+                && state.final_result().is_none()
+                && state.validation_failure().is_none()
             {
                 return Err(RunHandleError::ToolSettlement {
                     code: "stage_allocation_output_contract_pending",
@@ -498,7 +495,7 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
         // decide.rs:1142-1145 (terminal_body_from_candidate's own precondition:
         // a terminal candidate must exist).
         ReducerStageOutcome::FinalizeAccepted if cursor.stage == Stage::BeforeFinalize => {
-            if state.terminal_candidate.is_none() {
+            if state.terminal_candidate().is_none() {
                 return Err(RunHandleError::ToolSettlement {
                     code: "stage_allocation_terminal_candidate_missing",
                 });
@@ -509,12 +506,12 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
         ReducerStageOutcome::ContinueModel { .. }
             if cursor.stage == Stage::BeforeFinalize
                 && matches!(
-                    state.terminal_candidate,
+                    state.terminal_candidate(),
                     Some(TerminalCandidate::Completed { .. })
                 ) =>
         {
             state
-                .cycle
+                .cycle()
                 .checked_add(1)
                 .ok_or(RunHandleError::ToolSettlement {
                     code: "stage_allocation_cycle_overflow",

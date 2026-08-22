@@ -324,7 +324,7 @@ async fn park_on_approval(seed: u64) -> Parked {
         .await
         .expect("after model");
     wait_state(&journal, |state| {
-        state.phase == Some(RunPhase::AwaitingInteraction)
+        state.phase() == Some(RunPhase::AwaitingInteraction)
     })
     .await;
     drop(owner);
@@ -421,7 +421,7 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
     .await
     .expect("recover");
     assert!(
-        still_pending.state().pending_interaction.is_some(),
+        still_pending.state().pending_interaction().is_some(),
         "an unanswered approval before its deadline stays parked"
     );
 
@@ -445,20 +445,19 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
     .await
     .expect("recover");
     assert!(
-        settled.state().pending_interaction.is_none(),
+        settled.state().pending_interaction().is_none(),
         "the pending approval is settled"
     );
     assert_eq!(
         settled
             .state()
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .map(|terminal| terminal.outcome),
         Some(InteractionTerminalOutcome::Expired),
         "the kernel classified the settlement as an expiry, not a decision"
     );
     assert!(
-        settled.state().resolution_identities.is_empty(),
+        settled.state().resolution_identities().is_empty(),
         "expiry is a deadline event: no principal resolved anything"
     );
     assert_eq!(
@@ -476,7 +475,7 @@ async fn a_past_deadline_interaction_is_expired_by_the_tick() {
         "this run has nothing left to wait for once its approval expires"
     );
     assert!(
-        matches!(settled.state().phase, Some(RunPhase::Failed)),
+        matches!(settled.state().phase(), Some(RunPhase::Failed)),
         "the run whose deadline expired its approval is terminal"
     );
     assert!(
@@ -554,20 +553,19 @@ async fn a_resolution_that_races_the_deadline_still_expires_and_is_counted() {
     .await
     .expect("recover");
     assert!(
-        settled.state().pending_interaction.is_none(),
+        settled.state().pending_interaction().is_none(),
         "the approval is settled"
     );
     assert_eq!(
         settled
             .state()
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .map(|terminal| terminal.outcome),
         Some(InteractionTerminalOutcome::Expired),
         "a late answer is refused: the deadline settles it, not the principal"
     );
     assert!(
-        settled.state().resolution_identities.is_empty(),
+        settled.state().resolution_identities().is_empty(),
         "no resolution identity is recorded for a refused late answer"
     );
     assert_eq!(

@@ -6,8 +6,12 @@
 //! opt-in; the default SDK bundle does not depend on this crate.
 //!
 //! WASI is deny-by-default: filesystem and network imports are not linked
-//! unless the host offers the grant and the concrete resource. Fuel and store
-//! limits contain exhaustion. Signature policy is host configuration.
+//! unless the host offers the grant and the concrete resource, and preopen
+//! host paths are validated fail-closed against traversal and sensitive
+//! roots. Fuel and store limits contain exhaustion. Signature policy is host
+//! configuration and defaults to [`SignaturePolicy::Strict`];
+//! [`SignaturePolicy::Permissive`] is an explicit opt-in for
+//! development/fixtures only.
 //!
 //! Registration still uses [`finstack_ai::ExtensionDescriptor::trusted_in_process`]
 //! because [`finstack_ai::ExtensionTrust`] has no isolated variant in this
@@ -56,7 +60,7 @@ pub use error::{
     PLUGIN_LOCK_NOT_FOUND, PLUGIN_PERMISSION_DENIED, PLUGIN_RESOURCE_LIMIT,
     PLUGIN_SIGNATURE_UNTRUSTED, PLUGIN_TRAP, PluginHostError,
 };
-pub use grants::{FilesystemPreopen, GrantResources};
+pub use grants::{FilesystemPreopen, GrantResources, validate_preopen_host_path};
 pub use host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld, ReadyWasm};
 pub use instantiate::HostState;
 pub use limits::EffectiveLimits;

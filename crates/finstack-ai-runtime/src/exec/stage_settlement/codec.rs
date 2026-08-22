@@ -42,8 +42,7 @@ pub(super) fn canonical_draft(draft: &ModelRequestDraft) -> Result<RawJson, RunH
 /// read live rather than through a `CommitCoordinator::recover`.
 pub(super) fn canonical_terminal_candidate(state: &KernelState) -> Result<RawJson, RunHandleError> {
     let candidate = state
-        .terminal_candidate
-        .as_ref()
+        .terminal_candidate()
         .ok_or_else(|| stage_error(MIDDLEWARE_STAGE_INPUT_INVALID))?;
     canonical(candidate)
 }

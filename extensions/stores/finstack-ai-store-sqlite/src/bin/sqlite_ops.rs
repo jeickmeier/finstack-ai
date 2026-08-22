@@ -190,19 +190,18 @@ fn diagnose(db: Option<String>, session: Option<String>) -> Result<(), String> {
             let state = coordinator.state();
             println!(
                 "phase={}",
-                state.phase.map_or_else(
+                state.phase().map_or_else(
                     || "none".into(),
                     |phase| format!("{phase:?}").to_ascii_lowercase(),
                 )
             );
             println!(
                 "outstanding={}",
-                u64::from(state.pending_model_effect.is_some())
-                    + u64::from(state.pending_interaction.is_some())
+                u64::from(state.pending_model_effect().is_some())
+                    + u64::from(state.pending_interaction().is_some())
                     + u64::try_from(
                         state
-                            .active_tool_batch
-                            .as_ref()
+                            .active_tool_batch()
                             .map_or(0, |batch| batch.calls.len())
                     )
                     .unwrap_or(u64::MAX)

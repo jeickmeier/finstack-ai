@@ -272,7 +272,7 @@ mod native {
         .await
         .map_err(|error| workflow_error(&error))
         .and_then(|session| {
-            agent.validate_restored_mask(&session.last_state().active_capabilities)?;
+            agent.validate_restored_mask(session.last_state().active_capabilities())?;
             let providers: Arc<[Arc<dyn ContextProvider>]> = agent
                 .resolved
                 .run_plan()

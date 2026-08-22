@@ -13,9 +13,9 @@ fn tool_stage_failures_are_valid_only_at_their_frozen_boundaries() {
         decision_body_names(&before_decision),
         ["stage_outcome_recorded"]
     );
-    assert_eq!(before.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(before.kernel.state().phase(), Some(RunPhase::BeforeFinalize));
     assert!(matches!(
-        before.kernel.state().terminal_candidate.as_ref(),
+        before.kernel.state().terminal_candidate(),
         Some(TerminalCandidate::Failed { .. })
     ));
 
@@ -32,9 +32,9 @@ fn tool_stage_failures_are_valid_only_at_their_frozen_boundaries() {
         decision_body_names(&after_decision),
         ["stage_outcome_recorded"]
     );
-    assert_eq!(after.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(after.kernel.state().phase(), Some(RunPhase::BeforeFinalize));
     assert!(matches!(
-        after.kernel.state().terminal_candidate.as_ref(),
+        after.kernel.state().terminal_candidate(),
         Some(TerminalCandidate::Failed { .. })
     ));
 }

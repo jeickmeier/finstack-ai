@@ -10,8 +10,8 @@ fn empty_session_replay_matches_default_state() {
         recovered.state().state_hash().expect("hash"),
         KernelState::default().state_hash().expect("hash")
     );
-    assert!(recovered.state().model_settlements.is_empty());
-    assert!(recovered.state().completion_identities.is_empty());
+    assert!(recovered.state().model_settlements().is_empty());
+    assert!(recovered.state().completion_identities().is_empty());
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn snapshot_plus_tail_matches_full_replay_hashes_and_settlements() {
     ))
     .expect("v1")
     .state()
-    .model_settlements
+    .model_settlements()
     .is_empty());
 }
 
@@ -38,7 +38,7 @@ fn tool_bearing_snapshot_plus_tail_matches_full_replay() {
         id::<SessionTag>(1),
     ))
     .expect("tool session");
-    assert!(recovered.state().state_version >= 2);
+    assert!(recovered.state().state_version() >= 2);
     assert_snapshot_matches_full_replay(&store);
 }
 

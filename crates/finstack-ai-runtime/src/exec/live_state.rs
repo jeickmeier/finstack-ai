@@ -81,22 +81,21 @@ impl LiveRunState {
     ) -> Self {
         Self {
             revision,
-            journal_sequence: state.last_applied_sequence,
+            journal_sequence: state.last_applied_sequence(),
             status,
             fault_code,
-            phase: state.phase,
-            cycle: state.cycle,
+            phase: state.phase(),
+            cycle: state.cycle(),
             prepared_context_messages: state
-                .current_turn
-                .as_ref()
+                .current_turn()
                 .map_or_else(|| Arc::from([]), |turn| Arc::clone(&turn.context.messages)),
-            committed_run_messages: state.messages.as_slice().into(),
-            active_capabilities: Arc::clone(&state.active_capabilities),
-            resolved_plan_digest: state.resolved_plan_digest,
-            pending_interaction: state.pending_interaction.clone(),
-            validation_failure: state.validation_failure.clone(),
-            retry_attempts: state.retry.attempts,
-            terminal: state.terminal.clone(),
+            committed_run_messages: state.messages().as_slice().into(),
+            active_capabilities: Arc::clone(state.active_capabilities()),
+            resolved_plan_digest: state.resolved_plan_digest(),
+            pending_interaction: state.pending_interaction().cloned(),
+            validation_failure: state.validation_failure().cloned(),
+            retry_attempts: state.retry().attempts,
+            terminal: state.terminal().cloned(),
         }
     }
 }
@@ -124,7 +123,7 @@ pub(crate) fn session_head_update(
 ) -> Option<SessionHeadUpdate> {
     Some(SessionHeadUpdate {
         session_id: session.session_id()?,
-        last_applied_sequence: state.last_applied_sequence,
+        last_applied_sequence: state.last_applied_sequence(),
         head_checksum,
         projection: session.clone(),
     })

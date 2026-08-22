@@ -48,7 +48,7 @@ fn corrupt_and_mismatched_snapshots_are_ignored() {
     .clone();
     let (forked_bytes, forked_digest) = encode_snapshot(
         &recovered_state,
-        recovered_state.last_applied_sequence,
+        recovered_state.last_applied_sequence(),
         Digest::raw_json(b"forked-head"),
         None,
         None,

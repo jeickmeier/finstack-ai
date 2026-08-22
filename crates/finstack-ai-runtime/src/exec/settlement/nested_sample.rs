@@ -180,8 +180,7 @@ async fn execute_nested_model<C: Clock, R: RandomSource>(
 ) -> Result<NestedSample, RunHandleError> {
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .ok_or(RunHandleError::ToolSettlement {
             code: NESTED_SAMPLE_UNAVAILABLE,
         })?

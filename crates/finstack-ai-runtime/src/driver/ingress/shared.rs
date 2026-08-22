@@ -21,15 +21,13 @@ pub(super) fn known_interaction(
     interaction_id: InteractionId,
 ) -> bool {
     state
-        .pending_interaction
-        .as_ref()
+        .pending_interaction()
         .is_some_and(|pending| pending.request.interaction_id() == interaction_id)
         || state
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .is_some_and(|terminal| terminal.interaction_id == interaction_id)
         || state
-            .resolution_identities
+            .resolution_identities()
             .values()
             .any(|identity| identity.interaction_id == interaction_id)
 }
@@ -39,7 +37,7 @@ pub(super) fn interaction_settled_input(
     command: &InteractionResolutionCommand,
     submitted_at: Timestamp,
 ) -> KernelInput {
-    if let Some(pending) = &state.pending_interaction
+    if let Some(pending) = &state.pending_interaction()
         && pending.request.interaction_id() == command.resolution.interaction_id()
         && pending
             .request
@@ -56,17 +54,16 @@ pub(super) fn interaction_settled_input(
 
 pub(super) fn known_effect(state: &finstack_ai_kernel::KernelState, effect_id: EffectId) -> bool {
     state
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .is_some_and(|pending| pending.requested.effect_id() == effect_id)
-        || state.model_settlements.contains_key(&effect_id)
-        || state.tool_settlements.contains_key(&effect_id)
+        || state.model_settlements().contains_key(&effect_id)
+        || state.tool_settlements().contains_key(&effect_id)
         || state
-            .tool_calls
+            .tool_calls()
             .values()
             .any(|identity| identity.effect_id == Some(effect_id))
         || state
-            .completion_identities
+            .completion_identities()
             .values()
             .any(|identity| identity.effect_id == effect_id)
 }
@@ -76,7 +73,7 @@ pub(super) fn known_tool_effect(
     effect_id: EffectId,
 ) -> bool {
     state
-        .tool_calls
+        .tool_calls()
         .values()
         .any(|identity| identity.effect_id == Some(effect_id))
 }
@@ -86,7 +83,7 @@ pub(super) fn authorization_matches(
     principal: &PrincipalRef,
     authorization: &AuthorizationEvidence,
 ) -> bool {
-    state.accepted.as_ref().is_some_and(|accepted| {
+    state.accepted().is_some_and(|accepted| {
         let security = accepted.security();
         security.principal() == principal
             && security.authorization_policy_version() == authorization.policy_version()

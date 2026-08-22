@@ -732,8 +732,8 @@ where
                         code: "host_run_faulted_during_effect",
                     });
                 }
-                if coordinator.state().phase == Some(RunPhase::Cancelling)
-                    || coordinator.state().cancellation.is_some()
+                if coordinator.state().phase() == Some(RunPhase::Cancelling)
+                    || coordinator.state().cancellation().is_some()
                 {
                     return Err(RunHandleError::CancellationSettlement {
                         code: "host_effect_cancelled",

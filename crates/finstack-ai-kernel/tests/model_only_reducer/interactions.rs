@@ -137,13 +137,10 @@ pub(super) fn request_and_await(kind: InteractionKind) -> Harness {
 fn request_interaction_from_before_run_does_not_consume_the_stage_cursor() {
     let harness = request_and_await(InteractionKind::Approval);
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::AwaitingInteraction));
-    assert_eq!(state.state_version, 6);
-    assert!(state.stage_settlements.is_empty());
-    let pending = state
-        .pending_interaction
-        .as_ref()
-        .expect("pending interaction");
+    assert_eq!(state.phase(), Some(RunPhase::AwaitingInteraction));
+    assert_eq!(state.state_version(), 6);
+    assert!(state.stage_settlements().is_empty());
+    let pending = state.pending_interaction().expect("pending interaction");
     assert_eq!(pending.prior_phase, RunPhase::BeforeRun);
     assert_eq!(pending.cursor.stage, Stage::BeforeRun);
     assert_eq!(pending.request.kind(), &InteractionKind::Approval);
@@ -186,15 +183,15 @@ fn granting_resolution_restores_prior_phase_and_leaves_before_run_unset() {
     );
     assert!(decision.actions.is_empty());
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::BeforeRun));
-    assert!(state.pending_interaction.is_none());
-    assert!(state.stage_settlements.is_empty());
-    let terminal = state.last_interaction_terminal.as_ref().expect("terminal");
+    assert_eq!(state.phase(), Some(RunPhase::BeforeRun));
+    assert!(state.pending_interaction().is_none());
+    assert!(state.stage_settlements().is_empty());
+    let terminal = state.last_interaction_terminal().expect("terminal");
     assert_eq!(terminal.outcome, InteractionTerminalOutcome::Granted);
-    assert!(state.resolution_identities.contains_key("resolution-1"));
+    assert!(state.resolution_identities().contains_key("resolution-1"));
     settle_before_run(&mut harness);
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::PreparingContext)
     );
 }
@@ -209,11 +206,10 @@ fn denied_approval_is_a_schema_valid_resolution() {
     let terminal = harness
         .kernel
         .state()
-        .last_interaction_terminal
-        .as_ref()
+        .last_interaction_terminal()
         .expect("terminal");
     assert_eq!(terminal.outcome, InteractionTerminalOutcome::Denied);
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::BeforeRun));
 }
 
 #[test]
@@ -276,13 +272,9 @@ fn expiry_restores_prior_phase_without_a_grant() {
         })),
     );
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::BeforeRun));
+    assert_eq!(state.phase(), Some(RunPhase::BeforeRun));
     assert_eq!(
-        state
-            .last_interaction_terminal
-            .as_ref()
-            .expect("terminal")
-            .outcome,
+        state.last_interaction_terminal().expect("terminal").outcome,
         InteractionTerminalOutcome::Expired
     );
 }
@@ -312,14 +304,10 @@ fn expiry_is_recorded_when_the_run_deadline_has_also_been_reached() {
         })),
     );
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::BeforeRun));
-    assert!(state.terminal.is_none());
+    assert_eq!(state.phase(), Some(RunPhase::BeforeRun));
+    assert!(state.terminal().is_none());
     assert_eq!(
-        state
-            .last_interaction_terminal
-            .as_ref()
-            .expect("terminal")
-            .outcome,
+        state.last_interaction_terminal().expect("terminal").outcome,
         InteractionTerminalOutcome::Expired
     );
 }
@@ -341,12 +329,11 @@ fn cancel_requested_while_awaiting_interaction_includes_the_interaction_effect()
         }]
     );
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::Cancelling));
-    assert!(state.pending_interaction.is_some());
+    assert_eq!(state.phase(), Some(RunPhase::Cancelling));
+    assert!(state.pending_interaction().is_some());
     assert_eq!(
         state
-            .cancellation
-            .as_ref()
+            .cancellation()
             .expect("cancellation")
             .outstanding_effects
             .as_ref(),
@@ -383,17 +370,16 @@ fn reconcile_cancelled_interaction_emits_the_pair_and_keeps_cancelling_until_run
         ]
     );
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::Cancelled));
-    assert!(state.pending_interaction.is_none());
+    assert_eq!(state.phase(), Some(RunPhase::Cancelled));
+    assert!(state.pending_interaction().is_none());
     assert_eq!(
-        state
-            .last_interaction_terminal
-            .as_ref()
-            .expect("terminal")
-            .outcome,
+        state.last_interaction_terminal().expect("terminal").outcome,
         InteractionTerminalOutcome::Cancelled
     );
-    assert!(matches!(state.terminal, Some(TerminalState::Cancelled(_))));
+    assert!(matches!(
+        state.terminal(),
+        Some(TerminalState::Cancelled(_))
+    ));
 }
 
 #[test]
@@ -443,8 +429,7 @@ fn cancelled_while_waiting_restores_prior_phase() {
         harness
             .kernel
             .state()
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .expect("terminal")
             .outcome,
         InteractionTerminalOutcome::Cancelled
@@ -466,7 +451,7 @@ fn supported_kinds_can_request_and_resolve() {
     ] {
         let mut harness = request_and_await(kind.clone());
         assert_eq!(
-            harness.kernel.state().phase,
+            harness.kernel.state().phase(),
             Some(RunPhase::AwaitingInteraction),
             "{kind:?}"
         );
@@ -477,7 +462,7 @@ fn supported_kinds_can_request_and_resolve() {
             ))),
         );
         assert_eq!(
-            harness.kernel.state().phase,
+            harness.kernel.state().phase(),
             Some(RunPhase::BeforeRun),
             "{kind:?}"
         );
@@ -610,9 +595,9 @@ fn conflicting_resolution_is_rejected_without_mutation() {
 fn non_interaction_histories_keep_their_existing_state_version() {
     let mut harness = Harness::default();
     accept(&mut harness);
-    assert_eq!(harness.kernel.state().state_version, 1);
+    assert_eq!(harness.kernel.state().state_version(), 1);
     let before = harness.kernel.state().state_hash().expect("hash");
     settle_before_run(&mut harness);
-    assert_eq!(harness.kernel.state().state_version, 1);
+    assert_eq!(harness.kernel.state().state_version(), 1);
     assert_ne!(harness.kernel.state().state_hash().expect("hash"), before);
 }

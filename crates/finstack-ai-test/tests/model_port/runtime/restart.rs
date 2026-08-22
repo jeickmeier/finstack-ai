@@ -63,7 +63,7 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
             let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
                 .await
                 .expect("recover failure");
-            if recovered.state().phase == Some(RunPhase::BeforeFinalize) {
+            if recovered.state().phase() == Some(RunPhase::BeforeFinalize) {
                 break;
             }
             tokio::task::yield_now().await;
@@ -77,8 +77,8 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
         panic!(
             "model failure did not settle; status={:?}; phase={:?}; settlements={}",
             handle.status(),
-            recovered.state().phase,
-            recovered.state().model_settlements.len()
+            recovered.state().phase(),
+            recovered.state().model_settlements().len()
         );
     }
     handle
@@ -101,12 +101,12 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
     let sleeping = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
         .await
         .expect("recover sleeping");
-    assert_eq!(sleeping.state().phase, Some(RunPhase::Sleeping));
-    assert_eq!(sleeping.state().retry.attempts, 1);
+    assert_eq!(sleeping.state().phase(), Some(RunPhase::Sleeping));
+    assert_eq!(sleeping.state().retry().attempts, 1);
     assert_eq!(
         sleeping
             .state()
-            .retry
+            .retry()
             .pending
             .as_ref()
             .expect("timer")
@@ -154,10 +154,10 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
             let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
                 .await
                 .expect("recover fired timer");
-            if recovered.state().phase == Some(RunPhase::PreparingContext) {
-                assert_eq!(recovered.state().retry.attempts, 1);
-                assert!(recovered.state().retry.pending.is_none());
-                assert_eq!(recovered.state().retry.timer_firings.len(), 1);
+            if recovered.state().phase() == Some(RunPhase::PreparingContext) {
+                assert_eq!(recovered.state().retry().attempts, 1);
+                assert!(recovered.state().retry().pending.is_none());
+                assert_eq!(recovered.state().retry().timer_firings.len(), 1);
                 break;
             }
             tokio::task::yield_now().await;

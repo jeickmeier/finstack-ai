@@ -763,8 +763,7 @@ impl<T> Stream for OnceStream<T> {
 fn committed_draft(coordinator: &CommitCoordinator) -> ModelRequestDraft {
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending primary model");
     let finstack_ai_kernel::EffectInput::Model { request } = pending.requested.input() else {
         panic!("pending must be a model effect");
@@ -783,7 +782,7 @@ fn summary_occurrences(draft: &ModelRequestDraft) -> usize {
 fn compaction_requests(
     coordinator: &CommitCoordinator,
 ) -> Vec<finstack_ai_kernel::EffectRequested> {
-    let session_id = coordinator.state().session_id.expect("session");
+    let session_id = coordinator.state().session_id().expect("session");
     let loaded =
         block_on(coordinator.journal_store().load(LoadRequest { session_id })).expect("load");
     loaded
@@ -840,12 +839,12 @@ fn summarize_completes_against_a_scripted_model_without_duplicating_on_retry() {
     assert!(
         coordinator
             .state()
-            .model_settlements
+            .model_settlements()
             .contains_key(&requested[0].effect_id()),
         "child effect is settled and replayable"
     );
 
-    let session_id = coordinator.state().session_id.expect("session");
+    let session_id = coordinator.state().session_id().expect("session");
     let replayed = block_on(CommitCoordinator::recover(
         Arc::clone(&store) as Arc<dyn JournalStore>,
         session_id,
@@ -854,7 +853,7 @@ fn summarize_completes_against_a_scripted_model_without_duplicating_on_retry() {
     assert!(
         replayed
             .state()
-            .model_settlements
+            .model_settlements()
             .contains_key(&requested[0].effect_id()),
         "replay restores the compaction settlement"
     );
@@ -889,12 +888,11 @@ fn recover_summarize_after_crash(driver: &StageDriver, draft: &ModelRequestDraft
     assert!(
         crashing
             .state()
-            .pending_model_effect
-            .as_ref()
+            .pending_model_effect()
             .is_some_and(|pending| pending.requested.is_compaction_summary()),
         "crash leaves the committed child pending"
     );
-    let crash_session = crashing.state().session_id.expect("session");
+    let crash_session = crashing.state().session_id().expect("session");
     let mut recovered = block_on(CommitCoordinator::recover(
         Arc::clone(&crash_store) as Arc<dyn JournalStore>,
         crash_session,
@@ -932,7 +930,7 @@ fn host_task_resume_settles_pending_compaction_without_a_new_user_turn() {
         Some(&crashing_model),
     ))
     .expect_err("crash after compaction request");
-    let session_id = crashing.state().session_id.expect("session");
+    let session_id = crashing.state().session_id().expect("session");
     let mut recovered = block_on(CommitCoordinator::recover(
         Arc::clone(&store) as Arc<dyn JournalStore>,
         session_id,
@@ -953,7 +951,7 @@ fn host_task_resume_settles_pending_compaction_without_a_new_user_turn() {
     assert!(
         recovered
             .state()
-            .model_settlements
+            .model_settlements()
             .contains_key(&compaction_requests(&recovered)[0].effect_id()),
         "summary settles once without a new user turn"
     );
@@ -987,7 +985,7 @@ fn missing_compaction_authorization_fails_before_commit() {
         "unauthorized request must not commit a child effect"
     );
     assert!(
-        coordinator.state().pending_model_effect.is_none(),
+        coordinator.state().pending_model_effect().is_none(),
         "no pending model effect before commit"
     );
 }

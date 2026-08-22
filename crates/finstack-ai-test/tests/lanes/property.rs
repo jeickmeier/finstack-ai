@@ -75,11 +75,11 @@ fn lane_invariants_hold_for_fixed_seed_sibling_sequences() {
                         )
                         .await
                         .expect("accept");
-                    assert_eq!(coordinator.state().phase, Some(RunPhase::BeforeRun));
+                    assert_eq!(coordinator.state().phase(), Some(RunPhase::BeforeRun));
                     owners.push(coordinator);
                 }
                 for owner in &owners {
-                    assert!(owner.state().cancellation.is_none());
+                    assert!(owner.state().cancellation().is_none());
                 }
                 drop(owners);
                 drop(session);
@@ -92,7 +92,7 @@ fn lane_invariants_hold_for_fixed_seed_sibling_sequences() {
                         .coordinator_for_run(Some(id(run)))
                         .await
                         .expect("restored run");
-                    let class = classify_phase(coordinator.state().phase.expect("phase"));
+                    let class = classify_phase(coordinator.state().phase().expect("phase"));
                     assert_eq!(class, LegalRestore::Retryable);
                     let _ = lane;
                 }

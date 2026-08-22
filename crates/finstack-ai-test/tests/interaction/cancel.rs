@@ -33,15 +33,14 @@ async fn run_level_cancel_while_awaiting_interaction_closes_without_dispatching(
         .await
         .expect("cancel");
     wait_state(&ports.store, |state| {
-        state.phase == Some(RunPhase::Cancelled)
+        state.phase() == Some(RunPhase::Cancelled)
     })
     .await;
     let cancelled = recover_session(&ports.store).await;
     assert_eq!(
         cancelled
             .state()
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .expect("terminal")
             .outcome,
         InteractionTerminalOutcome::Cancelled
@@ -66,7 +65,7 @@ async fn late_privileged_resolution_after_run_cancel_fails_closed() {
         .await
         .expect("cancel");
     wait_state(&ports.store, |state| {
-        state.phase == Some(RunPhase::Cancelled)
+        state.phase() == Some(RunPhase::Cancelled)
     })
     .await;
     owner.shutdown().await;

@@ -151,12 +151,35 @@ impl Kernel {
     /// use finstack_ai_kernel::{Kernel, KernelState};
     ///
     /// let kernel = Kernel::try_restore(KernelState::default()).expect("restore");
-    /// assert_eq!(kernel.state().last_applied_sequence, 0);
+    /// assert_eq!(kernel.state().last_applied_sequence(), 0);
     /// ```
     pub fn try_restore(state: KernelState) -> Result<Self, KernelError> {
         state.validate()?;
         let _ = state.hash_projection()?;
         Ok(Self { state })
+    }
+
+    /// Adopt a filtered session head without replaying the skipped records.
+    ///
+    /// Recovery paths that replay a filtered journal view use this to move
+    /// `last_applied_sequence` forward to the durable head so subsequent
+    /// appends continue from the store's sequence. The sequence never moves
+    /// backwards.
+    ///
+    /// # Arguments
+    ///
+    /// * `sequence` - Durable session head reported by the store.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KernelError::InvariantViolation`] when `sequence` is behind
+    /// the replayed head.
+    pub fn adopt_session_head(&mut self, sequence: u64) -> Result<(), KernelError> {
+        if self.state.last_applied_sequence > sequence {
+            return Err(KernelError::InvariantViolation);
+        }
+        self.state.last_applied_sequence = sequence;
+        Ok(())
     }
 }
 

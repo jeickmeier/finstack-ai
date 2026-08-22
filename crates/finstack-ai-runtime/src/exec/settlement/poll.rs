@@ -47,7 +47,7 @@ pub(crate) struct DuePoll {
 pub(crate) fn due_polls(state: &KernelState, now: Timestamp) -> Vec<DuePoll> {
     let _ = now;
     state
-        .active_tool_batch
+        .active_tool_batch()
         .iter()
         .flat_map(|batch| batch.calls.iter())
         .filter_map(|call| {
@@ -100,8 +100,7 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
     let now = sources.now()?;
     let expired_effects = coordinator
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .map(|batch| {
             batch
                 .calls
@@ -150,7 +149,7 @@ pub(crate) fn next_due_poll_or_expiry(
     process_local_deadlines: &BTreeMap<EffectId, Option<Timestamp>>,
 ) -> Option<Timestamp> {
     state
-        .active_tool_batch
+        .active_tool_batch()
         .iter()
         .flat_map(|batch| batch.calls.iter())
         .flat_map(|call| match &call.status {

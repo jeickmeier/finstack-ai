@@ -10,9 +10,20 @@ use finstack_ai_runtime::ports::model::{
 
 use crate::protocol::{ListPromptsResult, ListToolsResult, Prompt, ResultType, Tool};
 use crate::transport::McpTransport;
-use crate::{MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED, McpConfig, McpError};
+use crate::{
+    MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED, McpConfig, McpError,
+};
 
 pub(crate) const MAX_LIST_PAGES: usize = 64;
+/// Serialized-size cap for one server-provided tool schema. Like the
+/// stdio `MAX_LINE_BYTES` cap, this is a fixed fail-closed bound with no
+/// runtime override: an untrusted server must not be able to inflate the
+/// frozen catalog with an arbitrarily large `inputSchema`/`outputSchema`.
+const MAX_SCHEMA_BYTES: usize = 64 * 1024;
+/// Nesting-depth cap for one server-provided tool schema. Bounds the
+/// recursive schema walks (`$ref` scan, canonicalization) against an
+/// adversarially deep document.
+const MAX_SCHEMA_DEPTH: usize = 32;
 const TOOL_ID_PREFIX: &str = "mcp.";
 
 pub(crate) async fn enumerate_catalog(transport: &dyn McpTransport) -> Result<Vec<Tool>, McpError> {
@@ -43,8 +54,10 @@ pub(crate) async fn enumerate_catalog(transport: &dyn McpTransport) -> Result<Ve
             ));
         }
         for tool in page.tools {
+            enforce_schema_limits(&tool.input_schema)?;
             reject_network_refs(&tool.input_schema)?;
             if let Some(output) = &tool.output_schema {
+                enforce_schema_limits(output)?;
                 reject_network_refs(output)?;
             }
             if tool.name.is_empty() {
@@ -301,6 +314,49 @@ fn raw_json(value: &serde_json::Value) -> Result<RawJson, McpError> {
             format!("schema is not raw json: {error}"),
         )
     })
+}
+
+/// Fail closed on a server-provided schema that exceeds the fixed size or
+/// nesting-depth bounds. Runs before any recursive walk of the schema so an
+/// adversarially deep document never drives unbounded recursion.
+fn enforce_schema_limits(value: &serde_json::Value) -> Result<(), McpError> {
+    if schema_depth_exceeds(value, MAX_SCHEMA_DEPTH) {
+        return Err(McpError::stable(
+            MCP_LIMIT_EXCEEDED,
+            "tool schema exceeds the nesting-depth limit",
+        ));
+    }
+    let bytes = serde_json::to_vec(value).map_err(|error| {
+        McpError::stable(
+            MCP_PROTOCOL_VIOLATION,
+            format!("tool schema serialization failed: {error}"),
+        )
+    })?;
+    if bytes.len() > MAX_SCHEMA_BYTES {
+        return Err(McpError::stable(
+            MCP_LIMIT_EXCEEDED,
+            "tool schema exceeds the serialized byte limit",
+        ));
+    }
+    Ok(())
+}
+
+/// True when `value` nests deeper than `remaining` levels. A leaf is depth 1;
+/// recursion stops as soon as the budget is exhausted, so the walk itself is
+/// bounded by the cap.
+fn schema_depth_exceeds(value: &serde_json::Value, remaining: usize) -> bool {
+    if remaining == 0 {
+        return true;
+    }
+    match value {
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(|nested| schema_depth_exceeds(nested, remaining - 1)),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|nested| schema_depth_exceeds(nested, remaining - 1)),
+        _ => false,
+    }
 }
 
 fn reject_network_refs(value: &serde_json::Value) -> Result<(), McpError> {

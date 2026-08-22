@@ -3,7 +3,7 @@ async fn stop_after_approval_request_waits_without_dispatch() {
     let (ports, owner) = park_on_approval(None).await;
     assert_eq!(ports.toolset.call_count(), 0);
     let recovered = crash_owner(owner, &ports.store).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingInteraction));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingInteraction));
     assert_eq!(
         interaction_resume_action(recovered.state(), timestamp(2_500)),
         InteractionResumeAction::WaitResolution
@@ -35,12 +35,11 @@ async fn grant_after_stop_dispatches_the_protected_tool_once() {
         .expect("grant");
     assert!(matches!(outcome, ExternalRouteOutcome::Committed(_)));
     let recovered = recover_session(&ports.store).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::BeforeToolBatch));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::BeforeToolBatch));
     assert_eq!(
         recovered
             .state()
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .expect("terminal")
             .outcome,
         InteractionTerminalOutcome::Granted
@@ -73,8 +72,7 @@ async fn denied_approval_never_dispatches_the_protected_tool() {
     assert_eq!(
         recovered
             .state()
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .expect("terminal")
             .outcome,
         InteractionTerminalOutcome::Denied
@@ -89,10 +87,9 @@ async fn denied_approval_never_dispatches_the_protected_tool() {
     .await
     .expect("respawn");
     wait_state(&ports.store, |state| {
-        state.phase == Some(RunPhase::AfterToolBatch)
+        state.phase() == Some(RunPhase::AfterToolBatch)
             || state
-                .active_tool_batch
-                .as_ref()
+                .active_tool_batch()
                 .is_some_and(|batch| !batch.calls.is_empty())
     })
     .await;
@@ -127,8 +124,7 @@ async fn expired_resolution_never_dispatches_the_protected_tool() {
     assert_eq!(
         recovered
             .state()
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .expect("terminal")
             .outcome,
         InteractionTerminalOutcome::Expired
@@ -148,7 +144,7 @@ async fn expired_resolution_never_dispatches_the_protected_tool() {
     .await
     .expect("respawn");
     wait_state(&ports.store, |state| {
-        state.phase == Some(RunPhase::AfterToolBatch) || state.last_interaction_terminal.is_some()
+        state.phase() == Some(RunPhase::AfterToolBatch) || state.last_interaction_terminal().is_some()
     })
     .await;
     assert_eq!(ports.toolset.call_count(), 0);
@@ -174,8 +170,7 @@ async fn expire_if_due_on_restore_never_dispatches() {
     .expect("respawn");
     wait_state(&ports.store, |state| {
         state
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .is_some_and(|terminal| terminal.outcome == InteractionTerminalOutcome::Expired)
     })
     .await;
@@ -260,8 +255,7 @@ async fn cancelled_while_waiting_never_dispatches() {
         .expect("cancel");
     wait_state(&ports.store, |state| {
         state
-            .last_interaction_terminal
-            .as_ref()
+            .last_interaction_terminal()
             .is_some_and(|terminal| terminal.outcome == InteractionTerminalOutcome::Cancelled)
     })
     .await;

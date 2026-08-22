@@ -9,13 +9,14 @@ use std::sync::Mutex;
 use sha2::{Digest, Sha256};
 
 use crate::error::PluginHostError;
+use crate::limits::EffectiveLimits;
 
 /// Canonical fields hashed into a cache key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheKeyParts {
     /// SHA-256 of the component bytes.
     pub digest: String,
-    /// `wasmtime` crate version plus the host config fingerprint.
+    /// `wasmtime` crate version plus the effective-config fingerprint.
     pub engine: String,
     /// Host `os` + `arch` (and cranelift ISA when exposed).
     pub target: String,
@@ -122,10 +123,10 @@ pub fn component_digest(bytes: &[u8]) -> String {
 /// Workspace-pinned `wasmtime` crate version recorded in the engine field.
 pub const WASMTIME_CRATE_VERSION: &str = "47.0.3";
 
-/// `wasmtime` version plus the compile-config fingerprint used by this host.
+/// `wasmtime` version plus the effective-config fingerprint used by this host.
 #[must_use]
-pub fn engine_fingerprint() -> String {
-    engine_fingerprint_parts(WASMTIME_CRATE_VERSION, CONFIG_FINGERPRINT)
+pub fn engine_fingerprint(limits: &EffectiveLimits) -> String {
+    engine_fingerprint_parts(WASMTIME_CRATE_VERSION, &config_fingerprint(limits))
 }
 
 /// Build an engine fingerprint from explicit parts so tests can invalidate independently.
@@ -183,10 +184,22 @@ pub fn cache_key(parts: &CacheKeyParts) -> String {
     hex_sha256(&canonical)
 }
 
-/// Config fingerprint recorded in the engine field. Fuel and the store limiter
-/// are resource-limit claims; epoch interruption remains the cancel channel.
-pub const CONFIG_FINGERPRINT: &str =
+/// Engine feature flags fixed by [`crate::PluginHost::try_new`]. Fuel and the
+/// store limiter are resource-limit claims; epoch interruption remains the
+/// cancel channel.
+pub const ENGINE_FEATURE_FLAGS: &str =
     "async=true,epoch=true,fuel=true,limiter=true,compiler=cranelift";
+
+/// Deterministic fingerprint of the effective configuration recorded in the
+/// engine field: the fixed feature flags plus the effective limits that shape
+/// execution semantics (fuel, memory, tables, instances).
+#[must_use]
+pub fn config_fingerprint(limits: &EffectiveLimits) -> String {
+    format!(
+        "{ENGINE_FEATURE_FLAGS},fuel={},max_memory_bytes={},max_tables={},max_instances={}",
+        limits.fuel, limits.max_memory_bytes, limits.max_tables, limits.max_instances
+    )
+}
 
 fn cranelift_isa() -> &'static str {
     if cfg!(target_arch = "aarch64") {
@@ -210,14 +223,16 @@ fn hex_sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CONFIG_FINGERPRINT, CacheKeyParts, ComponentCache, abi_identity, cache_key,
-        component_digest, engine_fingerprint, engine_fingerprint_parts, host_target,
+        CacheKeyParts, ComponentCache, ENGINE_FEATURE_FLAGS, abi_identity, cache_key,
+        component_digest, config_fingerprint, engine_fingerprint, engine_fingerprint_parts,
+        host_target,
     };
+    use crate::limits::EffectiveLimits;
 
     fn parts() -> CacheKeyParts {
         CacheKeyParts {
             digest: component_digest(b"component-a"),
-            engine: engine_fingerprint(),
+            engine: engine_fingerprint(&EffectiveLimits::default()),
             target: host_target(),
             abi: abi_identity("toolset-plugin", "0.0.4"),
         }
@@ -230,7 +245,7 @@ mod tests {
         let mut digest = parts();
         digest.digest = component_digest(b"component-b");
         let mut engine = parts();
-        engine.engine = engine_fingerprint_parts("0.0.0-test", CONFIG_FINGERPRINT);
+        engine.engine = engine_fingerprint_parts("0.0.0-test", ENGINE_FEATURE_FLAGS);
         let mut target = parts();
         target.target = "linux-x86_64-cranelift-x86_64".to_owned();
         let mut abi = parts();
@@ -250,6 +265,43 @@ mod tests {
             abi_identity("toolset-plugin", "0.0.4"),
             abi_identity("toolset-plugin", "1.0.0")
         );
+    }
+
+    #[test]
+    fn effective_limits_change_the_fingerprint_deterministically() {
+        let default_limits = EffectiveLimits::default();
+        assert_eq!(
+            engine_fingerprint(&default_limits),
+            engine_fingerprint(&default_limits),
+            "fingerprint must be deterministic"
+        );
+        let fingerprint = config_fingerprint(&default_limits);
+        assert!(fingerprint.starts_with(ENGINE_FEATURE_FLAGS));
+        for changed in [
+            EffectiveLimits {
+                fuel: default_limits.fuel + 1,
+                ..default_limits
+            },
+            EffectiveLimits {
+                max_memory_bytes: default_limits.max_memory_bytes + 1,
+                ..default_limits
+            },
+            EffectiveLimits {
+                max_tables: default_limits.max_tables + 1,
+                ..default_limits
+            },
+            EffectiveLimits {
+                max_instances: default_limits.max_instances + 1,
+                ..default_limits
+            },
+        ] {
+            assert_ne!(config_fingerprint(&changed), fingerprint);
+            let key = cache_key(&CacheKeyParts {
+                engine: engine_fingerprint(&changed),
+                ..parts()
+            });
+            assert_ne!(key, cache_key(&parts()), "limits must invalidate the key");
+        }
     }
 
     #[test]

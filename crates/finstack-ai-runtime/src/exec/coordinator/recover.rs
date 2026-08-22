@@ -290,8 +290,7 @@ pub(super) fn replay_scoped(
             if let Some(accelerated) = loaded.accelerated.as_ref()
                 && accelerated
                     .state
-                    .accepted
-                    .as_ref()
+                    .accepted()
                     .is_some_and(|accepted| accepted.run_id() == run_id)
                 && let Ok((kernel, next, timer)) = replay_from_snapshot(loaded, accelerated)
             {
@@ -339,7 +338,7 @@ fn replay_filtered(
         return Err("loaded_head_mismatch");
     }
     adopt_session_head(&mut kernel, loaded.head_sequence)?;
-    if kernel.state().last_applied_sequence != loaded.head_sequence {
+    if kernel.state().last_applied_sequence() != loaded.head_sequence {
         return Err("loaded_head_mismatch");
     }
     Ok((kernel, next_transient_sequence, pending_timer_scheduled_at))
@@ -456,17 +455,16 @@ fn update_continuation_from_record(
 }
 
 pub(super) fn adopt_session_head(kernel: &mut Kernel, sequence: u64) -> Result<(), &'static str> {
-    let current = kernel.state().last_applied_sequence;
+    let current = kernel.state().last_applied_sequence();
     if current == sequence {
         return Ok(());
     }
     if current > sequence {
         return Err("filtered_sequence_regression");
     }
-    let mut state = kernel.state().clone();
-    state.last_applied_sequence = sequence;
-    *kernel = Kernel::try_restore(state).map_err(|_| "filtered_head_invalid")?;
-    Ok(())
+    kernel
+        .adopt_session_head(sequence)
+        .map_err(|_| "filtered_head_invalid")
 }
 
 fn replay_loaded(
@@ -505,7 +503,7 @@ fn replay_from_snapshot(
     accelerated: &AcceleratedRestore,
 ) -> Result<(Kernel, u64, Option<Timestamp>), &'static str> {
     if accelerated.sequence > loaded.head_sequence
-        || accelerated.sequence != accelerated.state.last_applied_sequence
+        || accelerated.sequence != accelerated.state.last_applied_sequence()
     {
         return Err("snapshot_sequence_invalid");
     }
@@ -531,7 +529,7 @@ fn replay_from_snapshot(
             .ok_or("transient_event_sequence_exhausted")?;
         update_pending_timer_timestamp(&mut pending_timer_scheduled_at, batch);
     }
-    if kernel.state().last_applied_sequence != loaded.head_sequence {
+    if kernel.state().last_applied_sequence() != loaded.head_sequence {
         return Err("loaded_head_mismatch");
     }
     Ok((kernel, next_transient_sequence, pending_timer_scheduled_at))
@@ -557,7 +555,7 @@ fn replay_from_default(
         update_pending_timer_timestamp(&mut pending_timer_scheduled_at, batch);
     }
     if last_batch_sequence != loaded.head_sequence
-        || kernel.state().last_applied_sequence != loaded.head_sequence
+        || kernel.state().last_applied_sequence() != loaded.head_sequence
     {
         return Err("loaded_head_mismatch");
     }

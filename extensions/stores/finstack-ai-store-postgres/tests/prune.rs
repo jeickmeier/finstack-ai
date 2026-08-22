@@ -180,36 +180,42 @@ async fn scripted_session_with_aligned_snapshot(
     // overridden to match a later batch boundary is exactly what a real
     // `write_state_snapshot` caller would have produced had it recovered
     // through sequence 2.
-    state.last_applied_sequence = 2;
-    state.state_version = state.state_version.max(6);
-    state.completion_identities.insert(
+    state.set_last_applied_sequence(2);
+    state.set_state_version(state.state_version().max(6));
+    let mut identities = state.completion_identities().clone();
+    identities.insert(
         std::sync::Arc::from("completion-a"),
         CompletionIdentity {
             effect_id: id::<EffectTag>(9_001),
             settlement_digest: Digest::raw_json(b"{}"),
         },
     );
-    state.completion_identities.insert(
+    identities.insert(
         std::sync::Arc::from("completion-b"),
         CompletionIdentity {
             effect_id: id::<EffectTag>(9_002),
             settlement_digest: Digest::raw_json(b"{}"),
         },
     );
-    state.resolution_identities.insert(
+    state.set_completion_identities(identities);
+    let mut resolutions = state.resolution_identities().clone();
+    resolutions.insert(
         std::sync::Arc::from("resolution-a"),
         ResolutionIdentity {
             interaction_id: id::<InteractionTag>(9_003),
             settlement_digest: Digest::raw_json(b"{}"),
         },
     );
-    state.model_settlements.insert(
+    state.set_resolution_identities(resolutions);
+    let mut settlements = state.model_settlements().clone();
+    settlements.insert(
         id::<EffectTag>(9_004),
         ModelSettlementFingerprint {
             kind: ModelSettlementKind::Completed,
             digest: Digest::raw_json(b"{}"),
         },
     );
+    state.set_model_settlements(settlements);
 
     let (bytes, digest) =
         encode_snapshot(&state, 2, head_checksum_at_two, None, None).expect("encode snapshot");

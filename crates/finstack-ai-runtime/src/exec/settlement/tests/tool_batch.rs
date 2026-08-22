@@ -88,9 +88,9 @@ fn fully_filtered_batch_still_commits_every_source_call() {
         "coverage is positional: same calls, same order, no duplicates"
     );
     assert!(
-        coordinator.state().terminal.is_none(),
+        coordinator.state().terminal().is_none(),
         "a fully filtered batch is not a run failure: {:?}",
-        coordinator.state().terminal
+        coordinator.state().terminal()
     );
 }
 
@@ -216,13 +216,13 @@ fn a_middleware_failure_settles_the_stage_as_failed_instead_of_opening_a_batch()
     // normalizes the stage as failed and drives the run to
     // `BeforeFinalize` carrying the component's own descriptor; the
     // facade's finalize settlement is what commits the terminal.
-    assert_eq!(coordinator.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(coordinator.state().phase(), Some(RunPhase::BeforeFinalize));
     let Some(TerminalCandidate::Failed { error, .. }) =
-        coordinator.state().terminal_candidate.as_ref()
+        coordinator.state().terminal_candidate()
     else {
         panic!(
             "the middleware Fail must become the terminal candidate: {:?}",
-            coordinator.state().terminal_candidate
+            coordinator.state().terminal_candidate()
         );
     };
     assert_eq!(error.code.as_str(), "tool_batch_rejected");

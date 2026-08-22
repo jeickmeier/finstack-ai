@@ -99,6 +99,7 @@ pub finstack_ai_tools_mcp::StdioConfig::program: std::path::PathBuf
 impl finstack_ai_tools_mcp::StdioConfig
 pub fn finstack_ai_tools_mcp::StdioConfig::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::vec::Vec<alloc::string::String>>) -> Self
 pub fn finstack_ai_tools_mcp::StdioConfig::with_confinement(self, finstack_ai_runtime::services::process_confinement::ProcessConfinement, finstack_ai_runtime::services::process_confinement::ConfinementProfile) -> Self
+pub fn finstack_ai_tools_mcp::StdioConfig::with_read_timeout(self, core::time::Duration) -> Self
 impl core::clone::Clone for finstack_ai_tools_mcp::StdioConfig
 pub fn finstack_ai_tools_mcp::StdioConfig::clone(&self) -> finstack_ai_tools_mcp::StdioConfig
 impl core::cmp::Eq for finstack_ai_tools_mcp::StdioConfig

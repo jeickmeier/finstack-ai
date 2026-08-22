@@ -75,15 +75,28 @@ struct Case {
 fn stage_allocation_matches_decide_rs_arm_for_arm() {
     let base = accepted_state();
     let sources = test_sources();
+    let mut pending_json = state_at_phase(&base, RunPhase::AfterModel);
+    pending_json.set_output_configuration(Some(OutputConfiguration {
+        output: OutputSpec::JsonSchema {
+            schema: finstack_ai_kernel::SchemaRef {
+                draft: finstack_ai_kernel::JsonSchemaDraft::Draft202012,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"{}"),
+            },
+        },
+        ..OutputConfiguration::default()
+    }));
+    let mut overflow = with_candidate(
+        state_at_phase(&base, RunPhase::BeforeFinalize),
+        completed_candidate(u64::MAX),
+    );
+    overflow.set_cycle(u64::MAX);
 
     let cases = vec![
         // decide.rs:1107-1130 — Continue is admitted at BeforeRun.
         Case {
             label: "Continue @ BeforeRun",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeRun),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeRun),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeRun,
@@ -103,20 +116,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // otherwise an admitted stage for it.
         Case {
             label: "Continue @ AfterModel (pending JsonSchema output)",
-            state: KernelState {
-                phase: Some(RunPhase::AfterModel),
-                output_configuration: Some(OutputConfiguration {
-                    output: OutputSpec::JsonSchema {
-                        schema: finstack_ai_kernel::SchemaRef {
-                            draft: finstack_ai_kernel::JsonSchemaDraft::Draft202012,
-                            schema_version: 1,
-                            schema_digest: Digest::raw_json(b"{}"),
-                        },
-                    },
-                    ..OutputConfiguration::default()
-                }),
-                ..base.clone()
-            },
+            state: pending_json,
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::AfterModel,
@@ -127,10 +127,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1131-1133.
         Case {
             label: "ContextPrepared @ PrepareContext",
-            state: KernelState {
-                phase: Some(RunPhase::PreparingContext),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::PreparingContext),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::PrepareContext,
@@ -150,10 +147,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1134-1141.
         Case {
             label: "ModelRequestPrepared @ BeforeModel (ModelResponse contract)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeModel),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeModel),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeModel,
@@ -171,10 +165,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1137-1139 — the contract-kind guard.
         Case {
             label: "ModelRequestPrepared @ BeforeModel (ToolResult contract)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeModel),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeModel),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeModel,
@@ -185,11 +176,10 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1142-1145.
         Case {
             label: "FinalizeAccepted @ BeforeFinalize (candidate present)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeFinalize),
-                terminal_candidate: Some(completed_candidate(0)),
-                ..base.clone()
-            },
+            state: with_candidate(
+                state_at_phase(&base, RunPhase::BeforeFinalize),
+                completed_candidate(0),
+            ),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeFinalize,
@@ -209,10 +199,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // public `terminal_candidate` field) that a candidate must exist.
         Case {
             label: "FinalizeAccepted @ BeforeFinalize (no candidate)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeFinalize),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeFinalize),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeFinalize,
@@ -223,11 +210,10 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1146-1157.
         Case {
             label: "ContinueModel @ BeforeFinalize (Completed candidate)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeFinalize),
-                terminal_candidate: Some(completed_candidate(0)),
-                ..base.clone()
-            },
+            state: with_candidate(
+                state_at_phase(&base, RunPhase::BeforeFinalize),
+                completed_candidate(0),
+            ),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeFinalize,
@@ -247,11 +233,10 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // to the catch-all.
         Case {
             label: "ContinueModel @ BeforeFinalize (Failed candidate)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeFinalize),
-                terminal_candidate: Some(failed_candidate(0)),
-                ..base.clone()
-            },
+            state: with_candidate(
+                state_at_phase(&base, RunPhase::BeforeFinalize),
+                failed_candidate(0),
+            ),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeFinalize,
@@ -262,12 +247,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1153-1156 — the checked cycle-overflow guard.
         Case {
             label: "ContinueModel @ BeforeFinalize (cycle overflow)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeFinalize),
-                cycle: u64::MAX,
-                terminal_candidate: Some(completed_candidate(u64::MAX)),
-                ..base.clone()
-            },
+            state: overflow,
             cursor: StageCursor {
                 cycle: u64::MAX,
                 stage: Stage::BeforeFinalize,
@@ -278,10 +258,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1159-1161.
         Case {
             label: "Fail @ BeforeFinalize",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeFinalize),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeFinalize),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeFinalize,
@@ -302,10 +279,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1162-1164.
         Case {
             label: "Retry @ BeforeFinalize",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeFinalize),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeFinalize),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeFinalize,
@@ -330,10 +304,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // decide.rs:1165-1177.
         Case {
             label: "Fail @ BeforeRun",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeRun),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeRun),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeRun,
@@ -358,10 +329,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // group) = 3, events = 0, effects = 0, messages = 0.
         Case {
             label: "ToolBatchPrepared @ BeforeToolBatch (delegates to allocate_tool_opening)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeToolBatch),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeToolBatch),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeToolBatch,
@@ -383,10 +351,7 @@ fn stage_allocation_matches_decide_rs_arm_for_arm() {
         // admitted at the given stage under any arm.
         Case {
             label: "ContextPrepared @ BeforeRun (wrong stage, catch-all)",
-            state: KernelState {
-                phase: Some(RunPhase::BeforeRun),
-                ..base.clone()
-            },
+            state: state_at_phase(&base, RunPhase::BeforeRun),
             cursor: StageCursor {
                 cycle: 0,
                 stage: Stage::BeforeRun,

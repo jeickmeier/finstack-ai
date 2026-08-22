@@ -68,10 +68,11 @@ pub enum InteractionResumeAction {
 /// Classify the outstanding interaction without fabricating a resolution.
 #[must_use]
 pub fn interaction_resume_action(state: &KernelState, now: Timestamp) -> InteractionResumeAction {
-    let awaiting = state.phase == Some(RunPhase::AwaitingInteraction);
-    match (awaiting, state.pending_interaction.as_ref()) {
+    let awaiting = state.phase() == Some(RunPhase::AwaitingInteraction);
+    match (awaiting, state.pending_interaction()) {
         (false, None) => {
-            if state.last_interaction_terminal.is_some() || !state.resolution_identities.is_empty()
+            if state.last_interaction_terminal().is_some()
+                || !state.resolution_identities().is_empty()
             {
                 InteractionResumeAction::UseRecorded
             } else {
@@ -79,7 +80,7 @@ pub fn interaction_resume_action(state: &KernelState, now: Timestamp) -> Interac
             }
         }
         (true, Some(pending)) => {
-            if state.cancellation.is_some() {
+            if state.cancellation().is_some() {
                 return InteractionResumeAction::WaitResolution;
             }
             if pending.prior_phase == RunPhase::AwaitingInteraction {
@@ -92,9 +93,9 @@ pub fn interaction_resume_action(state: &KernelState, now: Timestamp) -> Interac
         }
         (false, Some(_))
             if matches!(
-                state.phase,
+                state.phase(),
                 Some(RunPhase::Cancelling | RunPhase::Suspended)
-            ) && state.cancellation.is_some() =>
+            ) && state.cancellation().is_some() =>
         {
             InteractionResumeAction::WaitResolution
         }
@@ -212,28 +213,24 @@ mod tests {
             InteractionResumeAction::NoOutstanding
         );
 
-        let recorded = KernelState {
-            last_interaction_terminal: Some(InteractionTerminal {
-                interaction_id: id(1),
-                kind: InteractionKind::Approval,
-                cursor: StageCursor {
-                    cycle: 0,
-                    stage: Stage::BeforeToolBatch,
-                },
-                outcome: InteractionTerminalOutcome::Granted,
-            }),
-            ..KernelState::default()
-        };
+        let mut recorded = KernelState::default();
+        recorded.set_last_interaction_terminal(Some(InteractionTerminal {
+            interaction_id: id(1),
+            kind: InteractionKind::Approval,
+            cursor: StageCursor {
+                cycle: 0,
+                stage: Stage::BeforeToolBatch,
+            },
+            outcome: InteractionTerminalOutcome::Granted,
+        }));
         assert_eq!(
             interaction_resume_action(&recorded, timestamp(1_000)),
             InteractionResumeAction::UseRecorded
         );
 
-        let waiting = KernelState {
-            phase: Some(RunPhase::AwaitingInteraction),
-            pending_interaction: Some(pending(Some(timestamp(2_000)))),
-            ..KernelState::default()
-        };
+        let mut waiting = KernelState::default();
+        waiting.set_phase(Some(RunPhase::AwaitingInteraction));
+        waiting.set_pending_interaction(Some(pending(Some(timestamp(2_000)))));
         assert_eq!(
             interaction_resume_action(&waiting, timestamp(1_000)),
             InteractionResumeAction::WaitResolution
@@ -244,36 +241,34 @@ mod tests {
         );
 
         let mut mismatched = waiting;
-        mismatched.pending_interaction = None;
+        mismatched.set_pending_interaction(None);
         assert_eq!(
             interaction_resume_action(&mismatched, timestamp(1_000)),
             InteractionResumeAction::SuspendUncertain
         );
 
-        let cancelling = KernelState {
-            phase: Some(RunPhase::Cancelling),
-            pending_interaction: Some(pending(Some(timestamp(2_000)))),
-            cancellation: Some(finstack_ai_kernel::CancellationState {
-                request: finstack_ai_kernel::CancellationRequest::try_new(
-                    finstack_ai_kernel::Id::from_bytes({
-                        let mut bytes = [0_u8; 16];
-                        bytes[6] = 0x70;
-                        bytes[8..].copy_from_slice(&3_u64.to_be_bytes());
-                        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-                        bytes
-                    }),
-                    finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
-                    Some("shutdown"),
-                )
-                .expect("request"),
-                prior_phase: RunPhase::AwaitingInteraction,
-                completed_effects: std::sync::Arc::from([]),
-                cancelled_effects: std::sync::Arc::from([]),
-                uncertain_effects: std::sync::Arc::from([]),
-                outstanding_effects: std::sync::Arc::from([]),
-            }),
-            ..KernelState::default()
-        };
+        let mut cancelling = KernelState::default();
+        cancelling.set_phase(Some(RunPhase::Cancelling));
+        cancelling.set_pending_interaction(Some(pending(Some(timestamp(2_000)))));
+        cancelling.set_cancellation(Some(finstack_ai_kernel::CancellationState {
+            request: finstack_ai_kernel::CancellationRequest::try_new(
+                finstack_ai_kernel::Id::from_bytes({
+                    let mut bytes = [0_u8; 16];
+                    bytes[6] = 0x70;
+                    bytes[8..].copy_from_slice(&3_u64.to_be_bytes());
+                    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                    bytes
+                }),
+                finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+                Some("shutdown"),
+            )
+            .expect("request"),
+            prior_phase: RunPhase::AwaitingInteraction,
+            completed_effects: std::sync::Arc::from([]),
+            cancelled_effects: std::sync::Arc::from([]),
+            uncertain_effects: std::sync::Arc::from([]),
+            outstanding_effects: std::sync::Arc::from([]),
+        }));
         assert_eq!(
             interaction_resume_action(&cancelling, timestamp(3_000)),
             InteractionResumeAction::WaitResolution

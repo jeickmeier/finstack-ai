@@ -91,17 +91,12 @@ impl InteractionRouter {
                 .await;
         };
 
-        let identity_valid = coordinator.state().session_id == Some(command.locator.session_id)
-            && coordinator.state().lane_id == Some(command.locator.lane_id)
-            && coordinator
-                .state()
-                .accepted
-                .as_ref()
-                .is_some_and(|accepted| {
-                    accepted.run_id() == command.locator.run_id
-                        && accepted.security().tenant_scope()
-                            == command.locator.tenant_scope.as_ref()
-                });
+        let identity_valid = coordinator.state().session_id() == Some(command.locator.session_id)
+            && coordinator.state().lane_id() == Some(command.locator.lane_id)
+            && coordinator.state().accepted().is_some_and(|accepted| {
+                accepted.run_id() == command.locator.run_id
+                    && accepted.security().tenant_scope() == command.locator.tenant_scope.as_ref()
+            });
         if !identity_valid {
             return self
                 .reject_unknown(
@@ -147,7 +142,7 @@ impl InteractionRouter {
                 )
                 .await;
         }
-        if let Some(pending) = coordinator.state().pending_interaction.as_ref()
+        if let Some(pending) = coordinator.state().pending_interaction()
             && pending.request.interaction_id() == interaction_id
             && pending
                 .request
@@ -163,7 +158,7 @@ impl InteractionRouter {
 
         let accepted_digest = coordinator
             .state()
-            .resolution_identities
+            .resolution_identities()
             .get(command.resolution.resolution_id())
             .map(|identity| identity.settlement_digest);
         let input = interaction_settled_input(coordinator.state(), &command, submitted_at);
@@ -252,16 +247,12 @@ impl InteractionRouter {
                 .await
                 .map(|_| Vec::new());
         };
-        let identity_valid = coordinator.state().session_id == Some(locator.session_id)
-            && coordinator.state().lane_id == Some(locator.lane_id)
-            && coordinator
-                .state()
-                .accepted
-                .as_ref()
-                .is_some_and(|accepted| {
-                    accepted.run_id() == locator.run_id
-                        && accepted.security().tenant_scope() == locator.tenant_scope.as_ref()
-                });
+        let identity_valid = coordinator.state().session_id() == Some(locator.session_id)
+            && coordinator.state().lane_id() == Some(locator.lane_id)
+            && coordinator.state().accepted().is_some_and(|accepted| {
+                accepted.run_id() == locator.run_id
+                    && accepted.security().tenant_scope() == locator.tenant_scope.as_ref()
+            });
         if !identity_valid {
             return self
                 .reject_unknown(
@@ -292,8 +283,7 @@ impl InteractionRouter {
         }
         Ok(coordinator
             .state()
-            .pending_interaction
-            .as_ref()
+            .pending_interaction()
             .map(|pending| vec![pending.request.clone()])
             .unwrap_or_default())
     }

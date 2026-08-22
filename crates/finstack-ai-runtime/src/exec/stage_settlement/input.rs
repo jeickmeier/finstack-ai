@@ -38,18 +38,18 @@ pub(super) fn stage_input(
 ) -> Result<StageInput, RunHandleError> {
     match cursor_stage {
         Stage::BeforeRun => Ok(StageInput::BeforeRun {
-            value: canonical_messages(state.messages.as_slice())?,
+            value: canonical_messages(state.messages().as_slice())?,
         }),
         Stage::PrepareContext => {
             let value = match outcome {
                 ReducerStageOutcome::ContextPrepared { messages } => canonical_messages(messages)?,
-                _ => canonical_messages(state.messages.as_slice())?,
+                _ => canonical_messages(state.messages().as_slice())?,
             };
             Ok(StageInput::PrepareContext { value })
         }
         Stage::AfterModel => {
             let message = state
-                .messages
+                .messages()
                 .last()
                 .ok_or_else(|| stage_error(MIDDLEWARE_STAGE_INPUT_INVALID))?;
             Ok(StageInput::AfterModel {
@@ -58,14 +58,14 @@ pub(super) fn stage_input(
         }
         Stage::AfterToolBatch => Ok(StageInput::AfterToolBatch {
             value: canonical_messages(trailing_role_run(
-                state.messages.as_slice(),
+                state.messages().as_slice(),
                 MessageRole::Tool,
             ))?,
         }),
         Stage::BeforeFinalize => {
-            let result_message = match state.terminal_candidate.as_ref() {
+            let result_message = match state.terminal_candidate() {
                 Some(finstack_ai_kernel::TerminalCandidate::Completed { message_id, .. }) => state
-                    .messages
+                    .messages()
                     .iter()
                     .find(|message| message.id() == message_id)
                     .map(canonical_message)

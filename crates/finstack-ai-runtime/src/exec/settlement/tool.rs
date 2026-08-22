@@ -44,13 +44,13 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
 ) -> Result<ToolResultDisposition, RunHandleError> {
     let effect_id = driver_result.seed.requested.effect_id();
     let state = coordinator.state();
-    let Some(batch) = state.active_tool_batch.as_ref() else {
+    let Some(batch) = state.active_tool_batch() else {
         return Ok(ToolResultDisposition::Settled);
     };
     let Some(active) = batch.call(effect_id) else {
         return Ok(ToolResultDisposition::Settled);
     };
-    if let Some(cancellation) = state.cancellation.as_ref()
+    if let Some(cancellation) = state.cancellation()
         && cancellation.outstanding_effects.contains(&effect_id)
     {
         let cancelled = driver_result
@@ -65,7 +65,7 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
             active.status,
             finstack_ai_kernel::ActiveToolCallStatus::Requested { deferred: None, .. }
         )
-        || state.terminal.is_some()
+        || state.terminal().is_some()
     {
         return Ok(ToolResultDisposition::Settled);
     }
@@ -293,7 +293,7 @@ pub(crate) async fn process_tool_progress<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
 ) -> Result<(), RunHandleError> {
     let state = coordinator.state();
-    let Some(batch) = state.active_tool_batch.as_ref() else {
+    let Some(batch) = state.active_tool_batch() else {
         return Ok(());
     };
     let Some(active) = batch.call(effect_id) else {
@@ -302,8 +302,8 @@ pub(crate) async fn process_tool_progress<C: Clock, R: RandomSource>(
     if !matches!(
         active.status,
         finstack_ai_kernel::ActiveToolCallStatus::Requested { deferred: None, .. }
-    ) || state.terminal.is_some()
-        || state.cancellation.is_some()
+    ) || state.terminal().is_some()
+        || state.cancellation().is_some()
     {
         return Ok(());
     }
@@ -424,8 +424,7 @@ fn allocate_tool_settlement<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
 ) -> Result<AllocatedIds, RunHandleError> {
     let batch = state
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .ok_or(RunHandleError::ToolSettlement {
             code: "tool_settlement_batch_missing",
         })?;
@@ -496,7 +495,7 @@ pub(crate) async fn resume_pending_tool_effects<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
 ) -> Result<ToolResumeAction, RunHandleError> {
-    let Some(batch) = coordinator.state().active_tool_batch.clone() else {
+    let Some(batch) = coordinator.state().active_tool_batch() else {
         return Ok(ToolResumeAction::NoOutstanding);
     };
     let mut first_pass = Vec::new();
@@ -628,7 +627,7 @@ pub(super) fn deferred_tool_seed(
     effect_id: EffectId,
 ) -> Option<ToolDispatchSeed> {
     let state = coordinator.state();
-    let batch = state.active_tool_batch.as_ref()?;
+    let batch = state.active_tool_batch()?;
     let call = batch.call(effect_id)?;
     let ActiveToolCallStatus::Requested { requested, .. } = &call.status else {
         return None;
@@ -646,7 +645,7 @@ pub(super) fn deferred_tool_seed(
         authorization,
         budget_scope_id,
         attempt: 1,
-        requested_at: state.accepted_at?,
+        requested_at: state.accepted_at()?,
         relation_depth: coordinator.accepted_relation_depth(),
     })
 }
@@ -658,12 +657,12 @@ fn dispatch_security_from_state(
     crate::ports::model::AuthorizationContext,
     Option<finstack_ai_kernel::BudgetScopeId>,
 )> {
-    let accepted = state.accepted.as_ref()?;
+    let accepted = state.accepted()?;
     let security = accepted.security();
     let locator = finstack_ai_kernel::OperationLocator::try_new(
         security.tenant_scope(),
-        state.session_id?,
-        state.lane_id?,
+        state.session_id()?,
+        state.lane_id()?,
         accepted.run_id(),
     )
     .ok()?;
@@ -718,15 +717,14 @@ async fn settle_reconciled_tool<C: Clock, R: RandomSource>(
     let effect_id = seed.requested.effect_id();
     if coordinator
         .state()
-        .tool_settlements
+        .tool_settlements()
         .contains_key(&effect_id)
     {
         return Ok(ToolResumeAction::UseRecorded);
     }
     let deferred = coordinator
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .is_some_and(|batch| {
             batch.call(effect_id).is_some_and(|call| {
                 matches!(
@@ -821,19 +819,15 @@ async fn ensure_or_wait_tool_deferred<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
 ) -> Result<ToolResumeAction, RunHandleError> {
     let effect_id = seed.requested.effect_id();
-    let existing = coordinator
-        .state()
-        .active_tool_batch
-        .as_ref()
-        .and_then(|batch| {
-            batch.call(effect_id).and_then(|call| match &call.status {
-                ActiveToolCallStatus::Requested {
-                    deferred: Some(deferred),
-                    ..
-                } => Some(deferred.clone()),
-                _ => None,
-            })
-        });
+    let existing = coordinator.state().active_tool_batch().and_then(|batch| {
+        batch.call(effect_id).and_then(|call| match &call.status {
+            ActiveToolCallStatus::Requested {
+                deferred: Some(deferred),
+                ..
+            } => Some(deferred.clone()),
+            _ => None,
+        })
+    });
     if let Some(existing) = existing {
         if existing.handle == deferral.handle {
             return Ok(ToolResumeAction::WaitExternal);
@@ -861,8 +855,7 @@ async fn submit_tool_fail_closed<C: Clock, R: RandomSource>(
 ) -> Result<(), RunHandleError> {
     let accepted = coordinator
         .state()
-        .accepted
-        .as_ref()
+        .accepted()
         .ok_or(RunHandleError::ToolSettlement {
             code: "tool_resume_accepted_missing",
         })?;
@@ -878,7 +871,7 @@ async fn submit_tool_fail_closed<C: Clock, R: RandomSource>(
         .locator;
     let accepted_digest = coordinator
         .state()
-        .tool_settlements
+        .tool_settlements()
         .get(&effect_id)
         .map(|fingerprint| fingerprint.digest);
     let rejection = ExternalCommandRejected::try_new(

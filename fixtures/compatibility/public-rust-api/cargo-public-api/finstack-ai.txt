@@ -888,6 +888,13 @@ impl serde_core::ser::Serialize for finstack_ai::HostFeature
 pub fn finstack_ai::HostFeature::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::HostFeature
 pub fn finstack_ai::HostFeature::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai::LinkedProviderSpec
+pub finstack_ai::LinkedProviderSpec::Anthropic(finstack_ai::AnthropicAgentSpec)
+pub finstack_ai::LinkedProviderSpec::Gateway(finstack_ai::GatewayAgentSpec)
+pub finstack_ai::LinkedProviderSpec::Gemini(finstack_ai::GeminiAgentSpec)
+pub finstack_ai::LinkedProviderSpec::Ollama(finstack_ai::OllamaAgentSpec)
+pub finstack_ai::LinkedProviderSpec::OpenAi(finstack_ai::OpenAiAgentSpec)
+pub finstack_ai::LinkedProviderSpec::OpenRouter(finstack_ai::OpenRouterAgentSpec)
 pub enum finstack_ai::LockedComponentKind
 pub finstack_ai::LockedComponentKind::ContextProvider
 pub finstack_ai::LockedComponentKind::Middleware
@@ -1014,13 +1021,6 @@ impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::VersionRequirement
 pub fn finstack_ai::VersionRequirement::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai::Agent
 impl finstack_ai::Agent
-pub async fn finstack_ai::Agent::anthropic(finstack_ai::AnthropicAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
-pub async fn finstack_ai::Agent::gateway(finstack_ai::GatewayAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
-pub async fn finstack_ai::Agent::gemini(finstack_ai::GeminiAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
-pub async fn finstack_ai::Agent::ollama(finstack_ai::OllamaAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
-pub async fn finstack_ai::Agent::openai(finstack_ai::OpenAiAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
-pub async fn finstack_ai::Agent::openrouter(finstack_ai::OpenRouterAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
-impl finstack_ai::Agent
 pub fn finstack_ai::Agent::builder(finstack_ai_kernel::primitives::ids::AgentId, finstack_ai_kernel::primitives::ids::BundleId, (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::port::Model>), (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)) -> finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::Agent::capability_catalog(&self) -> alloc::vec::Vec<finstack_ai::CapabilityCatalogEntry>
 pub fn finstack_ai::Agent::compact_capability_catalog(&self) -> alloc::string::String
@@ -1032,6 +1032,8 @@ pub fn finstack_ai::Agent::start(&self, finstack_ai::AgentRunRequest) -> core::r
 pub fn finstack_ai::Agent::try_from_resolved(alloc::sync::Arc<finstack_ai::ResolvedAgent>) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::try_with_output_schema(self, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::with_history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
+impl finstack_ai::Agent
+pub async fn finstack_ai::Agent::linked(finstack_ai::LinkedProviderSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 impl core::clone::Clone for finstack_ai::Agent
 pub fn finstack_ai::Agent::clone(&self) -> finstack_ai::Agent
 pub struct finstack_ai::AgentBuilder

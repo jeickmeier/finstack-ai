@@ -362,7 +362,7 @@ pub(crate) async fn append_foreign_accept(
             AppendRequest::try_new(
                 id(batch),
                 id(1),
-                parent.state().last_applied_sequence + 1,
+                parent.state().last_applied_sequence() + 1,
                 vec![draft],
             )
             .expect("append request"),

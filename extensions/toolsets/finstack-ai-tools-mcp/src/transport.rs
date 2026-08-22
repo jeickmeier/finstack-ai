@@ -37,6 +37,10 @@ const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1_048_576;
 /// no runtime override.
 const MAX_RESPONSE_BYTES_CEILING: usize = 64 * 1_048_576;
 const INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default stdio response timeout for a `StdioConfig` that does not set one
+/// explicitly. Bounds how long one round trip may wait on the server process
+/// even when the caller supplied no deadline.
+const DEFAULT_STDIO_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub(crate) struct RequestControl {
@@ -91,6 +95,13 @@ fn timeout_error() -> McpError {
     McpError::stable(
         MCP_TIMEOUT,
         "MCP request was cancelled or exceeded its deadline",
+    )
+}
+
+fn read_timeout_error() -> McpError {
+    McpError::stable(
+        MCP_TIMEOUT,
+        "stdio response exceeded the configured read timeout",
     )
 }
 
@@ -265,17 +276,32 @@ pub struct StdioConfig {
         finstack_ai_runtime::confinement::ProcessConfinement,
         finstack_ai_runtime::confinement::ConfinementProfile,
     )>,
+    read_timeout: Duration,
 }
 
 impl StdioConfig {
     /// Build a stdio target.
+    ///
+    /// The response timeout defaults to `DEFAULT_STDIO_READ_TIMEOUT`
+    /// (30 seconds); call [`Self::with_read_timeout`] to raise or lower it.
     #[must_use]
     pub fn new(program: impl Into<PathBuf>, args: impl Into<Vec<String>>) -> Self {
         Self {
             program: program.into(),
             args: args.into(),
             confinement: None,
+            read_timeout: DEFAULT_STDIO_READ_TIMEOUT,
         }
+    }
+
+    /// Override how long one round trip may wait for the server's response
+    /// on stdout before the request fails with [`crate::MCP_TIMEOUT`] and the
+    /// transport is poisoned. Zero is clamped to one millisecond; the
+    /// transport never waits unbounded on an unresponsive server process.
+    #[must_use]
+    pub fn with_read_timeout(mut self, read_timeout: Duration) -> Self {
+        self.read_timeout = read_timeout.max(Duration::from_millis(1));
+        self
     }
 
     /// Request the same runtime confinement service used by the shell crate.
@@ -323,6 +349,7 @@ pub(crate) struct StdioTransport {
     next_id: AtomicU64,
     notifications: Mutex<Vec<String>>,
     poisoned: AtomicBool,
+    read_timeout: Duration,
 }
 
 impl StdioTransport {
@@ -397,6 +424,7 @@ impl StdioTransport {
             next_id: AtomicU64::new(1),
             notifications: Mutex::new(Vec::new()),
             poisoned: AtomicBool::new(false),
+            read_timeout: config.read_timeout,
         })
     }
 
@@ -452,11 +480,15 @@ impl StdioTransport {
                 }
             }
         };
+        // `biased` keeps runtime cancellation and the caller deadline ahead of
+        // the transport's own read timeout, so cancelling a run still wins.
         let result = tokio::select! {
             biased;
             () = control.cancellation.cancelled() => Err(timeout_error()),
             () = control.wait_deadline() => Err(timeout_error()),
-            result = io => result,
+            timed = tokio::time::timeout(self.read_timeout, io) => {
+                timed.unwrap_or_else(|_elapsed| Err(read_timeout_error()))
+            }
         };
         if result.is_err() {
             self.poisoned.store(true, Ordering::SeqCst);
@@ -1089,6 +1121,32 @@ mod tests {
             }))
             .expect_err("foreign id");
         assert!(format!("{error}").contains(MCP_PROTOCOL_VIOLATION));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stdio_read_timeout_fails_the_request_and_poisons_the_transport() {
+        let config = StdioConfig::new("/bin/sleep", vec!["30".to_owned()])
+            .with_read_timeout(Duration::from_millis(50));
+        let transport = StdioTransport::try_spawn(&config).expect("spawns");
+        let error = transport
+            .request("tools/list", serde_json::json!({}))
+            .await
+            .expect_err("a server that never responds must time out");
+        assert_eq!(error.code(), MCP_TIMEOUT);
+        assert!(format!("{error}").contains("read timeout"));
+        let poisoned = transport
+            .request("tools/list", serde_json::json!({}))
+            .await
+            .expect_err("a timed-out transport must stay poisoned");
+        assert!(format!("{poisoned}").contains("poisoned"));
+    }
+
+    #[test]
+    fn stdio_read_timeout_clamps_zero() {
+        let config =
+            StdioConfig::new("/bin/echo", Vec::<String>::new()).with_read_timeout(Duration::ZERO);
+        assert_eq!(config.read_timeout, Duration::from_millis(1));
     }
 
     #[tokio::test]

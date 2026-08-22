@@ -177,7 +177,7 @@ async fn tick_fires_a_due_timer_and_keeps_the_row_when_no_new_wait() {
         .await
         .expect("recover");
     assert_eq!(
-        asleep.state().phase,
+        asleep.state().phase(),
         Some(RunPhase::Sleeping),
         "an undue timer is left alone"
     );
@@ -191,10 +191,10 @@ async fn tick_fires_a_due_timer_and_keeps_the_row_when_no_new_wait() {
         .await
         .expect("recover");
     assert!(
-        awake.state().retry.pending.is_none(),
+        awake.state().retry().pending.is_none(),
         "the due timer fired and cleared the pending retry"
     );
-    assert_ne!(awake.state().phase, Some(RunPhase::Sleeping));
+    assert_ne!(awake.state().phase(), Some(RunPhase::Sleeping));
 
     // The woken run is mid-flight in the stage loop with no classifiable
     // wait, so this worker cannot park it. The row must survive, unleased

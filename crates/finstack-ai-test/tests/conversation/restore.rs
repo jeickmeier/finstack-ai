@@ -51,10 +51,10 @@ async fn main_lane_restores_leaf_and_rejects_a_second_root() {
         Some(leaf)
     );
     assert_eq!(
-        recovered.state().accepted.as_ref().expect("run").run_id(),
+        recovered.state().accepted().expect("run").run_id(),
         id(3)
     );
-    assert_eq!(recovered.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::BeforeRun));
     assert_eq!(recovered.session().active_on_lane(id(2)), Some(id(3)));
     let mut recovered = recovered;
     assert!(matches!(
@@ -82,7 +82,7 @@ async fn pre046_journals_without_session_created_still_recover() {
         .expect("recover");
     assert!(recovered.session().main_lane().is_none());
     assert_eq!(
-        recovered.state().accepted.as_ref().expect("run").run_id(),
+        recovered.state().accepted().expect("run").run_id(),
         id(3)
     );
 }

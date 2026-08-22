@@ -268,7 +268,10 @@ pub(crate) async fn park_on_sleeping_inner(
     .await
     .expect("owner");
     drive_to_active_model_request(&owner.handle()).await;
-    wait_state(store, |state| state.phase == Some(RunPhase::BeforeFinalize)).await;
+    wait_state(store, |state| {
+        state.phase() == Some(RunPhase::BeforeFinalize)
+    })
+    .await;
     owner
         .handle()
         .submit(
@@ -287,6 +290,6 @@ pub(crate) async fn park_on_sleeping_inner(
         )
         .await
         .expect("schedule retry");
-    wait_state(store, |state| state.phase == Some(RunPhase::Sleeping)).await;
+    wait_state(store, |state| state.phase() == Some(RunPhase::Sleeping)).await;
     owner
 }

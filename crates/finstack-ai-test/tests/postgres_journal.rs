@@ -363,7 +363,7 @@ async fn postgres_v1_opens_prunes_and_replays_the_pending_model_effect() {
     let recovered = helpers::recover(Arc::clone(&port)).await;
     helpers::assert_legal(
         "postgres-W2",
-        recovered.state().phase,
+        recovered.state().phase(),
         LegalRestore::Retryable,
     );
     drop(recovered);
@@ -378,7 +378,7 @@ async fn postgres_v1_opens_prunes_and_replays_the_pending_model_effect() {
 
     let recovered = helpers::recover(Arc::clone(&port)).await;
     assert!(
-        recovered.state().pending_model_effect.is_some(),
+        recovered.state().pending_model_effect().is_some(),
         "the pruned prefix must still replay the pending model effect"
     );
 

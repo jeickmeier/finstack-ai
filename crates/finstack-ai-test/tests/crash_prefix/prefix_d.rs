@@ -5,17 +5,16 @@ async fn prefix_d1_through_d6_and_post_horizon() {
     drive_to_model_request(&mut coordinator).await;
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert!(recovered.state().pending_model_effect.is_some());
-    assert_legal("D1", recovered.state().phase, LegalRestore::Retryable);
-    assert_legal("D2", recovered.state().phase, LegalRestore::Retryable);
-    assert_legal("D3", recovered.state().phase, LegalRestore::Retryable);
+    assert!(recovered.state().pending_model_effect().is_some());
+    assert_legal("D1", recovered.state().phase(), LegalRestore::Retryable);
+    assert_legal("D2", recovered.state().phase(), LegalRestore::Retryable);
+    assert_legal("D3", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let mut coordinator = drive_to_pending_model(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending")
         .clone();
     coordinator
@@ -43,17 +42,16 @@ async fn prefix_d1_through_d6_and_post_horizon() {
         .expect("defer");
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingExternal));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingExternal));
     assert!(
         recovered
             .state()
-            .pending_model_effect
-            .as_ref()
+            .pending_model_effect()
             .expect("pending")
             .deferred
             .is_some()
     );
-    assert_legal("D4", recovered.state().phase, LegalRestore::Suspended);
+    assert_legal("D4", recovered.state().phase(), LegalRestore::Suspended);
 
     let mut recovered = recovered;
     let failed = finstack_ai_kernel::ErrorDescriptor::new(
@@ -96,8 +94,8 @@ async fn prefix_d1_through_d6_and_post_horizon() {
     assert!(again.committed.is_none(), "D5 equal replay is idempotent");
     assert_legal(
         "D5",
-        recovered.state().phase,
-        classify_phase(recovered.state().phase.expect("phase")),
+        recovered.state().phase(),
+        classify_phase(recovered.state().phase().expect("phase")),
     );
 
     let conflicting = ExternalEffectCompletion::try_new(
@@ -121,8 +119,8 @@ async fn prefix_d1_through_d6_and_post_horizon() {
     );
     let unchanged = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(
-        unchanged.state().completion_identities,
-        recovered.state().completion_identities
+        unchanged.state().completion_identities(),
+        recovered.state().completion_identities()
     );
 
     let sink = Arc::new(RecordingSink::default());
@@ -181,11 +179,10 @@ async fn prefix_d7_and_d8_tool_deferral() {
     drop(coordinator);
 
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingTools));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingTools));
     let batch = recovered
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("active tool batch");
     let call = batch.calls.first().expect("requested tool call");
     let tool_batch_id = batch.opened.tool_batch_id;
@@ -194,8 +191,8 @@ async fn prefix_d7_and_d8_tool_deferral() {
         call.status,
         ActiveToolCallStatus::Requested { deferred: None, .. }
     ));
-    assert!(!recovered.state().tool_settlements.contains_key(&effect_id));
-    assert_legal("D7", recovered.state().phase, LegalRestore::Retryable);
+    assert!(!recovered.state().tool_settlements().contains_key(&effect_id));
+    assert_legal("D7", recovered.state().phase(), LegalRestore::Retryable);
 
     let deferred_input = KernelInput::ToolBatchSettled(ToolBatchSettled {
         tool_batch_id,
@@ -224,10 +221,10 @@ async fn prefix_d7_and_d8_tool_deferral() {
     drop(recovered);
 
     let mut recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingExternal));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingExternal));
     assert_eq!(deferred_call_count(recovered.state()), 1);
-    assert!(!recovered.state().tool_settlements.contains_key(&effect_id));
-    assert_legal("D8", recovered.state().phase, LegalRestore::Suspended);
+    assert!(!recovered.state().tool_settlements().contains_key(&effect_id));
+    assert_legal("D8", recovered.state().phase(), LegalRestore::Suspended);
 
     let duplicate = recovered
         .submit(
@@ -240,16 +237,15 @@ async fn prefix_d7_and_d8_tool_deferral() {
     drop(recovered);
 
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingExternal));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingExternal));
     assert_eq!(deferred_call_count(recovered.state()), 1);
-    assert!(!recovered.state().tool_settlements.contains_key(&effect_id));
-    assert_legal("D8", recovered.state().phase, LegalRestore::Suspended);
+    assert!(!recovered.state().tool_settlements().contains_key(&effect_id));
+    assert_legal("D8", recovered.state().phase(), LegalRestore::Suspended);
 }
 
 fn deferred_call_count(state: &finstack_ai_kernel::KernelState) -> usize {
     state
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("active tool batch")
         .calls
         .iter()

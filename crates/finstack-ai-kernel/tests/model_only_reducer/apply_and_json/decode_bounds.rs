@@ -26,8 +26,7 @@ fn terminal_state_vocabulary_is_exactly_completed_failed_and_cancelled() {
     let completed_terminal = completed
         .kernel
         .state()
-        .terminal
-        .as_ref()
+        .terminal()
         .expect("completed terminal");
     assert_json_round_trip_and_unknown_fields(completed_terminal);
     assert!(
@@ -199,13 +198,15 @@ fn context_and_retained_completion_ids_enforce_bounds_and_semantics() {
     assert!(serde_json::from_value::<ContextPrepared>(mismatched_context).is_err());
 
     let mut invalid_state = KernelState::default();
-    invalid_state.completion_identities.insert(
+    let mut identities = invalid_state.completion_identities().clone();
+    identities.insert(
         Arc::from(""),
         finstack_ai_kernel::CompletionIdentity {
             effect_id: id::<finstack_ai_kernel::EffectTag>(EFFECT_ONE),
             settlement_digest: Digest::raw_json(b"settlement"),
         },
     );
+    invalid_state.set_completion_identities(identities);
     assert!(matches!(
         invalid_state.validate(),
         Err(KernelError::InvalidInputPayload {

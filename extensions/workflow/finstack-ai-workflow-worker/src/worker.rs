@@ -197,8 +197,7 @@ fn expiry_due(row: &WakeRow, now: Timestamp) -> bool {
 fn pending_matches_row(session: &WorkflowSession, row: &WakeRow) -> bool {
     session
         .last_state()
-        .pending_interaction
-        .as_ref()
+        .pending_interaction()
         .is_some_and(|pending| {
             pending.request.interaction_id().to_canonical_string() == row.pending_id.as_ref()
         })
@@ -795,8 +794,7 @@ impl WorkflowWorker {
         let terminal = matches!(wait, WorkflowWait::Terminal { .. });
         let security = session
             .last_state()
-            .accepted
-            .as_ref()
+            .accepted()
             .map(|accepted| accepted.security().clone());
         let checkpoint =
             park_for_wake(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;

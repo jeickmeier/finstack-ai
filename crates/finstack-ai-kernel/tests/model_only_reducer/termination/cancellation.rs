@@ -11,8 +11,8 @@ fn cancellation_without_outstanding_effects_reconciles_to_cancelled() {
         }),
     );
     assert!(decision.actions.is_empty());
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Cancelling));
-    assert_eq!(harness.kernel.state().state_version, 3);
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Cancelling));
+    assert_eq!(harness.kernel.state().state_version(), 3);
 
     harness.apply_input(
         transition_env(1_200, &[3, 4], &[2], &[], &[], &[], &[]),
@@ -23,9 +23,9 @@ fn cancellation_without_outstanding_effects_reconciles_to_cancelled() {
             uncertain_effects: Arc::from([]),
         }),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Cancelled));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Cancelled));
     assert!(matches!(
-        harness.kernel.state().terminal,
+        harness.kernel.state().terminal(),
         Some(TerminalState::Cancelled(_))
     ));
     assert!(matches!(
@@ -82,8 +82,8 @@ pub(super) fn drive_to_sleeping() -> Harness {
 #[test]
 fn retry_records_timer_intent_and_starts_a_fresh_cycle_after_firing() {
     let mut harness = drive_to_sleeping();
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Sleeping));
-    assert_eq!(harness.kernel.state().retry.attempts, 1);
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Sleeping));
+    assert_eq!(harness.kernel.state().retry().attempts, 1);
 
     harness.apply_input(
         transition_env(1_750, &[11], &[], &[], &[], &[], &[]),
@@ -93,12 +93,12 @@ fn retry_records_timer_intent_and_starts_a_fresh_cycle_after_firing() {
             fired_at: timestamp(1_750),
         }),
     );
-    assert_eq!(harness.kernel.state().cycle, 1);
+    assert_eq!(harness.kernel.state().cycle(), 1);
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::PreparingContext)
     );
-    assert!(harness.kernel.state().retry.pending.is_none());
+    assert!(harness.kernel.state().retry().pending.is_none());
 
     let mut replayed = Kernel::default();
     let mut transient_sequence = 0;
@@ -137,12 +137,11 @@ fn cancel_requested_while_sleeping_includes_the_timer_effect() {
         }]
     );
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::Cancelling));
-    assert!(state.retry.pending.is_some());
+    assert_eq!(state.phase(), Some(RunPhase::Cancelling));
+    assert!(state.retry().pending.is_some());
     assert_eq!(
         state
-            .cancellation
-            .as_ref()
+            .cancellation()
             .expect("cancellation")
             .outstanding_effects
             .as_ref(),
@@ -178,10 +177,10 @@ fn reconcile_cancelled_timer_does_not_start_a_fresh_cycle() {
         ]
     );
     let state = harness.kernel.state();
-    assert_eq!(state.phase, Some(RunPhase::Cancelled));
-    assert!(state.retry.pending.is_none());
-    assert!(state.retry.timer_firings.is_empty());
-    assert_eq!(state.cycle, 0);
+    assert_eq!(state.phase(), Some(RunPhase::Cancelled));
+    assert!(state.retry().pending.is_none());
+    assert!(state.retry().timer_firings.is_empty());
+    assert_eq!(state.cycle(), 0);
 }
 
 #[test]
@@ -203,7 +202,7 @@ fn timer_fired_after_uncertain_suspend_is_rejected() {
             uncertain_effects: Arc::from([id::<finstack_ai_kernel::EffectTag>(701)]),
         }),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Suspended));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Suspended));
     let before = harness.kernel.state().clone();
     assert_error_code(
         harness.kernel.decide(
@@ -278,13 +277,12 @@ fn active_model_cancellation_is_idempotent_and_uncertainty_suspends() {
             uncertain_effects: Arc::from([id::<finstack_ai_kernel::EffectTag>(EFFECT_ONE)]),
         }),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Suspended));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Suspended));
     assert_eq!(
         harness
             .kernel
             .state()
-            .suspension
-            .as_ref()
+            .suspension()
             .expect("suspension")
             .reason_code
             .as_str(),
@@ -324,8 +322,8 @@ fn reconciled_model_cancellation_records_effect_closure_before_run_cancelled() {
         decision.records[2].body(),
         RecordBody::RunCancelled(_)
     ));
-    assert!(harness.kernel.state().pending_model_effect.is_none());
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Cancelled));
+    assert!(harness.kernel.state().pending_model_effect().is_none());
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Cancelled));
     assert_termination_golden("valid--pr011-model-cancel.json", &harness);
 }
 
@@ -420,7 +418,7 @@ fn tool_cancellation_chunks_close_every_call_in_source_order() {
         harness
             .kernel
             .state()
-            .messages
+            .messages()
             .iter()
             .all(|message| message.role() != MessageRole::Tool)
     );
@@ -446,7 +444,7 @@ fn tool_cancellation_chunks_close_every_call_in_source_order() {
     let tool_results = harness
         .kernel
         .state()
-        .messages
+        .messages()
         .iter()
         .filter(|message| message.role() == MessageRole::Tool)
         .map(|message| match &message.content()[0] {
@@ -481,8 +479,8 @@ fn tool_cancellation_chunks_close_every_call_in_source_order() {
             })
             .all(|valid| valid)
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Cancelled));
-    assert!(harness.kernel.state().active_tool_batch.is_none());
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Cancelled));
+    assert!(harness.kernel.state().active_tool_batch().is_none());
     let replayed = replay(&harness.batches);
     assert_eq!(replayed.state(), harness.kernel.state());
     assert_eq!(
@@ -533,7 +531,7 @@ fn deferred_model_cancellation_preserves_effect_identity_through_reconciliation(
         cancelled.effect_id(),
         id::<finstack_ai_kernel::EffectTag>(EFFECT_ONE)
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Cancelled));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Cancelled));
 }
 
 #[test]
@@ -621,12 +619,12 @@ fn deferred_tool_cancellation_closes_original_effect_and_source_call() {
             uncertain_effects: Arc::from([]),
         }),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Cancelled));
-    assert!(harness.kernel.state().active_tool_batch.is_none());
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Cancelled));
+    assert!(harness.kernel.state().active_tool_batch().is_none());
     let tool_message = harness
         .kernel
         .state()
-        .messages
+        .messages()
         .last()
         .expect("cancelled tool result");
     let ContentBlock::ToolResult(result) = &tool_message.content()[0] else {

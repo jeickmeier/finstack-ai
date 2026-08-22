@@ -7,15 +7,15 @@ fn successful_model_only_path_has_exact_records_events_and_final_state() {
     let mut phases = Vec::new();
 
     accept(&mut harness);
-    phases.push(harness.kernel.state().phase);
+    phases.push(harness.kernel.state().phase());
     settle_before_run(&mut harness);
-    phases.push(harness.kernel.state().phase);
+    phases.push(harness.kernel.state().phase());
     prepare_context(&mut harness, 0, false);
-    phases.push(harness.kernel.state().phase);
+    phases.push(harness.kernel.state().phase());
     request_model(&mut harness, 0, false);
-    phases.push(harness.kernel.state().phase);
+    phases.push(harness.kernel.state().phase());
     complete_model(&mut harness, false, "completion-1");
-    phases.push(harness.kernel.state().phase);
+    phases.push(harness.kernel.state().phase());
     let after_model = settle_after_model(&mut harness, 0, false);
     assert!(
         after_model.records.iter().all(|record| !matches!(
@@ -24,9 +24,9 @@ fn successful_model_only_path_has_exact_records_events_and_final_state() {
         )),
         "after-model settlement must not propose a terminal record"
     );
-    phases.push(harness.kernel.state().phase);
+    phases.push(harness.kernel.state().phase());
     finalize(&mut harness, 0, false);
-    phases.push(harness.kernel.state().phase);
+    phases.push(harness.kernel.state().phase());
 
     assert_success_phases_and_records(&harness, &phases);
     assert_success_events(&harness);
@@ -76,28 +76,31 @@ fn assert_success_events(harness: &Harness) {
 
 fn assert_success_state_identity_and_indexes(harness: &Harness) {
     let state = harness.kernel.state();
-    assert_eq!(state.state_version, 1);
-    assert_eq!(state.last_applied_sequence, 11);
+    assert_eq!(state.state_version(), 1);
+    assert_eq!(state.last_applied_sequence(), 11);
     assert_eq!(
-        state.session_id,
+        state.session_id(),
         Some(id::<finstack_ai_kernel::SessionTag>(SESSION))
     );
-    assert_eq!(state.lane_id, Some(id::<finstack_ai_kernel::LaneTag>(LANE)));
     assert_eq!(
-        state.accepted.as_ref().map(RunAccepted::run_id),
+        state.lane_id(),
+        Some(id::<finstack_ai_kernel::LaneTag>(LANE))
+    );
+    assert_eq!(
+        state.accepted().map(RunAccepted::run_id),
         Some(id::<finstack_ai_kernel::RunTag>(RUN))
     );
-    assert_eq!(state.accepted.as_ref(), Some(&root_acceptance()));
-    assert_eq!(state.phase, Some(RunPhase::Completed));
-    assert_eq!(state.cycle, 0);
+    assert_eq!(state.accepted(), Some(&root_acceptance()));
+    assert_eq!(state.phase(), Some(RunPhase::Completed));
+    assert_eq!(state.cycle(), 0);
     assert_eq!(
-        state.messages.as_slice(),
+        state.messages().as_slice(),
         [assistant_message(FINAL_MESSAGE_ONE, 1_400, "hello")]
     );
-    assert!(state.pending_model_effect.is_none());
-    assert_eq!(state.stage_settlements.len(), 5);
-    assert_eq!(state.model_settlements.len(), 1);
-    assert_eq!(state.completion_identities.len(), 1);
+    assert!(state.pending_model_effect().is_none());
+    assert_eq!(state.stage_settlements().len(), 5);
+    assert_eq!(state.model_settlements().len(), 1);
+    assert_eq!(state.completion_identities().len(), 1);
     for stage in [
         Stage::BeforeRun,
         Stage::PrepareContext,
@@ -107,18 +110,18 @@ fn assert_success_state_identity_and_indexes(harness: &Harness) {
     ] {
         assert!(
             state
-                .stage_settlements
+                .stage_settlements()
                 .contains_key(&StageCursor { cycle: 0, stage })
         );
     }
     let effect_id = id::<finstack_ai_kernel::EffectTag>(EFFECT_ONE);
     let settlement = state
-        .model_settlements
+        .model_settlements()
         .get(&effect_id)
         .expect("model settlement fingerprint");
     assert_eq!(settlement.kind, ModelSettlementKind::Completed);
     let identity = state
-        .completion_identities
+        .completion_identities()
         .get("completion-1")
         .expect("completion identity");
     assert_eq!(identity.effect_id, effect_id);
@@ -127,7 +130,7 @@ fn assert_success_state_identity_and_indexes(harness: &Harness) {
 
 fn assert_success_turn_and_terminal(harness: &Harness) {
     let state = harness.kernel.state();
-    let turn = state.current_turn.as_ref().expect("completed current turn");
+    let turn = state.current_turn().expect("completed current turn");
     assert_eq!(turn.cycle, 0);
     assert_eq!(turn.turn_id, id::<finstack_ai_kernel::TurnTag>(TURN_ONE));
     assert_eq!(turn.context.cycle, 0);
@@ -158,7 +161,7 @@ fn assert_success_turn_and_terminal(harness: &Harness) {
 
     let completion = completed_effect(EFFECT_ONE, "completion-1", "hello");
     assert!(matches!(
-        state.terminal_candidate.as_ref(),
+        state.terminal_candidate(),
         Some(TerminalCandidate::Completed {
             cycle: 0,
             turn_id,
@@ -174,7 +177,7 @@ fn assert_success_turn_and_terminal(harness: &Harness) {
             && *result_digest == completion.output_digest()
     ));
     assert!(matches!(
-        state.terminal.as_ref(),
+        state.terminal(),
         Some(TerminalState::Completed(value))
             if value.cycle == 0
                 && value.turn_id == id::<finstack_ai_kernel::TurnTag>(TURN_ONE)
@@ -238,10 +241,8 @@ fn default_and_non_text_state_hash_vectors_use_recursive_explicit_nulls() {
         Metadata::empty(),
     )
     .expect("non-text message");
-    let state = KernelState {
-        messages: Arc::new(vec![message]),
-        ..KernelState::default()
-    };
+    let mut state = KernelState::default();
+    state.set_messages(Arc::new(vec![message]));
     let non_text_projection = json!({
         "state_version": 1,
         "last_applied_sequence": 0,
@@ -701,8 +702,7 @@ fn continuation_consumes_exact_fresh_ids_and_replays() {
     let pending = harness
         .kernel
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("second pending model effect");
     assert_eq!(pending.cycle, 1);
     assert_eq!(pending.turn_id, id::<finstack_ai_kernel::TurnTag>(TURN_TWO));

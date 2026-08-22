@@ -198,8 +198,7 @@ pub(crate) fn settle_model(store: Arc<MemoryJournalStore>) {
         .expect("recover pending model");
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending model")
         .clone();
     let completion = EffectCompleted::try_new(
@@ -345,8 +344,7 @@ pub(crate) fn settle_model_with_tool_call(store: Arc<MemoryJournalStore>) {
         .expect("recover pending model");
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending model")
         .clone();
     let completion = EffectCompleted::try_new(
@@ -426,16 +424,16 @@ pub(crate) fn assert_snapshot_matches_full_replay(store: &Arc<MemoryJournalStore
         full.state().state_hash().expect("hash")
     );
     assert_eq!(
-        accelerated.state().model_settlements,
-        full.state().model_settlements
+        accelerated.state().model_settlements(),
+        full.state().model_settlements()
     );
     assert_eq!(
-        accelerated.state().completion_identities,
-        full.state().completion_identities
+        accelerated.state().completion_identities(),
+        full.state().completion_identities()
     );
     assert_eq!(
-        accelerated.state().tool_settlements,
-        full.state().tool_settlements
+        accelerated.state().tool_settlements(),
+        full.state().tool_settlements()
     );
 }
 

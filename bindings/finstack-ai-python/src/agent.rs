@@ -13,8 +13,8 @@ use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
     GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
-    Session,
+    LinkedCommon, LinkedProviderSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+    OpenRouterMediaToolsSpec, Session,
 };
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
@@ -265,7 +265,7 @@ impl PyAgent {
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
-            let built = Agent::openai(OpenAiAgentSpec {
+            let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
                 model,
                 api_key,
                 reasoning_effort,
@@ -280,7 +280,7 @@ impl PyAgent {
                     child_runs,
                     approval_grant,
                 },
-            })
+            }))
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
@@ -345,7 +345,7 @@ impl PyAgent {
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
-            let built = Agent::openrouter(OpenRouterAgentSpec {
+            let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
                 model,
                 api_key,
                 referer,
@@ -362,7 +362,7 @@ impl PyAgent {
                     approval_grant,
                     openrouter_media,
                 },
-            })
+            }))
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
@@ -417,7 +417,7 @@ impl PyAgent {
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
-            let built = Agent::anthropic(AnthropicAgentSpec {
+            let built = Agent::linked(LinkedProviderSpec::Anthropic(AnthropicAgentSpec {
                 base_url,
                 model,
                 api_key,
@@ -430,7 +430,7 @@ impl PyAgent {
                     child_runs,
                     approval_grant,
                 },
-            })
+            }))
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
@@ -486,7 +486,7 @@ impl PyAgent {
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
-            let built = Agent::gemini(GeminiAgentSpec {
+            let built = Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
                 endpoint,
                 model,
                 api_key,
@@ -499,7 +499,7 @@ impl PyAgent {
                     child_runs,
                     approval_grant,
                 },
-            })
+            }))
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
@@ -552,7 +552,7 @@ impl PyAgent {
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
-            let built = Agent::ollama(OllamaAgentSpec {
+            let built = Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
                 base_url,
                 model,
                 common: LinkedCommon {
@@ -564,7 +564,7 @@ impl PyAgent {
                     child_runs,
                     approval_grant,
                 },
-            })
+            }))
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })
@@ -623,7 +623,7 @@ impl PyAgent {
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let (ports, output_adapter) = split_linked_ports(ports);
-            let built = Agent::gateway(GatewayAgentSpec {
+            let built = Agent::linked(LinkedProviderSpec::Gateway(GatewayAgentSpec {
                 endpoint,
                 model,
                 wire_protocol,
@@ -640,7 +640,7 @@ impl PyAgent {
                     approval_grant,
                     openrouter_media,
                 },
-            })
+            }))
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
         })

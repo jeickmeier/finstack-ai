@@ -58,7 +58,7 @@ fn event_projection(trace: &ExpectedTrace, durability: DurabilityClass) -> Vec<u
 }
 
 fn assistant_text(state: &KernelState) -> String {
-    let [message] = state.messages.as_slice() else {
+    let [message] = state.messages().as_slice() else {
         panic!("expected exactly one durable assistant message");
     };
     message

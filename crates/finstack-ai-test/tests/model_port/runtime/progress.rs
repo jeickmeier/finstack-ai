@@ -114,15 +114,15 @@ async fn runtime_publishes_validated_progress_before_terminal_settlement() {
     let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
         .await
         .expect("recover before terminal");
-    assert!(recovered.state().pending_model_effect.is_some());
-    assert!(recovered.state().model_settlements.is_empty());
+    assert!(recovered.state().pending_model_effect().is_some());
+    assert!(recovered.state().model_settlements().is_empty());
 
     control.release("terminal-gate");
     loop {
         let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
             .await
             .expect("recover after terminal");
-        if recovered.state().model_settlements.len() == 1 {
+        if recovered.state().model_settlements().len() == 1 {
             break;
         }
         tokio::task::yield_now().await;
@@ -144,7 +144,7 @@ async fn runtime_publishes_validated_progress_before_terminal_settlement() {
     let recovered = CommitCoordinator::recover(store, id::<SessionTag>(1))
         .await
         .expect("recover completed run");
-    assert!(recovered.state().terminal.is_some());
+    assert!(recovered.state().terminal().is_some());
     assert_eq!(
         stalled_durable.status().close_reason,
         Some(EventSubscriptionCloseReason::MissedDurable)

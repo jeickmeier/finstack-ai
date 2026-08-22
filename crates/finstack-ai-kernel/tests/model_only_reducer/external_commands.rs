@@ -34,8 +34,7 @@ fn durable_external_rejection_advances_only_the_journal_sequence() {
     let events_before = harness.events.len();
     let input = rejection_input(
         before
-            .accepted
-            .as_ref()
+            .accepted()
             .expect("accepted")
             .security()
             .principal()
@@ -55,10 +54,10 @@ fn durable_external_rejection_advances_only_the_journal_sequence() {
     ));
     assert_eq!(harness.events.len(), events_before);
     let mut expected = before;
-    expected.last_applied_sequence += 1;
+    expected.set_last_applied_sequence(expected.last_applied_sequence() + 1);
     assert_eq!(harness.kernel.state(), &expected);
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::Completed),
         "audit evidence must not reopen a terminal run"
     );
@@ -86,8 +85,7 @@ fn external_rejection_requires_the_accepted_principal_and_authorization() {
     let accepted_principal = harness
         .kernel
         .state()
-        .accepted
-        .as_ref()
+        .accepted()
         .expect("accepted")
         .security()
         .principal()

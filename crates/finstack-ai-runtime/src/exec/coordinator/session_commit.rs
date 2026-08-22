@@ -44,7 +44,7 @@ impl CommitCoordinator {
             let expected_sequence = self
                 .kernel
                 .state()
-                .last_applied_sequence
+                .last_applied_sequence()
                 .checked_add(1)
                 .ok_or_else(|| self.boundary_fault("composition_sequence_overflow"))?;
             let request =
@@ -66,7 +66,7 @@ impl CommitCoordinator {
                         actual_next_sequence: self
                             .kernel
                             .state()
-                            .last_applied_sequence
+                            .last_applied_sequence()
                             .saturating_add(1),
                     }));
                 }
@@ -117,7 +117,7 @@ impl CommitCoordinator {
             let expected_sequence = self
                 .kernel
                 .state()
-                .last_applied_sequence
+                .last_applied_sequence()
                 .checked_add(1)
                 .ok_or_else(|| self.boundary_fault("session_sequence_overflow"))?;
             let records = align_conversation_sequences(records.clone(), expected_sequence)?;
@@ -140,7 +140,7 @@ impl CommitCoordinator {
                         actual_next_sequence: self
                             .kernel
                             .state()
-                            .last_applied_sequence
+                            .last_applied_sequence()
                             .saturating_add(1),
                     }));
                 }
@@ -241,24 +241,24 @@ fn classify_composition_records(
     for record in records {
         let comparison = match record.body() {
             RecordBody::ChildRunPrepared(value) => state
-                .child_preparations
+                .child_preparations()
                 .get(&value.parent_effect_id)
                 .map(|existing| existing == value),
             RecordBody::BudgetReservationRequested(value) => state
-                .budget_reservations
+                .budget_reservations()
                 .get(&value.request.reservation_id)
                 .map(|existing| existing.request == value.request),
             RecordBody::BudgetReservationSettled(value) => state
-                .budget_reservations
+                .budget_reservations()
                 .get(&value.receipt.reservation_id)
                 .and_then(|existing| existing.settlement.as_ref())
                 .map(|existing| existing == &value.receipt),
             RecordBody::BudgetChargeRecorded(value) => state
-                .budget_charges
+                .budget_charges()
                 .get(&value.receipt.effect_id)
                 .map(|existing| existing == &value.receipt),
             RecordBody::BudgetReservationReleased(value) => state
-                .budget_reservations
+                .budget_reservations()
                 .get(&value.receipt.reservation_id)
                 .and_then(|existing| existing.release.as_ref())
                 .map(|existing| existing == &value.receipt),

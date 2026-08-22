@@ -119,7 +119,30 @@ pub struct OpenRouterMediaToolsSpec {
     pub title: Option<String>,
 }
 
-/// Arguments for [`Agent::openai`].
+/// Provider selection for [`Agent::linked`], the single linked-provider
+/// construction path.
+///
+/// Each variant carries the full typed spec for one wire protocol. All
+/// variants funnel into the same composition pipeline
+/// ([`NativeAgentBuilder::build_linked`]), so provider choice never changes
+/// registration, policy, or output-schema semantics.
+pub enum LinkedProviderSpec {
+    /// Official `OpenAI` Responses agent (always `https://api.openai.com`).
+    OpenAi(OpenAiAgentSpec),
+    /// `OpenRouter` Responses agent.
+    OpenRouter(OpenRouterAgentSpec),
+    /// Anthropic Messages agent.
+    Anthropic(AnthropicAgentSpec),
+    /// Gemini `generateContent` agent.
+    Gemini(GeminiAgentSpec),
+    /// Keyless Ollama `/api/chat` agent.
+    Ollama(OllamaAgentSpec),
+    /// Config-driven gateway agent dispatching onto one of the dedicated
+    /// providers.
+    Gateway(GatewayAgentSpec),
+}
+
+/// Arguments for [`LinkedProviderSpec::OpenAi`].
 pub struct OpenAiAgentSpec {
     /// Responses model name.
     pub model: String,
@@ -135,7 +158,7 @@ pub struct OpenAiAgentSpec {
     pub common: LinkedCommon,
 }
 
-/// Arguments for [`Agent::openrouter`].
+/// Arguments for [`LinkedProviderSpec::OpenRouter`].
 pub struct OpenRouterAgentSpec {
     /// `OpenRouter` model identifier (e.g. `openai/gpt-5`; `:nitro` and
     /// `:floor` routing suffixes are allowed).
@@ -156,7 +179,7 @@ pub struct OpenRouterAgentSpec {
     pub common: LinkedCommon,
 }
 
-/// Arguments for [`Agent::anthropic`].
+/// Arguments for [`LinkedProviderSpec::Anthropic`].
 pub struct AnthropicAgentSpec {
     /// Messages API base URL.
     pub base_url: String,
@@ -169,7 +192,7 @@ pub struct AnthropicAgentSpec {
     pub common: LinkedCommon,
 }
 
-/// Arguments for [`Agent::gemini`].
+/// Arguments for [`LinkedProviderSpec::Gemini`].
 pub struct GeminiAgentSpec {
     /// Gemini `generateContent` base URL (Generative Language API).
     pub endpoint: String,
@@ -182,7 +205,7 @@ pub struct GeminiAgentSpec {
     pub common: LinkedCommon,
 }
 
-/// Arguments for [`Agent::ollama`].
+/// Arguments for [`LinkedProviderSpec::Ollama`].
 pub struct OllamaAgentSpec {
     // No `api_key`: Ollama serves locally and takes no credential.
     /// Native `/api/chat` base URL.
@@ -193,7 +216,7 @@ pub struct OllamaAgentSpec {
     pub common: LinkedCommon,
 }
 
-/// Arguments for [`Agent::gateway`].
+/// Arguments for [`LinkedProviderSpec::Gateway`].
 pub struct GatewayAgentSpec {
     /// Provider endpoint URL. HTTPS is required off loopback.
     pub endpoint: String,
@@ -298,100 +321,46 @@ impl NativeAgentBuilder {
 }
 
 impl Agent {
-    /// Construct an official `OpenAI` Responses agent.
+    /// Construct a linked-provider agent. This is the single Rust-owned
+    /// construction path for every wire protocol; language bindings only map
+    /// arguments into a [`LinkedProviderSpec`] variant.
     ///
-    /// Always targets `https://api.openai.com`. Does not read environment
-    /// variables.
+    /// Never reads environment variables. Endpoint and credential rules are
+    /// per variant:
     ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
-    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when credentials, model, or
-    /// reasoning settings are invalid.
-    pub async fn openai(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        openai_inner(spec).await
-    }
-
-    /// Construct an `OpenRouter` Responses agent.
-    ///
-    /// Always targets `https://openrouter.ai/api/v1/responses`. Does not read
-    /// environment variables.
-    ///
-    /// Does not attach a [`finstack_ai_runtime::ports::model::MediaResolver`]. Vision, file,
-    /// and audio input require a host-built provider with
-    /// `with_media_resolver`; linked constructors do not accept host callback
-    /// resolvers across FFI. `spec.media_tools` registers outbound
-    /// media-generation tools only.
-    ///
-    /// # Arguments
-    ///
-    /// * `spec` - Model name, Bearer credential, optional attribution and
-    ///   reasoning fields, media-generation flag, and shared linked ports.
+    /// - [`LinkedProviderSpec::OpenAi`] always targets
+    ///   `https://api.openai.com`.
+    /// - [`LinkedProviderSpec::OpenRouter`] always targets
+    ///   `https://openrouter.ai/api/v1/responses`. It does not attach a
+    ///   [`finstack_ai_runtime::ports::model::MediaResolver`]: vision, file,
+    ///   and audio input require a host-built provider with
+    ///   `with_media_resolver`; `media_tools` registers outbound
+    ///   media-generation tools only.
+    /// - [`LinkedProviderSpec::Anthropic`] and [`LinkedProviderSpec::Gemini`]
+    ///   require HTTPS when `api_key` is set; a loopback endpoint may run
+    ///   without one.
+    /// - [`LinkedProviderSpec::Ollama`] is keyless and local.
+    /// - [`LinkedProviderSpec::Gateway`] dispatches onto the dedicated
+    ///   openai, anthropic, ollama, or gemini provider under `native-tokio`
+    ///   only; HTTPS is required off loopback and whenever a credential is
+    ///   set, and `openai_chat` is a configuration error.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
-    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when credentials, model,
-    /// attribution, or reasoning settings are invalid.
-    pub async fn openrouter(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        openrouter_inner(spec).await
-    }
-
-    /// Construct an Anthropic Messages agent.
-    ///
-    /// Does not read environment variables. HTTPS is required when `api_key`
-    /// is set.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
-    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the URL, model, or
-    /// credential pairing is invalid.
-    pub async fn anthropic(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        anthropic_inner(spec).await
-    }
-
-    /// Construct a Gemini `generateContent` agent.
-    ///
-    /// Does not read environment variables. Does not hardcode the Google
-    /// host: `spec.endpoint` is passed straight into the provider's
-    /// `GeminiConfig::try_new`. HTTPS is required when `api_key` is set.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
-    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the URL, model, or
-    /// credential pairing is invalid.
-    pub async fn gemini(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        gemini_inner(spec).await
-    }
-
-    /// Construct a keyless Ollama `/api/chat` agent.
-    ///
-    /// Does not read environment variables.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
-    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the URL or model is invalid.
-    pub async fn ollama(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        ollama_inner(spec).await
-    }
-
-    /// Construct a config-driven gateway agent.
-    ///
-    /// Dispatches onto the dedicated openai, anthropic, ollama, or gemini
-    /// provider under `native-tokio` only. Does not read environment variables. HTTPS
-    /// is required off loopback and whenever a credential is set. `openai_chat`
-    /// is a configuration error.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
-    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the route, protocol,
-    /// `hard_input_bytes`, or credential pairing is invalid.
-    pub async fn gateway(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        gateway_inner(spec).await
+    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host` or when
+    /// the `linked-providers` feature is disabled. Returns
+    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the endpoint, model,
+    /// credential pairing, attribution, reasoning, or gateway route is
+    /// invalid.
+    pub async fn linked(spec: LinkedProviderSpec) -> Result<LinkedAgent, AgentRunError> {
+        match spec {
+            LinkedProviderSpec::OpenAi(spec) => openai_inner(spec).await,
+            LinkedProviderSpec::OpenRouter(spec) => openrouter_inner(spec).await,
+            LinkedProviderSpec::Anthropic(spec) => anthropic_inner(spec).await,
+            LinkedProviderSpec::Gemini(spec) => gemini_inner(spec).await,
+            LinkedProviderSpec::Ollama(spec) => ollama_inner(spec).await,
+            LinkedProviderSpec::Gateway(spec) => gateway_inner(spec).await,
+        }
     }
 }
 
@@ -1153,7 +1122,7 @@ mod tests {
 
     #[tokio::test]
     async fn openai_constructs_without_a_network_request() {
-        let built = Agent::openai(OpenAiAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: None,
@@ -1164,7 +1133,7 @@ mod tests {
                 instruction: Some("Answer concisely.".into()),
                 ..common()
             },
-        })
+        }))
         .await
         .expect("openai construct");
         assert!(built.agent.capability_catalog().is_empty());
@@ -1175,7 +1144,7 @@ mod tests {
 
     #[tokio::test]
     async fn openai_rejects_unknown_reasoning_effort() {
-        let error = Agent::openai(OpenAiAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: Some("turbo".into()),
@@ -1185,7 +1154,7 @@ mod tests {
                 openrouter_media: None,
                 ..common()
             },
-        })
+        }))
         .await
         .err()
         .expect("unknown effort");
@@ -1196,7 +1165,7 @@ mod tests {
     #[tokio::test]
     async fn openai_empty_model_does_not_leak_the_api_key() {
         let canary = "sk-openai-secret-canary-056";
-        let error = Agent::openai(OpenAiAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
             model: String::new(),
             api_key: canary.into(),
             reasoning_effort: None,
@@ -1206,7 +1175,7 @@ mod tests {
                 openrouter_media: None,
                 ..common()
             },
-        })
+        }))
         .await
         .err()
         .expect("empty model");
@@ -1216,7 +1185,7 @@ mod tests {
 
     #[tokio::test]
     async fn openrouter_constructs_without_a_network_request() {
-        let built = Agent::openrouter(OpenRouterAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
             model: "openai/gpt-5".into(),
             api_key: "sk-or-secret-canary-101".into(),
             referer: Some("https://example.app".into()),
@@ -1228,7 +1197,7 @@ mod tests {
                 instruction: Some("Answer concisely.".into()),
                 ..common()
             },
-        })
+        }))
         .await
         .expect("openrouter construct");
         assert!(built.agent.capability_catalog().is_empty());
@@ -1237,7 +1206,7 @@ mod tests {
 
     #[tokio::test]
     async fn openrouter_rejects_media_tools_and_common_openrouter_media() {
-        let error = Agent::openrouter(OpenRouterAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
             model: "openai/gpt-5".into(),
             api_key: "sk-or-secret-canary-101".into(),
             referer: None,
@@ -1249,7 +1218,7 @@ mod tests {
                 openrouter_media: Some(openrouter_media()),
                 ..common()
             },
-        })
+        }))
         .await
         .err()
         .expect("both media sources");
@@ -1260,7 +1229,7 @@ mod tests {
     #[tokio::test]
     async fn openrouter_invalid_attribution_does_not_leak_the_api_key() {
         let canary = "sk-or-secret-canary-101";
-        let error = Agent::openrouter(OpenRouterAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
             model: "openai/gpt-5".into(),
             api_key: canary.into(),
             referer: Some("bad\nreferer".into()),
@@ -1269,7 +1238,7 @@ mod tests {
             reasoning_summary: None,
             media_tools: false,
             common: common(),
-        })
+        }))
         .await
         .err()
         .expect("invalid attribution");
@@ -1279,7 +1248,7 @@ mod tests {
 
     #[tokio::test]
     async fn openrouter_rejects_unknown_reasoning_effort() {
-        let error = Agent::openrouter(OpenRouterAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
             model: "openai/gpt-5".into(),
             api_key: "sk-or-secret-canary-101".into(),
             referer: None,
@@ -1288,7 +1257,7 @@ mod tests {
             reasoning_summary: None,
             media_tools: false,
             common: common(),
-        })
+        }))
         .await
         .err()
         .expect("unknown effort");
@@ -1299,7 +1268,7 @@ mod tests {
     #[tokio::test]
     async fn anthropic_http_credentials_fail_closed_without_leaking_the_canary() {
         let canary = "sk-ant-secret-canary-055";
-        let error = Agent::anthropic(AnthropicAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::Anthropic(AnthropicAgentSpec {
             base_url: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
@@ -1307,7 +1276,7 @@ mod tests {
                 openrouter_media: None,
                 ..common()
             },
-        })
+        }))
         .await
         .err()
         .expect("http + key");
@@ -1317,7 +1286,7 @@ mod tests {
 
     #[tokio::test]
     async fn gemini_constructs_without_a_network_request() {
-        let built = Agent::gemini(GeminiAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
             endpoint: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: None,
@@ -1326,7 +1295,7 @@ mod tests {
                 instruction: Some("Answer concisely.".into()),
                 ..common()
             },
-        })
+        }))
         .await
         .expect("gemini construct");
         assert!(built.agent.capability_catalog().is_empty());
@@ -1345,7 +1314,7 @@ mod tests {
     #[tokio::test]
     async fn gemini_http_credentials_fail_closed_without_leaking_the_canary() {
         let canary = "AIza-secret-canary-055";
-        let error = Agent::gemini(GeminiAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
             endpoint: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
@@ -1353,7 +1322,7 @@ mod tests {
                 openrouter_media: None,
                 ..common()
             },
-        })
+        }))
         .await
         .err()
         .expect("http + key");
@@ -1363,14 +1332,14 @@ mod tests {
 
     #[tokio::test]
     async fn ollama_constructs_without_a_network_request() {
-        let built = Agent::ollama(OllamaAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
             common: LinkedCommon {
                 openrouter_media: None,
                 ..common()
             },
-        })
+        }))
         .await
         .expect("ollama construct");
         assert!(built.agent.capability_catalog().is_empty());
@@ -1391,7 +1360,7 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_constructs_without_a_network_request() {
-        let built = Agent::gateway(gateway_spec())
+        let built = Agent::linked(LinkedProviderSpec::Gateway(gateway_spec()))
             .await
             .expect("gateway construct");
         assert!(built.agent.capability_catalog().is_empty());
@@ -1402,7 +1371,7 @@ mod tests {
     async fn gateway_rejects_missing_hard_input_bytes() {
         let mut spec = gateway_spec();
         spec.hard_input_bytes = None;
-        let error = Agent::gateway(spec)
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
             .await
             .err()
             .expect("missing hard_input_bytes");
@@ -1416,7 +1385,7 @@ mod tests {
         spec.endpoint = "http://api.example.test/v1/responses".into();
         spec.api_key = None;
         spec.auth_kind = Some("none".into());
-        let error = Agent::gateway(spec)
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
             .await
             .err()
             .expect("plaintext non-loopback");
@@ -1430,7 +1399,10 @@ mod tests {
         let mut spec = gateway_spec();
         spec.endpoint = "http://127.0.0.1:9/v1/responses".into();
         spec.api_key = Some(canary.into());
-        let error = Agent::gateway(spec).await.err().expect("http + key");
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .err()
+            .expect("http + key");
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("HTTPS"));
         assert!(!error.to_string().contains(canary));
@@ -1466,7 +1438,7 @@ mod tests {
     async fn gateway_gemini_generate_content_constructs_without_a_network_request() {
         let mut spec = gateway_spec();
         spec.wire_protocol = "gemini_generate_content".into();
-        let built = Agent::gateway(spec)
+        let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
             .await
             .expect("gateway gemini construct");
         assert!(built.agent.capability_catalog().is_empty());
@@ -1476,7 +1448,7 @@ mod tests {
     async fn gateway_rejects_a_misspelled_gemini_protocol() {
         let mut spec = gateway_spec();
         spec.wire_protocol = "gemini_generatecontent".into();
-        let error = Agent::gateway(spec)
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
             .await
             .err()
             .expect("misspelled gemini protocol stays an error");
@@ -1488,7 +1460,10 @@ mod tests {
     async fn gateway_rejects_openai_chat() {
         let mut spec = gateway_spec();
         spec.wire_protocol = "openai_chat".into();
-        let error = Agent::gateway(spec).await.err().expect("openai_chat");
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .err()
+            .expect("openai_chat");
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("openai_chat"));
     }
@@ -1511,7 +1486,7 @@ mod media_tests {
 
     #[tokio::test]
     async fn openai_media_tools_register_the_toolset() {
-        let built = Agent::openai(OpenAiAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: None,
@@ -1525,7 +1500,7 @@ mod media_tests {
                 }),
                 ..common()
             },
-        })
+        }))
         .await
         .expect("openai + media construct");
         let ids = toolset_ids(&built.agent);
@@ -1535,7 +1510,7 @@ mod media_tests {
 
     #[tokio::test]
     async fn openai_agent_registers_the_openrouter_media_toolset() {
-        let built = Agent::openai(OpenAiAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: None,
@@ -1545,7 +1520,7 @@ mod media_tests {
                 openrouter_media: Some(openrouter_media()),
                 ..common()
             },
-        })
+        }))
         .await
         .expect("openai + openrouter media construct");
         assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
@@ -1553,7 +1528,7 @@ mod media_tests {
 
     #[tokio::test]
     async fn openai_agent_rejects_an_empty_media_api_key() {
-        let error = Agent::openai(OpenAiAgentSpec {
+        let error = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: None,
@@ -1567,7 +1542,7 @@ mod media_tests {
                 }),
                 ..common()
             },
-        })
+        }))
         .await
         .err()
         .expect("empty media api key");
@@ -1576,7 +1551,7 @@ mod media_tests {
 
     #[tokio::test]
     async fn openrouter_media_tools_register_the_toolset() {
-        let built = Agent::openrouter(OpenRouterAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
             model: "openai/gpt-5".into(),
             api_key: "sk-or-secret-canary-101".into(),
             referer: None,
@@ -1585,7 +1560,7 @@ mod media_tests {
             reasoning_summary: None,
             media_tools: true,
             common: common(),
-        })
+        }))
         .await
         .expect("openrouter + media construct");
         assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
@@ -1593,7 +1568,7 @@ mod media_tests {
 
     #[tokio::test]
     async fn openrouter_registers_common_openrouter_media() {
-        let built = Agent::openrouter(OpenRouterAgentSpec {
+        let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
             model: "openai/gpt-5".into(),
             api_key: "sk-or-secret-canary-101".into(),
             referer: None,
@@ -1605,7 +1580,7 @@ mod media_tests {
                 openrouter_media: Some(openrouter_media()),
                 ..common()
             },
-        })
+        }))
         .await
         .expect("openrouter + common media construct");
         assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
@@ -1615,7 +1590,7 @@ mod media_tests {
     async fn gateway_registers_common_openrouter_media() {
         let mut spec = gateway_spec();
         spec.common.openrouter_media = Some(openrouter_media());
-        let built = Agent::gateway(spec)
+        let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
             .await
             .expect("gateway + openrouter media construct");
         assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));

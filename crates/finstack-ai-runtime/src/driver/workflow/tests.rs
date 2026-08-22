@@ -122,7 +122,8 @@ fn classify_wait_empty_is_still_running() {
 #[test]
 fn classify_wait_timer_from_retry_pending() {
     let mut state = KernelState::default();
-    state.retry.pending = Some(
+    let mut retry = state.retry().clone();
+    retry.pending = Some(
         RetryScheduled::try_new(
             0,
             1,
@@ -135,6 +136,7 @@ fn classify_wait_timer_from_retry_pending() {
         )
         .expect("timer"),
     );
+    state.set_retry(retry);
     assert_eq!(
         classify_wait(&state),
         Some(WorkflowWait::Timer {
@@ -148,7 +150,7 @@ fn classify_wait_timer_from_retry_pending() {
 fn classify_wait_deferred_model() {
     let mut state = KernelState::default();
     let requested = requested(RetrySafety::SafeToRetry);
-    state.pending_model_effect = Some(PendingModelEffect {
+    state.set_pending_model_effect(Some(PendingModelEffect {
         cycle: 0,
         turn_id: id(4),
         model_request_id: id(5),
@@ -167,7 +169,7 @@ fn classify_wait_deferred_model() {
             expires_at: None,
             output_contract: requested.output_contract().clone(),
         }),
-    });
+    }));
     let Some(WorkflowWait::DeferredEffect { effect_id, .. }) = classify_wait(&state) else {
         panic!("expected deferred");
     };
@@ -187,13 +189,13 @@ fn retry_decision_missing_effect_denies() {
 #[test]
 fn retry_decision_unsafe_and_limit() {
     let mut state = KernelState::default();
-    state.pending_model_effect = Some(PendingModelEffect {
+    state.set_pending_model_effect(Some(PendingModelEffect {
         cycle: 0,
         turn_id: id(4),
         model_request_id: id(5),
         requested: requested(RetrySafety::AtMostOnce),
         deferred: None,
-    });
+    }));
     assert_eq!(
         retry_decision(&state, effect_id(3), Some(&capabilities(true)), None),
         WorkflowRetryDecision::Deny {
@@ -201,22 +203,26 @@ fn retry_decision_unsafe_and_limit() {
         }
     );
 
-    state.pending_model_effect = Some(PendingModelEffect {
+    state.set_pending_model_effect(Some(PendingModelEffect {
         cycle: 0,
         turn_id: id(4),
         model_request_id: id(5),
         requested: requested(RetrySafety::SafeToRetry),
         deferred: None,
-    });
-    state.accepted = Some(accepted_with_retries(Some(1)));
-    state.limit_usage.retries = 1;
+    }));
+    state.set_accepted(Some(accepted_with_retries(Some(1))));
+    let mut usage = state.limit_usage().clone();
+    usage.retries = 1;
+    state.set_limit_usage(usage);
     assert_eq!(
         retry_decision(&state, effect_id(3), Some(&capabilities(true)), None),
         WorkflowRetryDecision::Deny {
             code: RETRY_LIMIT_REACHED,
         }
     );
-    state.limit_usage.retries = 0;
+    let mut usage = state.limit_usage().clone();
+    usage.retries = 0;
+    state.set_limit_usage(usage);
     assert_eq!(
         retry_decision(&state, effect_id(3), Some(&capabilities(true)), None),
         WorkflowRetryDecision::Allow { remaining: Some(1) }

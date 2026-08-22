@@ -92,7 +92,7 @@ fn assert_termination_golden(file: &str, harness: &Harness) {
         .map(|record| record.body().kind_name())
         .collect::<Vec<_>>();
     let tool_call_ids = state
-        .messages
+        .messages()
         .iter()
         .filter(|message| message.role() == MessageRole::Tool)
         .map(|message| match &message.content()[0] {
@@ -106,7 +106,7 @@ fn assert_termination_golden(file: &str, harness: &Harness) {
             _ => panic!("tool message must contain result"),
         })
         .collect::<Vec<_>>();
-    let terminal = state.terminal.as_ref().map(|terminal| match terminal {
+    let terminal = state.terminal().map(|terminal| match terminal {
         TerminalState::Completed(_) => "completed",
         TerminalState::Failed(_) => "failed",
         TerminalState::Cancelled(_) => "cancelled",
@@ -119,17 +119,17 @@ fn assert_termination_golden(file: &str, harness: &Harness) {
     }
     let actual = json!({
         "format_version": 1,
-        "phase": state.phase,
-        "cycle": state.cycle,
-        "state_version": state.state_version,
+        "phase": state.phase(),
+        "cycle": state.cycle(),
+        "state_version": state.state_version(),
         "records": records,
-        "retry_attempts": state.retry.attempts,
-        "has_pending_retry": state.retry.pending.is_some(),
-        "last_limit": state.last_limit.as_ref().map(|limit| &limit.dimension),
-        "cancellation_outstanding": state.cancellation.as_ref().map_or(0, |value| value.outstanding_effects.len()),
-        "cancellation_uncertain": state.cancellation.as_ref().map_or(0, |value| value.uncertain_effects.len()),
+        "retry_attempts": state.retry().attempts,
+        "has_pending_retry": state.retry().pending.is_some(),
+        "last_limit": state.last_limit().map(|limit| &limit.dimension),
+        "cancellation_outstanding": state.cancellation().map_or(0, |value| value.outstanding_effects.len()),
+        "cancellation_uncertain": state.cancellation().map_or(0, |value| value.uncertain_effects.len()),
         "tool_call_ids": tool_call_ids,
-        "active_tool_batch": state.active_tool_batch.is_some(),
+        "active_tool_batch": state.active_tool_batch().is_some(),
         "terminal": terminal,
         "replay_hash_equal": replayed.state().state_hash().expect("replay hash") == state.state_hash().expect("live hash"),
     });

@@ -85,25 +85,24 @@ fn poll_state(calls: Vec<ActiveToolCall>) -> KernelState {
         .iter()
         .map(|call| call.assigned.clone())
         .collect::<Vec<_>>();
-    KernelState {
-        active_tool_batch: Some(ActiveToolBatch::new(
-            finstack_ai_kernel::ToolBatchOpened {
-                cycle: 0,
-                turn_id: fixed_id(1),
-                tool_batch_id: fixed_id(2),
-                source_message_id: fixed_id(3),
-                calls: assigned.into(),
-                continuation: ToolBatchContinuation::ContinueModel,
-                plan_digest: Digest::raw_json(b"tool-batch-plan"),
-            },
-            calls,
-            0,
-            0,
-            std::sync::Arc::from([]),
-            None,
-        )),
-        ..KernelState::default()
-    }
+    let mut state = KernelState::default();
+    state.set_active_tool_batch(Some(ActiveToolBatch::new(
+        finstack_ai_kernel::ToolBatchOpened {
+            cycle: 0,
+            turn_id: fixed_id(1),
+            tool_batch_id: fixed_id(2),
+            source_message_id: fixed_id(3),
+            calls: assigned.into(),
+            continuation: ToolBatchContinuation::ContinueModel,
+            plan_digest: Digest::raw_json(b"tool-batch-plan"),
+        },
+        calls,
+        0,
+        0,
+        std::sync::Arc::from([]),
+        None,
+    )));
+    state
 }
 
 #[test]

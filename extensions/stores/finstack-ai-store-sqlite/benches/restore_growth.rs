@@ -241,7 +241,7 @@ fn snapshot_versus_full_replay(criterion: &mut Criterion) {
                 id::<SessionTag>(1),
             ))
             .expect("snapshot recover");
-            assert_eq!(recovered.state().last_applied_sequence, RESTORE_RECORDS);
+            assert_eq!(recovered.state().last_applied_sequence(), RESTORE_RECORDS);
         });
     });
 
@@ -259,7 +259,7 @@ fn snapshot_versus_full_replay(criterion: &mut Criterion) {
                 id::<SessionTag>(1),
             ))
             .expect("full recover");
-            assert_eq!(recovered.state().last_applied_sequence, RESTORE_RECORDS);
+            assert_eq!(recovered.state().last_applied_sequence(), RESTORE_RECORDS);
         });
     });
     eprintln!(

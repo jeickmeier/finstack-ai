@@ -55,7 +55,7 @@ fn mixed_groups_reverse_completion_preserves_source_order_and_finalize_candidate
         ),
     );
     assert_eq!(opened.actions.len(), 2);
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AwaitingTools));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AwaitingTools));
     assert_tool_golden("valid--pr010-mixed-groups.json", &harness);
 
     let reverse = settle_tool(
@@ -106,7 +106,7 @@ fn mixed_groups_reverse_completion_preserves_source_order_and_finalize_candidate
         TOOL_EFFECT_D,
         &calls[3],
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterToolBatch));
     assert_eq!(
         tool_message_call_ids(&harness),
         vec![CALL_A, CALL_B, CALL_C, CALL_D]
@@ -120,7 +120,7 @@ fn mixed_groups_reverse_completion_preserves_source_order_and_finalize_candidate
         transition_env(2_100, &[1_050], &[], &[], &[], &[], &[]),
         stage_input(0, Stage::AfterToolBatch, ReducerStageOutcome::Continue),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::BeforeFinalize));
     harness.apply_input(
         transition_env(2_200, &[1_060, 1_061], &[1_060], &[], &[], &[], &[]),
         stage_input(
@@ -130,7 +130,7 @@ fn mixed_groups_reverse_completion_preserves_source_order_and_finalize_candidate
         ),
     );
     let TerminalState::Completed(completed) =
-        harness.kernel.state().terminal.as_ref().expect("terminal")
+        harness.kernel.state().terminal().expect("terminal")
     else {
         panic!("expected completed run");
     };
@@ -175,8 +175,8 @@ fn unknown_tool_is_synthetic_and_continue_model_uses_state_v2() {
         ),
     );
     assert!(decision.actions.is_empty());
-    assert_eq!(harness.kernel.state().state_version, 2);
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(harness.kernel.state().state_version(), 2);
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterToolBatch));
     let result = last_tool_result(&harness);
     assert!(result.is_error());
     let ContentBlock::Json(value) = &result.content()[0] else {
@@ -189,9 +189,9 @@ fn unknown_tool_is_synthetic_and_continue_model_uses_state_v2() {
         transition_env(1_700, &[2_010], &[], &[], &[], &[], &[]),
         stage_input(0, Stage::AfterToolBatch, ReducerStageOutcome::Continue),
     );
-    assert_eq!(harness.kernel.state().cycle, 1);
+    assert_eq!(harness.kernel.state().cycle(), 1);
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::PreparingContext)
     );
     let encoded = serde_json::to_value(harness.kernel.state()).expect("state v2 JSON");
@@ -273,12 +273,11 @@ fn fail_run_drains_parallel_group_and_closes_only_undispatched_calls() {
             outcome: ToolSettlement::Failed(failure),
         }),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AwaitingTools));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AwaitingTools));
     let active = harness
         .kernel
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("active batch");
     assert!(matches!(
         active.calls[2].status,
@@ -303,8 +302,7 @@ fn fail_run_drains_parallel_group_and_closes_only_undispatched_calls() {
     let closed = harness
         .kernel
         .state()
-        .last_tool_batch
-        .as_ref()
+        .last_tool_batch()
         .expect("failed close");
     assert!(matches!(closed.outcome, ToolBatchOutcome::Failed { .. }));
     assert_eq!(
@@ -349,7 +347,7 @@ fn nested_mcp_sampling_journals_a_child_model_under_the_open_tool() {
             },
         ),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AwaitingTools));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AwaitingTools));
 
     let request = KernelInput::RequestCompactionModel(RequestCompactionModel {
         request: RawJson::parse(br#"{"sampling":"createMessage"}"#).expect("request"),
@@ -395,7 +393,7 @@ fn nested_mcp_sampling_journals_a_child_model_under_the_open_tool() {
         })
     );
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::AwaitingModel)
     );
 
@@ -411,8 +409,8 @@ fn nested_mcp_sampling_journals_a_child_model_under_the_open_tool() {
         }),
     );
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::AwaitingTools)
     );
-    assert!(harness.kernel.state().pending_model_effect.is_none());
+    assert!(harness.kernel.state().pending_model_effect().is_none());
 }

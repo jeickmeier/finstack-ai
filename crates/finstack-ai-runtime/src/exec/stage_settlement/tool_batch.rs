@@ -91,7 +91,7 @@ fn prior_write_tool_calls(coordinator: &CommitCoordinator, catalog: &ResolvedToo
     u64::try_from(
         coordinator
             .state()
-            .tool_calls
+            .tool_calls()
             .values()
             .filter(|identity| !read_only.contains(identity.call.tool_name()))
             .count(),

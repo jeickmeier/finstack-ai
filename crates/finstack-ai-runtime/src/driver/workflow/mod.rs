@@ -174,29 +174,30 @@ impl WorkflowDriverError {
 /// ```
 #[must_use]
 pub fn classify_wait(state: &KernelState) -> Option<WorkflowWait> {
-    if state.terminal.is_some()
+    if state.terminal().is_some()
         || matches!(
-            state.phase,
+            state.phase(),
             Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
         )
     {
-        return Some(WorkflowWait::Terminal { phase: state.phase });
+        return Some(WorkflowWait::Terminal {
+            phase: state.phase(),
+        });
     }
-    if let Some(pending) = &state.pending_interaction {
+    if let Some(pending) = &state.pending_interaction() {
         return Some(WorkflowWait::Interaction {
             interaction_id: pending.request.interaction_id(),
             request: pending.request.clone(),
         });
     }
-    if let Some(timer) = &state.retry.pending {
+    if let Some(timer) = &state.retry().pending {
         return Some(WorkflowWait::Timer {
             effect_id: timer.timer_effect_id,
             due_at: timer.due_at,
         });
     }
     if let Some(deferred) = state
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .and_then(|pending| pending.deferred.as_ref())
     {
         return Some(WorkflowWait::DeferredEffect {
@@ -204,7 +205,7 @@ pub fn classify_wait(state: &KernelState) -> Option<WorkflowWait> {
             handle: deferred.handle.clone(),
         });
     }
-    if let Some(batch) = &state.active_tool_batch {
+    if let Some(batch) = &state.active_tool_batch() {
         for call in batch.calls.iter() {
             if let ActiveToolCallStatus::Requested {
                 deferred: Some(deferred),
@@ -286,10 +287,9 @@ pub fn retry_decision(
             code: RETRY_NOT_SAFE,
         };
     }
-    let used = state.limit_usage.retries.max(state.retry.attempts);
+    let used = state.limit_usage().retries.max(state.retry().attempts);
     match state
-        .accepted
-        .as_ref()
+        .accepted()
         .and_then(|accepted| accepted.limits().max_retries)
     {
         Some(max) if used >= max => WorkflowRetryDecision::Deny {
@@ -303,12 +303,12 @@ pub fn retry_decision(
 }
 
 fn outstanding_request(state: &KernelState, effect_id: EffectId) -> Option<&EffectRequested> {
-    if let Some(pending) = &state.pending_model_effect
+    if let Some(pending) = &state.pending_model_effect()
         && pending.requested.effect_id() == effect_id
     {
         return Some(&pending.requested);
     }
-    if let Some(batch) = &state.active_tool_batch {
+    if let Some(batch) = &state.active_tool_batch() {
         for call in batch.calls.iter() {
             if let ActiveToolCallStatus::Requested { requested, .. } = &call.status
                 && requested.effect_id() == effect_id
@@ -323,13 +323,12 @@ fn outstanding_request(state: &KernelState, effect_id: EffectId) -> Option<&Effe
 fn checkpoint_handles(state: &KernelState) -> BTreeMap<EffectId, ExternalHandleRef> {
     let mut handles = BTreeMap::new();
     if let Some(deferred) = state
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .and_then(|pending| pending.deferred.as_ref())
     {
         handles.insert(deferred.effect_id, deferred.handle.clone());
     }
-    if let Some(batch) = &state.active_tool_batch {
+    if let Some(batch) = &state.active_tool_batch() {
         for call in batch.calls.iter() {
             if let ActiveToolCallStatus::Requested {
                 deferred: Some(deferred),
@@ -478,12 +477,11 @@ impl WorkflowSession {
             .map_err(|_| WorkflowDriverError::UnknownLocator)?;
         let accepted = coordinator
             .state()
-            .accepted
-            .as_ref()
+            .accepted()
             .ok_or(WorkflowDriverError::UnknownLocator)?;
         if accepted.security().tenant_scope() != locator.tenant_scope.as_ref()
-            || coordinator.state().session_id != Some(locator.session_id)
-            || coordinator.state().lane_id != Some(locator.lane_id)
+            || coordinator.state().session_id() != Some(locator.session_id)
+            || coordinator.state().lane_id() != Some(locator.lane_id)
             || accepted.run_id() != locator.run_id
         {
             return Err(WorkflowDriverError::UnknownLocator);
@@ -696,7 +694,7 @@ impl WorkflowSession {
         hint: Option<&WorkflowCheckpoint>,
     ) -> Result<Self, WorkflowDriverError> {
         let session = Self::attach(store, locator, clock, audit).await?;
-        let journal_seq = session.last_state.last_applied_sequence;
+        let journal_seq = session.last_state.last_applied_sequence();
         let _ = resolve_checkpoint_sequence(
             journal_seq,
             hint.map(|checkpoint| checkpoint.last_applied_seq),
@@ -718,7 +716,7 @@ impl WorkflowSession {
         hint: Option<&WorkflowCheckpoint>,
     ) -> Result<Self, WorkflowDriverError> {
         let session = Self::attach_seeded(store, locator, clock, random_seed, audit).await?;
-        let journal_seq = session.last_state.last_applied_sequence;
+        let journal_seq = session.last_state.last_applied_sequence();
         let _ = resolve_checkpoint_sequence(
             journal_seq,
             hint.map(|checkpoint| checkpoint.last_applied_seq),
@@ -783,27 +781,26 @@ impl WorkflowSession {
     pub fn persist_handoff(&self) -> Result<WorkflowCheckpoint, WorkflowDriverError> {
         let session_id = self
             .last_state
-            .session_id
+            .session_id()
             .ok_or(WorkflowDriverError::Recover {
                 code: "missing_session",
             })?;
         let lane_id = self
             .last_state
-            .lane_id
+            .lane_id()
             .ok_or(WorkflowDriverError::Recover {
                 code: "missing_lane",
             })?;
         let run_id = self
             .last_state
-            .accepted
-            .as_ref()
+            .accepted()
             .map_or(self.locator.run_id, finstack_ai_kernel::RunAccepted::run_id);
         Ok(WorkflowCheckpoint {
             tenant_scope: Arc::clone(&self.tenant_scope),
             session_id,
             lane_id,
             run_id,
-            last_applied_seq: self.last_state.last_applied_sequence,
+            last_applied_seq: self.last_state.last_applied_sequence(),
             external_handles: checkpoint_handles(&self.last_state),
         })
     }
@@ -831,8 +828,7 @@ impl WorkflowSession {
                 .map_err(|error| recover_error(&error))?;
         if coordinator
             .state()
-            .accepted
-            .as_ref()
+            .accepted()
             .is_none_or(|accepted| accepted.run_id() != self.locator.run_id)
         {
             return Err(WorkflowDriverError::UnknownLocator);
@@ -909,8 +905,7 @@ impl WorkflowSession {
                 .map_err(|error| recover_error(&error))?;
         if coordinator
             .state()
-            .accepted
-            .as_ref()
+            .accepted()
             .is_none_or(|accepted| accepted.run_id() != self.locator.run_id)
         {
             return Err(WorkflowDriverError::UnknownLocator);
@@ -1017,8 +1012,4 @@ fn spawn_code(error: &crate::run::RunHandleError) -> &'static str {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::field_reassign_with_default,
-    reason = "tests assemble kernel state incrementally"
-)]
 mod tests;

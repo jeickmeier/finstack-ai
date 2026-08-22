@@ -487,7 +487,7 @@ pub(crate) async fn drive_to_after_model<S: JournalStore + 'static>(
         let recovered = CommitCoordinator::recover(journal, id::<SessionTag>(1))
             .await
             .expect("recover");
-        if recovered.state().phase == Some(RunPhase::AfterModel) {
+        if recovered.state().phase() == Some(RunPhase::AfterModel) {
             break;
         }
         tokio::task::yield_now().await;
@@ -610,7 +610,7 @@ pub(crate) async fn wait_for_phase(store: &Arc<MemoryJournalStore>, phase: RunPh
         let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
             .await
             .expect("recover");
-        if recovered.state().phase == Some(phase) {
+        if recovered.state().phase() == Some(phase) {
             return;
         }
         tokio::task::yield_now().await;
@@ -722,9 +722,9 @@ pub(crate) async fn next_model_sequence_for_plan(
     let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
         .await
         .expect("recover before next model");
-    assert_eq!(recovered.state().phase, Some(RunPhase::PreparingContext));
-    let cycle = recovered.state().cycle;
-    let context: Arc<[Message]> = Arc::from(recovered.state().messages.as_slice());
+    assert_eq!(recovered.state().phase(), Some(RunPhase::PreparingContext));
+    let cycle = recovered.state().cycle();
+    let context: Arc<[Message]> = Arc::from(recovered.state().messages().as_slice());
     handle
         .submit(
             env(2_350, &[9_001, 9_002], &[], &[], &[9_003], &[], &[], 9_001),

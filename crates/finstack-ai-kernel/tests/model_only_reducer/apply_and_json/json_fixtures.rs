@@ -193,16 +193,14 @@ fn assert_state_and_record_payload_json() {
         completed
             .kernel
             .state()
-            .terminal_candidate
-            .as_ref()
+            .terminal_candidate()
             .expect("completed candidate"),
     );
     assert_json_round_trip_and_unknown_fields(
         completed
             .kernel
             .state()
-            .terminal
-            .as_ref()
+            .terminal()
             .expect("completed terminal"),
     );
     assert_json_round_trip_and_unknown_fields(&RunFailed {
@@ -227,8 +225,7 @@ fn assert_state_and_record_payload_json() {
         failed
             .kernel
             .state()
-            .terminal_candidate
-            .as_ref()
+            .terminal_candidate()
             .expect("failed candidate"),
     );
     failed.apply_input(
@@ -243,8 +240,7 @@ fn assert_state_and_record_payload_json() {
         failed
             .kernel
             .state()
-            .terminal
-            .as_ref()
+            .terminal()
             .expect("failed terminal"),
     );
 }
@@ -259,15 +255,15 @@ fn v1_accept_and_prepare_snapshot_preserves_sidecar_fields() {
     settle_before_run(&mut harness);
     prepare_context(&mut harness, 0, false);
     let state = harness.kernel.state().clone();
-    assert_eq!(state.state_version, 1);
-    assert!(state.accepted_at.is_some());
-    assert_eq!(state.limit_usage.turns, 1);
+    assert_eq!(state.state_version(), 1);
+    assert!(state.accepted_at().is_some());
+    assert_eq!(state.limit_usage().turns, 1);
     let before_hash = state.state_hash().expect("v1 hash");
     let json = serde_json::to_value(&state).expect("serialize v1");
     assert!(json.get("accepted_at").is_none());
     assert!(json.get("limit_usage").is_none());
     let restored: KernelState = serde_json::from_value(json).expect("restore v1");
-    assert_eq!(restored.accepted_at, state.accepted_at);
-    assert_eq!(restored.limit_usage, state.limit_usage);
+    assert_eq!(restored.accepted_at(), state.accepted_at());
+    assert_eq!(restored.limit_usage(), state.limit_usage());
     assert_eq!(restored.state_hash().expect("restored hash"), before_hash);
 }

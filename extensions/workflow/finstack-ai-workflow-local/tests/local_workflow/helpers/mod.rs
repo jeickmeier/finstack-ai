@@ -386,7 +386,7 @@ pub(crate) async fn drive_to_after_model(
         )
         .await
         .expect("model request");
-    wait_state(store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+    wait_state(store, |state| state.phase() == Some(RunPhase::AfterModel)).await;
 }
 
 pub(crate) async fn wait_state_on(

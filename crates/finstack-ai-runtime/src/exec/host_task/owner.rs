@@ -328,7 +328,7 @@ impl RunTaskOwner {
             active: Arc::clone(&active),
             parent: parent.clone(),
         });
-        let cancelling = coordinator.state().cancellation.is_some();
+        let cancelling = coordinator.state().cancellation().is_some();
         if cancelling {
             drain_idle_cancellation(&mut coordinator, &sources, true).await?;
         } else {

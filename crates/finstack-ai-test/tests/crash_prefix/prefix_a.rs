@@ -18,11 +18,11 @@ async fn prefix_a1_through_a2() {
         )
         .await
         .expect("activate");
-    let catalog = coordinator.state().active_capabilities.clone();
+    let catalog = coordinator.state().active_capabilities().clone();
     drop(coordinator);
     let mut recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().active_capabilities, catalog);
-    assert_legal("A1", recovered.state().phase, LegalRestore::Retryable);
+    assert_eq!(recovered.state().active_capabilities(), &catalog);
+    assert_legal("A1", recovered.state().phase(), LegalRestore::Retryable);
     let duplicate = recovered
         .submit(
             env(1_060, &[3], &[], &[], &[], &[], &[], 103),
@@ -31,5 +31,5 @@ async fn prefix_a1_through_a2() {
         .await
         .expect("equal activation");
     assert!(duplicate.committed.is_none(), "A2 no second activation");
-    assert_eq!(recovered.state().active_capabilities, catalog);
+    assert_eq!(recovered.state().active_capabilities(), &catalog);
 }

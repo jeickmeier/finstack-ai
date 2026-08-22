@@ -488,7 +488,7 @@ impl CommitCoordinator {
         let Some(component_owners) = owners.get(component) else {
             return true;
         };
-        self.state().active_capabilities.iter().any(|item| {
+        self.state().active_capabilities().iter().any(|item| {
             component_owners
                 .iter()
                 .any(|owner| &item.capability_id == owner)
@@ -564,16 +564,14 @@ impl CommitCoordinator {
         let pending = self
             .kernel
             .state()
-            .pending_model_effect
-            .as_ref()
+            .pending_model_effect()
             .ok_or("model_progress_without_pending_effect")?;
         let state = self.kernel.state();
         let accepted = state
-            .accepted
-            .as_ref()
+            .accepted()
             .ok_or("model_progress_without_accepted_run")?;
-        let session_id = state.session_id.ok_or("model_progress_without_session")?;
-        let lane_id = state.lane_id.ok_or("model_progress_without_lane")?;
+        let session_id = state.session_id().ok_or("model_progress_without_session")?;
+        let lane_id = state.lane_id().ok_or("model_progress_without_lane")?;
         let effect_id = pending.requested.effect_id();
         let transient_sequence = self.next_transient_sequence;
         let body = match progress {
@@ -623,14 +621,12 @@ impl CommitCoordinator {
     ) -> Result<RunEvent, &'static str> {
         let state = self.kernel.state();
         let accepted = state
-            .accepted
-            .as_ref()
+            .accepted()
             .ok_or("tool_progress_without_accepted_run")?;
-        let session_id = state.session_id.ok_or("tool_progress_without_session")?;
-        let lane_id = state.lane_id.ok_or("tool_progress_without_lane")?;
+        let session_id = state.session_id().ok_or("tool_progress_without_session")?;
+        let lane_id = state.lane_id().ok_or("tool_progress_without_lane")?;
         let batch = state
-            .active_tool_batch
-            .as_ref()
+            .active_tool_batch()
             .ok_or("tool_progress_without_active_batch")?;
         let call = batch
             .calls

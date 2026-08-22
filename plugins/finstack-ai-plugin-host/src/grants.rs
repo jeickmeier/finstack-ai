@@ -1,7 +1,7 @@
 //! Host-owned permission grants. A name is not a linked capability.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::PluginHostError;
 
@@ -32,11 +32,58 @@ pub struct FilesystemPreopen {
     /// Guest-visible path.
     pub guest_path: String,
     /// Host directory. Tests use a tempdir; never inherit `$HOME`.
+    /// Validated fail-closed by [`validate_preopen_host_path`].
     pub host_path: PathBuf,
     /// Read permission on the preopen.
     pub read: bool,
     /// Write permission on the preopen.
     pub write: bool,
+}
+
+/// Sensitive host roots that can never back a preopen.
+const SENSITIVE_ROOTS: [&str; 11] = [
+    "/", "/etc", "/usr", "/bin", "/sbin", "/var", "/proc", "/sys", "/dev", "/boot", "/root",
+];
+
+/// Fail-closed validation of one preopen host path.
+///
+/// # Errors
+///
+/// Returns [`PluginHostError::ConfigInvalid`] when the path is empty,
+/// contains a `..` component, or names a sensitive root (`/`, `/etc`,
+/// `/usr`, `/bin`, `/sbin`, `/var`, `/proc`, `/sys`, `/dev`, `/boot`,
+/// `/root`, or the user's home directory).
+pub fn validate_preopen_host_path(host_path: &Path) -> Result<(), PluginHostError> {
+    if host_path.as_os_str().is_empty() {
+        return Err(PluginHostError::ConfigInvalid(
+            "preopen host path must not be empty",
+        ));
+    }
+    if host_path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(PluginHostError::ConfigInvalid(
+            "preopen host path must not contain '..'",
+        ));
+    }
+    if SENSITIVE_ROOTS
+        .iter()
+        .any(|root| host_path == Path::new(root))
+    {
+        return Err(PluginHostError::ConfigInvalid(
+            "preopen host path names a sensitive root",
+        ));
+    }
+    if let Some(home) = std::env::var_os("HOME")
+        && !home.is_empty()
+        && host_path == Path::new(&home)
+    {
+        return Err(PluginHostError::ConfigInvalid(
+            "preopen host path must not be the home directory",
+        ));
+    }
+    Ok(())
 }
 
 /// Concrete resources required before WASI interfaces are linked.
@@ -125,8 +172,12 @@ pub fn can_link(name: &str, granted: &BTreeSet<String>, resources: &GrantResourc
 
 #[cfg(test)]
 mod tests {
-    use super::{default_application_grants, require_offered, validate_application_grants};
+    use super::{
+        default_application_grants, require_offered, validate_application_grants,
+        validate_preopen_host_path,
+    };
     use std::collections::BTreeSet;
+    use std::path::Path;
 
     #[test]
     fn default_grants_are_logging_and_blobs() {
@@ -153,5 +204,53 @@ mod tests {
         let offered = default_application_grants();
         let error = require_offered(&["filesystem".into()], &offered).expect_err("fs");
         assert_eq!(error.code(), "plugin_permission_denied");
+    }
+
+    #[test]
+    fn sensitive_roots_cannot_back_a_preopen() {
+        for root in [
+            "/", "/etc", "/usr", "/bin", "/sbin", "/var", "/proc", "/sys", "/dev", "/boot", "/root",
+        ] {
+            assert_eq!(
+                validate_preopen_host_path(Path::new(root))
+                    .expect_err(root)
+                    .code(),
+                "plugin_registration_invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn home_directory_cannot_back_a_preopen() {
+        if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) {
+            assert_eq!(
+                validate_preopen_host_path(Path::new(&home))
+                    .expect_err("home")
+                    .code(),
+                "plugin_registration_invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn parent_traversal_and_empty_paths_are_rejected() {
+        assert_eq!(
+            validate_preopen_host_path(Path::new("/tmp/sandbox/../../etc"))
+                .expect_err("traversal")
+                .code(),
+            "plugin_registration_invalid"
+        );
+        assert_eq!(
+            validate_preopen_host_path(Path::new(""))
+                .expect_err("empty")
+                .code(),
+            "plugin_registration_invalid"
+        );
+    }
+
+    #[test]
+    fn tempdir_path_is_accepted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        validate_preopen_host_path(dir.path()).expect("tempdir preopen");
     }
 }

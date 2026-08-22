@@ -15,7 +15,7 @@ async fn sqlite_v1_opens_prunes_and_process_kill_stays_separate() {
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_legal(
         "sqlite-W2",
-        recovered.state().phase,
+        recovered.state().phase(),
         LegalRestore::Retryable,
     );
     store
@@ -26,7 +26,7 @@ async fn sqlite_v1_opens_prunes_and_process_kill_stays_separate() {
         .await
         .expect("sqlite prune");
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert!(recovered.state().pending_model_effect.is_some());
+    assert!(recovered.state().pending_model_effect().is_some());
     let helper = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../extensions/stores/finstack-ai-store-sqlite/src/bin/sqlite_fault_helper.rs");
     assert!(

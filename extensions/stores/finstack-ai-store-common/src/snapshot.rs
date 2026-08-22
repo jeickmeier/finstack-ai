@@ -20,7 +20,7 @@ pub fn encode_state_request(
 ) -> Result<OpaqueSnapshot, StoreError> {
     let (bytes, digest) = encode_snapshot(
         &request.state,
-        request.state.last_applied_sequence,
+        request.state.last_applied_sequence(),
         request.head_checksum,
         request.pending_timer_scheduled_at,
         request.last_model_continuation.as_ref(),
@@ -29,7 +29,7 @@ pub fn encode_state_request(
         reason_code: "snapshot_encode_failed",
     })?;
     OpaqueSnapshot::try_new(
-        request.state.last_applied_sequence,
+        request.state.last_applied_sequence(),
         digest,
         bytes,
         max_bytes,
@@ -56,8 +56,8 @@ pub fn accelerated_from(snapshot: &OpaqueSnapshot) -> Option<AcceleratedRestore>
 /// restored state.
 #[must_use]
 pub fn outstanding_count(restored: &AcceleratedRestore) -> u64 {
-    u64::from(restored.state.pending_model_effect.is_some())
-        .saturating_add(u64::from(restored.state.pending_interaction.is_some()))
+    u64::from(restored.state.pending_model_effect().is_some())
+        .saturating_add(u64::from(restored.state.pending_interaction().is_some()))
 }
 
 /// Count the idempotency tombstones retained in a restored state.
@@ -66,11 +66,11 @@ pub fn tombstone_count(restored: &AcceleratedRestore) -> u64 {
     u64::try_from(
         restored
             .state
-            .completion_identities
+            .completion_identities()
             .len()
-            .saturating_add(restored.state.resolution_identities.len())
-            .saturating_add(restored.state.model_settlements.len())
-            .saturating_add(restored.state.tool_settlements.len()),
+            .saturating_add(restored.state.resolution_identities().len())
+            .saturating_add(restored.state.model_settlements().len())
+            .saturating_add(restored.state.tool_settlements().len()),
     )
     .unwrap_or(u64::MAX)
 }

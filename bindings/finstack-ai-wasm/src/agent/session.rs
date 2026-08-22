@@ -1,4 +1,4 @@
-use finstack_ai::{AGENT_RUN_UNSUPPORTED_PLAN, AgentRunError, OperationLocator};
+use finstack_ai::OperationLocator;
 use wasm_bindgen::prelude::*;
 
 use crate::executor;
@@ -265,34 +265,6 @@ impl Lane {
             .map(|inner| Run { inner })
             .map_err(|error| agent_error(&error, None))
     }
-
-    /// Park is unsupported on wasm-host; there is no truthful respawn path.
-    ///
-    /// # Errors
-    ///
-    /// Always returns `agent_run_unsupported_plan`.
-    pub fn suspend(&self) -> js_sys::Promise {
-        executor::drive(async { Err(park_unsupported("suspend")) })
-    }
-
-    /// Resume is unsupported on wasm-host; there is no truthful respawn path.
-    ///
-    /// # Errors
-    ///
-    /// Always returns `agent_run_unsupported_plan`.
-    pub fn resume(&self, _agent: &Agent) -> js_sys::Promise {
-        executor::drive(async { Err(park_unsupported("resume")) })
-    }
-}
-
-fn park_unsupported(verb: &str) -> JsValue {
-    agent_error(
-        &AgentRunError::Configuration {
-            code: finstack_ai_kernel::static_error_code!(AGENT_RUN_UNSUPPORTED_PLAN),
-            message: format!("lane {verb} is not supported on wasm-host"),
-        },
-        None,
-    )
 }
 
 /// In-process external identity map.

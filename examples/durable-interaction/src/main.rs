@@ -468,7 +468,7 @@ async fn drive_to_after_model(
             ),
         )
         .await?;
-    wait_state(store, |state| state.phase == Some(RunPhase::AfterModel)).await?;
+    wait_state(store, |state| state.phase() == Some(RunPhase::AfterModel)).await?;
     Ok(())
 }
 
@@ -533,7 +533,7 @@ async fn drive_past_missing_facade_decisions(
     clock: ExternalClock,
 ) -> Result<(), BoxError> {
     let recovered = CommitCoordinator::recover(Arc::clone(journal) as _, id(1)).await?;
-    let cycle = recovered.state().cycle;
+    let cycle = recovered.state().cycle();
     let model = Arc::new(finstack_ai_runtime::ports::model::ReadyModel::prepare(model).await?);
 
     let facade = RunTaskOwner::spawn_with_model_and_tools(
@@ -575,7 +575,7 @@ async fn drive_past_missing_facade_decisions(
         )
         .await?;
     wait_state(journal, |state| {
-        state.phase == Some(RunPhase::PreparingContext)
+        state.phase() == Some(RunPhase::PreparingContext)
     })
     .await?;
 
@@ -584,7 +584,7 @@ async fn drive_past_missing_facade_decisions(
         CommitCoordinator::recover(Arc::clone(journal) as _, id(1))
             .await?
             .state()
-            .messages
+            .messages()
             .as_slice(),
     );
     facade
@@ -623,7 +623,7 @@ async fn drive_past_missing_facade_decisions(
             ),
         )
         .await?;
-    wait_state(journal, |state| state.phase == Some(RunPhase::AfterModel)).await?;
+    wait_state(journal, |state| state.phase() == Some(RunPhase::AfterModel)).await?;
 
     facade
         .handle()
@@ -633,7 +633,7 @@ async fn drive_past_missing_facade_decisions(
         )
         .await?;
     wait_state(journal, |state| {
-        state.phase == Some(RunPhase::BeforeFinalize)
+        state.phase() == Some(RunPhase::BeforeFinalize)
     })
     .await?;
 
@@ -648,7 +648,7 @@ async fn drive_past_missing_facade_decisions(
             ),
         )
         .await?;
-    wait_state(journal, |state| state.terminal.is_some()).await?;
+    wait_state(journal, |state| state.terminal().is_some()).await?;
     drop(facade);
     Ok(())
 }
@@ -683,7 +683,7 @@ async fn main() -> Result<(), BoxError> {
         )
         .await?;
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingInteraction)
+        state.phase() == Some(RunPhase::AwaitingInteraction)
     })
     .await?;
     drop(owner);

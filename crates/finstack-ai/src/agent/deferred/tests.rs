@@ -270,8 +270,7 @@ async fn preview_parent() -> (AgentRun, Arc<dyn JournalStore>) {
                 CommitCoordinator::recover(Arc::clone(&store), parent.locator().session_id).await
                 && commit
                     .state()
-                    .accepted
-                    .as_ref()
+                    .accepted()
                     .is_some_and(|accepted| accepted.run_id() == parent.locator().run_id)
             {
                 return;
@@ -514,7 +513,7 @@ async fn deferred_tool_parent() -> (AgentRun, Arc<dyn JournalStore>) {
         loop {
             if let Ok(commit) =
                 CommitCoordinator::recover(Arc::clone(&store), parent.locator().session_id).await
-                && commit.state().phase == Some(RunPhase::AwaitingExternal)
+                && commit.state().phase() == Some(RunPhase::AwaitingExternal)
                 && !outstanding_deferrals(commit.state()).is_empty()
             {
                 return;

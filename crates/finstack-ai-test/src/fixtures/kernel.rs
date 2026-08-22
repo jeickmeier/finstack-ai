@@ -514,10 +514,10 @@ fn run_kernel_state(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureEr
                     .get("state_version")
                     .and_then(Value::as_u64)
                     .ok_or_else(|| fail("kernel-state expect.state_version required"))?;
-                if u64::from(state.state_version) != expected_version {
+                if u64::from(state.state_version()) != expected_version {
                     return Err(fail(format!(
                         "kernel-state version mismatch: expected {expected_version}, got {}",
-                        state.state_version
+                        state.state_version()
                     )));
                 }
                 state
@@ -605,14 +605,13 @@ fn representative_accepted_state(
     } else {
         None
     };
-    Ok(KernelState {
-        state_version,
-        session_id: Some(oracle_id::<finstack_ai_kernel::SessionTag>(1)),
-        lane_id: Some(oracle_id::<finstack_ai_kernel::LaneTag>(2)),
-        accepted: Some(oracle_root_acceptance()?),
-        accepted_at,
-        ..KernelState::default()
-    })
+    let mut state = KernelState::default();
+    state.set_state_version(state_version);
+    state.set_session_id(Some(oracle_id::<finstack_ai_kernel::SessionTag>(1)));
+    state.set_lane_id(Some(oracle_id::<finstack_ai_kernel::LaneTag>(2)));
+    state.set_accepted(Some(oracle_root_acceptance()?));
+    state.set_accepted_at(accepted_at);
+    Ok(state)
 }
 
 fn tool_call_bearing_state() -> Result<KernelState, PublicApiFixtureError> {
@@ -644,12 +643,11 @@ fn tool_call_bearing_state() -> Result<KernelState, PublicApiFixtureError> {
         Metadata::empty(),
     )
     .map_err(|error| fail(error.to_string()))?;
-    Ok(KernelState {
-        state_version: 2,
-        messages: std::sync::Arc::new(vec![message]),
-        tool_calls: [(*call.tool_call_id(), identity)].into_iter().collect(),
-        ..KernelState::default()
-    })
+    let mut state = KernelState::default();
+    state.set_state_version(2);
+    state.set_messages(std::sync::Arc::new(vec![message]));
+    state.set_tool_calls([(*call.tool_call_id(), identity)].into_iter().collect());
+    Ok(state)
 }
 
 fn oracle_id<T: finstack_ai_kernel::IdTag>(ordinal: u64) -> finstack_ai_kernel::Id<T> {

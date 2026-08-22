@@ -17,7 +17,7 @@ async fn trusted_session_matches_direct_owner_journal() {
             .expect("pause bound")
             .expect("paused execute");
         assert_eq!(permit.effect().action, ManualDriveAction::Execute);
-        wait_state(&store, |state| state.pending_model_effect.is_some()).await;
+        wait_state(&store, |state| state.pending_model_effect().is_some()).await;
         if through_session {
             drop(permit);
             drive.abort();
@@ -28,11 +28,11 @@ async fn trusted_session_matches_direct_owner_journal() {
                 .expect("attach")
                 .with_ports(model, locked_profile(), None);
             session.ensure_owner().await.expect("spawn");
-            wait_state(&store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+            wait_state(&store, |state| state.phase() == Some(RunPhase::AfterModel)).await;
         } else {
             permit.continue_dispatch();
             drive.await.expect("drive");
-            wait_state(&store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+            wait_state(&store, |state| state.phase() == Some(RunPhase::AfterModel)).await;
             drop(owner);
         }
         journal_trace(&store).await

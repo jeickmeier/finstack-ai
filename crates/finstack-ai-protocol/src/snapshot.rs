@@ -74,7 +74,7 @@ pub fn encode_snapshot(
     pending_timer_scheduled_at: Option<Timestamp>,
     last_model_continuation: Option<&RawJson>,
 ) -> Result<(Vec<u8>, Digest), ProtocolError> {
-    if sequence != state.last_applied_sequence {
+    if sequence != state.last_applied_sequence() {
         return Err(ProtocolError::integrity("snapshot_sequence_mismatch"));
     }
     let state_hash = state
@@ -120,7 +120,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<DecodedSnapshot, ProtocolError> {
     if envelope.format_version != format_version {
         return Err(ProtocolError::integrity("snapshot_format_mismatch"));
     }
-    if envelope.sequence != envelope.state.last_applied_sequence {
+    if envelope.sequence != envelope.state.last_applied_sequence() {
         return Err(ProtocolError::integrity("snapshot_sequence_mismatch"));
     }
     let state_hash = envelope
@@ -275,16 +275,14 @@ mod tests {
 
     #[test]
     fn v2_empty_tool_indexes_round_trip() {
-        let state = KernelState {
-            state_version: 2,
-            last_applied_sequence: 3,
-            ..KernelState::default()
-        };
+        let mut state = KernelState::default();
+        state.set_state_version(2);
+        state.set_last_applied_sequence(3);
         let checksum = finstack_ai_kernel::Digest::raw_json(b"v2-head");
         let (bytes, digest) = encode_snapshot(&state, 3, checksum, None, None).expect("encode");
         let decoded = decode_opaque_snapshot(3, digest, &bytes).expect("decode");
-        assert_eq!(decoded.state.state_version, 2);
-        assert_eq!(decoded.state.last_applied_sequence, 3);
+        assert_eq!(decoded.state.state_version(), 2);
+        assert_eq!(decoded.state.last_applied_sequence(), 3);
         assert_eq!(
             decoded.state.state_hash().expect("hash"),
             state.state_hash().expect("hash")
@@ -346,14 +344,15 @@ mod tests {
             Metadata::empty(),
         )
         .expect("message");
-        let state = KernelState {
-            messages: std::sync::Arc::new(vec![message.clone()]),
-            ..KernelState::default()
-        };
+        let mut state = KernelState::default();
+        state.set_messages(std::sync::Arc::new(vec![message.clone()]));
         let checksum = finstack_ai_kernel::Digest::raw_json(b"head");
         let (bytes, digest) = encode_snapshot(&state, 0, checksum, None, None).expect("encode");
         let decoded = decode_opaque_snapshot(0, digest, &bytes).expect("decode");
-        assert_eq!(decoded.state.messages.as_slice(), state.messages.as_slice());
+        assert_eq!(
+            decoded.state.messages().as_slice(),
+            state.messages().as_slice()
+        );
         assert_eq!(
             crate::decode::<Message>(&crate::encode(&message).expect("enc")).expect("msg"),
             message

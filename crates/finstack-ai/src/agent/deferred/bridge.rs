@@ -279,8 +279,7 @@ async fn completion_command(
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
     let accepted = commit
         .state()
-        .accepted
-        .as_ref()
+        .accepted()
         .ok_or_else(|| ChildRunBridgeError::failed("parent run is not accepted"))?;
     let security = accepted.security();
     let authorization = AuthorizationEvidence::try_new(
@@ -318,8 +317,7 @@ async fn tool_result_output(
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
     let call = commit
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .and_then(|batch| {
             batch
                 .calls

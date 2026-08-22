@@ -253,8 +253,8 @@ mod helpers {
                 if let Ok(commit) =
                     CommitCoordinator::recover(Arc::clone(&store), parent.locator().session_id)
                         .await
-                    && commit.state().phase == Some(RunPhase::AwaitingExternal)
-                    && let Some(batch) = commit.state().active_tool_batch.as_ref()
+                    && commit.state().phase() == Some(RunPhase::AwaitingExternal)
+                    && let Some(batch) = commit.state().active_tool_batch()
                     && let Some(call) = batch.calls.first()
                     && let finstack_ai_kernel::ActiveToolCallStatus::Requested {
                         deferred: Some(deferred),

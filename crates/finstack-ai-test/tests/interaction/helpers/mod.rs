@@ -455,7 +455,7 @@ pub(crate) async fn recover_session(store: &Arc<MemoryJournalStore>) -> CommitCo
 }
 
 pub(crate) async fn wait_phase(store: &Arc<MemoryJournalStore>, phase: RunPhase) {
-    wait_state(store, |state| state.phase == Some(phase)).await;
+    wait_state(store, |state| state.phase() == Some(phase)).await;
 }
 
 pub(crate) async fn wait_state(
@@ -770,8 +770,7 @@ pub(crate) async fn record_kinds(store: &Arc<MemoryJournalStore>) -> Vec<&'stati
 
 pub(crate) fn pending_id(state: &finstack_ai_kernel::KernelState) -> InteractionId {
     state
-        .pending_interaction
-        .as_ref()
+        .pending_interaction()
         .expect("pending")
         .request
         .interaction_id()

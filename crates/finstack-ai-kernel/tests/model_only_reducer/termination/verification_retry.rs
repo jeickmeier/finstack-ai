@@ -15,7 +15,7 @@ fn framework_retry_admits_over_completed_candidate() {
     limits.max_retries = Some(3);
     let mut harness = drive_to_before_finalize_with_limits(limits);
     assert!(matches!(
-        harness.kernel.state().terminal_candidate,
+        harness.kernel.state().terminal_candidate(),
         Some(TerminalCandidate::Completed { .. })
     ));
 
@@ -43,7 +43,7 @@ fn framework_retry_admits_over_completed_candidate() {
         decision.records[2].body(),
         RecordBody::EffectRequested(_)
     ));
-    assert_eq!(harness.kernel.state().retry.attempts, 1);
+    assert_eq!(harness.kernel.state().retry().attempts, 1);
 
     let encoded = serde_json::to_value(scheduled).expect("serialize retry schedule");
     assert_eq!(encoded["classification"], "framework");
@@ -120,7 +120,7 @@ fn retry_guard_matrix_still_holds_and_admits_failed_candidates() {
         }),
     );
     assert!(matches!(
-        failed_harness.kernel.state().terminal_candidate,
+        failed_harness.kernel.state().terminal_candidate(),
         Some(TerminalCandidate::Failed { .. })
     ));
     let framework_retry = finstack_ai_kernel::RetryDirective::try_new(
@@ -145,5 +145,5 @@ fn retry_guard_matrix_still_holds_and_admits_failed_candidates() {
         finstack_ai_kernel::RetryClassification::Framework
     );
     assert_eq!(scheduled.prior_error, expected_error);
-    assert_eq!(failed_harness.kernel.state().retry.attempts, 1);
+    assert_eq!(failed_harness.kernel.state().retry().attempts, 1);
 }

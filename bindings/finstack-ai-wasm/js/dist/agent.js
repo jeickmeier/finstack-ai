@@ -626,6 +626,11 @@ export class Session {
 }
 /**
  * Live handle for one lane in a session.
+ *
+ * Durable lane park/respawn (`suspend`/`resume`) and direct interaction
+ * management (`listInteractions`/`resolveInteraction`) are native-only.
+ * Browser WASM has no truthful respawn path; use the host session/inbox
+ * path instead.
  */
 export class Lane {
     #handle;
@@ -692,33 +697,6 @@ export class Lane {
     run(agent, input, options) {
         try {
             return new Run(this.#handle.run(agent.handle(), input, options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability, options?.attachments));
-        }
-        catch (error) {
-            throw FinstackError.fromUnknown(error);
-        }
-    }
-    /**
-     * Park is unsupported on wasm-host.
-     *
-     * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
-     */
-    async suspend() {
-        try {
-            await this.#handle.suspend();
-        }
-        catch (error) {
-            throw FinstackError.fromUnknown(error);
-        }
-    }
-    /**
-     * Resume is unsupported on wasm-host.
-     *
-     * @param _agent - Accepted for API parity with native `Lane.resume`.
-     * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
-     */
-    async resume(_agent) {
-        try {
-            await this.#handle.resume(_agent.handle());
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);

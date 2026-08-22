@@ -171,7 +171,11 @@ impl CommitCoordinator {
         if matches!(self.replay_scope, ReplayScope::StructuralOnly)
             && let Some(prior_checksum) = self.head_checksum
         {
-            let from_sequence = self.kernel.state().last_applied_sequence.saturating_add(1);
+            let from_sequence = self
+                .kernel
+                .state()
+                .last_applied_sequence()
+                .saturating_add(1);
             if from_sequence > 1 {
                 let loaded = self
                     .store
@@ -279,7 +283,7 @@ impl CommitCoordinator {
         {
             return;
         }
-        let head = self.kernel.state().last_applied_sequence;
+        let head = self.kernel.state().last_applied_sequence();
         let last = self.last_snapshot_sequence.unwrap_or(0);
         if head.saturating_sub(last) < self.snapshot_schedule.every_n_records {
             return;
@@ -342,8 +346,7 @@ impl CommitCoordinator {
                 if self
                     .kernel
                     .state()
-                    .pending_extension_effect
-                    .as_ref()
+                    .pending_extension_effect()
                     .is_some_and(|pending| pending.requested.effect_id() == effect_id)
         ) {
             // Context and middleware are executed synchronously by the stage

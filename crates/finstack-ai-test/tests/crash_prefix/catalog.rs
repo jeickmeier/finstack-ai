@@ -51,12 +51,11 @@ async fn prefix_effect_kind_and_lane_catalog() {
         drive_to_pending_tool(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingTools));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingTools));
     assert!(
         recovered
             .state()
-            .active_tool_batch
-            .as_ref()
+            .active_tool_batch()
             .is_some_and(|batch| batch.calls.iter().any(|call| call
                 .assigned
                 .plan
@@ -65,7 +64,7 @@ async fn prefix_effect_kind_and_lane_catalog() {
                 == "alpha")),
         "T1 journal must retain the tool effect"
     );
-    assert_legal("T1", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("T1", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let mut coordinator = settle_and_recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -96,14 +95,13 @@ async fn prefix_effect_kind_and_lane_catalog() {
         .expect("fail");
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_legal("K1", recovered.state().phase, LegalRestore::Failed);
+    assert_legal("K1", recovered.state().phase(), LegalRestore::Failed);
 
     let store = memory_store();
     let mut coordinator = drive_to_pending_model(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending")
         .clone();
     coordinator
@@ -151,17 +149,17 @@ async fn prefix_effect_kind_and_lane_catalog() {
         .expect("retry");
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::Sleeping));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::Sleeping));
     assert!(
         recovered
             .state()
-            .retry
+            .retry()
             .pending
             .as_ref()
             .is_some_and(|pending| pending.timer_effect_id == id(501)),
         "R1 journal must retain the timer effect"
     );
-    assert_legal("R1", recovered.state().phase, LegalRestore::Suspended);
+    assert_legal("R1", recovered.state().phase(), LegalRestore::Suspended);
 
     let store = memory_store();
     let mut coordinator = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -175,22 +173,22 @@ async fn prefix_effect_kind_and_lane_catalog() {
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(
-        recovered.state().phase,
+        recovered.state().phase(),
         Some(RunPhase::PreparingContext),
         "X1 is the PrepareContext crash window for EffectKind::Context"
     );
-    assert_legal("X1", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("X1", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let coordinator = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(
-        recovered.state().phase,
+        recovered.state().phase(),
         Some(RunPhase::BeforeRun),
         "M1 is the BeforeRun middleware crash window for EffectKind::Middleware"
     );
-    assert_legal("M1", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("M1", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let session = SessionRuntime::create(
@@ -238,10 +236,10 @@ async fn prefix_effect_kind_and_lane_catalog() {
         .accept_run(id(50), acceptance(4), simple_env(1_100, 20, 21, 22))
         .await
         .expect("accept sibling");
-    assert_eq!(main.state().phase, Some(RunPhase::BeforeRun));
-    assert_eq!(sibling.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(main.state().phase(), Some(RunPhase::BeforeRun));
+    assert_eq!(sibling.state().phase(), Some(RunPhase::BeforeRun));
     assert!(
-        sibling.state().cancellation.is_none(),
+        sibling.state().cancellation().is_none(),
         "P2 does not cancel sibling"
     );
     drop(main);
@@ -276,8 +274,8 @@ async fn prefix_effect_kind_and_lane_catalog() {
         .coordinator_for_run(Some(id(4)))
         .await
         .expect("sibling restore");
-    assert_legal("P1", main.state().phase, LegalRestore::Retryable);
-    assert_legal("P2", main.state().phase, LegalRestore::Retryable);
-    assert_legal("P3", sibling.state().phase, LegalRestore::Retryable);
-    assert_legal("P4", sibling.state().phase, LegalRestore::Retryable);
+    assert_legal("P1", main.state().phase(), LegalRestore::Retryable);
+    assert_legal("P2", main.state().phase(), LegalRestore::Retryable);
+    assert_legal("P3", sibling.state().phase(), LegalRestore::Retryable);
+    assert_legal("P4", sibling.state().phase(), LegalRestore::Retryable);
 }

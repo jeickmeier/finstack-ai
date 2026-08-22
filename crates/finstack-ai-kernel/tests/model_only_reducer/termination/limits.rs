@@ -7,7 +7,7 @@ fn model_request_limit_allows_equality_and_records_first_crossing() {
     settle_before_run(&mut below);
     prepare_context(&mut below, 0, false);
     request_model(&mut below, 0, false);
-    assert_eq!(below.kernel.state().limit_usage.model_requests, 1);
+    assert_eq!(below.kernel.state().limit_usage().model_requests, 1);
 
     let mut allowed = Harness::default();
     let mut limits = RunLimits::empty();
@@ -16,8 +16,8 @@ fn model_request_limit_allows_equality_and_records_first_crossing() {
     settle_before_run(&mut allowed);
     prepare_context(&mut allowed, 0, false);
     request_model(&mut allowed, 0, false);
-    assert_eq!(allowed.kernel.state().limit_usage.model_requests, 1);
-    assert_eq!(allowed.kernel.state().phase, Some(RunPhase::AwaitingModel));
+    assert_eq!(allowed.kernel.state().limit_usage().model_requests, 1);
+    assert_eq!(allowed.kernel.state().phase(), Some(RunPhase::AwaitingModel));
 
     let mut crossed = Harness::default();
     let mut limits = RunLimits::empty();
@@ -39,7 +39,7 @@ fn model_request_limit_allows_equality_and_records_first_crossing() {
             },
         ),
     );
-    assert_eq!(crossed.kernel.state().phase, Some(RunPhase::Failed));
+    assert_eq!(crossed.kernel.state().phase(), Some(RunPhase::Failed));
     assert!(matches!(
         crossed.batches.last().unwrap().records[0].body(),
         RecordBody::LimitReached(_)
@@ -79,7 +79,7 @@ fn scalar_stage_limits_cover_below_exact_and_above_boundaries() {
         if crossing {
             assert_limit_decision(&decision, &finstack_ai_kernel::LimitDimension::Turns);
         } else {
-            assert_eq!(harness.kernel.state().limit_usage.turns, 1);
+            assert_eq!(harness.kernel.state().limit_usage().turns, 1);
         }
     }
 
@@ -111,7 +111,7 @@ fn scalar_stage_limits_cover_below_exact_and_above_boundaries() {
             assert_limit_decision(&decision, &finstack_ai_kernel::LimitDimension::ContextBytes);
         } else {
             assert_eq!(
-                harness.kernel.state().limit_usage.context_bytes,
+                harness.kernel.state().limit_usage().context_bytes,
                 context_bytes
             );
         }
@@ -134,7 +134,7 @@ fn scalar_stage_limits_cover_below_exact_and_above_boundaries() {
             assert_limit_decision(&decision, &finstack_ai_kernel::LimitDimension::WallTime);
         } else {
             assert_eq!(
-                harness.kernel.state().limit_usage.wall_time,
+                harness.kernel.state().limit_usage().wall_time,
                 finstack_ai_kernel::Duration::from_millis(100)
             );
         }
@@ -213,14 +213,14 @@ fn completion_limits_cover_below_exact_and_above_boundaries() {
         if crossing {
             assert_limit_decision(&decision, &finstack_ai_kernel::LimitDimension::InputTokens);
         } else {
-            assert_eq!(harness.kernel.state().limit_usage.input_tokens, observed);
-            assert_eq!(harness.kernel.state().limit_usage.output_tokens, observed);
+            assert_eq!(harness.kernel.state().limit_usage().input_tokens, observed);
+            assert_eq!(harness.kernel.state().limit_usage().output_tokens, observed);
             assert_eq!(
-                harness.kernel.state().limit_usage.output_bytes,
+                harness.kernel.state().limit_usage().output_bytes,
                 output_bytes
             );
             assert_eq!(
-                harness.kernel.state().limit_usage.extension_counters[&extension_key],
+                harness.kernel.state().limit_usage().extension_counters[&extension_key],
                 observed
             );
         }
@@ -269,7 +269,7 @@ fn completion_limits_cover_below_exact_and_above_boundaries() {
                 harness
                     .kernel
                     .state()
-                    .limit_usage
+                    .limit_usage()
                     .cost
                     .as_ref()
                     .expect("cost")
@@ -404,7 +404,7 @@ fn tool_plan_limits_cover_below_exact_and_above_boundaries() {
         if crossing {
             assert_limit_decision(&decision, &finstack_ai_kernel::LimitDimension::ToolCalls);
         } else {
-            assert_eq!(harness.kernel.state().limit_usage.tool_calls, 2);
+            assert_eq!(harness.kernel.state().limit_usage().tool_calls, 2);
         }
     }
 
@@ -454,7 +454,7 @@ fn tool_plan_limits_cover_below_exact_and_above_boundaries() {
                 &finstack_ai_kernel::LimitDimension::ParallelTools,
             );
         } else {
-            assert_eq!(harness.kernel.state().limit_usage.max_parallel_tools, 2);
+            assert_eq!(harness.kernel.state().limit_usage().max_parallel_tools, 2);
         }
     }
 }
@@ -506,8 +506,8 @@ fn retry_limit_covers_below_exact_and_above_boundaries() {
         if crossing {
             assert_limit_decision(&decision, &finstack_ai_kernel::LimitDimension::Retries);
         } else {
-            assert_eq!(harness.kernel.state().retry.attempts, 1);
-            assert_eq!(harness.kernel.state().limit_usage.retries, 1);
+            assert_eq!(harness.kernel.state().retry().attempts, 1);
+            assert_eq!(harness.kernel.state().limit_usage().retries, 1);
         }
     }
 }
@@ -574,14 +574,14 @@ fn equal_context_prepared_redelivery_does_not_consume_turn_limit() {
         transition_env(1_200, &[3, 4], &[], &[], &[TURN_ONE], &[], &[]),
         input.clone(),
     );
-    let usage = harness.kernel.state().limit_usage.clone();
+    let usage = harness.kernel.state().limit_usage().clone();
     assert_eq!(usage.turns, 1);
     let duplicate = harness
         .kernel
         .decide(&empty_env(1_201), input)
         .expect("equal context redelivery");
     assert!(duplicate.records.is_empty());
-    assert_eq!(harness.kernel.state().limit_usage, usage);
+    assert_eq!(harness.kernel.state().limit_usage(), &usage);
     assert!(
         !duplicate
             .records
@@ -610,14 +610,14 @@ fn equal_model_settled_redelivery_does_not_consume_completion_usage() {
         transition_env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[FINAL_MESSAGE_ONE]),
         input.clone(),
     );
-    let before = harness.kernel.state().limit_usage.clone();
+    let before = harness.kernel.state().limit_usage().clone();
     assert_eq!(before.input_tokens, 10);
     let duplicate = harness
         .kernel
         .decide(&empty_env(1_401), input)
         .expect("equal model redelivery");
     assert!(duplicate.records.is_empty());
-    assert_eq!(harness.kernel.state().limit_usage, before);
+    assert_eq!(harness.kernel.state().limit_usage(), &before);
     assert!(
         !duplicate
             .records
@@ -632,7 +632,9 @@ fn decide_limit_counter_overflow_is_terminal_run_failed() {
     accept_with(&mut harness, RunLimits::empty(), None);
     settle_before_run(&mut harness);
     let mut state = harness.kernel.state().clone();
-    state.limit_usage.turns = u64::MAX;
+    let mut usage = state.limit_usage().clone();
+    usage.turns = u64::MAX;
+    state.set_limit_usage(usage);
     let kernel = Kernel::try_restore(state).expect("restore overflow state");
     let decision = kernel
         .decide(

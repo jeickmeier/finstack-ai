@@ -509,7 +509,7 @@ impl RemoteSnapshot {
                 "snapshot_checksum_sequence_mismatch",
             ));
         }
-        if state.last_applied_sequence != sequence {
+        if state.last_applied_sequence() != sequence {
             return Err(ProtocolError::invalid_message(
                 "snapshot_state_sequence_mismatch",
             ));
@@ -523,14 +523,13 @@ impl RemoteSnapshot {
             ));
         }
         let state_run_id = state
-            .accepted
-            .as_ref()
+            .accepted()
             .map(finstack_ai_kernel::RunAccepted::run_id);
         let locator_mismatch = state
-            .session_id
+            .session_id()
             .is_some_and(|value| value != locator.session_id())
             || state
-                .lane_id
+                .lane_id()
                 .is_some_and(|value| Some(value) != locator.lane_id())
             || state_run_id.is_some_and(|value| Some(value) != locator.run_id());
         if locator_mismatch {

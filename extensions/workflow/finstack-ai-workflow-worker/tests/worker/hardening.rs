@@ -364,7 +364,7 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
     .await
     .expect("recover");
     assert!(
-        recovered.state().pending_interaction.is_some(),
+        recovered.state().pending_interaction().is_some(),
         "the interaction was never resolved"
     );
 }

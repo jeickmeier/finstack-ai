@@ -150,27 +150,26 @@ fn state_with(calls: Vec<ActiveToolCall>, settled: &[u64]) -> KernelState {
         .iter()
         .map(|call| call.assigned.clone())
         .collect::<Vec<_>>();
-    let mut state = KernelState {
-        active_tool_batch: Some(ActiveToolBatch::new(
-            ToolBatchOpened {
-                cycle: 0,
-                turn_id: id(7),
-                tool_batch_id: id(8),
-                source_message_id: id(9),
-                calls: assigned.into(),
-                continuation: ToolBatchContinuation::ContinueModel,
-                plan_digest: Digest::raw_json(b"tool-batch-plan"),
-            },
-            calls,
-            0,
-            0,
-            Arc::from([]),
-            None,
-        )),
-        ..KernelState::default()
-    };
+    let mut state = KernelState::default();
+    state.set_active_tool_batch(Some(ActiveToolBatch::new(
+        ToolBatchOpened {
+            cycle: 0,
+            turn_id: id(7),
+            tool_batch_id: id(8),
+            source_message_id: id(9),
+            calls: assigned.into(),
+            continuation: ToolBatchContinuation::ContinueModel,
+            plan_digest: Digest::raw_json(b"tool-batch-plan"),
+        },
+        calls,
+        0,
+        0,
+        Arc::from([]),
+        None,
+    )));
+    let mut settlements = state.tool_settlements().clone();
     for ordinal in settled {
-        state.tool_settlements.insert(
+        settlements.insert(
             id(*ordinal),
             ToolSettlementFingerprint {
                 kind: ToolSettlementKind::Completed,
@@ -178,6 +177,7 @@ fn state_with(calls: Vec<ActiveToolCall>, settled: &[u64]) -> KernelState {
             },
         );
     }
+    state.set_tool_settlements(settlements);
     state
 }
 

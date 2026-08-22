@@ -185,25 +185,23 @@ fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
 #[test]
 fn the_stage_table_and_the_limit_requirement_are_mutually_exclusive() {
     let sources = test_sources();
-    let state = finstack_ai_kernel::KernelState {
-        session_id: Some(id::<SessionTag>(1)),
-        lane_id: Some(id::<LaneTag>(2)),
-        accepted: Some(acceptance(RunLimits {
-            max_retries: Some(0),
-            ..RunLimits::empty()
-        })),
-        accepted_at: Some(timestamp(1_000)),
-        phase: Some(finstack_ai_kernel::RunPhase::BeforeFinalize),
-        terminal_candidate: Some(finstack_ai_kernel::TerminalCandidate::Completed {
-            cycle: 0,
-            turn_id: id(20),
-            model_request_id: id(21),
-            effect_id: id(22),
-            message_id: id(23),
-            result_digest: Digest::raw_json(b"{}"),
-        }),
-        ..finstack_ai_kernel::KernelState::default()
-    };
+    let mut state = finstack_ai_kernel::KernelState::default();
+    state.set_session_id(Some(id::<SessionTag>(1)));
+    state.set_lane_id(Some(id::<LaneTag>(2)));
+    state.set_accepted(Some(acceptance(RunLimits {
+        max_retries: Some(0),
+        ..RunLimits::empty()
+    })));
+    state.set_accepted_at(Some(timestamp(1_000)));
+    state.set_phase(Some(finstack_ai_kernel::RunPhase::BeforeFinalize));
+    state.set_terminal_candidate(Some(finstack_ai_kernel::TerminalCandidate::Completed {
+        cycle: 0,
+        turn_id: id(20),
+        model_request_id: id(21),
+        effect_id: id(22),
+        message_id: id(23),
+        result_digest: Digest::raw_json(b"{}"),
+    }));
     let cursor = StageCursor {
         cycle: 0,
         stage: Stage::BeforeFinalize,
@@ -297,11 +295,11 @@ fn a_fold_that_crosses_a_limit_still_lands_through_the_choke_point() {
 
     assert!(
         matches!(
-            coordinator.state().terminal,
+            coordinator.state().terminal(),
             Some(finstack_ai_kernel::TerminalState::Failed(_))
         ),
         "decide_limit must have terminated the run, not been bypassed: {:?}",
-        coordinator.state().terminal
+        coordinator.state().terminal()
     );
 }
 
@@ -397,11 +395,11 @@ fn drive_to_before_finalize(coordinator: &mut CommitCoordinator) -> Message {
 
     assert!(
         matches!(
-            coordinator.state().terminal_candidate,
+            coordinator.state().terminal_candidate(),
             Some(finstack_ai_kernel::TerminalCandidate::Completed { .. })
         ),
         "the drive must land a Completed candidate before BeforeFinalize: {:?}",
-        coordinator.state().terminal_candidate
+        coordinator.state().terminal_candidate()
     );
     assistant
 }
@@ -454,13 +452,13 @@ fn a_framework_verifier_bounce_at_before_finalize_lands_end_to_end() {
 
     // ---- Step 1: the bounce lands as a retry, not a terminal -----------
     assert!(
-        coordinator.state().terminal.is_none(),
+        coordinator.state().terminal().is_none(),
         "a framework verifier bounce must not terminate the run: {:?}",
-        coordinator.state().terminal
+        coordinator.state().terminal()
     );
     let pending = coordinator
         .state()
-        .retry
+        .retry()
         .pending
         .clone()
         .expect("the bounce must leave a pending retry");
@@ -501,19 +499,19 @@ fn a_framework_verifier_bounce_at_before_finalize_lands_end_to_end() {
     .expect("the retry timer fires");
 
     assert_eq!(
-        coordinator.state().cycle,
+        coordinator.state().cycle(),
         1,
         "the fired timer must open cycle n + 1"
     );
     assert_eq!(
-        coordinator.state().phase,
+        coordinator.state().phase(),
         Some(RunPhase::PreparingContext),
         "the run must re-enter PreparingContext once the retry timer fires"
     );
     assert!(
         coordinator
             .state()
-            .messages
+            .messages()
             .iter()
             .any(|message| message.id() == bounced_assistant_message.id()),
         "the bounced assistant message must still be in state.messages on cycle n + 1"

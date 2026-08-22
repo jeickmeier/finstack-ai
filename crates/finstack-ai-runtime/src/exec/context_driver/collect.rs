@@ -79,8 +79,7 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
         }
         let effect_id = coordinator
             .state()
-            .pending_extension_effect
-            .as_ref()
+            .pending_extension_effect()
             .filter(|pending| {
                 pending.cursor == cursor
                     && pending.requested.component() == Some(&provider.descriptor().invocation)
@@ -192,7 +191,7 @@ fn context_request(
     let recent_history: Arc<[Message]> = history.into();
     let active_capabilities: Arc<[CapabilityId]> = coordinator
         .state()
-        .active_capabilities
+        .active_capabilities()
         .iter()
         .map(|capability| capability.capability_id.clone())
         .collect::<Vec<_>>()

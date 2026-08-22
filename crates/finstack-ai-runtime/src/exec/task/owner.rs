@@ -387,7 +387,7 @@ impl RunTaskOwner {
         let timer_active = timer_dispatcher.active();
         let mut tasks = JoinSet::new();
         tasks.spawn(event_task.run());
-        let cancelling = coordinator.state().cancellation.is_some();
+        let cancelling = coordinator.state().cancellation().is_some();
         if !cancelling && let Some(seed) = coordinator.pending_timer_seed() {
             timer_dispatcher
                 .resume(seed)
@@ -655,7 +655,7 @@ impl RunTaskOwner {
         let timer_active = timer_dispatcher.active();
         let mut tasks = JoinSet::new();
         tasks.spawn(event_task.run());
-        let cancelling = coordinator.state().cancellation.is_some();
+        let cancelling = coordinator.state().cancellation().is_some();
         if !cancelling && let Some(seed) = coordinator.pending_timer_seed() {
             timer_dispatcher
                 .resume(seed)

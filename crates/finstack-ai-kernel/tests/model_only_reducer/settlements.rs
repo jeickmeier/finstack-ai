@@ -16,14 +16,13 @@ fn equal_external_completion_is_empty_and_full_trace_replays() {
         deferred_input(TURN_ONE, MODEL_REQUEST_ONE, EFFECT_ONE, "external-job-1"),
     );
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     let pending = harness
         .kernel
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending external model");
     assert_eq!(
         pending.requested.effect_id(),
@@ -62,7 +61,7 @@ fn equal_external_completion_is_empty_and_full_trace_replays() {
             .iter()
             .any(|diagnostic| diagnostic.code() == "duplicate_settlement")
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterModel));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterModel));
     assert_exact_event_trace(&harness, &external_success_events());
     assert!(
         harness
@@ -287,13 +286,16 @@ fn failed_settlement_is_nonterminal_until_finalize_and_replays_exactly() {
         failed.clone(),
     );
     assert_eq!(decision_body_names(&decision), ["effect_failed"]);
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(
+        harness.kernel.state().phase(),
+        Some(RunPhase::BeforeFinalize)
+    );
     assert!(decision.records.iter().all(|record| !matches!(
         record.body(),
         RecordBody::RunCompleted(_) | RecordBody::RunFailed(_)
     )));
     assert!(matches!(
-        harness.kernel.state().terminal_candidate.as_ref(),
+        harness.kernel.state().terminal_candidate(),
         Some(TerminalCandidate::Failed { .. })
     ));
     assert_eq!(
@@ -328,7 +330,7 @@ fn failed_settlement_is_nonterminal_until_finalize_and_replays_exactly() {
         decision_body_names(&finalized),
         ["stage_outcome_recorded", "run_failed"]
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Failed));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::Failed));
     assert_exact_event_trace(&harness, &direct_failure_events());
     let replayed = replay(&harness.batches);
     assert_eq!(harness.kernel.state(), replayed.state());
@@ -558,10 +560,13 @@ fn failed_external_completion_preserves_effect_and_failure_candidate() {
         external_failed_input(EFFECT_ONE, "external-failed-1", "provider_failed"),
     );
     assert_eq!(decision_body_names(&decision), ["effect_failed"]);
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(
+        harness.kernel.state().phase(),
+        Some(RunPhase::BeforeFinalize)
+    );
     assert_exact_event_trace(&harness, &external_failure_events());
     assert!(matches!(
-        harness.kernel.state().terminal_candidate.as_ref(),
+        harness.kernel.state().terminal_candidate(),
         Some(TerminalCandidate::Failed {
             effect_id: Some(effect_id),
             ..
@@ -671,7 +676,7 @@ fn over_limit_settlement_after_model_is_rejected_without_mutation() {
             legal,
         ),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterModel));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterModel));
     let before = harness.kernel.state().clone();
     let before_hash = before.state_hash().expect("live hash");
     let over = finstack_ai_kernel::Usage::try_new(None, Some(100), None, None, BTreeMap::new())

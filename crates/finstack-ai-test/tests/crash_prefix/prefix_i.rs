@@ -13,8 +13,8 @@ async fn prefix_i1_through_i4() {
         .expect("request");
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingInteraction));
-    assert_legal("I1", recovered.state().phase, LegalRestore::Suspended);
+    assert_eq!(recovered.state().phase(), Some(RunPhase::AwaitingInteraction));
+    assert_legal("I1", recovered.state().phase(), LegalRestore::Suspended);
 
     let store = memory_store();
     let mut coordinator = settle_and_recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -47,11 +47,11 @@ async fn prefix_i1_through_i4() {
         )
         .await
         .expect("resolve");
-    let identities = coordinator.state().resolution_identities.clone();
+    let identities = coordinator.state().resolution_identities().clone();
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_eq!(recovered.state().resolution_identities, identities);
-    assert_legal("I2", recovered.state().phase, LegalRestore::Retryable);
+    assert_eq!(recovered.state().resolution_identities(), &identities);
+    assert_legal("I2", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let mut coordinator = settle_and_recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -78,8 +78,8 @@ async fn prefix_i1_through_i4() {
         .expect("expire");
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert!(recovered.state().last_interaction_terminal.is_some());
-    assert_legal("I3", recovered.state().phase, LegalRestore::Retryable);
+    assert!(recovered.state().last_interaction_terminal().is_some());
+    assert_legal("I3", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let mut coordinator = settle_and_recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -106,5 +106,5 @@ async fn prefix_i1_through_i4() {
         .expect("cancel");
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_legal("I4", recovered.state().phase, LegalRestore::Cancelled);
+    assert_legal("I4", recovered.state().phase(), LegalRestore::Cancelled);
 }

@@ -57,8 +57,7 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
     )?;
     if coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .is_some_and(|pending| pending.requested.is_compaction_summary())
     {
         return execute_and_settle(coordinator, sources, profile, model, request, cancellation)
@@ -129,7 +128,7 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
     model: &dyn Model,
     cancellation: &CancellationSignal,
 ) -> Result<bool, RunHandleError> {
-    let Some(pending) = coordinator.state().pending_model_effect.clone() else {
+    let Some(pending) = coordinator.state().pending_model_effect() else {
         return Ok(false);
     };
     if !pending.requested.is_compaction_summary() {
@@ -207,8 +206,7 @@ async fn execute_and_settle<C: Clock, R: RandomSource>(
 ) -> Result<CompactionModelResume, RunHandleError> {
     let pending = coordinator
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?
         .clone();
     if !pending.requested.is_compaction_summary() {
@@ -432,7 +430,7 @@ pub(crate) async fn load_completed_compaction_resume(
                 .is_some_and(|relation| relation.parent_effect_id == parent)
             && coordinator
                 .state()
-                .model_settlements
+                .model_settlements()
                 .contains_key(&requested.effect_id())
         {
             let result: ModelResponse = serde_json::from_slice(completed.output().as_bytes())

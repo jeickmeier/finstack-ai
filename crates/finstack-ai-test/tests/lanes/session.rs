@@ -119,7 +119,7 @@ async fn busy_lane_rejects_a_second_owner_while_the_sibling_continues() {
         .accept_run(id(2), root_acceptance(3), env(1_000, 10, 11, 12))
         .await
         .expect("accept main");
-    assert_eq!(main.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(main.state().phase(), Some(RunPhase::BeforeRun));
     session
         .try_acquire_run(id(50), id(4))
         .expect("acquire sibling");
@@ -127,7 +127,7 @@ async fn busy_lane_rejects_a_second_owner_while_the_sibling_continues() {
         .accept_run(id(50), root_acceptance(4), env(1_100, 20, 21, 22))
         .await
         .expect("accept sibling");
-    assert_eq!(sibling.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(sibling.state().phase(), Some(RunPhase::BeforeRun));
     assert_eq!(
         session.try_acquire_run(id(2), id(30)),
         Err(SessionError::LaneBusy)
@@ -143,8 +143,8 @@ async fn busy_lane_rejects_a_second_owner_while_the_sibling_continues() {
         )
         .await
         .is_err());
-    assert_eq!(sibling.state().phase, Some(RunPhase::BeforeRun));
-    assert!(sibling.state().cancellation.is_none());
+    assert_eq!(sibling.state().phase(), Some(RunPhase::BeforeRun));
+    assert!(sibling.state().cancellation().is_none());
     assert_eq!(
         session
             .projection()
@@ -191,15 +191,15 @@ async fn interleaved_lane_records_restore_from_the_session_head() {
         .await
         .expect("structural");
     assert_eq!(
-        coordinator.state().last_applied_sequence,
+        coordinator.state().last_applied_sequence(),
         restored
             .coordinator_for_run(None)
             .await
             .expect("again")
             .state()
-            .last_applied_sequence
+            .last_applied_sequence()
     );
-    assert!(coordinator.state().last_applied_sequence >= 5);
+    assert!(coordinator.state().last_applied_sequence() >= 5);
     let _ = main_a;
 }
 
@@ -256,7 +256,7 @@ async fn sqlite_parallel_lane_appenders_preserve_single_writer_invariants() {
         Some(right)
     );
     let coordinator = restored.coordinator_for_run(None).await.expect("head");
-    assert!(coordinator.state().last_applied_sequence >= 4);
+    assert!(coordinator.state().last_applied_sequence() >= 4);
 }
 
 #[tokio::test]
@@ -293,7 +293,11 @@ async fn child_run_and_lane_stay_distinct_and_cancel_fans_out() {
         )
         .await
         .expect("compatible");
-    let parent_accepted = parent.state().accepted.clone().expect("parent accepted");
+    let parent_accepted = parent
+        .state()
+        .accepted()
+        .cloned()
+        .expect("parent accepted");
     session.try_acquire_run(id(50), id(51)).expect("child lane");
     let compatible = session
         .accept_run(
@@ -312,8 +316,7 @@ async fn child_run_and_lane_stay_distinct_and_cancel_fans_out() {
     assert_ne!(
         compatible
             .state()
-            .accepted
-            .as_ref()
+            .accepted()
             .expect("child")
             .run_id(),
         id(3)
@@ -437,14 +440,14 @@ async fn child_run_and_lane_stay_distinct_and_cancel_fans_out() {
         .await
         .expect("detach recover");
     assert!(
-        compatible_again.state().terminal.is_some()
-            || compatible_again.state().cancellation.is_some()
+        compatible_again.state().terminal().is_some()
+            || compatible_again.state().cancellation().is_some()
     );
     assert!(
-        isolated_again.state().terminal.is_some() || isolated_again.state().cancellation.is_some()
+        isolated_again.state().terminal().is_some() || isolated_again.state().cancellation().is_some()
     );
-    assert!(detach_again.state().terminal.is_none());
-    assert!(detach_again.state().cancellation.is_none());
+    assert!(detach_again.state().terminal().is_none());
+    assert!(detach_again.state().cancellation().is_none());
 }
 
 #[tokio::test]

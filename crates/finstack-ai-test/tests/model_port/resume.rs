@@ -14,8 +14,8 @@ async fn model_resume_unstarted_crash_retries_same_identity() {
     );
     let pending = recovered
         .state()
-        .pending_model_effect
-        .clone()
+        .pending_model_effect()
+        .cloned()
         .expect("pending");
     let effect_id = pending.requested.effect_id();
     let request_id = pending.model_request_id;
@@ -32,7 +32,7 @@ async fn model_resume_unstarted_crash_retries_same_identity() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.model_settlements.contains_key(&effect_id)
+        state.model_settlements().contains_key(&effect_id)
     })
     .await;
     assert_eq!(model.request_count(), 1);
@@ -52,8 +52,7 @@ async fn model_resume_unstarted_crash_retries_same_identity() {
     assert_eq!(
         settled
             .state()
-            .pending_model_effect
-            .as_ref()
+            .pending_model_effect()
             .map(|pending| pending.requested.effect_id()),
         None
     );
@@ -105,7 +104,7 @@ async fn model_resume_in_flight_still_running_defers_without_second_request() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     assert_eq!(model.request_count(), 1);
@@ -153,8 +152,8 @@ async fn model_resume_in_flight_unknown_retries_same_effect_id() {
     let pending = recover_session(&store)
         .await
         .state()
-        .pending_model_effect
-        .clone()
+        .pending_model_effect()
+        .cloned()
         .expect("pending");
     let effect_id = pending.requested.effect_id();
     let request_id = pending.model_request_id;
@@ -173,7 +172,7 @@ async fn model_resume_in_flight_unknown_retries_same_effect_id() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.model_settlements.contains_key(&effect_id)
+        state.model_settlements().contains_key(&effect_id)
     })
     .await;
     assert_eq!(model.request_count(), 2);
@@ -192,7 +191,7 @@ async fn model_resume_in_flight_unknown_retries_same_effect_id() {
         recover_session(&store)
             .await
             .state()
-            .model_settlements
+            .model_settlements()
             .contains_key(&effect_id)
     );
     owner.shutdown().await;
@@ -213,8 +212,7 @@ async fn model_resume_completed_uncommitted_settles_without_request() {
     );
     let effect_id = recovered
         .state()
-        .pending_model_effect
-        .as_ref()
+        .pending_model_effect()
         .expect("pending")
         .requested
         .effect_id();
@@ -222,7 +220,7 @@ async fn model_resume_completed_uncommitted_settles_without_request() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.model_settlements.contains_key(&effect_id)
+        state.model_settlements().contains_key(&effect_id)
     })
     .await;
     assert_eq!(model.request_count(), 0);
@@ -251,7 +249,7 @@ async fn model_resume_deferred_same_handle_waits_and_completed_settles_externall
     .expect("owner");
     drive_to_active_model_request(&owner.handle()).await;
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     drop(owner);
@@ -266,7 +264,7 @@ async fn model_resume_deferred_same_handle_waits_and_completed_settles_externall
         .expect("respawn wait");
     assert_eq!(model.request_count(), requests);
     assert_eq!(
-        recover_session(&store).await.state().phase,
+        recover_session(&store).await.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     owner.shutdown().await;
@@ -276,7 +274,7 @@ async fn model_resume_deferred_same_handle_waits_and_completed_settles_externall
         .await
         .expect("respawn complete");
     wait_state(&store, |state| {
-        state.phase != Some(RunPhase::AwaitingExternal) && state.pending_model_effect.is_none()
+        state.phase() != Some(RunPhase::AwaitingExternal) && state.pending_model_effect().is_none()
     })
     .await;
     assert_eq!(model.request_count(), requests);
@@ -320,7 +318,7 @@ async fn model_resume_non_resumable_suspends_without_request() {
     );
     assert_eq!(model.request_count(), 0);
     assert_eq!(
-        recover_session(&store).await.state().phase,
+        recover_session(&store).await.state().phase(),
         Some(RunPhase::AwaitingModel)
     );
 
@@ -379,7 +377,7 @@ async fn model_resume_settled_effect_never_requests_or_reconciles() {
     .expect("owner");
     drive_to_active_model_request(&owner.handle()).await;
     wait_state(&store, |state| {
-        state.pending_model_effect.is_none() && !state.model_settlements.is_empty()
+        state.pending_model_effect().is_none() && !state.model_settlements().is_empty()
     })
     .await;
     let requests = model.request_count();
@@ -417,7 +415,7 @@ async fn model_resume_conflicting_deferred_handle_fails_closed() {
     .expect("owner");
     drive_to_active_model_request(&owner.handle()).await;
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     drop(owner);
@@ -433,7 +431,7 @@ async fn model_resume_conflicting_deferred_handle_fails_closed() {
     );
     assert!(journal_has_rejection(&store).await);
     assert_eq!(
-        recover_session(&store).await.state().phase,
+        recover_session(&store).await.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     assert_eq!(model.request_count(), 1);

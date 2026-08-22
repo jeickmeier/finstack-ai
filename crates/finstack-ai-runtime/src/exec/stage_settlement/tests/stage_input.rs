@@ -14,10 +14,9 @@ fn assistant_message(ordinal: u64, text: &str) -> Message {
 }
 
 fn state_with_messages(messages: Vec<Message>) -> finstack_ai_kernel::KernelState {
-    finstack_ai_kernel::KernelState {
-        messages: Arc::new(messages),
-        ..finstack_ai_kernel::KernelState::default()
-    }
+    let mut state = finstack_ai_kernel::KernelState::default();
+    state.set_messages(Arc::new(messages));
+    state
 }
 
 #[test]
@@ -104,10 +103,8 @@ fn before_finalize_stage_input_is_the_live_terminal_candidate() {
         message_id: id(23),
         result_digest: Digest::raw_json(b"{}"),
     };
-    let state = finstack_ai_kernel::KernelState {
-        terminal_candidate: Some(candidate.clone()),
-        ..finstack_ai_kernel::KernelState::default()
-    };
+    let mut state = finstack_ai_kernel::KernelState::default();
+    state.set_terminal_candidate(Some(candidate.clone()));
 
     let input = stage_input(
         &state,
@@ -155,11 +152,9 @@ fn before_finalize_stage_input_carries_the_completed_result_message() {
         message_id: *message.id(),
         result_digest: Digest::raw_json(b"{}"),
     };
-    let state = finstack_ai_kernel::KernelState {
-        terminal_candidate: Some(candidate),
-        messages: Arc::new(vec![message.clone()]),
-        ..finstack_ai_kernel::KernelState::default()
-    };
+    let mut state = finstack_ai_kernel::KernelState::default();
+    state.set_terminal_candidate(Some(candidate));
+    state.set_messages(Arc::new(vec![message.clone()]));
 
     let input = stage_input(
         &state,
@@ -195,10 +190,8 @@ fn before_finalize_stage_input_has_no_result_message_for_a_failed_candidate() {
         effect_id: None,
         error,
     };
-    let state = finstack_ai_kernel::KernelState {
-        terminal_candidate: Some(candidate),
-        ..finstack_ai_kernel::KernelState::default()
-    };
+    let mut state = finstack_ai_kernel::KernelState::default();
+    state.set_terminal_candidate(Some(candidate));
 
     let input = stage_input(
         &state,

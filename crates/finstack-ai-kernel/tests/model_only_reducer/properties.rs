@@ -71,7 +71,7 @@ fn reference_transition(phase: ReferencePhase, command: ReferenceCommand) -> Ref
 }
 
 fn assert_reference_phase(reference: ReferencePhase, harness: &Harness) {
-    let actual = match harness.kernel.state().phase {
+    let actual = match harness.kernel.state().phase() {
         None => ReferencePhase::Empty,
         Some(RunPhase::BeforeRun) => ReferencePhase::BeforeRun,
         Some(RunPhase::PreparingContext) => ReferencePhase::PreparingContext,

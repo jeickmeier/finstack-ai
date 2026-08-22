@@ -38,6 +38,7 @@ use crate::grants::FilesystemPreopen;
 use crate::host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld};
 use crate::limits::EffectiveLimits;
 use crate::lockfile::LockedPlugin;
+use crate::signature::SignaturePolicy;
 
 const EXPERIMENTAL: Version = Version {
     major: 0,
@@ -80,6 +81,7 @@ fn default_host() -> Arc<PluginHost> {
         PluginHost::try_new(
             PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
                 .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Permissive)
                 .with_default_limits(EffectiveLimits::for_tests()),
         )
         .expect("host"),
@@ -117,9 +119,11 @@ fn sandbox_host(preopens: Vec<FilesystemPreopen>) -> Arc<PluginHost> {
         PluginHost::try_new(
             PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
                 .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Permissive)
                 .with_application_grants(grants)
                 .expect("grants")
                 .with_filesystem_preopens(preopens)
+                .expect("preopens")
                 .with_default_limits(EffectiveLimits::for_tests()),
         )
         .expect("host"),
@@ -135,6 +139,7 @@ fn filesystem_offered_host() -> Arc<PluginHost> {
         PluginHost::try_new(
             PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
                 .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Permissive)
                 .with_application_grants(grants)
                 .expect("grants")
                 .with_default_limits(EffectiveLimits::for_tests()),

@@ -415,7 +415,7 @@ pub(crate) async fn drive_to_after_model_with_deadline(
         )
         .await
         .expect("model request");
-    wait_state(store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+    wait_state(store, |state| state.phase() == Some(RunPhase::AfterModel)).await;
 }
 
 pub(crate) async fn wait_state_on(
@@ -497,7 +497,7 @@ pub(crate) async fn park_on_deferred_effect(
     .await;
     drive_to_active_model_request(&owner.handle()).await;
     wait_state(store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     drop(owner);
@@ -553,7 +553,10 @@ pub(crate) async fn park_on_retry_timer(
     )
     .await;
     drive_to_active_model_request(&owner.handle()).await;
-    wait_state(store, |state| state.phase == Some(RunPhase::BeforeFinalize)).await;
+    wait_state(store, |state| {
+        state.phase() == Some(RunPhase::BeforeFinalize)
+    })
+    .await;
     owner
         .handle()
         .submit(
@@ -572,7 +575,7 @@ pub(crate) async fn park_on_retry_timer(
         )
         .await
         .expect("schedule retry");
-    wait_state(store, |state| state.phase == Some(RunPhase::Sleeping)).await;
+    wait_state(store, |state| state.phase() == Some(RunPhase::Sleeping)).await;
     drop(owner);
 
     let mut session =
@@ -734,12 +737,12 @@ pub(crate) async fn continue_retry_cycle_out_of_band(
         .await
         .expect("recover to continue the retried cycle");
     assert_eq!(
-        recovered.state().phase,
+        recovered.state().phase(),
         Some(RunPhase::PreparingContext),
         "continue_retry_cycle_out_of_band expects the retried cycle parked on PreparingContext"
     );
-    let cycle = recovered.state().cycle;
-    let messages: Arc<[Message]> = Arc::from(recovered.state().messages.as_slice());
+    let cycle = recovered.state().cycle();
+    let messages: Arc<[Message]> = Arc::from(recovered.state().messages().as_slice());
 
     let owner = spawn_model_owner(recovered, Arc::clone(model), clock.clone(), seed).await;
     owner
@@ -785,7 +788,10 @@ pub(crate) async fn continue_retry_cycle_out_of_band(
         )
         .await
         .expect("model request");
-    wait_state(store, |state| state.phase == Some(RunPhase::BeforeFinalize)).await;
+    wait_state(store, |state| {
+        state.phase() == Some(RunPhase::BeforeFinalize)
+    })
+    .await;
     drop(owner);
 }
 
@@ -804,11 +810,11 @@ pub(crate) async fn finalize_out_of_band(store: &Arc<MemoryJournalStore>) {
         .await
         .expect("recover for out-of-band finalize");
     assert_eq!(
-        coordinator.state().phase,
+        coordinator.state().phase(),
         Some(RunPhase::BeforeFinalize),
         "finalize_out_of_band expects the run parked on BeforeFinalize"
     );
-    let cycle = coordinator.state().cycle;
+    let cycle = coordinator.state().cycle();
     coordinator
         .submit(
             env(3_000, &[900, 901], &[902], &[], &[], &[], &[], 903),
@@ -821,5 +827,5 @@ pub(crate) async fn finalize_out_of_band(store: &Arc<MemoryJournalStore>) {
         .await
         .expect("finalize out of band");
     drop(coordinator);
-    wait_state(store, |state| state.terminal.is_some()).await;
+    wait_state(store, |state| state.terminal().is_some()).await;
 }

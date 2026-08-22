@@ -101,8 +101,7 @@ impl AgentRun {
         .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
         let accepted = commit
             .state()
-            .accepted
-            .as_ref()
+            .accepted()
             .ok_or_else(|| AgentRunError::runtime_message("parent run is not accepted"))?;
         if accepted.run_id() != self.locator().run_id {
             return Err(AgentRunError::runtime_message(
@@ -613,7 +612,7 @@ impl AgentRun {
                 Some(self.inner.locator.run_id),
             )
             .await
-                && let Some(accepted) = commit.state().accepted.clone()
+                && let Some(accepted) = commit.state().accepted().cloned()
                 && accepted.run_id() == self.inner.locator.run_id
             {
                 return Ok(accepted);

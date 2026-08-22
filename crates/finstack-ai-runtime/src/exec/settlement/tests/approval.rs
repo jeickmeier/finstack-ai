@@ -1,8 +1,7 @@
 fn pending_prompt(coordinator: &CommitCoordinator) -> String {
     let pending = coordinator
         .state()
-        .pending_interaction
-        .as_ref()
+        .pending_interaction()
         .expect("pending approval");
     assert_eq!(pending.request.kind(), &InteractionKind::Approval);
     match pending.request.prompt() {
@@ -14,8 +13,7 @@ fn pending_prompt(coordinator: &CommitCoordinator) -> String {
 fn pending_metadata(coordinator: &CommitCoordinator) -> String {
     coordinator
         .state()
-        .pending_interaction
-        .as_ref()
+        .pending_interaction()
         .expect("pending approval")
         .request
         .metadata()
@@ -32,8 +30,7 @@ fn resolve_approval(
 ) {
     let interaction_id = coordinator
         .state()
-        .pending_interaction
-        .as_ref()
+        .pending_interaction()
         .expect("pending approval")
         .request
         .interaction_id();

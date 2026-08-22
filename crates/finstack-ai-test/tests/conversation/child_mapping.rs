@@ -33,7 +33,7 @@ async fn compatible_lane_child_mapping_survives_recover_and_rejects_remap() {
         )
         .await
         .expect("prepare compatible");
-    let accepted = child_accepted(51, 44, parent.state().accepted.as_ref().expect("parent"));
+    let accepted = child_accepted(51, 44, parent.state().accepted().expect("parent"));
     append_foreign_accept(&store, &parent, accepted, 50, 210, 211, 212).await;
     let mut recovered = CommitCoordinator::recover(store, id(1))
         .await
@@ -119,7 +119,7 @@ async fn isolated_child_session_mapping_matches_recovered_relation() {
         .await
         .expect("prepare isolated");
     let isolated_accepted =
-        child_accepted(82, 45, parent.state().accepted.as_ref().expect("parent"));
+        child_accepted(82, 45, parent.state().accepted().expect("parent"));
     let mut child_session = CommitCoordinator::new(store.clone());
     child_session
         .submit(
@@ -144,8 +144,7 @@ async fn isolated_child_session_mapping_matches_recovered_relation() {
         .expect("isolated mapping");
     let child_relation = child_again
         .state()
-        .accepted
-        .as_ref()
+        .accepted()
         .expect("child run")
         .relation();
     assert_eq!(isolated_map.child.operation.run_id, id(82));

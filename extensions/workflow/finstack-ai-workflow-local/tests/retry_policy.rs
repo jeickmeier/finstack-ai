@@ -115,21 +115,20 @@ fn accepted_with_retries(max_retries: Option<u32>) -> RunAccepted {
 }
 
 fn outstanding_state(used_retries: u32) -> KernelState {
-    KernelState {
-        pending_model_effect: Some(PendingModelEffect {
-            cycle: 0,
-            turn_id: id(4),
-            model_request_id: id(5),
-            requested: requested(),
-            deferred: None,
-        }),
-        accepted: Some(accepted_with_retries(Some(1))),
-        limit_usage: finstack_ai_kernel::LimitUsage {
-            retries: used_retries,
-            ..finstack_ai_kernel::LimitUsage::default()
-        },
-        ..KernelState::default()
-    }
+    let mut state = KernelState::default();
+    state.set_pending_model_effect(Some(PendingModelEffect {
+        cycle: 0,
+        turn_id: id(4),
+        model_request_id: id(5),
+        requested: requested(),
+        deferred: None,
+    }));
+    state.set_accepted(Some(accepted_with_retries(Some(1))));
+    state.set_limit_usage(finstack_ai_kernel::LimitUsage {
+        retries: used_retries,
+        ..finstack_ai_kernel::LimitUsage::default()
+    });
+    state
 }
 
 #[test]

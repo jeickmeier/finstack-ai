@@ -24,7 +24,7 @@ use crate::bindings::v1::toolset::finstack::ai_host::blobs as blobs_v1;
 use crate::bindings::v1::toolset::finstack::ai_host::logging as logging_v1;
 use crate::bindings::v1::toolset::finstack::ai_types::types as types_v1;
 use crate::error::PluginHostError;
-use crate::grants::{GrantResources, can_link};
+use crate::grants::{GrantResources, can_link, validate_preopen_host_path};
 use crate::limits::{EffectiveLimits, store_limits};
 
 /// Send + Sync host-import state. This is not the in-process `RecordingLogger`
@@ -54,8 +54,10 @@ impl HostState {
     ///
     /// # Errors
     ///
-    /// Returns [`PluginHostError::InstantiateFailed`] when a configured
-    /// preopen path cannot be opened.
+    /// Returns [`PluginHostError::ConfigInvalid`] when a preopen host path
+    /// fails [`validate_preopen_host_path`], and
+    /// [`PluginHostError::InstantiateFailed`] when a configured preopen path
+    /// cannot be opened.
     pub fn try_with_grants(
         limits: StoreLimits,
         granted: &BTreeSet<String>,
@@ -401,6 +403,7 @@ fn wasi_ctx(
     let mut builder = WasiCtxBuilder::new();
     if can_link("filesystem", granted, resources) {
         for preopen in &resources.filesystem {
+            validate_preopen_host_path(&preopen.host_path)?;
             let dir_perms = match (preopen.read, preopen.write) {
                 (true, true) => DirPerms::READ | DirPerms::MUTATE,
                 (true, false) => DirPerms::READ,
@@ -430,8 +433,9 @@ fn wasi_ctx(
 ///
 /// # Errors
 ///
-/// Returns [`PluginHostError::InstantiateFailed`] when a granted preopen
-/// cannot be opened.
+/// Returns [`PluginHostError::ConfigInvalid`] when a granted preopen host
+/// path fails validation, and [`PluginHostError::InstantiateFailed`] when a
+/// granted preopen cannot be opened.
 pub fn host_state_for(
     limits: EffectiveLimits,
     granted: &BTreeSet<String>,
@@ -738,7 +742,8 @@ mod tests {
                     host_path: dir.path().to_path_buf(),
                     read: true,
                     write: false,
-                }]),
+                }])
+                .expect("preopens"),
         )
         .expect("host");
         let wat = r#"

@@ -44,17 +44,27 @@ fn acceptance(effective_deadline: Option<Timestamp>) -> RunAccepted {
 
 /// Base fixture reused by every test below: a minimally valid accepted,
 /// running `KernelState`. Individual tests override `phase`/`cycle`/
-/// `accepted` via struct-update syntax where the scenario needs it.
+/// `accepted` via the test-fixture mutators where the scenario needs it.
 fn accepted_state() -> KernelState {
-    KernelState {
-        session_id: Some(fixed_id::<SessionTag>(1)),
-        lane_id: Some(fixed_id::<LaneTag>(2)),
-        accepted: Some(acceptance(None)),
-        accepted_at: Some(fixed_timestamp(1_000)),
-        phase: Some(RunPhase::BeforeRun),
-        cycle: 0,
-        ..KernelState::default()
-    }
+    let mut state = KernelState::default();
+    state.set_session_id(Some(fixed_id::<SessionTag>(1)));
+    state.set_lane_id(Some(fixed_id::<LaneTag>(2)));
+    state.set_accepted(Some(acceptance(None)));
+    state.set_accepted_at(Some(fixed_timestamp(1_000)));
+    state.set_phase(Some(RunPhase::BeforeRun));
+    state.set_cycle(0);
+    state
+}
+
+fn state_at_phase(base: &KernelState, phase: RunPhase) -> KernelState {
+    let mut state = base.clone();
+    state.set_phase(Some(phase));
+    state
+}
+
+fn with_candidate(mut state: KernelState, candidate: TerminalCandidate) -> KernelState {
+    state.set_terminal_candidate(Some(candidate));
+    state
 }
 
 /// Deterministic, collision-free random source: each `fill_bytes` call
@@ -163,13 +173,10 @@ fn run_deadline_fail_closed_uses_a_stage_legal_outcome() {
 /// exactly the outcome the pre-existing bug submitted.
 #[test]
 fn stage_allocation_rejects_continue_at_before_tool_batch() {
-    let state = KernelState {
-        phase: Some(RunPhase::BeforeToolBatch),
-        ..accepted_state()
-    };
+    let state = state_at_phase(&accepted_state(), RunPhase::BeforeToolBatch);
     let sources = test_sources();
     let cursor = StageCursor {
-        cycle: state.cycle,
+        cycle: state.cycle(),
         stage: Stage::BeforeToolBatch,
     };
     assert!(
@@ -199,14 +206,11 @@ fn stage_allocation_rejects_continue_at_before_tool_batch() {
 fn run_deadline_fail_closed_is_admitted_by_the_kernel_at_before_tool_batch() {
     let deadline = fixed_timestamp(1_500);
     let now = fixed_timestamp(2_000);
-    let state = KernelState {
-        phase: Some(RunPhase::BeforeToolBatch),
-        accepted: Some(acceptance(Some(deadline))),
-        ..accepted_state()
-    };
+    let mut state = state_at_phase(&accepted_state(), RunPhase::BeforeToolBatch);
+    state.set_accepted(Some(acceptance(Some(deadline))));
     let sources = test_sources();
     let cursor = StageCursor {
-        cycle: state.cycle,
+        cycle: state.cycle(),
         stage: Stage::BeforeToolBatch,
     };
     let outcome = run_deadline_outcome().expect("run deadline outcome");

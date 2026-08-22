@@ -21,7 +21,7 @@ async fn prefix_w1_through_w6_snapshot_and_prune() {
         .await
         .expect("ack");
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
-    assert_legal("W1", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("W1", recovered.state().phase(), LegalRestore::Retryable);
 
     let store = memory_store();
     let mut coordinator = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -30,7 +30,7 @@ async fn prefix_w1_through_w6_snapshot_and_prune() {
     drop(coordinator);
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(recovered.state().state_hash().expect("hash"), before);
-    assert_legal("W2", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("W2", recovered.state().phase(), LegalRestore::Retryable);
 
     write_snapshot(&(Arc::clone(&store) as Arc<dyn JournalStore>), &recovered).await;
     let loaded = store
@@ -67,7 +67,7 @@ async fn prefix_w1_through_w6_snapshot_and_prune() {
     );
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(recovered.state().state_hash().expect("hash"), before);
-    assert_legal("W3", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("W3", recovered.state().phase(), LegalRestore::Retryable);
 
     write_snapshot(&(Arc::clone(&store) as Arc<dyn JournalStore>), &recovered).await;
     let accelerated = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
@@ -81,8 +81,8 @@ async fn prefix_w1_through_w6_snapshot_and_prune() {
         "W4 snapshot-plus-tail equals full replay"
     );
     assert_eq!(
-        accelerated.state().completion_identities,
-        full.state().completion_identities
+        accelerated.state().completion_identities(),
+        full.state().completion_identities()
     );
 
     let loaded = store
@@ -101,11 +101,11 @@ async fn prefix_w1_through_w6_snapshot_and_prune() {
         .expect("metadata");
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(
-        recovered.state().phase,
-        full.state().phase,
+        recovered.state().phase(),
+        full.state().phase(),
         "W5 no authority"
     );
-    assert_legal("W5", recovered.state().phase, LegalRestore::Retryable);
+    assert_legal("W5", recovered.state().phase(), LegalRestore::Retryable);
 
     write_snapshot(&(Arc::clone(&store) as Arc<dyn JournalStore>), &recovered).await;
     let receipt = store
@@ -119,6 +119,6 @@ async fn prefix_w1_through_w6_snapshot_and_prune() {
     assert!(receipt.retained_outstanding >= 1, "W6 outstanding retained");
     let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(recovered.state().state_hash().expect("hash"), before);
-    assert!(recovered.state().pending_model_effect.is_some());
-    assert_legal("W6", recovered.state().phase, LegalRestore::Retryable);
+    assert!(recovered.state().pending_model_effect().is_some());
+    assert_legal("W6", recovered.state().phase(), LegalRestore::Retryable);
 }

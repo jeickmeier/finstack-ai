@@ -475,7 +475,7 @@ fn a_compact_context_chain_lands_when_the_trailing_user_is_protected() {
     .expect("CompactContext must land once the trailing user is protected");
 
     assert!(
-        coordinator.state().pending_model_effect.is_some(),
+        coordinator.state().pending_model_effect().is_some(),
         "a landed CompactContext must commit the model effect"
     );
 }
@@ -508,8 +508,7 @@ fn prepare_context_instructions_compose_with_a_before_model_compaction() {
 
     let context_messages = coordinator
         .state()
-        .current_turn
-        .as_ref()
+        .current_turn()
         .expect("current turn")
         .context
         .messages
@@ -570,7 +569,7 @@ fn prepare_context_instructions_compose_with_a_before_model_compaction() {
     );
     assert_eq!(committed.messages[0].role(), MessageRole::System);
     assert!(
-        coordinator.state().pending_model_effect.is_some(),
+        coordinator.state().pending_model_effect().is_some(),
         "a landed CompactContext must commit the model effect"
     );
 }
@@ -726,7 +725,7 @@ fn redaction_replace_plus_compaction_is_unlandable_before_settlement() {
         "expected middleware_stage_unlandable, got {error:?}"
     );
     assert!(
-        coordinator.state().pending_model_effect.is_none(),
+        coordinator.state().pending_model_effect().is_none(),
         "a conflict must not open a model effect"
     );
 }
@@ -771,7 +770,7 @@ fn document_ingest_replace_plus_compaction_is_unlandable_before_settlement() {
             if code.as_ref() == MIDDLEWARE_STAGE_UNLANDABLE),
         "expected middleware_stage_unlandable, got {error:?}"
     );
-    assert!(coordinator.state().pending_model_effect.is_none());
+    assert!(coordinator.state().pending_model_effect().is_none());
 }
 
 #[test]
@@ -804,7 +803,7 @@ fn redaction_replace_alone_still_lands() {
             .collect::<Vec<_>>(),
         vec!["redacted".to_owned()],
     );
-    assert!(coordinator.state().pending_model_effect.is_some());
+    assert!(coordinator.state().pending_model_effect().is_some());
 }
 
 #[test]
@@ -837,5 +836,5 @@ fn document_ingest_replace_alone_still_lands() {
             .collect::<Vec<_>>(),
         vec!["ingested-note".to_owned()],
     );
-    assert!(coordinator.state().pending_model_effect.is_some());
+    assert!(coordinator.state().pending_model_effect().is_some());
 }

@@ -12,8 +12,7 @@ async fn tool_resume_unstarted_crash_retries_same_identity() {
     let (effect_id, tool_call_id, frozen) = requested_execute(recovered.state());
     let tool_batch_id = recovered
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("batch")
         .opened
         .tool_batch_id;
@@ -25,7 +24,7 @@ async fn tool_resume_unstarted_crash_retries_same_identity() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.tool_settlements.contains_key(&effect_id)
+        state.tool_settlements().contains_key(&effect_id)
     })
     .await;
     assert_eq!(toolset.call_count(), 1);
@@ -35,12 +34,11 @@ async fn tool_resume_unstarted_crash_retries_same_identity() {
     assert_eq!(*retried.call.tool_call_id(), tool_call_id);
     assert_eq!(retried, frozen);
     let settled = recover_session(&store).await;
-    assert!(settled.state().tool_settlements.contains_key(&effect_id));
+    assert!(settled.state().tool_settlements().contains_key(&effect_id));
     assert_eq!(
         settled
             .state()
-            .active_tool_batch
-            .as_ref()
+            .active_tool_batch()
             .map(|batch| batch.opened.tool_batch_id),
         None
     );
@@ -82,7 +80,7 @@ async fn tool_resume_in_flight_still_running_defers_without_second_call() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     assert_eq!(toolset.call_count(), 1);
@@ -118,7 +116,7 @@ async fn tool_resume_in_flight_unknown_retries_same_effect_id() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.tool_settlements.contains_key(&effect_id)
+        state.tool_settlements().contains_key(&effect_id)
     })
     .await;
     assert_eq!(toolset.call_count(), 2);
@@ -148,7 +146,7 @@ async fn tool_resume_completed_uncommitted_settles_without_call() {
         .await
         .expect("respawn");
     wait_state(&store, |state| {
-        state.tool_settlements.contains_key(&effect_id)
+        state.tool_settlements().contains_key(&effect_id)
     })
     .await;
     assert_eq!(toolset.call_count(), 0);
@@ -187,7 +185,7 @@ async fn tool_resume_deferred_same_handle_waits_and_completed_settles_externally
         .await
         .expect("ensure deferred");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     let calls = toolset.call_count();
@@ -203,7 +201,7 @@ async fn tool_resume_deferred_same_handle_waits_and_completed_settles_externally
         .expect("respawn wait");
     assert_eq!(toolset.call_count(), calls);
     assert_eq!(
-        recover_session(&store).await.state().phase,
+        recover_session(&store).await.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     owner.shutdown().await;
@@ -213,7 +211,7 @@ async fn tool_resume_deferred_same_handle_waits_and_completed_settles_externally
         .await
         .expect("respawn complete");
     wait_state(&store, |state| {
-        state.tool_settlements.contains_key(&effect_id)
+        state.tool_settlements().contains_key(&effect_id)
     })
     .await;
     assert_eq!(toolset.call_count(), calls);
@@ -259,7 +257,7 @@ async fn tool_resume_non_resumable_suspends_without_call() {
     );
     assert_eq!(toolset.call_count(), 0);
     assert_eq!(
-        recover_session(&store).await.state().phase,
+        recover_session(&store).await.state().phase(),
         Some(RunPhase::AwaitingTools)
     );
 
@@ -316,8 +314,8 @@ async fn tool_resume_settled_effect_never_calls_or_reconciles() {
     .await
     .expect("owner");
     drive_to_tools(&owner.handle(), &store, tools).await;
-    let settled = wait_state(&store, |state| !state.tool_settlements.is_empty()).await;
-    let effect_id = *settled.state().tool_settlements.keys().next().expect("id");
+    let settled = wait_state(&store, |state| !state.tool_settlements().is_empty()).await;
+    let effect_id = *settled.state().tool_settlements().keys().next().expect("id");
     let calls = toolset.call_count();
     owner.shutdown().await;
     let recovered = recover_session(&store).await;
@@ -363,8 +361,7 @@ async fn tool_resume_completed_subset_retries_outstanding_in_source_order() {
     let recovered = recover_session(&store).await;
     let batch = recovered
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("batch")
         .clone();
     assert_eq!(batch.calls.len(), 2);
@@ -391,7 +388,7 @@ async fn tool_resume_completed_subset_retries_outstanding_in_source_order() {
         .await
         .expect("respawn");
     let settled = wait_state(&store, |state| {
-        state.tool_settlements.contains_key(&first) && state.tool_settlements.contains_key(&second)
+        state.tool_settlements().contains_key(&first) && state.tool_settlements().contains_key(&second)
     })
     .await;
     assert_eq!(toolset.call_count(), calls + 1);
@@ -432,7 +429,7 @@ async fn tool_resume_conflicting_deferred_handle_fails_closed() {
         .await
         .expect("ensure deferred");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     owner.shutdown().await;
@@ -448,7 +445,7 @@ async fn tool_resume_conflicting_deferred_handle_fails_closed() {
     );
     assert!(journal_has_rejection(&store).await);
     assert_eq!(
-        recover_session(&store).await.state().phase,
+        recover_session(&store).await.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     assert_eq!(toolset.call_count(), 1);
@@ -482,7 +479,7 @@ async fn cancel_while_deferred_tool_does_not_issue_a_second_request() {
         .await
         .expect("deferred");
     wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     owner
@@ -497,7 +494,7 @@ async fn cancel_while_deferred_tool_does_not_issue_a_second_request() {
         .await
         .expect("cancel");
     wait_state(&store, |state| {
-        matches!(state.phase, Some(RunPhase::Cancelled | RunPhase::Suspended))
+        matches!(state.phase(), Some(RunPhase::Cancelled | RunPhase::Suspended))
     })
     .await;
     assert_eq!(toolset.call_count(), 1);

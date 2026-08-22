@@ -57,13 +57,12 @@ async fn restore_rebuilds_poll_deadline_from_committed_deferral() {
 
     drive_to_tools(&owner.handle(), &store, tools).await;
     let committed = wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     let effect_id = committed
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .and_then(|batch| batch.calls.first())
         .expect("deferred tool call")
         .assigned
@@ -112,13 +111,12 @@ async fn deferred_poll_reconciles_when_due_and_rearms_until_completion() {
 
     drive_to_tools(&owner.handle(), &store, tools).await;
     let recovered = wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     let effect_id = recovered
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .and_then(|batch| batch.calls.first())
         .expect("deferred tool call")
         .assigned
@@ -149,7 +147,7 @@ async fn deferred_poll_reconciles_when_due_and_rearms_until_completion() {
     let mut owner = spawn_tool_owner(recovered, model, catalog, 2_700, 814)
         .await
         .expect("completion poll");
-    wait_state(&store, |state| state.tool_settlements.contains_key(&effect_id)).await;
+    wait_state(&store, |state| state.tool_settlements().contains_key(&effect_id)).await;
     assert_eq!(toolset.reconcile_count(), 3);
     owner.shutdown().await;
 }
@@ -201,9 +199,9 @@ async fn deferred_poll_rearms_live_wait_after_still_running() {
     let mut owner = spawn_tool_owner(recovered, model, catalog, 2_600, 816)
         .await
         .expect("later poll");
-    let settled = wait_state(&store, |state| !state.tool_settlements.is_empty()).await;
+    let settled = wait_state(&store, |state| !state.tool_settlements().is_empty()).await;
     assert_eq!(toolset.reconcile_count(), 2);
-    assert_eq!(settled.state().tool_settlements.len(), 1);
+    assert_eq!(settled.state().tool_settlements().len(), 1);
     owner.shutdown().await;
 }
 
@@ -393,8 +391,7 @@ async fn deferred_polls_keep_later_live_waits_per_effect() {
     let recovered = wait_state(&store, |_| toolset.reconcile_count() == 1).await;
     let second_effect_id = recovered
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .and_then(|batch| batch.calls.get(1))
         .expect("second deferred tool call")
         .assigned
@@ -402,7 +399,7 @@ async fn deferred_polls_keep_later_live_waits_per_effect() {
 
     control.release("second-deferral");
     wait_state(&store, |state| {
-        state.tool_settlements.contains_key(&second_effect_id)
+        state.tool_settlements().contains_key(&second_effect_id)
     })
     .await;
     assert_eq!(toolset.reconcile_count(), 2);
@@ -446,10 +443,10 @@ async fn deferred_poll_capacity_one_drains_concurrent_terminal_schedules() {
     .expect("owner");
 
     drive_to_tools(&owner.handle(), &store, tools).await;
-    let settled = wait_state(&store, |state| state.tool_settlements.len() == 2).await;
+    let settled = wait_state(&store, |state| state.tool_settlements().len() == 2).await;
 
     assert_eq!(toolset.reconcile_count(), 3);
-    assert_eq!(settled.state().phase, Some(RunPhase::AwaitingExternal));
+    assert_eq!(settled.state().phase(), Some(RunPhase::AwaitingExternal));
     owner.shutdown().await;
 }
 
@@ -481,7 +478,7 @@ async fn deferred_poll_expiry_fails_without_reconciliation() {
 
     drive_to_tools(&owner.handle(), &store, tools).await;
     let recovered = wait_state(&store, |state| {
-        state.phase == Some(RunPhase::AwaitingExternal)
+        state.phase() == Some(RunPhase::AwaitingExternal)
     })
     .await;
     drop(owner);

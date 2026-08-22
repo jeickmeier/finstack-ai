@@ -96,14 +96,13 @@ fn fail_run_waits_for_a_deferred_parallel_call_before_aborting_later_groups() {
         .iter()
         .all(|record| !matches!(record.body(), RecordBody::ToolBatchClosed(_))));
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     let active = harness
         .kernel
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("unresolved batch remains active");
     assert!(matches!(
         active.calls[1].status,
@@ -144,13 +143,12 @@ fn fail_run_waits_for_a_deferred_parallel_call_before_aborting_later_groups() {
         external,
     );
     assert!(closed.actions.is_empty());
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterToolBatch));
     assert!(matches!(
         harness
             .kernel
             .state()
-            .last_tool_batch
-            .as_ref()
+            .last_tool_batch()
             .expect("failed close")
             .outcome,
         ToolBatchOutcome::Failed { .. }
@@ -216,7 +214,7 @@ fn deferred_tool_resumes_externally_and_duplicate_or_conflict_is_stable() {
         deferred_input.clone(),
     );
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     let duplicate = harness
@@ -251,7 +249,7 @@ fn deferred_tool_resumes_externally_and_duplicate_or_conflict_is_stable() {
         ),
         external.clone(),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterToolBatch));
     let duplicate = harness
         .kernel
         .decide(&empty_env(1_801), external)
@@ -323,7 +321,7 @@ fn second_defer_on_a_different_call_in_the_same_group_applies() {
         }),
     );
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     let second = deferred_tool(TOOL_EFFECT_B, "external-second");
@@ -340,14 +338,13 @@ fn second_defer_on_a_different_call_in_the_same_group_applies() {
         RecordBody::EffectDeferred(_)
     ));
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::AwaitingExternal)
     );
     let active = harness
         .kernel
         .state()
-        .active_tool_batch
-        .as_ref()
+        .active_tool_batch()
         .expect("batch remains active");
     assert!(matches!(
         active.calls[0].status,
@@ -508,7 +505,7 @@ fn prior_batch_external_redelivery_uses_the_original_batch_while_a_newer_batch_i
         ),
         external.clone(),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(harness.kernel.state().phase(), Some(RunPhase::AfterToolBatch));
 
     harness.apply_input(
         transition_env(2_000, &[6_030], &[], &[], &[], &[], &[]),
@@ -575,8 +572,7 @@ fn prior_batch_external_redelivery_uses_the_original_batch_while_a_newer_batch_i
     let state = harness.kernel.state();
     assert_eq!(
         state
-            .active_tool_batch
-            .as_ref()
+            .active_tool_batch()
             .expect("newer batch")
             .opened
             .tool_batch_id,
@@ -584,7 +580,7 @@ fn prior_batch_external_redelivery_uses_the_original_batch_while_a_newer_batch_i
     );
     assert_eq!(
         state
-            .tool_calls
+            .tool_calls()
             .get(&id::<finstack_ai_kernel::ToolCallTag>(CALL_A))
             .expect("prior call")
             .tool_batch_id,

@@ -15,7 +15,7 @@ use super::types::{ToolReconcileResult, ToolResumeAction};
 /// [`ToolResumeAction::Reconcile`].
 #[must_use]
 pub fn tool_resume_action(state: &KernelState, effect_id: EffectId) -> ToolResumeAction {
-    let Some(batch) = state.active_tool_batch.as_ref() else {
+    let Some(batch) = state.active_tool_batch() else {
         return ToolResumeAction::NoOutstanding;
     };
     let Some(call) = batch
@@ -25,7 +25,7 @@ pub fn tool_resume_action(state: &KernelState, effect_id: EffectId) -> ToolResum
     else {
         return ToolResumeAction::NoOutstanding;
     };
-    if state.tool_settlements.contains_key(&effect_id)
+    if state.tool_settlements().contains_key(&effect_id)
         || matches!(
             call.status,
             ActiveToolCallStatus::Settled { .. } | ActiveToolCallStatus::Buffered { .. }
@@ -85,7 +85,7 @@ pub fn map_tool_reconcile_result(
         | ToolResumeAction::WaitExternal
         | ToolResumeAction::SuspendUncertain => {}
     }
-    let awaiting_external = state.active_tool_batch.as_ref().is_some_and(|batch| {
+    let awaiting_external = state.active_tool_batch().is_some_and(|batch| {
         batch.calls.iter().any(|call| {
             call.assigned.effect_id == effect_id
                 && matches!(

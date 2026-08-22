@@ -31,8 +31,7 @@ fn prepare_context_middleware_adds_messages_to_the_committed_outcome() {
 
     let committed = coordinator
         .state()
-        .current_turn
-        .as_ref()
+        .current_turn()
         .expect("current turn");
     assert!(
         committed

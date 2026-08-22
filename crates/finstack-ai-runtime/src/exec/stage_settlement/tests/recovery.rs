@@ -5,7 +5,7 @@ fn missing_before_run_outcome_invokes_the_whole_chain_after_recover() {
     let store = Arc::new(MemoryStore::new());
     drop(accepted_on(Arc::clone(&store)));
     let mut recovered = recover(store);
-    assert_eq!(recovered.state().phase, Some(RunPhase::BeforeRun));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::BeforeRun));
 
     let calls = Arc::new(AtomicUsize::new(0));
     let driver = counting_driver("fixture.before-run", Stage::BeforeRun, &calls);
@@ -116,10 +116,10 @@ fn rejected_middleware_outcome_commits_a_failed_effect_settlement() {
             if code.as_ref() == crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED
     ));
     assert!(
-        coordinator.state().pending_extension_effect.is_none(),
+        coordinator.state().pending_extension_effect().is_none(),
         "validation failure must not strand a pending durable effect"
     );
-    assert_eq!(coordinator.state().extension_settlements.len(), 1);
+    assert_eq!(coordinator.state().extension_settlements().len(), 1);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn recorded_before_run_is_not_invoked_when_prepare_context_settles() {
     drop(coordinator);
 
     let mut recovered = recover(store);
-    assert_eq!(recovered.state().phase, Some(RunPhase::PreparingContext));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::PreparingContext));
     let driver = counting_driver("fixture.before-run", Stage::BeforeRun, &before_run_calls);
     block_on(settle_facade_stage(
         &mut recovered,
@@ -167,7 +167,7 @@ fn missing_prepare_context_outcome_invokes_that_whole_chain_after_recover() {
     drop(coordinator);
 
     let mut recovered = recover(store);
-    assert_eq!(recovered.state().phase, Some(RunPhase::PreparingContext));
+    assert_eq!(recovered.state().phase(), Some(RunPhase::PreparingContext));
     let calls = Arc::new(AtomicUsize::new(0));
     let driver = counting_driver("fixture.prepare-context", Stage::PrepareContext, &calls);
     block_on(settle_facade_stage(

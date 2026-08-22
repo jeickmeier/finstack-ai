@@ -246,7 +246,7 @@ impl<'a> ReducerDriver<'a> {
             self.apply_scripted_step(step)?;
         }
 
-        match self.kernel.state().phase {
+        match self.kernel.state().phase() {
             Some(finstack_ai_kernel::RunPhase::BeforeFinalize) => self.finalize()?,
             Some(finstack_ai_kernel::RunPhase::Completed) => {}
             phase => {
@@ -352,9 +352,9 @@ impl<'a> ReducerDriver<'a> {
     }
 
     fn prepare_context(&mut self, cycle: u64) -> Result<(), TraceError> {
-        let mut messages = Vec::with_capacity(self.kernel.state().messages.len() + 1);
+        let mut messages = Vec::with_capacity(self.kernel.state().messages().len() + 1);
         messages.push(self.initial.user_message.clone());
-        messages.extend(self.kernel.state().messages.iter().cloned());
+        messages.extend(self.kernel.state().messages().iter().cloned());
         self.settle_stage(
             cycle,
             Stage::PrepareContext,
@@ -368,8 +368,7 @@ impl<'a> ReducerDriver<'a> {
         let messages = self
             .kernel
             .state()
-            .current_turn
-            .as_ref()
+            .current_turn()
             .map(|turn| turn.context.messages.as_ref())
             .ok_or_else(|| adapter_error("prepared context missing before model request"))?;
         let request_text = serde_json::to_string(&json!({ "messages": messages }))
@@ -415,10 +414,9 @@ impl<'a> ReducerDriver<'a> {
         let pending = self
             .kernel
             .state()
-            .pending_model_effect
-            .as_ref()
+            .pending_model_effect()
             .ok_or_else(|| adapter_error("model_chunk requires a pending model effect"))?;
-        if self.kernel.state().phase != Some(finstack_ai_kernel::RunPhase::AwaitingModel) {
+        if self.kernel.state().phase() != Some(finstack_ai_kernel::RunPhase::AwaitingModel) {
             return Err(adapter_error(
                 "model_chunk is valid only while awaiting the direct model",
             ));
@@ -578,7 +576,7 @@ impl<'a> ReducerDriver<'a> {
     }
 
     fn before_finalize_continue(&mut self, step: &ScriptedStep) -> Result<(), TraceError> {
-        let cycle = self.kernel.state().cycle;
+        let cycle = self.kernel.state().cycle();
         self.settle_stage(
             cycle,
             Stage::BeforeFinalize,
@@ -594,7 +592,7 @@ impl<'a> ReducerDriver<'a> {
     }
 
     fn finalize(&mut self) -> Result<(), TraceError> {
-        let cycle = self.kernel.state().cycle;
+        let cycle = self.kernel.state().cycle();
         self.settle_stage(
             cycle,
             Stage::BeforeFinalize,
@@ -605,8 +603,7 @@ impl<'a> ReducerDriver<'a> {
     fn pending_model(&self) -> Result<&finstack_ai_kernel::PendingModelEffect, TraceError> {
         self.kernel
             .state()
-            .pending_model_effect
-            .as_ref()
+            .pending_model_effect()
             .ok_or_else(|| adapter_error("scripted model outcome has no pending model effect"))
     }
 
@@ -951,17 +948,17 @@ fn project_observed(
 /// Returns [`TraceError`] when terminal serialization or state hashing fails.
 pub fn project_reducer_terminal(kernel: &Kernel) -> Result<ReducerTerminalProjection, TraceError> {
     let final_state = json!({
-        "phase": kernel.state().phase,
-        "cycle": kernel.state().cycle,
-        "last_applied_sequence": kernel.state().last_applied_sequence,
+        "phase": kernel.state().phase(),
+        "cycle": kernel.state().cycle(),
+        "last_applied_sequence": kernel.state().last_applied_sequence(),
         "message_ids": kernel
             .state()
-            .messages
+            .messages()
             .iter()
             .map(|message| message.id().to_canonical_string())
             .collect::<Vec<_>>(),
     });
-    let final_result = serde_json::to_value(&kernel.state().terminal)
+    let final_result = serde_json::to_value(kernel.state().terminal())
         .map_err(|error| adapter_error(format!("final result serialization: {error}")))?;
     let state_hash = kernel
         .state()

@@ -70,7 +70,7 @@ pub(super) fn model_with_calls_and_limits(calls: &[ToolCallBlock], limits: RunLi
             },
         }),
     );
-    assert_eq!(harness.kernel.state().state_version, 2);
+    assert_eq!(harness.kernel.state().state_version(), 2);
     harness
 }
 
@@ -80,7 +80,7 @@ pub(super) fn settle_after_model_for_tools(harness: &mut Harness) {
         stage_input(0, Stage::AfterModel, ReducerStageOutcome::Continue),
     );
     assert_eq!(
-        harness.kernel.state().phase,
+        harness.kernel.state().phase(),
         Some(RunPhase::BeforeToolBatch)
     );
 }
@@ -224,7 +224,7 @@ fn tool_message_call_ids(harness: &Harness) -> Vec<u64> {
     harness
         .kernel
         .state()
-        .messages
+        .messages()
         .iter()
         .filter(|message| message.role() == MessageRole::Tool)
         .flat_map(finstack_ai_kernel::Message::content)
@@ -252,7 +252,7 @@ fn last_tool_result(harness: &Harness) -> &ToolResultBlock {
     let message = harness
         .kernel
         .state()
-        .messages
+        .messages()
         .iter()
         .rev()
         .find(|message| message.role() == MessageRole::Tool)
@@ -333,22 +333,16 @@ fn assert_tool_golden(file: &str, harness: &Harness) {
         .map(|record| record.body().kind_name())
         .collect::<Vec<_>>();
     let state = harness.kernel.state();
-    let last_batch_outcome = state
-        .last_tool_batch
-        .as_ref()
-        .map(|closed| match &closed.outcome {
-            ToolBatchOutcome::ContinueModel => "continue_model",
-            ToolBatchOutcome::Finalize => "finalize",
-            ToolBatchOutcome::Failed { .. } => "failed",
-        });
-    let terminal_candidate = state
-        .terminal_candidate
-        .as_ref()
-        .map(|candidate| match candidate {
-            TerminalCandidate::Completed { .. } => "completed",
-            TerminalCandidate::Failed { .. } => "failed",
-        });
-    let terminal = state.terminal.as_ref().map(|terminal| match terminal {
+    let last_batch_outcome = state.last_tool_batch().map(|closed| match &closed.outcome {
+        ToolBatchOutcome::ContinueModel => "continue_model",
+        ToolBatchOutcome::Finalize => "finalize",
+        ToolBatchOutcome::Failed { .. } => "failed",
+    });
+    let terminal_candidate = state.terminal_candidate().map(|candidate| match candidate {
+        TerminalCandidate::Completed { .. } => "completed",
+        TerminalCandidate::Failed { .. } => "failed",
+    });
+    let terminal = state.terminal().map(|terminal| match terminal {
         TerminalState::Completed(_) => "completed",
         TerminalState::Failed(_) => "failed",
         TerminalState::Cancelled(_) => "cancelled",
@@ -365,13 +359,13 @@ fn assert_tool_golden(file: &str, harness: &Harness) {
         == state.state_hash().expect("live hash");
     let actual = json!({
         "format_version": 1,
-        "phase": state.phase,
-        "cycle": state.cycle,
-        "state_version": state.state_version,
+        "phase": state.phase(),
+        "cycle": state.cycle(),
+        "state_version": state.state_version(),
         "records_after_open": records,
         "tool_message_call_ids": tool_message_call_ids(harness),
         "tool_event_call_ids": tool_event_call_ids(harness),
-        "active_batch": state.active_tool_batch.is_some(),
+        "active_batch": state.active_tool_batch().is_some(),
         "last_batch_outcome": last_batch_outcome,
         "terminal_candidate": terminal_candidate,
         "terminal": terminal,

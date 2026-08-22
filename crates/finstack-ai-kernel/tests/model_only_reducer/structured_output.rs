@@ -45,21 +45,21 @@ fn assert_structured_golden(file: &str, harness: &Harness) {
     }
     let actual = json!({
         "format_version": 1,
-        "phase": state.phase,
-        "cycle": state.cycle,
-        "state_version": state.state_version,
+        "phase": state.phase(),
+        "cycle": state.cycle(),
+        "state_version": state.state_version(),
         "records": harness.batches.iter().flat_map(|batch| batch.records.iter())
             .map(|record| record.body().kind_name()).collect::<Vec<_>>(),
-        "final_result_digest": state.final_result.as_ref().map(|result| result.value_digest.to_string()),
-        "validation_error": state.validation_failure.as_ref().map(|failure| failure.error.code.as_str()),
-        "skipped_tool_call_ids": state.final_result.as_ref().map_or_else(Vec::new, |result| {
+        "final_result_digest": state.final_result().map(|result| result.value_digest.to_string()),
+        "validation_error": state.validation_failure().map(|failure| failure.error.code.as_str()),
+        "skipped_tool_call_ids": state.final_result().map_or_else(Vec::new, |result| {
             result.skipped_tool_call_ids.iter().map(ToString::to_string).collect::<Vec<_>>()
         }),
-        "active_capabilities": state.active_capabilities.iter()
+        "active_capabilities": state.active_capabilities().iter()
             .map(|item| item.capability_id.as_str()).collect::<Vec<_>>(),
-        "active_tool_batch": state.active_tool_batch.is_some(),
-        "retry_attempts": state.retry.attempts,
-        "terminal": state.terminal.as_ref().map(|terminal| match terminal {
+        "active_tool_batch": state.active_tool_batch().is_some(),
+        "retry_attempts": state.retry().attempts,
+        "terminal": state.terminal().map(|terminal| match terminal {
             TerminalState::Completed(_) => "completed",
             TerminalState::Failed(_) => "failed",
             TerminalState::Cancelled(_) => "cancelled",
@@ -219,13 +219,12 @@ fn valid_json_result_is_durable_and_finalizes_with_candidate_digest() {
         decision.records[0].body(),
         RecordBody::FinalResultRecorded(FinalResultRecorded { value, .. }) if value == &candidate
     ));
-    assert_eq!(harness.kernel.state().state_version, 4);
+    assert_eq!(harness.kernel.state().state_version(), 4);
     assert_eq!(
         harness
             .kernel
             .state()
-            .final_result
-            .as_ref()
+            .final_result()
             .map(|result| result.value_digest),
         Some(candidate.digest())
     );
@@ -242,7 +241,10 @@ fn valid_json_result_is_durable_and_finalizes_with_candidate_digest() {
     );
 
     settle_structured_after_model(&mut harness, 11);
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(
+        harness.kernel.state().phase(),
+        Some(RunPhase::BeforeFinalize)
+    );
     harness.apply_input(
         transition_env(1_600, &[12, 13], &[5], &[], &[], &[], &[]),
         stage_input(
@@ -252,8 +254,8 @@ fn valid_json_result_is_durable_and_finalizes_with_candidate_digest() {
         ),
     );
     assert!(matches!(
-        harness.kernel.state().terminal,
-        Some(TerminalState::Completed(ref completed)) if completed.result_digest == candidate.digest()
+        harness.kernel.state().terminal(),
+        Some(TerminalState::Completed(completed)) if completed.result_digest == candidate.digest()
     ));
     assert_structured_golden("valid--pr012-success.json", &harness);
 }
@@ -289,8 +291,7 @@ fn validation_failure_retries_once_and_exhaustion_is_nonretryable() {
         retrying
             .kernel
             .state()
-            .validation_failure
-            .as_ref()
+            .validation_failure()
             .is_some_and(|failure| failure.error.retryable)
     );
     settle_structured_after_model(&mut retrying, 11);
@@ -318,10 +319,10 @@ fn validation_failure_retries_once_and_exhaustion_is_nonretryable() {
         }),
     );
     assert_eq!(
-        retrying.kernel.state().phase,
+        retrying.kernel.state().phase(),
         Some(RunPhase::PreparingContext)
     );
-    assert!(retrying.kernel.state().validation_failure.is_none());
+    assert!(retrying.kernel.state().validation_failure().is_none());
     assert_structured_golden("valid--pr012-validation-retry.json", &retrying);
 
     let mut exhausted = begin_structured_run(OutputEndStrategy::Early, Some(0));
@@ -339,8 +340,7 @@ fn validation_failure_retries_once_and_exhaustion_is_nonretryable() {
     let failure = exhausted
         .kernel
         .state()
-        .validation_failure
-        .as_ref()
+        .validation_failure()
         .expect("exhausted validation failure");
     assert!(!failure.error.retryable);
     assert_eq!(
@@ -386,15 +386,14 @@ fn early_skips_application_calls_while_exhaustive_plans_only_application_calls()
         early
             .kernel
             .state()
-            .final_result
-            .as_ref()
+            .final_result()
             .expect("early result")
             .skipped_tool_call_ids
             .as_ref(),
         &[id::<finstack_ai_kernel::ToolCallTag>(APPLICATION_CALL)]
     );
     settle_structured_after_model(&mut early, 11);
-    assert_eq!(early.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert_eq!(early.kernel.state().phase(), Some(RunPhase::BeforeFinalize));
     assert_structured_golden("valid--pr012-early.json", &early);
 
     let mut exhaustive = begin_structured_run(OutputEndStrategy::Exhaustive, None);
@@ -416,7 +415,7 @@ fn early_skips_application_calls_while_exhaustive_plans_only_application_calls()
     );
     settle_structured_after_model(&mut exhaustive, 11);
     assert_eq!(
-        exhaustive.kernel.state().phase,
+        exhaustive.kernel.state().phase(),
         Some(RunPhase::BeforeToolBatch)
     );
     let plan = super::tool_batches::execute(
@@ -439,8 +438,7 @@ fn early_skips_application_calls_while_exhaustive_plans_only_application_calls()
         exhaustive
             .kernel
             .state()
-            .active_tool_batch
-            .as_ref()
+            .active_tool_batch()
             .map(|batch| batch.calls.len()),
         Some(1)
     );
@@ -519,10 +517,10 @@ fn capability_activation_is_sorted_replay_complete_and_supports_all_sources() {
         transition_env(1_050, &[2], &[], &[], &[], &[], &[]),
         KernelInput::CapabilitiesActivated(activation.clone()),
     );
-    assert_eq!(harness.kernel.state().state_version, 4);
+    assert_eq!(harness.kernel.state().state_version(), 4);
     assert_eq!(
-        harness.kernel.state().active_capabilities,
-        activation.active
+        harness.kernel.state().active_capabilities(),
+        &activation.active
     );
     let duplicate = harness
         .kernel
@@ -535,7 +533,7 @@ fn capability_activation_is_sorted_replay_complete_and_supports_all_sources() {
     assert_structured_golden("valid--pr012-capabilities.json", &harness);
 
     let model_selected = CapabilitiesActivated {
-        prior_plan_digest: harness.kernel.state().resolved_plan_digest,
+        prior_plan_digest: harness.kernel.state().resolved_plan_digest(),
         resolved_plan_digest: Digest::raw_json(br#"{"plan":2}"#),
         active: Arc::from([ActiveCapability {
             capability_id: finstack_ai_kernel::CapabilityId::parse("finstack.capability.model")
@@ -548,14 +546,14 @@ fn capability_activation_is_sorted_replay_complete_and_supports_all_sources() {
         KernelInput::CapabilitiesActivated(model_selected.clone()),
     );
     assert_eq!(
-        harness.kernel.state().active_capabilities,
-        model_selected.active
+        harness.kernel.state().active_capabilities(),
+        &model_selected.active
     );
 
     let duplicate_id = finstack_ai_kernel::CapabilityId::parse("finstack.capability.alpha")
         .expect("capability id");
     let duplicate = CapabilitiesActivated {
-        prior_plan_digest: harness.kernel.state().resolved_plan_digest,
+        prior_plan_digest: harness.kernel.state().resolved_plan_digest(),
         resolved_plan_digest: Digest::raw_json(br#"{"plan":3}"#),
         active: Arc::from([
             ActiveCapability {
@@ -577,8 +575,7 @@ fn capability_activation_is_sorted_replay_complete_and_supports_all_sources() {
     );
 }
 
-#[test]
-fn capabilities_activated_is_accepted_at_the_named_mid_run_phase() {
+fn after_tool_batch_harness() -> Harness {
     let calls = vec![super::tool_batches::call(
         super::tool_batches::CALL_A,
         "alpha",
@@ -618,7 +615,16 @@ fn capabilities_activated_is_accepted_at_the_named_mid_run_phase() {
             },
         ),
     );
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+    harness
+}
+
+#[test]
+fn capabilities_activated_is_accepted_at_the_named_mid_run_phase() {
+    let mut harness = after_tool_batch_harness();
+    assert_eq!(
+        harness.kernel.state().phase(),
+        Some(RunPhase::AfterToolBatch)
+    );
 
     let first = CapabilitiesActivated {
         prior_plan_digest: None,
@@ -633,11 +639,14 @@ fn capabilities_activated_is_accepted_at_the_named_mid_run_phase() {
         transition_env(1_800, &[2_000], &[], &[], &[], &[], &[]),
         KernelInput::CapabilitiesActivated(first.clone()),
     );
-    assert_eq!(harness.kernel.state().active_capabilities, first.active);
-    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+    assert_eq!(harness.kernel.state().active_capabilities(), &first.active);
+    assert_eq!(
+        harness.kernel.state().phase(),
+        Some(RunPhase::AfterToolBatch)
+    );
 
     let second = CapabilitiesActivated {
-        prior_plan_digest: harness.kernel.state().resolved_plan_digest,
+        prior_plan_digest: harness.kernel.state().resolved_plan_digest(),
         resolved_plan_digest: Digest::raw_json(br#"{"plan":2}"#),
         active: Arc::from([
             ActiveCapability {
@@ -656,7 +665,7 @@ fn capabilities_activated_is_accepted_at_the_named_mid_run_phase() {
         transition_env(1_810, &[2_001], &[], &[], &[], &[], &[]),
         KernelInput::CapabilitiesActivated(second.clone()),
     );
-    assert_eq!(harness.kernel.state().active_capabilities, second.active);
+    assert_eq!(harness.kernel.state().active_capabilities(), &second.active);
 
     let noop = harness
         .kernel

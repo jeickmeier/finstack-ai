@@ -111,7 +111,7 @@
 //! )?;
 //! let events = kernel.apply(&batch, 0)?;
 //! assert_eq!(events.len(), 1);
-//! assert_eq!(kernel.state().phase, Some(RunPhase::BeforeRun));
+//! assert_eq!(kernel.state().phase(), Some(RunPhase::BeforeRun));
 //! # Ok(())
 //! # }
 //! ```

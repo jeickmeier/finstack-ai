@@ -170,6 +170,56 @@ async fn network_ref_in_input_schema_is_rejected() {
 }
 
 #[tokio::test]
+async fn oversized_tool_schema_is_rejected() {
+    let oversized = "x".repeat(64 * 1024);
+    let transport = ScriptedTransport::new(vec![serde_json::json!({
+        "resultType":"complete",
+        "tools":[{"name":"big","inputSchema":{"type":"object","description": oversized}}]
+    })]);
+    let error = enumerate_catalog(&transport)
+        .await
+        .expect_err("oversized schema must be rejected");
+    assert!(format!("{error}").contains(MCP_LIMIT_EXCEEDED));
+    assert!(format!("{error}").contains("serialized byte limit"));
+}
+
+#[tokio::test]
+async fn overly_deep_tool_schema_is_rejected() {
+    let mut schema = serde_json::json!({"type": "string"});
+    for _ in 0..40 {
+        schema = serde_json::json!({"type": "object", "properties": {"nested": schema}});
+    }
+    let transport = ScriptedTransport::new(vec![serde_json::json!({
+        "resultType":"complete",
+        "tools":[{"name":"deep","inputSchema": schema}]
+    })]);
+    let error = enumerate_catalog(&transport)
+        .await
+        .expect_err("overly deep schema must be rejected");
+    assert!(format!("{error}").contains(MCP_LIMIT_EXCEEDED));
+    assert!(format!("{error}").contains("nesting-depth limit"));
+}
+
+#[tokio::test]
+async fn normal_tool_schema_passes_the_schema_limits() {
+    let transport = ScriptedTransport::new(vec![serde_json::json!({
+        "resultType":"complete",
+        "tools":[{
+            "name":"weather",
+            "inputSchema":{
+                "type":"object",
+                "properties":{"city":{"type":"string"},"units":{"enum":["c","f"]}},
+                "required":["city"]
+            },
+            "outputSchema":{"type":"object","properties":{"temp":{"type":"number"}}}
+        }]
+    })]);
+    let tools = enumerate_catalog(&transport).await.expect("enumerates");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "weather");
+}
+
+#[tokio::test]
 async fn colliding_sanitized_tool_ids_fail_closed() {
     let transport = ScriptedTransport::new(vec![serde_json::json!({
         "resultType":"complete",
