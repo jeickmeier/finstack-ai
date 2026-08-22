@@ -275,8 +275,8 @@ impl PyAgent {
                 reasoning_effort,
                 reasoning_summary,
                 media_tools,
-                openrouter_media,
                 common: LinkedCommon {
+                    openrouter_media,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -354,6 +354,7 @@ impl PyAgent {
                     ports,
                     child_runs,
                     approval_grant,
+                    openrouter_media: None,
                 },
             })
             .await;
@@ -414,8 +415,8 @@ impl PyAgent {
                 base_url,
                 model,
                 api_key,
-                openrouter_media,
                 common: LinkedCommon {
+                    openrouter_media,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -483,8 +484,8 @@ impl PyAgent {
                 endpoint,
                 model,
                 api_key,
-                openrouter_media,
                 common: LinkedCommon {
+                    openrouter_media,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -548,8 +549,8 @@ impl PyAgent {
             let built = Agent::ollama(OllamaAgentSpec {
                 base_url,
                 model,
-                openrouter_media,
                 common: LinkedCommon {
+                    openrouter_media,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -623,6 +624,7 @@ impl PyAgent {
                     ports,
                     child_runs,
                     approval_grant,
+                    openrouter_media: None,
                 },
             })
             .await;
@@ -1186,6 +1188,7 @@ async fn build_python_agent(
             },
             child_runs,
             approval_grant,
+            openrouter_media: None,
         },
         model_name,
         empty_model_settings()?,

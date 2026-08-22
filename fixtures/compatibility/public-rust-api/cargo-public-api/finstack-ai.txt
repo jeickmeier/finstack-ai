@@ -1174,7 +1174,6 @@ pub finstack_ai::AnthropicAgentSpec::api_key: core::option::Option<alloc::string
 pub finstack_ai::AnthropicAgentSpec::base_url: alloc::string::String
 pub finstack_ai::AnthropicAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::AnthropicAgentSpec::model: alloc::string::String
-pub finstack_ai::AnthropicAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::AttachmentInput
 pub finstack_ai::AttachmentInput::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
 impl core::clone::Clone for finstack_ai::AttachmentInput
@@ -1384,7 +1383,6 @@ pub finstack_ai::GeminiAgentSpec::api_key: core::option::Option<alloc::string::S
 pub finstack_ai::GeminiAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::GeminiAgentSpec::endpoint: alloc::string::String
 pub finstack_ai::GeminiAgentSpec::model: alloc::string::String
-pub finstack_ai::GeminiAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::HistoryCachePolicy
 impl finstack_ai::HistoryCachePolicy
 pub const finstack_ai::HistoryCachePolicy::DEFAULT_MAX_BYTES: usize
@@ -1456,6 +1454,7 @@ pub finstack_ai::LinkedCommon::approval_grant: finstack_ai_runtime::ports::model
 pub finstack_ai::LinkedCommon::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
 pub finstack_ai::LinkedCommon::child_runs: finstack_ai_runtime::services::agent_invoker::ChildRunPolicy
 pub finstack_ai::LinkedCommon::instruction: core::option::Option<alloc::string::String>
+pub finstack_ai::LinkedCommon::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub finstack_ai::LinkedCommon::ports: finstack_ai::LinkedAgentPorts
 impl core::default::Default for finstack_ai::LinkedCommon
 pub fn finstack_ai::LinkedCommon::default() -> finstack_ai::LinkedCommon
@@ -1551,13 +1550,11 @@ pub struct finstack_ai::OllamaAgentSpec
 pub finstack_ai::OllamaAgentSpec::base_url: alloc::string::String
 pub finstack_ai::OllamaAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::OllamaAgentSpec::model: alloc::string::String
-pub finstack_ai::OllamaAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::OpenAiAgentSpec
 pub finstack_ai::OpenAiAgentSpec::api_key: alloc::string::String
 pub finstack_ai::OpenAiAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::OpenAiAgentSpec::media_tools: bool
 pub finstack_ai::OpenAiAgentSpec::model: alloc::string::String
-pub finstack_ai::OpenAiAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub finstack_ai::OpenAiAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenAiAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
 pub struct finstack_ai::OpenRouterAgentSpec

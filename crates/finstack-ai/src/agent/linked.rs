@@ -95,6 +95,11 @@ pub struct LinkedCommon {
     pub child_runs: ChildRunPolicy,
     /// Paid-tool approval grant mode. Bindings default this to `PerCall`.
     pub approval_grant: ApprovalGrantMode,
+    /// Optional `OpenRouter` media-toolset registration.
+    ///
+    /// Independent of which provider serves the model, so it lives here
+    /// rather than on four of the six provider specs.
+    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
 }
 
 /// `OpenRouter` media-toolset registration for any linked constructor.
@@ -114,7 +119,7 @@ pub struct OpenRouterMediaToolsSpec {
 pub struct OpenAiAgentSpec {
     /// Responses model name.
     pub model: String,
-    /// Explicit Bearer credential. Never read from the environment.
+    /// API key. Required: the endpoint accepts no anonymous calls.
     pub api_key: String,
     /// Optional Responses reasoning effort.
     pub reasoning_effort: Option<String>,
@@ -122,8 +127,6 @@ pub struct OpenAiAgentSpec {
     pub reasoning_summary: Option<String>,
     /// Register the native `OpenAI` media toolset alongside the model.
     pub media_tools: bool,
-    /// Optional `OpenRouter` media-toolset registration.
-    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -133,7 +136,7 @@ pub struct OpenRouterAgentSpec {
     /// `OpenRouter` model identifier (e.g. `openai/gpt-5`; `:nitro` and
     /// `:floor` routing suffixes are allowed).
     pub model: String,
-    /// Explicit Bearer credential. Never read from the environment.
+    /// API key. Required: the endpoint accepts no anonymous calls.
     pub api_key: String,
     /// Optional non-secret `HTTP-Referer` attribution header.
     pub referer: Option<String>,
@@ -155,10 +158,9 @@ pub struct AnthropicAgentSpec {
     pub base_url: String,
     /// Model name.
     pub model: String,
-    /// Optional API key. HTTPS is required when set.
+    /// Optional API key. HTTPS is required when set; a loopback base URL
+    /// may run without one.
     pub api_key: Option<String>,
-    /// Optional `OpenRouter` media-toolset registration.
-    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -169,22 +171,20 @@ pub struct GeminiAgentSpec {
     pub endpoint: String,
     /// Model name.
     pub model: String,
-    /// Optional API key. HTTPS is required when set.
+    /// Optional API key. HTTPS is required when set; a loopback endpoint
+    /// may run without one.
     pub api_key: Option<String>,
-    /// Optional `OpenRouter` media-toolset registration.
-    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
 
 /// Arguments for [`Agent::ollama`].
 pub struct OllamaAgentSpec {
+    // No `api_key`: Ollama serves locally and takes no credential.
     /// Native `/api/chat` base URL.
     pub base_url: String,
     /// Model name.
     pub model: String,
-    /// Optional `OpenRouter` media-toolset registration.
-    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -204,7 +204,8 @@ pub struct GatewayAgentSpec {
     pub hard_input_bytes: Option<u64>,
     /// Auth scheme: `none`, `bearer`, or `api_key`. Defaults from `api_key`.
     pub auth_kind: Option<String>,
-    /// Explicit credential. Never read from the environment.
+    /// Optional API key. HTTPS is required when set; a gateway may instead
+    /// authenticate through `auth_kind` and `credential_name`.
     pub api_key: Option<String>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
@@ -234,6 +235,7 @@ impl NativeAgentBuilder {
             ports,
             child_runs,
             approval_grant,
+            openrouter_media: _,
         } = common;
         for (component, toolset) in ports.toolsets {
             self = self.toolset(component, toolset);
@@ -412,7 +414,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     if let Some(api_key_for_tools) = api_key_for_tools {
         register_openai_media(&mut common.ports, api_key_for_tools)?;
     }
-    if let Some(media) = spec.openrouter_media {
+    if let Some(media) = common.openrouter_media.take() {
         register_openrouter_media(&mut common.ports, media)?;
     }
     build_linked_provider(
@@ -518,7 +520,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
             .map_err(|error| model_configuration_error(&error))?,
     );
     let mut common = spec.common;
-    if let Some(media) = spec.openrouter_media {
+    if let Some(media) = common.openrouter_media.take() {
         register_openrouter_media(&mut common.ports, media)?;
     }
     build_linked_provider(
@@ -568,7 +570,7 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
             .map_err(|error| model_configuration_error(&error))?,
     );
     let mut common = spec.common;
-    if let Some(media) = spec.openrouter_media {
+    if let Some(media) = common.openrouter_media.take() {
         register_openrouter_media(&mut common.ports, media)?;
     }
     build_linked_provider(
@@ -607,7 +609,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
             .map_err(|error| model_configuration_error(&error))?,
     );
     let mut common = spec.common;
-    if let Some(media) = spec.openrouter_media {
+    if let Some(media) = common.openrouter_media.take() {
         register_openrouter_media(&mut common.ports, media)?;
     }
     build_linked_provider(
@@ -1136,8 +1138,8 @@ mod tests {
             reasoning_effort: None,
             reasoning_summary: None,
             media_tools: false,
-            openrouter_media: None,
             common: LinkedCommon {
+                openrouter_media: None,
                 instruction: Some("Answer concisely.".into()),
                 ..common()
             },
@@ -1158,8 +1160,10 @@ mod tests {
             reasoning_effort: Some("turbo".into()),
             reasoning_summary: None,
             media_tools: false,
-            openrouter_media: None,
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: None,
+                ..common()
+            },
         })
         .await
         .err()
@@ -1177,8 +1181,10 @@ mod tests {
             reasoning_effort: None,
             reasoning_summary: None,
             media_tools: false,
-            openrouter_media: None,
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: None,
+                ..common()
+            },
         })
         .await
         .err()
@@ -1195,12 +1201,14 @@ mod tests {
             reasoning_effort: None,
             reasoning_summary: None,
             media_tools: true,
-            openrouter_media: Some(OpenRouterMediaToolsSpec {
-                api_key: "sk-or-media-canary".into(),
-                referer: None,
-                title: None,
-            }),
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: Some(OpenRouterMediaToolsSpec {
+                    api_key: "sk-or-media-canary".into(),
+                    referer: None,
+                    title: None,
+                }),
+                ..common()
+            },
         })
         .await
         .expect("openai + media construct");
@@ -1215,12 +1223,14 @@ mod tests {
             reasoning_effort: None,
             reasoning_summary: None,
             media_tools: false,
-            openrouter_media: Some(OpenRouterMediaToolsSpec {
-                api_key: "sk-or-media-canary".into(),
-                referer: None,
-                title: None,
-            }),
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: Some(OpenRouterMediaToolsSpec {
+                    api_key: "sk-or-media-canary".into(),
+                    referer: None,
+                    title: None,
+                }),
+                ..common()
+            },
         })
         .await
         .expect("openai + openrouter media construct");
@@ -1235,12 +1245,14 @@ mod tests {
             reasoning_effort: None,
             reasoning_summary: None,
             media_tools: false,
-            openrouter_media: Some(OpenRouterMediaToolsSpec {
-                api_key: String::new(),
-                referer: None,
-                title: None,
-            }),
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: Some(OpenRouterMediaToolsSpec {
+                    api_key: String::new(),
+                    referer: None,
+                    title: None,
+                }),
+                ..common()
+            },
         })
         .await
         .err()
@@ -1332,8 +1344,10 @@ mod tests {
             base_url: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
-            openrouter_media: None,
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: None,
+                ..common()
+            },
         })
         .await
         .err()
@@ -1348,8 +1362,8 @@ mod tests {
             endpoint: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: None,
-            openrouter_media: None,
             common: LinkedCommon {
+                openrouter_media: None,
                 instruction: Some("Answer concisely.".into()),
                 ..common()
             },
@@ -1376,8 +1390,10 @@ mod tests {
             endpoint: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
-            openrouter_media: None,
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: None,
+                ..common()
+            },
         })
         .await
         .err()
@@ -1391,8 +1407,10 @@ mod tests {
         let built = Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
-            openrouter_media: None,
-            common: common(),
+            common: LinkedCommon {
+                openrouter_media: None,
+                ..common()
+            },
         })
         .await
         .expect("ollama construct");

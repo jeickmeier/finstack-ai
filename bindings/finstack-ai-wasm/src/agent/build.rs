@@ -155,6 +155,7 @@ pub(super) async fn build_agent(
             },
             child_runs: ChildRunPolicy::Deny,
             approval_grant,
+            openrouter_media: None,
         },
         model_name.clone(),
         settings,
