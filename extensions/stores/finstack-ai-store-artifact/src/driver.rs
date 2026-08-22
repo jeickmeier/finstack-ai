@@ -7,7 +7,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -149,6 +148,7 @@ pub(crate) enum PutPayload {
     /// Fully materialized content.
     Bytes(Bytes),
     /// Content streamed from a local file; never fully materialized.
+    #[expect(dead_code, reason = "kept for streamed puts; callers use Bytes today")]
     File(PathBuf),
 }
 
@@ -225,15 +225,6 @@ pub(crate) struct ObjectPage {
     pub next: Option<PageToken>,
 }
 
-/// Time-limited download URL.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PresignedUrl {
-    /// Complete presigned URL.
-    pub url: Arc<str>,
-    /// Requested validity window in seconds.
-    pub expires_in_secs: u64,
-}
-
 /// Per-store object size ceiling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ObjectStoreLimits {
@@ -253,6 +244,10 @@ impl Default for ObjectStoreLimits {
 /// Scoped host-supplied unstructured object service.
 pub(crate) trait ObjectDriver: PortObject {
     /// Durably store exact content under the caller's scope.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "artifact algorithm uses put_if_absent")
+    )]
     fn put(
         &self,
         scope: ObjectScope,
@@ -265,6 +260,10 @@ pub(crate) trait ObjectDriver: PortObject {
     fn get(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<Bytes, ObjectError>>;
 
     /// Stream the object to `dest`; verifies content digest after writing.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "artifact algorithm materializes via get")
+    )]
     fn get_to_file(
         &self,
         scope: ObjectScope,
@@ -273,6 +272,10 @@ pub(crate) trait ObjectDriver: PortObject {
     ) -> PortFuture<Result<ObjectRef, ObjectError>>;
 
     /// Fetch the reference without content.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "artifact algorithm reads via get")
+    )]
     fn head(
         &self,
         scope: ObjectScope,
@@ -280,6 +283,10 @@ pub(crate) trait ObjectDriver: PortObject {
     ) -> PortFuture<Result<ObjectRef, ObjectError>>;
 
     /// Delete one object; deleting a missing object is not an error.
+    #[allow(
+        dead_code,
+        reason = "S3 loopback tests call this; the algorithm uses delete_if_digest"
+    )]
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>>;
 
     /// Store only when no object exists at the exact scoped key.
@@ -335,14 +342,6 @@ pub(crate) trait ObjectDriver: PortObject {
         page: PageToken,
     ) -> PortFuture<Result<ObjectPage, ObjectError>>;
 
-    /// Produce a time-limited download URL when the backend supports it.
-    fn presign_get(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-        expiry: Duration,
-    ) -> PortFuture<Result<PresignedUrl, ObjectError>>;
-
     /// This store's size ceilings.
     fn limits(&self) -> ObjectStoreLimits {
         ObjectStoreLimits::default()
@@ -351,6 +350,10 @@ pub(crate) trait ObjectDriver: PortObject {
 
 /// Compose the physical backend key: `{prefix}/{scope-digest-hex}/{key}`.
 #[must_use]
+#[cfg_attr(
+    not(any(test, feature = "s3")),
+    allow(dead_code, reason = "S3 and the in-memory fake compose keys")
+)]
 pub(crate) fn physical_object_key(
     key_prefix: Option<&str>,
     scope_digest: &Digest,
@@ -388,6 +391,10 @@ pub(crate) fn validate_object_metadata(metadata: &ObjectMetadata) -> Result<(), 
 pub(crate) enum ObjectError {
     /// Service unavailable (transport, auth, or server failure).
     #[error("{}: {message}", OBJECT_UNAVAILABLE)]
+    #[cfg_attr(
+        not(any(test, feature = "s3")),
+        allow(dead_code, reason = "S3 transport mapping constructs this")
+    )]
     Unavailable {
         /// Bounded non-secret diagnostic.
         message: Arc<str>,
@@ -452,6 +459,7 @@ pub(crate) enum ObjectError {
 impl ObjectError {
     /// Stable machine-readable code.
     #[must_use]
+    #[cfg_attr(not(test), expect(dead_code, reason = "driver tests assert codes"))]
     pub const fn code(&self) -> &'static str {
         match self {
             Self::Unavailable { .. } => OBJECT_UNAVAILABLE,
@@ -556,7 +564,7 @@ mod tests {
         assert_eq!(ObjectError::NotFound.code(), "object_not_found");
         assert_eq!(
             ObjectError::Unsupported {
-                operation: Arc::from("presign_get")
+                operation: Arc::from("put_if_absent")
             }
             .code(),
             "object_unsupported"

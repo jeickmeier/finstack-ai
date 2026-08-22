@@ -41,7 +41,7 @@
 //!   process confinement
 //! - [`ingress`] — external completion and interaction routing
 //! - [`workflow`] — workflow sessions and checkpoints
-//! - [`ids`] — clocks, random sources, UUIDv7
+//! - [`ids`] — clocks, random sources, `UUIDv7`
 //!
 //! Target drivers live behind the features: `native_driver` under
 //! `native-tokio`, `host_driver` under `wasm-host`.
@@ -134,6 +134,8 @@ pub(crate) use exec::{run_types, settlement, stage_settlement};
 pub(crate) use ports::{context, journal, middleware, model, observer, tool};
 pub(crate) use services::{id_generation, interaction};
 
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+pub use driver::host_driver;
 #[cfg(feature = "native-tokio")]
 pub use driver::sdk as native_driver;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
@@ -142,7 +144,6 @@ pub(crate) use exec::middleware_driver;
 pub use error::PortErrorInvalid;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use model::{parse_committed_model_request, stable_model_dispatch_code};
-#[cfg(feature = "native-tokio")]
 #[cfg(feature = "native-tokio")]
 pub(crate) use tool::{TOOL_PANICKED, TOOL_STREAM_INVALID};
 
@@ -232,16 +233,12 @@ pub mod audit {
 }
 
 /// Process confinement profiles and backends for spawned children.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod confinement {
-    pub use crate::services::process_confinement::{CONFINEMENT_DENIED, CONFINEMENT_IO};
-    #[cfg(not(target_arch = "wasm32"))]
     pub use crate::services::process_confinement::{
-        CONFINEMENT_UNAVAILABLE, ConfinedChild, ConfinementBackend, ConfinementError,
-        ConfinementProfile, ProcessConfinement, WindowsLpacProfile,
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    pub use crate::services::process_confinement::{
-        configure_process_tree, terminate_process_tree,
+        CONFINEMENT_DENIED, CONFINEMENT_IO, CONFINEMENT_UNAVAILABLE, ConfinedChild,
+        ConfinementBackend, ConfinementError, ConfinementProfile, ProcessConfinement,
+        WindowsLpacProfile, configure_process_tree, terminate_process_tree,
     };
 }
 
@@ -275,7 +272,7 @@ pub mod workflow {
     };
 }
 
-/// Deterministic id generation: clocks, random sources, UUIDv7.
+/// Deterministic id generation: clocks, random sources, `UUIDv7`.
 pub mod ids {
     pub use crate::id_generation::{
         Clock, ExternalClock, IdGenerationError, RandomSource, UuidV7Generator,

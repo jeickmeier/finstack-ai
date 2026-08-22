@@ -1,9 +1,5 @@
 //! Memory extension composition (store, recall provider, toolset, observer)
 //! for finstack-ai.
-//!
-//! This crate currently defines the bounded, validated memory record model.
-//! Later tasks add the store trait, recall provider, tool surface, and
-//! observer that compose on top of it.
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 #![warn(clippy::float_cmp)]

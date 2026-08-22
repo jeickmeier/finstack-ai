@@ -852,6 +852,80 @@ impl core::fmt::Debug for finstack_ai_runtime::events::EventSubscriptionStatus
 pub fn finstack_ai_runtime::events::EventSubscriptionStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::events::EventSubscriptionStatus
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::events::EventSubscriptionStatus
+pub mod finstack_ai_runtime::host_driver
+pub struct finstack_ai_runtime::host_driver::DriverUnavailable
+impl core::clone::Clone for finstack_ai_runtime::host_driver::DriverUnavailable
+pub fn finstack_ai_runtime::host_driver::DriverUnavailable::clone(&self) -> finstack_ai_runtime::host_driver::DriverUnavailable
+impl core::cmp::Eq for finstack_ai_runtime::host_driver::DriverUnavailable
+impl core::cmp::PartialEq for finstack_ai_runtime::host_driver::DriverUnavailable
+pub fn finstack_ai_runtime::host_driver::DriverUnavailable::eq(&self, &finstack_ai_runtime::host_driver::DriverUnavailable) -> bool
+impl core::error::Error for finstack_ai_runtime::host_driver::DriverUnavailable
+impl core::fmt::Debug for finstack_ai_runtime::host_driver::DriverUnavailable
+pub fn finstack_ai_runtime::host_driver::DriverUnavailable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_runtime::host_driver::DriverUnavailable
+pub fn finstack_ai_runtime::host_driver::DriverUnavailable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::host_driver::DriverUnavailable
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::host_driver::DriverUnavailable
+pub struct finstack_ai_runtime::host_driver::HostDriverHooks
+impl finstack_ai_runtime::host_driver::HostDriverHooks
+pub fn finstack_ai_runtime::host_driver::HostDriverHooks::new(impl core::ops::function::Fn(finstack_ai_runtime::ports::PortFuture<()>) + finstack_ai_runtime::ports::PortObject, impl core::ops::function::Fn(core::time::Duration, finstack_ai_runtime::host_driver::SleepCallback) + finstack_ai_runtime::ports::PortObject, alloc::sync::Arc<dyn finstack_ai_runtime::ids::Clock>, alloc::sync::Arc<dyn finstack_ai_runtime::ids::RandomSource>) -> Self
+impl core::clone::Clone for finstack_ai_runtime::host_driver::HostDriverHooks
+pub fn finstack_ai_runtime::host_driver::HostDriverHooks::clone(&self) -> finstack_ai_runtime::host_driver::HostDriverHooks
+pub struct finstack_ai_runtime::host_driver::HostTaskHandle
+impl finstack_ai_runtime::host_driver::HostTaskHandle
+pub fn finstack_ai_runtime::host_driver::HostTaskHandle::abort(&self)
+pub async fn finstack_ai_runtime::host_driver::HostTaskHandle::completed(&self)
+pub fn finstack_ai_runtime::host_driver::HostTaskHandle::is_completed(&self) -> bool
+impl core::clone::Clone for finstack_ai_runtime::host_driver::HostTaskHandle
+pub fn finstack_ai_runtime::host_driver::HostTaskHandle::clone(&self) -> finstack_ai_runtime::host_driver::HostTaskHandle
+pub struct finstack_ai_runtime::host_driver::InstalledClock
+impl core::clone::Clone for finstack_ai_runtime::host_driver::InstalledClock
+pub fn finstack_ai_runtime::host_driver::InstalledClock::clone(&self) -> finstack_ai_runtime::host_driver::InstalledClock
+impl core::default::Default for finstack_ai_runtime::host_driver::InstalledClock
+pub fn finstack_ai_runtime::host_driver::InstalledClock::default() -> finstack_ai_runtime::host_driver::InstalledClock
+impl core::fmt::Debug for finstack_ai_runtime::host_driver::InstalledClock
+pub fn finstack_ai_runtime::host_driver::InstalledClock::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::host_driver::InstalledClock
+impl finstack_ai_runtime::ids::Clock for finstack_ai_runtime::host_driver::InstalledClock
+pub fn finstack_ai_runtime::host_driver::InstalledClock::now(&self) -> core::result::Result<finstack_ai_kernel::primitives::time::Timestamp, finstack_ai_runtime::ids::IdGenerationError>
+pub struct finstack_ai_runtime::host_driver::InstalledRandom
+impl core::clone::Clone for finstack_ai_runtime::host_driver::InstalledRandom
+pub fn finstack_ai_runtime::host_driver::InstalledRandom::clone(&self) -> finstack_ai_runtime::host_driver::InstalledRandom
+impl core::default::Default for finstack_ai_runtime::host_driver::InstalledRandom
+pub fn finstack_ai_runtime::host_driver::InstalledRandom::default() -> finstack_ai_runtime::host_driver::InstalledRandom
+impl core::fmt::Debug for finstack_ai_runtime::host_driver::InstalledRandom
+pub fn finstack_ai_runtime::host_driver::InstalledRandom::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::host_driver::InstalledRandom
+impl finstack_ai_runtime::ids::RandomSource for finstack_ai_runtime::host_driver::InstalledRandom
+pub fn finstack_ai_runtime::host_driver::InstalledRandom::fill_bytes(&self, &mut [u8]) -> core::result::Result<(), finstack_ai_runtime::ids::IdGenerationError>
+pub struct finstack_ai_runtime::host_driver::Signal
+impl finstack_ai_runtime::host_driver::Signal
+pub fn finstack_ai_runtime::host_driver::Signal::new() -> Self
+pub fn finstack_ai_runtime::host_driver::Signal::notified(&self) -> impl core::future::future::Future<Output = ()> + '_
+pub fn finstack_ai_runtime::host_driver::Signal::notify_waiters(&self)
+impl core::clone::Clone for finstack_ai_runtime::host_driver::Signal
+pub fn finstack_ai_runtime::host_driver::Signal::clone(&self) -> finstack_ai_runtime::host_driver::Signal
+impl core::default::Default for finstack_ai_runtime::host_driver::Signal
+pub fn finstack_ai_runtime::host_driver::Signal::default() -> finstack_ai_runtime::host_driver::Signal
+pub struct finstack_ai_runtime::host_driver::TimeoutElapsed
+impl core::clone::Clone for finstack_ai_runtime::host_driver::TimeoutElapsed
+pub fn finstack_ai_runtime::host_driver::TimeoutElapsed::clone(&self) -> finstack_ai_runtime::host_driver::TimeoutElapsed
+impl core::cmp::Eq for finstack_ai_runtime::host_driver::TimeoutElapsed
+impl core::cmp::PartialEq for finstack_ai_runtime::host_driver::TimeoutElapsed
+pub fn finstack_ai_runtime::host_driver::TimeoutElapsed::eq(&self, &finstack_ai_runtime::host_driver::TimeoutElapsed) -> bool
+impl core::error::Error for finstack_ai_runtime::host_driver::TimeoutElapsed
+impl core::fmt::Debug for finstack_ai_runtime::host_driver::TimeoutElapsed
+pub fn finstack_ai_runtime::host_driver::TimeoutElapsed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_runtime::host_driver::TimeoutElapsed
+pub fn finstack_ai_runtime::host_driver::TimeoutElapsed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::host_driver::TimeoutElapsed
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::host_driver::TimeoutElapsed
+pub fn finstack_ai_runtime::host_driver::drive_local()
+pub fn finstack_ai_runtime::host_driver::install_driver(finstack_ai_runtime::host_driver::HostDriverHooks)
+pub fn finstack_ai_runtime::host_driver::spawn(finstack_ai_runtime::ports::PortFuture<()>) -> core::result::Result<finstack_ai_runtime::host_driver::HostTaskHandle, finstack_ai_runtime::host_driver::DriverUnavailable>
+pub async fn finstack_ai_runtime::host_driver::timeout<F>(core::time::Duration, F) -> core::result::Result<<F as core::future::future::Future>::Output, finstack_ai_runtime::host_driver::TimeoutElapsed> where F: core::future::future::Future
+pub async fn finstack_ai_runtime::host_driver::yield_now()
+pub type finstack_ai_runtime::host_driver::SleepCallback = alloc::boxed::Box<(dyn core::ops::function::FnOnce() + core::marker::Send + 'static)>
 pub mod finstack_ai_runtime::ids
 pub enum finstack_ai_runtime::ids::IdGenerationError
 pub finstack_ai_runtime::ids::IdGenerationError::Source(alloc::string::String)
@@ -892,12 +966,16 @@ pub fn finstack_ai_runtime::ids::UuidV7Generator<C, R>::fmt(&self, &mut core::fm
 impl<C: core::marker::Copy, R: core::marker::Copy> core::marker::Copy for finstack_ai_runtime::ids::UuidV7Generator<C, R>
 pub trait finstack_ai_runtime::ids::Clock
 pub fn finstack_ai_runtime::ids::Clock::now(&self) -> core::result::Result<finstack_ai_kernel::primitives::time::Timestamp, finstack_ai_runtime::ids::IdGenerationError>
+impl finstack_ai_runtime::ids::Clock for finstack_ai_runtime::host_driver::InstalledClock
+pub fn finstack_ai_runtime::host_driver::InstalledClock::now(&self) -> core::result::Result<finstack_ai_kernel::primitives::time::Timestamp, finstack_ai_runtime::ids::IdGenerationError>
 impl finstack_ai_runtime::ids::Clock for finstack_ai_runtime::ids::ExternalClock
 pub fn finstack_ai_runtime::ids::ExternalClock::now(&self) -> core::result::Result<finstack_ai_kernel::primitives::time::Timestamp, finstack_ai_runtime::ids::IdGenerationError>
 impl<T: finstack_ai_runtime::ids::Clock + ?core::marker::Sized> finstack_ai_runtime::ids::Clock for &T
 pub fn &T::now(&self) -> core::result::Result<finstack_ai_kernel::primitives::time::Timestamp, finstack_ai_runtime::ids::IdGenerationError>
 pub trait finstack_ai_runtime::ids::RandomSource
 pub fn finstack_ai_runtime::ids::RandomSource::fill_bytes(&self, &mut [u8]) -> core::result::Result<(), finstack_ai_runtime::ids::IdGenerationError>
+impl finstack_ai_runtime::ids::RandomSource for finstack_ai_runtime::host_driver::InstalledRandom
+pub fn finstack_ai_runtime::host_driver::InstalledRandom::fill_bytes(&self, &mut [u8]) -> core::result::Result<(), finstack_ai_runtime::ids::IdGenerationError>
 impl<T: finstack_ai_runtime::ids::RandomSource + ?core::marker::Sized> finstack_ai_runtime::ids::RandomSource for &T
 pub fn &T::fill_bytes(&self, &mut [u8]) -> core::result::Result<(), finstack_ai_runtime::ids::IdGenerationError>
 pub mod finstack_ai_runtime::ingress
@@ -1300,6 +1378,8 @@ impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::journal::
 pub struct finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 pub finstack_ai_runtime::ports::journal::JournalStoreDescriptor::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
 pub finstack_ai_runtime::ports::journal::JournalStoreDescriptor::store_id: alloc::sync::Arc<str>
+impl finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+pub fn finstack_ai_runtime::ports::journal::JournalStoreDescriptor::unspecified() -> Self
 impl core::clone::Clone for finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 pub fn finstack_ai_runtime::ports::journal::JournalStoreDescriptor::clone(&self) -> finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 impl core::cmp::Eq for finstack_ai_runtime::ports::journal::JournalStoreDescriptor

@@ -7,8 +7,8 @@ use finstack_ai::runtime::ports::PortFuture;
 #[cfg(target_arch = "wasm32")]
 use finstack_ai::runtime::ports::journal::OpaqueSnapshot;
 use finstack_ai::runtime::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
 #[cfg(target_arch = "wasm32")]
@@ -124,6 +124,13 @@ impl HostJournalStore {
 }
 
 impl JournalStore for HostJournalStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor {
+            store_id: Arc::from("finstack.store.host"),
+            metadata: finstack_ai_kernel::Metadata::empty(),
+        }
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         #[cfg(not(target_arch = "wasm32"))]
         {

@@ -11,8 +11,8 @@ use finstack_ai::runtime::ports::context::{
     ContextProviderDescriptor, ContextRequest,
 };
 use finstack_ai::runtime::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 use finstack_ai::runtime::ports::middleware::{
     Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
@@ -315,6 +315,10 @@ pub struct NativeJournalStoreProxy(std::sync::Mutex<()>);
 
 #[cfg(not(target_arch = "wasm32"))]
 impl JournalStore for NativeJournalStoreProxy {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, _request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         drop(self.0.lock());
         Box::pin(async {
@@ -627,6 +631,10 @@ impl JsJournalStoreProxy {
 
 #[cfg(target_arch = "wasm32")]
 impl JournalStore for JsJournalStoreProxy {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, _request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         Box::pin(async {
             Err(StoreError::Unavailable {

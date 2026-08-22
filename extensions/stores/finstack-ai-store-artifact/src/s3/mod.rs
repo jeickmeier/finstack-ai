@@ -5,5 +5,8 @@ mod request;
 mod sigv4;
 mod store;
 
+#[cfg(test)]
+mod loopback;
+
 pub use config::{Addressing, S3ObjectStoreConfig};
 pub use store::S3ObjectStore;

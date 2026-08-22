@@ -11,8 +11,8 @@ use finstack_ai_runtime::ports::context::{
     ContextProviderDescriptor, ContextRequest,
 };
 use finstack_ai_runtime::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 use finstack_ai_runtime::ports::middleware::{
     Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, StageInput, StageOutcome,
@@ -314,6 +314,10 @@ impl FaultJournalStore {
 }
 
 impl JournalStore for FaultJournalStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         if let Some(error) = self.take_fault(StoreOperation::Append) {
             return Box::pin(async move { Err(error) });
@@ -396,6 +400,10 @@ impl AmbiguousAckAfterCommitStore {
 }
 
 impl JournalStore for AmbiguousAckAfterCommitStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         let inner = Arc::clone(&self.inner);
         let remaining = Arc::clone(&self.remaining);

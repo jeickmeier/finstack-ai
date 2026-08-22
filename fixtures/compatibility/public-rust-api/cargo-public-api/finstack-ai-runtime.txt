@@ -1293,6 +1293,8 @@ impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::journal::
 pub struct finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 pub finstack_ai_runtime::ports::journal::JournalStoreDescriptor::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
 pub finstack_ai_runtime::ports::journal::JournalStoreDescriptor::store_id: alloc::sync::Arc<str>
+impl finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+pub fn finstack_ai_runtime::ports::journal::JournalStoreDescriptor::unspecified() -> Self
 impl core::clone::Clone for finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 pub fn finstack_ai_runtime::ports::journal::JournalStoreDescriptor::clone(&self) -> finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 impl core::cmp::Eq for finstack_ai_runtime::ports::journal::JournalStoreDescriptor

@@ -16,6 +16,7 @@ use finstack_ai_runtime::ports::context::ContextProvider;
 #[cfg(feature = "linked-providers")]
 use finstack_ai_runtime::ports::journal::JournalStore;
 use finstack_ai_runtime::ports::middleware::Middleware;
+#[cfg(feature = "linked-providers")]
 use finstack_ai_runtime::ports::model::Model;
 use finstack_ai_runtime::ports::model::{ModelName, ModelSettings};
 use finstack_ai_runtime::ports::observer::Observer;
@@ -223,11 +224,22 @@ impl NativeAgentBuilder {
     /// lock, or output-schema compilation fails.
     pub async fn build_linked(
         mut self,
-        common: LinkedCommon,
+        #[cfg_attr(not(feature = "linked-providers"), allow(unused_mut))] mut common: LinkedCommon,
         model_name: ModelName,
         settings: ModelSettings,
         default_timeout: Duration,
     ) -> Result<LinkedAgent, AgentRunError> {
+        #[cfg(feature = "linked-providers")]
+        if let Some(media) = common.openrouter_media.take() {
+            register_openrouter_media(&mut common.ports, media)?;
+        }
+        #[cfg(not(feature = "linked-providers"))]
+        if common.openrouter_media.is_some() {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_UNSUPPORTED_PLAN,
+                "openrouter_media requires the linked-providers feature",
+            ));
+        }
         let LinkedCommon {
             instruction,
             capabilities,
@@ -415,9 +427,6 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     if let Some(api_key_for_tools) = api_key_for_tools {
         register_openai_media(&mut common.ports, api_key_for_tools)?;
     }
-    if let Some(media) = common.openrouter_media.take() {
-        register_openrouter_media(&mut common.ports, media)?;
-    }
     build_linked_provider(
         (
             "python.agent.openai",
@@ -469,14 +478,17 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
     );
     let mut common = spec.common;
     if let Some(api_key_for_tools) = api_key_for_tools {
-        register_openrouter_media(
-            &mut common.ports,
-            OpenRouterMediaToolsSpec {
-                api_key: api_key_for_tools,
-                referer: spec.referer.clone(),
-                title: spec.title.clone(),
-            },
-        )?;
+        if common.openrouter_media.is_some() {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "openrouter media_tools and openrouter_media cannot both be set",
+            ));
+        }
+        common.openrouter_media = Some(OpenRouterMediaToolsSpec {
+            api_key: api_key_for_tools,
+            referer: spec.referer.clone(),
+            title: spec.title.clone(),
+        });
     }
     build_linked_provider(
         (
@@ -522,10 +534,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
         AnthropicProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    let mut common = spec.common;
-    if let Some(media) = common.openrouter_media.take() {
-        register_openrouter_media(&mut common.ports, media)?;
-    }
+    let common = spec.common;
     build_linked_provider(
         (
             "python.agent.anthropic",
@@ -574,10 +583,7 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         GeminiProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    let mut common = spec.common;
-    if let Some(media) = common.openrouter_media.take() {
-        register_openrouter_media(&mut common.ports, media)?;
-    }
+    let common = spec.common;
     build_linked_provider(
         (
             "python.agent.gemini",
@@ -613,10 +619,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
         OllamaProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    let mut common = spec.common;
-    if let Some(media) = common.openrouter_media.take() {
-        register_openrouter_media(&mut common.ports, media)?;
-    }
+    let common = spec.common;
     build_linked_provider(
         (
             "python.agent.ollama",
@@ -1135,6 +1138,24 @@ mod tests {
         LinkedCommon::default()
     }
 
+    fn toolset_ids(agent: &Agent) -> Vec<String> {
+        agent
+            .resolved()
+            .run_plan()
+            .toolsets()
+            .iter()
+            .map(|toolset| toolset.descriptor().component.id().to_string())
+            .collect()
+    }
+
+    fn openrouter_media() -> OpenRouterMediaToolsSpec {
+        OpenRouterMediaToolsSpec {
+            api_key: "sk-or-media-canary".into(),
+            referer: None,
+            title: None,
+        }
+    }
+
     #[tokio::test]
     async fn openai_constructs_without_a_network_request() {
         let built = Agent::openai(OpenAiAgentSpec {
@@ -1217,7 +1238,9 @@ mod tests {
         })
         .await
         .expect("openai + media construct");
-        assert!(built.agent.capability_catalog().is_empty());
+        let ids = toolset_ids(&built.agent);
+        assert!(ids.contains(&"python.toolset.openai_media".into()));
+        assert!(ids.contains(&"python.toolset.openrouter_media".into()));
     }
 
     #[tokio::test]
@@ -1229,17 +1252,13 @@ mod tests {
             reasoning_summary: None,
             media_tools: false,
             common: LinkedCommon {
-                openrouter_media: Some(OpenRouterMediaToolsSpec {
-                    api_key: "sk-or-media-canary".into(),
-                    referer: None,
-                    title: None,
-                }),
+                openrouter_media: Some(openrouter_media()),
                 ..common()
             },
         })
         .await
         .expect("openai + openrouter media construct");
-        assert!(built.agent.capability_catalog().is_empty());
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
     }
 
     #[tokio::test]
@@ -1300,7 +1319,49 @@ mod tests {
         })
         .await
         .expect("openrouter + media construct");
-        assert!(built.agent.capability_catalog().is_empty());
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[tokio::test]
+    async fn openrouter_registers_common_openrouter_media() {
+        let built = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            common: LinkedCommon {
+                openrouter_media: Some(openrouter_media()),
+                ..common()
+            },
+        })
+        .await
+        .expect("openrouter + common media construct");
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[tokio::test]
+    async fn openrouter_rejects_media_tools_and_common_openrouter_media() {
+        let error = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: true,
+            common: LinkedCommon {
+                openrouter_media: Some(openrouter_media()),
+                ..common()
+            },
+        })
+        .await
+        .err()
+        .expect("both media sources");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("cannot both be set"));
     }
 
     #[tokio::test]
@@ -1442,6 +1503,16 @@ mod tests {
             .expect("gateway construct");
         assert!(built.agent.capability_catalog().is_empty());
         assert_eq!(built.default_timeout, OPENAI_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn gateway_registers_common_openrouter_media() {
+        let mut spec = gateway_spec();
+        spec.common.openrouter_media = Some(openrouter_media());
+        let built = Agent::gateway(spec)
+            .await
+            .expect("gateway + openrouter media construct");
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
     }
 
     #[tokio::test]

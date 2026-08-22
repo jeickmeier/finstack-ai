@@ -26,6 +26,20 @@ pub struct JournalStoreDescriptor {
     pub metadata: Metadata,
 }
 
+impl JournalStoreDescriptor {
+    /// Placeholder identity for stores that have not named themselves.
+    ///
+    /// Production backends must supply a stable `store_id`. Test fakes may
+    /// use this.
+    #[must_use]
+    pub fn unspecified() -> Self {
+        Self {
+            store_id: Arc::from("journal-store.unspecified"),
+            metadata: Metadata::empty(),
+        }
+    }
+}
+
 /// Shared resource ceilings for in-process and sqlite journal stores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StoreLimits {
@@ -67,16 +81,12 @@ impl StoreLimits {
 pub trait JournalStore: PortObject {
     /// Immutable descriptor for this store.
     ///
-    /// The default reports an unspecified identity and no metadata. Backends
-    /// should override it so a host can tell which store is bound to the
-    /// journal port. Operating state stays on
-    /// [`health`](Self::health); this is identity, not status.
-    fn descriptor(&self) -> JournalStoreDescriptor {
-        JournalStoreDescriptor {
-            store_id: Arc::from("journal-store.unspecified"),
-            metadata: Metadata::empty(),
-        }
-    }
+    /// Identity a host records for the store bound to the journal port.
+    ///
+    /// Operating state stays on [`health`](Self::health); this is identity,
+    /// not status. Test fakes may return
+    /// [`JournalStoreDescriptor::unspecified`].
+    fn descriptor(&self) -> JournalStoreDescriptor;
 
     /// Atomically append one frozen request.
     ///

@@ -613,7 +613,7 @@ pub finstack_ai::AgentRunError::Configuration
 pub finstack_ai::AgentRunError::Configuration::code: &'static str
 pub finstack_ai::AgentRunError::Configuration::message: alloc::string::String
 pub finstack_ai::AgentRunError::Failed
-pub finstack_ai::AgentRunError::Failed::descriptor: finstack_ai_kernel::primitives::error::ErrorDescriptor
+pub finstack_ai::AgentRunError::Failed::descriptor: alloc::boxed::Box<finstack_ai_kernel::primitives::error::ErrorDescriptor>
 pub finstack_ai::AgentRunError::Runtime
 pub finstack_ai::AgentRunError::Runtime::code: finstack_ai_kernel::primitives::error::ErrorCode
 pub finstack_ai::AgentRunError::Runtime::message: alloc::string::String
@@ -621,7 +621,7 @@ pub finstack_ai::AgentRunError::Timeout
 pub finstack_ai::AgentRunError::Timeout::timeout: core::time::Duration
 impl finstack_ai::AgentRunError
 pub fn finstack_ai::AgentRunError::code(&self) -> &str
-pub const fn finstack_ai::AgentRunError::descriptor(&self) -> core::option::Option<&finstack_ai_kernel::primitives::error::ErrorDescriptor>
+pub fn finstack_ai::AgentRunError::descriptor(&self) -> core::option::Option<&finstack_ai_kernel::primitives::error::ErrorDescriptor>
 pub const fn finstack_ai::AgentRunError::retryable(&self) -> bool
 impl core::clone::Clone for finstack_ai::AgentRunError
 pub fn finstack_ai::AgentRunError::clone(&self) -> finstack_ai::AgentRunError

@@ -1209,6 +1209,7 @@ fn session_draft(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::JournalStoreDescriptor;
 
     #[test]
     fn session_error_codes_are_stable() {
@@ -1228,6 +1229,10 @@ mod tests {
     struct UnavailableStore;
 
     impl JournalStore for UnavailableStore {
+        fn descriptor(&self) -> JournalStoreDescriptor {
+            JournalStoreDescriptor::unspecified()
+        }
+
         fn append(
             &self,
             _request: finstack_ai_kernel::AppendRequest,

@@ -246,6 +246,10 @@ fn fault_public_types_remain_static_and_copyable() {
 struct UnusedStore;
 
 impl crate::ports::journal::JournalStore for UnusedStore {
+    fn descriptor(&self) -> crate::ports::journal::JournalStoreDescriptor {
+        crate::ports::journal::JournalStoreDescriptor::unspecified()
+    }
+
     fn append(
         &self,
         _request: finstack_ai_kernel::AppendRequest,

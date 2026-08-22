@@ -3,11 +3,10 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::driver::{
     ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
-    ObjectScope, ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, physical_object_key,
+    ObjectScope, ObjectStoreLimits, PageToken, PutPayload, physical_object_key,
     validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
@@ -20,10 +19,10 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::s3::config::S3ObjectStoreConfig;
 use crate::s3::request::{
-    BlobDigestHasher, ListTarget, RequestTarget, StreamingSha256, list_url, map_status_error,
-    map_transport_error, object_url, payload_sha256_hex,
+    BlobDigestHasher, ListTarget, StreamingSha256, list_url, map_status_error, map_transport_error,
+    object_url, payload_sha256_hex,
 };
-use crate::s3::sigv4::{SigningParams, UtcStamp, presign_url, sign_headers};
+use crate::s3::sigv4::{SigningParams, UtcStamp, sign_headers};
 
 /// 64 KiB read chunk used for both hash-pass and streaming-send file reads.
 const FILE_CHUNK_BYTES: usize = 64 * 1024;
@@ -193,16 +192,6 @@ impl ObjectDriver for S3ObjectStore {
         let client = self.client.clone();
         let config = self.config.clone();
         Box::pin(async move { list_impl(&client, &config, scope, prefix, page).await })
-    }
-
-    fn presign_get(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-        expiry: Duration,
-    ) -> PortFuture<Result<PresignedUrl, ObjectError>> {
-        let config = self.config.clone();
-        Box::pin(async move { presign_get_impl(&config, &scope, &key, expiry) })
     }
 
     fn limits(&self) -> ObjectStoreLimits {
@@ -871,35 +860,6 @@ async fn list_impl(
         None
     };
     Ok(ObjectPage { entries, next })
-}
-
-fn presign_get_impl(
-    config: &S3ObjectStoreConfig,
-    scope: &ObjectScope,
-    key: &ObjectKey,
-    expiry: Duration,
-) -> Result<PresignedUrl, ObjectError> {
-    let scope_digest = scope.digest()?;
-    let physical = physical_object_key(config.key_prefix(), &scope_digest, key);
-    let target: RequestTarget = object_url(config, &physical)?;
-    if expiry.is_zero() || expiry.subsec_nanos() != 0 || expiry > config.presign_expiry_max() {
-        return Err(ObjectError::InvalidMetadata {
-            message: Arc::from("invalid_presign_expiry"),
-        });
-    }
-    let params = signing_params(config, UtcStamp::now())?;
-    let url = presign_url(
-        &params,
-        "GET",
-        &target.path,
-        &target.host,
-        &target.scheme,
-        expiry.as_secs(),
-    );
-    Ok(PresignedUrl {
-        url: Arc::from(url),
-        expires_in_secs: expiry.as_secs(),
-    })
 }
 
 #[derive(Debug, Deserialize)]

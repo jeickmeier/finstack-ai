@@ -7,11 +7,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use crate::driver::{
     ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
-    ObjectScope, ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, physical_object_key,
+    ObjectScope, ObjectStoreLimits, PageToken, PutPayload, physical_object_key,
     validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
@@ -98,16 +97,6 @@ impl Default for FakeObjectDriver {
 }
 
 impl FakeObjectDriver {
-    /// Construct a fake with explicit size ceilings.
-    #[must_use]
-    pub fn with_limits(limits: ObjectStoreLimits) -> Self {
-        Self {
-            limits,
-            objects: Mutex::new(BTreeMap::new()),
-            poison_next_get: AtomicBool::new(false),
-        }
-    }
-
     /// Poison the next `get`/`get_to_file` call so it returns
     /// [`ObjectError::Integrity`] instead of the stored content.
     ///
@@ -380,20 +369,6 @@ impl ObjectDriver for FakeObjectDriver {
 
             Ok(ObjectPage { entries, next })
         })();
-        Box::pin(async move { result })
-    }
-
-    fn presign_get(
-        &self,
-        _scope: ObjectScope,
-        key: ObjectKey,
-        expiry: Duration,
-    ) -> PortFuture<Result<PresignedUrl, ObjectError>> {
-        let url = format!("fake://{key}", key = key.as_str());
-        let result = Ok(PresignedUrl {
-            url: Arc::from(url),
-            expires_in_secs: expiry.as_secs(),
-        });
         Box::pin(async move { result })
     }
 

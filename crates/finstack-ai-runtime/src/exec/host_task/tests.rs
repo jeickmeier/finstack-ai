@@ -26,8 +26,8 @@ use crate::event_hub::{
 use crate::ids::{Clock, RandomSource};
 use crate::ports::PortFuture;
 use crate::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 use crate::ports::model::{
     ApprovalGrantMode, InputCapabilities, Model, ModelCapabilities, ModelContextProfile,
@@ -91,6 +91,10 @@ impl MemoryStore {
 }
 
 impl JournalStore for MemoryStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         let mut requests = self.requests.lock().expect("requests");
         if let Some(existing) = requests.get(&request.batch_id()) {

@@ -1087,6 +1087,9 @@ class Agent:
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
         media_tools: bool = False,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -1136,6 +1139,16 @@ class Agent:
             media_tools: Register the OpenRouter media-generation toolset
                 (image, speech, video, and transcription tools) alongside
                 the model, reusing ``api_key``, ``referer``, and ``title``.
+                Cannot be combined with ``openrouter_media_api_key``.
+            openrouter_media_api_key: Optional explicit OpenRouter API key
+                for the media-generation toolset. Cannot be combined with
+                ``media_tools``.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -1152,7 +1165,12 @@ class Agent:
 
         Raises:
             ConfigurationError: The credential, model, capability set, or
-                port registration is invalid.
+                port registration is invalid. Also raised when
+                ``media_tools`` and ``openrouter_media_api_key`` are both
+                set.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
         """
     @staticmethod
     async def anthropic(
@@ -1385,6 +1403,9 @@ class Agent:
         hard_input_bytes: int | None = None,
         auth: str | None = None,
         api_key: str | None = None,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -1422,6 +1443,16 @@ class Agent:
             auth: ``none``, ``bearer``, or ``api_key``. Defaults from
                 ``api_key``.
             api_key: Explicit credential. HTTPS is required when set.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key, independent of ``api_key``.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -1440,6 +1471,9 @@ class Agent:
             ConfigurationError: The route, protocol, ``hard_input_bytes``,
                 credential pairing, capability set, or port registration is
                 invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
         """
     @staticmethod
     async def from_python(

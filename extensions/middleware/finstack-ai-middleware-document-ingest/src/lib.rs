@@ -240,15 +240,14 @@ impl DocumentIngestMiddleware {
 
     /// Construct with explicit parse limits.
     ///
+    /// A `try_new` variant, not a builder step: it takes no `self`. The
+    /// `try_with_limits` name is reserved for the consuming-builder form
+    /// used by the filesystem and shell toolsets.
+    ///
     /// # Errors
     ///
     /// Rejects an invalid checked-in identity or limits that cannot be
     /// encoded into the descriptor configuration digest.
-    /// Construct with explicit limits.
-    ///
-    /// A `try_new` variant, not a builder step: it takes no `self`. The
-    /// `try_with_limits` name is reserved for the consuming-builder form
-    /// used by the filesystem and shell toolsets.
     pub fn try_new_with_limits(
         store: Arc<dyn ArtifactStore>,
         limits: DocumentLimits,

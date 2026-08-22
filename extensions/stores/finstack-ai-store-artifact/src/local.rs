@@ -18,11 +18,10 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::driver::{
     ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
-    ObjectScope, ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, validate_object_metadata,
+    ObjectScope, ObjectStoreLimits, PageToken, PutPayload, validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
 use finstack_ai_runtime::Bytes;
@@ -43,9 +42,8 @@ const MAX_MEDIA_TYPE_BYTES: usize = 1024;
 
 /// Local-filesystem `ObjectDriver` backend.
 ///
-/// Intended for local development and tests. It does not support
-/// [`ObjectDriver::presign_get`]. Existing roots written by the former
-/// multi-file layout must be discarded and rebuilt.
+/// Intended for local development and tests. Existing roots written by the
+/// former multi-file layout must be discarded and rebuilt.
 pub struct LocalObjectStore {
     root: PathBuf,
     limits: ObjectStoreLimits,
@@ -63,13 +61,6 @@ impl LocalObjectStore {
             root: root_dir,
             limits: ObjectStoreLimits::default(),
         })
-    }
-
-    /// Set this store's size ceilings.
-    #[must_use]
-    pub const fn with_limits(mut self, limits: ObjectStoreLimits) -> Self {
-        self.limits = limits;
-        self
     }
 }
 
@@ -287,19 +278,6 @@ impl ObjectDriver for LocalObjectStore {
     ) -> PortFuture<Result<ObjectPage, ObjectError>> {
         let root = self.root.clone();
         Box::pin(async move { list_impl(&root, scope, prefix, page).await })
-    }
-
-    fn presign_get(
-        &self,
-        _scope: ObjectScope,
-        _key: ObjectKey,
-        _expiry: Duration,
-    ) -> PortFuture<Result<PresignedUrl, ObjectError>> {
-        Box::pin(async move {
-            Err(ObjectError::Unsupported {
-                operation: Arc::from("presign_get"),
-            })
-        })
     }
 
     fn limits(&self) -> ObjectStoreLimits {
@@ -734,6 +712,10 @@ async fn get_impl(root: &Path, scope: ObjectScope, key: ObjectKey) -> Result<Byt
     Ok(Bytes::from(content))
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "ObjectDriver::get_to_file is test-only today")
+)]
 async fn get_to_file_impl(
     root: &Path,
     scope: ObjectScope,
@@ -800,6 +782,10 @@ async fn get_to_file_impl(
     Ok(object_ref(opened.header))
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "ObjectDriver::head is test-only today")
+)]
 async fn head_impl(
     root: &Path,
     scope: ObjectScope,

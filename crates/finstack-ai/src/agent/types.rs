@@ -258,7 +258,7 @@ pub enum AgentRunError {
     #[error("{descriptor}")]
     Failed {
         /// Structured failure reported by the port that produced it.
-        descriptor: ErrorDescriptor,
+        descriptor: Box<ErrorDescriptor>,
     },
 }
 
@@ -270,7 +270,6 @@ impl AgentRunError {
             Self::Failed { descriptor } => descriptor.code.as_str(),
             Self::Runtime { code, .. } => code.as_str(),
             Self::Configuration { code, .. } => code,
-            Self::Runtime { .. } => AGENT_RUN_RUNTIME_FAILURE,
             Self::Timeout { .. } => AGENT_RUN_TIMEOUT,
             Self::Cancelled => AGENT_RUN_CANCELLED,
         }
@@ -313,7 +312,9 @@ impl AgentRunError {
     pub(super) fn model(error: ModelError) -> Self {
         error.to_descriptor().map_or_else(
             |fallback| Self::runtime_message(fallback.to_string()),
-            |descriptor| Self::Failed { descriptor },
+            |descriptor| Self::Failed {
+                descriptor: Box::new(descriptor),
+            },
         )
     }
 
@@ -322,7 +323,7 @@ impl AgentRunError {
     /// Present for [`AgentRunError::Failed`]; `None` for configuration,
     /// timeout and cancellation failures, which the SDK raises itself.
     #[must_use]
-    pub const fn descriptor(&self) -> Option<&ErrorDescriptor> {
+    pub fn descriptor(&self) -> Option<&ErrorDescriptor> {
         match self {
             Self::Failed { descriptor } => Some(descriptor),
             _ => None,
@@ -335,6 +336,7 @@ impl AgentRunError {
     /// those to `ErrorCode` touches ten construction sites in the runtime and
     /// is its own change. Prefer [`AgentRunError::code`], which returns the
     /// real one.
+    #[cfg(feature = "native-tokio")]
     pub(crate) const fn static_code(&self) -> &'static str {
         match self {
             Self::Configuration { code, .. } => code,

@@ -25,7 +25,7 @@ use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::context::{
     ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
 };
-use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest};
+use finstack_ai_runtime::ports::journal::{JournalStore, JournalStoreDescriptor, LoadRequest};
 use finstack_ai_runtime::ports::middleware::{
     CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionResult, Middleware,
     MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole,
@@ -104,6 +104,10 @@ impl LoadCountingStore {
 }
 
 impl JournalStore for LoadCountingStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(
         &self,
         request: finstack_ai_kernel::AppendRequest,

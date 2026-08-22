@@ -34,8 +34,8 @@ use crate::middleware::{
 use crate::middleware_driver::{StageDriver, StageFold, StageTerminal};
 use crate::ports::PortFuture;
 use crate::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 use crate::ports::middleware::{MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE};
 use crate::ports::model::CancellationSignal;

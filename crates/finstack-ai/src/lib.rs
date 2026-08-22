@@ -5,8 +5,8 @@
 //! Tokio driver; browser WASM consumers disable defaults and enable
 //! `wasm-host`.
 //!
-//! Start at [`Agent::builder`]. Everything its signature needs is re-exported
-//! here, so a consumer needs no direct kernel or runtime dependency.
+//! Start at [`Agent::builder`]. Identity and run types are re-exported here.
+//! A journal store still comes from a store-leaf crate.
 //!
 //! # Examples
 //!
@@ -60,8 +60,10 @@
 //! # }
 //! ```
 //!
-//! When a run fails, [`AgentRunError::descriptor`] carries the port's full
-//! [`ErrorDescriptor`] rather than a flattened message.
+//! When a model port reports a structured failure, [`AgentRunError::Failed`]
+//! carries the port's full [`ErrorDescriptor`]. Other runtime failures keep
+//! their stable code on [`AgentRunError::Runtime`]; read either with
+//! [`AgentRunError::code`].
 //!
 //! # Module map
 //!

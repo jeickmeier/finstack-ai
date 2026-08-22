@@ -17,8 +17,8 @@ use crate::audit::{
 };
 use crate::ports::PortFuture;
 use crate::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 
 fn id<T: IdTag>(ordinal: u64) -> Id<T> {
@@ -147,6 +147,10 @@ fn loaded_session() -> LoadedSession {
 struct StaticStore(LoadedSession);
 
 impl JournalStore for StaticStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(
         &self,
         _request: finstack_ai_kernel::AppendRequest,

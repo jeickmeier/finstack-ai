@@ -299,8 +299,10 @@ impl PyAgent {
     /// input require a host-built provider because Python factories do not
     /// accept host callback resolvers across FFI.
     /// `media_tools` registers outbound media-generation tools only.
+    /// `openrouter_media_*` registers the same toolset from an explicit key
+    /// and cannot be combined with `media_tools`.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, attribution, reasoning, media toolset, and primary port components distinctly"
@@ -317,6 +319,9 @@ impl PyAgent {
         reasoning_effort: Option<String>,
         reasoning_summary: Option<String>,
         media_tools: bool,
+        openrouter_media_api_key: Option<String>,
+        openrouter_media_referer: Option<String>,
+        openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
@@ -327,6 +332,11 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
+        let openrouter_media = openrouter_media_spec(
+            openrouter_media_api_key,
+            openrouter_media_referer,
+            openrouter_media_title,
+        )?;
         let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
@@ -354,7 +364,7 @@ impl PyAgent {
                     ports,
                     child_runs,
                     approval_grant,
-                    openrouter_media: None,
+                    openrouter_media,
                 },
             })
             .await;
@@ -570,10 +580,10 @@ impl PyAgent {
     /// required. `openai_chat` is a configuration error. The binding does
     /// not read environment variables.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
+    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards gateway route, auth, and primary port components distinctly"
+        reason = "linked factory forwards gateway route, auth, media toolset, and primary port components distinctly"
     )]
     fn gateway(
         py: Python<'_>,
@@ -587,6 +597,9 @@ impl PyAgent {
         hard_input_bytes: Option<u64>,
         auth: Option<String>,
         api_key: Option<String>,
+        openrouter_media_api_key: Option<String>,
+        openrouter_media_referer: Option<String>,
+        openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
@@ -597,6 +610,11 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
+        let openrouter_media = openrouter_media_spec(
+            openrouter_media_api_key,
+            openrouter_media_referer,
+            openrouter_media_title,
+        )?;
         let (ports, artifact_store) = linked_ports(
             py,
             toolsets,
@@ -624,7 +642,7 @@ impl PyAgent {
                     ports,
                     child_runs,
                     approval_grant,
-                    openrouter_media: None,
+                    openrouter_media,
                 },
             })
             .await;

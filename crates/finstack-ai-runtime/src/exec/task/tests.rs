@@ -18,8 +18,8 @@ use crate::events::{
 };
 use crate::ports::PortFuture;
 use crate::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 use crate::ports::model::ApprovalGrantMode;
 use crate::ports::observer::{NoopObserver, ObserverDescriptor, ObserverPayloadMode};
@@ -76,6 +76,10 @@ impl BlockingStore {
 }
 
 impl JournalStore for BlockingStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(
         &self,
         _request: finstack_ai_kernel::AppendRequest,

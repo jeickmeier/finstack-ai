@@ -23,5 +23,7 @@ let billing = BillingObserver::try_new(10_000).expect("billing observer");
 let _ = Arc::new(billing);
 ```
 
-`last_diagnostic()` surfaces `billing_ledger_saturated` when the entry bound is
-hit; new attribution keys are dropped while existing keys keep aggregating.
+`last_diagnostic()` returns `Err` when the diagnostic lock is poisoned, and
+otherwise the last overflow or saturation diagnostic — typically
+`billing_ledger_saturated` when the entry bound is hit. New attribution keys
+are dropped while existing keys keep aggregating.

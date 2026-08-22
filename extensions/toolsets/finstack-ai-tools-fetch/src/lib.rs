@@ -36,6 +36,7 @@ pub use toolset::HttpFetchToolset;
 // them for its own `Toolset` impl).
 #[cfg(test)]
 use finstack_ai_runtime::ports::model::ToolSpec;
+#[cfg(test)]
 use finstack_ai_runtime::ports::tool::ToolCallContext;
 
 /// Stable invalid-arguments error code.

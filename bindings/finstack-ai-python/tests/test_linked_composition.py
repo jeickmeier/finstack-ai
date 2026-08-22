@@ -141,6 +141,43 @@ def test_openai_accepts_reasoning_settings() -> None:
     asyncio.run(construct())
 
 
+def test_openrouter_constructs_with_openrouter_media() -> None:
+    async def construct() -> None:
+        agent = await finstack_ai.Agent.openrouter(
+            "fixture-model",
+            api_key="sk-openrouter-secret-canary-056",
+            openrouter_media_api_key="sk-openrouter-media-canary-056",
+        )
+        assert agent.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
+def test_openrouter_rejects_media_tools_and_openrouter_media() -> None:
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="cannot both be set"):
+            await finstack_ai.Agent.openrouter(
+                "fixture-model",
+                api_key="sk-openrouter-secret-canary-056",
+                media_tools=True,
+                openrouter_media_api_key="sk-openrouter-media-canary-056",
+            )
+
+    asyncio.run(construct())
+
+
+def test_openrouter_media_referer_requires_api_key() -> None:
+    async def construct() -> None:
+        with pytest.raises(ValueError, match="openrouter_media_api_key"):
+            await finstack_ai.Agent.openrouter(
+                "fixture-model",
+                api_key="sk-openrouter-secret-canary-056",
+                openrouter_media_referer="https://example.test",
+            )
+
+    asyncio.run(construct())
+
+
 def test_gateway_constructs_without_a_request() -> None:
     async def construct() -> None:
         agent = await finstack_ai.Agent.gateway(
@@ -151,6 +188,23 @@ def test_gateway_constructs_without_a_request() -> None:
             hard_input_bytes=1_000_000,
             auth="bearer",
             api_key="sk-gateway-secret-canary-045",
+        )
+        assert agent.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
+def test_gateway_constructs_with_openrouter_media() -> None:
+    async def construct() -> None:
+        agent = await finstack_ai.Agent.gateway(
+            "https://api.example.test/v1/responses",
+            "fixture-model",
+            wire_protocol="openai_responses",
+            credential_name="prod",
+            hard_input_bytes=1_000_000,
+            auth="bearer",
+            api_key="sk-gateway-secret-canary-045",
+            openrouter_media_api_key="sk-openrouter-media-canary-056",
         )
         assert agent.capability_catalog() == []
 

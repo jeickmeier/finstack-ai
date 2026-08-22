@@ -215,17 +215,24 @@ impl BillingObserver {
     }
 
     /// Last overflow or saturation diagnostic.
-    #[must_use]
-    pub fn last_diagnostic(&self) -> Option<ObserverDiagnostic> {
-        self.diagnostic.lock().ok().and_then(|slot| *slot)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObserverError::Unavailable`] when the diagnostic lock is
+    /// poisoned. `None` would be indistinguishable from no recorded
+    /// diagnostic, so the failure is reported rather than swallowed.
+    pub fn last_diagnostic(&self) -> Result<Option<ObserverDiagnostic>, ObserverError> {
+        self.diagnostic
+            .lock()
+            .map(|slot| *slot)
+            .map_err(|_| ObserverError::Unavailable)
     }
 
-    /// Snapshot the ledger. Returns an empty snapshot when state is poisoned.
+    /// Snapshot the ledger.
     ///
     /// The ledger assumes at-most-once settlement delivery: a duplicate
     /// `EffectCompleted` (or `EffectFailed`) for the same effect id is folded
     /// in again and double-counts usage, cost, and effect tallies.
-    #[must_use]
     ///
     /// # Errors
     ///
@@ -271,7 +278,6 @@ impl BillingObserver {
 
     /// Export the ledger as JSONL. All numerics are decimal strings; content
     /// payloads are never included.
-    #[must_use]
     ///
     /// # Errors
     ///

@@ -312,7 +312,11 @@ async fn oversized_or_missing_model_names_fall_back_to_none() {
     assert_eq!(snapshot.usage[0].effects, 2);
     assert_eq!(snapshot.unattributed_effects, 0);
     assert_eq!(
-        billing.last_diagnostic().expect("diagnostic").code,
+        billing
+            .last_diagnostic()
+            .expect("lock")
+            .expect("diagnostic")
+            .code,
         "billing_model_name_invalid"
     );
 }
@@ -363,7 +367,11 @@ async fn ledger_saturation_is_counted_and_diagnosed() {
     assert_eq!(snapshot.spend.len(), 1);
     assert_eq!(snapshot.overflowed_events, 1);
     assert_eq!(
-        billing.last_diagnostic().expect("diagnostic").code,
+        billing
+            .last_diagnostic()
+            .expect("lock")
+            .expect("diagnostic")
+            .code,
         "billing_ledger_saturated"
     );
     // The existing key keeps aggregating after saturation.
@@ -449,7 +457,11 @@ async fn pending_map_saturation_evicts_oldest_and_new_origins_still_attribute() 
         .await
         .expect("observe");
     assert_eq!(
-        billing.last_diagnostic().expect("diagnostic").code,
+        billing
+            .last_diagnostic()
+            .expect("lock")
+            .expect("diagnostic")
+            .code,
         "billing_pending_saturated"
     );
     // The evicted oldest effect settles unattributed; the over-cap effect

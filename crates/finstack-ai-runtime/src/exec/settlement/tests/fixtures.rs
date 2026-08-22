@@ -24,7 +24,10 @@ use crate::middleware::{
 };
 use crate::middleware_driver::StageDriver;
 use crate::ports::{PortFuture};
-use crate::ports::journal::{JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth};
+use crate::ports::journal::{
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
+};
 use crate::ports::model::{ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolSpec};
 use crate::ports::tool::{JsonSchemaToolValidatorCompiler, ToolCallContext, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolsetRegistration};
 
@@ -162,6 +165,10 @@ fn commit_request(request: &AppendRequest) -> CommittedBatch {
 }
 
 impl JournalStore for MemoryStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         let committed = commit_request(&request);
         let mut inner = self.inner.lock().expect("lock");

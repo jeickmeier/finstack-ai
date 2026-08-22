@@ -273,6 +273,10 @@ struct StallingSnapshotStore {
 }
 
 impl JournalStore for StallingSnapshotStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(
         &self,
         request: finstack_ai_kernel::AppendRequest,
@@ -334,6 +338,10 @@ impl FakeStore {
 }
 
 impl JournalStore for FakeStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         if let Some(log) = &self.composition_log {
             for record in request.records() {

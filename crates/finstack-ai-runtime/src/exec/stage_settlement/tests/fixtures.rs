@@ -417,6 +417,10 @@ fn commit_request(request: &AppendRequest) -> CommittedBatch {
 }
 
 impl JournalStore for MemoryStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         let mut inner = self.inner.lock().expect("lock");
         if let Some(existing) = inner.requests.get(&request.batch_id()) {

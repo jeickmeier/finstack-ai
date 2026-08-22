@@ -14,8 +14,8 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::ids::{IdGenerationError, RandomSource};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 use finstack_ai_runtime::ports::model::{
     AuthorizationContext, CancellationSignal, LockedModelContextProfile, Model, ModelCallContext,
@@ -214,6 +214,10 @@ impl FailFourthAppendStore {
 }
 
 impl JournalStore for FailFourthAppendStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         let call = self.appends.fetch_add(1, Ordering::AcqRel) + 1;
         if call == 4 {

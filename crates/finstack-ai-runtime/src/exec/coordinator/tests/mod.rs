@@ -24,7 +24,8 @@ use crate::child::{
 };
 use crate::ports::PortFuture;
 use crate::ports::journal::{
-    LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth,
 };
 use crate::ports::model::AuthorizationContext;
 use crate::{

@@ -1,7 +1,4 @@
-use finstack_ai::{
-    AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE,
-    AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, AgentRunError, OperationLocator,
-};
+use finstack_ai::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, OperationLocator};
 use wasm_bindgen::prelude::*;
 
 pub(super) fn configuration_error(message: impl Into<String>) -> AgentRunError {
@@ -42,7 +39,7 @@ pub(super) fn agent_error(error: &AgentRunError, locator: Option<&OperationLocat
     let _ = js_sys::Reflect::set(
         &object,
         &JsValue::from_str("code"),
-        &JsValue::from_str(stable_code(error)),
+        &JsValue::from_str(error.code()),
     );
     let _ = js_sys::Reflect::set(
         &object,
@@ -55,16 +52,6 @@ pub(super) fn agent_error(error: &AgentRunError, locator: Option<&OperationLocat
         let _ = js_sys::Reflect::set(&object, &JsValue::from_str("context"), &context);
     }
     object.into()
-}
-
-fn stable_code(error: &AgentRunError) -> &'static str {
-    match error.code() {
-        AGENT_RUN_INVALID_CONFIGURATION => AGENT_RUN_INVALID_CONFIGURATION,
-        AGENT_RUN_TIMEOUT => AGENT_RUN_TIMEOUT,
-        AGENT_RUN_CANCELLED => AGENT_RUN_CANCELLED,
-        AGENT_RUN_UNSUPPORTED_PLAN => AGENT_RUN_UNSUPPORTED_PLAN,
-        _ => AGENT_RUN_RUNTIME_FAILURE,
-    }
 }
 
 pub(super) fn locator_object(locator: &OperationLocator) -> Result<JsValue, JsValue> {

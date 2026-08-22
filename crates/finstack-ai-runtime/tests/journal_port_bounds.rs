@@ -5,8 +5,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::journal::{
-    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth,
+    JournalStore, JournalStoreDescriptor, LoadRequest, LoadedSession, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14,6 +14,10 @@ struct NativeStore(std::sync::Mutex<()>);
 
 #[cfg(not(target_arch = "wasm32"))]
 impl JournalStore for NativeStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, _request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         drop(self.0.lock());
         Box::pin(async {
@@ -62,6 +66,10 @@ struct LocalStore(std::rc::Rc<std::cell::Cell<u64>>);
 
 #[cfg(target_arch = "wasm32")]
 impl JournalStore for LocalStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor::unspecified()
+    }
+
     fn append(&self, _request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         self.0.set(self.0.get() + 1);
         Box::pin(async {

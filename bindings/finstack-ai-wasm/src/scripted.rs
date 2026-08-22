@@ -91,7 +91,7 @@ pub async fn drive_scripted_model_request(
         Ok(stream) => stream,
         Err(error) => {
             return Ok(JsValue::from_str(&encode_error(
-                error.code(),
+                error.code().as_str(),
                 error.category().as_str(),
             )));
         }
@@ -104,7 +104,7 @@ pub async fn drive_scripted_model_request(
             Ok(_) => {}
             Err(error) => {
                 return Ok(JsValue::from_str(&encode_error(
-                    error.code(),
+                    error.code().as_str(),
                     error.category().as_str(),
                 )));
             }
@@ -166,7 +166,7 @@ pub async fn drive_scripted_tool_call(
         Ok(stream) => stream,
         Err(error) => {
             return Ok(JsValue::from_str(&encode_error(
-                error.code(),
+                error.code().as_str(),
                 error.category().as_str(),
             )));
         }
@@ -179,7 +179,7 @@ pub async fn drive_scripted_tool_call(
             Ok(_) => {}
             Err(error) => {
                 return Ok(JsValue::from_str(&encode_error(
-                    error.code(),
+                    error.code().as_str(),
                     error.category().as_str(),
                 )));
             }
