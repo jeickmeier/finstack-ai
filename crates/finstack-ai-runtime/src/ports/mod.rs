@@ -1,11 +1,11 @@
 //! Six primary ports and the target-correct object and future bounds they share.
 
-pub(crate) mod context;
-pub(crate) mod journal;
-pub(crate) mod middleware;
-pub(crate) mod model;
-pub(crate) mod observer;
-pub(crate) mod tool;
+pub mod context;
+pub mod journal;
+pub mod middleware;
+pub mod model;
+pub mod observer;
+pub mod tool;
 
 use core::future::Future;
 use core::pin::Pin;

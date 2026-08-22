@@ -79,14 +79,14 @@ pub(crate) use finstack_ai_kernel::{
 mod driver;
 mod error;
 mod exec;
-mod ports;
+pub mod ports;
 mod services;
 #[cfg(feature = "native-tokio")]
 #[doc(hidden)]
 pub mod testing;
 
 #[cfg(feature = "native-tokio")]
-pub(crate) use driver::{ingress, native, workflow};
+pub(crate) use driver::native;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use exec::compaction_driver;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
@@ -99,7 +99,7 @@ pub(crate) use exec::{coordinator, event_hub};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use exec::{run_types, settlement, stage_settlement};
 pub(crate) use ports::{context, journal, middleware, model, observer, tool};
-pub(crate) use services::{id_generation, interaction, session};
+pub(crate) use services::{id_generation, interaction};
 
 #[cfg(feature = "wasm-host")]
 pub use driver::host_driver;
@@ -146,7 +146,7 @@ pub use services::process_confinement::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::process_confinement::{configure_process_tree, terminate_process_tree};
-pub use session::{
+pub use services::session::{
     LaneAppendIds, LaneCreateIds, LaneInspect, LaneRunContext, SessionCreateIds, SessionError,
     SessionHeadUpdate, SessionRuntime,
 };
@@ -257,15 +257,147 @@ pub use native::time::{DeadlineDiagnostic, MonotonicDeadline, RuntimeTimeError};
 pub use services::audit::{SecurityAuditGate, SecurityAuditGateError};
 
 #[cfg(feature = "native-tokio")]
-pub use ingress::{
+pub use driver::ingress::{
     ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, InteractionRouter,
 };
 
 #[cfg(feature = "native-tokio")]
-pub use workflow::{
+pub use driver::workflow::{
     WorkflowCheckpoint, WorkflowDriverError, WorkflowRetryDecision, WorkflowSession, WorkflowWait,
     classify_wait, resolve_checkpoint_sequence, retry_decision,
 };
 
 #[cfg(feature = "native-tokio")]
 pub use id_generation::{OsRandomSource, SystemClock};
+
+// ---- audience-scoped modules (canonical paths) ----
+
+/// Run lifecycle: handles, task configuration, retry and shutdown policy, live state and deadlines.
+pub mod run {
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub use crate::exec::live_state::LiveRunState;
+    #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+    pub use crate::host_task::{RunHandle, RunTaskOwner};
+    #[cfg(feature = "native-tokio")]
+    pub use crate::native::time::{DeadlineDiagnostic, MonotonicDeadline, RuntimeTimeError};
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub use crate::run_types::{
+        ModelTaskConfig, RetryBackoffPolicy, RunHandleError, RunStatus, RunTaskConfig,
+        SameIdentityRetryPolicy, ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,
+    };
+    #[cfg(feature = "native-tokio")]
+    pub use crate::task::{RunHandle, RunTaskOwner};
+}
+
+/// Child-run composition: invoking a child agent, starting it, and coordinating budget and lineage.
+pub mod child {
+    pub use crate::services::agent_invoker::{
+        AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext,
+        ChildRunHandle, ChildRunPolicy, ChildRunRequest, ChildRunStatus,
+    };
+    #[cfg(feature = "native-tokio")]
+    pub use crate::services::child_starter::{ChildRunStartRequest, ChildRunStarter};
+    pub use crate::services::composition::{
+        BudgetCoordinator, BudgetOperationIds, ChildCoordinationIds, ChildRunCoordinator,
+        CompositionError, child_relation_digest,
+    };
+}
+
+/// Scoped artifact storage, the one storage concept a host wires.
+pub mod artifact {
+    pub use crate::services::artifact::{
+        ARTIFACT_CAPACITY_EXCEEDED, ARTIFACT_INTEGRITY_FAILURE, ARTIFACT_SCOPE_MISMATCH,
+        ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
+        ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
+        DEFAULT_ARTIFACT_ORPHAN_GRACE_MS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_GC_BATCH,
+        MAX_ARTIFACT_OWNERS, MAX_ARTIFACTS, MAX_TOTAL_ARTIFACT_BYTES, artifact_storage_key,
+        build_artifact_ref, get_required_artifact, stage_required_artifact,
+        validate_artifact_scope, validate_retrieved_artifact, validate_staged_artifact,
+    };
+}
+
+/// The run-event hub: subscriptions, batching, filters and lag policy.
+pub mod events {
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub use crate::event_hub::EventSubscription;
+    pub use crate::event_hub::{
+        EventBatch, EventBatchConfig, EventDeliveryStats, EventFilter, EventHubConfig,
+        EventLagPolicy, EventSubscriptionCloseReason, EventSubscriptionConfig,
+        EventSubscriptionError, EventSubscriptionStatus, ProgressCoalescing,
+    };
+}
+
+/// Session and lane management, plus external-identity binding.
+pub mod session {
+    pub use crate::services::identity_map::{
+        ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
+    };
+    pub use crate::services::session::{
+        LaneAppendIds, LaneCreateIds, LaneInspect, LaneRunContext, SessionCreateIds, SessionError,
+        SessionHeadUpdate, SessionRuntime,
+    };
+}
+
+/// Security-audit sink and the gate that fails closed without it.
+pub mod audit {
+    #[cfg(feature = "native-tokio")]
+    pub use crate::services::audit::SecurityAuditGateHealth;
+    pub use crate::services::audit::{
+        SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
+        SecurityAuditReceipt, SecurityAuditSink,
+    };
+    #[cfg(feature = "native-tokio")]
+    pub use crate::services::audit::{SecurityAuditGate, SecurityAuditGateError};
+}
+
+/// Process confinement profiles and backends for spawned children.
+pub mod confinement {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use crate::services::process_confinement::{
+        CONFINEMENT_UNAVAILABLE, ConfinedChild, ConfinementBackend, ConfinementError,
+        ConfinementProfile, ProcessConfinement, WindowsLpacProfile,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use crate::services::process_confinement::{
+        configure_process_tree, terminate_process_tree,
+    };
+}
+
+/// Shared-budget reservation and settlement.
+pub mod budget {
+    pub use crate::services::budget::{BudgetError, BudgetLedger, BudgetReservationState};
+}
+
+/// Durable ingress: external completion and interaction routing.
+pub mod ingress {
+    #[cfg(feature = "native-tokio")]
+    pub use crate::driver::ingress::{
+        ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, InteractionRouter,
+    };
+    pub use crate::interaction::{InteractionResumeAction, interaction_resume_action};
+}
+
+/// Workflow sessions, checkpoints and retry decisions.
+pub mod workflow {
+    #[cfg(feature = "native-tokio")]
+    pub use crate::driver::workflow::{
+        WorkflowCheckpoint, WorkflowDriverError, WorkflowRetryDecision, WorkflowSession,
+        WorkflowWait, classify_wait, resolve_checkpoint_sequence, retry_decision,
+    };
+}
+
+/// Deterministic id generation: clocks, random sources, UUIDv7.
+pub mod ids {
+    pub use crate::id_generation::{
+        Clock, ExternalClock, IdGenerationError, RandomSource, UuidV7Generator,
+    };
+    #[cfg(feature = "native-tokio")]
+    pub use crate::id_generation::{OsRandomSource, SystemClock};
+}
+
+/// The commit coordinator: commit-before-effect ordering and outcomes.
+pub mod commit {
+    pub use crate::coordinator::{
+        CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault,
+    };
+}
