@@ -251,7 +251,7 @@ impl Registry {
         )
         .map_err(|error| AgentBuildError::MiddlewareInvalid {
             request_source: request.source.clone(),
-            failure_code: Arc::from(error.code()),
+            failure_code: Arc::from(error.code().as_str()),
             message: error.descriptor().message,
         })?;
 
@@ -448,7 +448,7 @@ impl Registry {
                         request_source: source.clone(),
                         component: id.clone(),
                         registration_source: registration.descriptor.source.id.clone(),
-                        failure_code: Arc::from(error.code()),
+                        failure_code: Arc::from(error.code().as_str()),
                         message: Arc::from(error.message()),
                     });
                 }

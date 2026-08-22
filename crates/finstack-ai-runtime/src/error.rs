@@ -70,8 +70,8 @@ impl PortErrorData {
         }
     }
 
-    pub(crate) fn code(&self) -> &str {
-        self.code.as_str()
+    pub(crate) const fn code(&self) -> &ErrorCode {
+        &self.code
     }
 
     pub(crate) const fn category(&self) -> ErrorCategory {

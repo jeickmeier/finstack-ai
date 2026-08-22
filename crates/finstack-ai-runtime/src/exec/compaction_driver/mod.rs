@@ -52,7 +52,7 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
     authorize_compaction_model_request(seed.compaction_authorization.as_ref(), request).map_err(
         |error| RunHandleError::Middleware {
-            code: Arc::from(error.code()),
+            code: Arc::from(error.code().as_str()),
         },
     )?;
     if coordinator
@@ -384,7 +384,7 @@ pub(crate) fn first_compaction_request(
 /// which classifies the same `ModelError` as a model-port failure.
 fn compaction_model_error(error: &crate::ports::model::ModelError) -> RunHandleError {
     RunHandleError::Middleware {
-        code: Arc::from(error.code()),
+        code: Arc::from(error.code().as_str()),
     }
 }
 

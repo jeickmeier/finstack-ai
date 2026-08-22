@@ -1,4 +1,4 @@
-use finstack_ai_kernel::{ErrorCategory, ErrorDescriptor, InteractionRequest, Metadata};
+use finstack_ai_kernel::{ErrorCategory, ErrorCode, ErrorDescriptor, InteractionRequest, Metadata};
 use thiserror::Error;
 
 use crate::error::{PortErrorData, PortErrorInvalid};
@@ -86,7 +86,7 @@ impl ToolError {
             metadata,
             TOOL_TEXT_MAX_BYTES,
         )?;
-        if let Some(expected) = reserved_category(data.code())
+        if let Some(expected) = reserved_category(data.code().as_str())
             && (data.category() != expected || data.retryable())
         {
             return Err(PortErrorInvalid::InvalidClassification);
@@ -111,7 +111,7 @@ impl ToolError {
 
     /// Stable adapter code.
     #[must_use]
-    pub fn code(&self) -> &str {
+    pub fn code(&self) -> &ErrorCode {
         self.data.code()
     }
 

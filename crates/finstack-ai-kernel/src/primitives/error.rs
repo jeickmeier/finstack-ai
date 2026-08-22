@@ -110,6 +110,30 @@ impl fmt::Display for ErrorCode {
     }
 }
 
+impl PartialEq<str> for ErrorCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for ErrorCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<ErrorCode> for str {
+    fn eq(&self, other: &ErrorCode) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<ErrorCode> for &str {
+    fn eq(&self, other: &ErrorCode) -> bool {
+        *self == other.as_str()
+    }
+}
+
 impl AsRef<str> for ErrorCode {
     fn as_ref(&self) -> &str {
         self.as_str()

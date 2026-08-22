@@ -94,7 +94,7 @@ impl PostCommitDispatcher for ModelDispatcher {
         parse_committed_model_request(self.model.as_ref(), &self.profile, request)
             .map(|_| ())
             .map_err(|error| DispatchError {
-                code: stable_model_dispatch_code(error.code()),
+                code: stable_model_dispatch_code(error.code().as_str()),
             })
     }
 
@@ -142,7 +142,7 @@ impl PostCommitDispatcher for ModelDispatcher {
                         Err(error) => {
                             return Box::pin(async move {
                                 Err(DispatchError {
-                                    code: stable_model_dispatch_code(error.code()),
+                                    code: stable_model_dispatch_code(error.code().as_str()),
                                 })
                             });
                         }

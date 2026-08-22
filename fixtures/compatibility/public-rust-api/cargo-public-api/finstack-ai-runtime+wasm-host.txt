@@ -1064,7 +1064,7 @@ impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ports::conte
 pub fn finstack_ai_runtime::ports::context::ContextContribution::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_runtime::ports::context::ContextError
 impl finstack_ai_runtime::ports::context::ContextError
-pub fn finstack_ai_runtime::ports::context::ContextError::code(&self) -> &str
+pub fn finstack_ai_runtime::ports::context::ContextError::code(&self) -> &finstack_ai_kernel::primitives::error::ErrorCode
 pub fn finstack_ai_runtime::ports::context::ContextError::descriptor(&self) -> finstack_ai_kernel::primitives::error::ErrorDescriptor
 pub fn finstack_ai_runtime::ports::context::ContextError::try_new(impl core::convert::AsRef<str>, finstack_ai_kernel::primitives::error::ErrorCategory, impl core::convert::AsRef<str>, finstack_ai_kernel::primitives::raw_json::Metadata) -> core::result::Result<Self, finstack_ai_runtime::PortErrorInvalid>
 impl core::clone::Clone for finstack_ai_runtime::ports::context::ContextError
@@ -1831,7 +1831,7 @@ impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ports::middl
 pub fn finstack_ai_runtime::ports::middleware::MiddlewareDescriptor::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_runtime::ports::middleware::MiddlewareError
 impl finstack_ai_runtime::ports::middleware::MiddlewareError
-pub fn finstack_ai_runtime::ports::middleware::MiddlewareError::code(&self) -> &str
+pub fn finstack_ai_runtime::ports::middleware::MiddlewareError::code(&self) -> &finstack_ai_kernel::primitives::error::ErrorCode
 pub fn finstack_ai_runtime::ports::middleware::MiddlewareError::descriptor(&self) -> finstack_ai_kernel::primitives::error::ErrorDescriptor
 pub fn finstack_ai_runtime::ports::middleware::MiddlewareError::try_new(impl core::convert::AsRef<str>, finstack_ai_kernel::primitives::error::ErrorCategory, impl core::convert::AsRef<str>, finstack_ai_kernel::primitives::raw_json::Metadata) -> core::result::Result<Self, finstack_ai_runtime::PortErrorInvalid>
 impl core::clone::Clone for finstack_ai_runtime::ports::middleware::MiddlewareError
@@ -2408,7 +2408,7 @@ pub fn finstack_ai_runtime::ports::model::ModelDescriptor::deserialize<__D>(__D)
 pub struct finstack_ai_runtime::ports::model::ModelError
 impl finstack_ai_runtime::ports::model::ModelError
 pub const fn finstack_ai_runtime::ports::model::ModelError::category(&self) -> finstack_ai_kernel::primitives::error::ErrorCategory
-pub fn finstack_ai_runtime::ports::model::ModelError::code(&self) -> &str
+pub fn finstack_ai_runtime::ports::model::ModelError::code(&self) -> &finstack_ai_kernel::primitives::error::ErrorCode
 pub fn finstack_ai_runtime::ports::model::ModelError::message(&self) -> &str
 pub const fn finstack_ai_runtime::ports::model::ModelError::metadata(&self) -> &finstack_ai_kernel::primitives::raw_json::Metadata
 pub const fn finstack_ai_runtime::ports::model::ModelError::retryable(&self) -> bool
@@ -3149,7 +3149,7 @@ pub fn finstack_ai_runtime::ports::tool::ToolDeferral::deserialize<__D>(__D) -> 
 pub struct finstack_ai_runtime::ports::tool::ToolError
 impl finstack_ai_runtime::ports::tool::ToolError
 pub const fn finstack_ai_runtime::ports::tool::ToolError::category(&self) -> finstack_ai_kernel::primitives::error::ErrorCategory
-pub fn finstack_ai_runtime::ports::tool::ToolError::code(&self) -> &str
+pub fn finstack_ai_runtime::ports::tool::ToolError::code(&self) -> &finstack_ai_kernel::primitives::error::ErrorCode
 pub fn finstack_ai_runtime::ports::tool::ToolError::interaction_request(&self) -> core::option::Option<finstack_ai_kernel::effects::interaction::InteractionRequest>
 pub fn finstack_ai_runtime::ports::tool::ToolError::message(&self) -> &str
 pub const fn finstack_ai_runtime::ports::tool::ToolError::metadata(&self) -> &finstack_ai_kernel::primitives::raw_json::Metadata

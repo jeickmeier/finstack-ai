@@ -397,7 +397,7 @@ fn document_parse_rejects_invalid_artifact_reference() {
         DocumentToolset::try_new(Arc::new(CaptureArtifactStore::default())).expect("toolset");
     let arguments = serde_json::json!({"artifact": {}});
     let error = call_tool_err(&toolset, "document_parse", &arguments);
-    assert_eq!(error.code(), crate::DOCUMENT_INVALID_ARGUMENTS);
+    assert_eq!(error.code().as_str(), crate::DOCUMENT_INVALID_ARGUMENTS);
 }
 
 #[test]
@@ -420,7 +420,7 @@ fn missing_artifact_or_path_property_is_invalid() {
         serde_json::json!({"path": "/tmp/x.pdf"}),
     ] {
         let error = call_tool_err(&toolset, "document_parse", &arguments);
-        assert_eq!(error.code(), crate::DOCUMENT_INVALID_ARGUMENTS);
+        assert_eq!(error.code().as_str(), crate::DOCUMENT_INVALID_ARGUMENTS);
     }
 }
 
@@ -432,7 +432,7 @@ fn unsupported_format_maps_to_stable_code() {
     let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
     let error = call_tool_err(&toolset, "document_parse", &arguments);
     assert!(matches!(
-        error.code(),
+        error.code().as_str(),
         crate::DOCUMENT_UNSUPPORTED_FORMAT | crate::DOCUMENT_PARSE_FAILED
     ));
 }
@@ -447,7 +447,7 @@ fn page_range_is_rejected_for_non_pdf_sources() {
         "page_range": [1, 1],
     });
     let error = call_tool_err(&toolset, "document_parse", &arguments);
-    assert_eq!(error.code(), crate::DOCUMENT_INVALID_ARGUMENTS);
+    assert_eq!(error.code().as_str(), crate::DOCUMENT_INVALID_ARGUMENTS);
 }
 
 #[test]
@@ -461,7 +461,7 @@ fn page_range_rejects_zero_based_and_reversed_ranges() {
             "page_range": [range.0, range.1],
         });
         let error = call_tool_err(&toolset, "document_parse", &arguments);
-        assert_eq!(error.code(), crate::DOCUMENT_INVALID_ARGUMENTS);
+        assert_eq!(error.code().as_str(), crate::DOCUMENT_INVALID_ARGUMENTS);
     }
 }
 

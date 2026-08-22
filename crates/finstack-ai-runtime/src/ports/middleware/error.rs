@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_kernel::{ErrorCategory, ErrorDescriptor, Metadata};
+use finstack_ai_kernel::{ErrorCategory, ErrorCode, ErrorDescriptor, Metadata};
 use thiserror::Error;
 
 use crate::error::{PortErrorData, PortErrorInvalid};
@@ -92,7 +92,7 @@ impl MiddlewareError {
 
     /// Stable error code.
     #[must_use]
-    pub fn code(&self) -> &str {
+    pub fn code(&self) -> &ErrorCode {
         self.data.code()
     }
 

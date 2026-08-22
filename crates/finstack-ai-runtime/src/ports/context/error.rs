@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_kernel::{ErrorCategory, ErrorDescriptor, Metadata};
+use finstack_ai_kernel::{ErrorCategory, ErrorCode, ErrorDescriptor, Metadata};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -83,7 +83,7 @@ impl ContextError {
 
     /// Stable error code.
     #[must_use]
-    pub fn code(&self) -> &str {
+    pub fn code(&self) -> &ErrorCode {
         self.data.code()
     }
 

@@ -256,6 +256,6 @@ fn context_stage_error(code: &'static str) -> RunHandleError {
 
 pub(crate) fn context_error(error: &ContextError) -> RunHandleError {
     RunHandleError::Middleware {
-        code: std::sync::Arc::from(error.code()),
+        code: std::sync::Arc::from(error.code().as_str()),
     }
 }

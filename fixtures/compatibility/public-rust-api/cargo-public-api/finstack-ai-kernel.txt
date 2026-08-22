@@ -3086,6 +3086,14 @@ impl core::cmp::Ord for finstack_ai_kernel::ErrorCode
 pub fn finstack_ai_kernel::ErrorCode::cmp(&self, &finstack_ai_kernel::ErrorCode) -> core::cmp::Ordering
 impl core::cmp::PartialEq for finstack_ai_kernel::ErrorCode
 pub fn finstack_ai_kernel::ErrorCode::eq(&self, &finstack_ai_kernel::ErrorCode) -> bool
+impl core::cmp::PartialEq<&str> for finstack_ai_kernel::ErrorCode
+pub fn finstack_ai_kernel::ErrorCode::eq(&self, &&str) -> bool
+impl core::cmp::PartialEq<finstack_ai_kernel::ErrorCode> for &str
+pub fn &str::eq(&self, &finstack_ai_kernel::ErrorCode) -> bool
+impl core::cmp::PartialEq<finstack_ai_kernel::ErrorCode> for str
+pub fn str::eq(&self, &finstack_ai_kernel::ErrorCode) -> bool
+impl core::cmp::PartialEq<str> for finstack_ai_kernel::ErrorCode
+pub fn finstack_ai_kernel::ErrorCode::eq(&self, &str) -> bool
 impl core::cmp::PartialOrd for finstack_ai_kernel::ErrorCode
 pub fn finstack_ai_kernel::ErrorCode::partial_cmp(&self, &finstack_ai_kernel::ErrorCode) -> core::option::Option<core::cmp::Ordering>
 impl core::convert::AsRef<str> for finstack_ai_kernel::ErrorCode

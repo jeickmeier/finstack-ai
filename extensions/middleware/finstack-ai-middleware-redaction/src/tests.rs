@@ -601,7 +601,7 @@ fn fail_outcome_returns_err_when_descriptor_is_unconstructable() {
         Ok(other) => panic!("expected Err, got {other:?}"),
     };
     assert!(!error.to_string().contains(secret));
-    assert!(!error.code().contains(secret));
+    assert!(!error.code().as_str().contains(secret));
     assert_eq!(error.code(), super::FAIL_CONSTRUCTION_CODE);
 }
 

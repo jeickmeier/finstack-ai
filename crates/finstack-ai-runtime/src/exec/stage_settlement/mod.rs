@@ -102,6 +102,6 @@ pub(super) fn stage_error(code: &'static str) -> RunHandleError {
 
 pub(super) fn middleware_error(error: &MiddlewareError) -> RunHandleError {
     RunHandleError::Middleware {
-        code: Arc::from(error.code()),
+        code: Arc::from(error.code().as_str()),
     }
 }

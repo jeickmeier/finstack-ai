@@ -413,7 +413,7 @@ pub(crate) async fn spawn_owner(
         finstack_ai_runtime::ports::model::ReadyModel::prepare(model)
             .await
             .map_err(|error| RunHandleError::Model {
-                code: Arc::from(error.code()),
+                code: Arc::from(error.code().as_str()),
             })?,
     );
     Box::pin(RunTaskOwner::spawn_with_model_and_tools(

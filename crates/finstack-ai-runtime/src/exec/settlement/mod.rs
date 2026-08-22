@@ -411,7 +411,7 @@ impl RandomSource for ProgressRandom {
 
 pub(crate) fn model_handle_error(error: &ModelError) -> RunHandleError {
     RunHandleError::Model {
-        code: Arc::from(error.code()),
+        code: Arc::from(error.code().as_str()),
     }
 }
 
@@ -455,7 +455,7 @@ pub(crate) fn tool_resume_retry_seeds(
 
 pub(crate) fn tool_handle_error(error: &ToolError) -> RunHandleError {
     RunHandleError::Tool {
-        code: Arc::from(error.code()),
+        code: Arc::from(error.code().as_str()),
     }
 }
 
