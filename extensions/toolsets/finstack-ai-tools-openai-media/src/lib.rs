@@ -730,7 +730,7 @@ mod tests {
         OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
         ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
-    use finstack_ai_memory::InProcessArtifactStore;
+    use finstack_ai_memory::store::InProcessArtifactStore;
     use finstack_ai_runtime::{
         ApprovalState, ArtifactStore, AuthorizationContext, CancellationSignal,
         JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, RunCallContext, ToolCatalogPlan,

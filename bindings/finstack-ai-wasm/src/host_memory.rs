@@ -12,9 +12,10 @@
 
 use std::sync::Arc;
 
-use finstack_ai_memory::{
-    MatchEvidence, MemoryHit, MemoryId, MemoryListing, MemoryPage, MemoryQuery, MemoryRecord,
-    MemoryScope, MemoryStore, MemoryStoreError, PutOutcome,
+use finstack_ai_memory::record::{MemoryId, MemoryRecord, MemoryScope};
+use finstack_ai_memory::store::{
+    MatchEvidence, MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStore,
+    MemoryStoreError, PutOutcome,
 };
 
 use finstack_ai::runtime::PortFuture;
@@ -595,10 +596,12 @@ mod tests {
     use crate::executor::block_on_ready;
     use crate::host::NativeHostResult;
     use finstack_ai_kernel::{Sensitivity, Timestamp};
-    use finstack_ai_memory::{
-        ExtractionMethod, MatchEvidence, MemoryBody, MemoryId, MemoryPage, MemoryProvenance,
-        MemoryQuery, MemoryRecord, MemoryScope, MemoryStore, MemoryStoreError, PutOutcome,
+    use finstack_ai_memory::record::{
+        ExtractionMethod, MemoryBody, MemoryId, MemoryProvenance, MemoryRecord, MemoryScope,
         RetentionPolicy,
+    };
+    use finstack_ai_memory::store::{
+        MatchEvidence, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
     };
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -888,7 +891,7 @@ mod tests {
             replacement
                 .supersedes
                 .as_ref()
-                .map(finstack_ai_memory::MemoryId::as_str),
+                .map(finstack_ai_memory::record::MemoryId::as_str),
             Some("m1")
         );
     }

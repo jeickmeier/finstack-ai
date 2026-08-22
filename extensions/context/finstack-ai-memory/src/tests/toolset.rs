@@ -12,7 +12,7 @@ use finstack_ai_runtime::{
 };
 use futures_util::StreamExt;
 
-use crate::MemoryScope;
+use crate::record::MemoryScope;
 use crate::store::{InProcessArtifactStore, InProcessMemoryStore, MemoryPage, MemoryStore};
 use crate::toolset::{MemoryPolicy, MemoryToolset};
 
@@ -20,7 +20,7 @@ fn toolset_with_policy(policy: MemoryPolicy) -> (MemoryToolset, Arc<InProcessMem
     let store = Arc::new(InProcessMemoryStore::new());
     let artifact_store = Arc::new(InProcessArtifactStore::default());
     let scope = MemoryScope::try_new("tenant-a").expect("scope");
-    let clock: crate::MemoryClock = Arc::new(|| UNIX_EPOCH);
+    let clock: crate::record::MemoryClock = Arc::new(|| UNIX_EPOCH);
     let toolset = MemoryToolset::try_new(
         store.clone() as Arc<dyn MemoryStore>,
         artifact_store,
@@ -213,7 +213,7 @@ async fn policy_is_enforced_at_call_and_reconcile_time() {
     else {
         panic!("disabled direct call must fail");
     };
-    assert_eq!(error.code(), crate::MEMORY_TOOL_POLICY_DENIED);
+    assert_eq!(error.code(), crate::toolset::MEMORY_TOOL_POLICY_DENIED);
 
     let effect = finstack_ai_runtime::PendingToolEffect {
         call: validated_call(&toolset, "forget_memory", args),
@@ -226,12 +226,12 @@ async fn policy_is_enforced_at_call_and_reconcile_time() {
         .reconcile(ctx, effect)
         .await
         .expect_err("disabled reconciliation");
-    assert_eq!(error.code(), crate::MEMORY_TOOL_POLICY_DENIED);
+    assert_eq!(error.code(), crate::toolset::MEMORY_TOOL_POLICY_DENIED);
     assert!(
         store
             .get(
                 MemoryScope::try_new("tenant-a").expect("scope"),
-                crate::MemoryId::parse("m1").expect("id"),
+                crate::record::MemoryId::parse("m1").expect("id"),
             )
             .await
             .expect("get")
@@ -285,12 +285,15 @@ async fn remember_stages_large_bodies_as_blobs() {
     let record = store
         .get(
             MemoryScope::try_new("tenant-a").expect("scope"),
-            crate::MemoryId::parse("mem-large").expect("id"),
+            crate::record::MemoryId::parse("mem-large").expect("id"),
         )
         .await
         .expect("get")
         .expect("record present");
-    assert!(matches!(record.body, crate::MemoryBody::Blob { .. }));
+    assert!(matches!(
+        record.body,
+        crate::record::MemoryBody::Blob { .. }
+    ));
     assert_eq!(record.preview.chars().count(), 256);
 }
 
@@ -318,7 +321,7 @@ async fn search_memory_returns_hits_and_never_tombstoned() {
         .forget(
             Arc::from("direct-forget"),
             MemoryScope::try_new("tenant-a").expect("scope"),
-            crate::MemoryId::parse("mem-searchable").expect("id"),
+            crate::record::MemoryId::parse("mem-searchable").expect("id"),
         )
         .await
         .expect("forget");
@@ -369,7 +372,7 @@ async fn forget_and_correct_require_ids_and_are_idempotent() {
     let record = store
         .get(
             MemoryScope::try_new("tenant-a").expect("scope"),
-            crate::MemoryId::parse("mem-forgettable").expect("id"),
+            crate::record::MemoryId::parse("mem-forgettable").expect("id"),
         )
         .await
         .expect("get");
@@ -432,7 +435,7 @@ async fn correct_memory_supersedes_and_is_idempotent() {
     let old_record = store
         .get(
             scope.clone(),
-            crate::MemoryId::parse("mem-old").expect("id"),
+            crate::record::MemoryId::parse("mem-old").expect("id"),
         )
         .await
         .expect("get");
@@ -441,13 +444,16 @@ async fn correct_memory_supersedes_and_is_idempotent() {
     let new_record = store
         .get(
             scope.clone(),
-            crate::MemoryId::parse(&expected_new_id).expect("id"),
+            crate::record::MemoryId::parse(&expected_new_id).expect("id"),
         )
         .await
         .expect("get")
         .expect("new record present");
     assert_eq!(
-        new_record.supersedes.as_ref().map(crate::MemoryId::as_str),
+        new_record
+            .supersedes
+            .as_ref()
+            .map(crate::record::MemoryId::as_str),
         Some("mem-old")
     );
 
@@ -533,11 +539,17 @@ async fn correct_memory_stages_large_replacement_bodies_as_blobs() {
     assert!(!result.is_error);
 
     let new_record = store
-        .get(scope, crate::MemoryId::parse(&expected_new_id).expect("id"))
+        .get(
+            scope,
+            crate::record::MemoryId::parse(&expected_new_id).expect("id"),
+        )
         .await
         .expect("get")
         .expect("new record present");
-    assert!(matches!(new_record.body, crate::MemoryBody::Blob { .. }));
+    assert!(matches!(
+        new_record.body,
+        crate::record::MemoryBody::Blob { .. }
+    ));
     assert_eq!(new_record.preview.chars().count(), 256);
 }
 
@@ -556,7 +568,7 @@ async fn call_rejects_a_locator_tenant_other_than_the_configured_one() {
     else {
         panic!("a foreign tenant scope must be rejected");
     };
-    assert_eq!(error.code(), crate::MEMORY_TOOL_INVALID_ARGUMENTS);
+    assert_eq!(error.code(), crate::toolset::MEMORY_TOOL_INVALID_ARGUMENTS);
 
     let listing = store
         .list(
@@ -585,7 +597,7 @@ async fn reconcile_rejects_a_locator_tenant_other_than_the_configured_one() {
     let Err(error) = toolset.reconcile(ctx, effect).await else {
         panic!("a foreign tenant scope must be rejected on reconcile");
     };
-    assert_eq!(error.code(), crate::MEMORY_TOOL_INVALID_ARGUMENTS);
+    assert_eq!(error.code(), crate::toolset::MEMORY_TOOL_INVALID_ARGUMENTS);
 
     let listing = store
         .list(
@@ -620,7 +632,7 @@ async fn reconcile_replays_a_matching_tenant_call() {
     let record = store
         .get(
             MemoryScope::try_new("tenant-a").expect("scope"),
-            crate::MemoryId::parse("mem-reconciled").expect("id"),
+            crate::record::MemoryId::parse("mem-reconciled").expect("id"),
         )
         .await
         .expect("get");
@@ -654,12 +666,15 @@ async fn remember_reports_an_id_conflict_instead_of_clobbering() {
     .await;
     assert!(second.is_error);
     let value: serde_json::Value = serde_json::from_str(second.output.as_str()).expect("json");
-    assert_eq!(value["code"].as_str(), Some(crate::MEMORY_TOOL_ID_CONFLICT));
+    assert_eq!(
+        value["code"].as_str(),
+        Some(crate::toolset::MEMORY_TOOL_ID_CONFLICT)
+    );
 
     let record = store
         .get(
             MemoryScope::try_new("tenant-a").expect("scope"),
-            crate::MemoryId::parse("mem-taken").expect("id"),
+            crate::record::MemoryId::parse("mem-taken").expect("id"),
         )
         .await
         .expect("get")
@@ -708,13 +723,13 @@ async fn correct_memory_rejects_an_unchanged_body() {
     let value: serde_json::Value = serde_json::from_str(result.output.as_str()).expect("json");
     assert_eq!(
         value["code"].as_str(),
-        Some(crate::MEMORY_TOOL_SELF_SUPERSESSION)
+        Some(crate::toolset::MEMORY_TOOL_SELF_SUPERSESSION)
     );
 
     let record = store
         .get(
             MemoryScope::try_new("tenant-a").expect("scope"),
-            crate::MemoryId::parse(&old_id).expect("id"),
+            crate::record::MemoryId::parse(&old_id).expect("id"),
         )
         .await
         .expect("get")
@@ -736,7 +751,7 @@ async fn scope_comes_from_configuration_not_arguments() {
     else {
         panic!("extra unknown field must be rejected");
     };
-    assert_eq!(error.code(), crate::MEMORY_TOOL_INVALID_ARGUMENTS);
+    assert_eq!(error.code(), crate::toolset::MEMORY_TOOL_INVALID_ARGUMENTS);
 }
 
 #[tokio::test]
@@ -758,7 +773,7 @@ async fn remember_accepts_a_long_multibyte_body() {
     let listing = store
         .list(
             MemoryScope::try_new("tenant-a").expect("scope"),
-            crate::MemoryPage {
+            crate::store::MemoryPage {
                 offset: 0,
                 limit: 10,
             },

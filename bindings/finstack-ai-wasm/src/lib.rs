@@ -67,9 +67,9 @@ use std::sync::Arc;
 
 use wasm_bindgen::prelude::*;
 
-/// In-process, non-persistent [`MemoryStore`](finstack_ai_memory::MemoryStore)
+/// In-process, non-persistent [`MemoryStore`](finstack_ai_memory::store::MemoryStore)
 /// for wasm consumers that skip host-backed persistence entirely.
-pub use finstack_ai_memory::InProcessMemoryStore;
+pub use finstack_ai_memory::store::InProcessMemoryStore;
 
 /// Install the host driver when the generated module loads.
 #[cfg(target_arch = "wasm32")]
@@ -512,8 +512,9 @@ impl JsMemoryStore {
     // Agent port bundle. Kept for the coming memory-extension task and for
     // direct Rust composition.
     #[allow(dead_code)]
-    pub(crate) fn port(&self) -> std::sync::Arc<dyn finstack_ai_memory::MemoryStore> {
-        std::sync::Arc::clone(&self.inner) as std::sync::Arc<dyn finstack_ai_memory::MemoryStore>
+    pub(crate) fn port(&self) -> std::sync::Arc<dyn finstack_ai_memory::store::MemoryStore> {
+        std::sync::Arc::clone(&self.inner)
+            as std::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>
     }
 }
 
@@ -656,7 +657,7 @@ pub fn compile_native_host_adapters() {
     use crate::host_memory::HostMemoryStore;
     use crate::host_store::{HostJournalStore, HostJournalStoreOptions};
     use finstack_ai::runtime::{ArtifactStore, Clock, JournalStore, RandomSource};
-    use finstack_ai_memory::MemoryStore;
+    use finstack_ai_memory::store::MemoryStore;
 
     compile_native_port_adapters();
     let store = HostJournalStore::from_callback(

@@ -4,7 +4,7 @@ use finstack_ai_kernel::{
     ArtifactId, ArtifactRef, BlobRef, ContentBlock, Digest, Message, MessageRole, Metadata,
     TEXT_MAX_BYTES, ToolCallId, ToolResultBlock,
 };
-use finstack_ai_memory::InProcessArtifactStore;
+use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_runtime::{
     ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
     MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware as _, MiddlewareError, ModelRequestDraft,

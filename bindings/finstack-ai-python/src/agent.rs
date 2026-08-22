@@ -17,7 +17,7 @@ use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
     SessionId, Version,
 };
-use finstack_ai_memory::InProcessArtifactStore;
+use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_tools_document::DocumentToolset;
 use pyo3::exceptions::{PyTypeError, PyValueError};

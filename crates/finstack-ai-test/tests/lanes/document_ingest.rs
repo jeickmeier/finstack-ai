@@ -9,7 +9,7 @@
 
 use finstack_ai::{AgentRunRequest, AttachmentInput};
 use finstack_ai_kernel::{EntryBody, Sensitivity};
-use finstack_ai_memory::InProcessArtifactStore;
+use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_runtime::{ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes};
 use finstack_ai_tools_document::DocumentToolset;

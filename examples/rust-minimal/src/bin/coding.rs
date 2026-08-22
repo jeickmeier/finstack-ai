@@ -29,7 +29,9 @@ use finstack_ai_context_repository::RepositoryContextProvider;
 use finstack_ai_kernel::{
     AgentId, BundleId, ComponentId, ComponentRef, Duration, RawJson, Version,
 };
-use finstack_ai_memory::{InProcessMemoryStore, MemoryContextProvider, MemoryScope, RecallConfig};
+use finstack_ai_memory::provider::{MemoryContextProvider, RecallConfig};
+use finstack_ai_memory::record::MemoryScope;
+use finstack_ai_memory::store::InProcessMemoryStore;
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_verify::{EvidenceVerifier, Verdict, VerifyMiddleware, VerifyPolicy};
 use finstack_ai_native_examples::{
@@ -91,7 +93,7 @@ async fn main() -> Result<(), BoxError> {
     let memory = MemoryScope::try_new("preview-local").and_then(|scope| {
         MemoryContextProvider::try_new(
             Arc::new(InProcessMemoryStore::new()),
-            Arc::new(finstack_ai_memory::InProcessArtifactStore::default()),
+            Arc::new(finstack_ai_memory::store::InProcessArtifactStore::default()),
             scope,
             RecallConfig::default(),
         )

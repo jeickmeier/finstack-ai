@@ -10,7 +10,7 @@ use finstack_ai::runtime::{
 };
 use finstack_ai::{Agent, AgentRunError};
 use finstack_ai_kernel::{AgentId, BundleId, ContentBlock, ProviderIds, TextBlock, Usage};
-use finstack_ai_memory::InProcessArtifactStore;
+use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,

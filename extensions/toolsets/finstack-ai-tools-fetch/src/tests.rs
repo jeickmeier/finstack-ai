@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
     PrincipalRef, RawJson, RunId, SessionId, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, ValidatedToolCall,
 };
-use finstack_ai_memory::InProcessArtifactStore;
+use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_net_guard::{HostResolver, UrlPolicy, parse_and_vet_url};
 use finstack_ai_runtime::{
     ArtifactStore, AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,

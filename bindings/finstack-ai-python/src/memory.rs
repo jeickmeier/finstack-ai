@@ -36,11 +36,13 @@ use std::sync::Arc;
 
 use finstack_ai::runtime::{ArtifactStore, ContextProvider, Observer, Toolset};
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_memory::extract::RuleBasedExtractor;
+use finstack_ai_memory::observer::MemoryObserver;
+use finstack_ai_memory::provider::{MemoryContextProvider, RecallConfig};
+use finstack_ai_memory::record::{MemoryScope, system_clock};
 use finstack_ai_memory::store::SqliteMemoryStore;
-use finstack_ai_memory::{
-    InProcessMemoryStore, MemoryContextProvider, MemoryObserver, MemoryPolicy, MemoryScope,
-    MemoryStore, MemoryToolset, RecallConfig, RuleBasedExtractor, system_clock,
-};
+use finstack_ai_memory::store::{InProcessMemoryStore, MemoryStore};
+use finstack_ai_memory::toolset::{MemoryPolicy, MemoryToolset};
 use pyo3::prelude::*;
 
 use crate::errors::{agent_error, configuration_error};

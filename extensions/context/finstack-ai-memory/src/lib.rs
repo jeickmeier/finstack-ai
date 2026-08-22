@@ -25,32 +25,17 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+// Each module is one component of the composition, and is the single canonical
+// path to the items it owns. Nothing is re-exported at the crate root: the 31
+// bound constants under `record`, `store` and `toolset` were already reachable
+// only through their module, so flattening the types alongside them produced
+// two paths for some items and one for the rest.
 pub mod extract;
 pub mod observer;
 pub mod provider;
 pub mod record;
 pub mod store;
 pub mod toolset;
-
-pub use extract::{CandidateMemory, DEFAULT_MARKER, MemoryExtractor, RuleBasedExtractor};
-pub use observer::{MemoryObserver, MemoryObserverDiagnostics};
-pub use provider::{MemoryContextProvider, RecallConfig};
-#[cfg(not(target_arch = "wasm32"))]
-pub use record::system_clock;
-pub use record::{
-    ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
-    MemoryRecord, MemoryScope, RetentionPolicy,
-};
-pub use store::{
-    InProcessArtifactStore, InProcessMemoryStore, MatchEvidence, MemoryArtifactAction, MemoryHit,
-    MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError,
-    MemoryStoreLimits, PutOutcome, reconcile_memory_artifacts,
-};
-pub use toolset::{
-    INLINE_BODY_MAX_BYTES, MEMORY_TOOL_ID_CONFLICT, MEMORY_TOOL_INVALID_ARGUMENTS,
-    MEMORY_TOOL_NOT_FOUND, MEMORY_TOOL_POLICY_DENIED, MEMORY_TOOL_SELF_SUPERSESSION,
-    MEMORY_TOOL_UNAVAILABLE, MemoryPolicy, MemoryToolset,
-};
 
 #[cfg(test)]
 mod tests;

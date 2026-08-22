@@ -209,7 +209,7 @@ async fn observer_skips_candidates_over_the_inline_body_cap() {
     assert_eq!(listing.records[0].preview.as_ref(), "a normal sized memory");
     assert_eq!(
         observer.diagnostics(),
-        crate::MemoryObserverDiagnostics {
+        crate::observer::MemoryObserverDiagnostics {
             attempted: 2,
             stored: 1,
             dropped: 1,
@@ -299,7 +299,7 @@ async fn observer_swallows_store_failures() {
         .expect("observe swallows put failure");
     assert_eq!(
         observer.diagnostics(),
-        crate::MemoryObserverDiagnostics {
+        crate::observer::MemoryObserverDiagnostics {
             attempted: 1,
             stored: 0,
             dropped: 0,
