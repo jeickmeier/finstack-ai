@@ -205,22 +205,21 @@ impl GeminiConfig {
         self
     }
 
-    /// Insert one named credential entry and select it.
+    /// Set the default credential from an [`Authentication`] value.
     ///
-    /// Returns `self` unchanged when the reserved `default` name is rejected.
-    #[must_use]
-    pub fn with_authentication(self, authentication: Authentication) -> Self {
+    /// # Errors
+    ///
+    /// Returns a configuration error when the credential cannot be stored.
+    /// It is reported rather than swallowed: silently returning an
+    /// unauthenticated config surfaces later as a confusing request failure.
+    pub fn with_authentication(self, authentication: Authentication) -> Result<Self, ModelError> {
         let mut store = CredentialStore::empty();
-        if store
+        store
             .insert(DEFAULT_CREDENTIAL_NAME, authentication)
-            .is_err()
-        {
-            return self;
-        }
-        let Ok(reference) = CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME) else {
-            return self;
-        };
-        self.with_credentials(store, reference)
+            .map_err(|_| config_error("default credential name is invalid"))?;
+        let reference = CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME)
+            .map_err(|_| config_error("default credential name is invalid"))?;
+        Ok(self.with_credentials(store, reference))
     }
 
     /// Append one secret custom header.
@@ -243,10 +242,17 @@ impl GeminiConfig {
     }
 
     /// Set the whole-request timeout.
-    #[must_use]
-    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration error when the timeout is zero or above one
+    /// hour, matching every other provider.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Result<Self, ModelError> {
+        if timeout.is_zero() || timeout > Duration::from_hours(1) {
+            return Err(config_error("provider request timeout is invalid"));
+        }
         self.request_timeout = timeout;
-        self
+        Ok(self)
     }
 
     /// Set raw SSE event and total response byte limits.
@@ -700,6 +706,7 @@ mod tests {
         let config = GeminiConfig::try_new("https://generativelanguage.googleapis.com")
             .expect("config")
             .with_authentication(Authentication::ApiKey(secret.clone()))
+            .expect("authentication")
             .with_secret_header(header.clone())
             .expect("header");
 
@@ -719,7 +726,8 @@ mod tests {
         let secret = SecretString::try_new(CANARY).expect("secret");
         let config = GeminiConfig::try_new("http://127.0.0.1:8080")
             .expect("config")
-            .with_authentication(Authentication::ApiKey(secret));
+            .with_authentication(Authentication::ApiKey(secret))
+            .expect("authentication");
         assert_eq!(
             config.header_map().expect_err("http credential").code(),
             crate::error::GEMINI_CONFIG_INVALID
@@ -752,7 +760,7 @@ mod tests {
             .expect("config")
             .with_request_timeout(Duration::ZERO);
         assert_eq!(
-            zero_timeout.validate().expect_err("zero timeout").code(),
+            zero_timeout.expect_err("zero timeout").code(),
             crate::error::GEMINI_CONFIG_INVALID
         );
 

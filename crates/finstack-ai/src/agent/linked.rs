@@ -394,7 +394,8 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         .map_err(|error| model_configuration_error(&error))?
         .with_authentication(Authentication::Bearer(
             SecretString::try_new(spec.api_key).map_err(|_| secret_configuration_error())?,
-        ));
+        ))
+        .map_err(|error| model_configuration_error(&error))?;
     let mut model_config = OpenAiModelConfig::try_new(
         &spec.model,
         LINKED_CONTEXT_WINDOW_TOKENS,
@@ -501,9 +502,11 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
     let mut config = AnthropicConfig::try_new(spec.base_url)
         .map_err(|error| model_configuration_error(&error))?;
     if let Some(api_key) = spec.api_key {
-        config = config.with_authentication(Authentication::ApiKey(
-            SecretString::try_new(api_key).map_err(|_| secret_configuration_error())?,
-        ));
+        config = config
+            .with_authentication(Authentication::ApiKey(
+                SecretString::try_new(api_key).map_err(|_| secret_configuration_error())?,
+            ))
+            .map_err(|error| model_configuration_error(&error))?;
     }
     let model_config = AnthropicModelConfig::try_new(
         &spec.model,
@@ -553,9 +556,11 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     let mut config =
         GeminiConfig::try_new(spec.endpoint).map_err(|error| model_configuration_error(&error))?;
     if let Some(api_key) = spec.api_key {
-        config = config.with_authentication(Authentication::ApiKey(
-            SecretString::try_new(api_key).map_err(|_| secret_configuration_error())?,
-        ));
+        config = config
+            .with_authentication(Authentication::ApiKey(
+                SecretString::try_new(api_key).map_err(|_| secret_configuration_error())?,
+            ))
+            .map_err(|error| model_configuration_error(&error))?;
     }
     let model_config = GeminiModelConfig::try_new(
         &spec.model,

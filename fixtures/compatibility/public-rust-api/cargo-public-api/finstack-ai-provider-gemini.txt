@@ -22,10 +22,10 @@ pub struct finstack_ai_provider_gemini::GeminiConfig
 impl finstack_ai_provider_gemini::GeminiConfig
 pub fn finstack_ai_provider_gemini::GeminiConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_gemini::GeminiConfig::try_new_vertex(impl core::convert::AsRef<str>, impl core::convert::AsRef<str>, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
-pub fn finstack_ai_provider_gemini::GeminiConfig::with_authentication(self, finstack_ai_runtime::ports::model::support::credentials::Authentication) -> Self
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_authentication(self, finstack_ai_runtime::ports::model::support::credentials::Authentication) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_gemini::GeminiConfig::with_credentials(self, finstack_ai_runtime::ports::model::support::credentials::CredentialStore, finstack_ai_runtime::ports::model::support::credentials::CredentialReference) -> Self
 pub fn finstack_ai_provider_gemini::GeminiConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::support::media::MediaResolver>) -> Self
-pub fn finstack_ai_provider_gemini::GeminiConfig::with_request_timeout(self, core::time::Duration) -> Self
+pub fn finstack_ai_provider_gemini::GeminiConfig::with_request_timeout(self, core::time::Duration) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_gemini::GeminiConfig::with_secret_header(self, finstack_ai_provider_gemini::SecretHeader) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_gemini::GeminiConfig::with_stream_limits(self, usize, usize) -> Self
 impl core::clone::Clone for finstack_ai_provider_gemini::GeminiConfig

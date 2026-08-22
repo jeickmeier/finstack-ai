@@ -141,22 +141,21 @@ impl OpenAiConfig {
         self.media_resolver.clone()
     }
 
-    /// Insert one named credential entry and select it.
+    /// Set the default credential from an [`Authentication`] value.
     ///
-    /// Returns `self` unchanged when the reserved `default` name is rejected.
-    #[must_use]
-    pub fn with_authentication(self, authentication: Authentication) -> Self {
+    /// # Errors
+    ///
+    /// Returns a configuration error when the credential cannot be stored.
+    /// It is reported rather than swallowed: silently returning an
+    /// unauthenticated config surfaces later as a confusing request failure.
+    pub fn with_authentication(self, authentication: Authentication) -> Result<Self, ModelError> {
         let mut store = CredentialStore::empty();
-        if store
+        store
             .insert(DEFAULT_CREDENTIAL_NAME, authentication)
-            .is_err()
-        {
-            return self;
-        }
-        let Ok(reference) = CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME) else {
-            return self;
-        };
-        self.with_credential_store(store, reference)
+            .map_err(|_| config_error("default credential name is invalid"))?;
+        let reference = CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME)
+            .map_err(|_| config_error("default credential name is invalid"))?;
+        Ok(self.with_credential_store(store, reference))
     }
 
     /// Bind an explicit host-supplied credential store and reference.
@@ -528,6 +527,7 @@ mod tests {
         let config = OpenAiConfig::try_new("https://api.openai.test")
             .expect("config")
             .with_authentication(Authentication::Bearer(secret.clone()))
+            .expect("authentication")
             .with_headers(vec![header.clone()])
             .with_media_resolver(std::sync::Arc::new(CanaryResolver));
 
@@ -606,7 +606,8 @@ mod tests {
         let secret = SecretString::try_new(CANARY).expect("secret");
         let config = OpenAiConfig::try_new("http://127.0.0.1:8080")
             .expect("local endpoint")
-            .with_authentication(Authentication::Bearer(secret.clone()));
+            .with_authentication(Authentication::Bearer(secret.clone()))
+            .expect("authentication");
         assert_eq!(
             config.header_map().expect_err("HTTP credential").code(),
             crate::error::CONFIG_INVALID

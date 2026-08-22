@@ -9,7 +9,7 @@ pub struct finstack_ai_provider_anthropic::AnthropicConfig
 impl finstack_ai_provider_anthropic::AnthropicConfig
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_anthropic_version(self, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
-pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_authentication(self, finstack_ai_runtime::ports::model::support::credentials::Authentication) -> Self
+pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_authentication(self, finstack_ai_runtime::ports::model::support::credentials::Authentication) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_credential_store(self, finstack_ai_runtime::ports::model::support::credentials::CredentialStore, finstack_ai_runtime::ports::model::support::credentials::CredentialReference) -> Self
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_headers(self, alloc::vec::Vec<finstack_ai_provider_anthropic::SecretHeader>) -> Self
 pub fn finstack_ai_provider_anthropic::AnthropicConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::support::media::MediaResolver>) -> Self

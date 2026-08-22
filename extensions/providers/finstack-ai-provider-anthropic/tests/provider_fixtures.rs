@@ -231,7 +231,8 @@ async fn optional_live_smoke() {
         .expect("live provider config")
         .with_authentication(Authentication::ApiKey(
             SecretString::try_new(secret).expect("live credential"),
-        ));
+        ))
+        .expect("authentication");
     let provider = AnthropicProvider::try_new(
         config,
         vec![

@@ -274,7 +274,8 @@ async fn api_key_header_sent_and_never_logged() {
     let secret = SecretString::try_new(canary).expect("secret");
     let https_config = GeminiConfig::try_new("https://generativelanguage.googleapis.com")
         .expect("config")
-        .with_authentication(Authentication::ApiKey(secret.clone()));
+        .with_authentication(Authentication::ApiKey(secret.clone()))
+        .expect("authentication");
     let https_model =
         GeminiModelConfig::try_new("gemini-fixture", 1_000_000, 128_000, 4_096).expect("model");
     let https_provider =
@@ -284,7 +285,8 @@ async fn api_key_header_sent_and_never_logged() {
     let (base_url, server) = serve_response("200 OK", "text/event-stream", Vec::new(), false).await;
     let plaintext_config = GeminiConfig::try_new(&base_url)
         .expect("config")
-        .with_authentication(Authentication::ApiKey(secret));
+        .with_authentication(Authentication::ApiKey(secret))
+        .expect("authentication");
     let plaintext_model =
         GeminiModelConfig::try_new("gemini-fixture", 1_000_000, 128_000, 4_096).expect("model");
     let error = GeminiProvider::try_new(plaintext_config, vec![plaintext_model])
