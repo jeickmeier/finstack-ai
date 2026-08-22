@@ -46,6 +46,7 @@ description = "Format, lint, gate the public API, test, and deny the Rust worksp
 run = """
 set -euo pipefail
 mise run check-repository-references
+mise run check-layering
 mise run runtime
 mise run check-rust
 mise run check-docs
@@ -71,6 +72,10 @@ cargo clippy -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --n
 [tasks.check-repository-references]
 description = "Reject references to removed planning and delivery-history artifacts"
 run = "python scripts/ci/check_stale_references.py"
+
+[tasks.check-layering]
+description = "Reject workspace dependency edges that violate the package tier law"
+run = "python scripts/ci/check_layering.py"
 
 [tasks.ci-python]
 description = "Format, lint, typecheck, and test Python bindings"
