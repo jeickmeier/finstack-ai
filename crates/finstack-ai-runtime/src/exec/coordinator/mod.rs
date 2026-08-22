@@ -112,8 +112,10 @@ pub enum CommitCoordinatorError {
 
 impl CommitCoordinatorError {
     /// Stable fault code for session commit and workflow recover.
+    ///
+    /// Every variant reports one, including those that carry no `code` field.
     #[must_use]
-    pub(crate) fn stable_code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::Decision { code }
             | Self::Faulted { code }

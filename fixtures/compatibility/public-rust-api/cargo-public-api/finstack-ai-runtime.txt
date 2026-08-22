@@ -534,6 +534,8 @@ pub finstack_ai_runtime::commit::CommitCoordinatorError::ModelRequest
 pub finstack_ai_runtime::commit::CommitCoordinatorError::ModelRequest::code: alloc::sync::Arc<str>
 pub finstack_ai_runtime::commit::CommitCoordinatorError::SidecarConflict
 pub finstack_ai_runtime::commit::CommitCoordinatorError::Store(finstack_ai_runtime::ports::journal::StoreError)
+impl finstack_ai_runtime::commit::CommitCoordinatorError
+pub fn finstack_ai_runtime::commit::CommitCoordinatorError::code(&self) -> &'static str
 impl core::clone::Clone for finstack_ai_runtime::commit::CommitCoordinatorError
 pub fn finstack_ai_runtime::commit::CommitCoordinatorError::clone(&self) -> finstack_ai_runtime::commit::CommitCoordinatorError
 impl core::cmp::Eq for finstack_ai_runtime::commit::CommitCoordinatorError

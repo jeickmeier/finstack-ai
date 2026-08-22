@@ -534,6 +534,8 @@ pub finstack_ai_runtime::commit::CommitCoordinatorError::ModelRequest
 pub finstack_ai_runtime::commit::CommitCoordinatorError::ModelRequest::code: alloc::sync::Arc<str>
 pub finstack_ai_runtime::commit::CommitCoordinatorError::SidecarConflict
 pub finstack_ai_runtime::commit::CommitCoordinatorError::Store(finstack_ai_runtime::ports::journal::StoreError)
+impl finstack_ai_runtime::commit::CommitCoordinatorError
+pub fn finstack_ai_runtime::commit::CommitCoordinatorError::code(&self) -> &'static str
 impl core::clone::Clone for finstack_ai_runtime::commit::CommitCoordinatorError
 pub fn finstack_ai_runtime::commit::CommitCoordinatorError::clone(&self) -> finstack_ai_runtime::commit::CommitCoordinatorError
 impl core::cmp::Eq for finstack_ai_runtime::commit::CommitCoordinatorError
@@ -3337,6 +3339,8 @@ pub finstack_ai_runtime::run::RunHandleError::Tool
 pub finstack_ai_runtime::run::RunHandleError::Tool::code: alloc::sync::Arc<str>
 pub finstack_ai_runtime::run::RunHandleError::ToolSettlement
 pub finstack_ai_runtime::run::RunHandleError::ToolSettlement::code: &'static str
+impl finstack_ai_runtime::run::RunHandleError
+pub fn finstack_ai_runtime::run::RunHandleError::code(&self) -> &str
 impl core::clone::Clone for finstack_ai_runtime::run::RunHandleError
 pub fn finstack_ai_runtime::run::RunHandleError::clone(&self) -> finstack_ai_runtime::run::RunHandleError
 impl core::cmp::Eq for finstack_ai_runtime::run::RunHandleError
@@ -3526,6 +3530,10 @@ impl core::fmt::Debug for finstack_ai_runtime::run::ToolTaskConfig
 pub fn finstack_ai_runtime::run::ToolTaskConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::run::ToolTaskConfig
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::run::ToolTaskConfig
+pub const finstack_ai_runtime::run::RUN_INTAKE_CLOSED: &str
+pub const finstack_ai_runtime::run::RUN_INVALID_CONFIGURATION: &str
+pub const finstack_ai_runtime::run::RUN_SHUTTING_DOWN: &str
+pub const finstack_ai_runtime::run::RUN_STOPPED: &str
 pub mod finstack_ai_runtime::session
 pub enum finstack_ai_runtime::session::IdentityMapError
 pub finstack_ai_runtime::session::IdentityMapError::Conflict

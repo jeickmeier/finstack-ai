@@ -187,15 +187,11 @@ impl SessionError {
     }
 
     fn recover(error: &CommitCoordinatorError) -> Self {
-        Self::Recover {
-            code: error.stable_code(),
-        }
+        Self::Recover { code: error.code() }
     }
 
     fn commit(error: &CommitCoordinatorError) -> Self {
-        Self::Commit {
-            code: error.stable_code(),
-        }
+        Self::Commit { code: error.code() }
     }
 }
 

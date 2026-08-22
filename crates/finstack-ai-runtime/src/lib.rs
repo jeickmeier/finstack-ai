@@ -158,7 +158,8 @@ pub mod run {
     pub use crate::native::time::{DeadlineDiagnostic, MonotonicDeadline, RuntimeTimeError};
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub use crate::run_types::{
-        ModelTaskConfig, RetryBackoffPolicy, RunHandleError, RunStatus, RunTaskConfig,
+        ModelTaskConfig, RUN_INTAKE_CLOSED, RUN_INVALID_CONFIGURATION, RUN_SHUTTING_DOWN,
+        RUN_STOPPED, RetryBackoffPolicy, RunHandleError, RunStatus, RunTaskConfig,
         SameIdentityRetryPolicy, ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,
     };
     #[cfg(feature = "native-tokio")]

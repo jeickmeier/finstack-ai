@@ -578,6 +578,26 @@
     },
     {
       "crate": "finstack-ai-runtime",
+      "name": "RUN_INTAKE_CLOSED",
+      "value": "run_intake_closed"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "RUN_INVALID_CONFIGURATION",
+      "value": "run_invalid_configuration"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "RUN_SHUTTING_DOWN",
+      "value": "run_shutting_down"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "RUN_STOPPED",
+      "value": "run_stopped"
+    },
+    {
+      "crate": "finstack-ai-runtime",
       "name": "TOOL_APPROVAL_REQUIRED",
       "value": "tool_approval_required"
     },

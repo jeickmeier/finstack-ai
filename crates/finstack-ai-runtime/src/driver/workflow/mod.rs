@@ -975,9 +975,7 @@ impl WorkflowSession {
 }
 
 fn recover_error(error: &crate::commit::CommitCoordinatorError) -> WorkflowDriverError {
-    WorkflowDriverError::Recover {
-        code: error.stable_code(),
-    }
+    WorkflowDriverError::Recover { code: error.code() }
 }
 
 fn reinstall_runtime_ports(

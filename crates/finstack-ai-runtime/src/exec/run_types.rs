@@ -375,6 +375,41 @@ pub enum RunHandleError {
     },
 }
 
+/// Stable code for a run rejected before it started.
+pub const RUN_INVALID_CONFIGURATION: &str = "run_invalid_configuration";
+/// Stable code for a run refused because the owner is shutting down.
+pub const RUN_SHUTTING_DOWN: &str = "run_shutting_down";
+/// Stable code for a run whose owner stopped before it completed.
+pub const RUN_STOPPED: &str = "run_stopped";
+/// Stable code for a run whose intake closed before submission.
+pub const RUN_INTAKE_CLOSED: &str = "run_intake_closed";
+
+impl RunHandleError {
+    /// Stable machine-readable code for this failure.
+    ///
+    /// Every variant reports one: those carrying a `code` field return it,
+    /// and the four state variants report a named constant.
+    #[must_use]
+    pub fn code(&self) -> &str {
+        match self {
+            Self::InvalidConfiguration => RUN_INVALID_CONFIGURATION,
+            Self::ShuttingDown => RUN_SHUTTING_DOWN,
+            Self::Stopped => RUN_STOPPED,
+            Self::IntakeClosed => RUN_INTAKE_CLOSED,
+            Self::Faulted { code }
+            | Self::ModelSettlement { code }
+            | Self::ToolSettlement { code }
+            | Self::Artifact { code }
+            | Self::InteractionSettlement { code }
+            | Self::Timer { code }
+            | Self::CancellationSettlement { code }
+            | Self::EventDelivery { code } => code,
+            Self::Model { code } | Self::Tool { code } | Self::Middleware { code } => code,
+            Self::Coordinator(error) => error.code(),
+        }
+    }
+}
+
 /// Worker-tearing fault code from a commit result, if any.
 ///
 /// [`RunHandleError::Middleware`] is excluded: a middleware failure aborts

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ActiveCapability, ArtifactRef, CapabilityId, ContentBlock, ErrorDescriptor, Message,
+    ActiveCapability, ArtifactRef, CapabilityId, ContentBlock, ErrorCode, ErrorDescriptor, Message,
     OperationLocator, RawJson, RunSecurityContext,
 };
 use finstack_ai_runtime::ids::IdGenerationError;
@@ -230,8 +230,14 @@ pub enum AgentRunError {
         message: String,
     },
     /// Runtime or provider failure.
-    #[error("{}: {message}", AGENT_RUN_RUNTIME_FAILURE)]
+    ///
+    /// `code` is the runtime's own code where one was reported, so the
+    /// failure stays machine-readable rather than collapsing into one
+    /// generic string.
+    #[error("{code}: {message}")]
     Runtime {
+        /// Stable code reported by the runtime.
+        code: ErrorCode,
         /// Non-secret explanation.
         message: String,
     },
@@ -262,6 +268,7 @@ impl AgentRunError {
     pub fn code(&self) -> &str {
         match self {
             Self::Failed { descriptor } => descriptor.code.as_str(),
+            Self::Runtime { code, .. } => code.as_str(),
             Self::Configuration { code, .. } => code,
             Self::Runtime { .. } => AGENT_RUN_RUNTIME_FAILURE,
             Self::Timeout { .. } => AGENT_RUN_TIMEOUT,
@@ -290,7 +297,13 @@ impl AgentRunError {
         reason = "used directly as a Result::map_err adapter"
     )]
     pub(super) fn runtime(error: RunHandleError) -> Self {
-        Self::runtime_message(error.to_string())
+        ErrorCode::new(error.code()).map_or_else(
+            |_| Self::runtime_message(error.to_string()),
+            |code| Self::Runtime {
+                code,
+                message: error.to_string(),
+            },
+        )
     }
 
     #[expect(
@@ -318,11 +331,10 @@ impl AgentRunError {
 
     /// Static fault code for callers that structurally require `&'static str`.
     ///
-    /// `Failed` carries a runtime-owned code, so it reports the generic
-    /// runtime-failure code here. Prefer [`AgentRunError::code`], which
-    /// returns the real one. This exists only for
-    /// `SessionError::{Commit, Recover}`, whose `code` field is still
-    /// `&'static str`; widening it to `ErrorCode` would let this go.
+    /// `SessionError::{Commit, Recover}` still take `&'static str`; widening
+    /// those to `ErrorCode` touches ten construction sites in the runtime and
+    /// is its own change. Prefer [`AgentRunError::code`], which returns the
+    /// real one.
     pub(crate) const fn static_code(&self) -> &'static str {
         match self {
             Self::Configuration { code, .. } => code,
@@ -334,6 +346,7 @@ impl AgentRunError {
 
     pub(super) fn runtime_message(message: impl Into<String>) -> Self {
         Self::Runtime {
+            code: finstack_ai_kernel::static_error_code!(AGENT_RUN_RUNTIME_FAILURE),
             message: message.into(),
         }
     }
