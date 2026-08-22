@@ -28,46 +28,13 @@ pub fn finstack_ai_kernel::ActiveToolCallStatus::serialize<__S>(&self, __S) -> c
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ActiveToolCallStatus
 pub fn finstack_ai_kernel::ActiveToolCallStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::AgentTag
-impl core::clone::Clone for finstack_ai_kernel::AgentTag
-pub fn finstack_ai_kernel::AgentTag::clone(&self) -> finstack_ai_kernel::AgentTag
-impl core::cmp::Eq for finstack_ai_kernel::AgentTag
-impl core::cmp::PartialEq for finstack_ai_kernel::AgentTag
-pub fn finstack_ai_kernel::AgentTag::eq(&self, &finstack_ai_kernel::AgentTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::AgentTag
-pub fn finstack_ai_kernel::AgentTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::AgentTag
-pub fn finstack_ai_kernel::AgentTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::AgentTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::AgentTag
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::AgentTag
 pub const finstack_ai_kernel::AgentTag::NAME: &'static str
 pub const finstack_ai_kernel::AgentTag::REQUIRES_NAMESPACE: bool
 pub enum finstack_ai_kernel::AppendBatchTag
-impl core::clone::Clone for finstack_ai_kernel::AppendBatchTag
-pub fn finstack_ai_kernel::AppendBatchTag::clone(&self) -> finstack_ai_kernel::AppendBatchTag
-impl core::cmp::Eq for finstack_ai_kernel::AppendBatchTag
-impl core::cmp::PartialEq for finstack_ai_kernel::AppendBatchTag
-pub fn finstack_ai_kernel::AppendBatchTag::eq(&self, &finstack_ai_kernel::AppendBatchTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::AppendBatchTag
-pub fn finstack_ai_kernel::AppendBatchTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::AppendBatchTag
-pub fn finstack_ai_kernel::AppendBatchTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::AppendBatchTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::AppendBatchTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::AppendBatchTag
 pub const finstack_ai_kernel::AppendBatchTag::NAME: &'static str
 pub enum finstack_ai_kernel::ArtifactTag
-impl core::clone::Clone for finstack_ai_kernel::ArtifactTag
-pub fn finstack_ai_kernel::ArtifactTag::clone(&self) -> finstack_ai_kernel::ArtifactTag
-impl core::cmp::Eq for finstack_ai_kernel::ArtifactTag
-impl core::cmp::PartialEq for finstack_ai_kernel::ArtifactTag
-pub fn finstack_ai_kernel::ArtifactTag::eq(&self, &finstack_ai_kernel::ArtifactTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ArtifactTag
-pub fn finstack_ai_kernel::ArtifactTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::ArtifactTag
-pub fn finstack_ai_kernel::ArtifactTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::ArtifactTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ArtifactTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::ArtifactTag
 pub const finstack_ai_kernel::ArtifactTag::NAME: &'static str
 pub enum finstack_ai_kernel::AssigneeHint
@@ -126,45 +93,12 @@ impl core::fmt::Display for finstack_ai_kernel::BudgetRecordError
 pub fn finstack_ai_kernel::BudgetRecordError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::BudgetRecordError
 pub enum finstack_ai_kernel::BudgetReservationTag
-impl core::clone::Clone for finstack_ai_kernel::BudgetReservationTag
-pub fn finstack_ai_kernel::BudgetReservationTag::clone(&self) -> finstack_ai_kernel::BudgetReservationTag
-impl core::cmp::Eq for finstack_ai_kernel::BudgetReservationTag
-impl core::cmp::PartialEq for finstack_ai_kernel::BudgetReservationTag
-pub fn finstack_ai_kernel::BudgetReservationTag::eq(&self, &finstack_ai_kernel::BudgetReservationTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::BudgetReservationTag
-pub fn finstack_ai_kernel::BudgetReservationTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::BudgetReservationTag
-pub fn finstack_ai_kernel::BudgetReservationTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::BudgetReservationTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::BudgetReservationTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::BudgetReservationTag
 pub const finstack_ai_kernel::BudgetReservationTag::NAME: &'static str
 pub enum finstack_ai_kernel::BudgetScopeTag
-impl core::clone::Clone for finstack_ai_kernel::BudgetScopeTag
-pub fn finstack_ai_kernel::BudgetScopeTag::clone(&self) -> finstack_ai_kernel::BudgetScopeTag
-impl core::cmp::Eq for finstack_ai_kernel::BudgetScopeTag
-impl core::cmp::PartialEq for finstack_ai_kernel::BudgetScopeTag
-pub fn finstack_ai_kernel::BudgetScopeTag::eq(&self, &finstack_ai_kernel::BudgetScopeTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::BudgetScopeTag
-pub fn finstack_ai_kernel::BudgetScopeTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::BudgetScopeTag
-pub fn finstack_ai_kernel::BudgetScopeTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::BudgetScopeTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::BudgetScopeTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::BudgetScopeTag
 pub const finstack_ai_kernel::BudgetScopeTag::NAME: &'static str
 pub enum finstack_ai_kernel::BundleTag
-impl core::clone::Clone for finstack_ai_kernel::BundleTag
-pub fn finstack_ai_kernel::BundleTag::clone(&self) -> finstack_ai_kernel::BundleTag
-impl core::cmp::Eq for finstack_ai_kernel::BundleTag
-impl core::cmp::PartialEq for finstack_ai_kernel::BundleTag
-pub fn finstack_ai_kernel::BundleTag::eq(&self, &finstack_ai_kernel::BundleTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::BundleTag
-pub fn finstack_ai_kernel::BundleTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::BundleTag
-pub fn finstack_ai_kernel::BundleTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::BundleTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::BundleTag
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::BundleTag
 pub const finstack_ai_kernel::BundleTag::NAME: &'static str
 pub const finstack_ai_kernel::BundleTag::REQUIRES_NAMESPACE: bool
@@ -207,17 +141,6 @@ pub fn finstack_ai_kernel::CancellationPropagation::serialize<__S>(&self, __S) -
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::CancellationPropagation
 pub fn finstack_ai_kernel::CancellationPropagation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::CancellationRequestTag
-impl core::clone::Clone for finstack_ai_kernel::CancellationRequestTag
-pub fn finstack_ai_kernel::CancellationRequestTag::clone(&self) -> finstack_ai_kernel::CancellationRequestTag
-impl core::cmp::Eq for finstack_ai_kernel::CancellationRequestTag
-impl core::cmp::PartialEq for finstack_ai_kernel::CancellationRequestTag
-pub fn finstack_ai_kernel::CancellationRequestTag::eq(&self, &finstack_ai_kernel::CancellationRequestTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::CancellationRequestTag
-pub fn finstack_ai_kernel::CancellationRequestTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::CancellationRequestTag
-pub fn finstack_ai_kernel::CancellationRequestTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::CancellationRequestTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::CancellationRequestTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::CancellationRequestTag
 pub const finstack_ai_kernel::CancellationRequestTag::NAME: &'static str
 pub enum finstack_ai_kernel::CapabilityActivationSource
@@ -244,17 +167,6 @@ pub fn finstack_ai_kernel::CapabilityActivationSource::serialize<__S>(&self, __S
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::CapabilityActivationSource
 pub fn finstack_ai_kernel::CapabilityActivationSource::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::CapabilityTag
-impl core::clone::Clone for finstack_ai_kernel::CapabilityTag
-pub fn finstack_ai_kernel::CapabilityTag::clone(&self) -> finstack_ai_kernel::CapabilityTag
-impl core::cmp::Eq for finstack_ai_kernel::CapabilityTag
-impl core::cmp::PartialEq for finstack_ai_kernel::CapabilityTag
-pub fn finstack_ai_kernel::CapabilityTag::eq(&self, &finstack_ai_kernel::CapabilityTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::CapabilityTag
-pub fn finstack_ai_kernel::CapabilityTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::CapabilityTag
-pub fn finstack_ai_kernel::CapabilityTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::CapabilityTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::CapabilityTag
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::CapabilityTag
 pub const finstack_ai_kernel::CapabilityTag::NAME: &'static str
 pub const finstack_ai_kernel::CapabilityTag::REQUIRES_NAMESPACE: bool
@@ -276,17 +188,6 @@ pub fn finstack_ai_kernel::ChildPlacement::serialize<__S>(&self, __S) -> core::r
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ChildPlacement
 pub fn finstack_ai_kernel::ChildPlacement::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::ComponentTag
-impl core::clone::Clone for finstack_ai_kernel::ComponentTag
-pub fn finstack_ai_kernel::ComponentTag::clone(&self) -> finstack_ai_kernel::ComponentTag
-impl core::cmp::Eq for finstack_ai_kernel::ComponentTag
-impl core::cmp::PartialEq for finstack_ai_kernel::ComponentTag
-pub fn finstack_ai_kernel::ComponentTag::eq(&self, &finstack_ai_kernel::ComponentTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ComponentTag
-pub fn finstack_ai_kernel::ComponentTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::ComponentTag
-pub fn finstack_ai_kernel::ComponentTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::ComponentTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ComponentTag
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::ComponentTag
 pub const finstack_ai_kernel::ComponentTag::NAME: &'static str
 pub const finstack_ai_kernel::ComponentTag::REQUIRES_NAMESPACE: bool
@@ -550,17 +451,6 @@ pub fn finstack_ai_kernel::EffectOutputKind::serialize<__S>(&self, __S) -> core:
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::EffectOutputKind
 pub fn finstack_ai_kernel::EffectOutputKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::EffectOutputTag
-impl core::clone::Clone for finstack_ai_kernel::EffectOutputTag
-pub fn finstack_ai_kernel::EffectOutputTag::clone(&self) -> finstack_ai_kernel::EffectOutputTag
-impl core::cmp::Eq for finstack_ai_kernel::EffectOutputTag
-impl core::cmp::PartialEq for finstack_ai_kernel::EffectOutputTag
-pub fn finstack_ai_kernel::EffectOutputTag::eq(&self, &finstack_ai_kernel::EffectOutputTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::EffectOutputTag
-pub fn finstack_ai_kernel::EffectOutputTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::EffectOutputTag
-pub fn finstack_ai_kernel::EffectOutputTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::EffectOutputTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::EffectOutputTag
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::EffectOutputTag
 pub const finstack_ai_kernel::EffectOutputTag::NAME: &'static str
 pub const finstack_ai_kernel::EffectOutputTag::REQUIRES_NAMESPACE: bool
@@ -582,17 +472,6 @@ pub fn finstack_ai_kernel::EffectPurpose::serialize<__S>(&self, __S) -> core::re
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::EffectPurpose
 pub fn finstack_ai_kernel::EffectPurpose::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::EffectTag
-impl core::clone::Clone for finstack_ai_kernel::EffectTag
-pub fn finstack_ai_kernel::EffectTag::clone(&self) -> finstack_ai_kernel::EffectTag
-impl core::cmp::Eq for finstack_ai_kernel::EffectTag
-impl core::cmp::PartialEq for finstack_ai_kernel::EffectTag
-pub fn finstack_ai_kernel::EffectTag::eq(&self, &finstack_ai_kernel::EffectTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::EffectTag
-pub fn finstack_ai_kernel::EffectTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::EffectTag
-pub fn finstack_ai_kernel::EffectTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::EffectTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::EffectTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::EffectTag
 pub const finstack_ai_kernel::EffectTag::NAME: &'static str
 pub enum finstack_ai_kernel::EntryBody
@@ -626,17 +505,6 @@ pub fn finstack_ai_kernel::EntryError::fmt(&self, &mut core::fmt::Formatter<'_>)
 impl core::marker::Copy for finstack_ai_kernel::EntryError
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::EntryError
 pub enum finstack_ai_kernel::EntryTag
-impl core::clone::Clone for finstack_ai_kernel::EntryTag
-pub fn finstack_ai_kernel::EntryTag::clone(&self) -> finstack_ai_kernel::EntryTag
-impl core::cmp::Eq for finstack_ai_kernel::EntryTag
-impl core::cmp::PartialEq for finstack_ai_kernel::EntryTag
-pub fn finstack_ai_kernel::EntryTag::eq(&self, &finstack_ai_kernel::EntryTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::EntryTag
-pub fn finstack_ai_kernel::EntryTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::EntryTag
-pub fn finstack_ai_kernel::EntryTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::EntryTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::EntryTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::EntryTag
 pub const finstack_ai_kernel::EntryTag::NAME: &'static str
 pub enum finstack_ai_kernel::ErrorCategory
@@ -725,17 +593,6 @@ impl core::fmt::Display for finstack_ai_kernel::EventError
 pub fn finstack_ai_kernel::EventError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::EventError
 pub enum finstack_ai_kernel::EventTag
-impl core::clone::Clone for finstack_ai_kernel::EventTag
-pub fn finstack_ai_kernel::EventTag::clone(&self) -> finstack_ai_kernel::EventTag
-impl core::cmp::Eq for finstack_ai_kernel::EventTag
-impl core::cmp::PartialEq for finstack_ai_kernel::EventTag
-pub fn finstack_ai_kernel::EventTag::eq(&self, &finstack_ai_kernel::EventTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::EventTag
-pub fn finstack_ai_kernel::EventTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::EventTag
-pub fn finstack_ai_kernel::EventTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::EventTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::EventTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::EventTag
 pub const finstack_ai_kernel::EventTag::NAME: &'static str
 pub enum finstack_ai_kernel::ExtensionSettlement
@@ -884,17 +741,6 @@ pub fn finstack_ai_kernel::InteractionSettled::serialize<__S>(&self, __S) -> cor
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::InteractionSettled
 pub fn finstack_ai_kernel::InteractionSettled::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::InteractionTag
-impl core::clone::Clone for finstack_ai_kernel::InteractionTag
-pub fn finstack_ai_kernel::InteractionTag::clone(&self) -> finstack_ai_kernel::InteractionTag
-impl core::cmp::Eq for finstack_ai_kernel::InteractionTag
-impl core::cmp::PartialEq for finstack_ai_kernel::InteractionTag
-pub fn finstack_ai_kernel::InteractionTag::eq(&self, &finstack_ai_kernel::InteractionTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::InteractionTag
-pub fn finstack_ai_kernel::InteractionTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::InteractionTag
-pub fn finstack_ai_kernel::InteractionTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::InteractionTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::InteractionTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::InteractionTag
 pub const finstack_ai_kernel::InteractionTag::NAME: &'static str
 pub enum finstack_ai_kernel::InteractionTerminalOutcome
@@ -1050,17 +896,6 @@ pub fn finstack_ai_kernel::KeyParseErrorKind::fmt(&self, &mut core::fmt::Formatt
 impl core::marker::Copy for finstack_ai_kernel::KeyParseErrorKind
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::KeyParseErrorKind
 pub enum finstack_ai_kernel::LaneTag
-impl core::clone::Clone for finstack_ai_kernel::LaneTag
-pub fn finstack_ai_kernel::LaneTag::clone(&self) -> finstack_ai_kernel::LaneTag
-impl core::cmp::Eq for finstack_ai_kernel::LaneTag
-impl core::cmp::PartialEq for finstack_ai_kernel::LaneTag
-pub fn finstack_ai_kernel::LaneTag::eq(&self, &finstack_ai_kernel::LaneTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::LaneTag
-pub fn finstack_ai_kernel::LaneTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::LaneTag
-pub fn finstack_ai_kernel::LaneTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::LaneTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::LaneTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::LaneTag
 pub const finstack_ai_kernel::LaneTag::NAME: &'static str
 pub enum finstack_ai_kernel::LimitDimension
@@ -1092,17 +927,6 @@ pub fn finstack_ai_kernel::LimitDimension::serialize<__S>(&self, __S) -> core::r
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::LimitDimension
 pub fn finstack_ai_kernel::LimitDimension::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::LimitTag
-impl core::clone::Clone for finstack_ai_kernel::LimitTag
-pub fn finstack_ai_kernel::LimitTag::clone(&self) -> finstack_ai_kernel::LimitTag
-impl core::cmp::Eq for finstack_ai_kernel::LimitTag
-impl core::cmp::PartialEq for finstack_ai_kernel::LimitTag
-pub fn finstack_ai_kernel::LimitTag::eq(&self, &finstack_ai_kernel::LimitTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::LimitTag
-pub fn finstack_ai_kernel::LimitTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::LimitTag
-pub fn finstack_ai_kernel::LimitTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::LimitTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::LimitTag
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::LimitTag
 pub const finstack_ai_kernel::LimitTag::NAME: &'static str
 pub const finstack_ai_kernel::LimitTag::REQUIRES_NAMESPACE: bool
@@ -1209,31 +1033,9 @@ pub fn finstack_ai_kernel::MessageRole::serialize<__S>(&self, __S) -> core::resu
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::MessageRole
 pub fn finstack_ai_kernel::MessageRole::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::MessageTag
-impl core::clone::Clone for finstack_ai_kernel::MessageTag
-pub fn finstack_ai_kernel::MessageTag::clone(&self) -> finstack_ai_kernel::MessageTag
-impl core::cmp::Eq for finstack_ai_kernel::MessageTag
-impl core::cmp::PartialEq for finstack_ai_kernel::MessageTag
-pub fn finstack_ai_kernel::MessageTag::eq(&self, &finstack_ai_kernel::MessageTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::MessageTag
-pub fn finstack_ai_kernel::MessageTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::MessageTag
-pub fn finstack_ai_kernel::MessageTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::MessageTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::MessageTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::MessageTag
 pub const finstack_ai_kernel::MessageTag::NAME: &'static str
 pub enum finstack_ai_kernel::ModelRequestTag
-impl core::clone::Clone for finstack_ai_kernel::ModelRequestTag
-pub fn finstack_ai_kernel::ModelRequestTag::clone(&self) -> finstack_ai_kernel::ModelRequestTag
-impl core::cmp::Eq for finstack_ai_kernel::ModelRequestTag
-impl core::cmp::PartialEq for finstack_ai_kernel::ModelRequestTag
-pub fn finstack_ai_kernel::ModelRequestTag::eq(&self, &finstack_ai_kernel::ModelRequestTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ModelRequestTag
-pub fn finstack_ai_kernel::ModelRequestTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::ModelRequestTag
-pub fn finstack_ai_kernel::ModelRequestTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::ModelRequestTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ModelRequestTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::ModelRequestTag
 pub const finstack_ai_kernel::ModelRequestTag::NAME: &'static str
 pub enum finstack_ai_kernel::ModelSettlement
@@ -1532,17 +1334,6 @@ impl core::fmt::Display for finstack_ai_kernel::RecordError
 pub fn finstack_ai_kernel::RecordError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::RecordError
 pub enum finstack_ai_kernel::RecordTag
-impl core::clone::Clone for finstack_ai_kernel::RecordTag
-pub fn finstack_ai_kernel::RecordTag::clone(&self) -> finstack_ai_kernel::RecordTag
-impl core::cmp::Eq for finstack_ai_kernel::RecordTag
-impl core::cmp::PartialEq for finstack_ai_kernel::RecordTag
-pub fn finstack_ai_kernel::RecordTag::eq(&self, &finstack_ai_kernel::RecordTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::RecordTag
-pub fn finstack_ai_kernel::RecordTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::RecordTag
-pub fn finstack_ai_kernel::RecordTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::RecordTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::RecordTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::RecordTag
 pub const finstack_ai_kernel::RecordTag::NAME: &'static str
 pub enum finstack_ai_kernel::ReducerStageOutcome
@@ -1841,17 +1632,6 @@ pub fn finstack_ai_kernel::RunRelationKind::serialize<__S>(&self, __S) -> core::
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::RunRelationKind
 pub fn finstack_ai_kernel::RunRelationKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::RunTag
-impl core::clone::Clone for finstack_ai_kernel::RunTag
-pub fn finstack_ai_kernel::RunTag::clone(&self) -> finstack_ai_kernel::RunTag
-impl core::cmp::Eq for finstack_ai_kernel::RunTag
-impl core::cmp::PartialEq for finstack_ai_kernel::RunTag
-pub fn finstack_ai_kernel::RunTag::eq(&self, &finstack_ai_kernel::RunTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::RunTag
-pub fn finstack_ai_kernel::RunTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::RunTag
-pub fn finstack_ai_kernel::RunTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::RunTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::RunTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::RunTag
 pub const finstack_ai_kernel::RunTag::NAME: &'static str
 pub enum finstack_ai_kernel::Sensitivity
@@ -1895,17 +1675,6 @@ impl core::fmt::Display for finstack_ai_kernel::SessionRecordError
 pub fn finstack_ai_kernel::SessionRecordError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_kernel::SessionRecordError
 pub enum finstack_ai_kernel::SessionTag
-impl core::clone::Clone for finstack_ai_kernel::SessionTag
-pub fn finstack_ai_kernel::SessionTag::clone(&self) -> finstack_ai_kernel::SessionTag
-impl core::cmp::Eq for finstack_ai_kernel::SessionTag
-impl core::cmp::PartialEq for finstack_ai_kernel::SessionTag
-pub fn finstack_ai_kernel::SessionTag::eq(&self, &finstack_ai_kernel::SessionTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::SessionTag
-pub fn finstack_ai_kernel::SessionTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::SessionTag
-pub fn finstack_ai_kernel::SessionTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::SessionTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::SessionTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::SessionTag
 pub const finstack_ai_kernel::SessionTag::NAME: &'static str
 pub enum finstack_ai_kernel::Stage
@@ -2104,17 +1873,6 @@ pub fn finstack_ai_kernel::ToolBatchOutcome::serialize<__S>(&self, __S) -> core:
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ToolBatchOutcome
 pub fn finstack_ai_kernel::ToolBatchOutcome::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::ToolBatchTag
-impl core::clone::Clone for finstack_ai_kernel::ToolBatchTag
-pub fn finstack_ai_kernel::ToolBatchTag::clone(&self) -> finstack_ai_kernel::ToolBatchTag
-impl core::cmp::Eq for finstack_ai_kernel::ToolBatchTag
-impl core::cmp::PartialEq for finstack_ai_kernel::ToolBatchTag
-pub fn finstack_ai_kernel::ToolBatchTag::eq(&self, &finstack_ai_kernel::ToolBatchTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ToolBatchTag
-pub fn finstack_ai_kernel::ToolBatchTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::ToolBatchTag
-pub fn finstack_ai_kernel::ToolBatchTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::ToolBatchTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ToolBatchTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::ToolBatchTag
 pub const finstack_ai_kernel::ToolBatchTag::NAME: &'static str
 pub enum finstack_ai_kernel::ToolCallPlan
@@ -2137,17 +1895,6 @@ pub fn finstack_ai_kernel::ToolCallPlan::serialize<__S>(&self, __S) -> core::res
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ToolCallPlan
 pub fn finstack_ai_kernel::ToolCallPlan::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::ToolCallTag
-impl core::clone::Clone for finstack_ai_kernel::ToolCallTag
-pub fn finstack_ai_kernel::ToolCallTag::clone(&self) -> finstack_ai_kernel::ToolCallTag
-impl core::cmp::Eq for finstack_ai_kernel::ToolCallTag
-impl core::cmp::PartialEq for finstack_ai_kernel::ToolCallTag
-pub fn finstack_ai_kernel::ToolCallTag::eq(&self, &finstack_ai_kernel::ToolCallTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ToolCallTag
-pub fn finstack_ai_kernel::ToolCallTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::ToolCallTag
-pub fn finstack_ai_kernel::ToolCallTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::ToolCallTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ToolCallTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::ToolCallTag
 pub const finstack_ai_kernel::ToolCallTag::NAME: &'static str
 pub enum finstack_ai_kernel::ToolExecutionMode
@@ -2226,32 +1973,10 @@ pub fn finstack_ai_kernel::ToolSettlementKind::serialize<__S>(&self, __S) -> cor
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ToolSettlementKind
 pub fn finstack_ai_kernel::ToolSettlementKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::ToolTag
-impl core::clone::Clone for finstack_ai_kernel::ToolTag
-pub fn finstack_ai_kernel::ToolTag::clone(&self) -> finstack_ai_kernel::ToolTag
-impl core::cmp::Eq for finstack_ai_kernel::ToolTag
-impl core::cmp::PartialEq for finstack_ai_kernel::ToolTag
-pub fn finstack_ai_kernel::ToolTag::eq(&self, &finstack_ai_kernel::ToolTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ToolTag
-pub fn finstack_ai_kernel::ToolTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::ToolTag
-pub fn finstack_ai_kernel::ToolTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::ToolTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ToolTag
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::ToolTag
 pub const finstack_ai_kernel::ToolTag::NAME: &'static str
 pub const finstack_ai_kernel::ToolTag::REQUIRES_NAMESPACE: bool
 pub enum finstack_ai_kernel::TurnTag
-impl core::clone::Clone for finstack_ai_kernel::TurnTag
-pub fn finstack_ai_kernel::TurnTag::clone(&self) -> finstack_ai_kernel::TurnTag
-impl core::cmp::Eq for finstack_ai_kernel::TurnTag
-impl core::cmp::PartialEq for finstack_ai_kernel::TurnTag
-pub fn finstack_ai_kernel::TurnTag::eq(&self, &finstack_ai_kernel::TurnTag) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::TurnTag
-pub fn finstack_ai_kernel::TurnTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for finstack_ai_kernel::TurnTag
-pub fn finstack_ai_kernel::TurnTag::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for finstack_ai_kernel::TurnTag
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::TurnTag
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::TurnTag
 pub const finstack_ai_kernel::TurnTag::NAME: &'static str
 pub enum finstack_ai_kernel::UnknownUsagePolicy

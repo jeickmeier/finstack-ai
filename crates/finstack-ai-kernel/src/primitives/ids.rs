@@ -20,8 +20,11 @@ pub trait IdTag: Send + Sync + 'static {
 
 macro_rules! define_id_tag {
     ($tag:ident, $name:literal) => {
+        // Uninhabited: no value ever exists, so trait impls on the tag itself
+        // are unreachable. `Id<T>` hand-implements every trait under
+        // `T: IdTag`, and `PhantomData<fn() -> T>` imposes no auto-trait bound,
+        // so deriving here only enlarged the public surface.
         #[doc = concat!("Tag for [`", stringify!($tag), "`]-family identifiers.")]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum $tag {}
         impl IdTag for $tag {
             const NAME: &'static str = $name;
@@ -287,8 +290,8 @@ pub trait KeyTag: Send + Sync + 'static {
 
 macro_rules! define_key_tag {
     ($tag:ident, $name:literal, $requires_namespace:expr) => {
+        // Uninhabited; see `define_id_tag` for why no derives belong here.
         #[doc = concat!("Tag for [`", stringify!($tag), "`]-family keys.")]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum $tag {}
         impl KeyTag for $tag {
             const NAME: &'static str = $name;
