@@ -3,7 +3,7 @@ use wasm_bindgen::prelude::*;
 
 pub(super) fn configuration_error(message: impl Into<String>) -> AgentRunError {
     AgentRunError::Configuration {
-        code: AGENT_RUN_INVALID_CONFIGURATION,
+        code: finstack_ai_kernel::static_error_code!(AGENT_RUN_INVALID_CONFIGURATION),
         message: message.into(),
     }
 }

@@ -3632,7 +3632,7 @@ pub fn finstack_ai_runtime::session::IdentityMapError::fmt(&self, &mut core::fmt
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::session::IdentityMapError
 pub enum finstack_ai_runtime::session::SessionError
 pub finstack_ai_runtime::session::SessionError::Commit
-pub finstack_ai_runtime::session::SessionError::Commit::code: &'static str
+pub finstack_ai_runtime::session::SessionError::Commit::code: finstack_ai_kernel::primitives::error::ErrorCode
 pub finstack_ai_runtime::session::SessionError::Conversation(finstack_ai_kernel::conversation::tree::ConversationError)
 pub finstack_ai_runtime::session::SessionError::DuplicateLaneName
 pub finstack_ai_runtime::session::SessionError::Identity(finstack_ai_runtime::session::IdentityMapError)
@@ -3641,12 +3641,12 @@ pub finstack_ai_runtime::session::SessionError::InvalidMessageText
 pub finstack_ai_runtime::session::SessionError::LaneBusy
 pub finstack_ai_runtime::session::SessionError::Poisoned
 pub finstack_ai_runtime::session::SessionError::Recover
-pub finstack_ai_runtime::session::SessionError::Recover::code: &'static str
+pub finstack_ai_runtime::session::SessionError::Recover::code: finstack_ai_kernel::primitives::error::ErrorCode
 pub finstack_ai_runtime::session::SessionError::TenantScopeMismatch
 pub finstack_ai_runtime::session::SessionError::UnknownEntry
 pub finstack_ai_runtime::session::SessionError::UnknownLane
 impl finstack_ai_runtime::session::SessionError
-pub const fn finstack_ai_runtime::session::SessionError::code(&self) -> &'static str
+pub fn finstack_ai_runtime::session::SessionError::code(&self) -> &str
 impl core::clone::Clone for finstack_ai_runtime::session::SessionError
 pub fn finstack_ai_runtime::session::SessionError::clone(&self) -> finstack_ai_runtime::session::SessionError
 impl core::cmp::Eq for finstack_ai_runtime::session::SessionError

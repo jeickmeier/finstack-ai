@@ -1,9 +1,9 @@
 //! `MemoryStore` port: the trait memory-backed extensions implement, plus
 //! query/result types and an in-process reference implementation.
 //!
-//! Nothing here is opinionated about persistence; [`InProcessMemoryStore`]
-//! is a reference/test implementation, and the `sqlite` feature (a later
-//! task) adds a durable one.
+//! [`InProcessMemoryStore`] is the non-durable reference/test implementation.
+//! On non-WASM targets, the `sqlite` feature exposes the durable
+//! [`SqliteMemoryStore`].
 
 use std::sync::Arc;
 

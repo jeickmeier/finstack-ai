@@ -350,7 +350,7 @@ impl Lane {
         if let Some(run) = crate::agent::live_run(self)? {
             return run.cancel_with_initiator(initiator).await.map_err(|error| {
                 SessionError::Commit {
-                    code: error.static_code(),
+                    code: error.owned_code(),
                 }
             });
         }
@@ -378,7 +378,7 @@ impl Lane {
             finstack_ai_kernel::Metadata::empty(),
         )
         .map_err(|_| SessionError::Commit {
-            code: "message_invalid",
+            code: finstack_ai_kernel::static_error_code!("message_invalid"),
         })?;
         self.session
             .ensure()
@@ -419,7 +419,7 @@ fn generated_lane_ids(fork: bool) -> Result<LaneCreateIds, SessionError> {
 
 fn generated_timestamp() -> Result<Timestamp, SessionError> {
     finstack_ai_runtime::ids::Clock::now(&AgentClock).map_err(|_| SessionError::Commit {
-        code: "clock_unavailable",
+        code: finstack_ai_kernel::static_error_code!("clock_unavailable"),
     })
 }
 
@@ -427,7 +427,7 @@ fn generate<T: IdTag>() -> Result<finstack_ai_kernel::Id<T>, SessionError> {
     UuidV7Generator::new(AgentClock, AgentRandom)
         .generate()
         .map_err(|_| SessionError::Commit {
-            code: "id_generation_failed",
+            code: finstack_ai_kernel::static_error_code!("id_generation_failed"),
         })
 }
 
@@ -451,7 +451,7 @@ fn generated_env() -> Result<finstack_ai_kernel::TransitionEnv, SessionError> {
             vec![generate::<CancellationRequestTag>()?],
         )
         .map_err(|_| SessionError::Commit {
-            code: "allocated_ids_invalid",
+            code: finstack_ai_kernel::static_error_code!("allocated_ids_invalid"),
         })?,
     })
 }

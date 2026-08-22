@@ -587,7 +587,7 @@ impl AgentRun {
             Arc::clone(&self.inner.locator.tenant_scope),
         )
         .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        .map_err(|error| AgentRunError::session(&error))?;
         session
             .cancel_run(
                 run_id,
@@ -595,13 +595,13 @@ impl AgentRun {
                 &mut || {
                     NativeIds::cancellation_environment().map_err(|error| {
                         finstack_ai_runtime::session::SessionError::Commit {
-                            code: error.static_code(),
+                            code: error.owned_code(),
                         }
                     })
                 },
             )
             .await
-            .map_err(|error| AgentRunError::runtime_message(error.to_string()))
+            .map_err(|error| AgentRunError::session(&error))
     }
 
     async fn wait_accepted(&self) -> Result<RunAccepted, AgentRunError> {

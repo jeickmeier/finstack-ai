@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     AppendBatchId, CancellationInitiator, ChildPlacement, ConversationEntry, ConversationError,
-    DeadlinePropagation, Digest, EntryBody, EntryId, KernelInput, LABEL_MAX_BYTES, LaneCreated,
-    LaneId, LaneMoved, Message, Metadata, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
-    RecordDraft, RecordId, RunAccepted, RunId, SessionCreated, SessionId, SessionProjection,
-    Timestamp, TransitionEnv,
+    DeadlinePropagation, Digest, EntryBody, EntryId, ErrorCode, KernelInput, LABEL_MAX_BYTES,
+    LaneCreated, LaneId, LaneMoved, Message, Metadata, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
+    RecordBody, RecordDraft, RecordId, RunAccepted, RunId, SessionCreated, SessionId,
+    SessionProjection, Timestamp, TransitionEnv,
 };
 use thiserror::Error;
 
@@ -126,13 +126,13 @@ pub enum SessionError {
     #[error("session recover failed: {code}")]
     Recover {
         /// Stable fault code.
-        code: &'static str,
+        code: ErrorCode,
     },
     /// A structural or run commit failed.
     #[error("session commit failed: {code}")]
     Commit {
         /// Stable fault code.
-        code: &'static str,
+        code: ErrorCode,
     },
     /// The named or identified lane does not exist.
     #[error("unknown lane")]
@@ -169,9 +169,9 @@ pub enum SessionError {
 impl SessionError {
     /// Stable lowercase error code.
     #[must_use]
-    pub const fn code(&self) -> &'static str {
+    pub fn code(&self) -> &str {
         match self {
-            Self::Recover { code } | Self::Commit { code } => code,
+            Self::Recover { code } | Self::Commit { code } => code.as_str(),
             Self::UnknownLane => "unknown_lane",
             Self::UnknownEntry => "unknown_entry",
             Self::LaneBusy => "lane_busy",
@@ -187,12 +187,21 @@ impl SessionError {
     }
 
     fn recover(error: &CommitCoordinatorError) -> Self {
-        Self::Recover { code: error.code() }
+        Self::Recover {
+            code: session_error_code(error.code()),
+        }
     }
 
     fn commit(error: &CommitCoordinatorError) -> Self {
-        Self::Commit { code: error.code() }
+        Self::Commit {
+            code: session_error_code(error.code()),
+        }
     }
+}
+
+fn session_error_code(code: impl AsRef<str>) -> ErrorCode {
+    ErrorCode::new(code)
+        .unwrap_or_else(|_| finstack_ai_kernel::static_error_code!("session_error_code_invalid"))
 }
 
 struct SessionInner {
@@ -241,11 +250,13 @@ impl SessionRuntime {
                         })
                         .await
                         .map_err(|_| SessionError::Recover {
-                            code: "session_load_failed",
+                            code: session_error_code("session_load_failed"),
                         })?;
                     if loaded.head_sequence > 0 {
-                        let projection = project_loaded(&loaded)
-                            .map_err(|code| SessionError::Recover { code })?;
+                        let projection =
+                            project_loaded(&loaded).map_err(|code| SessionError::Recover {
+                                code: session_error_code(code),
+                            })?;
                         let coordinator = CommitCoordinator::structural_from_loaded(
                             Arc::clone(&store),
                             &loaded,
@@ -336,11 +347,13 @@ impl SessionRuntime {
                 InternDecision::Lead(leader) => {
                     let loaded = store.load(LoadRequest { session_id }).await.map_err(|_| {
                         SessionError::Recover {
-                            code: "session_load_failed",
+                            code: session_error_code("session_load_failed"),
                         }
                     })?;
                     let projection =
-                        project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
+                        project_loaded(&loaded).map_err(|code| SessionError::Recover {
+                            code: session_error_code(code),
+                        })?;
                     let coordinator = CommitCoordinator::structural_from_loaded(
                         Arc::clone(&store),
                         &loaded,
@@ -430,7 +443,7 @@ impl SessionRuntime {
             || update.projection.session_id() != Some(self.session_id)
         {
             return Err(SessionError::Recover {
-                code: "session_head_id_mismatch",
+                code: session_error_code("session_head_id_mismatch"),
             });
         }
         let mut inner = self.lock()?;
@@ -473,9 +486,11 @@ impl SessionRuntime {
             })
             .await
             .map_err(|_| SessionError::Recover {
-                code: "session_load_failed",
+                code: session_error_code("session_load_failed"),
             })?;
-        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
+        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover {
+            code: session_error_code(code),
+        })?;
         let coordinator = CommitCoordinator::structural_from_loaded(
             Arc::clone(&self.store),
             &loaded,
@@ -736,7 +751,7 @@ impl SessionRuntime {
             })
             .collect::<Vec<_>>();
         let head = inner.head.as_ref().ok_or(SessionError::Recover {
-            code: "structural_head_missing",
+            code: session_error_code("structural_head_missing"),
         })?;
         Ok(LaneRunContext {
             messages: history.into(),
@@ -973,10 +988,12 @@ impl SessionRuntime {
                         .submit(next_env()?, input)
                         .await
                         .map_err(|_| SessionError::Commit {
-                            code: "live_run_cancel_failed",
+                            code: session_error_code("live_run_cancel_failed"),
                         })?;
                 if let Some(fault) = outcome.fault {
-                    return Err(SessionError::Commit { code: fault.code });
+                    return Err(SessionError::Commit {
+                        code: session_error_code(fault.code),
+                    });
                 }
             } else {
                 self.cancel_recovered(run_id, next_env()?, input).await?;
@@ -1037,7 +1054,7 @@ impl SessionRuntime {
         )?];
         if let Some(entry_id) = fork {
             let moved_id = ids.lane_moved_record_id.ok_or(SessionError::Commit {
-                code: "lane_moved_record_id_missing",
+                code: session_error_code("lane_moved_record_id_missing"),
             })?;
             records.push(session_draft(
                 moved_id,
@@ -1074,9 +1091,11 @@ impl SessionRuntime {
             })
             .await
             .map_err(|_| SessionError::Recover {
-                code: "session_load_failed",
+                code: session_error_code("session_load_failed"),
             })?;
-        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
+        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover {
+            code: session_error_code(code),
+        })?;
         CommitCoordinator::structural_from_loaded(Arc::clone(&self.store), &loaded, projection)
             .map_err(|error| SessionError::recover(&error))
     }
@@ -1202,7 +1221,7 @@ fn session_draft(
         body,
     )
     .map_err(|_| SessionError::Commit {
-        code: "session_records_invalid",
+        code: session_error_code("session_records_invalid"),
     })
 }
 
@@ -1409,9 +1428,7 @@ mod tests {
                     projection: SessionProjection::new(other_session),
                 })
                 .await,
-            Err(SessionError::Recover {
-                code: "session_head_id_mismatch"
-            })
+            Err(SessionError::Recover { code }) if code == "session_head_id_mismatch"
         ));
 
         runtime

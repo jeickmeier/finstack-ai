@@ -9,6 +9,8 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::ids::IdGenerationError;
 use finstack_ai_runtime::ports::model::{ModelError, ModelName, ModelSettings};
 use finstack_ai_runtime::run::RunHandleError;
+#[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::session::SessionError;
 use thiserror::Error;
 
 /// Invalid public run configuration.
@@ -225,7 +227,7 @@ pub enum AgentRunError {
     #[error("{code}: {message}")]
     Configuration {
         /// Stable error code.
-        code: &'static str,
+        code: ErrorCode,
         /// Non-secret explanation.
         message: String,
     },
@@ -268,10 +270,19 @@ impl AgentRunError {
     pub fn code(&self) -> &str {
         match self {
             Self::Failed { descriptor } => descriptor.code.as_str(),
-            Self::Runtime { code, .. } => code.as_str(),
-            Self::Configuration { code, .. } => code,
+            Self::Runtime { code, .. } | Self::Configuration { code, .. } => code.as_str(),
             Self::Timeout { .. } => AGENT_RUN_TIMEOUT,
             Self::Cancelled => AGENT_RUN_CANCELLED,
+        }
+    }
+
+    #[cfg(feature = "native-tokio")]
+    pub(crate) fn owned_code(&self) -> ErrorCode {
+        match self {
+            Self::Failed { descriptor } => descriptor.code.clone(),
+            Self::Runtime { code, .. } | Self::Configuration { code, .. } => code.clone(),
+            Self::Timeout { .. } => finstack_ai_kernel::static_error_code!(AGENT_RUN_TIMEOUT),
+            Self::Cancelled => finstack_ai_kernel::static_error_code!(AGENT_RUN_CANCELLED),
         }
     }
 
@@ -284,9 +295,11 @@ impl AgentRunError {
         false
     }
 
-    pub(super) fn configuration(code: &'static str, message: impl Into<String>) -> Self {
+    pub(super) fn configuration(code: impl AsRef<str>, message: impl Into<String>) -> Self {
         Self::Configuration {
-            code,
+            code: ErrorCode::new(code).unwrap_or_else(|_| {
+                finstack_ai_kernel::static_error_code!(AGENT_RUN_INVALID_CONFIGURATION)
+            }),
             message: message.into(),
         }
     }
@@ -318,6 +331,16 @@ impl AgentRunError {
         )
     }
 
+    #[cfg(feature = "native-tokio")]
+    pub(super) fn session(error: &SessionError) -> Self {
+        let code = ErrorCode::new(error.code())
+            .unwrap_or_else(|_| finstack_ai_kernel::static_error_code!(AGENT_RUN_RUNTIME_FAILURE));
+        Self::Runtime {
+            code,
+            message: error.to_string(),
+        }
+    }
+
     /// Structured failure descriptor, when a port reported one.
     ///
     /// Present for [`AgentRunError::Failed`]; `None` for configuration,
@@ -327,22 +350,6 @@ impl AgentRunError {
         match self {
             Self::Failed { descriptor } => Some(descriptor),
             _ => None,
-        }
-    }
-
-    /// Static fault code for callers that structurally require `&'static str`.
-    ///
-    /// `SessionError::{Commit, Recover}` still take `&'static str`; widening
-    /// those to `ErrorCode` touches ten construction sites in the runtime and
-    /// is its own change. Prefer [`AgentRunError::code`], which returns the
-    /// real one.
-    #[cfg(feature = "native-tokio")]
-    pub(crate) const fn static_code(&self) -> &'static str {
-        match self {
-            Self::Configuration { code, .. } => code,
-            Self::Timeout { .. } => AGENT_RUN_TIMEOUT,
-            Self::Cancelled => AGENT_RUN_CANCELLED,
-            Self::Runtime { .. } | Self::Failed { .. } => AGENT_RUN_RUNTIME_FAILURE,
         }
     }
 

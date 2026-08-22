@@ -610,7 +610,7 @@ impl core::marker::StructuralPartialEq for finstack_ai::AgentBuildError
 pub enum finstack_ai::AgentRunError
 pub finstack_ai::AgentRunError::Cancelled
 pub finstack_ai::AgentRunError::Configuration
-pub finstack_ai::AgentRunError::Configuration::code: &'static str
+pub finstack_ai::AgentRunError::Configuration::code: finstack_ai_kernel::primitives::error::ErrorCode
 pub finstack_ai::AgentRunError::Configuration::message: alloc::string::String
 pub finstack_ai::AgentRunError::Failed
 pub finstack_ai::AgentRunError::Failed::descriptor: alloc::boxed::Box<finstack_ai_kernel::primitives::error::ErrorDescriptor>

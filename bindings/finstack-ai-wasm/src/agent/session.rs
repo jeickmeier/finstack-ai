@@ -288,7 +288,7 @@ impl Lane {
 fn park_unsupported(verb: &str) -> JsValue {
     agent_error(
         &AgentRunError::Configuration {
-            code: AGENT_RUN_UNSUPPORTED_PLAN,
+            code: finstack_ai_kernel::static_error_code!(AGENT_RUN_UNSUPPORTED_PLAN),
             message: format!("lane {verb} is not supported on wasm-host"),
         },
         None,

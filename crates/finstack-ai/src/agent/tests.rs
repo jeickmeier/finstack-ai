@@ -7,10 +7,11 @@ use finstack_ai_kernel::{
     ActiveCapability, ActiveToolCallStatus, AgentId, ArtifactId, ArtifactRef,
     AuthorizationEvidence, BlobRef, BundleId, CapabilityActivationSource, CapabilityId,
     ChildPlacement, ChildRunLocator, ComponentId, ComponentInvocation, ComponentRef, ContentBlock,
-    Digest, EffectId, EffectTag, ExternalEffectCompletion, ExternalEffectCompletionCommand,
-    ExternalEffectOutcome, InvocationRecovery, MediaRef, OperationLocator, ProviderIds, RawJson,
-    RecordBody, RetryClassification, RetryDirective, RunEventClass, RunPhase, RunSecurityContext,
-    RunTag, Stage, TerminalState, TextBlock, ToolExecutionMode, ToolId, Usage, Version,
+    Digest, EffectId, EffectTag, ErrorCode, ExternalEffectCompletion,
+    ExternalEffectCompletionCommand, ExternalEffectOutcome, InvocationRecovery, MediaRef,
+    OperationLocator, ProviderIds, RawJson, RecordBody, RetryClassification, RetryDirective,
+    RunEventClass, RunPhase, RunSecurityContext, RunTag, Stage, TerminalState, TextBlock,
+    ToolExecutionMode, ToolId, Usage, Version,
 };
 use finstack_ai_kernel::{
     BudgetRequest, ExternalHandleRef, Metadata, ReconciliationPolicy, RetrySafety,
@@ -57,6 +58,7 @@ use crate::{
     BundleResolver, BundleSpec, CapabilityActivation, CapabilitySpec, ChildRunPolicy,
     CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
     Registrar, RegistrationError, RegistrationMetadata, RunPolicy, RuntimeServices, Session,
+    SessionError,
 };
 
 const VERSION: Version = Version {
@@ -64,6 +66,43 @@ const VERSION: Version = Version {
     minor: 0,
     patch: 1,
 };
+
+#[test]
+fn dynamic_runtime_code_survives_the_session_error_bridge() {
+    let source = AgentRunError::Runtime {
+        code: ErrorCode::new("provider_runtime_failed").expect("code"),
+        message: String::from("provider runtime failed"),
+    };
+    let session = SessionError::Commit {
+        code: source.owned_code(),
+    };
+
+    let bridged = AgentRunError::session(&session);
+
+    assert_eq!(bridged.code(), "provider_runtime_failed");
+}
+
+#[test]
+fn structured_failure_code_survives_the_session_error_bridge() {
+    let source = AgentRunError::Failed {
+        descriptor: Box::new(
+            finstack_ai_kernel::ErrorDescriptor::new(
+                "provider_structured_failure",
+                "provider structured failure",
+                finstack_ai_kernel::ErrorCategory::Model,
+                false,
+            )
+            .expect("descriptor"),
+        ),
+    };
+    let session = SessionError::Commit {
+        code: source.owned_code(),
+    };
+
+    let bridged = AgentRunError::session(&session);
+
+    assert_eq!(bridged.code(), "provider_structured_failure");
+}
 
 struct PreviewExtension {
     model_id: ComponentId,
