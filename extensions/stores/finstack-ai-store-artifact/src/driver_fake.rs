@@ -10,12 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::driver::{
-    OBJECT_INVALID_KEY, OBJECT_NOT_FOUND, OBJECT_TOO_LARGE, OBJECT_UNSUPPORTED, ObjectDriver,
-    ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef, ObjectScope,
-    ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, physical_object_key,
+    ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
+    ObjectScope, ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, physical_object_key,
     validate_object_metadata,
 };
-use finstack_ai_kernel::{Digest, Metadata, Sensitivity};
+use finstack_ai_kernel::Digest;
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::ports::PortFuture;
 

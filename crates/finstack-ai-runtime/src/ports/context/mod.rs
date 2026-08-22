@@ -17,14 +17,9 @@ pub(crate) use committed::context_resume_action;
 #[cfg(all(test, any(feature = "native-tokio", feature = "wasm-host")))]
 pub(crate) use committed::map_context_reconcile_result;
 pub use committed::{CommittedContextCall, InvocationResumeAction, RecordedContextContribution};
-#[cfg(any(
-    all(test, feature = "native-tokio"),
-    all(feature = "wasm-host", not(feature = "native-tokio")),
-))]
-pub(crate) use error::CONTEXT_RECOVERY_UNCERTAIN;
 pub use error::{
     CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED, CONTEXT_CONFIGURATION_INVALID,
-    CONTEXT_CONTRIBUTION_INVALID, ContextError,
+    CONTEXT_CONTRIBUTION_INVALID, CONTEXT_RECOVERY_UNCERTAIN, ContextError,
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use port::CONTEXT_STAGE;

@@ -170,7 +170,11 @@ impl core::marker::Copy for finstack_ai_runtime::artifact::ArtifactStoreLimits
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::artifact::ArtifactStoreLimits
 pub const finstack_ai_runtime::artifact::ARTIFACT_CAPACITY_EXCEEDED: &str
 pub const finstack_ai_runtime::artifact::ARTIFACT_INTEGRITY_FAILURE: &str
+pub const finstack_ai_runtime::artifact::ARTIFACT_INVALID_METADATA: &str
+pub const finstack_ai_runtime::artifact::ARTIFACT_NOT_FOUND: &str
 pub const finstack_ai_runtime::artifact::ARTIFACT_SCOPE_MISMATCH: &str
+pub const finstack_ai_runtime::artifact::ARTIFACT_TOO_LARGE: &str
+pub const finstack_ai_runtime::artifact::ARTIFACT_UNAVAILABLE: &str
 pub const finstack_ai_runtime::artifact::DEFAULT_ARTIFACT_ORPHAN_GRACE_MS: u64
 pub const finstack_ai_runtime::artifact::MAX_ARTIFACTS: usize
 pub const finstack_ai_runtime::artifact::MAX_ARTIFACT_BYTES: usize
@@ -312,6 +316,10 @@ impl serde_core::ser::Serialize for finstack_ai_runtime::budget::BudgetReservati
 pub fn finstack_ai_runtime::budget::BudgetReservationState::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::budget::BudgetReservationState
 pub fn finstack_ai_runtime::budget::BudgetReservationState::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const finstack_ai_runtime::budget::BUDGET_CONFLICT: &str
+pub const finstack_ai_runtime::budget::BUDGET_INVALID_RECEIPT: &str
+pub const finstack_ai_runtime::budget::BUDGET_UNAVAILABLE: &str
+pub const finstack_ai_runtime::budget::BUDGET_UNKNOWN: &str
 pub trait finstack_ai_runtime::budget::BudgetLedger: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_runtime::budget::BudgetLedger::charge(&self, finstack_ai_kernel::records::policy::budget::BudgetChargeRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::records::policy::budget::BudgetChargeReceipt, finstack_ai_runtime::budget::BudgetError>>
 pub fn finstack_ai_runtime::budget::BudgetLedger::reconcile(&self, finstack_ai_kernel::primitives::ids::BudgetScopeId, finstack_ai_kernel::primitives::ids::BudgetReservationId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::budget::BudgetReservationState, finstack_ai_runtime::budget::BudgetError>>
@@ -503,7 +511,9 @@ pub fn finstack_ai_runtime::child::ChildRunRequest::eq(&self, &finstack_ai_runti
 impl core::fmt::Debug for finstack_ai_runtime::child::ChildRunRequest
 pub fn finstack_ai_runtime::child::ChildRunRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::child::ChildRunRequest
+pub const finstack_ai_runtime::child::AGENT_INVOKE_CONFLICT: &str
 pub const finstack_ai_runtime::child::AGENT_INVOKE_INVALID_ACCEPTANCE: &str
+pub const finstack_ai_runtime::child::AGENT_INVOKE_UNAVAILABLE: &str
 pub trait finstack_ai_runtime::child::AgentInvoker: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_runtime::child::AgentInvoker::cancel(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::child::AgentInvokeError>>
 pub fn finstack_ai_runtime::child::AgentInvoker::start_or_attach(&self, finstack_ai_runtime::child::ChildRunContext, finstack_ai_runtime::child::ChildRunRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::child::ChildRunHandle, finstack_ai_runtime::child::AgentInvokeError>>
@@ -669,6 +679,8 @@ pub fn finstack_ai_runtime::confinement::WindowsLpacProfile::eq(&self, &finstack
 impl core::fmt::Debug for finstack_ai_runtime::confinement::WindowsLpacProfile
 pub fn finstack_ai_runtime::confinement::WindowsLpacProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::confinement::WindowsLpacProfile
+pub const finstack_ai_runtime::confinement::CONFINEMENT_DENIED: &str
+pub const finstack_ai_runtime::confinement::CONFINEMENT_IO: &str
 pub const finstack_ai_runtime::confinement::CONFINEMENT_UNAVAILABLE: &str
 pub fn finstack_ai_runtime::confinement::configure_process_tree(&mut std::process::Command) -> core::result::Result<(), finstack_ai_runtime::confinement::ConfinementError>
 pub fn finstack_ai_runtime::confinement::terminate_process_tree(u32) -> core::io::error::Result<()>
@@ -1206,6 +1218,7 @@ pub const finstack_ai_runtime::ports::context::CONTEXT_BUDGET_EXCEEDED: &str
 pub const finstack_ai_runtime::ports::context::CONTEXT_COMMIT_REQUIRED: &str
 pub const finstack_ai_runtime::ports::context::CONTEXT_CONFIGURATION_INVALID: &str
 pub const finstack_ai_runtime::ports::context::CONTEXT_CONTRIBUTION_INVALID: &str
+pub const finstack_ai_runtime::ports::context::CONTEXT_RECOVERY_UNCERTAIN: &str
 pub trait finstack_ai_runtime::ports::context::ContextProvider: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_runtime::ports::context::ContextProvider::collect(&self, finstack_ai_runtime::ports::context::ContextCallContext, finstack_ai_runtime::ports::context::ContextRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::ContextContribution, finstack_ai_runtime::ports::context::ContextError>>
 pub fn finstack_ai_runtime::ports::context::ContextProvider::descriptor(&self) -> finstack_ai_runtime::ports::context::ContextProviderDescriptor
@@ -1905,6 +1918,8 @@ pub const finstack_ai_runtime::ports::middleware::MIDDLEWARE_COMMIT_REQUIRED: &s
 pub const finstack_ai_runtime::ports::middleware::MIDDLEWARE_ORDER_CYCLE: &str
 pub const finstack_ai_runtime::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED: &str
 pub const finstack_ai_runtime::ports::middleware::MIDDLEWARE_RESOLUTION_INVALID: &str
+pub const finstack_ai_runtime::ports::middleware::MIDDLEWARE_STAGE_BOUNDS_EXCEEDED: &str
+pub const finstack_ai_runtime::ports::middleware::MIDDLEWARE_STAGE_UNLANDABLE: &str
 pub trait finstack_ai_runtime::ports::middleware::Middleware: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_runtime::ports::middleware::Middleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::MiddlewareDescriptor
 pub fn finstack_ai_runtime::ports::middleware::Middleware::invoke(&self, finstack_ai_runtime::ports::middleware::MiddlewareContext, finstack_ai_runtime::ports::middleware::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::StageOutcome, finstack_ai_runtime::ports::middleware::MiddlewareError>>
@@ -3252,12 +3267,24 @@ impl core::fmt::Debug for finstack_ai_runtime::ports::tool::ToolsetRegistration
 pub fn finstack_ai_runtime::ports::tool::ToolsetRegistration::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const finstack_ai_runtime::ports::tool::MCP_SAMPLING_REQUIRED: &str
 pub const finstack_ai_runtime::ports::tool::MCP_SAMPLING_UNAVAILABLE: &str
+pub const finstack_ai_runtime::ports::tool::MCP_SAMPLING_UNSUPPORTED: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_APPROVAL_REQUIRED: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_ARGUMENTS_INVALID: &str
 pub const finstack_ai_runtime::ports::tool::TOOL_CANCELLED: &str
 pub const finstack_ai_runtime::ports::tool::TOOL_DEADLINE_EXCEEDED: &str
 pub const finstack_ai_runtime::ports::tool::TOOL_DEFERRAL_EXPIRED: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_DEFERRAL_INVALID: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_DEFERRAL_NOT_DECLARED: &str
 pub const finstack_ai_runtime::ports::tool::TOOL_INTERACTION_REQUIRED: &str
 pub const finstack_ai_runtime::ports::tool::TOOL_OUTPUT_INVALID: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_PANICKED: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_POLICY_DENIED: &str
 pub const finstack_ai_runtime::ports::tool::TOOL_RECONCILIATION_UNSUPPORTED: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_REGISTRATION_INVALID: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_RESULT_LIMIT_EXCEEDED: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_STREAM_INVALID: &str
+pub const finstack_ai_runtime::ports::tool::TOOL_STREAM_LIMIT_EXCEEDED: &str
+pub const finstack_ai_runtime::ports::tool::UNKNOWN_TOOL: &str
 pub trait finstack_ai_runtime::ports::tool::ToolValidator: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_runtime::ports::tool::ToolValidator::validate(&self, &finstack_ai_kernel::primitives::raw_json::RawJson) -> finstack_ai_kernel::records::policy::validation::ValidationOutcome
 pub trait finstack_ai_runtime::ports::tool::ToolValidatorCompiler: finstack_ai_runtime::ports::PortObject

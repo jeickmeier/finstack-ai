@@ -109,3 +109,23 @@ impl MiddlewareError {
         }
     }
 }
+
+/// Stable code for a middleware outcome with no kernel landing path at the
+/// stage it was produced at.
+///
+/// Covers outcomes that never have a `ReducerStageOutcome` peer at all
+/// (`Suspend`, `Complete`, `RequestInteraction`, `RequestCompactionModel`),
+/// and outcomes that have one only at a different stage than the one they
+/// were produced at (`Retry` outside `BeforeFinalize`; `Replace` and
+/// `CompactContext` outside the two stages that carry model context).
+pub const MIDDLEWARE_STAGE_UNLANDABLE: &str = "middleware_stage_unlandable";
+
+/// Stable code for a fold whose accumulated `AddInstructions`/`AddContext`
+/// content would exceed a kernel-enforced array bound if landed.
+///
+/// This bound used to be checked only by the kernel, against the final
+/// message array. It moves to the driver because middleware can now add to
+/// that array; the driver checks what it can see (the aggregate additions),
+/// which is a necessary — not sufficient — condition for the kernel accepting
+/// the eventual `ReducerStageOutcome`.
+pub const MIDDLEWARE_STAGE_BOUNDS_EXCEEDED: &str = "middleware_stage_bounds_exceeded";

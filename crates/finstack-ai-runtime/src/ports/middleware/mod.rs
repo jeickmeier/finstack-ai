@@ -35,6 +35,7 @@ pub use digest::{
     compaction_protected_set_digest, compaction_source_digest, compaction_summary_digest,
 };
 pub use error::MiddlewareError;
+pub use error::{MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE};
 pub use port::Middleware;
 #[cfg(test)]
 pub(crate) use types::parse_stage;

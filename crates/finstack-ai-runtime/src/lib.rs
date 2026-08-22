@@ -112,8 +112,6 @@ pub(crate) use exec::middleware_driver;
 
 pub use error::PortErrorInvalid;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-pub(crate) use model::MODEL_PROFILE_INVALID;
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use model::{parse_committed_model_request, stable_model_dispatch_code};
 #[cfg(feature = "native-tokio")]
 #[cfg(feature = "native-tokio")]
@@ -140,6 +138,7 @@ pub mod run {
 
 /// Child-run composition: invoking a child agent, starting it, and coordinating budget and lineage.
 pub mod child {
+    pub use crate::services::agent_invoker::{AGENT_INVOKE_CONFLICT, AGENT_INVOKE_UNAVAILABLE};
     pub use crate::services::agent_invoker::{
         AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext,
         ChildRunHandle, ChildRunPolicy, ChildRunRequest, ChildRunStatus,
@@ -162,6 +161,9 @@ pub mod artifact {
         MAX_ARTIFACT_OWNERS, MAX_ARTIFACTS, MAX_TOTAL_ARTIFACT_BYTES, artifact_storage_key,
         build_artifact_ref, get_required_artifact, stage_required_artifact,
         validate_artifact_scope, validate_retrieved_artifact, validate_staged_artifact,
+    };
+    pub use crate::services::artifact::{
+        ARTIFACT_INVALID_METADATA, ARTIFACT_NOT_FOUND, ARTIFACT_TOO_LARGE, ARTIFACT_UNAVAILABLE,
     };
 }
 
@@ -201,6 +203,7 @@ pub mod audit {
 
 /// Process confinement profiles and backends for spawned children.
 pub mod confinement {
+    pub use crate::services::process_confinement::{CONFINEMENT_DENIED, CONFINEMENT_IO};
     #[cfg(not(target_arch = "wasm32"))]
     pub use crate::services::process_confinement::{
         CONFINEMENT_UNAVAILABLE, ConfinedChild, ConfinementBackend, ConfinementError,
@@ -214,6 +217,9 @@ pub mod confinement {
 
 /// Shared-budget reservation and settlement.
 pub mod budget {
+    pub use crate::services::budget::{
+        BUDGET_CONFLICT, BUDGET_INVALID_RECEIPT, BUDGET_UNAVAILABLE, BUDGET_UNKNOWN,
+    };
     pub use crate::services::budget::{BudgetError, BudgetLedger, BudgetReservationState};
 }
 
@@ -228,6 +234,10 @@ pub mod ingress {
 
 /// Workflow sessions, checkpoints and retry decisions.
 pub mod workflow {
+    #[cfg(feature = "native-tokio")]
+    pub use crate::driver::workflow::{
+        EFFECT_NOT_OUTSTANDING, RETRY_LIMIT_REACHED, RETRY_NOT_SAFE,
+    };
     #[cfg(feature = "native-tokio")]
     pub use crate::driver::workflow::{
         WorkflowCheckpoint, WorkflowDriverError, WorkflowRetryDecision, WorkflowSession,

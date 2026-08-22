@@ -48,7 +48,7 @@ fn a_non_terminal_fold_with_no_landing_is_rejected_not_dropped() {
     )
     .expect_err("nothing at AfterModel can carry a tool filter");
     assert!(matches!(&error, RunHandleError::Middleware { code }
-        if code.as_ref() == crate::middleware_driver::MIDDLEWARE_STAGE_UNLANDABLE));
+        if code.as_ref() == crate::ports::middleware::MIDDLEWARE_STAGE_UNLANDABLE));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn a_tool_batch_fold_with_no_policy_expression_is_rejected_not_dropped() {
         let error =
             tool_batch_policy(&fold).expect_err("a BeforeToolBatch fold has nowhere to land this");
         assert!(matches!(&error, RunHandleError::Middleware { code }
-            if code.as_ref() == crate::middleware_driver::MIDDLEWARE_STAGE_UNLANDABLE));
+            if code.as_ref() == crate::ports::middleware::MIDDLEWARE_STAGE_UNLANDABLE));
     }
 }
 

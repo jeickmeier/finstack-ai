@@ -97,6 +97,4 @@ mod fold;
 mod tests;
 
 pub use driver::StageDriver;
-pub use fold::{
-    MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE, StageFold, StageTerminal,
-};
+pub use fold::{StageFold, StageTerminal};

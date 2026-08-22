@@ -6,9 +6,7 @@ use finstack_ai_kernel::{
     RetryDirective, Sensitivity, Stage, TextBlock, ToolId, Version,
 };
 
-use super::{
-    MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE, StageFold, StageTerminal,
-};
+use super::{StageFold, StageTerminal};
 use crate::context::{ContextAuthority, ContextItem, ContextItemKind, ContextProvenance};
 use crate::middleware::{
     CompactionEvidence, CompactionModelRequest, CompactionResult, MiddlewareDescriptor,
@@ -18,6 +16,7 @@ use crate::middleware::{
 use crate::model::{
     CancellationSignal, ModelName, ModelRequestDraft, ModelRequestLimits, ModelSettings,
 };
+use crate::ports::middleware::{MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE};
 
 fn id<T: IdTag>(value: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];

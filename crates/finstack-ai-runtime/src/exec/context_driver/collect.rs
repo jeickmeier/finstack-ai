@@ -267,7 +267,7 @@ fn rebuild_messages<C: Clock, R: RandomSource>(
     }
     if messages.len() > SEMANTIC_ARRAY_MAX_ITEMS {
         return Err(RunHandleError::Middleware {
-            code: Arc::from(crate::middleware_driver::MIDDLEWARE_STAGE_BOUNDS_EXCEEDED),
+            code: Arc::from(crate::ports::middleware::MIDDLEWARE_STAGE_BOUNDS_EXCEEDED),
         });
     }
     Ok(messages.into())

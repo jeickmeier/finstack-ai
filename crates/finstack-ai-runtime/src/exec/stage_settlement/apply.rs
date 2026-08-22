@@ -7,10 +7,9 @@ use finstack_ai_kernel::{
 
 use crate::context::ContextItem;
 use crate::ids::{Clock, RandomSource};
-use crate::middleware_driver::{
-    MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE, StageFold, StageTerminal,
-};
+use crate::middleware_driver::{StageFold, StageTerminal};
 use crate::model::ModelRequestDraft;
+use crate::ports::middleware::{MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE};
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
 

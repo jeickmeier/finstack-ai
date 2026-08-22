@@ -159,7 +159,7 @@ fn oversized_context_fold_is_a_stable_bounds_error() {
         .expect_err("base + additions exceed the semantic array bound");
     assert!(
         matches!(&error, RunHandleError::Middleware { code }
-            if code.as_ref() == crate::middleware_driver::MIDDLEWARE_STAGE_BOUNDS_EXCEEDED),
+            if code.as_ref() == crate::ports::middleware::MIDDLEWARE_STAGE_BOUNDS_EXCEEDED),
         "expected a stable bounds error, got {error:?}"
     );
 }

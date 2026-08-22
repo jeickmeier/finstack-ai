@@ -6,9 +6,8 @@ use finstack_ai_kernel::{ErrorDescriptor, Stage, StageCursor, ToolCallBlock, Too
 use crate::coordinator::CommitCoordinator;
 use crate::ids::{Clock, RandomSource};
 use crate::middleware::{BeforeToolBatchInput, StageInput};
-use crate::middleware_driver::{
-    MIDDLEWARE_STAGE_UNLANDABLE, StageDriver, StageFold, StageTerminal,
-};
+use crate::middleware_driver::{StageDriver, StageFold, StageTerminal};
+use crate::ports::middleware::MIDDLEWARE_STAGE_UNLANDABLE;
 use crate::ports::model::SideEffectClass;
 use crate::ports::tool::ResolvedToolCatalog;
 use crate::run_types::RunHandleError;

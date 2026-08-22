@@ -85,7 +85,7 @@ impl HostDispatcher {
         };
         let draft = parse_committed_model_request(self.model.as_ref(), &self.profile, raw)
             .map_err(|error| DispatchError {
-                code: stable_model_dispatch_code(error.code()),
+                code: stable_model_dispatch_code(error.code().as_str()),
             })?;
         let cancellation = self.parent.child();
         {
@@ -190,7 +190,7 @@ impl PostCommitDispatcher for HostDispatcher {
                 parse_committed_model_request(self.model.as_ref(), &self.profile, request)
                     .map(|_| ())
                     .map_err(|error| DispatchError {
-                        code: stable_model_dispatch_code(error.code()),
+                        code: stable_model_dispatch_code(error.code().as_str()),
                     })?;
             }
             if let ReducerStageOutcome::ToolBatchPrepared { calls, .. } = &settled.outcome {
