@@ -5,7 +5,7 @@ use finstack_ai_kernel::{
 #[cfg(all(test, feature = "native-tokio"))]
 use finstack_ai_kernel::{EffectCompleted, InvocationRecovery};
 
-use crate::ReconcileContext;
+use crate::ports::model::ReconcileContext;
 
 use super::error::{
     CONTEXT_BUDGET_EXCEEDED, CONTEXT_CONTRIBUTION_INVALID, CONTEXT_RECOVERY_UNCERTAIN, ContextError,

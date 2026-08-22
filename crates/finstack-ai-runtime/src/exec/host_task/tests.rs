@@ -16,25 +16,32 @@ use finstack_ai_kernel::{
 use futures_core::Stream;
 
 use super::*;
+use crate::Usage;
 use crate::coordinator::CommitCoordinator;
+use crate::driver::host_driver;
 use crate::event_hub::{
     EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionConfig,
     ProgressCoalescing,
 };
-use crate::host_driver;
-use crate::{
-    ApprovalGrantMode, Clock, InputCapabilities, JournalStore, JsonSchemaToolValidatorCompiler,
-    LoadRequest, LoadedSession, Model, ModelCapabilities, ModelContextProfile, ModelDescriptor,
-    ModelError, ModelEventStream, ModelName, ModelProgress, ModelRequest, ModelRequestDraft,
-    ModelResponse, ModelSettings, ModelStreamItem, ModelTaskConfig, ModelTokenEstimate,
-    ModelWarmupContext, PortFuture, RandomSource, ResolvedToolCatalog, RunTaskConfig,
-    SameIdentityRetryPolicy, SideEffectClass, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth, StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolCallContext, ToolCallDelta, ToolDeferralSupport, ToolError, ToolEventStream,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolStreamItem, ToolStreamLimits,
-    ToolTaskConfig, Toolset, ToolsetDescriptor, ToolsetRegistration, Usage,
-    resolve_model_context_profile,
+use crate::ids::{Clock, RandomSource};
+use crate::ports::PortFuture;
+use crate::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
 };
+use crate::ports::model::{
+    ApprovalGrantMode, InputCapabilities, Model, ModelCapabilities, ModelContextProfile,
+    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelProgress, ModelRequest,
+    ModelRequestDraft, ModelResponse, ModelSettings, ModelStreamItem, ModelTokenEstimate,
+    ModelWarmupContext, SideEffectClass, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
+    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, resolve_model_context_profile,
+};
+use crate::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolCallContext, ToolError,
+    ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolStreamItem,
+    ToolStreamLimits, Toolset, ToolsetDescriptor, ToolsetRegistration,
+};
+use crate::run::{ModelTaskConfig, RunTaskConfig, SameIdentityRetryPolicy, ToolTaskConfig};
 
 fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
@@ -60,11 +67,11 @@ fn live_state_wait_observes_host_lifecycle_and_retains_terminal_snapshot() {
     let shutting_down = block_on(handle.wait_for_live_state(initial.revision)).expect("revision");
     assert!(matches!(
         shutting_down.status,
-        crate::RunStatus::ShuttingDown | crate::RunStatus::Stopped
+        crate::run::RunStatus::ShuttingDown | crate::run::RunStatus::Stopped
     ));
     let _ = block_on(owner.shutdown());
     let terminal = handle.live_state();
-    assert_eq!(terminal.status, crate::RunStatus::Stopped);
+    assert_eq!(terminal.status, crate::run::RunStatus::Stopped);
     assert!(terminal.revision >= shutting_down.revision);
     assert!(terminal.revision > initial.revision);
 }
@@ -307,7 +314,7 @@ impl Model for ToolCallingModel {
 
     fn request(&self, _request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
         let calls = (0..2)
-            .map(|index| crate::ModelToolCall {
+            .map(|index| crate::ports::model::ModelToolCall {
                 name: Arc::from("parallel-test"),
                 arguments: RawJson::parse(format!(r#"{{"value":{index}}}"#)).expect("arguments"),
                 provider_call_id: None,
@@ -346,7 +353,7 @@ impl Drop for ActiveToolCall {
 }
 
 struct ParallelToolset {
-    spec: crate::ToolSpec,
+    spec: crate::ports::model::ToolSpec,
     started: AtomicU64,
     active: Arc<AtomicU64>,
     maximum_active: AtomicU64,
@@ -357,7 +364,7 @@ struct ParallelToolset {
 impl ParallelToolset {
     fn new() -> Arc<Self> {
         Arc::new(Self {
-            spec: crate::ToolSpec {
+            spec: crate::ports::model::ToolSpec {
                 id: ToolId::parse("finstack.tools.parallel-test").expect("tool id"),
                 model_name: Arc::from("parallel-test"),
                 title: Arc::from("parallel test"),
@@ -375,8 +382,8 @@ impl ParallelToolset {
                 execution: ToolExecutionMode::Parallel,
                 side_effect: SideEffectClass::ReadOnly,
                 retry_safety: RetrySafety::SafeToRetry,
-                approval: crate::ApprovalMetadata {
-                    requirement: crate::ApprovalRequirement::NotRequired,
+                approval: crate::ports::model::ApprovalMetadata {
+                    requirement: crate::ports::model::ApprovalRequirement::NotRequired,
                     reason: None,
                     attributes: Metadata::empty(),
                 },
@@ -406,7 +413,7 @@ impl Toolset for ParallelToolset {
         }
     }
 
-    fn tools(&self) -> Arc<[crate::ToolSpec]> {
+    fn tools(&self) -> Arc<[crate::ports::model::ToolSpec]> {
         Arc::from([self.spec.clone()])
     }
 
@@ -462,7 +469,7 @@ struct TestClock {
 }
 
 impl Clock for TestClock {
-    fn now(&self) -> Result<Timestamp, crate::IdGenerationError> {
+    fn now(&self) -> Result<Timestamp, crate::ids::IdGenerationError> {
         let ms = self.now.fetch_add(1, Ordering::AcqRel);
         Ok(Timestamp::from_unix_ms(i64::try_from(ms).expect("ms")).expect("timestamp"))
     }
@@ -473,7 +480,7 @@ struct TestRandom {
 }
 
 impl RandomSource for TestRandom {
-    fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), crate::IdGenerationError> {
+    fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), crate::ids::IdGenerationError> {
         for byte in buf {
             *byte = u8::try_from(self.next.fetch_add(1, Ordering::AcqRel) & 0xff).expect("byte");
         }
@@ -590,7 +597,7 @@ fn model_config() -> ModelTaskConfig {
     ModelTaskConfig {
         job_capacity: 8,
         result_capacity: 8,
-        stream_limits: crate::ModelStreamLimits::default(),
+        stream_limits: crate::ports::model::ModelStreamLimits::default(),
         same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }
@@ -693,8 +700,9 @@ fn submit_dispatches_model_and_publishes_one_event_batch() {
         resolve_model_context_profile(model_profile.clone(), None, None, false).expect("profile");
     let model = Arc::new(CompletingModel::new(model_profile));
     let model_port: Arc<dyn Model> = model.clone();
-    let ready_model =
-        Arc::new(block_on(crate::ReadyModel::prepare(model_port)).expect("model readiness"));
+    let ready_model = Arc::new(
+        block_on(crate::ports::model::ReadyModel::prepare(model_port)).expect("model readiness"),
+    );
     let mut owner = block_on(RunTaskOwner::spawn_with_model(
         CommitCoordinator::new(store),
         run_config(),
@@ -764,7 +772,7 @@ fn submit_dispatches_model_and_publishes_one_event_batch() {
         settings: ModelSettings {
             values: RawJson::parse(b"{}").expect("settings"),
         },
-        limits: crate::ModelRequestLimits {
+        limits: crate::ports::model::ModelRequestLimits {
             max_input_bytes: locked.profile.hard_input_bytes,
             max_input_tokens: locked
                 .profile
@@ -830,7 +838,8 @@ fn parallel_tool_group_runs_concurrently_and_settles_through_the_owner() {
     let toolset = ParallelToolset::new();
     let catalog = parallel_catalog(Arc::clone(&toolset));
     let tools = toolset.tools();
-    let ready_model = Arc::new(block_on(crate::ReadyModel::prepare(model)).expect("ready model"));
+    let ready_model =
+        Arc::new(block_on(crate::ports::model::ReadyModel::prepare(model)).expect("ready model"));
     let mut owner = block_on(RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(store.clone()),
         run_config(),
@@ -905,7 +914,7 @@ fn parallel_tool_group_runs_concurrently_and_settles_through_the_owner() {
         settings: ModelSettings {
             values: RawJson::parse(b"{}").expect("settings"),
         },
-        limits: crate::ModelRequestLimits {
+        limits: crate::ports::model::ModelRequestLimits {
             max_input_bytes: locked.profile.hard_input_bytes,
             max_input_tokens: locked
                 .profile

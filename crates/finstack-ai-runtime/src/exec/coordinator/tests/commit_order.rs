@@ -153,7 +153,7 @@ fn recovery_restores_last_model_continuation_from_committed_output() {
     let continuation =
         RawJson::parse(r#"{"provider":"openai.responses","replay_items":[],"version":1}"#)
             .expect("continuation");
-    let response = crate::ModelResponse {
+    let response = crate::ports::model::ModelResponse {
         assistant_content: Arc::from([ContentBlock::Text(
             TextBlock::try_new("hello").expect("text"),
         )]),

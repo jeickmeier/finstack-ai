@@ -16,9 +16,10 @@ use crate::context::{
     ContextProvider, ContextProviderDescriptor, ContextReconcileResult, ContextRequest,
     InvocationResumeAction, map_context_reconcile_result,
 };
-use crate::{
-    AuthorizationContext, CancellationSignal, PendingContextEffect, PortFuture, ReconcileContext,
-    RunCallContext,
+use crate::ports::PortFuture;
+use crate::ports::context::PendingContextEffect;
+use crate::ports::model::{
+    AuthorizationContext, CancellationSignal, ReconcileContext, RunCallContext,
 };
 
 use super::commit::chain_digest;
@@ -61,7 +62,7 @@ fn structural_protected_covers_system_developer_and_trailing_user() {
 
 #[test]
 fn empty_provider_chain_digest_is_deterministic() {
-    let empty: Arc<[Arc<dyn crate::ContextProvider>]> = Arc::from([]);
+    let empty: Arc<[Arc<dyn crate::ports::context::ContextProvider>]> = Arc::from([]);
     assert_eq!(chain_digest(&empty), chain_digest(&empty));
     assert_ne!(chain_digest(&empty), Digest::raw_json(b""));
 }

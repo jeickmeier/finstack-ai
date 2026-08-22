@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use finstack_ai_kernel::{KernelInput, TransitionEnv};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::CommitOutcome;
+use crate::commit::CommitOutcome;
 use crate::event_hub::EventHubHandle;
 use crate::exec::live_state::{LiveRunState, LiveStatePublisher, session_head_update};
 use crate::observer::ObserverDiagnosticBuffer;
@@ -17,8 +17,8 @@ pub(super) struct Shared {
     pub(super) live_state: watch::Sender<LiveRunState>,
     pub(super) kernel_state: Mutex<finstack_ai_kernel::KernelState>,
     pub(super) record_kinds: Mutex<Arc<[Arc<str>]>>,
-    pub(super) session_head: Mutex<Option<crate::SessionHeadUpdate>>,
-    pub(super) compaction_checkpoint: Mutex<Option<crate::CompactionCheckpoint>>,
+    pub(super) session_head: Mutex<Option<crate::session::SessionHeadUpdate>>,
+    pub(super) compaction_checkpoint: Mutex<Option<crate::ports::middleware::CompactionCheckpoint>>,
     pub(super) events: EventHubHandle,
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
     pub(super) timer_already_due: AtomicU64,
@@ -62,7 +62,10 @@ impl LiveStatePublisher for Shared {
         ));
     }
 
-    fn publish_compaction_checkpoint(&self, checkpoint: Option<&crate::CompactionCheckpoint>) {
+    fn publish_compaction_checkpoint(
+        &self,
+        checkpoint: Option<&crate::ports::middleware::CompactionCheckpoint>,
+    ) {
         if let Ok(mut current) = self.compaction_checkpoint.lock() {
             current.clone_from(&checkpoint.cloned());
         }

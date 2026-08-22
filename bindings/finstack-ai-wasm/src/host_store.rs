@@ -3,11 +3,12 @@
 
 use std::sync::Arc;
 
+use finstack_ai::runtime::ports::PortFuture;
 #[cfg(target_arch = "wasm32")]
-use finstack_ai::runtime::OpaqueSnapshot;
-use finstack_ai::runtime::{
-    JournalStore, LoadRequest, LoadedSession, PortFuture, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth,
+use finstack_ai::runtime::ports::journal::OpaqueSnapshot;
+use finstack_ai::runtime::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
 };
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
 #[cfg(target_arch = "wasm32")]
@@ -520,7 +521,7 @@ mod tests {
     use super::{HostJournalStore, HostJournalStoreOptions};
     use crate::executor::block_on_ready;
     use crate::host::NativeHostResult;
-    use finstack_ai::runtime::{JournalStore, LoadRequest};
+    use finstack_ai::runtime::ports::journal::{JournalStore, LoadRequest};
     use finstack_ai_kernel::SessionId;
 
     #[test]

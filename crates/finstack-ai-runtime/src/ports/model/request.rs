@@ -61,7 +61,7 @@ pub enum ApprovalRequirement {
 /// # Examples
 ///
 /// ```
-/// use finstack_ai_runtime::ApprovalGrantMode;
+/// use finstack_ai_runtime::ports::model::ApprovalGrantMode;
 ///
 /// assert_eq!(ApprovalGrantMode::default(), ApprovalGrantMode::PerCall);
 /// ```

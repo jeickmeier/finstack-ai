@@ -5,9 +5,11 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::ports::{PortFuture, PortObject};
+use bytes::Bytes;
+
 use crate::{
-    ArtifactId, ArtifactRef, BlobRef, Bytes, Digest, Metadata, PortFuture, PortObject, RunId,
-    Sensitivity, SessionId, Timestamp,
+    ArtifactId, ArtifactRef, BlobRef, Digest, Metadata, RunId, Sensitivity, SessionId, Timestamp,
 };
 
 /// Stable code for an unavailable artifact service.

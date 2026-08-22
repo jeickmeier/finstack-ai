@@ -742,7 +742,7 @@ async fn settle_controller_cancellation(
     handle: &RunHandle,
     initiator: CancellationInitiator,
     not_before: Option<Timestamp>,
-) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+) -> Result<finstack_ai_runtime::run::LiveRunState, AgentRunError> {
     let state = handle.live_state();
     if state.terminal.is_some() {
         return Ok(state);
@@ -782,7 +782,7 @@ async fn settle_controller_cancellation(
 
 async fn wait_for_terminal(
     handle: &RunHandle,
-) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+) -> Result<finstack_ai_runtime::run::LiveRunState, AgentRunError> {
     loop {
         let state = handle.live_state();
         if state.terminal.is_some() {
@@ -815,7 +815,7 @@ fn runtime_uncertainty(message: impl Into<String>) -> AgentRunError {
 pub(super) async fn wait_for_phase(
     handle: &RunHandle,
     phases: &[RunPhase],
-) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+) -> Result<finstack_ai_runtime::run::LiveRunState, AgentRunError> {
     loop {
         let state = handle.live_state();
         if state.phase.is_some_and(|phase| phases.contains(&phase)) {
@@ -836,7 +836,7 @@ pub(super) async fn wait_for_phase(
 pub(super) async fn wait_for_cycle(
     handle: &RunHandle,
     prior_cycle: u64,
-) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+) -> Result<finstack_ai_runtime::run::LiveRunState, AgentRunError> {
     loop {
         let state = handle.live_state();
         if state.cycle > prior_cycle || state.terminal.is_some() {
@@ -855,7 +855,7 @@ pub(super) async fn wait_for_cycle(
 }
 
 pub(super) fn ensure_nonterminal_failure(
-    state: &finstack_ai_runtime::LiveRunState,
+    state: &finstack_ai_runtime::run::LiveRunState,
     timeout: Duration,
 ) -> Result<(), AgentRunError> {
     match state.terminal.as_ref() {
@@ -918,7 +918,7 @@ pub(super) fn model_draft(
 }
 
 pub(super) fn structured_candidate(
-    state: &finstack_ai_runtime::LiveRunState,
+    state: &finstack_ai_runtime::run::LiveRunState,
 ) -> Option<(MessageId, RawJson, StructuredResultSource)> {
     let message = state.committed_run_messages.last()?;
     for (index, block) in message.content().iter().enumerate() {

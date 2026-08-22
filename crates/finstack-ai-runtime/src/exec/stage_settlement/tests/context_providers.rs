@@ -87,7 +87,7 @@ impl ContextProvider for ErrorContextProvider {
         self.calls.fetch_add(1, Ordering::AcqRel);
         Box::pin(async {
             Err(ContextError::try_new(
-                crate::CONTEXT_CONTRIBUTION_INVALID,
+                crate::ports::context::CONTEXT_CONTRIBUTION_INVALID,
                 ErrorCategory::Validation,
                 "fixture provider failed collect",
                 Metadata::empty(),
@@ -274,7 +274,7 @@ fn prepare_context_invokes_committed_providers_and_projects_protected() {
 
 fn settle_prepare_context(
     coordinator: &mut CommitCoordinator,
-) -> Result<crate::CommitOutcome, RunHandleError> {
+) -> Result<crate::commit::CommitOutcome, RunHandleError> {
     let sources = test_sources();
     block_on(settle_facade_stage(
         coordinator,
@@ -370,7 +370,7 @@ fn prepare_context_provider_error_fails_the_stage_with_stable_code() {
         matches!(
             &error,
             RunHandleError::Middleware { code }
-                if code.as_ref() == crate::CONTEXT_CONTRIBUTION_INVALID
+                if code.as_ref() == crate::ports::context::CONTEXT_CONTRIBUTION_INVALID
         ),
         "expected the provider's stable code, got {error:?}"
     );
@@ -391,16 +391,16 @@ fn prepare_context_driver_matches_direct_port_conformance_contribution() {
         run_id: id::<finstack_ai_kernel::RunTag>(3),
         user_input: Arc::from([]),
         recent_history: Arc::from([]),
-        budget: crate::ContextBudget {
+        budget: crate::ports::context::ContextBudget {
             max_items: 8,
             max_tokens: 1_024,
             max_bytes: 4_096,
-            overflow: crate::ContextOverflowPolicy::Reject,
+            overflow: crate::ports::context::ContextOverflowPolicy::Reject,
         },
         active_capabilities: Arc::from([]),
     };
     let context = ContextCallContext {
-        run: crate::RunCallContext {
+        run: crate::ports::model::RunCallContext {
             locator: finstack_ai_kernel::OperationLocator::try_new(
                 "tenant-a",
                 request.session_id,
@@ -408,7 +408,7 @@ fn prepare_context_driver_matches_direct_port_conformance_contribution() {
                 request.run_id,
             )
             .expect("locator"),
-            authorization: crate::AuthorizationContext {
+            authorization: crate::ports::model::AuthorizationContext {
                 principal: finstack_ai_kernel::PrincipalRef::try_new(
                     "issuer",
                     "subject",

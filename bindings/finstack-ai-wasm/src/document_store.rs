@@ -15,12 +15,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use finstack_ai::runtime::{
+use finstack_ai::runtime::Bytes;
+use finstack_ai::runtime::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
     ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
-    Bytes, PortFuture, artifact_storage_key, build_artifact_ref, validate_artifact_scope,
-    validate_retrieved_artifact,
+    artifact_storage_key, build_artifact_ref, validate_artifact_scope, validate_retrieved_artifact,
 };
+use finstack_ai::runtime::ports::PortFuture;
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Digest, Timestamp};
 
 /// Maximum total staged content bytes retained across all entries before
@@ -300,8 +301,9 @@ impl ArtifactStore for DocumentArtifactStore {
 mod tests {
     use super::{DocumentArtifactStore, MAX_TOTAL_CONTENT_BYTES};
     use crate::executor::block_on_ready;
-    use finstack_ai::runtime::{
-        ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
+    use finstack_ai::runtime::Bytes;
+    use finstack_ai::runtime::artifact::{
+        ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
     };
     use finstack_ai_kernel::{Metadata, Sensitivity, SessionId};
 

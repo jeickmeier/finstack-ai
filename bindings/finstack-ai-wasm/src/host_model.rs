@@ -3,9 +3,10 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::model::{
     InputCapabilities, Model, ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError,
-    ModelEventStream, ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, PortFuture,
+    ModelEventStream, ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate,
     StructuredOutputCapability, TextDelta, TokenEstimatorSource, ToolCallDelta,
 };
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata};
@@ -151,7 +152,7 @@ impl Model for HostModel {
         Ok(ModelTokenEstimate {
             input_tokens: u64::try_from(canonical_request.len())
                 .map_err(|_| model_failure(HostFailure::InvalidResult))?,
-            estimator: finstack_ai::runtime::TokenEstimatorRef {
+            estimator: finstack_ai::runtime::ports::model::TokenEstimatorRef {
                 id: Arc::from("finstack.js.bytes-upper-bound"),
                 version: Arc::from("1"),
                 source: TokenEstimatorSource::ConservativeUpperBound,
@@ -236,7 +237,7 @@ impl HostModel {
 }
 
 fn items_from_response(
-    response: finstack_ai::runtime::ModelResponse,
+    response: finstack_ai::runtime::ports::model::ModelResponse,
 ) -> Result<ModelEventStream, ModelError> {
     let mut items = Vec::with_capacity(2);
     if let Some(text) = response
@@ -356,7 +357,7 @@ mod tests {
     use crate::executor::block_on_ready;
     use crate::fixture::model_request;
     use crate::host::{HostModelOptions, NativeHostResult};
-    use finstack_ai::runtime::{CancellationSignal, Model, ModelStreamItem};
+    use finstack_ai::runtime::ports::model::{CancellationSignal, Model, ModelStreamItem};
 
     fn options() -> HostModelOptions {
         HostModelOptions {
@@ -372,7 +373,7 @@ mod tests {
     fn collect(
         model: &HostModel,
         cancellation: CancellationSignal,
-    ) -> Result<Vec<ModelStreamItem>, finstack_ai::runtime::ModelError> {
+    ) -> Result<Vec<ModelStreamItem>, finstack_ai::runtime::ports::model::ModelError> {
         let request = model_request(&model.descriptor().models[0], cancellation).expect("request");
         let stream = block_on_ready(model.request(request))?;
         let mut items = Vec::new();

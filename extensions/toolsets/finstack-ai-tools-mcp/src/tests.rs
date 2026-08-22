@@ -585,7 +585,7 @@ async fn resource_provider_satisfies_context_conformance() {
 }
 
 fn preview_model() -> Arc<finstack_ai_test::ScriptedModel> {
-    use finstack_ai::runtime::{
+    use finstack_ai::runtime::ports::model::{
         ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TokenEstimatorRef,
         TokenEstimatorSource,
     };
@@ -609,7 +609,7 @@ fn preview_model() -> Arc<finstack_ai_test::ScriptedModel> {
         vec![ScriptedModelPlan {
             actions: vec![
                 ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                    finstack_ai::runtime::TextDelta {
+                    finstack_ai::runtime::ports::model::TextDelta {
                         text: Arc::from("ok"),
                     },
                 ))),
@@ -632,7 +632,8 @@ async fn run_with_mcp_provider(
     provider: McpContextProvider,
     model: Arc<finstack_ai_test::ScriptedModel>,
 ) {
-    use finstack_ai::runtime::{JournalStore, Model, ModelName};
+    use finstack_ai::runtime::ports::journal::JournalStore;
+    use finstack_ai::runtime::ports::model::{Model, ModelName};
     use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
     use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
@@ -702,7 +703,7 @@ async fn run_with_mcp_provider(
         .expect("production run");
 }
 
-fn message_texts(request: &finstack_ai::runtime::ModelRequest) -> Vec<String> {
+fn message_texts(request: &finstack_ai::runtime::ports::model::ModelRequest) -> Vec<String> {
     request
         .draft
         .messages
@@ -945,7 +946,7 @@ async fn reconstruct_signals_catalog_drift() {
 #[tokio::test]
 async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
     use finstack_ai::Agent;
-    use finstack_ai::runtime::JournalStore;
+    use finstack_ai::runtime::ports::journal::JournalStore;
     use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
@@ -982,7 +983,7 @@ async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
                 ComponentId::parse("test.model.mcp-reresolve").expect("model"),
                 Some(version),
             ),
-            preview_model() as Arc<dyn finstack_ai::runtime::Model>,
+            preview_model() as Arc<dyn finstack_ai::runtime::ports::model::Model>,
         ),
         (
             ComponentRef::new(
@@ -1023,7 +1024,7 @@ async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
     );
 }
 
-fn memory_journal_store() -> Arc<dyn finstack_ai::runtime::JournalStore> {
+fn memory_journal_store() -> Arc<dyn finstack_ai::runtime::ports::journal::JournalStore> {
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
     Arc::new(
@@ -1056,9 +1057,9 @@ async fn connect_read_only_mcp_agent(
     tool_name: &str,
     frames: Vec<serde_json::Value>,
     model: Arc<finstack_ai_test::ScriptedModel>,
-    store: Arc<dyn finstack_ai::runtime::JournalStore>,
+    store: Arc<dyn finstack_ai::runtime::ports::journal::JournalStore>,
 ) -> finstack_ai::Agent {
-    use finstack_ai::runtime::Model;
+    use finstack_ai::runtime::ports::model::Model;
     use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 
     let toolset = McpToolset::connect(
@@ -1104,7 +1105,7 @@ async fn connect_read_only_mcp_agent(
 }
 
 fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
-    use finstack_ai::runtime::{
+    use finstack_ai::runtime::ports::model::{
         ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall,
         TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
     };
@@ -1152,7 +1153,7 @@ fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
             ScriptedModelPlan {
                 actions: vec![
                     ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                        finstack_ai::runtime::TextDelta {
+                        finstack_ai::runtime::ports::model::TextDelta {
                             text: Arc::from("oslo is ready"),
                         },
                     ))),
@@ -1176,7 +1177,7 @@ fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
 async fn elicitation_journals_interaction_and_host_resolution_completes_the_tool() {
     use std::time::Duration;
 
-    use finstack_ai::runtime::LoadRequest;
+    use finstack_ai::runtime::ports::journal::LoadRequest;
     use finstack_ai::{AgentRunRequest, InteractionResolution};
     use finstack_ai_kernel::{AuthorizationEvidence, InteractionKind};
 
@@ -1201,7 +1202,8 @@ async fn elicitation_journals_interaction_and_host_resolution_completes_the_tool
     let run = agent
         .start(
             AgentRunRequest::try_new(
-                finstack_ai::runtime::ModelName::try_new("preview-1").expect("model name"),
+                finstack_ai::runtime::ports::model::ModelName::try_new("preview-1")
+                    .expect("model name"),
                 "ask the tool",
                 security.clone(),
             )
@@ -1261,7 +1263,7 @@ async fn elicitation_journals_interaction_and_host_resolution_completes_the_tool
 }
 
 fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
-    use finstack_ai::runtime::{
+    use finstack_ai::runtime::ports::model::{
         ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall,
         TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
     };
@@ -1309,7 +1311,7 @@ fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
             ScriptedModelPlan {
                 actions: vec![
                     ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                        finstack_ai::runtime::TextDelta {
+                        finstack_ai::runtime::ports::model::TextDelta {
                             text: Arc::from("sampled"),
                         },
                     ))),
@@ -1328,7 +1330,7 @@ fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
             ScriptedModelPlan {
                 actions: vec![
                     ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                        finstack_ai::runtime::TextDelta {
+                        finstack_ai::runtime::ports::model::TextDelta {
                             text: Arc::from("done"),
                         },
                     ))),
@@ -1353,7 +1355,7 @@ async fn sampling_journals_a_nested_model_under_the_parent_tool() {
     use std::time::Duration;
 
     use finstack_ai::AgentRunRequest;
-    use finstack_ai::runtime::LoadRequest;
+    use finstack_ai::runtime::ports::journal::LoadRequest;
     use finstack_ai_kernel::{EffectPurpose, NestedModelKind, RecordBody};
 
     let store = memory_journal_store();
@@ -1374,7 +1376,8 @@ async fn sampling_journals_a_nested_model_under_the_parent_tool() {
         Duration::from_secs(8),
         agent.run(
             AgentRunRequest::try_new(
-                finstack_ai::runtime::ModelName::try_new("preview-1").expect("model name"),
+                finstack_ai::runtime::ports::model::ModelName::try_new("preview-1")
+                    .expect("model name"),
                 "call echo",
                 security,
             )

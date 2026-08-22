@@ -84,7 +84,7 @@ impl PyEvent {
 /// Immutable bounded transport batch.
 #[pyclass(module = "finstack_ai._finstack_ai", name = "EventBatch", frozen)]
 pub(crate) struct PyEventBatch {
-    inner: finstack_ai::runtime::EventBatch,
+    inner: finstack_ai::runtime::events::EventBatch,
     serialized: OnceLock<Result<Arc<[u8]>, Arc<str>>>,
 }
 

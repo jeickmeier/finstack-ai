@@ -1,8 +1,8 @@
 //! Test-only scripted drives for host adapters. Not Agent-run parity.
 
-use finstack_ai::runtime::{
-    CancellationSignal, JournalStore, Model, ModelStreamItem, ToolStreamItem,
-};
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::runtime::ports::model::{CancellationSignal, Model, ModelStreamItem};
+use finstack_ai::runtime::ports::tool::ToolStreamItem;
 use futures_util::StreamExt;
 use serde::Serialize;
 use wasm_bindgen::JsValue;

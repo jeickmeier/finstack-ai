@@ -5,7 +5,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::PortFuture;
+use crate::ports::PortFuture;
 
 /// No native runtime is active for a requested driver operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

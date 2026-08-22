@@ -6,7 +6,7 @@ use finstack_ai_kernel::{Duration, Timestamp};
 use thiserror::Error;
 use tokio::time::{Instant, sleep_until};
 
-use crate::{Clock, IdGenerationError};
+use crate::ids::{Clock, IdGenerationError};
 
 /// Diagnostic classification produced while converting a durable deadline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

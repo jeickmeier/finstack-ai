@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::Toolset;
+use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
 use finstack_ai_tools_elicitation::{ElicitationKind, ElicitationToolDef, ElicitationToolset};
 use pyo3::exceptions::{PyTypeError, PyValueError};

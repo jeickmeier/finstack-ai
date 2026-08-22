@@ -1,4 +1,4 @@
-use crate::{PortFuture, PortObject};
+use crate::ports::{PortFuture, PortObject};
 
 use super::error::MiddlewareError;
 use super::types::{MiddlewareContext, MiddlewareDescriptor, StageInput, StageMask, StageOutcome};

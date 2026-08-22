@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, SnapshotSchedule};
+use crate::ports::journal::{
+    AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, SnapshotSchedule,
+};
 
 use finstack_ai_kernel::{
     CommittedBatch, Digest, EffectOutputKind, Kernel, RawJson, RecordBody, RecordEnvelope, RunId,

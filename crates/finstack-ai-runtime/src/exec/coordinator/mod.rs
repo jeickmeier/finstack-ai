@@ -22,10 +22,10 @@ use finstack_ai_kernel::{Decision, KernelError, KernelInput, TransitionEnv};
 use finstack_ai_kernel::{KernelInput, TransitionEnv};
 use thiserror::Error;
 
-use crate::{
-    ContextProvider, JournalStore, ModelProgress, ResolvedMiddlewareChain, SnapshotSchedule,
-    StoreError,
-};
+use crate::ports::context::ContextProvider;
+use crate::ports::journal::{JournalStore, SnapshotSchedule, StoreError};
+use crate::ports::middleware::ResolvedMiddlewareChain;
+use crate::ports::model::ModelProgress;
 
 pub(crate) use dispatch::PostCommitDispatcher;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

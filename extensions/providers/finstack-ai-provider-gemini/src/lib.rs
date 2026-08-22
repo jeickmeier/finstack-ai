@@ -28,7 +28,7 @@ mod request;
 mod sse;
 
 pub use config::{GeminiConfig, GeminiEndpoint, GeminiModelConfig, SecretHeader};
-pub use finstack_ai_runtime::{
+pub use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
     SecretString,
 };

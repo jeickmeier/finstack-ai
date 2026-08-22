@@ -2,9 +2,11 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    PortFuture, ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem,
-    Toolset, ToolsetDescriptor,
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::model::ToolSpec;
+use finstack_ai::runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
+    ToolsetDescriptor,
 };
 use finstack_ai_kernel::{ComponentId, ComponentRef, ErrorCategory, Metadata, ValidatedToolCall};
 use futures_util::stream;
@@ -270,7 +272,8 @@ mod tests {
     use crate::executor::block_on_ready;
     use crate::fixture::{echo_tool_json, tool_call};
     use crate::host::{JS_HOST_RESULT_INVALID, NativeHostResult};
-    use finstack_ai::runtime::{CancellationSignal, ToolStreamItem, Toolset};
+    use finstack_ai::runtime::ports::model::CancellationSignal;
+    use finstack_ai::runtime::ports::tool::{ToolStreamItem, Toolset};
     use futures_util::Stream;
 
     fn options() -> HostToolsetOptions {

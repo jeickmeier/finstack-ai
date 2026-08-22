@@ -6,7 +6,8 @@ use finstack_ai_kernel::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{PortStream, RunCallContext, UsageDelta};
+use crate::ports::PortStream;
+use crate::ports::model::{RunCallContext, UsageDelta};
 
 use super::error::ToolError;
 

@@ -10,16 +10,18 @@ use finstack_ai_kernel::{
     TransitionEnv, ValidatedToolCall,
 };
 
+use crate::ToolProgress;
 use crate::coordinator::{CommitCoordinator, CommitCoordinatorError, ToolDispatchSeed};
-use crate::run_types::RunHandleError;
-use crate::tool::AssembledToolTerminal;
-use crate::{
-    CancellationSignal, Clock, PendingToolEffect, RandomSource, ReconcileContext,
-    ResolvedToolCatalog, RunCallContext, ToolCallContext, ToolDeferral, ToolError, ToolProgress,
+use crate::ids::{Clock, RandomSource};
+use crate::ports::model::{CancellationSignal, ReconcileContext, RunCallContext};
+use crate::ports::tool::{
+    PendingToolEffect, ResolvedToolCatalog, ToolCallContext, ToolDeferral, ToolError,
     ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamLimits,
     ToolTerminal, map_tool_reconcile_result, normalize_tool_result, tool_resume_action,
     tool_retry_allowed,
 };
+use crate::run_types::RunHandleError;
+use crate::tool::AssembledToolTerminal;
 
 use super::cancel::reconcile_cancelled_effect;
 use super::ids::submit_resume_input;
@@ -75,7 +77,7 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
         .is_some_and(|deadline| deadline <= now)
     {
         driver_result.result = Err(ToolError::try_new(
-            crate::TOOL_DEADLINE_EXCEEDED,
+            crate::ports::tool::TOOL_DEADLINE_EXCEEDED,
             ErrorCategory::Deadline,
             false,
             "tool result arrived after the committed deadline",
@@ -90,7 +92,7 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
         return Ok(ToolResultDisposition::ParkedForInteraction);
     }
     if let Err(error) = &driver_result.result
-        && error.code() == crate::MCP_SAMPLING_REQUIRED
+        && error.code() == crate::ports::tool::MCP_SAMPLING_REQUIRED
     {
         return Box::pin(super::nested_sample::fulfill_nested_sample(
             coordinator,
@@ -187,7 +189,7 @@ pub(crate) async fn fail_parked_tool<C: Clock, R: RandomSource>(
         ToolDriverResult {
             seed,
             result: Err(ToolError::stable(
-                crate::TOOL_CANCELLED,
+                crate::ports::tool::TOOL_CANCELLED,
                 "parked tool interaction was not resolved",
             )),
         },
@@ -653,7 +655,7 @@ fn dispatch_security_from_state(
     state: &finstack_ai_kernel::KernelState,
 ) -> Option<(
     finstack_ai_kernel::OperationLocator,
-    crate::AuthorizationContext,
+    crate::ports::model::AuthorizationContext,
     Option<finstack_ai_kernel::BudgetScopeId>,
 )> {
     let accepted = state.accepted.as_ref()?;
@@ -667,7 +669,7 @@ fn dispatch_security_from_state(
     .ok()?;
     Some((
         locator,
-        crate::AuthorizationContext {
+        crate::ports::model::AuthorizationContext {
             principal: security.principal().clone(),
             authentication_method: Arc::from(security.authentication_method()),
             assurance_level: Arc::from(security.assurance_level()),

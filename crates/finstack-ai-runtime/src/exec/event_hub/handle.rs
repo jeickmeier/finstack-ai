@@ -8,7 +8,7 @@ use super::{
     EventPublishError, EventSubscriptionConfig, EventSubscriptionError, RuntimeEventPublisher,
     SubscriberAudience,
 };
-use crate::PortFuture;
+use crate::ports::PortFuture;
 
 #[derive(Clone)]
 pub(crate) struct EventHubHandle {

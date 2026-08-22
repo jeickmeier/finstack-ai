@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize};
 
 use crate::context::ContextItem;
-use crate::{ModelRequestDraft, RunCallContext, ToolSpec};
+use crate::ports::model::{ModelRequestDraft, RunCallContext, ToolSpec};
 
 use super::error::MiddlewareError;
 use super::{
@@ -494,7 +494,7 @@ pub struct CompactionModelResume {
     /// Child effect identity.
     pub effect_id: finstack_ai_kernel::EffectId,
     /// Normalized provider result.
-    pub result: crate::ModelResponse,
+    pub result: crate::ports::model::ModelResponse,
     /// Original bounded resume state.
     pub resume_state: RawJson,
 }

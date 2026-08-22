@@ -1,6 +1,6 @@
 //! Immutable observer port and no-op/reference adapters.
 
-pub(crate) mod export;
+pub mod export;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
 use std::collections::VecDeque;
@@ -16,7 +16,7 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{PortFuture, PortObject};
+use crate::ports::{PortFuture, PortObject};
 
 /// Stable observer configuration error.
 pub const OBSERVER_CONFIGURATION_INVALID: &str = "observer_configuration_invalid";

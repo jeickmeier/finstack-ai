@@ -12,7 +12,7 @@ use super::{
     EventSubscriptionError, RuntimeEventPublisher,
 };
 use super::{EventHubHandle, EventSubscription, event_hub};
-use crate::{EventBatchConfig, EventFilter, ProgressCoalescing};
+use crate::events::{EventBatchConfig, EventFilter, ProgressCoalescing};
 
 fn id<T: IdTag>(value: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];

@@ -65,7 +65,7 @@ impl fmt::Debug for SecretString {
 /// (ADR-048). [`SecretString`] is stricter: it also rejects non-ASCII bytes.
 ///
 /// ```
-/// use finstack_ai_runtime::secret_is_valid;
+/// use finstack_ai_runtime::ports::model::secret_is_valid;
 ///
 /// assert!(secret_is_valid("sk-test"));
 /// assert!(!secret_is_valid(""));

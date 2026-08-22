@@ -6,7 +6,7 @@ use std::sync::Arc;
 use finstack_ai_kernel::{RawJson, ValidationIssue, ValidationOutcome};
 use jsonschema::{Draft, Resource, Retrieve, Uri};
 
-use crate::PortObject;
+use crate::ports::PortObject;
 
 use super::error::ToolError;
 

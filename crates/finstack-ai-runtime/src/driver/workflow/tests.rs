@@ -1,5 +1,5 @@
 use super::*;
-use crate::{
+use crate::ports::model::{
     InputCapabilities, ModelContextProfile, ModelName, StructuredOutputCapability,
     TokenEstimatorRef, TokenEstimatorSource,
 };
@@ -235,8 +235,8 @@ fn fault_public_types_remain_static_and_copyable() {
 
     fn assert_copy<T: Copy>() {}
 
-    assert_copy::<crate::RunStatus>();
-    let error = crate::RunHandleError::Faulted {
+    assert_copy::<crate::run::RunStatus>();
+    let error = crate::run::RunHandleError::Faulted {
         code: "timer_deadline_invalid",
     };
 
@@ -245,13 +245,15 @@ fn fault_public_types_remain_static_and_copyable() {
 
 struct UnusedStore;
 
-impl crate::JournalStore for UnusedStore {
+impl crate::ports::journal::JournalStore for UnusedStore {
     fn append(
         &self,
         _request: finstack_ai_kernel::AppendRequest,
-    ) -> crate::PortFuture<Result<finstack_ai_kernel::CommittedBatch, crate::StoreError>> {
+    ) -> crate::ports::PortFuture<
+        Result<finstack_ai_kernel::CommittedBatch, crate::ports::journal::StoreError>,
+    > {
         Box::pin(async {
-            Err(crate::StoreError::Unavailable {
+            Err(crate::ports::journal::StoreError::Unavailable {
                 reason_code: "unused",
             })
         })
@@ -259,10 +261,12 @@ impl crate::JournalStore for UnusedStore {
 
     fn load(
         &self,
-        _request: crate::LoadRequest,
-    ) -> crate::PortFuture<Result<crate::LoadedSession, crate::StoreError>> {
+        _request: crate::ports::journal::LoadRequest,
+    ) -> crate::ports::PortFuture<
+        Result<crate::ports::journal::LoadedSession, crate::ports::journal::StoreError>,
+    > {
         Box::pin(async {
-            Err(crate::StoreError::Unavailable {
+            Err(crate::ports::journal::StoreError::Unavailable {
                 reason_code: "unused",
             })
         })
@@ -270,18 +274,24 @@ impl crate::JournalStore for UnusedStore {
 
     fn write_snapshot(
         &self,
-        _request: crate::SnapshotRequest,
-    ) -> crate::PortFuture<Result<crate::SnapshotReceipt, crate::StoreError>> {
+        _request: crate::ports::journal::SnapshotRequest,
+    ) -> crate::ports::PortFuture<
+        Result<crate::ports::journal::SnapshotReceipt, crate::ports::journal::StoreError>,
+    > {
         Box::pin(async {
-            Err(crate::StoreError::Unavailable {
+            Err(crate::ports::journal::StoreError::Unavailable {
                 reason_code: "unused",
             })
         })
     }
 
-    fn health(&self) -> crate::PortFuture<Result<crate::StoreHealth, crate::StoreError>> {
+    fn health(
+        &self,
+    ) -> crate::ports::PortFuture<
+        Result<crate::ports::journal::StoreHealth, crate::ports::journal::StoreError>,
+    > {
         Box::pin(async {
-            Err(crate::StoreError::Unavailable {
+            Err(crate::ports::journal::StoreError::Unavailable {
                 reason_code: "unused",
             })
         })
@@ -290,10 +300,13 @@ impl crate::JournalStore for UnusedStore {
 
 #[test]
 fn reinstall_runtime_ports_restores_chain_and_providers() {
-    let mut coordinator = crate::CommitCoordinator::new(Arc::new(UnusedStore));
+    let mut coordinator = crate::commit::CommitCoordinator::new(Arc::new(UnusedStore));
     assert!(coordinator.middleware_chain().is_none());
     assert!(coordinator.context_providers().is_none());
-    let chain = Arc::new(crate::ResolvedMiddlewareChain::try_new(Vec::new()).expect("empty chain"));
+    let chain = Arc::new(
+        crate::ports::middleware::ResolvedMiddlewareChain::try_new(Vec::new())
+            .expect("empty chain"),
+    );
     reinstall_runtime_ports(
         &mut coordinator,
         None,

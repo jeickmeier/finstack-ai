@@ -6,10 +6,10 @@ use finstack_ai_kernel::{
     OperationLocator, PrincipalRef, RecordExternalCommandRejected, Timestamp,
 };
 
-use crate::{
-    CommitCoordinator, CommitCoordinatorError, JournalStore, OsRandomSource, SecurityAuditCategory,
-    SecurityAuditGate, SystemClock, UuidV7Generator,
-};
+use crate::audit::{SecurityAuditCategory, SecurityAuditGate};
+use crate::commit::{CommitCoordinator, CommitCoordinatorError};
+use crate::ids::{OsRandomSource, SystemClock, UuidV7Generator};
+use crate::ports::journal::JournalStore;
 
 use crate::interaction::validate_interaction_response;
 
@@ -55,7 +55,7 @@ impl InteractionRouter {
     ///
     /// A matching outstanding request is validated against
     /// [`finstack_ai_kernel::InteractionRequest::response_schema`] with
-    /// [`crate::JsonSchemaToolValidatorCompiler`] before any
+    /// [`crate::ports::tool::JsonSchemaToolValidatorCompiler`] before any
     /// [`KernelInput::InteractionSettled`] is built. Invalid payloads return
     /// [`ExternalRouteError::InvalidNormalizedCommand`] and do not commit.
     ///

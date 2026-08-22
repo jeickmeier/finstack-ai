@@ -180,12 +180,12 @@ impl Run {
     }
 }
 
-fn live_state_object(state: &finstack_ai::runtime::LiveRunState) -> Result<JsValue, JsValue> {
+fn live_state_object(state: &finstack_ai::runtime::run::LiveRunState) -> Result<JsValue, JsValue> {
     let status = match state.status {
-        finstack_ai::runtime::RunStatus::Running => "running",
-        finstack_ai::runtime::RunStatus::ShuttingDown => "shutting_down",
-        finstack_ai::runtime::RunStatus::Stopped => "stopped",
-        finstack_ai::runtime::RunStatus::Faulted { .. } => "faulted",
+        finstack_ai::runtime::run::RunStatus::Running => "running",
+        finstack_ai::runtime::run::RunStatus::ShuttingDown => "shutting_down",
+        finstack_ai::runtime::run::RunStatus::Stopped => "stopped",
+        finstack_ai::runtime::run::RunStatus::Faulted { .. } => "faulted",
     };
     let value = serde_json::json!({
         "revision": state.revision,
@@ -210,7 +210,7 @@ fn live_state_object(state: &finstack_ai::runtime::LiveRunState) -> Result<JsVal
 }
 
 fn observer_diagnostics_object(
-    diagnostics: &finstack_ai::runtime::ObserverDiagnostics,
+    diagnostics: &finstack_ai::runtime::ports::observer::ObserverDiagnostics,
 ) -> Result<JsValue, JsValue> {
     let recent = js_sys::Array::new();
     for diagnostic in diagnostics.recent.iter() {

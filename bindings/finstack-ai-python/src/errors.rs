@@ -1,6 +1,6 @@
 //! Map Rust agent and session errors onto the stable `FinstackError` hierarchy.
 
-use finstack_ai::runtime::SessionError;
+use finstack_ai::runtime::session::SessionError;
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, AgentRunError,
 };

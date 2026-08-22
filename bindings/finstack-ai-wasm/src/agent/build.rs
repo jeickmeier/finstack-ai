@@ -1,10 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai::runtime::{
-    ArtifactStore, CommitCoordinator, JournalStore, LoadRequest, Middleware, ModelName,
-    ModelSettings, StoreError, Toolset,
-};
+use finstack_ai::runtime::artifact::ArtifactStore;
+use finstack_ai::runtime::commit::CommitCoordinator;
+use finstack_ai::runtime::ports::journal::{JournalStore, LoadRequest, StoreError};
+use finstack_ai::runtime::ports::middleware::Middleware;
+use finstack_ai::runtime::ports::model::{ModelName, ModelSettings};
+use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{
     Agent as FacadeAgent, CapabilitySpec, ChildRunPolicy, LinkedAgentPorts, LinkedCommon,
 };
@@ -84,11 +86,23 @@ fn document_ingest_ports() -> Result<DocumentIngestPorts, JsValue> {
 pub(super) async fn build_agent(
     model_name: ModelName,
     model_component: ComponentRef,
-    model: Arc<dyn finstack_ai::runtime::Model>,
-    mut toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
-    context_providers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)>,
-    mut middleware: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Middleware>)>,
-    observers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Observer>)>,
+    model: Arc<dyn finstack_ai::runtime::ports::model::Model>,
+    mut toolsets: Vec<(
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::tool::Toolset>,
+    )>,
+    context_providers: Vec<(
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::context::ContextProvider>,
+    )>,
+    mut middleware: Vec<(
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::middleware::Middleware>,
+    )>,
+    observers: Vec<(
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::observer::Observer>,
+    )>,
     instruction: Option<String>,
     store: Option<Arc<dyn JournalStore>>,
     capabilities: Vec<CapabilitySpec>,

@@ -12,7 +12,7 @@ use super::error::{
 };
 use super::types::{ToolDeferral, ToolEventStream, ToolResult, ToolStreamItem};
 use super::validator::ToolValidator;
-use crate::ToolDeferralSupport;
+use crate::ports::model::ToolDeferralSupport;
 
 /// Maximum exact artifact references accepted before one tool terminal.
 pub const MAX_TOOL_RESULT_ARTIFACTS: usize = 64;

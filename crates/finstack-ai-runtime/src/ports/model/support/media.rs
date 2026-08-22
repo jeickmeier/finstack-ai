@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::BlobRef;
 
-use crate::{ContentBlock, ModelRequestDraft, PortFuture, PortObject};
+use crate::ContentBlock;
+use crate::ports::model::ModelRequestDraft;
+use crate::ports::{PortFuture, PortObject};
 
 /// Resolve one committed blob reference to provider-usable media.
 pub trait MediaResolver: PortObject {
@@ -127,7 +129,7 @@ mod tests {
         Timestamp,
     };
 
-    use crate::{ModelName, ModelRequestLimits, ModelSettings};
+    use crate::ports::model::{ModelName, ModelRequestLimits, ModelSettings};
 
     use super::*;
 

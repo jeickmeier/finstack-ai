@@ -7,12 +7,15 @@ use finstack_ai_kernel::{
     Metadata, OperationLocator, RecordTag, RemoteRouteRef, RunTag, SessionTag,
 };
 
-use crate::{
+use crate::child::{
     AgentInvokeError, AgentInvoker, AgentRef, ChildCoordinationIds, ChildRunContext,
-    ChildRunCoordinator, ChildRunHandle, ChildRunPolicy, ChildRunRequest, Clock, CommitCoordinator,
-    JournalStore, LaneCreateIds, OsRandomSource, SessionCreateIds, SessionRuntime, SystemClock,
-    ToolCallContext, UuidV7Generator,
+    ChildRunCoordinator, ChildRunHandle, ChildRunPolicy, ChildRunRequest,
 };
+use crate::commit::CommitCoordinator;
+use crate::ids::{Clock, OsRandomSource, SystemClock, UuidV7Generator};
+use crate::ports::journal::JournalStore;
+use crate::ports::tool::ToolCallContext;
+use crate::session::{LaneCreateIds, SessionCreateIds, SessionRuntime};
 
 /// Data-only request submitted to the host child-run admission boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +151,7 @@ impl ChildRunStarter {
             )
             .await
             .map_err(|error| match error {
-                crate::CompositionError::Agent(error) => error,
+                crate::child::CompositionError::Agent(error) => error,
                 other => unavailable(other.to_string()),
             })
     }
@@ -161,7 +164,7 @@ impl ChildRunStarter {
     pub async fn status(
         &self,
         locator: &ChildRunLocator,
-    ) -> Result<crate::ChildRunStatus, AgentInvokeError> {
+    ) -> Result<crate::child::ChildRunStatus, AgentInvokeError> {
         self.invoker.status(locator).await
     }
 

@@ -113,7 +113,7 @@ fn rejected_middleware_outcome_commits_a_failed_effect_settlement() {
     assert!(matches!(
         error,
         RunHandleError::Middleware { ref code }
-            if code.as_ref() == crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED
+            if code.as_ref() == crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED
     ));
     assert!(
         coordinator.state().pending_extension_effect.is_none(),

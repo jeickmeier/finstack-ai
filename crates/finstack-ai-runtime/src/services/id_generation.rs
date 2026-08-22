@@ -99,7 +99,7 @@ impl<C: Clock, R: RandomSource> UuidV7Generator<C, R> {
 ///
 /// ```
 /// use finstack_ai_kernel::Timestamp;
-/// use finstack_ai_runtime::{Clock, ExternalClock};
+/// use finstack_ai_runtime::ids::{Clock, ExternalClock};
 ///
 /// let clock = ExternalClock::new(Timestamp::from_unix_ms(1_000).expect("ts"));
 /// clock.jump(250).expect("forward");

@@ -18,9 +18,9 @@ use super::types::ToolCallContext;
 ///     EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId, SessionId, ToolBatchId,
 ///     ToolCallId,
 /// };
-/// use finstack_ai_runtime::{
-///     AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, verify_authority,
-/// };
+/// use finstack_ai_runtime::ports::model::{CancellationSignal, RunCallContext};
+/// use finstack_ai_runtime::ports::tool::{ToolCallContext, verify_authority};
+/// use finstack_ai_runtime::ports::model::AuthorizationContext;
 ///
 /// let locator = OperationLocator::try_new(
 ///     "tenant-a",

@@ -6,10 +6,10 @@ use finstack_ai_kernel::{
     KernelInput, OperationLocator, PrincipalRef, RecordExternalCommandRejected, Timestamp,
 };
 
-use crate::{
-    CommitCoordinator, CommitCoordinatorError, JournalStore, OsRandomSource, SecurityAuditCategory,
-    SecurityAuditGate, SystemClock, UuidV7Generator,
-};
+use crate::audit::{SecurityAuditCategory, SecurityAuditGate};
+use crate::commit::{CommitCoordinator, CommitCoordinatorError};
+use crate::ids::{OsRandomSource, SystemClock, UuidV7Generator};
+use crate::ports::journal::JournalStore;
 
 use super::shared::{
     EXTERNAL_COMMAND_DIGEST_DOMAIN, OPERATION_LOCATOR_DIGEST_DOMAIN, allocate_transition_env,
@@ -22,7 +22,7 @@ pub struct ExternalCompletionRouter {
     store: Arc<dyn JournalStore>,
     audit: Arc<SecurityAuditGate>,
     ids: UuidV7Generator<SystemClock, OsRandomSource>,
-    horizon: Option<crate::IdempotencyHorizon>,
+    horizon: Option<crate::ports::journal::IdempotencyHorizon>,
 }
 
 impl ExternalCompletionRouter {
@@ -39,7 +39,7 @@ impl ExternalCompletionRouter {
 
     /// Bind the application-configured settlement horizon.
     #[must_use]
-    pub fn with_horizon(mut self, horizon: crate::IdempotencyHorizon) -> Self {
+    pub fn with_horizon(mut self, horizon: crate::ports::journal::IdempotencyHorizon) -> Self {
         self.horizon = Some(horizon);
         self
     }

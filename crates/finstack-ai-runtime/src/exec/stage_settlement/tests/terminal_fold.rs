@@ -153,10 +153,10 @@ fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
         stage: Stage::BeforeToolBatch,
     };
 
-    let catalog = crate::ResolvedToolCatalog::try_new(
+    let catalog = crate::ports::tool::ResolvedToolCatalog::try_new(
         [],
         &std::collections::BTreeMap::new(),
-        &crate::JsonSchemaToolValidatorCompiler,
+        &crate::ports::tool::JsonSchemaToolValidatorCompiler,
     )
     .expect("empty catalog");
     let sources = test_sources();
@@ -307,8 +307,8 @@ fn a_fold_that_crosses_a_limit_still_lands_through_the_choke_point() {
 
 // ---- Verification bounce lands end to end -----------------------------
 
-fn verify_model_response(text: &str) -> crate::ModelResponse {
-    crate::ModelResponse {
+fn verify_model_response(text: &str) -> crate::ports::model::ModelResponse {
+    crate::ports::model::ModelResponse {
         assistant_content: Arc::from([ContentBlock::Text(TextBlock::try_new(text).expect("text"))]),
         tool_calls: Arc::from([]),
         usage: finstack_ai_kernel::Usage::empty(),

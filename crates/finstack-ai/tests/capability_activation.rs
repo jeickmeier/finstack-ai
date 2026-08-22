@@ -2,10 +2,16 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    ContextContribution, ContextProvider, ContextProviderDescriptor, JournalStore, Middleware,
-    MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, Model, ModelContextProfile, ModelName,
-    ModelStreamItem, ModelToolCall, OrderTier, StageMask, StageOutcome, TextDelta,
+use finstack_ai::runtime::ports::context::{
+    ContextContribution, ContextProvider, ContextProviderDescriptor,
+};
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::runtime::ports::middleware::{
+    Middleware, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, OrderTier, StageMask,
+    StageOutcome,
+};
+use finstack_ai::runtime::ports::model::{
+    Model, ModelContextProfile, ModelName, ModelStreamItem, ModelToolCall, TextDelta,
     TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
 };
 use finstack_ai::{
@@ -56,7 +62,7 @@ fn completed(text: &str) -> ScriptedModelPlan {
                 text: Arc::from(text),
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(
-                finstack_ai::runtime::ModelResponse {
+                finstack_ai::runtime::ports::model::ModelResponse {
                     assistant_content: Arc::from([finstack_ai_kernel::ContentBlock::Text(
                         finstack_ai_kernel::TextBlock::try_new(text).expect("text"),
                     )]),
@@ -76,7 +82,7 @@ fn activate_call(id: &str) -> ScriptedModelPlan {
         serde_json::to_vec(&serde_json::json!({ "id": id })).expect("arguments"),
     )
     .expect("raw");
-    let response = finstack_ai::runtime::ModelResponse {
+    let response = finstack_ai::runtime::ports::model::ModelResponse {
         assistant_content: Arc::from([]),
         tool_calls: Arc::from([ModelToolCall {
             name: Arc::from("capability_activate"),
@@ -386,9 +392,9 @@ async fn activating_a_model_capability_commits_before_tools_appear() {
     let host = Arc::new(NativeCapabilityHost::new(
         "test.capability.research: Research notes",
     ));
-    let skills: Arc<dyn finstack_ai::runtime::Toolset> =
+    let skills: Arc<dyn finstack_ai::runtime::ports::tool::Toolset> =
         Arc::new(SkillsToolset::try_new(skills_host(&host)).expect("skills"));
-    let calculator: Arc<dyn finstack_ai::runtime::Toolset> =
+    let calculator: Arc<dyn finstack_ai::runtime::ports::tool::Toolset> =
         Arc::new(CalculatorToolset::try_new().expect("calculator"));
     let agent = base_builder(Arc::clone(&model) as Arc<dyn Model>)
         .capability_activation_host(Arc::clone(&host))

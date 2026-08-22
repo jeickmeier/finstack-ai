@@ -10,7 +10,8 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize, de};
 use thiserror::Error;
 
-pub use finstack_ai_runtime::{ApprovalGrantMode, ChildRunPolicy};
+pub use finstack_ai_runtime::child::ChildRunPolicy;
+pub use finstack_ai_runtime::ports::model::ApprovalGrantMode;
 
 #[cfg(test)]
 mod tests;

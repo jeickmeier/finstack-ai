@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::model::{
     InputCapabilities, Model, ModelCapabilities, ModelContextProfile, ModelDeferral,
     ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest, ModelResponse,
-    ModelStreamItem, ModelTokenEstimate, ModelToolCall, PortFuture, StructuredOutputCapability,
-    TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    ModelStreamItem, ModelTokenEstimate, ModelToolCall, StructuredOutputCapability, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
 };
 use finstack_ai_kernel::{
     ComponentRef, ErrorCategory, ExternalHandleRef, Metadata, ProviderIds, RawJson,

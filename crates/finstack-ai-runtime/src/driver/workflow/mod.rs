@@ -18,14 +18,23 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{
-    ApprovalGrantMode, CommitCoordinator, ContextProvider, EventHubConfig, ExternalClock,
-    ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, IdGenerationError,
-    InteractionRouter, JournalStore, LockedModelContextProfile, Model, ModelCapabilities,
-    ModelTaskConfig, ModelWarmupContext, OsRandomSource, RandomSource, ReadyModel,
-    ResolvedMiddlewareChain, ResolvedToolCatalog, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, SecurityAuditGate, ToolSpec, ToolStreamLimits, ToolTaskConfig,
-    model_retry_allowed, tool_retry_allowed,
+use crate::audit::SecurityAuditGate;
+use crate::commit::CommitCoordinator;
+use crate::events::EventHubConfig;
+use crate::ids::{ExternalClock, IdGenerationError, OsRandomSource, RandomSource};
+use crate::ingress::{
+    ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, InteractionRouter,
+};
+use crate::ports::context::ContextProvider;
+use crate::ports::journal::JournalStore;
+use crate::ports::middleware::ResolvedMiddlewareChain;
+use crate::ports::model::{
+    ApprovalGrantMode, LockedModelContextProfile, Model, ModelCapabilities, ModelWarmupContext,
+    ReadyModel, ToolSpec, model_retry_allowed,
+};
+use crate::ports::tool::{ResolvedToolCatalog, ToolStreamLimits, tool_retry_allowed};
+use crate::run::{
+    ModelTaskConfig, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, ToolTaskConfig,
 };
 
 /// Stable deny codes for [`retry_decision`].
@@ -159,7 +168,7 @@ impl WorkflowDriverError {
 ///
 /// ```
 /// use finstack_ai_kernel::KernelState;
-/// use finstack_ai_runtime::classify_wait;
+/// use finstack_ai_runtime::workflow::classify_wait;
 ///
 /// assert!(classify_wait(&KernelState::default()).is_none());
 /// ```
@@ -217,7 +226,7 @@ pub fn classify_wait(state: &KernelState) -> Option<WorkflowWait> {
 /// # Examples
 ///
 /// ```
-/// use finstack_ai_runtime::resolve_checkpoint_sequence;
+/// use finstack_ai_runtime::workflow::resolve_checkpoint_sequence;
 ///
 /// assert_eq!(resolve_checkpoint_sequence(5, Some(99)), 5);
 /// assert_eq!(resolve_checkpoint_sequence(5, Some(5)), 5);
@@ -237,7 +246,7 @@ pub const fn resolve_checkpoint_sequence(journal_seq: u64, hint: Option<u64>) ->
 ///
 /// ```
 /// use finstack_ai_kernel::{EffectId, Id, KernelState};
-/// use finstack_ai_runtime::{WorkflowRetryDecision, retry_decision};
+/// use finstack_ai_runtime::workflow::{WorkflowRetryDecision, retry_decision};
 ///
 /// let state = KernelState::default();
 /// let effect_id = Id::from_bytes([
@@ -875,7 +884,7 @@ impl WorkflowSession {
                 let ready = ReadyModel::prepare_with_context(
                     Arc::clone(model),
                     ModelWarmupContext {
-                        cancellation: crate::CancellationSignal::new(),
+                        cancellation: crate::ports::model::CancellationSignal::new(),
                         deadline: None,
                         metadata: crate::Metadata::empty(),
                     },
@@ -924,7 +933,7 @@ impl WorkflowSession {
         let model_config = ModelTaskConfig {
             job_capacity: 2,
             result_capacity: 2,
-            stream_limits: crate::ModelStreamLimits::default(),
+            stream_limits: crate::ports::model::ModelStreamLimits::default(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         };
         let owner = if let Some(catalog) = self.catalog.clone() {
@@ -965,7 +974,7 @@ impl WorkflowSession {
     }
 }
 
-fn recover_error(error: &crate::CommitCoordinatorError) -> WorkflowDriverError {
+fn recover_error(error: &crate::commit::CommitCoordinatorError) -> WorkflowDriverError {
     WorkflowDriverError::Recover {
         code: error.stable_code(),
     }
@@ -988,24 +997,24 @@ fn reinstall_runtime_ports(
     }
 }
 
-fn spawn_code(error: &crate::RunHandleError) -> &'static str {
+fn spawn_code(error: &crate::run::RunHandleError) -> &'static str {
     match error {
-        crate::RunHandleError::InvalidConfiguration => "invalid_configuration",
-        crate::RunHandleError::ShuttingDown => "shutting_down",
-        crate::RunHandleError::Stopped => "stopped",
-        crate::RunHandleError::Faulted { code } => code,
-        crate::RunHandleError::IntakeClosed => "intake_closed",
-        crate::RunHandleError::Coordinator(_) => "coordinator",
-        crate::RunHandleError::Model { .. } | crate::RunHandleError::ModelSettlement { .. } => {
-            "model"
-        }
-        crate::RunHandleError::Tool { .. } | crate::RunHandleError::ToolSettlement { .. } => "tool",
-        crate::RunHandleError::InteractionSettlement { .. } => "interaction",
-        crate::RunHandleError::Timer { .. } => "timer",
-        crate::RunHandleError::CancellationSettlement { .. } => "cancellation",
-        crate::RunHandleError::EventDelivery { .. } => "event_delivery",
-        crate::RunHandleError::Middleware { .. } => "middleware",
-        crate::RunHandleError::Artifact { .. } => "artifact",
+        crate::run::RunHandleError::InvalidConfiguration => "invalid_configuration",
+        crate::run::RunHandleError::ShuttingDown => "shutting_down",
+        crate::run::RunHandleError::Stopped => "stopped",
+        crate::run::RunHandleError::Faulted { code } => code,
+        crate::run::RunHandleError::IntakeClosed => "intake_closed",
+        crate::run::RunHandleError::Coordinator(_) => "coordinator",
+        crate::run::RunHandleError::Model { .. }
+        | crate::run::RunHandleError::ModelSettlement { .. } => "model",
+        crate::run::RunHandleError::Tool { .. }
+        | crate::run::RunHandleError::ToolSettlement { .. } => "tool",
+        crate::run::RunHandleError::InteractionSettlement { .. } => "interaction",
+        crate::run::RunHandleError::Timer { .. } => "timer",
+        crate::run::RunHandleError::CancellationSettlement { .. } => "cancellation",
+        crate::run::RunHandleError::EventDelivery { .. } => "event_delivery",
+        crate::run::RunHandleError::Middleware { .. } => "middleware",
+        crate::run::RunHandleError::Artifact { .. } => "artifact",
     }
 }
 

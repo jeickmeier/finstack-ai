@@ -11,10 +11,9 @@ use finstack_ai_kernel::{
     TextBlock, Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
 };
 
-use crate::{
-    ContextAuthority, ContextItemKind, ContextProvenance, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelSettings, PortFuture,
-};
+use crate::ports::PortFuture;
+use crate::ports::context::{ContextAuthority, ContextItemKind, ContextProvenance};
+use crate::ports::model::{ModelName, ModelRequestDraft, ModelRequestLimits, ModelSettings};
 
 fn id<T: IdTag>(value: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
@@ -226,7 +225,7 @@ fn valid_compaction(
         input.source_entries[0].message.clone(),
         input.source_entries[3].message.clone(),
     ]);
-    let summary = crate::ContextItem::try_new(
+    let summary = crate::ports::context::ContextItem::try_new(
         ContextItemKind::DerivedSummary,
         vec![ContentBlock::Text(
             TextBlock::try_new("lookup completed").expect("text"),
@@ -243,7 +242,7 @@ fn valid_compaction(
         false,
     )
     .expect("summary");
-    let derived_summaries: Arc<[crate::ContextItem]> = Arc::from([summary]);
+    let derived_summaries: Arc<[crate::ports::context::ContextItem]> = Arc::from([summary]);
     let checkpoint_summary = CompactedSummary::Inline(Arc::clone(&derived_summaries));
     let summary_digest = compaction_summary_digest(&checkpoint_summary).expect("summary digest");
     CompactionResult {

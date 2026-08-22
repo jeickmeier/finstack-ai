@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    PortFuture, ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem,
-    Toolset, ToolsetDescriptor,
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::model::ToolSpec;
+use finstack_ai::runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
+    ToolsetDescriptor,
 };
 use finstack_ai_kernel::{ArtifactRef, ComponentRef, ErrorCategory, Metadata, RawJson};
 use futures_util::stream;

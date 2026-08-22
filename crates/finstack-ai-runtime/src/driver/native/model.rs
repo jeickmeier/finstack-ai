@@ -12,14 +12,16 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use crate::coordinator::{DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch};
+use crate::ids::Clock;
+use crate::ports::PortFuture;
+use crate::ports::model::{
+    CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelError,
+    ModelProgress, ModelRequest, ModelStreamAssembler, ModelTerminal, RunCallContext,
+};
+use crate::run::MonotonicDeadline;
 use crate::run_types::{SameIdentityRetryPolicy, provider_retry_after, same_identity_retryable};
 use crate::settlement::ModelDriverResult;
-use crate::{
-    CancellationSignal, Clock, LockedModelContextProfile, Metadata, Model, ModelCallContext,
-    ModelError, ModelProgress, ModelRequest, ModelStreamAssembler, ModelTerminal,
-    MonotonicDeadline, PortFuture, RunCallContext, parse_committed_model_request,
-    stable_model_dispatch_code,
-};
+use crate::{Metadata, parse_committed_model_request, stable_model_dispatch_code};
 
 pub(crate) struct ModelJob {
     pub(crate) seed: ModelDispatchSeed,
@@ -326,7 +328,7 @@ async fn settle_model_cancellation(
 }
 
 fn model_job_preflight(
-    deadline: Result<Option<MonotonicDeadline>, crate::RuntimeTimeError>,
+    deadline: Result<Option<MonotonicDeadline>, crate::run::RuntimeTimeError>,
     cancellation: &CancellationSignal,
 ) -> Result<Option<MonotonicDeadline>, ModelError> {
     if cancellation.is_cancelled() {
@@ -534,18 +536,19 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::{
+    use crate::ports::model::{
         AuthorizationContext, InputCapabilities, ModelCapabilities, ModelContextProfile,
         ModelDescriptor, ModelEventStream, ModelName, ModelRequestDraft, ModelRequestLimits,
         ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTokenEstimate,
-        ModelWarmupContext, OutputSpec, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
-        TokenEstimatorSource, Usage,
+        ModelWarmupContext, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
+        TokenEstimatorSource,
     };
+    use crate::{OutputSpec, Usage};
 
     struct FixedClock(Timestamp);
 
     impl Clock for FixedClock {
-        fn now(&self) -> Result<Timestamp, crate::IdGenerationError> {
+        fn now(&self) -> Result<Timestamp, crate::ids::IdGenerationError> {
             Ok(self.0)
         }
     }
@@ -758,7 +761,7 @@ mod tests {
             assembler,
             SameIdentityRetryPolicy {
                 max_retries: 1,
-                backoff: crate::RetryBackoffPolicy {
+                backoff: crate::run::RetryBackoffPolicy {
                     initial_delay: Duration::ZERO,
                     maximum_delay: Duration::ZERO,
                     maximum_jitter: Duration::ZERO,

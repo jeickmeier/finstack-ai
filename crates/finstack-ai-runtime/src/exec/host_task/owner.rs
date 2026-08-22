@@ -4,14 +4,20 @@ use std::time::Duration;
 
 use finstack_ai_kernel::OperationLocator;
 
-use crate::LiveRunState;
 use crate::context::CONTEXT_RECOVERY_UNCERTAIN;
 use crate::coordinator::{CommitCoordinator, PostCommitDispatcher};
+use crate::driver::host_driver;
 use crate::event_hub::event_hub;
-use crate::host_driver;
+use crate::events::{EventSubscriptionConfig, EventSubscriptionError};
+use crate::ids::{Clock, RandomSource};
 use crate::observer::{
     OBSERVER_DELIVERY_FAILED, OBSERVER_SHUTDOWN_TIMEOUT, OBSERVER_SUBSCRIPTION_FAILED,
 };
+use crate::ports::context::InvocationResumeAction;
+use crate::ports::model::{CancellationSignal, LockedModelContextProfile, ReadyModel};
+use crate::ports::observer::{Observer, ObserverDiagnostic};
+use crate::ports::tool::{ResolvedToolCatalog, ToolResumeAction, ToolStreamAssembler};
+use crate::run::LiveRunState;
 use crate::run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
     ToolTaskConfig,
@@ -21,11 +27,6 @@ use crate::settlement::{
     model_resume_retry_seed, prepare_tool_batch_if_ready, resume_pending_context_effects,
     resume_pending_model_effect, resume_pending_tool_effects, tool_resume_retry_seeds,
     validate_model_binding,
-};
-use crate::{
-    CancellationSignal, Clock, EventSubscriptionConfig, EventSubscriptionError,
-    InvocationResumeAction, LockedModelContextProfile, Observer, ObserverDiagnostic, RandomSource,
-    ReadyModel, ResolvedToolCatalog, ToolResumeAction, ToolStreamAssembler,
 };
 
 use super::dispatcher::HostDispatcher;
@@ -105,8 +106,8 @@ impl RunTaskOwner {
         random: R,
     ) -> Result<Self, RunHandleError>
     where
-        C: Clock + crate::PortObject,
-        R: RandomSource + crate::PortObject,
+        C: Clock + crate::ports::PortObject,
+        R: RandomSource + crate::ports::PortObject,
     {
         Self::spawn_with_model_and_artifacts(
             coordinator,
@@ -136,13 +137,13 @@ impl RunTaskOwner {
         model_config: ModelTaskConfig,
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
-        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        artifact_store: Option<(Arc<dyn crate::artifact::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
     where
-        C: Clock + crate::PortObject,
-        R: RandomSource + crate::PortObject,
+        C: Clock + crate::ports::PortObject,
+        R: RandomSource + crate::ports::PortObject,
     {
         Self::spawn_inner(
             coordinator,
@@ -183,8 +184,8 @@ impl RunTaskOwner {
         random: R,
     ) -> Result<Self, RunHandleError>
     where
-        C: Clock + crate::PortObject,
-        R: RandomSource + crate::PortObject,
+        C: Clock + crate::ports::PortObject,
+        R: RandomSource + crate::ports::PortObject,
     {
         Self::spawn_with_model_tools_and_artifacts(
             coordinator,
@@ -218,13 +219,13 @@ impl RunTaskOwner {
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Arc<ResolvedToolCatalog>,
-        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        artifact_store: Option<(Arc<dyn crate::artifact::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
     where
-        C: Clock + crate::PortObject,
-        R: RandomSource + crate::PortObject,
+        C: Clock + crate::ports::PortObject,
+        R: RandomSource + crate::ports::PortObject,
     {
         Self::spawn_inner(
             coordinator,
@@ -254,13 +255,13 @@ impl RunTaskOwner {
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Option<Arc<ResolvedToolCatalog>>,
-        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        artifact_store: Option<(Arc<dyn crate::artifact::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
     where
-        C: Clock + crate::PortObject,
-        R: RandomSource + crate::PortObject,
+        C: Clock + crate::ports::PortObject,
+        R: RandomSource + crate::ports::PortObject,
     {
         let run_config = run_config.validate()?;
         let (event_handle, ()) =
@@ -455,7 +456,7 @@ impl RunTaskOwner {
     ///
     /// Callers should consume this only after graceful, non-faulted shutdown.
     #[must_use]
-    pub fn take_session_head(&mut self) -> Option<crate::SessionHeadUpdate> {
+    pub fn take_session_head(&mut self) -> Option<crate::session::SessionHeadUpdate> {
         self.handle
             .shared
             .session_head
@@ -467,7 +468,9 @@ impl RunTaskOwner {
     /// Take the latest validated process-local compaction checkpoint.
     #[doc(hidden)]
     #[must_use]
-    pub fn take_compaction_checkpoint(&mut self) -> Option<crate::CompactionCheckpoint> {
+    pub fn take_compaction_checkpoint(
+        &mut self,
+    ) -> Option<crate::ports::middleware::CompactionCheckpoint> {
         self.handle
             .shared
             .compaction_checkpoint

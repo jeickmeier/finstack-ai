@@ -15,25 +15,31 @@ use finstack_ai_kernel::{
 };
 use futures_core::Stream;
 
+use crate::Usage;
+use crate::commit::CommitCoordinator;
 use crate::compaction_driver::resume_pending_compaction_model;
 use crate::context::{ContextAuthority, ContextItem, ContextItemKind, ContextProvenance};
+use crate::ids::{ExternalClock, IdGenerationError, RandomSource};
 use crate::middleware::{
     BeforeModelInput, CompactionEvidence, CompactionResult, MiddlewareDescriptor, MiddlewareOrder,
     MiddlewareRegistration, MiddlewareRole, OrderTier, PromptCacheImpact, ResolvedMiddlewareChain,
     StageInput, StageMask, StageOutcome,
 };
 use crate::middleware_driver::StageDriver;
-use crate::settlement::SettlementSources;
-use crate::stage_settlement::settle_facade_stage_with_model;
-use crate::{
-    CancellationSignal, CommitCoordinator, ExternalClock, IdGenerationError, InputCapabilities,
-    JournalStore, LoadRequest, LoadedSession, Model, ModelCapabilities, ModelContextProfile,
+use crate::ports::PortFuture;
+use crate::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
+};
+use crate::ports::model::{
+    CancellationSignal, InputCapabilities, Model, ModelCapabilities, ModelContextProfile,
     ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest, ModelRequestDraft,
     ModelResponse, ModelSettings, ModelStreamItem, ModelTokenEstimate, ModelWarmupContext,
-    PortFuture, RandomSource, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth,
-    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, Usage,
+    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
     resolve_model_context_profile,
 };
+use crate::settlement::SettlementSources;
+use crate::stage_settlement::settle_facade_stage_with_model;
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {
     let mut context = Context::from_waker(Waker::noop());
@@ -221,7 +227,7 @@ fn descriptor(component: &str) -> MiddlewareDescriptor {
     }
 }
 
-fn test_profile() -> crate::LockedModelContextProfile {
+fn test_profile() -> crate::ports::model::LockedModelContextProfile {
     resolve_model_context_profile(
         ModelContextProfile {
             provider: Arc::from("fixture-provider"),
@@ -874,7 +880,7 @@ fn recover_summarize_after_crash(driver: &StageDriver, draft: &ModelRequestDraft
     .expect_err("first attempt crashes after the request commits");
     assert!(matches!(
         crash_error,
-        crate::RunHandleError::Middleware { .. }
+        crate::run::RunHandleError::Middleware { .. }
     ));
     assert!(
         crashing
@@ -967,8 +973,8 @@ fn missing_compaction_authorization_fails_before_commit() {
     assert!(
         matches!(
             &error,
-            crate::RunHandleError::Middleware { code }
-                if code.as_ref() == crate::COMPACTION_MODEL_NOT_AUTHORIZED
+            crate::run::RunHandleError::Middleware { code }
+                if code.as_ref() == crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED
         ),
         "expected compaction_model_not_authorized, got {error:?}"
     );
@@ -1040,8 +1046,8 @@ fn mismatched_compaction_authorization_fails_before_commit() {
     assert!(
         matches!(
             &error,
-            crate::RunHandleError::Middleware { code }
-                if code.as_ref() == crate::COMPACTION_MODEL_NOT_AUTHORIZED
+            crate::run::RunHandleError::Middleware { code }
+                if code.as_ref() == crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED
         ),
         "expected compaction_model_not_authorized, got {error:?}"
     );
@@ -1067,19 +1073,26 @@ fn authorize_compaction_model_request_rejects_sensitivity_and_digest_mismatches(
         residency_policy_digest: Digest::raw_json(b"residency"),
         resume_state: RawJson::parse(b"{}").expect("resume"),
     };
-    crate::authorize_compaction_model_request(Some(&auth), &ok).expect("authorized");
+    crate::ports::middleware::authorize_compaction_model_request(Some(&auth), &ok)
+        .expect("authorized");
     assert!(
-        crate::authorize_compaction_model_request(None, &ok).is_err(),
+        crate::ports::middleware::authorize_compaction_model_request(None, &ok).is_err(),
         "absence denies"
     );
     let too_sensitive = crate::middleware::CompactionModelRequest {
         source_sensitivity: Sensitivity::Confidential,
         ..ok.clone()
     };
-    assert!(crate::authorize_compaction_model_request(Some(&auth), &too_sensitive).is_err());
+    assert!(
+        crate::ports::middleware::authorize_compaction_model_request(Some(&auth), &too_sensitive)
+            .is_err()
+    );
     let wrong_digest = crate::middleware::CompactionModelRequest {
         residency_policy_digest: Digest::raw_json(b"other"),
         ..ok
     };
-    assert!(crate::authorize_compaction_model_request(Some(&auth), &wrong_digest).is_err());
+    assert!(
+        crate::ports::middleware::authorize_compaction_model_request(Some(&auth), &wrong_digest)
+            .is_err()
+    );
 }

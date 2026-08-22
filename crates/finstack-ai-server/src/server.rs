@@ -51,9 +51,7 @@ impl Server {
     /// use std::sync::Arc;
     /// use std::time::Duration;
     ///
-    /// use finstack_ai_runtime::{
-    ///     SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink,
-    /// };
+    /// use finstack_ai_runtime::audit::{SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink};
     /// use finstack_ai_server::{ListenAddr, Server, StaticAuthVerifier};
     ///
     /// struct Ready;

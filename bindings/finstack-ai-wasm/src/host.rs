@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{ModelError, ModelResponse, ModelToolCall};
+use finstack_ai::runtime::ports::model::{ModelError, ModelResponse, ModelToolCall};
 use finstack_ai_kernel::{
     ArtifactRef, ContentBlock, ErrorCategory, JsonBlock, Metadata, ProviderIds, RawJson, TextBlock,
     Usage,
@@ -268,11 +268,11 @@ pub const fn host_component_version() -> finstack_ai_kernel::Version {
 
 /// Conservative byte-upper-bound estimator identity for JS hosts.
 #[must_use]
-pub fn js_estimator() -> finstack_ai::runtime::TokenEstimatorRef {
-    finstack_ai::runtime::TokenEstimatorRef {
+pub fn js_estimator() -> finstack_ai::runtime::ports::model::TokenEstimatorRef {
+    finstack_ai::runtime::ports::model::TokenEstimatorRef {
         id: Arc::from(JS_ESTIMATOR_ID),
         version: Arc::from("1"),
-        source: finstack_ai::runtime::TokenEstimatorSource::ConservativeUpperBound,
+        source: finstack_ai::runtime::ports::model::TokenEstimatorSource::ConservativeUpperBound,
     }
 }
 

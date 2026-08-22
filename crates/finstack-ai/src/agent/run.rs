@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 #[cfg(feature = "native-tokio")]
 use finstack_ai_kernel::ValidationOutcome;
 use finstack_ai_kernel::{CancelRequested, CancellationInitiator, KernelInput, OperationLocator};
-use finstack_ai_runtime::EventSubscription;
 use finstack_ai_runtime::events::EventBatch;
+use finstack_ai_runtime::events::EventSubscription;
 use finstack_ai_runtime::run::RunHandle;
 
 #[cfg(feature = "native-tokio")]
@@ -211,7 +211,9 @@ impl AgentRun {
     ///
     /// Returns the retained startup failure when no runtime handle was
     /// published.
-    pub async fn live_state(&self) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+    pub async fn live_state(
+        &self,
+    ) -> Result<finstack_ai_runtime::run::LiveRunState, AgentRunError> {
         Ok(self.runtime_handle().await?.live_state())
     }
 
@@ -223,7 +225,7 @@ impl AgentRun {
     pub async fn wait_for_live_state(
         &self,
         after_revision: u64,
-    ) -> Result<finstack_ai_runtime::LiveRunState, AgentRunError> {
+    ) -> Result<finstack_ai_runtime::run::LiveRunState, AgentRunError> {
         self.runtime_handle()
             .await?
             .wait_for_live_state(after_revision)

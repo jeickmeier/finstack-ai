@@ -1,4 +1,4 @@
-use crate::StoreError;
+use crate::ports::journal::StoreError;
 
 use finstack_ai_kernel::{
     AppendBatchId, AppendRequest, CommittedBatch, ConversationEntry, EntryId, KernelState, LaneId,

@@ -11,13 +11,13 @@ use finstack_ai_kernel::{
 };
 
 use crate::coordinator::{CommitCoordinator, CommitCoordinatorError, ModelDispatchSeed};
-use crate::run_types::RunHandleError;
-use crate::{
-    CancellationSignal, Clock, Model, ModelDeferral, ModelError, ModelProgress,
-    ModelReconcileResult, ModelRequestDraft, ModelResponse, ModelResumeAction, ModelTerminal,
-    RandomSource, ReconcileContext, RunCallContext, map_model_reconcile_result,
-    model_resume_action, model_retry_allowed,
+use crate::ids::{Clock, RandomSource};
+use crate::ports::model::{
+    CancellationSignal, Model, ModelDeferral, ModelError, ModelProgress, ModelReconcileResult,
+    ModelRequestDraft, ModelResponse, ModelResumeAction, ModelTerminal, ReconcileContext,
+    RunCallContext, map_model_reconcile_result, model_resume_action, model_retry_allowed,
 };
+use crate::run_types::RunHandleError;
 
 use super::cancel::reconcile_cancelled_effect;
 use super::ids::submit_resume_input;

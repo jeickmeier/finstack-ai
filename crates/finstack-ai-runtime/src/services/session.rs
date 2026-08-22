@@ -203,7 +203,7 @@ struct SessionInner {
     projection: SessionProjection,
     guards: BTreeMap<LaneId, LaneOwner>,
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-    live_runs: BTreeMap<RunId, crate::RunHandle>,
+    live_runs: BTreeMap<RunId, crate::run::RunHandle>,
     /// Structural-only coordinator at the live session head. Taken out for
     /// the duration of one structural commit so the mutex is not held across
     /// store I/O.
@@ -881,7 +881,7 @@ impl SessionRuntime {
         &self,
         lane_id: LaneId,
         run_id: RunId,
-        handle: crate::RunHandle,
+        handle: crate::run::RunHandle,
     ) -> Result<(), SessionError> {
         let mut inner = self.lock()?;
         if inner.guards.get(&lane_id) != Some(&LaneOwner::Active(run_id)) {
@@ -1235,10 +1235,11 @@ mod tests {
         fn append(
             &self,
             _request: finstack_ai_kernel::AppendRequest,
-        ) -> crate::PortFuture<Result<finstack_ai_kernel::CommittedBatch, crate::StoreError>>
-        {
+        ) -> crate::ports::PortFuture<
+            Result<finstack_ai_kernel::CommittedBatch, crate::ports::journal::StoreError>,
+        > {
             Box::pin(async {
-                Err(crate::StoreError::Unavailable {
+                Err(crate::ports::journal::StoreError::Unavailable {
                     reason_code: "unavailable",
                 })
             })
@@ -1247,9 +1248,11 @@ mod tests {
         fn load(
             &self,
             _request: LoadRequest,
-        ) -> crate::PortFuture<Result<crate::LoadedSession, crate::StoreError>> {
+        ) -> crate::ports::PortFuture<
+            Result<crate::ports::journal::LoadedSession, crate::ports::journal::StoreError>,
+        > {
             Box::pin(async {
-                Err(crate::StoreError::Unavailable {
+                Err(crate::ports::journal::StoreError::Unavailable {
                     reason_code: "unavailable",
                 })
             })
@@ -1257,18 +1260,24 @@ mod tests {
 
         fn write_snapshot(
             &self,
-            _request: crate::SnapshotRequest,
-        ) -> crate::PortFuture<Result<crate::SnapshotReceipt, crate::StoreError>> {
+            _request: crate::ports::journal::SnapshotRequest,
+        ) -> crate::ports::PortFuture<
+            Result<crate::ports::journal::SnapshotReceipt, crate::ports::journal::StoreError>,
+        > {
             Box::pin(async {
-                Err(crate::StoreError::Unavailable {
+                Err(crate::ports::journal::StoreError::Unavailable {
                     reason_code: "unavailable",
                 })
             })
         }
 
-        fn health(&self) -> crate::PortFuture<Result<crate::StoreHealth, crate::StoreError>> {
+        fn health(
+            &self,
+        ) -> crate::ports::PortFuture<
+            Result<crate::ports::journal::StoreHealth, crate::ports::journal::StoreError>,
+        > {
             Box::pin(async {
-                Err(crate::StoreError::Unavailable {
+                Err(crate::ports::journal::StoreError::Unavailable {
                     reason_code: "unavailable",
                 })
             })

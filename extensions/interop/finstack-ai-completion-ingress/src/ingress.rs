@@ -101,7 +101,7 @@ impl CompletionIngress {
 
     /// Return operator-visible readiness of the required audit path.
     #[must_use]
-    pub fn health(&self) -> finstack_ai_runtime::SecurityAuditGateHealth {
+    pub fn health(&self) -> finstack_ai_runtime::audit::SecurityAuditGateHealth {
         self.audit.operational_health()
     }
 

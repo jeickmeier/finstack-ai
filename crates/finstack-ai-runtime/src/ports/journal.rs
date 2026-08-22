@@ -9,7 +9,7 @@ use finstack_ai_kernel::{
 };
 use thiserror::Error;
 
-use crate::{PortFuture, PortObject};
+use crate::ports::{PortFuture, PortObject};
 
 /// Maximum envelopes returned by one [`JournalStore::scan`] call.
 pub const SCAN_PAGE_MAX_RECORDS: u32 = 256;
@@ -515,7 +515,7 @@ pub struct AcceleratedRestore {
     pub state: KernelState,
 }
 
-/// Best-effort snapshot write policy used by [`crate::CommitCoordinator`].
+/// Best-effort snapshot write policy used by [`crate::commit::CommitCoordinator`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotSchedule {
     /// Minimum records after the last snapshot before another write is attempted.

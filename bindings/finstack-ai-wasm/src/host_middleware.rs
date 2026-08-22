@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::middleware::{
     Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
-    MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+    MiddlewareRole, OrderTier, StageInput, StageMask, StageOutcome,
 };
 use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ComponentRef, Digest, ErrorCategory, InvocationRecovery,

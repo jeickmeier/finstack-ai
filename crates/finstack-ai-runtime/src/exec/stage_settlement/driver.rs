@@ -8,20 +8,22 @@ use finstack_ai_kernel::{
     RetrySafety, Stage, StageCursor, StageSettled, TransitionEnv,
 };
 
+use crate::commit::CommitOutcome;
 use crate::compaction_driver::{
     first_compaction_request, fulfill_compaction_model, load_completed_compaction_resume,
 };
 use crate::context_driver::{ContextDriver, collect_context_stage};
 use crate::coordinator::CommitCoordinator;
+use crate::ids::{Clock, RandomSource};
 use crate::middleware::{
     CompactionModelResume, MIDDLEWARE_RESOLUTION_INVALID, MiddlewareRole, ResolvedMiddleware,
     StageInput, StageOutcome, stage_name, validate_stage_outcome,
 };
 use crate::middleware_driver::{StageDriver, StageFold};
 use crate::model::{LockedModelContextProfile, Model};
+use crate::ports::model::RunCallContext;
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
-use crate::{Clock, CommitOutcome, RandomSource, RunCallContext};
 
 use super::apply::apply_fold;
 use super::codec::{canonical_draft, parse_draft};
@@ -40,7 +42,7 @@ use super::{MIDDLEWARE_STAGE_IDENTITY_MISSING, middleware_error, stage_error};
 /// [`StageDriver::is_active`] — not this `Option` — is the passthrough gate.
 pub(crate) fn stage_driver(
     coordinator: &CommitCoordinator,
-    cancellation: &crate::CancellationSignal,
+    cancellation: &crate::ports::model::CancellationSignal,
 ) -> Option<StageDriver> {
     coordinator
         .middleware_chain()
@@ -54,7 +56,7 @@ pub(crate) fn stage_driver(
 /// projection (system/developer and the trailing current user).
 pub(crate) fn context_driver(
     coordinator: &CommitCoordinator,
-    cancellation: &crate::CancellationSignal,
+    cancellation: &crate::ports::model::CancellationSignal,
 ) -> Option<ContextDriver> {
     coordinator
         .context_providers()
@@ -241,9 +243,10 @@ async fn apply_context_providers<C: Clock, R: RandomSource>(
     if settled.cursor.stage == Stage::BeforeModel && coordinator.context_projection().is_some() {
         return Ok(());
     }
-    let cancellation = stage_driver.map_or_else(crate::CancellationSignal::new, |driver| {
-        driver.cancellation().child()
-    });
+    let cancellation = stage_driver
+        .map_or_else(crate::ports::model::CancellationSignal::new, |driver| {
+            driver.cancellation().child()
+        });
     let Some(driver) = context_driver(coordinator, &cancellation) else {
         return Ok(());
     };
@@ -381,10 +384,10 @@ async fn invoke_stage_chain<C: Clock, R: RandomSource>(
         .as_ref()
         .map(serde_json_canonicalizer::to_vec)
         .transpose()
-        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?
+        .map_err(|_| stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?
         .map(finstack_ai_kernel::RawJson::parse)
         .transpose()
-        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
+        .map_err(|_| stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
     let durable_input = strip_disposable_input_checkpoint(input.clone());
     let input_json = durable_input
         .to_raw_json()
@@ -477,7 +480,7 @@ async fn invoke_middleware_component<C: Clock, R: RandomSource>(
         commit_middleware_request(coordinator, invocation, resolved, pipeline_index, effect_id)
             .await?
     };
-    let context = crate::MiddlewareContext {
+    let context = crate::ports::middleware::MiddlewareContext {
         run: RunCallContext {
             effect_id,
             locator: invocation.seed.locator.clone(),
@@ -649,21 +652,23 @@ fn recovered_middleware_outcome(
         .map(|(requested, completed)| {
             serde_json::from_slice(completed.output().as_bytes())
                 .map(|outcome| (requested.effect_id(), outcome))
-                .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))
+                .map_err(|_| stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED))
         })
         .transpose()
 }
 
 fn middleware_settlement(
     requested: &EffectRequested,
-    result: &Result<StageOutcome, crate::MiddlewareError>,
+    result: &Result<StageOutcome, crate::ports::middleware::MiddlewareError>,
 ) -> Result<ExtensionSettlement, RunHandleError> {
     match result {
         Ok(outcome) => {
-            let bytes = serde_json_canonicalizer::to_vec(outcome)
-                .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
-            let output = finstack_ai_kernel::RawJson::parse(bytes)
-                .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
+            let bytes = serde_json_canonicalizer::to_vec(outcome).map_err(|_| {
+                stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED)
+            })?;
+            let output = finstack_ai_kernel::RawJson::parse(bytes).map_err(|_| {
+                stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED)
+            })?;
             EffectCompleted::try_new(
                 requested.effect_id(),
                 requested.output_contract().clone(),
@@ -675,7 +680,7 @@ fn middleware_settlement(
                 None,
             )
             .map(ExtensionSettlement::Completed)
-            .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))
+            .map_err(|_| stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED))
         }
         Err(error) => EffectFailed::try_new(
             requested.effect_id(),
@@ -685,7 +690,7 @@ fn middleware_settlement(
             None::<&str>,
         )
         .map(ExtensionSettlement::Failed)
-        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED)),
+        .map_err(|_| stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED)),
     }
 }
 
@@ -715,7 +720,7 @@ fn extension_env<C: Clock, R: RandomSource>(
 ) -> Result<TransitionEnv, RunHandleError> {
     let event_count = body
         .derived_event_count(RECORD_KIND_VERSION)
-        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
+        .map_err(|_| stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?;
     Ok(TransitionEnv {
         now: sources.now()?,
         ids: AllocatedIds::try_new(
@@ -733,6 +738,6 @@ fn extension_env<C: Clock, R: RandomSource>(
             vec![sources.generate::<AppendBatchTag>()?],
             Vec::new(),
         )
-        .map_err(|_| stage_error(crate::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?,
+        .map_err(|_| stage_error(crate::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED))?,
     })
 }

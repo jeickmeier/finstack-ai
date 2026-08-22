@@ -18,6 +18,7 @@ use finstack_ai_kernel::{
 };
 
 use crate::coordinator::CommitCoordinator;
+use crate::ids::{Clock, RandomSource};
 use crate::middleware::{
     CompactionModelRequest, CompactionModelResume, StageOutcome, authorize_compaction_model_request,
 };
@@ -25,9 +26,9 @@ use crate::model::{
     Model, ModelCallContext, ModelRequest, ModelResponse, ModelStreamAssembler, ModelStreamLimits,
     ModelTerminal, validate_model_request,
 };
+use crate::ports::model::{CancellationSignal, LockedModelContextProfile, RunCallContext};
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
-use crate::{CancellationSignal, Clock, LockedModelContextProfile, RandomSource, RunCallContext};
 
 const COMPACTION_PHASE_UNAVAILABLE: &str = "compaction_phase_unavailable";
 
@@ -71,9 +72,9 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
     let request_json = request
         .request
         .canonical_bytes()
-        .map_err(|_| stage_error(crate::MODEL_REQUEST_INVALID))?;
+        .map_err(|_| stage_error(crate::ports::model::MODEL_REQUEST_INVALID))?;
     let request_json = finstack_ai_kernel::RawJson::parse(request_json)
-        .map_err(|_| stage_error(crate::MODEL_REQUEST_INVALID))?;
+        .map_err(|_| stage_error(crate::ports::model::MODEL_REQUEST_INVALID))?;
     let middleware_component_id =
         finstack_ai_kernel::ComponentId::parse("finstack.middleware.compaction")
             .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
@@ -137,8 +138,8 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
     let finstack_ai_kernel::EffectInput::Model { request: raw } = pending.requested.input() else {
         return Err(stage_error(COMPACTION_PHASE_UNAVAILABLE));
     };
-    let draft: crate::ModelRequestDraft = serde_json::from_slice(raw.as_bytes())
-        .map_err(|_| stage_error(crate::MODEL_REQUEST_INVALID))?;
+    let draft: crate::ports::model::ModelRequestDraft = serde_json::from_slice(raw.as_bytes())
+        .map_err(|_| stage_error(crate::ports::model::MODEL_REQUEST_INVALID))?;
     let seed = coordinator
         .stage_dispatch_seed()
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
@@ -146,7 +147,7 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
         seed.compaction_authorization
             .as_ref()
             .ok_or_else(|| RunHandleError::Middleware {
-                code: Arc::from(crate::COMPACTION_MODEL_NOT_AUTHORIZED),
+                code: Arc::from(crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED),
             })?;
     // Recheck the accepted lock. Never fabricate resume model/digest/sensitivity:
     // prefer the committed component when present; otherwise the lock binds the
@@ -158,7 +159,7 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
         );
         if authorization.allowed_model() != &model_ref {
             return Err(RunHandleError::Middleware {
-                code: Arc::from(crate::COMPACTION_MODEL_NOT_AUTHORIZED),
+                code: Arc::from(crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED),
             });
         }
         model_ref
@@ -166,7 +167,7 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
         let model_ref = authorization.allowed_model().clone();
         if model_ref.version().is_some() {
             return Err(RunHandleError::Middleware {
-                code: Arc::from(crate::COMPACTION_MODEL_NOT_AUTHORIZED),
+                code: Arc::from(crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED),
             });
         }
         model_ref
@@ -381,7 +382,7 @@ pub(crate) fn first_compaction_request(
 /// [`RunHandleError::Middleware`] so they abort the submitting run and leave
 /// the worker healthy — not [`crate::settlement`]'s `model_handle_error`,
 /// which classifies the same `ModelError` as a model-port failure.
-fn compaction_model_error(error: &crate::ModelError) -> RunHandleError {
+fn compaction_model_error(error: &crate::ports::model::ModelError) -> RunHandleError {
     RunHandleError::Middleware {
         code: Arc::from(error.code()),
     }

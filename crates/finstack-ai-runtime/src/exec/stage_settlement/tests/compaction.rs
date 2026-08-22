@@ -44,7 +44,7 @@ fn driver_from(descriptor: MiddlewareDescriptor, outcome: StageOutcome) -> Stage
 }
 
 /// The `BeforeModelInput` this choke point actually assembles for `draft`.
-fn assembled_before_model_input(draft: &crate::ModelRequestDraft) -> BeforeModelInput {
+fn assembled_before_model_input(draft: &crate::ports::model::ModelRequestDraft) -> BeforeModelInput {
     let StageInput::BeforeModel(input) = stage_input(
         &state_with_messages(Vec::new()),
         Stage::BeforeModel,
@@ -217,7 +217,7 @@ fn cache_aware_driver() -> (
     (driver, seen)
 }
 
-fn before_model_stage_input(draft: &crate::ModelRequestDraft) -> StageInput {
+fn before_model_stage_input(draft: &crate::ports::model::ModelRequestDraft) -> StageInput {
     StageInput::BeforeModel(Box::new(assembled_before_model_input(draft)))
 }
 

@@ -8,8 +8,10 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
-use crate::LiveRunState;
+use crate::commit::CommitCoordinator;
 use crate::event_hub::event_hub;
+use crate::events::{EventSubscriptionConfig, EventSubscriptionError};
+use crate::ids::{Clock, RandomSource};
 use crate::native::model::{ModelDispatcher, run_model_jobs};
 use crate::native::timer::{TimerDispatcher, run_timer_jobs};
 use crate::native::tool::{
@@ -18,6 +20,13 @@ use crate::native::tool::{
 use crate::observer::{
     OBSERVER_DELIVERY_FAILED, OBSERVER_SHUTDOWN_TIMEOUT, OBSERVER_SUBSCRIPTION_FAILED,
 };
+use crate::ports::model::{CancellationSignal, LockedModelContextProfile, Model, ReadyModel};
+use crate::ports::observer::{Observer, ObserverDiagnostic};
+use crate::ports::tool::{
+    ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED, ToolStreamAssembler,
+};
+use crate::run::LiveRunState;
+use crate::run::MonotonicDeadline;
 use crate::run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
 };
@@ -26,12 +35,6 @@ use crate::settlement::{
     drive_due_polls, model_resume_retry_seed, next_due_poll_or_expiry, prepare_tool_batch_if_ready,
     resume_pending_model_effect, resume_pending_tool_effects, tool_resume_retry_seeds,
     validate_model_binding,
-};
-use crate::{
-    CancellationSignal, Clock, CommitCoordinator, EventSubscriptionConfig, EventSubscriptionError,
-    LockedModelContextProfile, Model, MonotonicDeadline, Observer, ObserverDiagnostic,
-    RandomSource, ReadyModel, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED,
-    ToolStreamAssembler,
 };
 
 use super::handle::RunHandle;
@@ -302,7 +305,7 @@ impl RunTaskOwner {
         model_config: ModelTaskConfig,
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
-        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        artifact_store: Option<(Arc<dyn crate::artifact::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
@@ -334,7 +337,7 @@ impl RunTaskOwner {
         model_config: ModelTaskConfig,
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
-        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        artifact_store: Option<(Arc<dyn crate::artifact::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
@@ -542,7 +545,7 @@ impl RunTaskOwner {
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Arc<ResolvedToolCatalog>,
-        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        artifact_store: Option<(Arc<dyn crate::artifact::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
@@ -578,7 +581,7 @@ impl RunTaskOwner {
         ready_model: Arc<ReadyModel>,
         profile: LockedModelContextProfile,
         catalog: Arc<ResolvedToolCatalog>,
-        artifact_store: Option<(Arc<dyn crate::ArtifactStore>, OperationLocator)>,
+        artifact_store: Option<(Arc<dyn crate::artifact::ArtifactStore>, OperationLocator)>,
         clock: C,
         random: R,
     ) -> Result<Self, RunHandleError>
@@ -811,7 +814,7 @@ impl RunTaskOwner {
     ///
     /// Callers should consume this only after graceful, non-faulted shutdown.
     #[must_use]
-    pub fn take_session_head(&mut self) -> Option<crate::SessionHeadUpdate> {
+    pub fn take_session_head(&mut self) -> Option<crate::session::SessionHeadUpdate> {
         self.handle
             .shared
             .session_head
@@ -823,7 +826,9 @@ impl RunTaskOwner {
     /// Take the latest validated process-local compaction checkpoint.
     #[doc(hidden)]
     #[must_use]
-    pub fn take_compaction_checkpoint(&mut self) -> Option<crate::CompactionCheckpoint> {
+    pub fn take_compaction_checkpoint(
+        &mut self,
+    ) -> Option<crate::ports::middleware::CompactionCheckpoint> {
         self.handle
             .shared
             .compaction_checkpoint
@@ -971,7 +976,7 @@ mod tests {
     struct TestClock(Timestamp);
 
     impl Clock for TestClock {
-        fn now(&self) -> Result<Timestamp, crate::IdGenerationError> {
+        fn now(&self) -> Result<Timestamp, crate::ids::IdGenerationError> {
             Ok(self.0)
         }
     }

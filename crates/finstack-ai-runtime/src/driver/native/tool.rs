@@ -13,14 +13,18 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::timeout;
 
 use crate::coordinator::{DispatchError, PostCommitDispatcher, RuntimeDispatch, ToolDispatchSeed};
+use crate::ids::Clock;
 use crate::native::model::ModelDispatcher;
+use crate::ports::PortFuture;
+use crate::ports::model::{CancellationSignal, RunCallContext};
+use crate::ports::tool::{
+    ResolvedTool, ResolvedToolCatalog, TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED, ToolCallContext,
+    ToolError, ToolStreamAssembler,
+};
+use crate::run::MonotonicDeadline;
 use crate::settlement::ToolDriverResult;
 use crate::tool::AssembledToolTerminal;
-use crate::{
-    CancellationSignal, Clock, MonotonicDeadline, PortFuture, ResolvedTool, ResolvedToolCatalog,
-    RunCallContext, TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED, TOOL_PANICKED, ToolCallContext,
-    ToolError, ToolProgress, ToolStreamAssembler,
-};
+use crate::{TOOL_PANICKED, ToolProgress};
 
 pub use crate::run_types::ToolTaskConfig;
 
@@ -549,7 +553,7 @@ where
 }
 
 fn tool_job_preflight(
-    deadline: Result<Option<MonotonicDeadline>, crate::RuntimeTimeError>,
+    deadline: Result<Option<MonotonicDeadline>, crate::run::RuntimeTimeError>,
     cancellation: &CancellationSignal,
 ) -> Result<Option<MonotonicDeadline>, ToolError> {
     if cancellation.is_cancelled() {

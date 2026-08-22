@@ -543,7 +543,7 @@ fn drive_to_prepare_context(coordinator: &mut CommitCoordinator) {
     .expect("before run");
 }
 
-fn committed_record_ids(outcome: &crate::CommitOutcome) -> Vec<finstack_ai_kernel::RecordId> {
+fn committed_record_ids(outcome: &crate::commit::CommitOutcome) -> Vec<finstack_ai_kernel::RecordId> {
     outcome
         .committed
         .as_ref()

@@ -5,7 +5,7 @@
 //! free of wasm-bindgen.
 
 #[cfg(any(target_arch = "wasm32", test))]
-use finstack_ai::runtime::PortFuture;
+use finstack_ai::runtime::ports::PortFuture;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::{future_to_promise, spawn_local};

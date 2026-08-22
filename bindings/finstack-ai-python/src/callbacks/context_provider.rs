@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::context::{
     ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, PortFuture,
+    ContextProviderDescriptor, ContextRequest,
 };
 use finstack_ai_kernel::{ComponentRef, ErrorCategory, Metadata};
 use pyo3::prelude::*;

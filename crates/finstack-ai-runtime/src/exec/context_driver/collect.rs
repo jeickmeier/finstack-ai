@@ -11,10 +11,11 @@ use crate::context::{
     ContextRequest, RecordedContextContribution, assemble_context,
 };
 use crate::coordinator::CommitCoordinator;
+use crate::ids::{Clock, RandomSource};
 use crate::model::LockedModelContextProfile;
+use crate::ports::model::RunCallContext;
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
-use crate::{Clock, RandomSource, RunCallContext};
 
 use super::commit::{ContextInvocation, chain_digest, committed_context_call, context_error};
 use super::{ContextDriver, ProtectedProjection, empty_assembled};
@@ -59,7 +60,7 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
             continue;
         }
         let provider_index = u32::try_from(index).map_err(|_| RunHandleError::Middleware {
-            code: Arc::from(crate::CONTEXT_CONFIGURATION_INVALID),
+            code: Arc::from(crate::ports::context::CONTEXT_CONFIGURATION_INVALID),
         })?;
         let replay = ContextReplay {
             component: &provider.descriptor().invocation,
@@ -170,7 +171,7 @@ fn replayed_context_contribution(
         .map(|(_, completed)| {
             serde_json::from_slice(completed.output().as_bytes()).map_err(|_| {
                 RunHandleError::Middleware {
-                    code: Arc::from(crate::CONTEXT_CONTRIBUTION_INVALID),
+                    code: Arc::from(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID),
                 }
             })
         })

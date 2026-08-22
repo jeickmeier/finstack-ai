@@ -6,7 +6,10 @@ use std::time::Duration;
 use crate::approval_grant::PyApprovalGrantMode;
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
-use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
+use finstack_ai::runtime::artifact::ArtifactStore;
+use finstack_ai::runtime::ports::middleware::Middleware;
+use finstack_ai::runtime::ports::model::{Model, ModelName, ModelSettings};
+use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
     GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts,
@@ -90,7 +93,10 @@ impl PyContextProviderArg {
         &self,
         py: Python<'_>,
         artifact_store: &Arc<dyn ArtifactStore>,
-    ) -> PyResult<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)> {
+    ) -> PyResult<(
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::context::ContextProvider>,
+    )> {
         match self {
             Self::Python(provider) => Ok(provider.bind(py).borrow().registration()),
             Self::Memory(provider) => provider
@@ -114,7 +120,10 @@ impl PyObserverArg {
     fn registration(
         &self,
         py: Python<'_>,
-    ) -> (ComponentRef, Arc<dyn finstack_ai::runtime::Observer>) {
+    ) -> (
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::observer::Observer>,
+    ) {
         match self {
             Self::Python(observer) => observer.bind(py).borrow().registration(),
             Self::Memory(observer) => observer.bind(py).borrow().registration(),
@@ -844,7 +853,7 @@ impl PyAgent {
             let runtime = pyo3_async_runtimes::tokio::get_runtime();
             let _guard = runtime.enter();
             runtime.block_on(store.get(
-                finstack_ai::runtime::ArtifactScope {
+                finstack_ai::runtime::artifact::ArtifactScope {
                     tenant_scope: Arc::from("python-local"),
                     session_id: SessionId::from_bytes([0_u8; 16]),
                     run_id: None,
@@ -1017,9 +1026,15 @@ fn wrap_linked_agent(
 struct LinkedPorts {
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
     artifact_store: Option<Arc<dyn ArtifactStore>>,
-    context_providers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)>,
+    context_providers: Vec<(
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::context::ContextProvider>,
+    )>,
     middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
-    observers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Observer>)>,
+    observers: Vec<(
+        ComponentRef,
+        Arc<dyn finstack_ai::runtime::ports::observer::Observer>,
+    )>,
     output: Option<PreparedPydanticOutput>,
 }
 

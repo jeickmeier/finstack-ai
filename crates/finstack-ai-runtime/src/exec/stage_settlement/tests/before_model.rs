@@ -30,7 +30,7 @@ fn tool_spec(name: &str) -> crate::model::ToolSpec {
 /// = `10_000 - (1_000 + 500)`.
 const FIXTURE_HARD_INPUT_TOKENS: u64 = 8_500;
 
-fn test_profile() -> crate::LockedModelContextProfile {
+fn test_profile() -> crate::ports::model::LockedModelContextProfile {
     crate::model::resolve_model_context_profile(
         crate::model::ModelContextProfile {
             provider: Arc::from("fixture-provider"),
@@ -56,8 +56,8 @@ fn test_profile() -> crate::LockedModelContextProfile {
 fn request_draft(
     messages: Vec<Message>,
     tools: Vec<crate::model::ToolSpec>,
-) -> crate::ModelRequestDraft {
-    crate::ModelRequestDraft {
+) -> crate::ports::model::ModelRequestDraft {
+    crate::ports::model::ModelRequestDraft {
         model: crate::model::ModelName::try_new("fixture-model").expect("model"),
         messages: messages.into(),
         tools: tools.into(),
@@ -81,7 +81,7 @@ fn model_output_contract() -> finstack_ai_kernel::EffectOutputContract {
     }
 }
 
-fn model_request_settled(draft: &crate::ModelRequestDraft) -> StageSettled {
+fn model_request_settled(draft: &crate::ports::model::ModelRequestDraft) -> StageSettled {
     StageSettled {
         cursor: StageCursor {
             cycle: 0,
@@ -123,7 +123,7 @@ fn before_model_env() -> TransitionEnv {
 }
 
 /// The model draft the kernel actually committed for the pending effect.
-fn committed_model_request(coordinator: &CommitCoordinator) -> crate::ModelRequestDraft {
+fn committed_model_request(coordinator: &CommitCoordinator) -> crate::ports::model::ModelRequestDraft {
     let pending = coordinator
         .state()
         .pending_model_effect
@@ -276,7 +276,7 @@ fn a_before_model_replace_still_admits_additive_and_narrowing_contributions() {
 fn an_oversized_before_model_fold_is_a_stable_bounds_error() {
     let sources = test_sources();
     let fold = StageFold {
-        context: (0..crate::ModelRequestDraft::MAX_MESSAGES)
+        context: (0..crate::ports::model::ModelRequestDraft::MAX_MESSAGES)
             .map(|_| item("x"))
             .collect(),
         ..StageFold::default()
@@ -304,7 +304,7 @@ fn an_oversized_before_model_fold_is_a_stable_bounds_error() {
 fn an_oversized_before_model_replace_is_the_same_stable_bounds_error() {
     let sources = test_sources();
     let oversized = request_draft(
-        (0..=crate::ModelRequestDraft::MAX_MESSAGES)
+        (0..=crate::ports::model::ModelRequestDraft::MAX_MESSAGES)
             .map(|ordinal| user_message(u64::try_from(ordinal).expect("ordinal") + 1_000, "x"))
             .collect(),
         Vec::new(),

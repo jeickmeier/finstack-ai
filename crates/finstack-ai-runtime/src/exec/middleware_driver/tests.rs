@@ -550,7 +550,7 @@ impl crate::middleware::Middleware for Stub {
         &self,
         _ctx: crate::middleware::MiddlewareContext,
         _input: crate::middleware::StageInput,
-    ) -> crate::PortFuture<Result<StageOutcome, crate::middleware::MiddlewareError>> {
+    ) -> crate::ports::PortFuture<Result<StageOutcome, crate::middleware::MiddlewareError>> {
         Box::pin(async { Ok(StageOutcome::Continue) })
     }
 }

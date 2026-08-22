@@ -5,10 +5,12 @@ use finstack_ai_kernel::{
     RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft, RunTag, Sensitivity,
 };
 
-use crate::{
+use crate::Bytes;
+use crate::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactScope,
-    ArtifactStore, Bytes, PortFuture, build_artifact_ref,
+    ArtifactStore, build_artifact_ref,
 };
+use crate::ports::PortFuture;
 
 #[derive(Default)]
 struct RecordingArtifactStore {
@@ -88,7 +90,7 @@ fn owned_artifact(locator: &OperationLocator) -> (ArtifactScope, ArtifactRef) {
             name: None,
             attributes: Metadata::empty(),
         },
-        &crate::ArtifactStoreLimits::default(),
+        &crate::artifact::ArtifactStoreLimits::default(),
     )
     .expect("artifact");
     (scope, artifact)

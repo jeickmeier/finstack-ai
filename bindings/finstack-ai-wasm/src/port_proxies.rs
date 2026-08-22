@@ -5,17 +5,31 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    ApprovalMetadata, ApprovalRequirement, ContextCallContext, ContextContribution, ContextError,
-    ContextProvider, ContextProviderDescriptor, ContextRequest, InputCapabilities, JournalStore,
-    LoadRequest, LoadedSession, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRole, Model, ModelCapabilities,
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::context::{
+    ContextCallContext, ContextContribution, ContextError, ContextProvider,
+    ContextProviderDescriptor, ContextRequest,
+};
+use finstack_ai::runtime::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
+};
+use finstack_ai::runtime::ports::middleware::{
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, StageInput, StageMask, StageOutcome,
+};
+use finstack_ai::runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, InputCapabilities, Model, ModelCapabilities,
     ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest,
-    ModelResponse, ModelStreamItem, ModelTokenEstimate, Observer, ObserverDescriptor,
-    ObserverError, ObserverPayloadMode, OrderTier, PortFuture, SideEffectClass, SnapshotReceipt,
-    SnapshotRequest, StageInput, StageMask, StageOutcome, StoreError, StoreHealth,
-    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, ToolCallContext,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ModelResponse, ModelStreamItem, ModelTokenEstimate, SideEffectClass,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, ToolDeferralSupport,
+    ToolSpec,
+};
+use finstack_ai::runtime::ports::observer::{
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
+};
+use finstack_ai::runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
     ToolsetDescriptor,
 };
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
@@ -717,7 +731,7 @@ mod tests {
         NativeModelProxy, NativeObserverProxy, NativeToolsetProxy, compile_native_port_proxies,
     };
     use crate::executor::block_on_ready;
-    use finstack_ai::runtime::{JournalStore, LoadRequest};
+    use finstack_ai::runtime::ports::journal::{JournalStore, LoadRequest};
     use finstack_ai_kernel::SessionId;
 
     #[test]

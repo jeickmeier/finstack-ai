@@ -23,7 +23,9 @@
 use std::error::Error;
 use std::sync::Arc;
 
-use finstack_ai::runtime::{JournalStore, Model, ModelName, Toolset};
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::runtime::ports::model::{Model, ModelName};
+use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};

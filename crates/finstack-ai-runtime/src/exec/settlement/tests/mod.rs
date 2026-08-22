@@ -20,7 +20,9 @@ use super::stage::{
 };
 use super::*;
 use crate::coordinator::CommitCoordinator;
-use crate::{ApprovalGrantMode, CancellationSignal, ExternalClock, ResolvedToolCatalog};
+use crate::ids::ExternalClock;
+use crate::ports::model::{ApprovalGrantMode, CancellationSignal};
+use crate::ports::tool::ResolvedToolCatalog;
 
 include!("allocation_unit.rs");
 include!("allocation_table.rs");
@@ -35,7 +37,7 @@ mod artifact_ownership;
 async fn cancellation_without_outstanding_effects_reaches_a_durable_terminal() {
     let store = Arc::new(MemoryStore::new());
     let mut coordinator =
-        CommitCoordinator::new(Arc::clone(&store) as Arc<dyn crate::JournalStore>);
+        CommitCoordinator::new(Arc::clone(&store) as Arc<dyn crate::ports::journal::JournalStore>);
     coordinator
         .submit(
             env(1_000, &[1], &[1], &[], &[], &[], &[], 101),

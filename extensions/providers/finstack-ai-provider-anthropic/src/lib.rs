@@ -31,7 +31,7 @@ mod sse;
 pub const ANTHROPIC_MESSAGES_VERSION: &str = "2023-06-01";
 
 pub use config::{AnthropicConfig, AnthropicModelConfig, SecretHeader};
-pub use finstack_ai_runtime::{
+pub use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
     SecretString,
 };

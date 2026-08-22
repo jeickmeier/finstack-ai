@@ -3,7 +3,7 @@ use finstack_ai_kernel::{
     RetrySafety, ToolCallPlan,
 };
 
-use crate::{SideEffectClass, ToolSpec};
+use crate::ports::model::{SideEffectClass, ToolSpec};
 
 use super::types::{ToolReconcileResult, ToolResumeAction};
 

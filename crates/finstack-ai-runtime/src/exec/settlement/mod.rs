@@ -24,15 +24,18 @@ use finstack_ai_kernel::{
 };
 
 use crate::coordinator::{CommitCoordinator, ModelDispatchSeed, ToolDispatchSeed};
+use crate::ids::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
+use crate::ports::model::{
+    ApprovalGrantMode, CancellationSignal, LockedModelContextProfile,
+    MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelContextProfileOverride, ModelError,
+    ModelRequestDraft, ModelResumeAction, ModelTerminal, resolve_model_context_profile,
+};
+use crate::ports::tool::{
+    ApprovalState, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED, ToolError,
+    ToolResumeAction,
+};
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
-use crate::{
-    ApprovalGrantMode, ApprovalState, CancellationSignal, Clock, IdGenerationError,
-    LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, Model,
-    ModelContextProfileOverride, ModelError, ModelRequestDraft, ModelResumeAction, ModelTerminal,
-    RandomSource, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED, ToolError,
-    ToolResumeAction, UuidV7Generator, resolve_model_context_profile,
-};
 
 pub(crate) use cancel::drain_idle_cancellation;
 #[cfg(feature = "native-tokio")]
@@ -133,7 +136,7 @@ pub(crate) struct SettlementSources<C, R> {
     progress_random: ProgressRandom,
     nested_sampling: Option<NestedSamplingPorts>,
     approval: Mutex<ApprovalGrantLedger>,
-    artifact_store: Option<Arc<dyn crate::ArtifactStore>>,
+    artifact_store: Option<Arc<dyn crate::artifact::ArtifactStore>>,
     artifact_locator: Option<OperationLocator>,
 }
 
@@ -153,7 +156,7 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
 
     pub(crate) fn attach_artifact_store(
         &mut self,
-        store: Arc<dyn crate::ArtifactStore>,
+        store: Arc<dyn crate::artifact::ArtifactStore>,
         locator: OperationLocator,
     ) {
         self.artifact_store = Some(store);
@@ -170,7 +173,7 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
         };
         let loaded = coordinator
             .journal_store()
-            .load(crate::LoadRequest {
+            .load(crate::ports::journal::LoadRequest {
                 session_id: locator.session_id,
             })
             .await
@@ -205,8 +208,9 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             .ok_or(RunHandleError::Artifact {
                 code: "artifact_store_missing",
             })?;
-        let owner = crate::ArtifactOwnerId::try_new(format!("journal:{}", locator.session_id))
-            .map_err(|error| RunHandleError::Artifact { code: error.code() })?;
+        let owner =
+            crate::artifact::ArtifactOwnerId::try_new(format!("journal:{}", locator.session_id))
+                .map_err(|error| RunHandleError::Artifact { code: error.code() })?;
         for artifact in artifacts {
             let scope = [
                 Sensitivity::Public,
@@ -219,7 +223,7 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             .flat_map(|sensitivity| {
                 [Some(locator.run_id), None].map(|run_id| (sensitivity, run_id))
             })
-            .map(|(sensitivity, run_id)| crate::ArtifactScope {
+            .map(|(sensitivity, run_id)| crate::artifact::ArtifactScope {
                 tenant_scope: Arc::clone(&locator.tenant_scope),
                 session_id: locator.session_id,
                 run_id,
@@ -227,7 +231,7 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             })
             .find(|scope| scope.digest().ok() == Some(artifact.scope_digest()))
             .ok_or(RunHandleError::Artifact {
-                code: crate::ARTIFACT_SCOPE_MISMATCH,
+                code: crate::artifact::ARTIFACT_SCOPE_MISMATCH,
             })?;
             store
                 .pin(scope, artifact.clone(), owner.clone())
@@ -467,7 +471,7 @@ pub(crate) fn validate_model_binding(
         || !descriptor.models.contains(&profile.profile.model)
     {
         return Err(RunHandleError::Model {
-            code: Arc::from(crate::MODEL_PROFILE_INVALID),
+            code: Arc::from(crate::ports::model::MODEL_PROFILE_INVALID),
         });
     }
     let provider = model.capabilities(&profile.profile.model).context_profile;
@@ -483,7 +487,7 @@ pub(crate) fn validate_model_binding(
         .map_err(|error| model_handle_error(&error))?;
     if relocked != *profile {
         return Err(RunHandleError::Model {
-            code: Arc::from(crate::MODEL_PROFILE_INVALID),
+            code: Arc::from(crate::ports::model::MODEL_PROFILE_INVALID),
         });
     }
     Ok(())

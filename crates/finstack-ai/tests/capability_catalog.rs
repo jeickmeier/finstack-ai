@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    JournalStore, Model, ModelContextProfile, ModelName, ModelStreamItem, TextDelta,
-    TokenEstimatorRef, TokenEstimatorSource,
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::runtime::ports::model::{
+    Model, ModelContextProfile, ModelName, ModelStreamItem, TextDelta, TokenEstimatorRef,
+    TokenEstimatorSource,
 };
 use finstack_ai::{
     Agent, AgentRunRequest, CapabilityActivation, CapabilitySpec, InstructionSpec, PrincipalRef,
@@ -194,7 +195,7 @@ fn completed(text: &str) -> ScriptedModelPlan {
                 text: Arc::from(text),
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(
-                finstack_ai::runtime::ModelResponse {
+                finstack_ai::runtime::ports::model::ModelResponse {
                     assistant_content: Arc::from([finstack_ai_kernel::ContentBlock::Text(
                         finstack_ai_kernel::TextBlock::try_new(text).expect("text"),
                     )]),

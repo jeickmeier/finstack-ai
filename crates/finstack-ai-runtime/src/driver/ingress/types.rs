@@ -3,8 +3,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::Digest;
 use thiserror::Error;
 
-use crate::CommitCoordinatorError;
-use crate::CommitOutcome;
+use crate::commit::CommitCoordinatorError;
+use crate::commit::CommitOutcome;
 
 /// Successful classification of one authenticated external completion command.
 #[derive(Debug, Clone)]

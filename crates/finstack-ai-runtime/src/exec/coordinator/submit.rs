@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
+use crate::ports::journal::{
     LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, StateSnapshotRequest, StoreError,
 };
 

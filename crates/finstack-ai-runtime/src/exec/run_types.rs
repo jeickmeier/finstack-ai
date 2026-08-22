@@ -7,10 +7,9 @@ use finstack_ai_kernel::EffectId;
 use thiserror::Error;
 
 use crate::coordinator::{CommitCoordinatorError, CommitOutcome};
-use crate::{
-    ApprovalGrantMode, EventHubConfig, ModelError, ModelStreamAssembler, ModelStreamLimits,
-    ToolStreamLimits,
-};
+use crate::events::EventHubConfig;
+use crate::ports::model::{ApprovalGrantMode, ModelError, ModelStreamAssembler, ModelStreamLimits};
+use crate::ports::tool::ToolStreamLimits;
 
 pub(crate) fn same_identity_retryable(error: &ModelError) -> bool {
     error.retryable()

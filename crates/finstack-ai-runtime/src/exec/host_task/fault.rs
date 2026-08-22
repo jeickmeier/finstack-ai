@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use crate::ModelError;
+use crate::ports::model::ModelError;
 use crate::run_types::{RunHandleError, RunStatus};
 
 use super::handle::RunHandle;

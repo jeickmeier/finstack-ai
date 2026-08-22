@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use finstack_ai::runtime::ModelName;
+use finstack_ai::runtime::ports::model::ModelName;
 use finstack_ai::{AgentRunRequest, AttachmentInput, PrincipalRef, RunSecurityContext};
 use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, Version};
 use wasm_bindgen::prelude::*;

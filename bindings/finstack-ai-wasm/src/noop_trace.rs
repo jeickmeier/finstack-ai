@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::CommitCoordinator;
+use finstack_ai::runtime::commit::CommitCoordinator;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
 const NOOP_TRACE: &str =

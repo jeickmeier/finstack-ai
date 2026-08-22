@@ -85,7 +85,7 @@ pub use finstack_ai_kernel::{
 /// `finstack-ai-kernel`.
 pub use finstack_ai_runtime as runtime;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-pub use finstack_ai_runtime::{
+pub use finstack_ai_runtime::session::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, LaneInspect,
     MemoryExternalIdentityMap, SessionError,
 };

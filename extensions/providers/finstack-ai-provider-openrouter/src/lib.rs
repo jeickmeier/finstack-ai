@@ -12,7 +12,7 @@ mod stream;
 
 pub use catalog::model_configs_from_catalog_json;
 pub use config::{OpenRouterConfig, OpenRouterModelConfig, SecretHeader};
-pub use finstack_ai_runtime::{
+pub use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
     SecretString,
 };

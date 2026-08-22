@@ -7,12 +7,17 @@ use finstack_ai_kernel::{
 };
 use tokio::sync::{mpsc, watch};
 
+use crate::commit::CommitCoordinator;
 use crate::coordinator::ToolDispatchSeed;
+use crate::ids::{Clock, RandomSource};
 use crate::middleware_driver::StageDriver;
 use crate::model::Model;
 use crate::native::model::ModelDriverMessage;
 use crate::native::timer::{TimerDriverMessage, TimerDriverResult};
 use crate::native::tool::ToolDriverMessage;
+use crate::ports::model::LockedModelContextProfile;
+use crate::ports::tool::ResolvedToolCatalog;
+use crate::run::{DeadlineDiagnostic, RunStatus};
 use crate::run_types::{RunHandleError, result_fault_code};
 use crate::settlement::{
     SettlementSources, ToolResultDisposition, continue_after_interaction, drain_idle_cancellation,
@@ -20,10 +25,6 @@ use crate::settlement::{
     process_model_result, process_tool_progress, process_tool_result, reconcile_cancelled_effect,
 };
 use crate::stage_settlement::submit_command;
-use crate::{
-    Clock, CommitCoordinator, DeadlineDiagnostic, LockedModelContextProfile, RandomSource,
-    ResolvedToolCatalog, RunStatus,
-};
 
 use super::fault::{fault_worker, model_runtime_fault, runtime_fault};
 use super::owner::{DuePollWake, arm_due_poll_wait};
@@ -186,7 +187,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     mut timer_results: mpsc::Receiver<TimerDriverMessage>,
     mut due_poll_fired: watch::Receiver<DuePollWake>,
     due_poll_schedules: watch::Sender<Option<Timestamp>>,
-    due_poll_cancellation: crate::CancellationSignal,
+    due_poll_cancellation: crate::ports::model::CancellationSignal,
     mut process_local_poll_deadlines: BTreeMap<EffectId, Option<Timestamp>>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,

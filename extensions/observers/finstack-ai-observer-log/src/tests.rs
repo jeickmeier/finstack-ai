@@ -6,7 +6,7 @@ use finstack_ai_kernel::{
     RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag, Timestamp,
 };
 use finstack_ai_kernel::{RunEvent, Sensitivity};
-use finstack_ai_runtime::journal_export_jsonl;
+use finstack_ai_runtime::ports::observer::export::journal_export_jsonl;
 use finstack_ai_runtime::ports::observer::{Observer, ObserverPayloadMode};
 use finstack_ai_test::check_observer_conformance;
 use tempfile::tempdir;

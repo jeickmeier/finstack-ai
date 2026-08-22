@@ -252,16 +252,18 @@ impl JsModel {
 
 #[cfg(target_arch = "wasm32")]
 impl JsModel {
-    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Model> {
-        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Model>
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ports::model::Model> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ports::model::Model>
     }
 
     pub(crate) fn component(&self) -> finstack_ai_kernel::ComponentRef {
         self.inner.component().clone()
     }
 
-    pub(crate) fn model_name(&self) -> Result<finstack_ai::runtime::ModelName, JsValue> {
-        finstack_ai::runtime::Model::descriptor(self.inner.as_ref())
+    pub(crate) fn model_name(
+        &self,
+    ) -> Result<finstack_ai::runtime::ports::model::ModelName, JsValue> {
+        finstack_ai::runtime::ports::model::Model::descriptor(self.inner.as_ref())
             .models
             .first()
             .cloned()
@@ -306,8 +308,8 @@ impl JsToolset {
 
 #[cfg(target_arch = "wasm32")]
 impl JsToolset {
-    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Toolset> {
-        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Toolset>
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ports::tool::Toolset> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ports::tool::Toolset>
     }
 
     pub(crate) fn component(&self) -> finstack_ai_kernel::ComponentRef {
@@ -345,8 +347,8 @@ impl JsContextProvider {
 #[cfg(target_arch = "wasm32")]
 impl JsContextProvider {
     /// Borrow the trusted context-provider port.
-    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ContextProvider> {
-        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ContextProvider>
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ports::context::ContextProvider> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ports::context::ContextProvider>
     }
 
     /// Exact registered component identity.
@@ -385,8 +387,8 @@ impl JsMiddleware {
 #[cfg(target_arch = "wasm32")]
 impl JsMiddleware {
     /// Borrow the trusted middleware port.
-    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Middleware> {
-        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Middleware>
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ports::middleware::Middleware> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ports::middleware::Middleware>
     }
 
     /// Exact registered component identity.
@@ -425,8 +427,8 @@ impl JsObserver {
 #[cfg(target_arch = "wasm32")]
 impl JsObserver {
     /// Borrow the trusted observer port.
-    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Observer> {
-        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Observer>
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ports::observer::Observer> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ports::observer::Observer>
     }
 
     /// Exact registered component identity.
@@ -472,8 +474,11 @@ impl JsJournalStore {
 
 #[cfg(target_arch = "wasm32")]
 impl JsJournalStore {
-    pub(crate) fn port(&self) -> std::sync::Arc<dyn finstack_ai::runtime::JournalStore> {
-        std::sync::Arc::clone(&self.inner) as std::sync::Arc<dyn finstack_ai::runtime::JournalStore>
+    pub(crate) fn port(
+        &self,
+    ) -> std::sync::Arc<dyn finstack_ai::runtime::ports::journal::JournalStore> {
+        std::sync::Arc::clone(&self.inner)
+            as std::sync::Arc<dyn finstack_ai::runtime::ports::journal::JournalStore>
     }
 }
 
@@ -656,7 +661,9 @@ pub fn compile_native_host_adapters() {
     use crate::host_clock::{HostClock, HostRandomSource};
     use crate::host_memory::HostMemoryStore;
     use crate::host_store::{HostJournalStore, HostJournalStoreOptions};
-    use finstack_ai::runtime::{ArtifactStore, Clock, JournalStore, RandomSource};
+    use finstack_ai::runtime::artifact::ArtifactStore;
+    use finstack_ai::runtime::ids::{Clock, RandomSource};
+    use finstack_ai::runtime::ports::journal::JournalStore;
     use finstack_ai_memory::store::MemoryStore;
 
     compile_native_port_adapters();
@@ -698,7 +705,11 @@ fn compile_native_port_adapters() {
     use crate::host_model::HostModel;
     use crate::host_observer::{HostObserver, HostObserverOptions};
     use crate::host_toolset::{HostToolset, HostToolsetOptions};
-    use finstack_ai::runtime::{ContextProvider, Middleware, Model, Observer, Toolset};
+    use finstack_ai::runtime::ports::context::ContextProvider;
+    use finstack_ai::runtime::ports::middleware::Middleware;
+    use finstack_ai::runtime::ports::model::Model;
+    use finstack_ai::runtime::ports::observer::Observer;
+    use finstack_ai::runtime::ports::tool::Toolset;
 
     let Ok(model) = HostModel::from_callback(
         HostModelOptions {

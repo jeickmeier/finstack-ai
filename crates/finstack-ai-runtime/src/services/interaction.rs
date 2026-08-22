@@ -11,7 +11,7 @@ use finstack_ai_kernel::{RawJson, ValidationOutcome};
 use thiserror::Error;
 
 #[cfg(any(test, feature = "native-tokio"))]
-use crate::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
+use crate::ports::tool::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
 
 /// Fail-closed interaction-response validation failure.
 #[cfg(any(test, feature = "native-tokio"))]

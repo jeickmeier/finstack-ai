@@ -1,6 +1,6 @@
 //! Host clock and random-source adapters.
 
-use finstack_ai::runtime::{Clock, IdGenerationError, RandomSource};
+use finstack_ai::runtime::ids::{Clock, IdGenerationError, RandomSource};
 use finstack_ai_kernel::Timestamp;
 
 use crate::host::HostFailure;
@@ -147,7 +147,7 @@ impl RandomSource for HostRandomSource {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::HostClock;
-    use finstack_ai::runtime::Clock;
+    use finstack_ai::runtime::ids::Clock;
 
     #[test]
     fn native_clock_converts_unix_ms() {

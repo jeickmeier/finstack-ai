@@ -3,7 +3,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{ComponentInvocation, Digest, Metadata, PipelinePosition};
 use serde::{Deserialize, Serialize};
 
-use crate::{PortFuture, PortObject, ReconcileContext, RunCallContext};
+use crate::ports::model::{ReconcileContext, RunCallContext};
+use crate::ports::{PortFuture, PortObject};
 
 use super::error::ContextError;
 use super::types::{ContextContribution, ContextRequest};

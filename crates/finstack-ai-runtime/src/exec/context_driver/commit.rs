@@ -9,9 +9,10 @@ use crate::context::{
     CONTEXT_STAGE, CommittedContextCall, ContextCallContext, ContextError, ContextProvider,
     ContextProviderDescriptor, ContextRequest,
 };
+use crate::ids::{Clock, RandomSource};
+use crate::ports::model::RunCallContext;
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
-use crate::{Clock, RandomSource, RunCallContext};
 
 pub(crate) struct ContextInvocation<'a, C, R> {
     pub(crate) provider: &'a dyn ContextProvider,
@@ -30,7 +31,7 @@ pub(crate) struct ContextInvocation<'a, C, R> {
 /// Returns a stable context or identity error when the envelope cannot be
 /// constructed or the provider fails.
 pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
-    coordinator: &mut crate::CommitCoordinator,
+    coordinator: &mut crate::commit::CommitCoordinator,
     invocation: ContextInvocation<'_, C, R>,
 ) -> Result<crate::context::ContextContribution, RunHandleError> {
     let descriptor = invocation.provider.descriptor();
@@ -40,7 +41,7 @@ pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
         invocation.provider_index,
     )
     .map_err(|_| RunHandleError::Middleware {
-        code: std::sync::Arc::from(crate::CONTEXT_CONFIGURATION_INVALID),
+        code: std::sync::Arc::from(crate::ports::context::CONTEXT_CONFIGURATION_INVALID),
     })?;
     let raw = invocation
         .request
@@ -61,11 +62,11 @@ pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
             .state()
             .pending_extension_effect
             .as_ref()
-            .ok_or_else(|| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+            .ok_or_else(|| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?;
         let envelope = coordinator
             .replayed_extension_envelope(invocation.run.effect_id)
             .cloned()
-            .ok_or_else(|| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+            .ok_or_else(|| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?;
         (pending.requested.clone(), envelope)
     } else {
         let requested = EffectRequested::try_new(
@@ -82,7 +83,7 @@ pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
             RetrySafety::SafeToRetry,
             invocation.run.deadline,
         )
-        .map_err(|_| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+        .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?;
         let env = request_environment(invocation.sources, &requested)?;
         let outcome = coordinator
             .submit(
@@ -102,7 +103,7 @@ pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
                 })
             })
             .cloned()
-            .ok_or_else(|| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?;
+            .ok_or_else(|| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?;
         (requested, envelope)
     };
     let context = ContextCallContext {
@@ -137,10 +138,12 @@ fn context_settlement(
 ) -> Result<ExtensionSettlement, RunHandleError> {
     match result {
         Ok(contribution) => {
-            let bytes = serde_json_canonicalizer::to_vec(contribution)
-                .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?;
-            let output = finstack_ai_kernel::RawJson::parse(bytes)
-                .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?;
+            let bytes = serde_json_canonicalizer::to_vec(contribution).map_err(|_| {
+                context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID)
+            })?;
+            let output = finstack_ai_kernel::RawJson::parse(bytes).map_err(|_| {
+                context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID)
+            })?;
             Ok(ExtensionSettlement::Completed(
                 EffectCompleted::try_new(
                     requested.effect_id(),
@@ -152,7 +155,9 @@ fn context_settlement(
                     None::<&str>,
                     None,
                 )
-                .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?,
+                .map_err(|_| {
+                    context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID)
+                })?,
             ))
         }
         Err(error) => Ok(ExtensionSettlement::Failed(
@@ -163,7 +168,9 @@ fn context_settlement(
                 None,
                 None::<&str>,
             )
-            .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?,
+            .map_err(|_| {
+                context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID)
+            })?,
         )),
     }
 }
@@ -186,7 +193,7 @@ fn request_environment<C: Clock, R: RandomSource>(
     let event_count =
         body.derived_event_count(RECORD_KIND_VERSION)
             .map_err(|_| RunHandleError::Middleware {
-                code: std::sync::Arc::from(crate::CONTEXT_COMMIT_REQUIRED),
+                code: std::sync::Arc::from(crate::ports::context::CONTEXT_COMMIT_REQUIRED),
             })?;
     Ok(TransitionEnv {
         now: sources.now()?,
@@ -205,7 +212,7 @@ fn request_environment<C: Clock, R: RandomSource>(
             vec![sources.generate::<AppendBatchTag>()?],
             Vec::new(),
         )
-        .map_err(|_| context_stage_error(crate::CONTEXT_COMMIT_REQUIRED))?,
+        .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?,
     })
 }
 
@@ -219,7 +226,7 @@ fn settlement_environment<C: Clock, R: RandomSource>(
     };
     let event_count = body
         .derived_event_count(RECORD_KIND_VERSION)
-        .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?;
+        .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID))?;
     Ok(TransitionEnv {
         now: sources.now()?,
         ids: AllocatedIds::try_new(
@@ -237,7 +244,7 @@ fn settlement_environment<C: Clock, R: RandomSource>(
             vec![sources.generate::<AppendBatchTag>()?],
             Vec::new(),
         )
-        .map_err(|_| context_stage_error(crate::CONTEXT_CONTRIBUTION_INVALID))?,
+        .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID))?,
     })
 }
 

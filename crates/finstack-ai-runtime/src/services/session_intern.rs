@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, Weak};
 use finstack_ai_kernel::SessionId;
 
 use super::session::{SessionError, SessionRuntime};
-use crate::JournalStore;
+use crate::ports::journal::JournalStore;
 
 type InternKey = (usize, SessionId);
 

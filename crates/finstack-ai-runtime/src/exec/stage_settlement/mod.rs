@@ -41,7 +41,7 @@
 //!   intercept does not run.
 //! - `CompactContext` is landable once the last [`CompactionSourceEntry`] is a
 //!   protected user. `protected` stays authoritative-from-the-context-port
-//!   ([`crate::ContextItem::protected`]) plus the structural rule (system /
+//!   ([`crate::ports::context::ContextItem::protected`]) plus the structural rule (system /
 //!   developer messages and the trailing current user). The production
 //!   `ContextProvider` driver projects that bit into
 //!   [`input::before_model_input`]; a compactor still cannot set it.

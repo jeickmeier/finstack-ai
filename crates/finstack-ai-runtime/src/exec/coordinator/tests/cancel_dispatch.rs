@@ -26,7 +26,7 @@ fn cancel_registered_effect_missing_id_is_idempotent() {
 
 #[test]
 fn cancel_registered_effect_returns_registered_signal() {
-    let signal = crate::CancellationSignal::new();
+    let signal = crate::ports::model::CancellationSignal::new();
     let mut map = BTreeMap::new();
     map.insert(id(7), signal.clone());
     let active = Mutex::new(map);

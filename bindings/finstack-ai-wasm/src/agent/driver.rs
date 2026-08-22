@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai::runtime::{Clock, RandomSource};
+use finstack_ai::runtime::ids::{Clock, RandomSource};
 use js_sys::Uint8Array;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -35,10 +35,10 @@ struct BrowserClock;
 impl Clock for BrowserClock {
     fn now(
         &self,
-    ) -> Result<finstack_ai_kernel::Timestamp, finstack_ai::runtime::IdGenerationError> {
+    ) -> Result<finstack_ai_kernel::Timestamp, finstack_ai::runtime::ids::IdGenerationError> {
         let millis = js_sys::Date::now();
         if !millis.is_finite() || millis < 0.0 || millis > 9_007_199_254_740_991.0 {
-            return Err(finstack_ai::runtime::IdGenerationError::Source(
+            return Err(finstack_ai::runtime::ids::IdGenerationError::Source(
                 "host clock overflow".into(),
             ));
         }
@@ -54,26 +54,35 @@ impl Clock for BrowserClock {
 struct BrowserRandom;
 
 impl RandomSource for BrowserRandom {
-    fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), finstack_ai::runtime::IdGenerationError> {
+    fn fill_bytes(
+        &self,
+        buf: &mut [u8],
+    ) -> Result<(), finstack_ai::runtime::ids::IdGenerationError> {
         let len = u32::try_from(buf.len()).map_err(|_| {
-            finstack_ai::runtime::IdGenerationError::Source(
+            finstack_ai::runtime::ids::IdGenerationError::Source(
                 "host entropy request is too large".into(),
             )
         })?;
         let array = Uint8Array::new_with_length(len);
         let global = js_sys::global();
         let crypto = js_sys::Reflect::get(&global, &JsValue::from_str("crypto")).map_err(|_| {
-            finstack_ai::runtime::IdGenerationError::Source("host crypto is unavailable".into())
+            finstack_ai::runtime::ids::IdGenerationError::Source(
+                "host crypto is unavailable".into(),
+            )
         })?;
         let fill =
             js_sys::Reflect::get(&crypto, &JsValue::from_str("getRandomValues")).map_err(|_| {
-                finstack_ai::runtime::IdGenerationError::Source("host crypto is unavailable".into())
+                finstack_ai::runtime::ids::IdGenerationError::Source(
+                    "host crypto is unavailable".into(),
+                )
             })?;
         let fill = fill.dyn_into::<js_sys::Function>().map_err(|_| {
-            finstack_ai::runtime::IdGenerationError::Source("host crypto is unavailable".into())
+            finstack_ai::runtime::ids::IdGenerationError::Source(
+                "host crypto is unavailable".into(),
+            )
         })?;
         fill.call1(&crypto, &array).map_err(|_| {
-            finstack_ai::runtime::IdGenerationError::Source("host entropy fill failed".into())
+            finstack_ai::runtime::ids::IdGenerationError::Source("host entropy fill failed".into())
         })?;
         array.copy_to(buf);
         Ok(())

@@ -33,7 +33,7 @@ mod store;
 
 pub use cron::{CronError, CronFire, CronSchedule, IntervalSchedule};
 pub use driver::LocalWorkflowDriver;
-pub use finstack_ai_runtime::{
+pub use finstack_ai_runtime::workflow::{
     WorkflowCheckpoint, WorkflowDriverError, WorkflowRetryDecision, WorkflowSession, WorkflowWait,
     classify_wait, resolve_checkpoint_sequence, retry_decision,
 };

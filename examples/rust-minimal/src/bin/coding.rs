@@ -23,7 +23,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use finstack_ai::runtime::{ContextProvider, JournalStore, Middleware, Model, ModelName, Toolset};
+use finstack_ai::runtime::ports::context::ContextProvider;
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::runtime::ports::middleware::Middleware;
+use finstack_ai::runtime::ports::model::{Model, ModelName};
+use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{Agent, AgentRunRequest};
 use finstack_ai_context_repository::RepositoryContextProvider;
 use finstack_ai_kernel::{

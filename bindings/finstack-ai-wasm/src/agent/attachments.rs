@@ -9,8 +9,9 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, stage_required_artifact,
+use finstack_ai::runtime::Bytes;
+use finstack_ai::runtime::artifact::{
+    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
 };
 use finstack_ai::{AttachmentInput, MAX_RUN_ATTACHMENTS};
 use finstack_ai_kernel::{Metadata, Sensitivity, SessionId};

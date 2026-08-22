@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use finstack_ai::runtime::EventBatch as RuntimeEventBatch;
+use finstack_ai::runtime::events::EventBatch as RuntimeEventBatch;
 use finstack_ai_kernel::RunEvent;
 use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;

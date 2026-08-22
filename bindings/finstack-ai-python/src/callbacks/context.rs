@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use finstack_ai::runtime::CancellationSignal;
+use finstack_ai::runtime::ports::model::CancellationSignal;
 use futures_util::future::{Either, select};
 use futures_util::{FutureExt, pin_mut};
 use pyo3::prelude::*;
@@ -113,7 +113,10 @@ impl PyCallbackContext {
 }
 
 impl PyCallbackContext {
-    pub(super) fn new(kind: &'static str, run: &finstack_ai::runtime::RunCallContext) -> Self {
+    pub(super) fn new(
+        kind: &'static str,
+        run: &finstack_ai::runtime::ports::model::RunCallContext,
+    ) -> Self {
         Self {
             state: CallbackState::new(),
             cancellation: run.cancellation.clone(),

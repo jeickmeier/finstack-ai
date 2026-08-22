@@ -4,8 +4,9 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::Instant;
 
-use finstack_ai::runtime::{
-    JournalStore, Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TextDelta,
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::runtime::ports::model::{
+    Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TextDelta,
     TokenEstimatorRef, TokenEstimatorSource,
 };
 use finstack_ai::{Agent, AgentRunError};

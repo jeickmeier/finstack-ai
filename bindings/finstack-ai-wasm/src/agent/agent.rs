@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use finstack_ai::runtime::{ArtifactStore, ModelName};
+use finstack_ai::runtime::artifact::ArtifactStore;
+use finstack_ai::runtime::ports::model::ModelName;
 use finstack_ai::{Agent as FacadeAgent, HistoryCachePolicy as FacadeHistoryCachePolicy};
 use finstack_ai_kernel::SessionId;
 use wasm_bindgen::prelude::*;

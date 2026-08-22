@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use finstack_ai::runtime::PortFuture;
+use finstack_ai::runtime::ports::PortFuture;
 use finstack_ai_kernel::ErrorCategory;
 use futures_util::future::{Either, select};
 use futures_util::{FutureExt, pin_mut};

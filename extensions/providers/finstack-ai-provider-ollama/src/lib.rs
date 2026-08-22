@@ -28,7 +28,7 @@ mod provider;
 mod request;
 
 pub use config::{OllamaConfig, OllamaModelConfig};
-pub use finstack_ai_runtime::{
+pub use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
     SecretString,
 };

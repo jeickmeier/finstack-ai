@@ -2,10 +2,12 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelContextProfile, ModelName,
-    ModelResponse, ModelStreamItem, TokenEstimatorRef, TokenEstimatorSource, Toolset,
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::runtime::ports::model::{
+    Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TokenEstimatorRef,
+    TokenEstimatorSource,
 };
+use finstack_ai::runtime::ports::tool::{JsonSchemaToolValidatorCompiler, Toolset};
 use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, RawJson, Version};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};

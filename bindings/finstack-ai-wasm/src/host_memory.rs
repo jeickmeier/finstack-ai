@@ -18,7 +18,7 @@ use finstack_ai_memory::store::{
     MemoryStoreError, PutOutcome,
 };
 
-use finstack_ai::runtime::PortFuture;
+use finstack_ai::runtime::ports::PortFuture;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 

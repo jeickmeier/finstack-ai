@@ -8,7 +8,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::coordinator::{DispatchError, PostCommitDispatcher, RuntimeDispatch, TimerDispatchSeed};
-use crate::{CancellationSignal, Clock, DeadlineDiagnostic, MonotonicDeadline, PortFuture};
+use crate::ids::Clock;
+use crate::ports::PortFuture;
+use crate::ports::model::CancellationSignal;
+use crate::run::{DeadlineDiagnostic, MonotonicDeadline};
 
 pub(crate) struct TimerJob {
     seed: TimerDispatchSeed,
@@ -220,7 +223,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::IdGenerationError;
+    use crate::ids::IdGenerationError;
 
     struct MutableClock(AtomicI64);
 

@@ -7,7 +7,16 @@ use std::task::Poll;
 use finstack_ai_kernel::{EffectId, RunPhase};
 
 use crate::coordinator::{CommitCoordinator, ModelDispatchSeed, ToolDispatchSeed};
+use crate::ids::{Clock, RandomSource};
 use crate::middleware_driver::StageDriver;
+use crate::ports::model::{
+    CancellationSignal, LockedModelContextProfile, Model, ModelError, ModelRequest,
+    ModelStreamAssembler, ModelTerminal,
+};
+use crate::ports::tool::{
+    ResolvedTool, ResolvedToolCatalog, ToolCallContext, ToolError, ToolStreamAssembler,
+};
+use crate::run::ToolTaskConfig;
 use crate::run_types::{RunHandleError, result_fault_code};
 use crate::run_types::{SameIdentityRetryPolicy, provider_retry_after, same_identity_retryable};
 use crate::settlement::{
@@ -18,11 +27,6 @@ use crate::settlement::{
 };
 use crate::stage_settlement::submit_command;
 use crate::tool::AssembledToolTerminal;
-use crate::{
-    CancellationSignal, Clock, LockedModelContextProfile, Model, ModelError, ModelRequest,
-    ModelStreamAssembler, ModelTerminal, RandomSource, ResolvedTool, ResolvedToolCatalog,
-    ToolCallContext, ToolError, ToolStreamAssembler, ToolTaskConfig,
-};
 
 use super::fault::{fault_shared, finish_worker, host_drain_fault, model_cancellation_error};
 use super::shared::{CommandIntake, HostWork, RunCommand, Shared};
@@ -77,8 +81,8 @@ pub(super) async fn run_worker_with_effects<C, R>(
     profile: LockedModelContextProfile,
     retry_policy: SameIdentityRetryPolicy,
 ) where
-    C: Clock + crate::PortObject,
-    R: RandomSource + crate::PortObject,
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
 {
     let mut parked_tool: Option<ToolDispatchSeed> = None;
     loop {
@@ -164,12 +168,12 @@ async fn submit_and_reply<C, R>(
     stage_driver: Option<&StageDriver>,
     sources: &SettlementSources<C, R>,
     profile: &LockedModelContextProfile,
-    model: &Arc<dyn crate::Model>,
+    model: &Arc<dyn crate::ports::model::Model>,
     command: RunCommand,
 ) -> bool
 where
-    C: Clock + crate::PortObject,
-    R: RandomSource + crate::PortObject,
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
 {
     let RunCommand { env, input, reply } = command;
     let result = submit_command(
@@ -219,8 +223,8 @@ async fn drain_effects_accepting_commands<C, R>(
     retry_policy: SameIdentityRetryPolicy,
 ) -> Result<(), RunHandleError>
 where
-    C: Clock + crate::PortObject,
-    R: RandomSource + crate::PortObject,
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
 {
     loop {
         let work = pending
@@ -340,14 +344,14 @@ struct HostToolCompletion {
 
 struct HostToolCompletions {
     values: Mutex<VecDeque<HostToolCompletion>>,
-    available: crate::host_driver::Signal,
+    available: crate::driver::host_driver::Signal,
 }
 
 impl HostToolCompletions {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             values: Mutex::new(VecDeque::new()),
-            available: crate::host_driver::Signal::new(),
+            available: crate::driver::host_driver::Signal::new(),
         })
     }
 
@@ -391,8 +395,8 @@ async fn settle_parallel_tools<C, R>(
     parked_tool: &mut Option<ToolDispatchSeed>,
 ) -> Result<(), RunHandleError>
 where
-    C: Clock + crate::PortObject,
-    R: RandomSource + crate::PortObject,
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
 {
     let assembler = tool_assembler.ok_or(RunHandleError::ToolSettlement {
         code: "tool_runtime_unavailable",
@@ -409,7 +413,7 @@ where
         .max(1);
     let completions = HostToolCompletions::new();
     let mut running_by_tool = BTreeMap::<finstack_ai_kernel::ToolId, usize>::new();
-    let mut tasks = Vec::<crate::host_driver::HostTaskHandle>::new();
+    let mut tasks = Vec::<crate::driver::host_driver::HostTaskHandle>::new();
     let mut running = 0_usize;
     let mut intake_open = true;
 
@@ -431,7 +435,7 @@ where
             let cancellation = context.run.cancellation.clone();
             let call = seed.call.clone();
             let effect_id = context.run.effect_id;
-            let task = crate::host_driver::spawn(Box::pin(async move {
+            let task = crate::driver::host_driver::spawn(Box::pin(async move {
                 let (progress, result) =
                     drive_tool_cancellable(resolved, context, call, assembler, cancellation).await;
                 if let Ok(mut values) = task_active.lock() {
@@ -535,13 +539,13 @@ where
     Ok(())
 }
 
-async fn abort_host_tasks(tasks: &[crate::host_driver::HostTaskHandle]) {
+async fn abort_host_tasks(tasks: &[crate::driver::host_driver::HostTaskHandle]) {
     for task in tasks {
         if !task.is_completed() {
             task.abort();
         }
     }
-    crate::host_driver::yield_now().await;
+    crate::driver::host_driver::yield_now().await;
     for task in tasks {
         task.completed().await;
     }
@@ -567,8 +571,8 @@ async fn settle_driven_model<C, R>(
     retry_policy: SameIdentityRetryPolicy,
 ) -> Result<(), RunHandleError>
 where
-    C: Clock + crate::PortObject,
-    R: RandomSource + crate::PortObject,
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
 {
     let effect_id = request.call.run.effect_id;
     let draft = request.draft.clone();
@@ -636,8 +640,8 @@ async fn settle_driven_tool<C, R>(
     resolved: Arc<ResolvedTool>,
 ) -> Result<Option<ToolDispatchSeed>, RunHandleError>
 where
-    C: Clock + crate::PortObject,
-    R: RandomSource + crate::PortObject,
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
 {
     let effect_id = context.run.effect_id;
     let assembler = tool_assembler.ok_or(RunHandleError::ToolSettlement {
@@ -660,7 +664,7 @@ where
         Err(RunHandleError::CancellationSettlement { .. }) => (
             Vec::new(),
             Err(ToolError::stable(
-                crate::TOOL_CANCELLED,
+                crate::ports::tool::TOOL_CANCELLED,
                 "tool call was cancelled during execution",
             )),
         ),
@@ -694,8 +698,8 @@ async fn drive_accepting_commands<C, R, T>(
     drive: impl Future<Output = T>,
 ) -> Result<T, RunHandleError>
 where
-    C: Clock + crate::PortObject,
-    R: RandomSource + crate::PortObject,
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
 {
     let mut drive = std::pin::pin!(drive);
     loop {
@@ -746,7 +750,10 @@ async fn drive_model(
     assembler: ModelStreamAssembler,
     request: ModelRequest,
     policy: SameIdentityRetryPolicy,
-) -> (Vec<crate::ModelProgress>, Result<ModelTerminal, ModelError>) {
+) -> (
+    Vec<crate::ports::model::ModelProgress>,
+    Result<ModelTerminal, ModelError>,
+) {
     let mut progress = Vec::new();
     let effect_id = request.call.run.effect_id;
     let max_attempts = policy.max_retries.saturating_add(1);
@@ -762,7 +769,7 @@ async fn drive_model(
             );
         }
         if let Ok(metadata) = crate::Metadata::parse(format!(r#"{{"attempt":{attempt}}}"#)) {
-            progress.push(crate::ModelProgress::Heartbeat(metadata));
+            progress.push(crate::ports::model::ModelProgress::Heartbeat(metadata));
         }
         let result = match model.request(request.clone()).await {
             Ok(stream) => {
@@ -783,7 +790,7 @@ async fn drive_model(
                     |retry_after| retry_after.max(policy.backoff.delay(effect_id, attempt)),
                 );
                 if !delay.is_zero() {
-                    crate::host_driver::sleep(delay).await;
+                    crate::driver::host_driver::sleep(delay).await;
                 }
             }
             Err(error) => return (progress, Err(error)),
@@ -804,7 +811,7 @@ async fn drive_tool(
         return (
             Vec::new(),
             Err(ToolError::stable(
-                crate::TOOL_CANCELLED,
+                crate::ports::tool::TOOL_CANCELLED,
                 "tool call was cancelled before execution",
             )),
         );
@@ -846,7 +853,7 @@ async fn drive_tool_cancellable(
             return Poll::Ready((
                 Vec::new(),
                 Err(ToolError::stable(
-                    crate::TOOL_CANCELLED,
+                    crate::ports::tool::TOOL_CANCELLED,
                     "tool call was cancelled during execution",
                 )),
             ));

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::ValidatedToolCall;
 
-use crate::{PortFuture, PortObject, ToolSpec};
+use crate::ports::model::ToolSpec;
+use crate::ports::{PortFuture, PortObject};
 
 use super::error::ToolError;
 use super::types::{
@@ -37,7 +38,7 @@ pub trait Toolset: PortObject {
     /// Reconcile one previously committed outstanding effect.
     fn reconcile(
         &self,
-        _ctx: crate::ReconcileContext,
+        _ctx: crate::ports::model::ReconcileContext,
         _effect: PendingToolEffect,
     ) -> PortFuture<Result<ToolReconcileResult, ToolError>> {
         Box::pin(async { Ok(ToolReconcileResult::Unknown) })

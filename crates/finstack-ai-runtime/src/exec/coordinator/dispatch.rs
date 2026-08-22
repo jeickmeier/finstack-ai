@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use crate::{AuthorizationContext, PortFuture, PortObject};
+use crate::ports::model::AuthorizationContext;
+use crate::ports::{PortFuture, PortObject};
 
 use finstack_ai_kernel::{
     ActiveToolCallStatus, CommittedBatch, EffectId, EffectKind, EffectRequested, KernelInput,
@@ -113,7 +114,7 @@ impl CommitCoordinator {
     /// The accepted run's relation depth, or `0` before a run is accepted.
     ///
     /// Shared one-line lookup for call sites that build a [`RunCallContext`]
-    /// (`crate::RunCallContext`) outside the stage-boundary seed path.
+    /// (`crate::ports::model::RunCallContext`) outside the stage-boundary seed path.
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn accepted_relation_depth(&self) -> u16 {
         relation_depth_from_state(self.kernel.state())
@@ -208,10 +209,12 @@ pub(crate) struct DispatchError {
 /// successful lock is an idempotent no-op for the caller.
 #[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
 pub(crate) fn cancel_registered_effect(
-    active: &std::sync::Mutex<std::collections::BTreeMap<EffectId, crate::CancellationSignal>>,
+    active: &std::sync::Mutex<
+        std::collections::BTreeMap<EffectId, crate::ports::model::CancellationSignal>,
+    >,
     effect_id: EffectId,
     unavailable: &'static str,
-) -> Result<Option<crate::CancellationSignal>, DispatchError> {
+) -> Result<Option<crate::ports::model::CancellationSignal>, DispatchError> {
     let guard = active
         .lock()
         .map_err(|_| DispatchError { code: unavailable })?;
@@ -287,7 +290,7 @@ pub(crate) struct ContextDispatchSeed {
     pub(crate) requested: EffectRequested,
     pub(crate) envelope: finstack_ai_kernel::RecordEnvelope,
     pub(crate) locator: OperationLocator,
-    pub(crate) authorization: crate::AuthorizationContext,
+    pub(crate) authorization: crate::ports::model::AuthorizationContext,
     pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
     pub(crate) attempt: u32,
     pub(crate) relation_depth: u16,

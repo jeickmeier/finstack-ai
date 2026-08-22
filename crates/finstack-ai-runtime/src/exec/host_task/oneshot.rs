@@ -2,7 +2,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use crate::host_driver::Signal;
+use crate::driver::host_driver::Signal;
 
 pub(super) fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
     let inner = Arc::new(OneshotInner {

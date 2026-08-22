@@ -23,12 +23,10 @@ use crate::middleware::{
     StageMask, StageOutcome,
 };
 use crate::middleware_driver::StageDriver;
-use crate::{
-    ApprovalMetadata, ApprovalRequirement, JournalStore, JsonSchemaToolValidatorCompiler,
-    LoadRequest, LoadedSession, PortFuture, SideEffectClass, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth, ToolCallContext, ToolEventStream, ToolExecutionPolicy,
-    ToolPolicyDecision, ToolSpec, ToolsetRegistration,
-};
+use crate::ports::{PortFuture};
+use crate::ports::journal::{JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth};
+use crate::ports::model::{ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolSpec};
+use crate::ports::tool::{JsonSchemaToolValidatorCompiler, ToolCallContext, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolsetRegistration};
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {
     let mut context = TaskContext::from_waker(Waker::noop());
@@ -263,9 +261,9 @@ struct FixtureToolset {
     specs: Arc<[ToolSpec]>,
 }
 
-impl crate::Toolset for FixtureToolset {
-    fn descriptor(&self) -> crate::ToolsetDescriptor {
-        crate::ToolsetDescriptor {
+impl crate::ports::tool::Toolset for FixtureToolset {
+    fn descriptor(&self) -> crate::ports::tool::ToolsetDescriptor {
+        crate::ports::tool::ToolsetDescriptor {
             name: Arc::from("fixture.toolset"),
             metadata: Metadata::empty(),
         }

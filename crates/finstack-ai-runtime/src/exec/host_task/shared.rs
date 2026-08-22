@@ -4,13 +4,15 @@ use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{KernelInput, TransitionEnv};
 
+use crate::commit::CommitOutcome;
 use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
+use crate::driver::host_driver::Signal;
 use crate::event_hub::EventHubHandle;
 use crate::exec::live_state::{LiveRunState, LiveStatePublisher, session_head_update};
-use crate::host_driver::Signal;
 use crate::observer::ObserverDiagnosticBuffer;
+use crate::ports::model::ModelRequest;
+use crate::ports::tool::{ResolvedTool, ToolCallContext};
 use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
-use crate::{CommitOutcome, ModelRequest, ResolvedTool, ToolCallContext};
 
 use super::oneshot::OneshotSender;
 
@@ -22,8 +24,8 @@ pub(super) struct Shared {
     pub(super) live_state: Mutex<LiveRunState>,
     pub(super) kernel_state: Mutex<finstack_ai_kernel::KernelState>,
     pub(super) record_kinds: Mutex<Arc<[Arc<str>]>>,
-    pub(super) session_head: Mutex<Option<crate::SessionHeadUpdate>>,
-    pub(super) compaction_checkpoint: Mutex<Option<crate::CompactionCheckpoint>>,
+    pub(super) session_head: Mutex<Option<crate::session::SessionHeadUpdate>>,
+    pub(super) compaction_checkpoint: Mutex<Option<crate::ports::middleware::CompactionCheckpoint>>,
     pub(super) live_state_changed: Signal,
     pub(super) events: EventHubHandle,
     pub(super) shutdown_report: Mutex<Option<ShutdownReport>>,
@@ -109,7 +111,10 @@ impl LiveStatePublisher for Shared {
         self.live_state_changed.notify_waiters();
     }
 
-    fn publish_compaction_checkpoint(&self, checkpoint: Option<&crate::CompactionCheckpoint>) {
+    fn publish_compaction_checkpoint(
+        &self,
+        checkpoint: Option<&crate::ports::middleware::CompactionCheckpoint>,
+    ) {
         if let Ok(mut current) = self.compaction_checkpoint.lock() {
             current.clone_from(&checkpoint.cloned());
         }

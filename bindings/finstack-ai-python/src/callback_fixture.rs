@@ -2,10 +2,13 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    AssembledToolStream, AuthorizationContext, CancellationSignal, ModelCallContext, ModelRequest,
-    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamLimits,
-    ModelTerminal, RunCallContext, ToolCallContext, ToolResult, ToolStreamLimits, ToolTerminal,
+use finstack_ai::runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ModelCallContext, ModelRequest, ModelRequestDraft,
+    ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamLimits, ModelTerminal,
+    RunCallContext,
+};
+use finstack_ai::runtime::ports::tool::{
+    AssembledToolStream, ToolCallContext, ToolResult, ToolStreamLimits, ToolTerminal,
 };
 use finstack_ai_kernel::{
     ContentBlock, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,

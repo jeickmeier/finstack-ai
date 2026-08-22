@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use finstack_ai_kernel::{ErrorDescriptor, RawJson, RetryDirective, Stage, ToolId};
 
-use crate::ModelRequestDraft;
 use crate::context::ContextItem;
 use crate::middleware::{CompactionResult, MiddlewareError, StageOutcome};
+use crate::ports::model::ModelRequestDraft;
 
 /// Stable code for a middleware outcome with no kernel landing path at the
 /// stage it was produced at.

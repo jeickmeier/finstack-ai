@@ -5,7 +5,7 @@ use std::sync::Arc;
 use finstack_ai_kernel::{ContentBlock, Metadata, RawJson, Usage};
 use serde::{Deserialize, Serialize};
 
-use crate::PortStream;
+use crate::ports::PortStream;
 
 use super::error::{ModelError, STREAM_REASONING_MAX_BYTES, STREAM_TEXT_MAX_BYTES};
 use super::identity::validated_label;

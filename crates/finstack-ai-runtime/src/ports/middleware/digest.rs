@@ -86,8 +86,8 @@ pub fn compaction_checkpoint_compatible(
         .unwrap_or(0);
     let summary_is_safe = match &checkpoint.summary {
         CompactedSummary::Inline(items) => items.iter().all(|item| {
-            item.kind == crate::ContextItemKind::DerivedSummary
-                && item.authority == crate::ContextAuthority::Untrusted
+            item.kind == crate::ports::context::ContextItemKind::DerivedSummary
+                && item.authority == crate::ports::context::ContextAuthority::Untrusted
                 && sensitivity_rank(item.sensitivity) >= source_sensitivity
         }),
         CompactedSummary::Artifact(_) => true,

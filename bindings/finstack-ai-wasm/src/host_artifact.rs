@@ -6,12 +6,13 @@ use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
 
-use finstack_ai::runtime::{
+use finstack_ai::runtime::Bytes;
+use finstack_ai::runtime::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
     ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
-    Bytes, PortFuture, artifact_storage_key, build_artifact_ref, validate_artifact_scope,
-    validate_retrieved_artifact,
+    artifact_storage_key, build_artifact_ref, validate_artifact_scope, validate_retrieved_artifact,
 };
+use finstack_ai::runtime::ports::PortFuture;
 #[cfg(not(target_arch = "wasm32"))]
 use finstack_ai_kernel::Digest;
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Timestamp};
@@ -570,7 +571,8 @@ impl ArtifactStore for HostArtifactStore {
 mod tests {
     use super::HostArtifactStore;
     use crate::executor::block_on_ready;
-    use finstack_ai::runtime::{ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes};
+    use finstack_ai::runtime::Bytes;
+    use finstack_ai::runtime::artifact::{ArtifactMetadata, ArtifactScope, ArtifactStore};
     use finstack_ai_kernel::{Metadata, Sensitivity, SessionId};
 
     #[test]

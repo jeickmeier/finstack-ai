@@ -5,10 +5,11 @@ use finstack_ai_kernel::{
     ReducerStageOutcome, StageCursor, StageSettled, TransitionEnv,
 };
 
+use crate::commit::CommitOutcome;
 use crate::coordinator::CommitCoordinator;
+use crate::ids::{Clock, RandomSource};
 use crate::run_types::RunHandleError;
 use crate::settlement::{SettlementSources, stage_allocation};
-use crate::{Clock, CommitOutcome, RandomSource};
 
 use super::{MIDDLEWARE_STAGE_PAYLOAD_INVALID, stage_error};
 

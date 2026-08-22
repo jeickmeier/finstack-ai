@@ -343,8 +343,11 @@ impl std::io::Write for CountingJsonWriter {
 mod sequence_tests;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-pub(crate) trait RuntimeEventPublisher: crate::PortObject {
-    fn publish(&self, events: Arc<[RunEvent]>) -> crate::PortFuture<Result<(), EventPublishError>>;
+pub(crate) trait RuntimeEventPublisher: crate::ports::PortObject {
+    fn publish(
+        &self,
+        events: Arc<[RunEvent]>,
+    ) -> crate::ports::PortFuture<Result<(), EventPublishError>>;
 }
 
 #[cfg(feature = "native-tokio")]

@@ -9,11 +9,13 @@ use super::shared::HostWork;
 use crate::coordinator::{
     DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch, ToolDispatchSeed,
 };
-use crate::{
+use crate::ports::PortFuture;
+use crate::ports::model::{
     CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelRequest,
-    PortFuture, ResolvedTool, ResolvedToolCatalog, RunCallContext, ToolCallContext,
-    parse_committed_model_request, stable_model_dispatch_code,
+    RunCallContext,
 };
+use crate::ports::tool::{ResolvedTool, ResolvedToolCatalog, ToolCallContext};
+use crate::{parse_committed_model_request, stable_model_dispatch_code};
 
 pub(super) struct HostDispatcher {
     pub(super) model: Arc<dyn Model>,

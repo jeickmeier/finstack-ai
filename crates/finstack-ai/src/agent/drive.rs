@@ -391,7 +391,7 @@ async fn await_retry_cycle(
 pub(super) fn output_from_live_state(
     handle: &RunHandle,
     locator: OperationLocator,
-    state: &finstack_ai_runtime::LiveRunState,
+    state: &finstack_ai_runtime::run::LiveRunState,
     timeout: std::time::Duration,
 ) -> Result<AgentRunOutput, AgentRunError> {
     let completed = match state

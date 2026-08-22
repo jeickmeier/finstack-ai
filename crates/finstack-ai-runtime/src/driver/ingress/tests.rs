@@ -11,10 +11,13 @@ use finstack_ai_kernel::{
 };
 
 use super::*;
-use crate::{
-    JournalStore, LoadRequest, LoadedSession, PortFuture, SecurityAuditCategory,
-    SecurityAuditError, SecurityAuditEvent, SecurityAuditGate, SecurityAuditHealth,
-    SecurityAuditReceipt, SecurityAuditSink, SnapshotReceipt, SnapshotRequest, StoreError,
+use crate::audit::{
+    SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditGate,
+    SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink,
+};
+use crate::ports::PortFuture;
+use crate::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
     StoreHealth,
 };
 

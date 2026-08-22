@@ -21,10 +21,12 @@ use super::input::{stage_input, trailing_role_run};
 use super::submit::{folded_allocation_error, limit_crossing_allocation};
 use super::tool_batch::tool_batch_policy;
 use super::*;
+use crate::commit::CommitCoordinator;
 use crate::context::{
     ContextAuthority, ContextCallContext, ContextContribution, ContextError, ContextItem,
     ContextItemKind, ContextProvenance, ContextProvider, ContextProviderDescriptor, ContextRequest,
 };
+use crate::ids::{ExternalClock, IdGenerationError, RandomSource};
 use crate::middleware::{
     BeforeModelInput, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRegistration,
     MiddlewareRole, OrderTier, ResolvedMiddlewareChain, StageInput, StageMask, StageOutcome,
@@ -33,12 +35,13 @@ use crate::middleware_driver::{
     MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE, StageDriver, StageFold,
     StageTerminal,
 };
-use crate::settlement::SettlementSources;
-use crate::{
-    CancellationSignal, CommitCoordinator, ExternalClock, IdGenerationError, JournalStore,
-    LoadRequest, LoadedSession, PortFuture, RandomSource, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth,
+use crate::ports::PortFuture;
+use crate::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
 };
+use crate::ports::model::CancellationSignal;
+use crate::settlement::SettlementSources;
 
 include!("fixtures.rs");
 include!("passthrough.rs");

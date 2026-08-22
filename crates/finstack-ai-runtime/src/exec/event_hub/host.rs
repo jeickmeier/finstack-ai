@@ -11,8 +11,8 @@ use super::{
     EventSubscriptionStatus, ProgressCoalescing, RuntimeEventPublisher, SubscriberAudience,
     validate_event_sequences,
 };
-use crate::PortFuture;
-use crate::host_driver::Signal;
+use crate::driver::host_driver::Signal;
+use crate::ports::PortFuture;
 
 #[derive(Debug, Clone)]
 struct SizedEvent {
@@ -66,7 +66,10 @@ impl EventSubscription {
             let wait = self.subscriber.ready.notified();
             let flush_after = self.flush_wait();
             if let Some(duration) = flush_after {
-                if crate::host_driver::timeout(duration, wait).await.is_err() {
+                if crate::driver::host_driver::timeout(duration, wait)
+                    .await
+                    .is_err()
+                {
                     self.flush_due();
                 }
             } else {
@@ -292,7 +295,7 @@ async fn deliver(subscriber: &Subscriber, events: &[SizedEvent]) {
                     durable,
                     accepted,
                 } => {
-                    if crate::host_driver::timeout(timeout, wait_for_space(subscriber))
+                    if crate::driver::host_driver::timeout(timeout, wait_for_space(subscriber))
                         .await
                         .is_err()
                     {
@@ -564,8 +567,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::host_driver;
-    use crate::{EventBatchConfig, EventFilter, ProgressCoalescing};
+    use crate::driver::host_driver;
+    use crate::events::{EventBatchConfig, EventFilter, ProgressCoalescing};
 
     fn block_on<F: Future>(future: F) -> F::Output {
         let mut future = std::pin::pin!(future);

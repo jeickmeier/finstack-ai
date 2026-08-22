@@ -7,8 +7,8 @@ use finstack_ai_kernel::{
     RunPhase, TerminalState,
 };
 
-use crate::SessionHeadUpdate;
 use crate::run_types::RunStatus;
+use crate::session::SessionHeadUpdate;
 
 /// Curated latest-only state for one live or completed run owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,7 +111,10 @@ pub(crate) trait LiveStatePublisher: Send + Sync {
         record_kinds: &[Arc<str>],
     );
 
-    fn publish_compaction_checkpoint(&self, checkpoint: Option<&crate::CompactionCheckpoint>);
+    fn publish_compaction_checkpoint(
+        &self,
+        checkpoint: Option<&crate::ports::middleware::CompactionCheckpoint>,
+    );
 }
 
 pub(crate) fn session_head_update(

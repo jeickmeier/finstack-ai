@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode, PortFuture,
+use finstack_ai::runtime::ports::PortFuture;
+use finstack_ai::runtime::ports::observer::{
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
 };
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Sensitivity};
 use serde::Deserialize;

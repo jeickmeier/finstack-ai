@@ -12,7 +12,8 @@ use finstack_ai_kernel::{
     Version,
 };
 
-use crate::{AuthorizationContext, CancellationSignal, PortFuture, RunCallContext};
+use crate::ports::PortFuture;
+use crate::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
 
 fn id<T: IdTag>(value: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];

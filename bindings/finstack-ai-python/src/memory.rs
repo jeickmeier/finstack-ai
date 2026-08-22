@@ -34,7 +34,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use finstack_ai::runtime::{ArtifactStore, ContextProvider, Observer, Toolset};
+use finstack_ai::runtime::artifact::ArtifactStore;
+use finstack_ai::runtime::ports::context::ContextProvider;
+use finstack_ai::runtime::ports::observer::Observer;
+use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
 use finstack_ai_memory::extract::RuleBasedExtractor;
 use finstack_ai_memory::observer::MemoryObserver;

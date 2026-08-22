@@ -4,7 +4,7 @@ use finstack_ai_kernel::PendingModelEffect;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 use finstack_ai_kernel::RawJson;
 
-use crate::{PortFuture, PortObject};
+use crate::ports::{PortFuture, PortObject};
 
 use super::context::{ModelReconcileResult, ModelRequest, ModelWarmupContext, ReconcileContext};
 use super::error::ModelError;

@@ -6,7 +6,7 @@ fn first_pass_and_reconcile_deferred_settlements_are_byte_identical() {
         .into_iter()
         .next()
         .expect("pending tool seed");
-    let deferral = crate::ToolDeferral {
+    let deferral = crate::ports::tool::ToolDeferral {
         handle: finstack_ai_kernel::ExternalHandleRef::try_new(
             ComponentId::parse("finstack.tools.scripted").expect("component"),
             "handle-1",
@@ -23,7 +23,7 @@ fn first_pass_and_reconcile_deferred_settlements_are_byte_identical() {
         result: Ok(AssembledToolTerminal {
             usage: Some(crate::Usage::empty()),
             artifacts: std::sync::Arc::from([]),
-            terminal: crate::ToolTerminal::Deferred(deferral.clone()),
+            terminal: crate::ports::tool::ToolTerminal::Deferred(deferral.clone()),
         }),
     })
     .expect("first-pass settlement");

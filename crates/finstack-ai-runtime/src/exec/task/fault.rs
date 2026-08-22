@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use tokio::sync::mpsc;
 
-use crate::CommitCoordinatorError;
+use crate::commit::CommitCoordinatorError;
 use crate::run_types::{RunHandleError, RunStatus};
 
 use super::shared::{RunCommand, Shared};

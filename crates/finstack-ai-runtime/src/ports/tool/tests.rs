@@ -11,11 +11,12 @@ use finstack_ai_kernel::{
 };
 use futures_util::stream;
 
-use crate::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStoreLimits,
-    AuthorizationContext, CancellationSignal, RunCallContext, SideEffectClass, ToolCallContext,
-    ToolDeferralSupport, ToolSpec, build_artifact_ref,
+use crate::artifact::{ArtifactMetadata, ArtifactScope, ArtifactStoreLimits, build_artifact_ref};
+use crate::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal,
+    RunCallContext, SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
+use crate::ports::tool::ToolCallContext;
 
 use super::error::TOOL_STREAM_LIMIT_EXCEEDED;
 use super::stream::MAX_TOOL_RESULT_ARTIFACTS;

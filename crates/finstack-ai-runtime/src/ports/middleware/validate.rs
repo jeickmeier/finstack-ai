@@ -219,8 +219,8 @@ pub fn validate_compaction_result(
         .max()
         .unwrap_or(0);
     for summary in result.derived_summaries.iter() {
-        if summary.kind != crate::ContextItemKind::DerivedSummary
-            || summary.authority != crate::ContextAuthority::Untrusted
+        if summary.kind != crate::ports::context::ContextItemKind::DerivedSummary
+            || summary.authority != crate::ports::context::ContextAuthority::Untrusted
             || sensitivity_rank(summary.sensitivity) < source_sensitivity
         {
             return Err(MiddlewareError::compaction_invalid());

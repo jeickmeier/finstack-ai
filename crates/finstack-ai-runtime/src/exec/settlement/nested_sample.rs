@@ -9,18 +9,20 @@ use finstack_ai_kernel::{
     TransitionEnv,
 };
 
+use crate::RawJson;
 use crate::coordinator::CommitCoordinator;
+use crate::ids::{Clock, RandomSource};
 use crate::model::{
     ModelCallContext, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
     ModelStreamAssembler, ModelStreamLimits, ModelTerminal, validate_model_request,
 };
+use crate::ports::model::{CancellationSignal, RunCallContext};
+use crate::ports::tool::{
+    MCP_SAMPLING_REQUIRED, MCP_SAMPLING_UNAVAILABLE, NestedSample, ToolCallContext, ToolError,
+    ToolStreamAssembler, ToolStreamLimits,
+};
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
-use crate::{
-    CancellationSignal, Clock, MCP_SAMPLING_REQUIRED, MCP_SAMPLING_UNAVAILABLE, NestedSample,
-    RandomSource, RawJson, RunCallContext, ToolCallContext, ToolError, ToolStreamAssembler,
-    ToolStreamLimits,
-};
 
 use super::{SettlementSources, ToolDriverResult, model_handle_error, tool::process_tool_result};
 
@@ -94,7 +96,7 @@ async fn commit_nested_request<C: Clock, R: RandomSource>(
         .map_err(|error| model_handle_error(&error))?;
     let request_json =
         RawJson::parse(request_json).map_err(|_| RunHandleError::ToolSettlement {
-            code: crate::MODEL_REQUEST_INVALID,
+            code: crate::ports::model::MODEL_REQUEST_INVALID,
         })?;
     coordinator
         .submit(
@@ -171,7 +173,7 @@ async fn complete_parent_tool(
 async fn execute_nested_model<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
-    model: &dyn crate::Model,
+    model: &dyn crate::ports::model::Model,
     draft: &ModelRequestDraft,
     cancellation: &CancellationSignal,
     driver_result: &ToolDriverResult,
@@ -278,7 +280,7 @@ async fn execute_nested_model<C: Clock, R: RandomSource>(
 
 fn draft_from_sampling(
     params: &RawJson,
-    profile: &crate::LockedModelContextProfile,
+    profile: &crate::ports::model::LockedModelContextProfile,
 ) -> Result<ModelRequestDraft, RunHandleError> {
     if profile.profile.hard_input_bytes == 0 || profile.profile.reserved_output_tokens == 0 {
         return Err(RunHandleError::Tool {

@@ -9,7 +9,7 @@ use std::time::Duration;
 use finstack_ai_kernel::{Digest, PrincipalRef, Timestamp};
 use thiserror::Error;
 
-use crate::{PortFuture, PortObject};
+use crate::ports::{PortFuture, PortObject};
 
 /// Security-relevant external-ingress failure category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

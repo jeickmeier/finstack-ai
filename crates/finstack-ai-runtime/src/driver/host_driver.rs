@@ -13,7 +13,9 @@ use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
-use crate::{Clock, IdGenerationError, PortFuture, PortObject, RandomSource, Timestamp};
+use crate::Timestamp;
+use crate::ids::{Clock, IdGenerationError, RandomSource};
+use crate::ports::{PortFuture, PortObject};
 
 /// No host driver is installed for a requested operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

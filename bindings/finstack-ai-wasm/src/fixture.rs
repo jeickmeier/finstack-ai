@@ -4,10 +4,11 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
+use finstack_ai::runtime::ports::model::{
     AuthorizationContext, CancellationSignal, ModelCallContext, ModelName, ModelRequest,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, RunCallContext, ToolCallContext,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, RunCallContext,
 };
+use finstack_ai::runtime::ports::tool::ToolCallContext;
 use finstack_ai_kernel::{
     ContentBlock, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Message,
     MessageId, MessageRole, Metadata, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,

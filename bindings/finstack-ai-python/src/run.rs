@@ -3,10 +3,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai::runtime::{
-    ArtifactMetadata, ArtifactStore, Bytes, ExternalRouteOutcome, ModelName, ModelSettings,
-    stage_required_artifact,
-};
+use finstack_ai::runtime::Bytes;
+use finstack_ai::runtime::artifact::{ArtifactMetadata, ArtifactStore, stage_required_artifact};
+use finstack_ai::runtime::ingress::ExternalRouteOutcome;
+use finstack_ai::runtime::ports::model::{ModelName, ModelSettings};
 use finstack_ai::{
     AgentRunError, AgentRunOutput, AgentRunRequest, AttachmentInput, MAX_RUN_ATTACHMENTS,
     PrincipalRef, RemoteChildRouteSpec, RunSecurityContext,
@@ -276,13 +276,13 @@ impl PyRun {
 
 fn live_state_to_python(
     py: Python<'_>,
-    state: &finstack_ai::runtime::LiveRunState,
+    state: &finstack_ai::runtime::run::LiveRunState,
 ) -> PyResult<Py<PyAny>> {
     let status = match state.status {
-        finstack_ai::runtime::RunStatus::Running => "running",
-        finstack_ai::runtime::RunStatus::ShuttingDown => "shutting_down",
-        finstack_ai::runtime::RunStatus::Stopped => "stopped",
-        finstack_ai::runtime::RunStatus::Faulted { .. } => "faulted",
+        finstack_ai::runtime::run::RunStatus::Running => "running",
+        finstack_ai::runtime::run::RunStatus::ShuttingDown => "shutting_down",
+        finstack_ai::runtime::run::RunStatus::Stopped => "stopped",
+        finstack_ai::runtime::run::RunStatus::Faulted { .. } => "faulted",
     };
     let value = serde_json::json!({
         "revision": state.revision,
@@ -305,7 +305,7 @@ fn live_state_to_python(
 
 fn observer_diagnostics_to_python(
     py: Python<'_>,
-    diagnostics: &finstack_ai::runtime::ObserverDiagnostics,
+    diagnostics: &finstack_ai::runtime::ports::observer::ObserverDiagnostics,
 ) -> PyResult<Py<PyAny>> {
     let recent = PyList::empty(py);
     for diagnostic in diagnostics.recent.iter() {
@@ -425,8 +425,8 @@ pub(crate) fn collect_attachments(
 /// content-derived `ArtifactId` and ignores the scope passed to `get`, so a
 /// stable placeholder session id is sufficient here; `stage_required_artifact`
 /// only checks the staged artifact against the *same* scope passed to it.
-fn attachment_scope(tenant_scope: &str) -> finstack_ai::runtime::ArtifactScope {
-    finstack_ai::runtime::ArtifactScope {
+fn attachment_scope(tenant_scope: &str) -> finstack_ai::runtime::artifact::ArtifactScope {
+    finstack_ai::runtime::artifact::ArtifactScope {
         tenant_scope: std::sync::Arc::from(tenant_scope),
         session_id: SessionId::from_bytes([0_u8; 16]),
         run_id: None,

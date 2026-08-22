@@ -10,7 +10,7 @@ use finstack_ai_kernel::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::ToolSpec;
+use crate::ports::model::ToolSpec;
 
 use super::error::{
     TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_POLICY_DENIED, ToolError, UNKNOWN_TOOL,
@@ -75,7 +75,7 @@ pub struct ToolsetRegistration {
     /// Required host policy keyed by every tool id in this Toolset.
     ///
     /// Host [`ToolPolicyDecision::Allow`] cannot weaken a tool that
-    /// declared [`crate::ApprovalRequirement::Policy`].
+    /// declared [`crate::ports::model::ApprovalRequirement::Policy`].
     pub policies: BTreeMap<ToolId, ToolExecutionPolicy>,
     /// Optional component invocation keyed by tool id.
     pub components: BTreeMap<ToolId, ComponentInvocation>,
@@ -257,7 +257,7 @@ impl ResolvedToolCatalog {
     /// Approval-required tools return [`ToolCatalogPlan::RequireApproval`] until
     /// this call's [`ApprovalState`] is [`ApprovalState::Granted`]. Denied or
     /// expired approvals close with a diagnostic synthetic and never become
-    /// `Execute`. [`crate::ApprovalRequirement::Policy`] is a mandatory floor
+    /// `Execute`. [`crate::ports::model::ApprovalRequirement::Policy`] is a mandatory floor
     /// and cannot be weakened by host [`ToolPolicyDecision::Allow`].
     #[must_use]
     pub fn decide_plan(
@@ -290,10 +290,11 @@ impl ResolvedToolCatalog {
             ));
         }
         let declared_floor = match tool.spec.approval.requirement {
-            crate::ApprovalRequirement::Required | crate::ApprovalRequirement::Policy => {
+            crate::ports::model::ApprovalRequirement::Required
+            | crate::ports::model::ApprovalRequirement::Policy => {
                 ToolPolicyDecision::RequireApproval
             }
-            crate::ApprovalRequirement::NotRequired => ToolPolicyDecision::Allow,
+            crate::ports::model::ApprovalRequirement::NotRequired => ToolPolicyDecision::Allow,
         };
         let effective = tool
             .policy
