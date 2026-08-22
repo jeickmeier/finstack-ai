@@ -118,7 +118,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_tools_document::DocumentE
 pub struct finstack_ai_tools_document::DocumentToolset
 impl finstack_ai_tools_document::DocumentToolset
 pub fn finstack_ai_tools_document::DocumentToolset::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
-pub fn finstack_ai_tools_document::DocumentToolset::try_with_limits(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
+pub fn finstack_ai_tools_document::DocumentToolset::try_new_with_limits(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
 impl core::clone::Clone for finstack_ai_tools_document::DocumentToolset
 pub fn finstack_ai_tools_document::DocumentToolset::clone(&self) -> finstack_ai_tools_document::DocumentToolset
 impl core::fmt::Debug for finstack_ai_tools_document::DocumentToolset

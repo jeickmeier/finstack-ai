@@ -74,7 +74,7 @@ impl DocumentToolset {
     /// Returns a configuration error only if a checked-in identity or schema
     /// constant is invalid.
     pub fn try_new(artifact_store: Arc<dyn ArtifactStore>) -> Result<Self, DocumentError> {
-        Self::try_with_limits(artifact_store, DocumentLimits::default())
+        Self::try_new_with_limits(artifact_store, DocumentLimits::default())
     }
 
     /// Construct with explicit limits.
@@ -83,7 +83,12 @@ impl DocumentToolset {
     ///
     /// Returns a configuration error only if a checked-in identity or schema
     /// constant is invalid.
-    pub fn try_with_limits(
+    /// Construct with explicit limits.
+    ///
+    /// A `try_new` variant, not a builder step: it takes no `self`. The
+    /// `try_with_limits` name is reserved for the consuming-builder form
+    /// used by the filesystem and shell toolsets.
+    pub fn try_new_with_limits(
         artifact_store: Arc<dyn ArtifactStore>,
         limits: DocumentLimits,
     ) -> Result<Self, DocumentError> {

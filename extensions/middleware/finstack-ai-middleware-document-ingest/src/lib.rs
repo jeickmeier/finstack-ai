@@ -235,7 +235,7 @@ impl DocumentIngestMiddleware {
             max_input_bytes: u64::try_from(store.limits().max_artifact_bytes).unwrap_or(u64::MAX),
             ..DocumentLimits::default()
         };
-        Self::try_with_limits(store, limits)
+        Self::try_new_with_limits(store, limits)
     }
 
     /// Construct with explicit parse limits.
@@ -244,7 +244,12 @@ impl DocumentIngestMiddleware {
     ///
     /// Rejects an invalid checked-in identity or limits that cannot be
     /// encoded into the descriptor configuration digest.
-    pub fn try_with_limits(
+    /// Construct with explicit limits.
+    ///
+    /// A `try_new` variant, not a builder step: it takes no `self`. The
+    /// `try_with_limits` name is reserved for the consuming-builder form
+    /// used by the filesystem and shell toolsets.
+    pub fn try_new_with_limits(
         store: Arc<dyn ArtifactStore>,
         limits: DocumentLimits,
     ) -> Result<Self, DocumentIngestError> {

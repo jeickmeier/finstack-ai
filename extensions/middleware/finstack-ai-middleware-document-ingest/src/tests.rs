@@ -339,7 +339,7 @@ fn store_fetch_failure_fails_closed() {
 fn parser_failure_is_fail_soft_and_must_strip() {
     let store = Arc::new(CaptureArtifactStore::default());
     let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    let middleware = DocumentIngestMiddleware::try_with_limits(
+    let middleware = DocumentIngestMiddleware::try_new_with_limits(
         store,
         DocumentLimits {
             max_input_bytes: 1,
@@ -472,7 +472,7 @@ fn mismatched_declared_name_fails_reference_validation() {
 }
 
 fn ingest_with_limits(limits: DocumentLimits) -> DocumentIngestMiddleware {
-    DocumentIngestMiddleware::try_with_limits(Arc::new(CaptureArtifactStore::default()), limits)
+    DocumentIngestMiddleware::try_new_with_limits(Arc::new(CaptureArtifactStore::default()), limits)
         .expect("middleware")
 }
 
@@ -516,7 +516,7 @@ fn try_new_digest_matches_equivalent_explicit_store_limits() {
     let store: Arc<dyn ArtifactStore> =
         Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(max_artifact_bytes));
     let derived = DocumentIngestMiddleware::try_new(Arc::clone(&store)).expect("try_new");
-    let explicit = DocumentIngestMiddleware::try_with_limits(
+    let explicit = DocumentIngestMiddleware::try_new_with_limits(
         store,
         DocumentLimits {
             max_input_bytes: u64::try_from(max_artifact_bytes).expect("fits u64"),
@@ -543,7 +543,7 @@ fn configuration_identity_pins_canonical_bytes_and_version_tag() {
         "canonical identity must contain the version tag"
     );
 
-    let middleware = DocumentIngestMiddleware::try_with_limits(
+    let middleware = DocumentIngestMiddleware::try_new_with_limits(
         Arc::new(CaptureArtifactStore::default()),
         defaults,
     )
