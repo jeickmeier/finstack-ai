@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
-use finstack_ai_runtime::{
-    JournalStore, LoadRequest, LoadedSession, PortFuture, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

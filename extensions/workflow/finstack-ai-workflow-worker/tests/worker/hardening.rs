@@ -14,7 +14,11 @@ use finstack_ai_kernel::{
     AuthorizationEvidence, InteractionResolution, InteractionResolutionCommand, OperationLocator,
     PrincipalRef, RawJson,
 };
-use finstack_ai_runtime::{CommitCoordinator, ExternalClock, JournalStore, Model, WorkflowWait};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::Model;
+use finstack_ai_runtime::workflow::WorkflowWait;
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
@@ -34,8 +38,8 @@ struct BindPorts {
 impl PortsFactory for BindPorts {
     fn bind(
         &self,
-        session: finstack_ai_runtime::WorkflowSession,
-    ) -> Result<finstack_ai_runtime::WorkflowSession, WorkerError> {
+        session: finstack_ai_runtime::workflow::WorkflowSession,
+    ) -> Result<finstack_ai_runtime::workflow::WorkflowSession, WorkerError> {
         Ok(session.with_ports(
             Arc::clone(&self.model),
             crate::helpers::locked_profile(),
@@ -171,7 +175,7 @@ async fn a_stale_wake_row_is_corrected_by_the_journal() {
     // so `drive_until_wait` times out there; a bare `CommitCoordinator`
     // stands in for that missing facade to reach Terminal.
     clock.jump(60_000).expect("past due");
-    let mut oob = finstack_ai_runtime::WorkflowSession::trusted_seeded(
+    let mut oob = finstack_ai_runtime::workflow::WorkflowSession::trusted_seeded(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
         locator(),
         clock.clone(),
@@ -275,7 +279,7 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
     // fixture needed): the worker's `require_locator` rejection is about the
     // *resolve* path, not about how the interaction was requested.
     let interaction_id = crate::helpers::request_interaction(&journal, timestamp(2_000)).await;
-    let mut session = finstack_ai_runtime::WorkflowSession::trusted_seeded(
+    let mut session = finstack_ai_runtime::workflow::WorkflowSession::trusted_seeded(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
         locator(),
         clock.clone(),

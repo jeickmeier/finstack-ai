@@ -6,7 +6,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, Metadata, RawJson, SchemaRef, Timestamp, Version,
 };
-use finstack_ai_runtime::{CancellationSignal, PortFuture, PortObject};
+use finstack_ai_runtime::ports::model::CancellationSignal;
+use finstack_ai_runtime::ports::{PortFuture, PortObject};
 use thiserror::Error;
 
 use super::errors::{AgentBuildError, RegistrationError};

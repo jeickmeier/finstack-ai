@@ -50,7 +50,7 @@ use finstack_ai_kernel::{
     RecordEnvelope, SessionId, Timestamp,
 };
 use finstack_ai_protocol::{ChainAnchor, decode};
-use finstack_ai_runtime::{LoadWindow, LoadedSession, OpaqueSnapshot, StoreError};
+use finstack_ai_runtime::ports::journal::{LoadWindow, LoadedSession, OpaqueSnapshot, StoreError};
 pub(crate) use finstack_ai_store_common::VerifiedHead;
 use finstack_ai_store_common::{
     AppendIdentity, FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, accelerated_from,

@@ -10,12 +10,18 @@ use finstack_ai_kernel::{
     RetryClassification, RetryDirective, RetrySafety, RunPhase, SessionTag, Stage, TransitionEnv,
 };
 use finstack_ai_kernel::{KernelState, RecordBody};
-use finstack_ai_runtime::testing::ManualDriveAction;
-use finstack_ai_runtime::{
-    ApprovalGrantMode, Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, Model,
-    ModelDeferral, ModelError, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RunHandleError,
-    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, TextDelta,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::Clock;
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest};
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, Model, ModelDeferral, ModelError, ModelStreamItem, ModelStreamLimits,
+    TextDelta,
 };
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandleError, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+};
+use finstack_ai_runtime::testing::ManualDriveAction;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{FixedClock, ScriptedModelAction, ScriptedModelPlan};
 
@@ -79,7 +85,7 @@ where
     C: Clock + Send + Sync + 'static,
 {
     let model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(model)
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(model)
             .await
             .map_err(|error| RunHandleError::Model {
                 code: Arc::from(error.code()),

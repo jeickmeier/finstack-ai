@@ -8,10 +8,14 @@ use finstack_ai_kernel::{
     AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, ContentBlock, ProviderIds,
     RunSecurityContext, TextBlock, Usage, ValidatedToolCall, Version,
 };
-use finstack_ai_runtime::{
-    JournalStore, Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem,
-    PortFuture, TokenEstimatorRef, TokenEstimatorSource, ToolCallContext, ToolError,
-    ToolEventStream, ToolSpec, Toolset, ToolsetDescriptor,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TokenEstimatorRef,
+    TokenEstimatorSource, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, Toolset, ToolsetDescriptor,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};

@@ -32,10 +32,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, ErrorCategory, Metadata, RawJson, ValidatedToolCall};
-use finstack_ai_runtime::{
-    NestedSample, PendingToolEffect, PortFuture, ReconcileContext, TOOL_INTERACTION_REQUIRED,
-    TOOL_OUTPUT_INVALID, ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult,
-    ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, verify_authority,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{ReconcileContext, ToolSpec};
+use finstack_ai_runtime::ports::tool::{
+    NestedSample, PendingToolEffect, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID,
+    ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult, ToolResult, ToolStreamItem,
+    Toolset, ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use thiserror::Error;
@@ -76,7 +78,7 @@ pub const MCP_RESULT_UNSUPPORTED: &str = "mcp_result_unsupported";
 /// Stable fail-closed code when `resources/subscribe` names a missing resource.
 pub const MCP_SUBSCRIBE_UNKNOWN: &str = "mcp_subscribe_unknown";
 /// Stable intercept when `tools/call` asks the host to run `sampling/createMessage`.
-pub use finstack_ai_runtime::MCP_SAMPLING_REQUIRED;
+pub use finstack_ai_runtime::ports::tool::MCP_SAMPLING_REQUIRED;
 /// Stable output-limit code.
 pub const MCP_LIMIT_EXCEEDED: &str = "mcp_limit_exceeded";
 /// Stable required-artifact-service code.
@@ -186,7 +188,7 @@ impl McpConfig {
         Ok(self)
     }
 
-    /// Bind an allowlisted stdio server under [`finstack_ai_runtime::ProcessConfinement`].
+    /// Bind an allowlisted stdio server under [`finstack_ai_runtime::confinement::ProcessConfinement`].
     ///
     /// Requested-and-unavailable fails closed at construct. Unconfined
     /// [`Self::stdio`] stays the T1 path.
@@ -197,8 +199,8 @@ impl McpConfig {
     pub fn stdio_confined(
         self,
         config: StdioConfig,
-        confinement: finstack_ai_runtime::ProcessConfinement,
-        profile: finstack_ai_runtime::ConfinementProfile,
+        confinement: finstack_ai_runtime::confinement::ProcessConfinement,
+        profile: finstack_ai_runtime::confinement::ConfinementProfile,
     ) -> Result<Self, McpError> {
         self.stdio(config.with_confinement(confinement, profile))
     }

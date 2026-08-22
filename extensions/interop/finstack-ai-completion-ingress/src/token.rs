@@ -180,7 +180,7 @@ mod tests {
         AuthorizationEvidence, EffectId, LaneId, OperationLocator, PrincipalRef, RunId, SessionId,
         Timestamp,
     };
-    use finstack_ai_runtime::SecretString;
+    use finstack_ai_runtime::ports::model::SecretString;
 
     fn keys() -> crate::config::ResolvedKeys {
         validated_keys(&CompletionIngressConfig {

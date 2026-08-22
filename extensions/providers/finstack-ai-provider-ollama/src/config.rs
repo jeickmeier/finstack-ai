@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
     ModelCapabilities, ModelContextProfile, ModelError, ModelName, StructuredOutputCapability,
     TokenEstimatorRef, TokenEstimatorSource,
@@ -414,7 +414,7 @@ pub(crate) fn estimator_ref() -> TokenEstimatorRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use finstack_ai_runtime::SecretString;
+    use finstack_ai_runtime::ports::model::SecretString;
 
     const CANARY: &str = "ollama-secret-canary-070";
 
@@ -442,13 +442,16 @@ mod tests {
         fn resolve(
             &self,
             _blob: &finstack_ai_kernel::BlobRef,
-        ) -> finstack_ai_runtime::PortFuture<
-            Result<finstack_ai_runtime::ResolvedMedia, finstack_ai_runtime::MediaResolveError>,
+        ) -> finstack_ai_runtime::ports::PortFuture<
+            Result<
+                finstack_ai_runtime::ports::model::ResolvedMedia,
+                finstack_ai_runtime::ports::model::MediaResolveError,
+            >,
         > {
             Box::pin(async {
-                Ok(finstack_ai_runtime::ResolvedMedia::Url(Arc::from(
-                    "https://example.test/a.png",
-                )))
+                Ok(finstack_ai_runtime::ports::model::ResolvedMedia::Url(
+                    Arc::from("https://example.test/a.png"),
+                ))
             })
         }
     }

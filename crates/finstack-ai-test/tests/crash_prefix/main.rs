@@ -26,13 +26,21 @@ use finstack_ai_kernel::{
     TextBlock, ToolBatchSettled, ToolSettlement,
 };
 use finstack_ai_kernel::{ArtifactRef, BlobRef, ExternalEffectCompletionCommand, Sensitivity};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::artifact::{
     ARTIFACT_INTEGRITY_FAILURE, ArtifactMetadata, ArtifactScope, ArtifactStoreLimits,
+    validate_staged_artifact,
+};
+use finstack_ai_runtime::audit::{SecurityAuditCategory, SecurityAuditGate};
+use finstack_ai_runtime::child::{
     BudgetCoordinator, BudgetOperationIds, ChildRunCoordinator, CompositionError,
-    ExternalCompletionRouter, ExternalRouteError, IdempotencyHorizon, JournalStore, LaneAppendIds,
-    LaneCreateIds, LoadRequest, OpaqueSnapshot, PruneRequest, SecurityAuditCategory,
-    SecurityAuditGate, SessionCreateIds, SessionError, SessionRuntime, SnapshotRequest,
-    WriteMetadataRequest, validate_staged_artifact,
+};
+use finstack_ai_runtime::ingress::{ExternalCompletionRouter, ExternalRouteError};
+use finstack_ai_runtime::ports::journal::{
+    IdempotencyHorizon, JournalStore, LoadRequest, OpaqueSnapshot, PruneRequest, SnapshotRequest,
+    WriteMetadataRequest,
+};
+use finstack_ai_runtime::session::{
+    LaneAppendIds, LaneCreateIds, SessionCreateIds, SessionError, SessionRuntime,
 };
 use finstack_ai_test::{LegalRestore, all_activated_record_bodies, classify_phase};
 

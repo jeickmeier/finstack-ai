@@ -10,13 +10,21 @@ use finstack_ai_kernel::{
     RawJson, ReconciliationPolicy, RecordBody, RetrySafety, SessionTag, ToolCallId, ToolCallPlan,
     ValidatedToolCall,
 };
-use finstack_ai_runtime::testing::ManualDriveAction;
-use finstack_ai_runtime::{
-    ApprovalGrantMode, Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, Model,
-    ModelStreamLimits, ModelTaskConfig, ResolvedToolCatalog, RunHandleError, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolDeferral, ToolReconcileResult,
-    ToolResult, ToolStreamLimits, ToolTaskConfig,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::Clock;
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest};
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, Model, ModelStreamLimits, SideEffectClass,
 };
+use finstack_ai_runtime::ports::tool::{
+    ResolvedToolCatalog, ToolDeferral, ToolReconcileResult, ToolResult, ToolStreamLimits,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandleError, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+    ToolTaskConfig,
+};
+use finstack_ai_runtime::testing::ManualDriveAction;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{FixedClock, ScriptedModel, ScriptedToolPlan, ScriptedToolset};
 
@@ -85,13 +93,13 @@ pub(crate) fn scripted_tool_deferral(handle: &str) -> ToolDeferral {
     }
 }
 
-pub(crate) fn at_most_once_spec() -> finstack_ai_runtime::ToolSpec {
+pub(crate) fn at_most_once_spec() -> finstack_ai_runtime::ports::model::ToolSpec {
     let mut spec = tool_spec("echo");
     spec.retry_safety = RetrySafety::AtMostOnce;
     spec
 }
 
-pub(crate) fn non_idempotent_spec() -> finstack_ai_runtime::ToolSpec {
+pub(crate) fn non_idempotent_spec() -> finstack_ai_runtime::ports::model::ToolSpec {
     let mut spec = tool_spec("echo");
     spec.side_effect = SideEffectClass::NonIdempotentWrite;
     spec
@@ -102,16 +110,16 @@ pub(crate) type ResumePorts = (
     Arc<ScriptedToolset>,
     Arc<dyn Model>,
     Arc<ResolvedToolCatalog>,
-    Arc<[finstack_ai_runtime::ToolSpec]>,
+    Arc<[finstack_ai_runtime::ports::model::ToolSpec]>,
 );
 
 pub(crate) fn resume_ports(
     call_count: usize,
     plans: Vec<ScriptedToolPlan>,
     reconcile: Vec<ToolReconcileResult>,
-    spec: finstack_ai_runtime::ToolSpec,
+    spec: finstack_ai_runtime::ports::model::ToolSpec,
 ) -> ResumePorts {
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([spec]);
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> = Arc::from([spec]);
     let toolset =
         Arc::new(ScriptedToolset::new(Arc::clone(&tools), plans).with_reconcile_results(reconcile));
     let catalog = catalog(Arc::clone(&toolset), 2);
@@ -182,7 +190,7 @@ where
     C: Clock + Send + Sync + 'static,
 {
     let model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(model)
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(model)
             .await
             .map_err(|error| RunHandleError::Model {
                 code: Arc::from(error.code()),
@@ -300,7 +308,7 @@ pub(crate) async fn crash_before_tool_dispatch(
     store: Arc<MemoryJournalStore>,
     model: Arc<dyn Model>,
     catalog: Arc<ResolvedToolCatalog>,
-    tools: Arc<[finstack_ai_runtime::ToolSpec]>,
+    tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]>,
 ) -> CommitCoordinator {
     Box::pin(crash_before_tool_dispatch_inner(
         store, model, catalog, tools,
@@ -312,7 +320,7 @@ pub(crate) async fn crash_before_tool_dispatch_inner(
     store: Arc<MemoryJournalStore>,
     model: Arc<dyn Model>,
     catalog: Arc<ResolvedToolCatalog>,
-    tools: Arc<[finstack_ai_runtime::ToolSpec]>,
+    tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]>,
 ) -> CommitCoordinator {
     let mut coordinator = CommitCoordinator::new(store.clone());
     let mut drive = coordinator.enable_manual_drive(1).expect("manual drive");

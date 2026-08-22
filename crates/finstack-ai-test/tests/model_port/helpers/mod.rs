@@ -11,14 +11,19 @@ use finstack_ai_kernel::{
     RunAccepted, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, SessionTag,
     Stage, StageCursor, TextBlock, Timestamp, TransitionEnv, Usage,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, IdGenerationError, JournalStore, LoadRequest,
-    LoadedSession, LockedModelContextProfile, Model, ModelCallContext, ModelContextProfile,
-    ModelError, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
-    ModelStreamAssembler, ModelStreamLimits, ModelTerminal, PortFuture, RandomSource,
-    RunCallContext, RunHandle, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth,
-    TokenEstimatorRef, TokenEstimatorSource, resolve_model_context_profile,
+use finstack_ai_runtime::ids::{IdGenerationError, RandomSource};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
 };
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, LockedModelContextProfile, Model, ModelCallContext,
+    ModelContextProfile, ModelError, ModelRequest, ModelRequestDraft, ModelRequestLimits,
+    ModelResponse, ModelSettings, ModelStreamAssembler, ModelStreamLimits, ModelTerminal,
+    RunCallContext, TokenEstimatorRef, TokenEstimatorSource, resolve_model_context_profile,
+};
+use finstack_ai_runtime::run::RunHandle;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedInput, ScriptedModel, ScriptedModelPlan, ScriptedStep, ScriptedStepKind,
@@ -42,7 +47,7 @@ pub(crate) fn timestamp(ms: i64) -> Timestamp {
 pub(crate) fn profile() -> ModelContextProfile {
     ModelContextProfile {
         provider: Arc::from("scripted"),
-        model: finstack_ai_runtime::ModelName::try_new("scripted-1").expect("model"),
+        model: finstack_ai_runtime::ports::model::ModelName::try_new("scripted-1").expect("model"),
         hard_input_bytes: 2_000_000,
         context_window_tokens: 3_000_000,
         max_output_tokens: 1_000,

@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::thread::{self, JoinHandle};
 
-use finstack_ai_runtime::{PortFuture, StoreError};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::StoreError;
 use rusqlite::Connection;
 
 use crate::config::{SqliteStoreConfig, SqliteStoreLimits, is_memory_path};

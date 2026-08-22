@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use finstack_ai_runtime::{SecurityAuditGate, SecurityAuditSink};
+use finstack_ai_runtime::audit::{SecurityAuditGate, SecurityAuditSink};
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -60,9 +60,9 @@ impl Server {
     /// impl SecurityAuditSink for Ready {
     ///     fn record(
     ///         &self,
-    ///         event: finstack_ai_runtime::SecurityAuditEvent,
-    ///     ) -> finstack_ai_runtime::PortFuture<
-    ///         Result<SecurityAuditReceipt, finstack_ai_runtime::SecurityAuditError>,
+    ///         event: finstack_ai_runtime::audit::SecurityAuditEvent,
+    ///     ) -> finstack_ai_runtime::ports::PortFuture<
+    ///         Result<SecurityAuditReceipt, finstack_ai_runtime::audit::SecurityAuditError>,
     ///     > {
     ///         let event_id = std::sync::Arc::<str>::from(event.event_id());
     ///         Box::pin(async move {
@@ -74,8 +74,8 @@ impl Server {
     ///     }
     ///     fn health(
     ///         &self,
-    ///     ) -> finstack_ai_runtime::PortFuture<
-    ///         Result<SecurityAuditHealth, finstack_ai_runtime::SecurityAuditError>,
+    ///     ) -> finstack_ai_runtime::ports::PortFuture<
+    ///         Result<SecurityAuditHealth, finstack_ai_runtime::audit::SecurityAuditError>,
     ///     > {
     ///         Box::pin(async { Ok(SecurityAuditHealth { ready: true }) })
     ///     }

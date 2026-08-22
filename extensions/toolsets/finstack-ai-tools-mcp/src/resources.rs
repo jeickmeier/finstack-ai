@@ -7,12 +7,13 @@ use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory, InvocationRecovery,
     Metadata, Sensitivity, TextBlock, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
     ContextAuthority, ContextCallContext, ContextContribution, ContextError, ContextItem,
     ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
     ContextProviderDescriptor, ContextReconcileResult, ContextRequest, PendingContextEffect,
-    PortFuture, ReconcileContext,
 };
+use finstack_ai_runtime::ports::model::ReconcileContext;
 
 use crate::classify::{MAX_LIST_PAGES, optional_catalog_missing};
 use crate::protocol::{
@@ -423,7 +424,7 @@ async fn collect_frozen(
         && matches!(request.budget.overflow, ContextOverflowPolicy::Reject)
     {
         return Err(context_error(
-            finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
+            finstack_ai_runtime::ports::context::CONTEXT_BUDGET_EXCEEDED,
             ErrorCategory::Limit,
             "MCP resource contribution exceeds the committed budget",
         ));
@@ -483,7 +484,7 @@ fn apply_overflow(
 ) -> Result<ContextContribution, ContextError> {
     match request.budget.overflow {
         ContextOverflowPolicy::Reject => Err(context_error(
-            finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
+            finstack_ai_runtime::ports::context::CONTEXT_BUDGET_EXCEEDED,
             ErrorCategory::Limit,
             "MCP resource contribution exceeds the committed budget",
         )),
@@ -565,7 +566,7 @@ fn estimate_tokens(text: &str) -> u64 {
 
 fn contribution_invalid(message: &'static str) -> ContextError {
     context_error(
-        finstack_ai_runtime::CONTEXT_CONTRIBUTION_INVALID,
+        finstack_ai_runtime::ports::context::CONTEXT_CONTRIBUTION_INVALID,
         ErrorCategory::Validation,
         message,
     )

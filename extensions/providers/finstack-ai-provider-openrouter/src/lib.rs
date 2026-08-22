@@ -1,4 +1,4 @@
-//! `OpenRouter` Responses (`/api/v1/responses`) implementation of the public [`Model`](finstack_ai_runtime::Model) port.
+//! `OpenRouter` Responses (`/api/v1/responses`) implementation of the public [`Model`](finstack_ai_runtime::ports::model::Model) port.
 
 #![warn(missing_docs)]
 

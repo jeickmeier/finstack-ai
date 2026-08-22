@@ -4,10 +4,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, RawJson, Version};
-use finstack_ai_runtime::{
-    CancellationSignal, ContextProvider, JournalStore, Middleware, MiddlewareRegistration, Model,
-    ModelWarmupContext, Observer, PortFuture, ReadyModel, ResolvedMiddlewareChain, Toolset,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::ContextProvider;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::middleware::{
+    Middleware, MiddlewareRegistration, ResolvedMiddlewareChain,
 };
+use finstack_ai_runtime::ports::model::{
+    CancellationSignal, Model, ModelWarmupContext, ReadyModel,
+};
+use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::tool::Toolset;
 
 use super::errors::{
     AgentBuildError, RegisteredComponentDescriptor, RegistrationEvent, ResolutionDiagnostic,

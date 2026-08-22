@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use finstack_ai_kernel::{ArtifactRef, Duration, Sensitivity, Timestamp};
-use finstack_ai_runtime::{ArtifactScope, validate_artifact_scope};
+use finstack_ai_runtime::artifact::{ArtifactScope, validate_artifact_scope};
 
 /// Maximum byte length of a [`MemoryId`].
 pub const MEMORY_ID_MAX_BYTES: usize = 256;

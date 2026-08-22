@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{ComponentId, Digest, LaneId, SessionId};
-use finstack_ai_runtime::CompactionCheckpoint;
+use finstack_ai_runtime::ports::middleware::CompactionCheckpoint;
 
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError};
 
@@ -190,7 +190,7 @@ impl HistoryCache {
 mod tests {
     use super::*;
     use finstack_ai_kernel::{EntryId, Sensitivity};
-    use finstack_ai_runtime::CompactedSummary;
+    use finstack_ai_runtime::ports::middleware::CompactedSummary;
 
     fn session(byte: u8) -> SessionId {
         SessionId::from_bytes([byte; 16])

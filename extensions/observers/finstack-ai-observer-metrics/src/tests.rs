@@ -6,7 +6,10 @@ use finstack_ai_kernel::{
     RunTag, SessionTag, TextBlock, Timestamp,
 };
 use finstack_ai_kernel::{RunEvent, Sensitivity};
-use finstack_ai_runtime::{CompactionEvidence, CompactionResult, Observer, PromptCacheImpact};
+use finstack_ai_runtime::ports::middleware::{
+    CompactionEvidence, CompactionResult, PromptCacheImpact,
+};
+use finstack_ai_runtime::ports::observer::Observer;
 use finstack_ai_test::check_observer_conformance;
 
 use super::MetricsObserver;

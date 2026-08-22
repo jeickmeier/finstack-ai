@@ -22,10 +22,7 @@ use std::collections::BTreeSet;
 
 use finstack_ai_kernel::{RetrySafety, ToolExecutionMode, ToolId};
 use finstack_ai_middleware_tool_policy::{ToolPolicyConfig, ToolPolicyMiddleware};
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ModelName, SideEffectClass, ToolDeferralSupport,
-    ToolSpec,
-};
+use finstack_ai_runtime::ports::model::{ApprovalMetadata, ApprovalRequirement, ModelName, SideEffectClass, ToolDeferralSupport, ToolSpec};
 use finstack_ai_test::ScriptedToolset;
 
 const TOOL_POLICY_COMPONENT_VERSION: Version = Version {

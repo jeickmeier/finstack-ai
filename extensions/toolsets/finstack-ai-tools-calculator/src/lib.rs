@@ -26,9 +26,12 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, ToolCallContext,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
     ToolsetDescriptor,
 };
 use futures_util::stream;

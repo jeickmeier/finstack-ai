@@ -72,7 +72,7 @@ async fn conflicting_checkpoint_sequence_is_ignored() {
     let journal_seq = hint.last_applied_seq;
     hint.last_applied_seq = journal_seq.saturating_add(99);
     assert_eq!(
-        finstack_ai_runtime::resolve_checkpoint_sequence(journal_seq, Some(hint.last_applied_seq)),
+        finstack_ai_runtime::workflow::resolve_checkpoint_sequence(journal_seq, Some(hint.last_applied_seq)),
         journal_seq
     );
     let _ = (store, clock, model);

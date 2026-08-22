@@ -55,7 +55,7 @@
 //! ambiguous acknowledgement.
 
 use finstack_ai_kernel::SessionId;
-use finstack_ai_runtime::{PruneReceipt, PruneRequest, StoreError};
+use finstack_ai_runtime::ports::journal::{PruneReceipt, PruneRequest, StoreError};
 use finstack_ai_store_common::{
     accelerated_from, admit_prune_snapshot, outstanding_count, tombstone_count,
 };
@@ -134,7 +134,7 @@ impl PruneStatements {
 /// `InvalidRequest{prune_not_batch_aligned}` when the snapshot sequence does
 /// not land on a batch boundary, `Integrity{prune_snapshot_undecodable}` when
 /// the stored snapshot cannot be decoded into an
-/// [`finstack_ai_runtime::AcceleratedRestore`], and otherwise the mapped
+/// [`finstack_ai_runtime::ports::journal::AcceleratedRestore`], and otherwise the mapped
 /// driver error.
 pub(crate) async fn prune(
     client: &mut PooledClient<Client>,

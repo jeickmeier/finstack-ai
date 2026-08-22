@@ -13,14 +13,20 @@ use finstack_ai_kernel::{
     RunRelation, RunSecurityContext, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv,
     Usage,
 };
-use finstack_ai_runtime::{
-    ApprovalGrantMode, Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError,
-    JournalStore, LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelError,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::{Clock, ExternalClock, IdGenerationError, RandomSource};
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest};
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, LockedModelContextProfile, Model, ModelContextProfile, ModelError,
     ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
-    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolSpec, WorkflowSession, resolve_model_context_profile,
+    ModelStreamItem, ModelStreamLimits, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
+    ToolSpec, resolve_model_context_profile,
 };
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+};
+use finstack_ai_runtime::workflow::WorkflowSession;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_local::{LocalWorkflowDriver, MemoryCronStore};
@@ -228,7 +234,7 @@ pub(crate) async fn spawn_model_owner(
     random: u64,
 ) -> RunTaskOwner {
     let model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(model)
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(model)
             .await
             .expect("model readiness"),
     );

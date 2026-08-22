@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
     ContentBlock, MediaRef, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
     ToolCallId,
 };
-use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec};
+use finstack_ai_runtime::ports::model::{ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::value::RawValue;
@@ -568,7 +568,7 @@ mod tests {
         MessageId, Metadata, ProviderIds, RetrySafety, TextBlock, Timestamp, ToolCallBlock,
         ToolExecutionMode, ToolId, ToolResultBlock,
     };
-    use finstack_ai_runtime::{
+    use finstack_ai_runtime::ports::model::{
         ApprovalMetadata, ApprovalRequirement, ModelName, ModelRequestLimits, ModelSettings,
         SideEffectClass, ToolSpec,
     };
@@ -1095,7 +1095,7 @@ mod tests {
             },
             max_result_bytes: 1_024,
             metadata: Metadata::empty(),
-            deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
+            deferral: finstack_ai_runtime::ports::model::ToolDeferralSupport::Never,
         }
     }
 

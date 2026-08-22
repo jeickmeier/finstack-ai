@@ -26,13 +26,21 @@ use finstack_ai_kernel::{
     Stage, StageCursor, TextBlock, Timestamp, ToolBatchContinuation, ToolCallBlock, ToolCallPlan,
     ToolExecutionMode, ToolFailurePolicy, ToolId, TransitionEnv, Usage, ValidatedToolCall, Version,
 };
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, AuthorizationContext, BudgetError, BudgetLedger,
-    BudgetOperationIds, BudgetReservationState, ChildCoordinationIds, ChildRunContext,
-    ChildRunHandle, ChildRunRequest, CommitCoordinator, IdempotencyHorizon, JournalStore,
-    LoadRequest, PortFuture, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
-    SecurityAuditReceipt, SecurityAuditSink, StateSnapshotRequest,
+use finstack_ai_runtime::audit::{
+    SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth, SecurityAuditReceipt,
+    SecurityAuditSink,
 };
+use finstack_ai_runtime::budget::{BudgetError, BudgetLedger, BudgetReservationState};
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, AgentRef, BudgetOperationIds, ChildCoordinationIds,
+    ChildRunContext, ChildRunHandle, ChildRunRequest,
+};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::{
+    IdempotencyHorizon, JournalStore, LoadRequest, StateSnapshotRequest,
+};
+use finstack_ai_runtime::ports::model::AuthorizationContext;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,
@@ -538,7 +546,7 @@ impl AgentInvoker for RecordingInvoker {
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
         let relation_digest =
-            finstack_ai_runtime::child_relation_digest(&context, &request).expect("digest");
+            finstack_ai_runtime::child::child_relation_digest(&context, &request).expect("digest");
         let locator = request.locator;
         Box::pin(async move {
             Ok(ChildRunHandle {

@@ -40,17 +40,25 @@ use finstack_ai_kernel::{
     RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Stage,
     StageCursor, TextBlock, Timestamp, TransitionEnv, Usage,
 };
-use finstack_ai_runtime::{
-    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
-    ExternalClock, IdGenerationError, JsonSchemaToolValidatorCompiler, LockedModelContextProfile,
-    Model, ModelContextProfile, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
-    ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
-    RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, SideEffectClass, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolCallDelta, ToolDeferralSupport, ToolExecutionPolicy, ToolPolicyDecision, ToolResult,
-    ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
-    WorkflowSession, WorkflowWait, classify_wait, resolve_model_context_profile,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::{ExternalClock, IdGenerationError, RandomSource};
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, LockedModelContextProfile, Model,
+    ModelContextProfile, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
+    ModelSettings, ModelStreamItem, ModelStreamLimits, ModelToolCall, SideEffectClass, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolSpec,
+    resolve_model_context_profile,
 };
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolResult, ToolStreamItem, ToolStreamLimits, Toolset, ToolsetRegistration,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+    ToolTaskConfig,
+};
+use finstack_ai_runtime::workflow::{WorkflowSession, WorkflowWait, classify_wait};
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
     SqliteStoreLimits,
@@ -373,7 +381,7 @@ async fn spawn_owner(
     clock: ExternalClock,
     random: u64,
 ) -> Result<RunTaskOwner, BoxError> {
-    let model = Arc::new(finstack_ai_runtime::ReadyModel::prepare(model).await?);
+    let model = Arc::new(finstack_ai_runtime::ports::model::ReadyModel::prepare(model).await?);
     Ok(RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(store),
         RunTaskConfig {
@@ -525,7 +533,7 @@ async fn drive_past_missing_facade_decisions(
 ) -> Result<(), BoxError> {
     let recovered = CommitCoordinator::recover(Arc::clone(journal) as _, id(1)).await?;
     let cycle = recovered.state().cycle;
-    let model = Arc::new(finstack_ai_runtime::ReadyModel::prepare(model).await?);
+    let model = Arc::new(finstack_ai_runtime::ports::model::ReadyModel::prepare(model).await?);
 
     let facade = RunTaskOwner::spawn_with_model_and_tools(
         recovered,

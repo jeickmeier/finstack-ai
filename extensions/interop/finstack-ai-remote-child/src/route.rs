@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, ExternalHandleRef, RawJson, RemoteRouteRef, Version,
 };
-use finstack_ai_runtime::{AgentInvokeError, SecretString};
+use finstack_ai_runtime::child::AgentInvokeError;
+use finstack_ai_runtime::ports::model::SecretString;
 
 /// Explicit route and credential used to construct a remote invoker.
 ///

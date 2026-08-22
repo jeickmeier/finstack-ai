@@ -165,7 +165,7 @@ impl<'de> Deserialize<'de> for CapabilitySpec {
 /// Serializable run-policy subset owned by agent composition.
 ///
 /// [`Self::approval_grant`] selects how paid-tool approvals park and
-/// release. It does not relax [`finstack_ai_runtime::ApprovalRequirement::Policy`]:
+/// release. It does not relax [`finstack_ai_runtime::ports::model::ApprovalRequirement::Policy`]:
 /// that floor still applies on every catalog. Existing specs that omit
 /// `approval_grant` deserialize as [`ApprovalGrantMode::PerCall`].
 ///
@@ -194,7 +194,7 @@ pub struct RunPolicy {
     /// [`ApprovalGrantMode::PerCall`] (default) parks once per unpaid
     /// Policy or Required tool call. [`ApprovalGrantMode::InformedBatch`]
     /// parks once listing every remaining unpaid paid tool. Neither mode
-    /// can weaken [`finstack_ai_runtime::ApprovalRequirement::Policy`].
+    /// can weaken [`finstack_ai_runtime::ports::model::ApprovalRequirement::Policy`].
     #[serde(default, skip_serializing_if = "approval_grant_is_per_call")]
     pub approval_grant: ApprovalGrantMode,
 }

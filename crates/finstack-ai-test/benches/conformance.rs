@@ -30,14 +30,17 @@ use finstack_ai_kernel::{
     RunSecurityContext, SessionId, Stage, StageCursor, StageSettled, TextBlock, Timestamp,
     ToolCallBlock, ToolCallIdentity, ToolCallTag, TransitionEnv, TurnId, TurnTag, Usage,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
     AuthorizationContext, CancellationSignal, InputCapabilities, Model, ModelCallContext,
     ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream,
     ModelName, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
-    ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTokenEstimate, PortFuture,
-    RunCallContext, StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolStreamAssembler,
-    ToolStreamItem, UsageDelta,
+    ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTokenEstimate, RunCallContext,
+    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
+    ToolDeferralSupport, UsageDelta,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolError, ToolEventStream, ToolResult, ToolStreamAssembler, ToolStreamItem,
 };
 use finstack_ai_test::{
     ConformanceRunner, NoOpRustAdapter, ReducerRustAdapter, compare_normalized_bytes,

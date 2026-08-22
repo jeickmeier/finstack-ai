@@ -7,10 +7,11 @@ use finstack_ai_kernel::{
     AgentId, BundleId, ComponentInvocation, ComponentRef, Digest, InvocationRecovery,
     JsonSchemaDraft, RawJson, SchemaRef,
 };
-use finstack_ai_runtime::{
-    ArtifactStore, JsonSchemaToolValidatorCompiler, Model, ResolvedToolCatalog,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolValidator, ToolValidatorCompiler,
-    ToolsetRegistration,
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ports::model::Model;
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolValidator, ToolValidatorCompiler, ToolsetRegistration,
 };
 
 use super::activation::NativeCapabilityHost;
@@ -109,11 +110,11 @@ fn prepare_tool_catalog(resolved: &ResolvedAgent) -> Result<ResolvedToolCatalog,
                 .iter()
                 .map(|tool| {
                     let approval = match tool.approval.requirement {
-                        finstack_ai_runtime::ApprovalRequirement::NotRequired => {
+                        finstack_ai_runtime::ports::model::ApprovalRequirement::NotRequired => {
                             ToolPolicyDecision::Allow
                         }
-                        finstack_ai_runtime::ApprovalRequirement::Required
-                        | finstack_ai_runtime::ApprovalRequirement::Policy => {
+                        finstack_ai_runtime::ports::model::ApprovalRequirement::Required
+                        | finstack_ai_runtime::ports::model::ApprovalRequirement::Policy => {
                             ToolPolicyDecision::RequireApproval
                         }
                     };
@@ -178,7 +179,10 @@ impl Agent {
         agent_id: AgentId,
         bundle_id: BundleId,
         model: (ComponentRef, Arc<dyn Model>),
-        store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
+        store: (
+            ComponentRef,
+            Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
+        ),
     ) -> NativeAgentBuilder {
         NativeAgentBuilder::new(agent_id, bundle_id, model, store)
     }
@@ -344,7 +348,7 @@ impl Agent {
     pub(super) fn live_tool_specs(
         &self,
         active: &[finstack_ai_kernel::ActiveCapability],
-    ) -> Vec<finstack_ai_runtime::ToolSpec> {
+    ) -> Vec<finstack_ai_runtime::ports::model::ToolSpec> {
         self.tools
             .tools()
             .filter(|tool| {
@@ -530,7 +534,7 @@ impl Agent {
 
     /// Borrow the resolved journal store.
     #[must_use]
-    pub fn journal_store(&self) -> Arc<dyn finstack_ai_runtime::JournalStore> {
+    pub fn journal_store(&self) -> Arc<dyn finstack_ai_runtime::ports::journal::JournalStore> {
         Arc::clone(self.resolved.run_plan().store().handle())
     }
 

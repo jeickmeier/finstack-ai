@@ -37,7 +37,7 @@ async fn shutdown_aborts_an_uncooperative_model_only_after_its_grace_deadline() 
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model_port)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                 .await
                 .expect("model readiness"),
         ),

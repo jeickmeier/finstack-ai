@@ -1,4 +1,4 @@
-//! Durable multi-writer `PostgreSQL` [`JournalStore`](finstack_ai_runtime::JournalStore)
+//! Durable multi-writer `PostgreSQL` [`JournalStore`](finstack_ai_runtime::ports::journal::JournalStore)
 //! implementation (docs/superpowers/specs/2026-08-20-postgres-journal-design.md).
 //!
 //! Unlike sqlite's single ordered worker, operations run natively async on
@@ -7,7 +7,7 @@
 //! ordering. Applications inject this crate explicitly. It is not the Agent,
 //! Python, or WASM default (no WASM support: native-tokio only).
 //!
-//! This crate provides the complete [`JournalStore`](finstack_ai_runtime::JournalStore)
+//! This crate provides the complete [`JournalStore`](finstack_ai_runtime::ports::journal::JournalStore)
 //! surface over `PostgreSQL`: configuration, error mapping, schema
 //! management, the connection pool, an open path with `health()`, the
 //! multi-writer `append` protocol, chain-verified `load`/`load_from`,

@@ -3,10 +3,10 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId, SessionId,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ContextBudget, ContextCallContext,
-    ContextOverflowPolicy, ContextProvider, ContextRequest, RunCallContext,
+use finstack_ai_runtime::ports::context::{
+    ContextBudget, ContextCallContext, ContextOverflowPolicy, ContextProvider, ContextRequest,
 };
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
 use tempfile::TempDir;
 
 use super::*;
@@ -112,7 +112,10 @@ async fn budget_reject_does_not_silently_exceed() {
         .collect(context(), request(ContextOverflowPolicy::Reject, 4))
         .await
         .expect_err("budget");
-    assert_eq!(error.code(), finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED);
+    assert_eq!(
+        error.code(),
+        finstack_ai_runtime::ports::context::CONTEXT_BUDGET_EXCEEDED
+    );
 }
 
 #[cfg(unix)]

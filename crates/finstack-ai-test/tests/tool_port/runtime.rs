@@ -96,7 +96,7 @@ async fn tool_progress_advances_the_transient_sequence_without_entering_the_jour
 #[tokio::test]
 async fn tool_reported_errors_remain_bounded_and_stably_classified() {
     let spec = tool_spec("reported-error");
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([spec]);
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> = Arc::from([spec]);
     let toolset = Arc::new(ScriptedToolset::new(Arc::clone(&tools), Vec::new()));
     let resolved = catalog(toolset, 1)
         .by_name("reported-error")
@@ -141,7 +141,7 @@ async fn tool_reported_errors_remain_bounded_and_stably_classified() {
     }
 
     let deadline = ToolError::try_new(
-        finstack_ai_runtime::TOOL_DEADLINE_EXCEEDED,
+        finstack_ai_runtime::ports::tool::TOOL_DEADLINE_EXCEEDED,
         finstack_ai_kernel::ErrorCategory::Deadline,
         false,
         "tool result arrived after its committed deadline",
@@ -160,7 +160,7 @@ async fn tool_reported_errors_remain_bounded_and_stably_classified() {
 
 #[tokio::test]
 async fn failed_tool_batch_append_never_executes_a_tool() {
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([tool_spec("echo")]);
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> = Arc::from([tool_spec("echo")]);
     let toolset = Arc::new(ScriptedToolset::new(
         Arc::clone(&tools),
         vec![completed_tool(0)],
@@ -195,7 +195,7 @@ async fn failed_tool_batch_append_never_executes_a_tool() {
             stream_limits: ToolStreamLimits::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model)
                 .await
                 .expect("model readiness"),
         ),
@@ -426,9 +426,9 @@ async fn reverse_completion_commits_arrivals_but_finalizes_tool_messages_in_sour
         tokio::task::yield_now().await;
     }
     wait_for_phase(&store, RunPhase::AfterToolBatch).await;
-    let loaded = finstack_ai_runtime::JournalStore::load(
+    let loaded = finstack_ai_runtime::ports::journal::JournalStore::load(
         store.as_ref(),
-        finstack_ai_runtime::LoadRequest {
+        finstack_ai_runtime::ports::journal::LoadRequest {
             session_id: id::<SessionTag>(1),
         },
     )
@@ -493,9 +493,9 @@ async fn native_panic_becomes_stable_call_failure_without_leaking_payload_or_kil
     let (mut owner, store, toolset, handle) =
         setup(2, plans, 2, 2, ToolExecutionMode::Parallel).await;
     wait_for_phase(&store, RunPhase::AfterToolBatch).await;
-    let loaded = finstack_ai_runtime::JournalStore::load(
+    let loaded = finstack_ai_runtime::ports::journal::JournalStore::load(
         store.as_ref(),
-        finstack_ai_runtime::LoadRequest {
+        finstack_ai_runtime::ports::journal::LoadRequest {
             session_id: id::<SessionTag>(1),
         },
     )

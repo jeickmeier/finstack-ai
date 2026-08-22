@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{AuthorizationEvidence, InteractionKind, RunSecurityContext, Timestamp};
-use finstack_ai_runtime::{WorkflowCheckpoint, WorkflowSession, WorkflowWait, classify_wait};
+use finstack_ai_runtime::workflow::{
+    WorkflowCheckpoint, WorkflowSession, WorkflowWait, classify_wait,
+};
 use finstack_ai_workflow_worker::{WakeIndexStore, park as worker_park};
 
 use crate::error::HitlError;

@@ -47,7 +47,7 @@ async fn runtime_publishes_validated_progress_before_terminal_settlement() {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model_port)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                 .await
                 .expect("model readiness"),
         ),

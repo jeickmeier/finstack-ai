@@ -208,18 +208,20 @@ pub fn run_public_api_fixture(fixture: &PublicApiFixture) -> Result<(), PublicAp
         | "pr014-record"
         | "pr046-record"
         | "corrupt-replay" => crate::fixtures::kernel::run_pr009_subject(fixture),
-        "model-request-draft" => {
-            run_strict_runtime_subject::<finstack_ai_runtime::ModelRequestDraft>(fixture)
+        "model-request-draft" => run_strict_runtime_subject::<
+            finstack_ai_runtime::ports::model::ModelRequestDraft,
+        >(fixture),
+        "model-context-profile" => run_strict_runtime_subject::<
+            finstack_ai_runtime::ports::model::ModelContextProfile,
+        >(fixture),
+        "tool-spec" => {
+            run_strict_runtime_subject::<finstack_ai_runtime::ports::model::ToolSpec>(fixture)
         }
-        "model-context-profile" => {
-            run_strict_runtime_subject::<finstack_ai_runtime::ModelContextProfile>(fixture)
-        }
-        "tool-spec" => run_strict_runtime_subject::<finstack_ai_runtime::ToolSpec>(fixture),
         "pr047-identity" => {
-            run_strict_runtime_subject::<finstack_ai_runtime::ExternalIdentityKey>(fixture)
+            run_strict_runtime_subject::<finstack_ai_runtime::session::ExternalIdentityKey>(fixture)
         }
         "pr047-lane-inspect" => {
-            run_strict_runtime_subject::<finstack_ai_runtime::LaneInspect>(fixture)
+            run_strict_runtime_subject::<finstack_ai_runtime::session::LaneInspect>(fixture)
         }
         other => Err(PublicApiFixtureError::Failed(format!(
             "unknown subject {other}"

@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use finstack_ai_kernel::{Digest, Metadata, RunId, Sensitivity, SessionId};
-use finstack_ai_runtime::{Bytes, PortFuture, PortObject};
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::ports::{PortFuture, PortObject};
 
 /// Stable code for an unavailable object service.
 pub(crate) const OBJECT_UNAVAILABLE: &str = "object_unavailable";

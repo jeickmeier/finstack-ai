@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{Digest, Timestamp};
 use finstack_ai_protocol::{RemoteAuthMethod, RemotePreAuth, require_features, select_version};
-use finstack_ai_runtime::{SecurityAuditCategory, SecurityAuditEvent, SecurityAuditGate};
+use finstack_ai_runtime::audit::{SecurityAuditCategory, SecurityAuditEvent, SecurityAuditGate};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 

@@ -10,10 +10,14 @@ mod native {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use finstack_ai_kernel::OperationLocator;
-    use finstack_ai_runtime::{
-        ContextProvider, ExternalClock, LockedModelContextProfile, ModelContextProfileOverride,
-        ResolvedToolCatalog, SessionError, WorkflowSession, resolve_model_context_profile,
+    use finstack_ai_runtime::ids::ExternalClock;
+    use finstack_ai_runtime::ports::context::ContextProvider;
+    use finstack_ai_runtime::ports::model::{
+        LockedModelContextProfile, ModelContextProfileOverride, resolve_model_context_profile,
     };
+    use finstack_ai_runtime::ports::tool::ResolvedToolCatalog;
+    use finstack_ai_runtime::session::SessionError;
+    use finstack_ai_runtime::workflow::WorkflowSession;
 
     use super::{AGENT_RUN_INVALID_CONFIGURATION, Agent, AgentRun, AgentRunError};
     use crate::agent::prepare::NativeIds;
@@ -215,7 +219,7 @@ mod native {
     }
 
     type WorkflowPorts = (
-        Arc<finstack_ai_runtime::ReadyModel>,
+        Arc<finstack_ai_runtime::ports::model::ReadyModel>,
         LockedModelContextProfile,
         Option<Arc<ResolvedToolCatalog>>,
     );
@@ -248,7 +252,7 @@ mod native {
     }
 
     pub(super) fn workflow_error(
-        error: &finstack_ai_runtime::WorkflowDriverError,
+        error: &finstack_ai_runtime::workflow::WorkflowDriverError,
     ) -> AgentRunError {
         AgentRunError::runtime_message(error.to_string())
     }
@@ -310,7 +314,7 @@ pub(crate) use native::LaneLive;
 #[cfg(feature = "native-tokio")]
 pub(crate) fn live_run(
     lane: &crate::Lane,
-) -> Result<Option<AgentRun>, finstack_ai_runtime::SessionError> {
+) -> Result<Option<AgentRun>, finstack_ai_runtime::session::SessionError> {
     native::live_run(lane)
 }
 
@@ -356,13 +360,13 @@ impl crate::Lane {
     /// Park the in-process driver without dropping the journal.
     ///
     /// The lane's active or suspended run remains durable. [`Self::resume`]
-    /// respawns [`finstack_ai_runtime::RunTaskOwner`].
+    /// respawns [`finstack_ai_runtime::run::RunTaskOwner`].
     ///
     /// # Errors
     ///
     /// Returns a recover or lock failure.
     #[cfg(feature = "native-tokio")]
-    pub async fn suspend(&self) -> Result<(), finstack_ai_runtime::SessionError> {
+    pub async fn suspend(&self) -> Result<(), finstack_ai_runtime::session::SessionError> {
         let Some((generation, run)) = native::begin_suspend(self)? else {
             return Ok(());
         };
@@ -374,12 +378,12 @@ impl crate::Lane {
         native::finish_suspend(self, generation)
     }
 
-    /// Recover the parked run and respawn [`finstack_ai_runtime::RunTaskOwner`].
+    /// Recover the parked run and respawn [`finstack_ai_runtime::run::RunTaskOwner`].
     ///
-    /// Restore uses [`finstack_ai_runtime::WorkflowSession::trusted`] plus
-    /// [`finstack_ai_runtime::WorkflowSession::with_ports`],
-    /// [`finstack_ai_runtime::WorkflowSession::with_middleware_chain`],
-    /// [`finstack_ai_runtime::WorkflowSession::with_context_providers`],
+    /// Restore uses [`finstack_ai_runtime::workflow::WorkflowSession::trusted`] plus
+    /// [`finstack_ai_runtime::workflow::WorkflowSession::with_ports`],
+    /// [`finstack_ai_runtime::workflow::WorkflowSession::with_middleware_chain`],
+    /// [`finstack_ai_runtime::workflow::WorkflowSession::with_context_providers`],
     /// and the local-workflow restart respawn path.
     ///
     /// # Errors

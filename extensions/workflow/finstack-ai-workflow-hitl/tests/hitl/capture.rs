@@ -10,11 +10,14 @@ use finstack_ai_kernel::{
     RunPropagationPolicy, RunRelation, RunSecurityContext, TextBlock, Timestamp, TransitionEnv,
     Version,
 };
-use finstack_ai_runtime::{
-    CommitCoordinator, ExternalClock, JournalStore, LockedModelContextProfile, Model,
-    ModelContextProfile, ModelName, TokenEstimatorRef, TokenEstimatorSource, WorkflowCheckpoint,
-    WorkflowSession, WorkflowWait, resolve_model_context_profile,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    LockedModelContextProfile, Model, ModelContextProfile, ModelName, TokenEstimatorRef,
+    TokenEstimatorSource, resolve_model_context_profile,
 };
+use finstack_ai_runtime::workflow::{WorkflowCheckpoint, WorkflowSession, WorkflowWait};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
 use finstack_ai_workflow_hitl::{

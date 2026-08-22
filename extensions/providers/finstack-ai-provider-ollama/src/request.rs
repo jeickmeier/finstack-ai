@@ -7,7 +7,7 @@ use base64::Engine as _;
 use finstack_ai_kernel::{
     ContentBlock, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
 };
-use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia};
+use finstack_ai_runtime::ports::model::{ModelError, ModelRequestDraft, ResolvedMedia};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -458,7 +458,7 @@ mod tests {
         JsonSchemaDraft, MessageId, Metadata, ProviderIds, SchemaRef, TextBlock, Timestamp,
         ToolCallBlock, ToolCallId, ToolResultBlock,
     };
-    use finstack_ai_runtime::{ModelName, ModelRequestLimits, ModelSettings};
+    use finstack_ai_runtime::ports::model::{ModelName, ModelRequestLimits, ModelSettings};
 
     #[test]
     fn maps_native_messages_tools_limits_and_reasoning() {
@@ -799,8 +799,8 @@ mod tests {
         .expect("message")
     }
 
-    fn tool(name: &str, schema: &[u8]) -> finstack_ai_runtime::ToolSpec {
-        finstack_ai_runtime::ToolSpec {
+    fn tool(name: &str, schema: &[u8]) -> finstack_ai_runtime::ports::model::ToolSpec {
+        finstack_ai_runtime::ports::model::ToolSpec {
             id: finstack_ai_kernel::ToolId::parse("finstack.tools.fixture").expect("tool id"),
             model_name: Arc::from(name),
             title: Arc::from("Fixture tool"),
@@ -808,16 +808,16 @@ mod tests {
             input_schema: RawJson::parse(schema).expect("schema"),
             output_schema: None,
             execution: finstack_ai_kernel::ToolExecutionMode::Sequential,
-            side_effect: finstack_ai_runtime::SideEffectClass::ReadOnly,
+            side_effect: finstack_ai_runtime::ports::model::SideEffectClass::ReadOnly,
             retry_safety: finstack_ai_kernel::RetrySafety::SafeToRetry,
-            approval: finstack_ai_runtime::ApprovalMetadata {
-                requirement: finstack_ai_runtime::ApprovalRequirement::NotRequired,
+            approval: finstack_ai_runtime::ports::model::ApprovalMetadata {
+                requirement: finstack_ai_runtime::ports::model::ApprovalRequirement::NotRequired,
                 reason: None,
                 attributes: Metadata::empty(),
             },
             max_result_bytes: 1_024,
             metadata: Metadata::empty(),
-            deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
+            deferral: finstack_ai_runtime::ports::model::ToolDeferralSupport::Never,
         }
     }
 
@@ -825,7 +825,7 @@ mod tests {
         messages: Vec<Message>,
         settings: &[u8],
         output: OutputSpec,
-        tools: Vec<finstack_ai_runtime::ToolSpec>,
+        tools: Vec<finstack_ai_runtime::ports::model::ToolSpec>,
     ) -> ModelRequestDraft {
         ModelRequestDraft {
             model: ModelName::try_new("fixture-model").expect("model"),

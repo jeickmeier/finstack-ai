@@ -39,12 +39,13 @@ use crate::driver::{
     ObjectDriver, ObjectError, ObjectKey, ObjectMetadata, ObjectScope, PageToken, PutPayload,
 };
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Digest, Metadata, Timestamp};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
     ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
-    Bytes, PortFuture, artifact_storage_key, build_artifact_ref, validate_artifact_scope,
-    validate_retrieved_artifact,
+    artifact_storage_key, build_artifact_ref, validate_artifact_scope, validate_retrieved_artifact,
 };
+use finstack_ai_runtime::ports::PortFuture;
 use serde::{Deserialize, Serialize};
 
 const ENVELOPE_MAGIC: &[u8; 8] = b"FSAIART2";

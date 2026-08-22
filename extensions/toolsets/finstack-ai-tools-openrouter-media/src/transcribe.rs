@@ -1,7 +1,7 @@
 //! `openrouter_transcribe_audio` handler.
 
 use base64::Engine as _;
-use finstack_ai_runtime::{ToolCallContext, ToolError};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 

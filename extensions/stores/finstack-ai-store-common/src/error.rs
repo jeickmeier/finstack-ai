@@ -1,7 +1,7 @@
 //! Protocol-to-store error mapping shared by all backends.
 
 use finstack_ai_protocol::ProtocolError;
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 
 /// Map a protocol failure onto the stable store error surface.
 #[must_use]

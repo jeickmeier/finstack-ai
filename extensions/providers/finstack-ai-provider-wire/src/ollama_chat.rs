@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use finstack_ai_kernel::{ContentBlock, JsonBlock, ProviderIds, RawJson, TextBlock, Usage};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ModelResponse, ModelStreamItem, ModelToolCall, ReasoningDelta, TextDelta, ToolCallDelta,
     UsageDelta,
 };

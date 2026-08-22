@@ -7,10 +7,12 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Timestamp};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactRead,
-    ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits, Bytes, PortFuture,
+    ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
 };
+use finstack_ai_runtime::ports::PortFuture;
 
 use crate::artifact::ObjectArtifactStore;
 

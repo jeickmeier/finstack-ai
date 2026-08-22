@@ -7,10 +7,11 @@ use base64::Engine as _;
 pub(crate) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use finstack_ai_kernel::{ArtifactRef, ErrorCategory, Metadata, Sensitivity, Timestamp};
 use finstack_ai_net_guard::{BodyReadInterrupt, NetGuardError, read_body_bounded_interruptible};
-use finstack_ai_runtime::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ToolCallContext, ToolError,
-    stage_required_artifact,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
 };
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use futures_util::StreamExt;
 use reqwest::header::HeaderValue;
 use serde::Deserialize;

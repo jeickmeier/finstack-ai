@@ -10,11 +10,16 @@ use finstack_ai_kernel::{
     Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId,
     ToolCallBlock, ToolExecutionMode, ToolFailurePolicy, ToolId, ValidatedToolCall, Version,
 };
-use finstack_ai_runtime::{
-    AssembledToolStream, AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget,
-    ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider, ContextRequest,
-    RunCallContext, ToolCallContext, ToolDeferralSupport, ToolResult, ToolStreamAssembler,
-    ToolStreamLimits, ToolTerminal, Toolset,
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy,
+    ContextProvider, ContextRequest,
+};
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, RunCallContext, ToolDeferralSupport,
+};
+use finstack_ai_runtime::ports::tool::{
+    AssembledToolStream, ToolCallContext, ToolResult, ToolStreamAssembler, ToolStreamLimits,
+    ToolTerminal, Toolset,
 };
 use finstack_ai_test::{
     ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
@@ -242,7 +247,7 @@ fn context_call() -> ContextCallContext {
 async fn assemble(
     toolset: &dyn Toolset,
     call: ValidatedToolCall,
-) -> Result<AssembledToolStream, finstack_ai_runtime::ToolError> {
+) -> Result<AssembledToolStream, finstack_ai_runtime::ports::tool::ToolError> {
     let stream = toolset.call(tool_ctx(), call).await?;
     ToolStreamAssembler::new(ToolStreamLimits::default())
         .assemble(stream, None, 1_024, ToolDeferralSupport::Never)
@@ -731,7 +736,7 @@ async fn template_project_builds_and_runs() {
         )
         .await
         .expect("call");
-    let finstack_ai_runtime::ToolStreamItem::Completed(result) =
+    let finstack_ai_runtime::ports::tool::ToolStreamItem::Completed(result) =
         stream.next().await.expect("item").expect("ok")
     else {
         panic!("expected completion");

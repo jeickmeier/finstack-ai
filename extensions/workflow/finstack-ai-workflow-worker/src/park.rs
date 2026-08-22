@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use finstack_ai_runtime::{WorkflowCheckpoint, WorkflowSession, WorkflowWait, classify_wait};
+use finstack_ai_runtime::workflow::{
+    WorkflowCheckpoint, WorkflowSession, WorkflowWait, classify_wait,
+};
 
 use crate::error::WorkerError;
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow};

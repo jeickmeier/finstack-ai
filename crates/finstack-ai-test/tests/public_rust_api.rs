@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use finstack_ai_kernel::Timestamp;
-use finstack_ai_runtime::UuidV7Generator;
+use finstack_ai_runtime::ids::UuidV7Generator;
 use finstack_ai_test::{
     FixedClock, PatternRandomSource, discover_public_api_fixtures, load_public_api_fixture,
     run_all_public_api_fixtures, run_public_api_fixture,

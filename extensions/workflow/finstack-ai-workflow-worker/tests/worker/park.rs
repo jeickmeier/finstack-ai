@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use finstack_ai_runtime::{ExternalClock, Model, WorkflowWait, classify_wait};
+use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::ports::model::Model;
+use finstack_ai_runtime::workflow::{WorkflowWait, classify_wait};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_worker::{MemoryWorkerStore, WakeIndexStore, WakeReason, park};
 

@@ -8,10 +8,11 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_provider_wire::{GeminiGenerateContentAssembly, StreamNormError, StreamNormKind};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
     CancellationSignal, InputCapabilities, MediaResolveError, MediaResolveKind, Model,
     ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, PortFuture,
+    ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate,
     ReconcileContext, ResolveDraftMediaError, StructuredOutputCapability, resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
@@ -67,7 +68,7 @@ impl GeminiProvider {
     ///
     /// ```
     /// use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
-    /// use finstack_ai_runtime::Model;
+    /// use finstack_ai_runtime::ports::model::Model;
     ///
     /// let config = GeminiConfig::try_new("http://127.0.0.1:9").expect("config");
     /// let model =
@@ -499,7 +500,7 @@ mod tests {
         ProviderIds, RawJson, RunId, SessionId, Timestamp,
     };
     use finstack_ai_provider_wire::{GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly};
-    use finstack_ai_runtime::{
+    use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
         ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem, RunCallContext,
     };

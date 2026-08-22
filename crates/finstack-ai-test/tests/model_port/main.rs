@@ -13,20 +13,27 @@ use finstack_ai_kernel::{
     RetryDirective, RetrySafety, RunEventBody, RunEventKind, RunPhase, Sensitivity, SessionTag,
     Stage, TextBlock, TransitionEnv, Usage,
 };
-use finstack_ai_runtime::{
-    ApprovalGrantMode, CancellationSignal, CommitCoordinator, CommitCoordinatorError,
+use finstack_ai_runtime::commit::{CommitCoordinator, CommitCoordinatorError};
+use finstack_ai_runtime::events::{
     EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionCloseReason,
-    EventSubscriptionConfig, ExternalClock, JournalStore, LoadRequest,
-    MODEL_RECONCILIATION_UNSUPPORTED, MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
+    EventSubscriptionConfig, ProgressCoalescing,
+};
+use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest, StoreError};
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, CancellationSignal, MODEL_RECONCILIATION_UNSUPPORTED,
+    MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
     MODEL_STREAM_ERROR_AFTER_COMPLETION, MODEL_STREAM_ITEM_AFTER_COMPLETION,
     MODEL_STREAM_MISSING_COMPLETION, MODEL_TOOL_CALL_ARGUMENTS_INVALID,
     MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE, MODEL_USAGE_INVALID, Model,
     ModelDeferral, ModelError, ModelProgress, ModelReconcileResult, ModelResponse,
-    ModelResumeAction, ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
-    ModelTerminal, ModelToolCall, ModelWarmupContext, OpaqueProviderEvent, ProgressCoalescing,
-    ReasoningDelta, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, ShutdownOutcome, StoreError, TextDelta, ToolCallDelta, UsageDelta,
-    model_resume_action,
+    ModelResumeAction, ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTerminal,
+    ModelToolCall, ModelWarmupContext, OpaqueProviderEvent, ReasoningDelta, TextDelta,
+    ToolCallDelta, UsageDelta, model_resume_action,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
+    SameIdentityRetryPolicy, ShutdownOutcome,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{FixedClock, ScriptedModel, ScriptedModelAction, ScriptedModelPlan};

@@ -8,7 +8,7 @@ use finstack_ai_protocol::{
     decode_envelope, decode_frame_len, encode_envelope, encode_frame, require_features,
     select_version,
 };
-use finstack_ai_runtime::AgentInvokeError;
+use finstack_ai_runtime::child::AgentInvokeError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{Duration, Instant};
 
@@ -123,7 +123,7 @@ where
     let method = match route
         .token
         .as_ref()
-        .map(finstack_ai_runtime::SecretString::expose)
+        .map(finstack_ai_runtime::ports::model::SecretString::expose)
     {
         Some(token) if !token.is_empty() => RemoteAuthMethod::Bearer {
             token: token.to_owned(),

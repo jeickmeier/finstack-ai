@@ -6,7 +6,7 @@ async fn panicking_sink_does_not_fail_the_run() {
     let request = isolated_child_request(Arc::clone(&store), &parent).await;
     let bridge = ChildRunBridge::new(
         vec![Arc::new(ClaimingPlanner::new(request))],
-        Arc::clone(&invoker) as Arc<dyn finstack_ai_runtime::AgentInvoker>,
+        Arc::clone(&invoker) as Arc<dyn finstack_ai_runtime::child::AgentInvoker>,
         Arc::clone(&invoker) as Arc<dyn finstack_ai::ChildRunResolver>,
     )
     .with_event_sink(Arc::new(PanickingSink));
@@ -26,7 +26,7 @@ async fn blocking_sink_does_not_fail_the_run() {
     let request = isolated_child_request(Arc::clone(&store), &parent).await;
     let bridge = ChildRunBridge::new(
         vec![Arc::new(ClaimingPlanner::new(request))],
-        Arc::clone(&invoker) as Arc<dyn finstack_ai_runtime::AgentInvoker>,
+        Arc::clone(&invoker) as Arc<dyn finstack_ai_runtime::child::AgentInvoker>,
         Arc::clone(&invoker) as Arc<dyn finstack_ai::ChildRunResolver>,
     )
     .with_event_sink(Arc::new(BlockingSink));

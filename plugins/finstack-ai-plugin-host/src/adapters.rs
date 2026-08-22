@@ -10,10 +10,15 @@ use finstack_ai_kernel::{
     ComponentRef, Digest, ErrorCategory, InvocationRecovery, Metadata, RawJson, Timestamp,
     ValidatedToolCall, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
     ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, PortFuture, ToolCallContext, ToolError,
-    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    ContextProviderDescriptor, ContextRequest,
+};
+use finstack_ai_runtime::ports::model::ToolSpec;
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
+    ToolsetDescriptor,
 };
 use finstack_ai_wit::{
     NoopPluginHooks, PluginGuestHooks, PluginLifecycle, PluginManifest, honor_deadline,
@@ -473,7 +478,7 @@ fn construction_context(manifest: &PluginManifest) -> ComponentConstructionConte
     ComponentConstructionContext {
         component: ComponentRef::new(manifest.identity.clone(), Some(adapter_version(manifest))),
         configuration: None,
-        cancellation: finstack_ai_runtime::CancellationSignal::new(),
+        cancellation: finstack_ai_runtime::ports::model::CancellationSignal::new(),
         deadline: None,
         metadata: Metadata::empty(),
     }
@@ -482,7 +487,7 @@ fn construction_context(manifest: &PluginManifest) -> ComponentConstructionConte
 async fn instantiate_toolset(
     host: &PluginHost,
     ready: &ReadyWasm,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
 ) -> Result<LiveToolset, PluginHostError> {
     let limits = effective_limits(&ready.manifest, host.default_limits());
     let mut store = new_store(
@@ -510,7 +515,7 @@ async fn instantiate_toolset(
 async fn instantiate_context(
     host: &PluginHost,
     ready: &ReadyWasm,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
 ) -> Result<LiveContext, PluginHostError> {
     let limits = effective_limits(&ready.manifest, host.default_limits());
     let mut store = new_store(
@@ -540,7 +545,7 @@ fn map_guest_result<T, U>(
         Result<T, crate::bindings::toolset::finstack::ai_types::types::PluginError>,
         wasmtime::Error,
     >,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     ok: impl FnOnce(T) -> U,
 ) -> Result<U, PluginHostError> {
     match result {
@@ -557,7 +562,7 @@ fn map_guest_result_v1<T, U>(
         Result<T, crate::bindings::v1::toolset::finstack::ai_types::types::PluginError>,
         wasmtime::Error,
     >,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     ok: impl FnOnce(T) -> U,
 ) -> Result<U, PluginHostError> {
     match result {
@@ -571,7 +576,7 @@ fn map_guest_result_v1<T, U>(
 
 async fn list_tools_on(
     live: &mut LiveToolset,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
 ) -> Result<finstack_ai_wit::ToolCatalog, PluginHostError> {
     match live {
         LiveToolset::V004(store, bindings) => map_guest_result(
@@ -595,7 +600,7 @@ async fn list_tools_on(
 
 async fn call_tool_on(
     live: &mut LiveToolset,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     context: &finstack_ai_wit::CallContext,
     tool_id: &str,
     args: &[u8],
@@ -628,7 +633,7 @@ async fn call_tool_on(
 
 async fn collect_items_on(
     live: &mut LiveContext,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     query: &finstack_ai_wit::ContextQuery,
 ) -> Result<Vec<finstack_ai_wit::generated::ContextItem>, PluginHostError> {
     match live {
@@ -662,7 +667,7 @@ async fn list_tools(
     ready: &ReadyWasm,
     exclusive: &Semaphore,
     serialized: &SerializedToolset,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     deadline: Option<Timestamp>,
 ) -> Result<finstack_ai_wit::ToolCatalog, PluginHostError> {
     match host.instance_policy() {
@@ -700,7 +705,7 @@ async fn call_tool(
     ready: &ReadyWasm,
     exclusive: &Semaphore,
     serialized: &SerializedToolset,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     deadline: Option<Timestamp>,
     context: &finstack_ai_wit::CallContext,
     tool_id: &str,
@@ -740,7 +745,7 @@ async fn collect_items(
     ready: &ReadyWasm,
     exclusive: &Semaphore,
     serialized: &SerializedContext,
-    cancel: &finstack_ai_runtime::CancellationSignal,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     deadline: Option<Timestamp>,
     query: &finstack_ai_wit::ContextQuery,
 ) -> Result<Vec<finstack_ai_wit::generated::ContextItem>, PluginHostError> {
@@ -853,7 +858,9 @@ mod tests {
     #[test]
     fn reference_context_item_bytes() {
         use finstack_ai_kernel::{ContentBlock, Sensitivity, TextBlock};
-        use finstack_ai_runtime::{ContextAuthority, ContextItemKind, ContextProvenance};
+        use finstack_ai_runtime::ports::context::{
+            ContextAuthority, ContextItemKind, ContextProvenance,
+        };
         use finstack_ai_wit::encode_guest_item;
         use std::sync::Arc;
 

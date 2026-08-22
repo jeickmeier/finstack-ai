@@ -15,9 +15,9 @@ use finstack_ai_kernel::{
     RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SessionTag, Stage,
     StageCursor, TextBlock, Timestamp, ToolCallBlock, ToolCallTag, TransitionEnv,
 };
-use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, LoadRequest, OpaqueSnapshot, SnapshotRequest,
-    StateSnapshotRequest,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, OpaqueSnapshot, SnapshotRequest, StateSnapshotRequest,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
@@ -470,7 +470,9 @@ pub(crate) fn recover_hash(store: &Arc<MemoryJournalStore>) -> Digest {
     .expect("hash")
 }
 
-pub(crate) fn load_session(store: &Arc<MemoryJournalStore>) -> finstack_ai_runtime::LoadedSession {
+pub(crate) fn load_session(
+    store: &Arc<MemoryJournalStore>,
+) -> finstack_ai_runtime::ports::journal::LoadedSession {
     block_on(store.load(LoadRequest {
         session_id: id::<SessionTag>(1),
     }))

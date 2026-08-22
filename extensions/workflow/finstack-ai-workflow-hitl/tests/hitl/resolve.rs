@@ -10,7 +10,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     AuthorizationEvidence, Id, InteractionRequest, InteractionTag, PrincipalRef, RawJson,
 };
-use finstack_ai_runtime::{JournalStore, WorkflowWait};
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::workflow::WorkflowWait;
 use finstack_ai_workflow_hitl::{
     HitlError, HitlInboxStore, HitlRouter, InteractionRow, InteractionStatus, MemoryHitlStore,
     ResolutionInput, ResolveAuthorizer, capture,

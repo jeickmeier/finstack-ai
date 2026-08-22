@@ -9,13 +9,19 @@ use finstack_ai_kernel::{
     ToolExecutionMode, ToolId, Version,
 };
 use finstack_ai_kernel::{BudgetRequest, Metadata, RetrySafety};
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata, ApprovalRequirement,
-    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, JournalStore,
-    ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall, PortFuture,
-    SideEffectClass, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferral,
-    ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset, child_relation_digest,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext, ChildRunHandle, ChildRunRequest,
+    child_relation_digest,
 };
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, ModelContextProfile, ModelName, ModelResponse,
+    ModelStreamItem, ModelToolCall, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
+    ToolCallDelta, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{ToolDeferral, ToolStreamItem, Toolset};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
@@ -178,7 +184,7 @@ fn completed(text: &str) -> ScriptedModelPlan {
     ScriptedModelPlan {
         actions: vec![
             ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                finstack_ai_runtime::TextDelta {
+                finstack_ai_runtime::ports::model::TextDelta {
                     text: Arc::from(text),
                 },
             ))),
@@ -224,10 +230,9 @@ fn request(input: &str) -> AgentRunRequest {
 }
 
 async fn preview_parent() -> (AgentRun, Arc<dyn JournalStore>) {
-    let model: Arc<dyn finstack_ai_runtime::Model> = Arc::new(ScriptedModel::from_plans(
-        profile(),
-        vec![completed("parent")],
-    ));
+    let model: Arc<dyn finstack_ai_runtime::ports::model::Model> = Arc::new(
+        ScriptedModel::from_plans(profile(), vec![completed("parent")]),
+    );
     let store: Arc<dyn JournalStore> = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
             sessions: 4,
@@ -460,10 +465,11 @@ async fn deferred_tool_parent() -> (AgentRun, Arc<dyn JournalStore>) {
             )))],
         }],
     ));
-    let model: Arc<dyn finstack_ai_runtime::Model> = Arc::new(ScriptedModel::from_plans(
-        profile(),
-        vec![echo_tool_call(), completed("unused parent retry")],
-    ));
+    let model: Arc<dyn finstack_ai_runtime::ports::model::Model> =
+        Arc::new(ScriptedModel::from_plans(
+            profile(),
+            vec![echo_tool_call(), completed("unused parent retry")],
+        ));
     let store: Arc<dyn JournalStore> = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
             sessions: 4,
@@ -522,10 +528,9 @@ async fn deferred_tool_parent() -> (AgentRun, Arc<dyn JournalStore>) {
 }
 
 async fn completing_child(store: Arc<dyn JournalStore>) -> AgentRun {
-    let model: Arc<dyn finstack_ai_runtime::Model> = Arc::new(ScriptedModel::from_plans(
-        profile(),
-        vec![completed("child done")],
-    ));
+    let model: Arc<dyn finstack_ai_runtime::ports::model::Model> = Arc::new(
+        ScriptedModel::from_plans(profile(), vec![completed("child done")]),
+    );
     let agent = Agent::builder(
         AgentId::parse("test.agent.deferred-child").expect("agent"),
         BundleId::parse("test.bundle.deferred-child").expect("bundle"),

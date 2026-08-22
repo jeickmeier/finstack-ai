@@ -11,10 +11,14 @@ use finstack_ai_kernel::{
     RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext, SessionCreated,
     SessionTag, TextBlock, Timestamp, ToolCallBlock, ToolResultBlock, TransitionEnv,
 };
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, AuthorizationContext, ChildCoordinationIds,
-    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, JournalStore, PortFuture,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, AgentRef, ChildCoordinationIds, ChildRunContext,
+    ChildRunHandle, ChildRunRequest,
 };
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::AuthorizationContext;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
 pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {
@@ -190,7 +194,7 @@ impl AgentInvoker for RecordingInvoker {
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
         *self.starts.lock().expect("starts") += 1;
         let relation_digest =
-            finstack_ai_runtime::child_relation_digest(&context, &request).expect("digest");
+            finstack_ai_runtime::child::child_relation_digest(&context, &request).expect("digest");
         let locator = request.locator;
         Box::pin(async move {
             Ok(ChildRunHandle {

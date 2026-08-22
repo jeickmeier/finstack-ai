@@ -32,11 +32,17 @@ use finstack_ai_kernel::{
     AgentId, BudgetRequest, ChildPlacement, ContentBlock, ErrorCategory, Metadata, RawJson,
     RetrySafety, TextBlock, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentRef, ApprovalMetadata,
-    ApprovalRequirement, ChildRunHandle, ChildRunStartRequest, ChildRunStarter, PortFuture,
-    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult,
-    ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, verify_authority,
+use finstack_ai_runtime::child::{
+    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentRef, ChildRunHandle,
+    ChildRunStartRequest, ChildRunStarter,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
+    ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;

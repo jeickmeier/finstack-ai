@@ -22,9 +22,10 @@ use finstack_ai_kernel::{
     RunSecurityContext, RunTag, SessionTag, Timestamp, TransitionEnv,
 };
 use finstack_ai_protocol::encode_snapshot;
-use finstack_ai_runtime::{
-    CommitCoordinator, IdempotencyHorizon, JournalStore, LoadFromRequest, LoadWindow,
-    OpaqueSnapshot, PruneRequest, ScanRequest, SnapshotRequest, StoreError, StoreLimits,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{
+    IdempotencyHorizon, JournalStore, LoadFromRequest, LoadWindow, OpaqueSnapshot, PruneRequest,
+    ScanRequest, SnapshotRequest, StoreError, StoreLimits,
 };
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_test::store_fixtures::{draft, id, request};
@@ -158,7 +159,7 @@ async fn scripted_session_with_aligned_snapshot(
     // to cover; its checksum is the snapshot's `head_checksum`.
     let head_checksum_at_two = {
         let loaded = store
-            .load(finstack_ai_runtime::LoadRequest {
+            .load(finstack_ai_runtime::ports::journal::LoadRequest {
                 session_id: id::<SessionTag>(1),
             })
             .await

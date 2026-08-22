@@ -20,7 +20,7 @@ use crate::protocol::{Meta, PROTOCOL_VERSION, jsonrpc_request};
 use finstack_ai_kernel::Timestamp;
 use finstack_ai_net_guard::NetGuardError;
 use finstack_ai_net_guard::{BodyReadInterrupt, read_body_bounded_interruptible};
-use finstack_ai_runtime::CancellationSignal;
+use finstack_ai_runtime::ports::model::CancellationSignal;
 
 use crate::{
     MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_SERVER_NOT_ALLOWLISTED, MCP_TIMEOUT,
@@ -262,8 +262,8 @@ pub struct StdioConfig {
     /// Additional argv after the program.
     pub args: Vec<String>,
     confinement: Option<(
-        finstack_ai_runtime::ProcessConfinement,
-        finstack_ai_runtime::ConfinementProfile,
+        finstack_ai_runtime::confinement::ProcessConfinement,
+        finstack_ai_runtime::confinement::ConfinementProfile,
     )>,
 }
 
@@ -287,8 +287,8 @@ impl StdioConfig {
     #[must_use]
     pub fn with_confinement(
         mut self,
-        confinement: finstack_ai_runtime::ProcessConfinement,
-        profile: finstack_ai_runtime::ConfinementProfile,
+        confinement: finstack_ai_runtime::confinement::ProcessConfinement,
+        profile: finstack_ai_runtime::confinement::ConfinementProfile,
     ) -> Self {
         self.confinement = Some((confinement, profile));
         self
@@ -311,7 +311,7 @@ enum StdioState {
         stdout: BufReader<ChildStdout>,
     },
     Confined {
-        child: finstack_ai_runtime::ConfinedChild,
+        child: finstack_ai_runtime::confinement::ConfinedChild,
         stdin: tokio::fs::File,
         stdout: BufReader<tokio::fs::File>,
     },
@@ -330,7 +330,7 @@ impl StdioTransport {
         let state = if let Some((confinement, profile)) = &config.confinement {
             if confinement.is_unavailable() {
                 return Err(McpError::stable(
-                    finstack_ai_runtime::CONFINEMENT_UNAVAILABLE,
+                    finstack_ai_runtime::confinement::CONFINEMENT_UNAVAILABLE,
                     "MCP stdio confinement was requested and is unavailable",
                 ));
             }
@@ -367,9 +367,10 @@ impl StdioTransport {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
-            finstack_ai_runtime::configure_process_tree(command.as_std_mut()).map_err(|error| {
-                McpError::stable(error.code(), "MCP stdio process tree setup failed")
-            })?;
+            finstack_ai_runtime::confinement::configure_process_tree(command.as_std_mut())
+                .map_err(|error| {
+                    McpError::stable(error.code(), "MCP stdio process tree setup failed")
+                })?;
             let mut child = command.spawn().map_err(|error| {
                 McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
             })?;
@@ -532,7 +533,7 @@ async fn terminate_stdio_state(state: &mut StdioState) {
         StdioState::Unconfined { child, stdin, .. } => {
             let _ = stdin.shutdown().await;
             if let Some(process_id) = child.id() {
-                let _ = finstack_ai_runtime::terminate_process_tree(process_id);
+                let _ = finstack_ai_runtime::confinement::terminate_process_tree(process_id);
             }
             let _ = child.wait().await;
         }

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::ErrorCategory;
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
     ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
     StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,

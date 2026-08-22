@@ -9,10 +9,15 @@ use finstack_ai_kernel::{
     MessageRole, Metadata, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId,
     SessionId, TextBlock, Timestamp,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
     ArtifactError, ArtifactMetadata, ArtifactRead, ArtifactScope, ArtifactStore,
-    AuthorizationContext, BeforeModelInput, Bytes, CancellationSignal, ModelName,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, PortFuture, RunCallContext, StageInput,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::middleware::{BeforeModelInput, StageInput};
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ModelName, ModelRequestDraft, ModelRequestLimits,
+    ModelSettings, RunCallContext,
 };
 
 pub(crate) const SAMPLE_CSV: &[u8] = include_bytes!("../../../../fixtures/documents/sample.csv");
@@ -151,7 +156,7 @@ pub(crate) fn stage(
     media: &str,
     name: &str,
 ) -> ArtifactRef {
-    block_on(finstack_ai_runtime::stage_required_artifact(
+    block_on(finstack_ai_runtime::artifact::stage_required_artifact(
         store,
         test_scope(),
         Bytes::copy_from_slice(bytes),
@@ -170,10 +175,10 @@ pub(crate) fn blob_of(artifact: &ArtifactRef) -> BlobRef {
     artifact.blob().clone()
 }
 
-pub(crate) fn middleware_context() -> finstack_ai_runtime::MiddlewareContext {
+pub(crate) fn middleware_context() -> finstack_ai_runtime::ports::middleware::MiddlewareContext {
     let principal =
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
-    finstack_ai_runtime::MiddlewareContext {
+    finstack_ai_runtime::ports::middleware::MiddlewareContext {
         run: RunCallContext {
             locator: OperationLocator::try_new(
                 "tenant-a",

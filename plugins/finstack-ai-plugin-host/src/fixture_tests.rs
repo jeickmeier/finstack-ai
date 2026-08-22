@@ -13,12 +13,15 @@ use finstack_ai_kernel::{
     RunId, SessionId, TextBlock, ToolCallBlock, ToolCallId, ToolExecutionMode, ToolFailurePolicy,
     ToolId, ValidatedToolCall, Version,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget, ContextCallContext,
-    ContextItemKind, ContextOverflowPolicy, ContextRequest, Model, ModelContextProfile, ModelName,
-    RunCallContext, TokenEstimatorRef, TokenEstimatorSource, ToolCallContext, ToolStreamItem,
-    Toolset,
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy,
+    ContextRequest,
 };
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, Model, ModelContextProfile, ModelName,
+    RunCallContext, TokenEstimatorRef, TokenEstimatorSource,
+};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolStreamItem, Toolset};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
 use finstack_ai_wit::{NoopPluginHooks, manifest::manifest_digest_hex, parse_manifest};
@@ -149,7 +152,7 @@ impl Extension for StoreExtension {
     }
 
     fn register(&self, registrar: &mut Registrar) -> Result<(), finstack_ai::RegistrationError> {
-        let handle: Arc<dyn finstack_ai_runtime::JournalStore> = self.store.clone();
+        let handle: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore> = self.store.clone();
         registrar.store(
             RegistrationMetadata::new(component("test.store.memory"), MODEL_VERSION),
             ReadyComponent::new(handle),

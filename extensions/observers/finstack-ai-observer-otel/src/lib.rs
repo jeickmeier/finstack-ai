@@ -25,9 +25,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, RunEventKind, Version};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::observer::{
     Observer, ObserverDescriptor, ObserverDiagnostic, ObserverError, ObserverEventView,
-    ObserverPayloadMode, PortFuture,
+    ObserverPayloadMode,
 };
 use opentelemetry::KeyValue;
 use opentelemetry::trace::{Span, Tracer, TracerProvider};

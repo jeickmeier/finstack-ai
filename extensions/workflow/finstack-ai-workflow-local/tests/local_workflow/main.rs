@@ -19,16 +19,23 @@ use finstack_ai_kernel::{
     OperationLocator, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
     ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunPhase, Stage, Usage,
 };
-use finstack_ai_runtime::testing::ManualDriveAction;
-use finstack_ai_runtime::{
-    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, Clock, CommitCoordinator,
-    EventHubConfig, ExternalClock, JournalStore, JsonSchemaToolValidatorCompiler, Model,
-    ModelDeferral, ModelResponse, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
-    ModelToolCall, ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
-    SideEffectClass, ToolCallDelta, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec,
-    ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
-    WorkflowSession, WorkflowWait,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::{Clock, ExternalClock};
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, Model, ModelDeferral, ModelResponse,
+    ModelStreamItem, ModelStreamLimits, ModelToolCall, SideEffectClass, ToolCallDelta, ToolSpec,
 };
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolResult, ToolStreamItem, ToolStreamLimits, Toolset, ToolsetRegistration,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, ToolTaskConfig,
+};
+use finstack_ai_runtime::testing::ManualDriveAction;
+use finstack_ai_runtime::workflow::{WorkflowSession, WorkflowWait};
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,
 };

@@ -1,7 +1,7 @@
 //! Executable spec for the tick driving the kernel's credential-free
 //! interaction expiry.
 //!
-//! `finstack_ai_runtime::InteractionResumeAction::ExpireIfDue`
+//! `finstack_ai_runtime::ingress::InteractionResumeAction::ExpireIfDue`
 //! (`crates/finstack-ai-runtime/src/services/interaction.rs`) is applied by
 //! `apply_interaction_resume`
 //! (`crates/finstack-ai-runtime/src/exec/settlement/interaction.rs`), which
@@ -25,15 +25,23 @@ use finstack_ai_kernel::{
     InteractionTerminalOutcome, Metadata, PrincipalRef, ProviderIds, RawJson, ReducerStageOutcome,
     RetrySafety, RunPhase, Stage, Timestamp, ToolExecutionMode, ToolFailurePolicy, ToolId, Usage,
 };
-use finstack_ai_runtime::{
-    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
-    ExternalClock, JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelResponse,
-    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall, ResolvedToolCatalog,
-    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolCallDelta,
-    ToolDeferralSupport, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec,
-    ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
-    WorkflowSession, WorkflowWait,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, Model, ModelResponse,
+    ModelStreamItem, ModelStreamLimits, ModelToolCall, SideEffectClass, ToolCallDelta,
+    ToolDeferralSupport, ToolSpec,
 };
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolResult, ToolStreamItem, ToolStreamLimits, Toolset, ToolsetRegistration,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, ToolTaskConfig,
+};
+use finstack_ai_runtime::workflow::{WorkflowSession, WorkflowWait};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
     ScriptedToolset,
@@ -264,7 +272,7 @@ async fn park_on_approval(seed: u64) -> Parked {
     let model = approval_model();
     let model_port: Arc<dyn Model> = model.clone();
     let ready_model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(model_port)
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
             .await
             .expect("model readiness"),
     );

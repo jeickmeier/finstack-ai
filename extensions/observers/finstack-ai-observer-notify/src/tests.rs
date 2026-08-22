@@ -7,7 +7,8 @@ use finstack_ai_kernel::{
     QueueDepthWarning, RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RawJson, RunEvent,
     RunEventBody, RunEventClass, RunTag, Sensitivity, SessionTag, TextBlock, Timestamp, Version,
 };
-use finstack_ai_runtime::{Observer, ObserverPayloadMode, SecretString};
+use finstack_ai_runtime::ports::model::SecretString;
+use finstack_ai_runtime::ports::observer::{Observer, ObserverPayloadMode};
 use finstack_ai_test::check_observer_conformance;
 
 use super::{
@@ -226,7 +227,7 @@ mod tests_support {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use finstack_ai_runtime::PortFuture;
+    use finstack_ai_runtime::ports::PortFuture;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::{InteractionNotification, NotificationSink, SinkError};

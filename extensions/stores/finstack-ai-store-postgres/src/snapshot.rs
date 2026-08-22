@@ -45,7 +45,7 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, RecordEnvelope, SessionId};
 use finstack_ai_protocol::{ChainAnchor, verify_chain_from};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::journal::{
     MetadataReceipt, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
     StoreError, StoreLimits, WriteMetadataRequest,
 };

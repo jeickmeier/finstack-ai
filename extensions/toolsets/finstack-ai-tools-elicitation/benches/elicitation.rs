@@ -14,9 +14,8 @@ use finstack_ai_kernel::{
     PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, Toolset,
-};
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, Toolset};
 use finstack_ai_tools_elicitation::{ElicitationKind, ElicitationToolDef, ElicitationToolset};
 
 fn context() -> ToolCallContext {

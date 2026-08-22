@@ -8,7 +8,8 @@ use finstack_ai_kernel::{
     RawJson, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted,
     RunId, RunPhase, SessionId, Stage, TerminalState,
 };
-use finstack_ai_runtime::{LockedModelContextProfile, RunHandle};
+use finstack_ai_runtime::ports::model::LockedModelContextProfile;
+use finstack_ai_runtime::run::RunHandle;
 
 use super::handle::Agent;
 use super::prepare::{

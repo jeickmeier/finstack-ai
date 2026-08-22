@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use finstack_ai_kernel::ErrorCategory;
-use finstack_ai_runtime::{CancellationSignal, TOOL_CANCELLED, ToolError};
+use finstack_ai_runtime::ports::model::CancellationSignal;
+use finstack_ai_runtime::ports::tool::{TOOL_CANCELLED, ToolError};
 use rustix::fd::OwnedFd;
 use rustix::fs::{Dir, FileType, Mode, OFlags, fstat, open, openat};
 use serde::Serialize;

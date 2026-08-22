@@ -46,7 +46,7 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model_port)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                 .await
                 .expect("model readiness"),
         ),
@@ -139,7 +139,7 @@ async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(replacement)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(replacement)
                 .await
                 .expect("replacement model readiness"),
         ),

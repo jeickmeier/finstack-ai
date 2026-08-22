@@ -13,7 +13,8 @@ use finstack_ai_net_guard::{
     BodyReadInterrupt, HostResolver, NetGuardError, SystemResolver, UrlPolicy, VettedUrl,
     parse_and_vet_url, pinned_client, read_body_bounded_interruptible, resolve_and_pin,
 };
-use finstack_ai_runtime::{ArtifactStore, ToolCallContext, ToolError};
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use futures_util::StreamExt;
 use reqwest::header::{HeaderName, HeaderValue};
 

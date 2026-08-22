@@ -16,8 +16,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Sensitivity, Version};
-use finstack_ai_runtime::{
-    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode, PortFuture,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::observer::{
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
 };
 
 use crate::extract::MemoryExtractor;

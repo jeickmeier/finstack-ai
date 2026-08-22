@@ -28,7 +28,7 @@ async fn failed_model_request_append_never_executes_the_model() {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model_port)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                 .await
                 .expect("model readiness"),
         ),
@@ -149,7 +149,7 @@ async fn malformed_stream_settles_as_failure_without_partial_durable_success() {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model_port)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                 .await
                 .expect("model readiness"),
         ),
@@ -214,7 +214,7 @@ async fn an_expired_committed_deadline_prevents_provider_execution() {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model_port)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                 .await
                 .expect("model readiness"),
         ),

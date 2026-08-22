@@ -42,11 +42,15 @@ use finstack_ai_kernel::{
     BlobRef, ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory,
     InvocationRecovery, Message, MessageRole, Metadata, RawJson, Stage, TextBlock, Version,
 };
-use finstack_ai_runtime::{
-    ArtifactScope, ArtifactStore, Bytes, CancellationSignal, MIDDLEWARE_OUTCOME_NOT_ALLOWED,
-    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
-    MiddlewareRole, ModelRequestDraft, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{ArtifactScope, ArtifactStore};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::middleware::{
+    MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext, MiddlewareDescriptor,
+    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, StageInput, StageMask,
+    StageOutcome,
 };
+use finstack_ai_runtime::ports::model::{CancellationSignal, ModelRequestDraft};
 use finstack_ai_tools_document::parser::{self, DocumentFormat, DocumentLimits};
 use thiserror::Error;
 

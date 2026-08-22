@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use finstack_ai_kernel::{Metadata, RunId, Sensitivity, SessionId, TIMESTAMP_MAX_MS, Timestamp};
-use finstack_ai_runtime::{ArtifactMetadata, ArtifactScope, Bytes, stage_required_artifact};
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{ArtifactMetadata, ArtifactScope, stage_required_artifact};
 
 fn controlled_sqlite(now: Arc<AtomicI64>, limits: MemoryStoreLimits) -> SqliteMemoryStore {
     SqliteMemoryStore::open_in_memory_with(

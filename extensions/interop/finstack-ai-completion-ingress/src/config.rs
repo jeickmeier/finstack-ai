@@ -3,7 +3,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use finstack_ai_runtime::SecretString;
+use finstack_ai_runtime::ports::model::SecretString;
 use thiserror::Error;
 
 /// Minimum accepted signing-key length in bytes.
@@ -103,7 +103,7 @@ pub(crate) fn validated_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use finstack_ai_runtime::SecretString;
+    use finstack_ai_runtime::ports::model::SecretString;
 
     fn key(byte: u8) -> SecretString {
         SecretString::try_new(String::from_utf8(vec![byte; 32]).expect("ascii")).expect("secret")

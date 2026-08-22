@@ -1,4 +1,4 @@
-//! Durable local `SQLite` [`JournalStore`](finstack_ai_runtime::JournalStore) implementation.
+//! Durable local `SQLite` [`JournalStore`](finstack_ai_runtime::ports::journal::JournalStore) implementation.
 //!
 //! WAL plus `synchronous=FULL` is the only acknowledged durable mode.
 //! Records stay append-only; snapshots are a disposable cache. Applications

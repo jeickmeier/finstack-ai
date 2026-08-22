@@ -6,10 +6,8 @@ use finstack_ai_kernel::{
     PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, UNIX_EPOCH,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, ToolStreamItem,
-    Toolset,
-};
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolStreamItem, Toolset};
 use futures_util::StreamExt;
 
 use crate::record::MemoryScope;
@@ -118,7 +116,7 @@ async fn call_and_extract(
     ctx: ToolCallContext,
     name: &str,
     arguments: &[u8],
-) -> finstack_ai_runtime::ToolResult {
+) -> finstack_ai_runtime::ports::tool::ToolResult {
     let mut stream = toolset
         .call(ctx, validated_call(toolset, name, arguments))
         .await
@@ -215,10 +213,10 @@ async fn policy_is_enforced_at_call_and_reconcile_time() {
     };
     assert_eq!(error.code(), crate::toolset::MEMORY_TOOL_POLICY_DENIED);
 
-    let effect = finstack_ai_runtime::PendingToolEffect {
+    let effect = finstack_ai_runtime::ports::tool::PendingToolEffect {
         call: validated_call(&toolset, "forget_memory", args),
     };
-    let ctx = finstack_ai_runtime::ReconcileContext {
+    let ctx = finstack_ai_runtime::ports::model::ReconcileContext {
         run: run_context(EffectId::from_bytes([41; 16])),
         original_input_digest: Digest::raw_json(b"{}"),
     };
@@ -587,10 +585,10 @@ async fn call_rejects_a_locator_tenant_other_than_the_configured_one() {
 async fn reconcile_rejects_a_locator_tenant_other_than_the_configured_one() {
     let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
     let args = br#"{"id":"mem-x","keywords":["alpha"],"body":"body text"}"#;
-    let effect = finstack_ai_runtime::PendingToolEffect {
+    let effect = finstack_ai_runtime::ports::tool::PendingToolEffect {
         call: validated_call(&toolset, "remember", args),
     };
-    let ctx = finstack_ai_runtime::ReconcileContext {
+    let ctx = finstack_ai_runtime::ports::model::ReconcileContext {
         run: run_context_for_tenant(EffectId::from_bytes([31; 16]), "tenant-b"),
         original_input_digest: Digest::raw_json(b"{}"),
     };
@@ -616,17 +614,17 @@ async fn reconcile_rejects_a_locator_tenant_other_than_the_configured_one() {
 async fn reconcile_replays_a_matching_tenant_call() {
     let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
     let args = br#"{"id":"mem-reconciled","keywords":["alpha"],"body":"body text"}"#;
-    let effect = finstack_ai_runtime::PendingToolEffect {
+    let effect = finstack_ai_runtime::ports::tool::PendingToolEffect {
         call: validated_call(&toolset, "remember", args),
     };
-    let ctx = finstack_ai_runtime::ReconcileContext {
+    let ctx = finstack_ai_runtime::ports::model::ReconcileContext {
         run: run_context(EffectId::from_bytes([32; 16])),
         original_input_digest: Digest::raw_json(b"{}"),
     };
     let result = toolset.reconcile(ctx, effect).await.expect("reconcile");
     assert!(matches!(
         result,
-        finstack_ai_runtime::ToolReconcileResult::Completed(_)
+        finstack_ai_runtime::ports::tool::ToolReconcileResult::Completed(_)
     ));
 
     let record = store

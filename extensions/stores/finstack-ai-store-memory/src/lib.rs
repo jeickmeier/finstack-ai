@@ -32,9 +32,10 @@ use finstack_ai_kernel::{
     RecordId, SessionId,
 };
 use finstack_ai_protocol::ChainAnchor;
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::{
     JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
-    OpaqueSnapshot, PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
+    OpaqueSnapshot, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
     SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
     WriteMetadataRequest,
 };
@@ -849,7 +850,7 @@ mod tests {
         RecordTag, SessionCreated, SessionTag, Timestamp,
     };
     use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
-    use finstack_ai_runtime::SCAN_PAGE_MAX_RECORDS;
+    use finstack_ai_runtime::ports::journal::SCAN_PAGE_MAX_RECORDS;
     use finstack_ai_test::store_fixtures::{draft, id, request};
 
     use super::*;

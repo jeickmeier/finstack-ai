@@ -16,13 +16,20 @@ use finstack_ai_kernel::{
     ToolExecutionMode, ToolId, Version,
 };
 use finstack_ai_kernel::{BudgetRequest, Metadata, RetrySafety};
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata, ApprovalRequirement,
-    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, EventBatch, JournalStore,
-    Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall,
-    PortFuture, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    ToolDeferral, ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset, child_relation_digest,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext, ChildRunHandle, ChildRunRequest,
+    child_relation_digest,
 };
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventBatch;
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, Model, ModelContextProfile, ModelName, ModelResponse,
+    ModelStreamItem, ModelToolCall, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
+    ToolCallDelta, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{ToolDeferral, ToolStreamItem, Toolset};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
@@ -56,7 +63,7 @@ pub(crate) fn completed(text: &str) -> ScriptedModelPlan {
     ScriptedModelPlan {
         actions: vec![
             ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                finstack_ai_runtime::TextDelta {
+                finstack_ai_runtime::ports::model::TextDelta {
                     text: Arc::from(text),
                 },
             ))),

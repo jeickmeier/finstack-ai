@@ -49,7 +49,7 @@ impl CronError {
     }
 }
 
-/// Interval expression evaluated against [`finstack_ai_runtime::ExternalClock`].
+/// Interval expression evaluated against [`finstack_ai_runtime::ids::ExternalClock`].
 ///
 /// # Examples
 ///
@@ -181,7 +181,7 @@ impl IntervalSchedule {
 /// Durable adapter schedule row. Not a kernel record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CronSchedule {
-    /// Tenant captured from [`finstack_ai_runtime::WorkflowSession::tenant_scope`].
+    /// Tenant captured from [`finstack_ai_runtime::workflow::WorkflowSession::tenant_scope`].
     pub tenant_scope: Arc<str>,
     /// Caller-chosen schedule identity, unique per tenant.
     pub schedule_id: Arc<str>,

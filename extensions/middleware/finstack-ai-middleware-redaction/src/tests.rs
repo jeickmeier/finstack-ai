@@ -7,10 +7,12 @@ use finstack_ai_kernel::{
     OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, Stage, TextBlock, Timestamp,
     ToolResultBlock,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, BeforeModelInput, CancellationSignal, MiddlewareError, ModelName,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, OrderTier, RunCallContext, StageInput,
-    StageOutcome,
+use finstack_ai_runtime::ports::middleware::{
+    BeforeModelInput, MiddlewareError, OrderTier, StageInput, StageOutcome,
+};
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ModelName, ModelRequestDraft, ModelRequestLimits,
+    ModelSettings, RunCallContext,
 };
 
 use crate::detect::Detectors;
@@ -35,10 +37,10 @@ fn id<T: IdTag>(value: u64) -> Id<T> {
     Id::from_bytes(bytes)
 }
 
-fn middleware_context() -> finstack_ai_runtime::MiddlewareContext {
+fn middleware_context() -> finstack_ai_runtime::ports::middleware::MiddlewareContext {
     let principal =
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
-    finstack_ai_runtime::MiddlewareContext {
+    finstack_ai_runtime::ports::middleware::MiddlewareContext {
         run: RunCallContext {
             relation_depth: 0,
             locator: OperationLocator::try_new(
@@ -620,8 +622,9 @@ fn off_policy_ignores_after_model() {
 // ---------------------------------------------------------------------------
 
 use finstack_ai_kernel::{ComponentId, ComponentInvocation, InvocationRecovery, Version};
-use finstack_ai_runtime::{
-    Middleware, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, PortFuture, StageMask,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::middleware::{
+    Middleware, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, StageMask,
 };
 
 /// Stub Replace-emitting inner middleware standing in for document-ingest.
@@ -676,7 +679,7 @@ impl Middleware for StubInner {
 
     fn invoke(
         &self,
-        _ctx: finstack_ai_runtime::MiddlewareContext,
+        _ctx: finstack_ai_runtime::ports::middleware::MiddlewareContext,
         _input: StageInput,
     ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
         let outcome = self.outcome.clone();

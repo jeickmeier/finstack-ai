@@ -25,10 +25,11 @@ use core::task::{Context, Poll};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ProviderIds, Usage};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
     InputCapabilities, Model, ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError,
     ModelEventStream, ModelName, ModelRequest, ModelResponse, ModelStreamItem, ModelTokenEstimate,
-    PortFuture, StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
 };
 use futures_core::Stream;
 
@@ -146,7 +147,7 @@ mod tests {
         EffectId, LaneId, Metadata, ModelRequestId, OperationLocator, OutputSpec, PrincipalRef,
         RawJson, RunId, SessionId,
     };
-    use finstack_ai_runtime::{
+    use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, ModelCallContext, ModelRequestDraft,
         ModelRequestLimits, ModelSettings, ModelStreamLimits, ModelTerminal, RunCallContext,
     };

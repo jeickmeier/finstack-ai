@@ -15,20 +15,33 @@ use finstack_ai_kernel::{
 use finstack_ai_kernel::{
     BudgetRequest, ExternalHandleRef, Metadata, ReconciliationPolicy, RetrySafety,
 };
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata, ApprovalRequirement,
-    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, CompactedSummary,
-    CompactionCheckpoint, CompactionEvidence, CompactionResult, ContextAuthority, ContextItem,
-    ContextItemKind, ContextProvenance, ExternalRouteOutcome, JournalStore, LoadRequest,
-    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
-    MiddlewareRole, Model, ModelContextProfile, ModelDeferral, ModelName, ModelResponse,
-    ModelStreamItem, ModelToolCall, NoopObserver, Observer, ObserverDescriptor, ObserverError,
-    ObserverPayloadMode, OrderTier, PortFuture, PromptCacheImpact, SideEffectClass, StageInput,
-    StageMask, StageOutcome, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferral,
-    ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset, child_relation_digest,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext, ChildRunHandle, ChildRunRequest,
+    child_relation_digest,
+};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ingress::ExternalRouteOutcome;
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+};
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest};
+use finstack_ai_runtime::ports::middleware::{
+    CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionResult, Middleware,
+    MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole,
+    OrderTier, PromptCacheImpact, StageInput, StageMask, StageOutcome,
     compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
     compaction_summary_digest,
 };
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, Model, ModelContextProfile, ModelDeferral, ModelName,
+    ModelResponse, ModelStreamItem, ModelToolCall, SideEffectClass, TokenEstimatorRef,
+    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::observer::{
+    NoopObserver, Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
+};
+use finstack_ai_runtime::ports::tool::{ToolDeferral, ToolStreamItem, Toolset};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ManualGate, ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedObserver,
@@ -94,31 +107,45 @@ impl JournalStore for LoadCountingStore {
     fn append(
         &self,
         request: finstack_ai_kernel::AppendRequest,
-    ) -> PortFuture<Result<finstack_ai_kernel::CommittedBatch, finstack_ai_runtime::StoreError>>
-    {
+    ) -> PortFuture<
+        Result<finstack_ai_kernel::CommittedBatch, finstack_ai_runtime::ports::journal::StoreError>,
+    > {
         self.inner.append(request)
     }
 
     fn load(
         &self,
         request: LoadRequest,
-    ) -> PortFuture<Result<finstack_ai_runtime::LoadedSession, finstack_ai_runtime::StoreError>>
-    {
+    ) -> PortFuture<
+        Result<
+            finstack_ai_runtime::ports::journal::LoadedSession,
+            finstack_ai_runtime::ports::journal::StoreError,
+        >,
+    > {
         self.loads.fetch_add(1, Ordering::AcqRel);
         self.inner.load(request)
     }
 
     fn write_snapshot(
         &self,
-        request: finstack_ai_runtime::SnapshotRequest,
-    ) -> PortFuture<Result<finstack_ai_runtime::SnapshotReceipt, finstack_ai_runtime::StoreError>>
-    {
+        request: finstack_ai_runtime::ports::journal::SnapshotRequest,
+    ) -> PortFuture<
+        Result<
+            finstack_ai_runtime::ports::journal::SnapshotReceipt,
+            finstack_ai_runtime::ports::journal::StoreError,
+        >,
+    > {
         self.inner.write_snapshot(request)
     }
 
     fn health(
         &self,
-    ) -> PortFuture<Result<finstack_ai_runtime::StoreHealth, finstack_ai_runtime::StoreError>> {
+    ) -> PortFuture<
+        Result<
+            finstack_ai_runtime::ports::journal::StoreHealth,
+            finstack_ai_runtime::ports::journal::StoreError,
+        >,
+    > {
         self.inner.health()
     }
 }
@@ -155,7 +182,7 @@ impl Extension for PreviewExtension {
     }
 }
 
-fn profile() -> finstack_ai_runtime::ModelContextProfile {
+fn profile() -> finstack_ai_runtime::ports::model::ModelContextProfile {
     ModelContextProfile {
         provider: Arc::from("scripted"),
         model: ModelName::try_new("preview-1").expect("model name"),
@@ -198,7 +225,7 @@ fn completed_with_id(text: &str, completion_id: &str) -> ScriptedModelPlan {
     ScriptedModelPlan {
         actions: vec![
             ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                finstack_ai_runtime::TextDelta {
+                finstack_ai_runtime::ports::model::TextDelta {
                     text: Arc::from(text),
                 },
             ))),
@@ -618,7 +645,7 @@ async fn started_run_retains_result_and_delivers_bounded_batches() {
         0..1,
         ["b", "a", "t", "c", "h", "e", "d"].map(|text| {
             ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                finstack_ai_runtime::TextDelta {
+                finstack_ai_runtime::ports::model::TextDelta {
                     text: Arc::from(text),
                 },
             )))
@@ -922,7 +949,10 @@ fn observer_descriptor(id: &str) -> ObserverDescriptor {
 async fn run_with_observer(
     observer_id: &str,
     observer: Arc<dyn Observer>,
-) -> (AgentRunOutput, finstack_ai_runtime::ObserverDiagnostics) {
+) -> (
+    AgentRunOutput,
+    finstack_ai_runtime::ports::observer::ObserverDiagnostics,
+) {
     let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
         profile(),
         vec![completed("observer-ok")],
@@ -1009,12 +1039,12 @@ async fn failing_or_stalled_observer_does_not_change_journal_prefix() {
     assert_eq!(fail_diagnostics.dropped, 0);
     assert_eq!(
         fail_diagnostics.recent[0].code,
-        finstack_ai_runtime::OBSERVER_DELIVERY_FAILED
+        finstack_ai_runtime::ports::observer::OBSERVER_DELIVERY_FAILED
     );
     assert_eq!(stall_diagnostics.total, 1);
     assert_eq!(
         stall_diagnostics.recent[0].code,
-        finstack_ai_runtime::OBSERVER_SHUTDOWN_TIMEOUT
+        finstack_ai_runtime::ports::observer::OBSERVER_SHUTDOWN_TIMEOUT
     );
 }
 
@@ -1088,7 +1118,7 @@ async fn suspend_parks_without_dropping_the_journal() {
     assert_eq!(inspect.active_run_id, Some(run_id));
     let journal: Arc<dyn JournalStore> = store.clone();
     let loaded = journal
-        .load(finstack_ai_runtime::LoadRequest {
+        .load(finstack_ai_runtime::ports::journal::LoadRequest {
             session_id: session.session_id(),
         })
         .await
@@ -2303,7 +2333,7 @@ impl CheckpointCompactor {
 
     fn compact(
         descriptor: &MiddlewareDescriptor,
-        input: &finstack_ai_runtime::BeforeModelInput,
+        input: &finstack_ai_runtime::ports::middleware::BeforeModelInput,
     ) -> CompactionResult {
         let replacement_messages = input.request.messages.clone();
         let summary = ContextItem::try_new(
@@ -2365,8 +2395,9 @@ impl CheckpointCompactor {
                 cache_impact: PromptCacheImpact::StablePrefixPreserved,
             },
             checkpoint: checkpoint_end.map(|index| {
-                let checkpoint_entries: Arc<[finstack_ai_runtime::CompactionSourceEntry]> =
-                    input.source_entries[..=index].to_vec().into();
+                let checkpoint_entries: Arc<
+                    [finstack_ai_runtime::ports::middleware::CompactionSourceEntry],
+                > = input.source_entries[..=index].to_vec().into();
                 let checkpoint_source = compaction_source_digest(&checkpoint_entries)
                     .expect("checkpoint source digest");
                 CompactionCheckpoint {
@@ -2383,8 +2414,10 @@ impl CheckpointCompactor {
                 }
             }),
         };
-        finstack_ai_runtime::validate_compaction_result(descriptor, input, &result)
-            .expect("test compaction must validate");
+        finstack_ai_runtime::ports::middleware::validate_compaction_result(
+            descriptor, input, &result,
+        )
+        .expect("test compaction must validate");
         result
     }
 }

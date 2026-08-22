@@ -13,12 +13,12 @@ use finstack_ai_kernel::{
     ComponentId, ContentBlock, ErrorCategory, ExternalHandleRef, Metadata, PendingModelEffect,
     ProviderIds, RawJson, ReconciliationPolicy, TextBlock, Usage,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
     CancellationSignal, InputCapabilities, Model, ModelCapabilities, ModelContextProfile,
     ModelDeferral, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult,
     ModelRequest, ModelResponse, ModelStreamItem, ModelTokenEstimate, ModelToolCall,
-    ModelWarmupContext, PortFuture, ReconcileContext, StructuredOutputCapability, TextDelta,
-    ToolCallDelta,
+    ModelWarmupContext, ReconcileContext, StructuredOutputCapability, TextDelta, ToolCallDelta,
 };
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};

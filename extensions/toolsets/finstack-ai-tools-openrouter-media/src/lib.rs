@@ -51,10 +51,15 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactStore, PortFuture, SecretRejected, SecretString,
-    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult,
-    ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, verify_authority,
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SecretRejected, SecretString, SideEffectClass,
+    ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
+    ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use reqwest::header::HeaderValue;
@@ -557,10 +562,12 @@ mod tests {
         OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
         ToolCallId, ToolCallPlan, ToolFailurePolicy, ValidatedToolCall,
     };
-    use finstack_ai_runtime::{
-        ApprovalState, AuthorizationContext, CancellationSignal, JsonSchemaToolValidatorCompiler,
-        ResolvedToolCatalog, RunCallContext, ToolCatalogPlan, ToolExecutionPolicy,
-        ToolPolicyDecision, Toolset, ToolsetRegistration,
+    use finstack_ai_runtime::ports::model::{
+        AuthorizationContext, CancellationSignal, RunCallContext,
+    };
+    use finstack_ai_runtime::ports::tool::{
+        ApprovalState, JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolCatalogPlan,
+        ToolExecutionPolicy, ToolPolicyDecision, Toolset, ToolsetRegistration,
     };
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

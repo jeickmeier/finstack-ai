@@ -1,4 +1,4 @@
-//! Official `OpenAI` Responses (`/v1/responses`) implementation of the public [`Model`](finstack_ai_runtime::Model) port.
+//! Official `OpenAI` Responses (`/v1/responses`) implementation of the public [`Model`](finstack_ai_runtime::ports::model::Model) port.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]

@@ -26,11 +26,17 @@ use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, Digest, InvocationRecovery, Metadata, RunEvent, Stage,
     Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
     ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRole, Observer, ObserverDescriptor, ObserverError,
-    ObserverPayloadMode, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+    ContextProviderDescriptor, ContextRequest,
+};
+use finstack_ai_runtime::ports::middleware::{
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, StageInput, StageMask, StageOutcome,
+};
+use finstack_ai_runtime::ports::observer::{
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
 };
 
 fn invocation(component: ComponentId) -> ComponentInvocation {

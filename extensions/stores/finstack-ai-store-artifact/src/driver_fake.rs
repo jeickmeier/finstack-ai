@@ -16,7 +16,8 @@ use crate::driver::{
     validate_object_metadata,
 };
 use finstack_ai_kernel::{Digest, Metadata, Sensitivity};
-use finstack_ai_runtime::{Bytes, PortFuture};
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::ports::PortFuture;
 
 /// Number of entries returned per [`FakeObjectDriver::list`] page.
 ///

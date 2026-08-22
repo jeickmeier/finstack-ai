@@ -11,13 +11,16 @@ use finstack_ai_kernel::{
     EffectTag, Metadata, OperationLocator, PrincipalPropagation, RecordTag, RunAccepted,
     RunPropagationPolicy, RunRelation, RunRelationKind, RunTag, TextBlock, Timestamp,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::child::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
-    AuthorizationContext, ChildCoordinationIds, ChildRunContext, ChildRunCoordinator,
-    ChildRunHandle, ChildRunRequest, CommitCoordinator, PortFuture, child_relation_digest,
+    ChildCoordinationIds, ChildRunContext, ChildRunCoordinator, ChildRunHandle, ChildRunRequest,
+    child_relation_digest,
 };
+use finstack_ai_runtime::commit::CommitCoordinator;
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::{ExternalCompletionRouter, ExternalRouteOutcome};
+use finstack_ai_runtime::ingress::{ExternalCompletionRouter, ExternalRouteOutcome};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::AuthorizationContext;
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;
@@ -418,7 +421,7 @@ impl AgentRun {
             }
             match prepared.placement {
                 ChildPlacement::IsolatedChildSession => {
-                    let _ = finstack_ai_runtime::SessionRuntime::open(
+                    let _ = finstack_ai_runtime::session::SessionRuntime::open(
                         Arc::clone(&self.inner.store),
                         prepared.child.operation.session_id,
                         Arc::clone(&prepared.child.operation.tenant_scope),
@@ -578,7 +581,7 @@ impl AgentRun {
         session_id: finstack_ai_kernel::SessionId,
         run_id: finstack_ai_kernel::RunId,
     ) -> Result<(), AgentRunError> {
-        let session = finstack_ai_runtime::SessionRuntime::open(
+        let session = finstack_ai_runtime::session::SessionRuntime::open(
             Arc::clone(&self.inner.store),
             session_id,
             Arc::clone(&self.inner.locator.tenant_scope),
@@ -591,7 +594,7 @@ impl AgentRun {
                 self.inner.cancellation_initiator.clone(),
                 &mut || {
                     NativeIds::cancellation_environment().map_err(|error| {
-                        finstack_ai_runtime::SessionError::Commit { code: error.code() }
+                        finstack_ai_runtime::session::SessionError::Commit { code: error.code() }
                     })
                 },
             )

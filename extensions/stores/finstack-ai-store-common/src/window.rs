@@ -2,7 +2,7 @@
 
 use finstack_ai_kernel::{AppendBatchId, CommittedBatch, Digest, RecordEnvelope, SessionId};
 use finstack_ai_protocol::{ChainAnchor, verify_chain_from};
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 
 use crate::error::protocol_error;
 
@@ -17,14 +17,14 @@ pub struct WindowCodes {
     pub checksum: &'static str,
 }
 
-/// Codes for [`finstack_ai_runtime::LoadWindow::FromSequence`].
+/// Codes for [`finstack_ai_runtime::ports::journal::LoadWindow::FromSequence`].
 pub const FROM_SEQUENCE_WINDOW: WindowCodes = WindowCodes {
     gap: "load_from_sequence_gap",
     split: "load_from_splits_batch",
     checksum: "load_from_prior_checksum_mismatch",
 };
 
-/// Codes for [`finstack_ai_runtime::LoadWindow::SnapshotPlusTail`].
+/// Codes for [`finstack_ai_runtime::ports::journal::LoadWindow::SnapshotPlusTail`].
 pub const SNAPSHOT_WINDOW: WindowCodes = WindowCodes {
     gap: "snapshot_missing_record",
     split: "snapshot_splits_batch",

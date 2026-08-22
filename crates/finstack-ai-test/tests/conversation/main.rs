@@ -9,10 +9,9 @@ use finstack_ai_kernel::{
     LaneTag, Message, MessageRole, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
     RecordEnvelope, RunPhase, SessionTag,
 };
-use finstack_ai_runtime::{
-    ChildRunContext, ChildRunCoordinator, CommitCoordinator, CommitCoordinatorError,
-    CompositionError, JournalStore, LoadRequest, SnapshotSchedule,
-};
+use finstack_ai_runtime::child::{ChildRunContext, ChildRunCoordinator, CompositionError};
+use finstack_ai_runtime::commit::{CommitCoordinator, CommitCoordinatorError};
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest, SnapshotSchedule};
 
 mod helpers;
 use helpers::*;

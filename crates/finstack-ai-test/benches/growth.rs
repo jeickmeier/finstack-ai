@@ -18,7 +18,7 @@ use finstack_ai_kernel::{
     ToolExecutionMode, ToolFailurePolicy, ToolId, ToolResultBlock, ToolSettlement, TransitionEnv,
     TurnId, ValidatedToolCall,
 };
-use finstack_ai_runtime::JournalStore;
+use finstack_ai_runtime::ports::journal::JournalStore;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,

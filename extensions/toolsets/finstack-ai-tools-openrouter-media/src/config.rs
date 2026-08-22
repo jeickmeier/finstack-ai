@@ -26,7 +26,7 @@ pub struct OpenRouterMediaConfig {
     /// Explicit API key. Empty values fail closed.
     ///
     /// Construction validates the value as
-    /// [`SecretString`](finstack_ai_runtime::SecretString) and stores it as
+    /// [`SecretString`](finstack_ai_runtime::ports::model::SecretString) and stores it as
     /// an `Authorization` [`HeaderValue`](reqwest::header::HeaderValue) so
     /// the raw key is not cloned on every call.
     pub api_key: String,

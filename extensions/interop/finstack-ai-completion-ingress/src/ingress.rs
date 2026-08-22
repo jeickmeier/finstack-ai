@@ -5,7 +5,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     AuthorizationEvidence, EffectId, OperationLocator, PrincipalRef, Timestamp,
 };
-use finstack_ai_runtime::{IdempotencyHorizon, JournalStore, SecurityAuditGate};
+use finstack_ai_runtime::audit::SecurityAuditGate;
+use finstack_ai_runtime::ports::journal::{IdempotencyHorizon, JournalStore};
 use thiserror::Error;
 
 use crate::config::{
@@ -157,8 +158,8 @@ impl CompletionIngress {
         token: &str,
         body: &[u8],
         submitted_at: Timestamp,
-    ) -> Result<finstack_ai_runtime::ExternalRouteOutcome, IngressError> {
-        use finstack_ai_runtime::SecurityAuditCategory;
+    ) -> Result<finstack_ai_runtime::ingress::ExternalRouteOutcome, IngressError> {
+        use finstack_ai_runtime::audit::SecurityAuditCategory;
 
         let claims = match crate::token::verify_token(&self.keys, token, submitted_at) {
             Ok(claims) => claims,
@@ -233,7 +234,7 @@ impl CompletionIngress {
             return Err(crate::audit::audit_and_reject(&self.audit, event).await);
         };
 
-        let mut router = finstack_ai_runtime::ExternalCompletionRouter::new(
+        let mut router = finstack_ai_runtime::ingress::ExternalCompletionRouter::new(
             Arc::clone(&self.store),
             Arc::clone(&self.audit),
         );
@@ -243,18 +244,20 @@ impl CompletionIngress {
         Box::pin(router.route(command, submitted_at))
             .await
             .map_err(|error| match error {
-                finstack_ai_runtime::ExternalRouteError::IngressRejected
-                | finstack_ai_runtime::ExternalRouteError::InvalidNormalizedCommand => {
+                finstack_ai_runtime::ingress::ExternalRouteError::IngressRejected
+                | finstack_ai_runtime::ingress::ExternalRouteError::InvalidNormalizedCommand => {
                     IngressError::Rejected
                 }
-                finstack_ai_runtime::ExternalRouteError::IdAllocation => {
+                finstack_ai_runtime::ingress::ExternalRouteError::IdAllocation => {
                     IngressError::Unavailable {
                         reason_code: "id_allocation",
                     }
                 }
-                finstack_ai_runtime::ExternalRouteError::Runtime(_) => IngressError::Unavailable {
-                    reason_code: "runtime",
-                },
+                finstack_ai_runtime::ingress::ExternalRouteError::Runtime(_) => {
+                    IngressError::Unavailable {
+                        reason_code: "runtime",
+                    }
+                }
             })
     }
 }
@@ -282,10 +285,12 @@ mod tests {
         AuthorizationEvidence, EffectId, LaneId, OperationLocator, PrincipalRef, RunId, SessionId,
         Timestamp,
     };
-    use finstack_ai_runtime::{
-        PortFuture, SecretString, SecurityAuditError, SecurityAuditEvent, SecurityAuditGate,
-        SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink,
+    use finstack_ai_runtime::audit::{
+        SecurityAuditError, SecurityAuditEvent, SecurityAuditGate, SecurityAuditHealth,
+        SecurityAuditReceipt, SecurityAuditSink,
     };
+    use finstack_ai_runtime::ports::PortFuture;
+    use finstack_ai_runtime::ports::model::SecretString;
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
     use std::sync::Arc;
     use std::time::Duration;

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
     ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
     ResolveDraftMediaError, resolve_draft_media,
@@ -65,7 +65,7 @@ impl OpenAiProvider {
     ///
     /// ```
     /// use finstack_ai_provider_openai::{OpenAiConfig, OpenAiModelConfig, OpenAiProvider};
-    /// use finstack_ai_runtime::Model;
+    /// use finstack_ai_runtime::ports::model::Model;
     ///
     /// let config = OpenAiConfig::try_new("http://127.0.0.1:9").expect("config");
     /// let model = OpenAiModelConfig::try_new(
@@ -182,14 +182,14 @@ impl Model for OpenAiProvider {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         models.get(model).map_or_else(
             || ModelCapabilities {
-                input: finstack_ai_runtime::InputCapabilities {
+                input: finstack_ai_runtime::ports::model::InputCapabilities {
                     text: false,
                     json: false,
                     images: false,
                     audio: false,
                     files: false,
                 },
-                context_profile: finstack_ai_runtime::ModelContextProfile {
+                context_profile: finstack_ai_runtime::ports::model::ModelContextProfile {
                     provider: Arc::from("openai"),
                     model: model.clone(),
                     hard_input_bytes: 0,
@@ -201,7 +201,8 @@ impl Model for OpenAiProvider {
                 },
                 native_tool_calls: false,
                 parallel_tool_calls: false,
-                structured_output: finstack_ai_runtime::StructuredOutputCapability::Native,
+                structured_output:
+                    finstack_ai_runtime::ports::model::StructuredOutputCapability::Native,
                 reasoning: false,
                 prompt_cache: false,
                 resumable_stream: false,
@@ -234,7 +235,7 @@ impl Model for OpenAiProvider {
     fn request(
         &self,
         request: ModelRequest,
-    ) -> finstack_ai_runtime::PortFuture<Result<ModelEventStream, ModelError>> {
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<ModelEventStream, ModelError>> {
         let client = self.client.clone();
         let endpoint = self.endpoint.clone();
         let model = self.model_config(&request.draft.model);
@@ -305,7 +306,7 @@ impl Model for OpenAiProvider {
         &self,
         _ctx: ReconcileContext,
         _effect: PendingModelEffect,
-    ) -> finstack_ai_runtime::PortFuture<Result<ModelReconcileResult, ModelError>> {
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<ModelReconcileResult, ModelError>> {
         Box::pin(async { Ok(ModelReconcileResult::Unknown) })
     }
 }
@@ -336,7 +337,7 @@ impl Drop for ReceiverModelStream {
 async fn drive_response(
     response: reqwest::Response,
     sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
-    cancellation: finstack_ai_runtime::CancellationSignal,
+    cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
     request_id: String,
     structured: bool,
     max_event_bytes: usize,
@@ -416,8 +417,8 @@ fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
     }
 }
 
-fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
-    use finstack_ai_runtime::MediaResolveKind;
+fn map_resolve(error: finstack_ai_runtime::ports::model::MediaResolveError) -> ModelError {
+    use finstack_ai_runtime::ports::model::MediaResolveKind;
     match error.kind {
         MediaResolveKind::NotFound => crate::error::request_error(error.message),
         MediaResolveKind::Unavailable => crate::error::error(
@@ -477,10 +478,11 @@ mod tests {
         ModelRequestId, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId,
         SessionId, Timestamp,
     };
-    use finstack_ai_runtime::{
+    use finstack_ai_runtime::ports::PortFuture;
+    use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, MediaResolveError, MediaResolver,
         ModelCallContext, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-        PortFuture, ResolvedMedia, RunCallContext, StructuredOutputCapability,
+        ResolvedMedia, RunCallContext, StructuredOutputCapability,
     };
 
     use super::*;

@@ -7,10 +7,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, ValidatedToolCall};
-use finstack_ai_runtime::{
-    CancellationSignal, PendingToolEffect, PortFuture, ReconcileContext, ToolCallContext,
-    ToolError, ToolEventStream, ToolReconcileResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{CancellationSignal, ReconcileContext, ToolSpec};
+use finstack_ai_runtime::ports::tool::{
+    PendingToolEffect, ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult,
+    ToolStreamItem, Toolset, ToolsetDescriptor,
 };
 use futures_core::Stream;
 

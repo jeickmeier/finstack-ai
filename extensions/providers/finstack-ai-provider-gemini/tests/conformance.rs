@@ -11,7 +11,7 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
 use finstack_ai_provider_wire::GeminiGenerateContentAssembly;
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal, Model,
     ModelCallContext, ModelName, ModelRequest, ModelRequestDraft, ModelRequestLimits,
     ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTerminal, RunCallContext,

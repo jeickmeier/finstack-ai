@@ -18,10 +18,10 @@ use finstack_ai::runtime::{
 };
 use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
-use finstack_ai_runtime::{
-    ApprovalGrantMode, CommitCoordinator, EventHubConfig, RunTaskConfig, RunTaskOwner,
-    ShutdownOutcome,
-};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ports::model::ApprovalGrantMode;
+use finstack_ai_runtime::run::{RunTaskConfig, RunTaskOwner, ShutdownOutcome};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 

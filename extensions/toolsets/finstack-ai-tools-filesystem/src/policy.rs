@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_runtime::ToolError;
+use finstack_ai_runtime::ports::tool::ToolError;
 
 use crate::{FileSystemError, invalid_error, policy_error};
 

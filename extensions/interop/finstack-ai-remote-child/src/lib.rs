@@ -47,9 +47,8 @@ mod tests {
         RemotePreAuth, VersionOffer, decode_envelope, decode_frame_len, encode_envelope,
         encode_frame,
     };
-    use finstack_ai_runtime::{
-        AgentInvoker, AuthorizationContext, ChildRunContext, ChildRunRequest,
-    };
+    use finstack_ai_runtime::child::{AgentInvoker, ChildRunContext, ChildRunRequest};
+    use finstack_ai_runtime::ports::model::AuthorizationContext;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -213,7 +212,7 @@ mod tests {
                 .expect("route"),
             }),
         };
-        let agent = finstack_ai_runtime::AgentRef {
+        let agent = finstack_ai_runtime::child::AgentRef {
             id: AgentId::parse("python.agent.remote").expect("agent"),
             bundle: Some(BundleId::parse("python.bundle.remote").expect("bundle")),
             spec_digest: Digest::raw_json(b"{}"),

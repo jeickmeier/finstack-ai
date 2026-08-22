@@ -10,11 +10,11 @@ use finstack_ai_kernel::{
     RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
 };
 use finstack_ai_kernel::{EffectId, KernelState};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     InputCapabilities, ModelCapabilities, ModelContextProfile, ModelName,
-    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, WorkflowRetryDecision,
-    retry_decision,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
 };
+use finstack_ai_runtime::workflow::{WorkflowRetryDecision, retry_decision};
 
 fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];

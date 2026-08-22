@@ -27,9 +27,10 @@ use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, Digest, ErrorCategory, ErrorDescriptor, InvocationRecovery,
     Metadata, Stage, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::middleware::{
     Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
-    MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+    MiddlewareRole, OrderTier, StageInput, StageMask, StageOutcome,
 };
 
 mod config;
@@ -132,7 +133,7 @@ impl Middleware for ToolPolicyMiddleware {
                     ))
                 }
                 _ => Err(MiddlewareError::try_new(
-                    finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                    finstack_ai_runtime::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
                     ErrorCategory::Middleware,
                     "tool-policy only runs at before_model and before_tool_batch",
                     Metadata::empty(),

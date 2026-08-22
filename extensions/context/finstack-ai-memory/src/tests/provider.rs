@@ -4,11 +4,11 @@ use finstack_ai_kernel::{
     ContentBlock, Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId,
     SessionId, TextBlock,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CONTEXT_BUDGET_EXCEEDED, CONTEXT_CONTRIBUTION_INVALID,
-    CancellationSignal, ContextAuthority, ContextBudget, ContextCallContext, ContextItemKind,
-    ContextOverflowPolicy, ContextProvider, ContextRequest, RunCallContext,
+use finstack_ai_runtime::ports::context::{
+    CONTEXT_BUDGET_EXCEEDED, CONTEXT_CONTRIBUTION_INVALID, ContextAuthority, ContextBudget,
+    ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider, ContextRequest,
 };
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
 
 use crate::{provider::*, record::*, store::*};
 
@@ -234,7 +234,7 @@ async fn recall_order_is_deterministic_by_tier_then_id() {
         .await
         .expect("second collect");
 
-    let ids = |contribution: &finstack_ai_runtime::ContextContribution| {
+    let ids = |contribution: &finstack_ai_runtime::ports::context::ContextContribution| {
         contribution
             .items
             .iter()

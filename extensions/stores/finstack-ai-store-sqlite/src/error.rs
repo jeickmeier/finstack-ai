@@ -1,4 +1,4 @@
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 pub(crate) use finstack_ai_store_common::protocol_error;
 
 pub(crate) fn i64_from_u64(value: u64, reason_code: &'static str) -> Result<i64, StoreError> {

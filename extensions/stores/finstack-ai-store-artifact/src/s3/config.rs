@@ -4,11 +4,11 @@ use core::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_runtime::ArtifactError;
+use finstack_ai_runtime::artifact::ArtifactError;
 
 use crate::artifact::map_object_error;
 use crate::driver::ObjectError;
-use finstack_ai_runtime::SecretString;
+use finstack_ai_runtime::ports::model::SecretString;
 use reqwest::Url;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);

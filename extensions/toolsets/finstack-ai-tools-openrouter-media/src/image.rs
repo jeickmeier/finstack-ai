@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use finstack_ai_kernel::ErrorCategory;
-use finstack_ai_runtime::{ArtifactStore, ToolCallContext, ToolError};
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 

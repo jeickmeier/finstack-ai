@@ -32,7 +32,7 @@ use finstack_ai_kernel::{
     ExternalCommandTarget, Id, IdTag, LaneTag, PrincipalRef, RECORD_FORMAT_VERSION,
     RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordTag, RunTag, SessionTag,
 };
-use finstack_ai_runtime::JournalStore;
+use finstack_ai_runtime::ports::journal::JournalStore;
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits,
 };

@@ -10,7 +10,8 @@ use thiserror::Error;
 /// Maximum number of roles in a [`RoleAllowlist`].
 pub(crate) const MAX_ROLES: usize = 128;
 /// Maximum number of tools in any tool set (aliases `ModelRequestDraft::MAX_TOOLS`).
-pub(crate) const MAX_TOOLS_PER_SET: usize = finstack_ai_runtime::ModelRequestDraft::MAX_TOOLS;
+pub(crate) const MAX_TOOLS_PER_SET: usize =
+    finstack_ai_runtime::ports::model::ModelRequestDraft::MAX_TOOLS;
 /// Maximum number of jailbreak trigger patterns.
 pub(crate) const MAX_PATTERNS: usize = 64;
 /// Maximum byte length of a single jailbreak trigger pattern.

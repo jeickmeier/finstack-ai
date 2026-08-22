@@ -4,7 +4,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use finstack_ai_provider_openrouter::{
     OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider, model_configs_from_catalog_json,
 };
-use finstack_ai_runtime::{Model, ModelName};
+use finstack_ai_runtime::ports::model::{Model, ModelName};
 
 fn provider_estimate(criterion: &mut Criterion) {
     let config = OpenRouterConfig::try_new("http://127.0.0.1:9").expect("config");

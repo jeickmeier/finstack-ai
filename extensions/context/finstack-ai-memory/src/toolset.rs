@@ -12,12 +12,17 @@ use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
     ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactPersistence, ArtifactScope,
-    ArtifactStore, PendingToolEffect, PortFuture, ReconcileContext, RunCallContext,
-    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
-    ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    stage_required_artifact,
+use finstack_ai_runtime::artifact::{
+    ArtifactMetadata, ArtifactPersistence, ArtifactScope, ArtifactStore, stage_required_artifact,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, ReconcileContext, RunCallContext, SideEffectClass,
+    ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    PendingToolEffect, ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult,
+    ToolResult, ToolStreamItem, Toolset, ToolsetDescriptor,
 };
 use futures_util::stream;
 use serde::Deserialize;

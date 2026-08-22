@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 
 use crate::config::{SqliteDurability, SqliteSynchronous};
 use crate::error::map_sqlite_error;

@@ -1,7 +1,8 @@
 //! Planner and child-run resolver contracts for deferred tool effects.
 
 use finstack_ai_kernel::{ChildRunLocator, EffectDeferred, OperationLocator};
-use finstack_ai_runtime::{ChildRunRequest, PortFuture};
+use finstack_ai_runtime::child::ChildRunRequest;
+use finstack_ai_runtime::ports::PortFuture;
 use thiserror::Error;
 
 use super::bridge::ChildRunBridgeError;
@@ -36,7 +37,7 @@ pub enum DeferredPlanError {
 /// Claims or declines a deferred parent effect for a child run.
 ///
 /// Return [`Ok`]`(None)` when this planner does not own the handle. The
-/// in-process invoker usually implements both [`finstack_ai_runtime::AgentInvoker`]
+/// in-process invoker usually implements both [`finstack_ai_runtime::child::AgentInvoker`]
 /// and [`ChildRunResolver`].
 pub trait DeferredChildPlanner: Send + Sync {
     /// Plan a child request for `context`, or return `Ok(None)` if unowned.
@@ -49,7 +50,7 @@ pub trait DeferredChildPlanner: Send + Sync {
 /// Resolves a prepared child locator to a live [`AgentRun`].
 ///
 /// The in-process invoker usually implements both
-/// [`finstack_ai_runtime::AgentInvoker`] and this trait.
+/// [`finstack_ai_runtime::child::AgentInvoker`] and this trait.
 pub trait ChildRunResolver: Send + Sync {
     /// Return the live child handle for a previously prepared locator.
     fn resolve(&self, child: &ChildRunLocator)

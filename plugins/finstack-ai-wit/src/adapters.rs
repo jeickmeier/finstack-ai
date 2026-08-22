@@ -10,10 +10,15 @@ use finstack_ai_kernel::{
     ComponentRef, Digest, ErrorCategory, InvocationRecovery, Metadata, RawJson, ValidatedToolCall,
     Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
     ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, PortFuture, ToolCallContext, ToolError,
-    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    ContextProviderDescriptor, ContextRequest,
+};
+use finstack_ai_runtime::ports::model::ToolSpec;
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
+    ToolsetDescriptor,
 };
 use futures_util::stream;
 
@@ -344,7 +349,7 @@ fn construction_context(manifest: &PluginManifest) -> ComponentConstructionConte
     ComponentConstructionContext {
         component: ComponentRef::new(manifest.identity.clone(), Some(adapter_version(manifest))),
         configuration: None,
-        cancellation: finstack_ai_runtime::CancellationSignal::new(),
+        cancellation: finstack_ai_runtime::ports::model::CancellationSignal::new(),
         deadline: None,
         metadata: Metadata::empty(),
     }
@@ -425,11 +430,13 @@ mod tests {
         ComponentId, ContentBlock, Digest, EffectId, LaneId, Metadata, OperationLocator,
         PrincipalRef, RunId, SessionId, TextBlock, Version,
     };
-    use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, ContextBudget, ContextCallContext,
-        ContextItemKind, ContextOverflowPolicy, ContextRequest, Model, ModelContextProfile,
-        ModelName, RecordedContextContribution, RunCallContext, TokenEstimatorRef,
-        TokenEstimatorSource, assemble_context,
+    use finstack_ai_runtime::ports::context::{
+        ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextRequest,
+        RecordedContextContribution, assemble_context,
+    };
+    use finstack_ai_runtime::ports::model::{
+        AuthorizationContext, CancellationSignal, Model, ModelContextProfile, ModelName,
+        RunCallContext, TokenEstimatorRef, TokenEstimatorSource,
     };
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
     use finstack_ai_test::ScriptedModel;
@@ -532,7 +539,8 @@ mod tests {
             &self,
             registrar: &mut Registrar,
         ) -> Result<(), finstack_ai::RegistrationError> {
-            let handle: Arc<dyn finstack_ai_runtime::JournalStore> = self.store.clone();
+            let handle: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore> =
+                self.store.clone();
             registrar.store(
                 RegistrationMetadata::new(component("test.store.memory"), MODEL_VERSION),
                 ReadyComponent::new(handle),
@@ -662,7 +670,7 @@ mod tests {
             .expect("collect");
         assert_eq!(contribution.items.len(), 2);
         assert!(contribution.items.iter().all(|item| {
-            item.authority == finstack_ai_runtime::ContextAuthority::Untrusted
+            item.authority == finstack_ai_runtime::ports::context::ContextAuthority::Untrusted
                 && matches!(
                     item.kind,
                     ContextItemKind::QuotedSource | ContextItemKind::Reference
@@ -678,12 +686,8 @@ mod tests {
         )
         .expect("assemble");
         assert_eq!(assembled.items.len(), 2);
-        assert!(
-            assembled
-                .items
-                .iter()
-                .all(|item| item.authority == finstack_ai_runtime::ContextAuthority::Untrusted)
-        );
+        assert!(assembled.items.iter().all(|item| item.authority
+            == finstack_ai_runtime::ports::context::ContextAuthority::Untrusted));
         let reports = resolved.health().await;
         assert!(
             reports

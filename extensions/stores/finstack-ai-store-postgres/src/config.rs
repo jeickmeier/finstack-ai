@@ -2,7 +2,7 @@ use core::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_runtime::{StoreError, StoreLimits};
+use finstack_ai_runtime::ports::journal::{StoreError, StoreLimits};
 
 /// Default schema (namespace) used to hold the store's tables.
 pub const DEFAULT_SCHEMA: &str = "finstack_ai";
@@ -21,7 +21,7 @@ pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_SCHEMA_LEN: usize = 63;
 
 /// Durability policy applied to every pooled connection and advertised by
-/// [`finstack_ai_runtime::JournalStore::health`].
+/// [`finstack_ai_runtime::ports::journal::JournalStore::health`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PostgresDurability {
     /// `SET synchronous_commit = on` on every pooled connection.
@@ -69,7 +69,7 @@ pub struct PostgresStoreConfig {
     /// Schema-management policy.
     pub schema_policy: SchemaPolicy,
     /// Timeout applied when establishing a new pooled connection (and, in
-    /// [`finstack_ai_runtime::JournalStore::health`], to the checkout and
+    /// [`finstack_ai_runtime::ports::journal::JournalStore::health`], to the checkout and
     /// `SELECT 1` probe).
     ///
     /// Must be non-zero: a zero timeout would expire before the connect

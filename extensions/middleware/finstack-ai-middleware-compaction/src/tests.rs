@@ -5,11 +5,13 @@ use finstack_ai_kernel::{
     ContentBlock, EntryTag, Id, IdTag, Message, MessageRole, Metadata, ProviderIds, RawJson,
     Sensitivity, TextBlock, Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, BeforeModelInput, CancellationSignal, CompactionModelResume,
-    CompactionSourceEntry, Middleware, MiddlewareContext, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelResponse, ModelSettings, RunCallContext, StageInput, StageOutcome,
-    compaction_checkpoint_compatible, validate_stage_outcome,
+use finstack_ai_runtime::ports::middleware::{
+    BeforeModelInput, CompactionModelResume, CompactionSourceEntry, Middleware, MiddlewareContext,
+    StageInput, StageOutcome, compaction_checkpoint_compatible, validate_stage_outcome,
+};
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ModelName, ModelRequestDraft, ModelRequestLimits,
+    ModelResponse, ModelSettings, RunCallContext,
 };
 use finstack_ai_test::{
     CompactionConformanceCase, MiddlewareConformanceCase, SharedCompactionProjection,
@@ -676,7 +678,7 @@ async fn cancelled_invoke_fails_closed() {
 #[test]
 fn incompatible_checkpoint_is_a_cache_miss() {
     let input = history();
-    let mut checkpoint = finstack_ai_runtime::CompactionCheckpoint {
+    let mut checkpoint = finstack_ai_runtime::ports::middleware::CompactionCheckpoint {
         component_id: ComponentId::parse("finstack.middleware.compaction").expect("id"),
         strategy_id: Arc::from(SLIDING_WINDOW),
         strategy_version: 1,
@@ -759,7 +761,9 @@ async fn sliding_window_terminates_on_five_thousand_entries() {
         CompactionMiddleware::try_new(CompactionConfig::sliding_window(64, 0)).expect("middleware");
     match invoke(&middleware, input, None).await {
         Ok(StageOutcome::CompactContext(_) | StageOutcome::Continue) => {}
-        Err(error) if error.code() == finstack_ai_runtime::COMPACTION_RESULT_INVALID => {}
+        Err(error)
+            if error.code()
+                == finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID => {}
         other => panic!("sliding window did not terminate cleanly: {other:?}"),
     }
 }

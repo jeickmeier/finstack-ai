@@ -8,9 +8,8 @@ use finstack_ai_kernel::{
     Digest, EffectOutputContract, EffectOutputKind, Metadata, PrincipalRef, RawJson, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ToolResult, ToolStreamItem, Toolset,
-};
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal};
+use finstack_ai_runtime::ports::tool::{ToolResult, ToolStreamItem, Toolset};
 use futures_util::StreamExt;
 
 use super::*;
@@ -47,7 +46,7 @@ fn host(recording: Arc<RecordingHost>) -> SkillsHost {
 
 fn context() -> ToolCallContext {
     ToolCallContext {
-        run: finstack_ai_runtime::RunCallContext {
+        run: finstack_ai_runtime::ports::model::RunCallContext {
             locator: OperationLocator::try_new(
                 "tenant-a",
                 SessionId::from_bytes([1; 16]),

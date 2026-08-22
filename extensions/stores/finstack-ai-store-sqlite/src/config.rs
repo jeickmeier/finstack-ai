@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use finstack_ai_runtime::{StoreError, StoreLimits};
+use finstack_ai_runtime::ports::journal::{StoreError, StoreLimits};
 
 /// Default lock-wait used when a second connection contends for the writer.
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
@@ -18,7 +18,7 @@ pub enum SqliteSynchronous {
     Off,
 }
 
-/// Durability policy applied at open and advertised by [`finstack_ai_runtime::JournalStore::health`].
+/// Durability policy applied at open and advertised by [`finstack_ai_runtime::ports::journal::JournalStore::health`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SqliteDurability {
     /// WAL plus `synchronous=FULL` (and Darwin full-fsync controls).

@@ -39,15 +39,23 @@ use finstack_ai_kernel::{
     ReducerStageOutcome, RetrySafety, RunPhase, Stage, ToolExecutionMode, ToolFailurePolicy,
     ToolId, ToolResultBlock, Usage,
 };
-use finstack_ai_runtime::{
-    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
-    ExternalClock, JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelResponse,
-    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall, ResolvedToolCatalog,
-    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolCallDelta,
-    ToolDeferral, ToolDeferralSupport, ToolExecutionPolicy, ToolPolicyDecision, ToolResult,
-    ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
-    WorkflowSession, WorkflowWait,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, Model, ModelResponse,
+    ModelStreamItem, ModelStreamLimits, ModelToolCall, SideEffectClass, ToolCallDelta,
+    ToolDeferralSupport, ToolSpec,
 };
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolDeferral, ToolExecutionPolicy,
+    ToolPolicyDecision, ToolResult, ToolStreamItem, ToolStreamLimits, Toolset, ToolsetRegistration,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, ToolTaskConfig,
+};
+use finstack_ai_runtime::workflow::{WorkflowSession, WorkflowWait};
 use finstack_ai_store_memory::MemoryJournalStore;
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
@@ -91,7 +99,7 @@ async fn drive_past_missing_facade_decisions(
             .await
             .expect("recover for facade");
     let ready_model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(Arc::clone(model))
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(Arc::clone(model))
             .await
             .expect("model readiness"),
     );
@@ -401,7 +409,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
     ));
     let clock = ExternalClock::new(timestamp(2_500));
     let ready_model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(Arc::clone(&model))
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(Arc::clone(&model))
             .await
             .expect("model readiness"),
     );
@@ -659,7 +667,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
     ));
     let clock = ExternalClock::new(timestamp(2_500));
     let ready_model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(Arc::clone(&model))
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(Arc::clone(&model))
             .await
             .expect("model readiness"),
     );

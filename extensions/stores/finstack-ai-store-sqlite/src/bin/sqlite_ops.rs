@@ -29,8 +29,9 @@ use std::time::Duration;
 
 use finstack_ai_kernel::{AppendRequest, Id, RecordDraft, RecordEnvelope, SessionId};
 use finstack_ai_protocol::{from_diagnostic_json, to_diagnostic_jsonl};
-use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, LoadRequest, SCAN_PAGE_MAX_RECORDS, ScanRequest,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, SCAN_PAGE_MAX_RECORDS, ScanRequest,
 };
 use finstack_ai_store_sqlite::{
     SCHEMA_USER_VERSION, SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits,

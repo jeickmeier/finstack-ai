@@ -1,7 +1,7 @@
 //! Reference-server errors.
 
 use finstack_ai_protocol::ProtocolError;
-use finstack_ai_runtime::SecurityAuditGateError;
+use finstack_ai_runtime::audit::SecurityAuditGateError;
 use thiserror::Error;
 
 /// Stable reference-server failures.

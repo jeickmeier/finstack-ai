@@ -7,7 +7,7 @@ use finstack_ai_protocol::{
     POST_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteCommand, RemoteDurableStep,
     RemotePostAuth, VersionOffer, encode,
 };
-use finstack_ai_runtime::{SecurityAuditCategory, SecurityAuditGate};
+use finstack_ai_runtime::audit::{SecurityAuditCategory, SecurityAuditGate};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::timeout;
 

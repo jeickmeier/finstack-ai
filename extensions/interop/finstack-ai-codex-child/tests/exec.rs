@@ -11,9 +11,10 @@ use finstack_ai_kernel::{
     BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, Digest, EffectId, LaneId,
     Metadata, OperationLocator, PrincipalRef, RunId, SessionId, TextBlock,
 };
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AuthorizationContext, ChildRunContext, ChildRunRequest,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunRequest,
 };
+use finstack_ai_runtime::ports::model::AuthorizationContext;
 
 fn fake_invoker(mode: &str, workspace: &std::path::Path) -> CodexChildInvoker {
     CodexChildInvoker::try_new(CodexExecConfig {

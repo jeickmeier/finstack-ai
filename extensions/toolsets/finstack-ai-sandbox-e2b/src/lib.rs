@@ -34,9 +34,12 @@ use finstack_ai_kernel::{
     ValidatedToolCall,
 };
 use finstack_ai_net_guard::{BodyReadInterrupt, NetGuardError, read_body_bounded_interruptible};
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, ToolCallContext,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
     ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
@@ -482,10 +485,12 @@ mod tests {
         OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
         ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
-    use finstack_ai_runtime::{
-        ApprovalState, AuthorizationContext, CancellationSignal, JsonSchemaToolValidatorCompiler,
-        ResolvedToolCatalog, RunCallContext, ToolCatalogPlan, ToolExecutionPolicy,
-        ToolPolicyDecision, Toolset, ToolsetRegistration,
+    use finstack_ai_runtime::ports::model::{
+        AuthorizationContext, CancellationSignal, RunCallContext,
+    };
+    use finstack_ai_runtime::ports::tool::{
+        ApprovalState, JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolCatalogPlan,
+        ToolExecutionPolicy, ToolPolicyDecision, Toolset, ToolsetRegistration,
     };
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 #[cfg(feature = "native-tokio")]
 use finstack_ai_kernel::ValidationOutcome;
 use finstack_ai_kernel::{CancelRequested, CancellationInitiator, KernelInput, OperationLocator};
-use finstack_ai_runtime::{EventBatch, EventSubscription, RunHandle};
+use finstack_ai_runtime::EventSubscription;
+use finstack_ai_runtime::events::EventBatch;
+use finstack_ai_runtime::run::RunHandle;
 
 #[cfg(feature = "native-tokio")]
 use finstack_ai_kernel::{InteractionRequest, InteractionResolution, InteractionSettled, RawJson};
@@ -12,7 +14,7 @@ use finstack_ai_runtime::host_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::native_driver as driver;
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
+use finstack_ai_runtime::ports::tool::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
 
 use super::prepare::{NativeIds, submit};
 use super::types::{AgentRunError, AgentRunOutput};
@@ -20,7 +22,7 @@ use crate::ChildRunPolicy;
 
 pub(super) struct AgentRunInner {
     pub(super) locator: OperationLocator,
-    pub(super) store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    pub(super) store: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     #[cfg_attr(
         all(feature = "wasm-host", not(feature = "native-tokio")),
         allow(dead_code)
@@ -44,7 +46,7 @@ pub(super) struct AgentRunInner {
         all(feature = "wasm-host", not(feature = "native-tokio")),
         allow(dead_code)
     )]
-    pub(super) remote_invoker: Mutex<Option<Arc<dyn finstack_ai_runtime::AgentInvoker>>>,
+    pub(super) remote_invoker: Mutex<Option<Arc<dyn finstack_ai_runtime::child::AgentInvoker>>>,
     #[cfg_attr(
         all(feature = "wasm-host", not(feature = "native-tokio")),
         allow(dead_code)
@@ -187,7 +189,9 @@ impl AgentRun {
         all(feature = "wasm-host", not(feature = "native-tokio")),
         allow(dead_code)
     )]
-    pub(crate) fn journal_store(&self) -> &Arc<dyn finstack_ai_runtime::JournalStore> {
+    pub(crate) fn journal_store(
+        &self,
+    ) -> &Arc<dyn finstack_ai_runtime::ports::journal::JournalStore> {
         &self.inner.store
     }
 
@@ -324,7 +328,7 @@ impl AgentRun {
     /// published.
     pub async fn observer_diagnostics(
         &self,
-    ) -> Result<finstack_ai_runtime::ObserverDiagnostics, AgentRunError> {
+    ) -> Result<finstack_ai_runtime::ports::observer::ObserverDiagnostics, AgentRunError> {
         Ok(self.runtime_handle().await?.observer_diagnostics())
     }
 

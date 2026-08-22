@@ -1,5 +1,5 @@
 use finstack_ai_kernel::{ErrorCategory, Metadata};
-use finstack_ai_runtime::ModelError;
+use finstack_ai_runtime::ports::model::ModelError;
 
 pub(crate) const CONFIG_INVALID: &str = "anthropic_config_invalid";
 pub(crate) const REQUEST_INVALID: &str = "anthropic_request_invalid";

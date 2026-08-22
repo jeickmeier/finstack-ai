@@ -8,12 +8,20 @@ use std::fmt;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, RunEvent, ValidatedToolCall};
-use finstack_ai_runtime::{
-    AssembledModelStream, AssembledToolStream, ContextCallContext, ContextContribution,
-    ContextProvider, ContextRequest, JournalStore, Middleware, MiddlewareContext, Model, ModelName,
-    ModelRequest, ModelStreamAssembler, ModelStreamLimits, ModelTerminal, Observer, StageInput,
-    StageOutcome, ToolCallContext, ToolStreamAssembler, ToolStreamLimits, Toolset,
-    validate_stage_outcome,
+use finstack_ai_runtime::ports::context::{
+    ContextCallContext, ContextContribution, ContextProvider, ContextRequest,
+};
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::middleware::{
+    Middleware, MiddlewareContext, StageInput, StageOutcome, validate_stage_outcome,
+};
+use finstack_ai_runtime::ports::model::{
+    AssembledModelStream, Model, ModelName, ModelRequest, ModelStreamAssembler, ModelStreamLimits,
+    ModelTerminal,
+};
+use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::tool::{
+    AssembledToolStream, ToolCallContext, ToolStreamAssembler, ToolStreamLimits, Toolset,
 };
 
 /// Published suite version printed on every port-conformance failure.
@@ -410,7 +418,7 @@ pub async fn check_journal_store_conformance(
         "equal batch retry returned a different committed result",
     )?;
     let loaded = store
-        .load(finstack_ai_runtime::LoadRequest {
+        .load(finstack_ai_runtime::ports::journal::LoadRequest {
             session_id: case.request.session_id(),
         })
         .await

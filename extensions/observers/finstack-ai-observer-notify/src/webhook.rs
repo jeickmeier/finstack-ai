@@ -2,7 +2,8 @@
 
 use core::fmt;
 
-use finstack_ai_runtime::{PortFuture, SecretString};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::SecretString;
 
 use crate::http::JsonPoster;
 use crate::{InteractionNotification, NotificationSink, NotifyObserverError, SinkError};

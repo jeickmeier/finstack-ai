@@ -7,12 +7,13 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Digest, Timestamp};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
     ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
-    Bytes, PortFuture, artifact_storage_key, build_artifact_ref, validate_artifact_scope,
-    validate_retrieved_artifact,
+    artifact_storage_key, build_artifact_ref, validate_artifact_scope, validate_retrieved_artifact,
 };
+use finstack_ai_runtime::ports::PortFuture;
 
 use crate::record::{
     INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryClock,
@@ -312,7 +313,7 @@ impl ArtifactStore for InProcessArtifactStore {
 mod artifact_store_tests {
     use super::*;
     use finstack_ai_kernel::{Metadata, RunId, Sensitivity, SessionId};
-    use finstack_ai_runtime::{get_required_artifact, stage_required_artifact};
+    use finstack_ai_runtime::artifact::{get_required_artifact, stage_required_artifact};
 
     fn scope(tenant: &str) -> ArtifactScope {
         ArtifactScope {

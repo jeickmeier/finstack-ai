@@ -4,10 +4,10 @@ use finstack_ai_kernel::{
     PrincipalRef, RetrySafety, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, PendingToolEffect, ReconcileContext, RunCallContext,
-    SideEffectClass, ToolReconcileResult, Toolset,
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ReconcileContext, RunCallContext, SideEffectClass,
 };
+use finstack_ai_runtime::ports::tool::{PendingToolEffect, ToolReconcileResult, Toolset};
 use futures_util::StreamExt;
 
 #[test]

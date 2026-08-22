@@ -27,9 +27,12 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, ToolCallContext,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
     ToolsetDescriptor,
 };
 use futures_core::Stream;
@@ -120,10 +123,10 @@ mod tests {
         Digest, EffectOutputContract, EffectOutputKind, LaneId, OperationLocator, PrincipalRef,
         RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy, Usage,
     };
-    use finstack_ai_runtime::{
-        AssembledToolStream, AuthorizationContext, CancellationSignal, RunCallContext,
-        ToolStreamLimits, ToolTerminal,
+    use finstack_ai_runtime::ports::model::{
+        AuthorizationContext, CancellationSignal, RunCallContext,
     };
+    use finstack_ai_runtime::ports::tool::{AssembledToolStream, ToolStreamLimits, ToolTerminal};
     use finstack_ai_test::{ToolsetConformanceCase, check_toolset_conformance};
 
     fn session_id(value: u64) -> SessionId {

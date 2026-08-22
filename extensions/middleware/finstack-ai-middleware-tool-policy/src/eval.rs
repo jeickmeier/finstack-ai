@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ContentBlock, MessageRole, ToolId};
-use finstack_ai_runtime::{BeforeModelInput, BeforeToolBatchInput, SideEffectClass};
+use finstack_ai_runtime::ports::middleware::{BeforeModelInput, BeforeToolBatchInput};
+use finstack_ai_runtime::ports::model::SideEffectClass;
 
 use crate::{
     JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, TOOL_POLICY_WRITE_BUDGET_EXCEEDED,

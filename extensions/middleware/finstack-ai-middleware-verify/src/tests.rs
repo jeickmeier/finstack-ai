@@ -5,10 +5,13 @@ use finstack_ai_kernel::{
     ContentBlock, Digest, EffectId, LaneId, Message, MessageRole, Metadata, OperationLocator,
     OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, TextBlock, Timestamp,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, BeforeModelInput, CancellationSignal, Middleware, MiddlewareContext,
-    ModelName, ModelRequestDraft, ModelRequestLimits, ModelSettings, RunCallContext, StageInput,
-    StageOutcome, validate_stage_outcome,
+use finstack_ai_runtime::ports::middleware::{
+    BeforeModelInput, Middleware, MiddlewareContext, StageInput, StageOutcome,
+    validate_stage_outcome,
+};
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ModelName, ModelRequestDraft, ModelRequestLimits,
+    ModelSettings, RunCallContext,
 };
 use finstack_ai_test::{MiddlewareConformanceCase, check_middleware_conformance};
 

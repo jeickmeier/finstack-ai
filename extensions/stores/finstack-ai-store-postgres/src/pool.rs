@@ -22,7 +22,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_postgres::Statement;
 
@@ -82,7 +82,7 @@ struct PoolInner<C> {
 /// A small bounded pool of connections of type `C`.
 ///
 /// Cheaply [`Clone`] (an `Arc` clone) so it can be captured by `'static`
-/// futures returned from [`finstack_ai_runtime::JournalStore`] methods.
+/// futures returned from [`finstack_ai_runtime::ports::journal::JournalStore`] methods.
 pub(crate) struct Pool<C> {
     inner: Arc<PoolInner<C>>,
 }

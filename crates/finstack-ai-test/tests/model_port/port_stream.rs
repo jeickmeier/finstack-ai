@@ -351,7 +351,7 @@ async fn malformed_tool_usage_and_response_sequences_are_fail_closed() {
     .expect_err("item limit");
     assert_eq!(
         error.code(),
-        finstack_ai_runtime::MODEL_STREAM_LIMIT_EXCEEDED
+        finstack_ai_runtime::ports::model::MODEL_STREAM_LIMIT_EXCEEDED
     );
     assert_eq!(error.category(), finstack_ai_kernel::ErrorCategory::Limit);
     assert!(!error.retryable());
@@ -378,7 +378,7 @@ async fn completed_and_deferred_byte_limits_match_canonical_encoded_len() {
             .await
             .expect_err("completed over limit")
             .code(),
-        finstack_ai_runtime::MODEL_STREAM_LIMIT_EXCEEDED
+        finstack_ai_runtime::ports::model::MODEL_STREAM_LIMIT_EXCEEDED
     );
 
     let deferral = ModelDeferral {
@@ -407,7 +407,7 @@ async fn completed_and_deferred_byte_limits_match_canonical_encoded_len() {
             .await
             .expect_err("deferred over limit")
             .code(),
-        finstack_ai_runtime::MODEL_STREAM_LIMIT_EXCEEDED
+        finstack_ai_runtime::ports::model::MODEL_STREAM_LIMIT_EXCEEDED
     );
 }
 

@@ -26,10 +26,13 @@ use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory, InvocationRecovery,
     Metadata, Sensitivity, Stage, TextBlock, Version,
 };
-use finstack_ai_runtime::{
-    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance, Middleware,
-    MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole,
-    OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+};
+use finstack_ai_runtime::ports::middleware::{
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, StageInput, StageMask, StageOutcome,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -228,7 +231,7 @@ impl Middleware for InstructionsMiddleware {
         Box::pin(async move {
             if !matches!(input, StageInput::PrepareContext { .. }) {
                 return Err(MiddlewareError::try_new(
-                    finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                    finstack_ai_runtime::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
                     ErrorCategory::Middleware,
                     "instructions only run at prepare_context",
                     Metadata::empty(),

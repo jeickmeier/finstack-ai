@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use finstack_ai_runtime::StoreLimits;
+use finstack_ai_runtime::ports::journal::StoreLimits;
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 
 /// Environment variable naming a live Postgres server for the integration

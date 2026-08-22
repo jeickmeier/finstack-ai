@@ -11,7 +11,8 @@ use finstack_ai::{AgentRunRequest, AttachmentInput};
 use finstack_ai_kernel::{EntryBody, Sensitivity};
 use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
-use finstack_ai_runtime::{ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes};
+use finstack_ai_runtime::artifact::{ArtifactMetadata, ArtifactScope, ArtifactStore};
+use finstack_ai_runtime::{Bytes};
 use finstack_ai_tools_document::DocumentToolset;
 
 const SAMPLE_CSV: &[u8] = include_bytes!("../../../../fixtures/documents/sample.csv");
@@ -43,12 +44,12 @@ async fn document_ingest_agent_with_store(
     artifact_store: Arc<dyn ArtifactStore>,
 ) -> (
     Agent,
-    Arc<dyn finstack_ai_runtime::JournalStore>,
+    Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     Arc<ScriptedModel>,
 ) {
     use finstack_ai_kernel::{AgentId, BundleId};
 
-    let store: Arc<dyn finstack_ai_runtime::JournalStore> = Arc::new(
+    let store: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore> = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
             sessions: 8,
             batches_per_session: 64,
@@ -113,7 +114,7 @@ async fn document_ingest_agent_with_store(
 
 async fn document_ingest_agent() -> (
     Agent,
-    Arc<dyn finstack_ai_runtime::JournalStore>,
+    Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     Arc<ScriptedModel>,
     Arc<dyn ArtifactStore>,
 ) {
@@ -144,7 +145,7 @@ async fn document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_fil
         .expect("staged artifact");
 
     let mut request = AgentRunRequest::try_new(
-        finstack_ai_runtime::ModelName::try_new("lanes-1").expect("model name"),
+        finstack_ai_runtime::ports::model::ModelName::try_new("lanes-1").expect("model name"),
         "Please summarize the attached document",
         security("decision-v1"),
     )
@@ -190,7 +191,7 @@ async fn document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_fil
 
     // (c) the canonical journaled conversation still carries the original
     // user message with its File block, unmodified by the middleware.
-    let session = finstack_ai_runtime::SessionRuntime::open(
+    let session = finstack_ai_runtime::session::SessionRuntime::open(
         Arc::clone(&store),
         output.locator.session_id,
         Arc::clone(&output.locator.tenant_scope),
@@ -256,7 +257,7 @@ async fn large_attachment_stages_through_the_object_backed_artifact_store() {
     );
 
     let mut request = AgentRunRequest::try_new(
-        finstack_ai_runtime::ModelName::try_new("lanes-1").expect("model name"),
+        finstack_ai_runtime::ports::model::ModelName::try_new("lanes-1").expect("model name"),
         "Please summarize the attached document",
         security("decision-v1"),
     )

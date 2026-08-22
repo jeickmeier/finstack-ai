@@ -10,9 +10,8 @@ use finstack_ai_kernel::{
     Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId, Timestamp,
     ToolCallBlock, ToolExecutionMode, ToolFailurePolicy, ToolId, ValidatedToolCall, Version,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, Toolset,
-};
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, Toolset};
 use finstack_ai_wit::{
     MAX_RAW_JSON_BYTES, NoopPluginHooks, parse_manifest, reject_before_allocation,
 };
@@ -445,7 +444,7 @@ async fn large_payload_is_rejected_before_guest_allocation() {
     let item = stream.next().await.expect("item").expect("ok");
     assert!(matches!(
         item,
-        finstack_ai_runtime::ToolStreamItem::Completed(_)
+        finstack_ai_runtime::ports::tool::ToolStreamItem::Completed(_)
     ));
 }
 

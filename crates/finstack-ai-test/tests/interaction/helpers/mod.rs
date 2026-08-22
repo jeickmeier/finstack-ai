@@ -16,17 +16,29 @@ use finstack_ai_kernel::{
     SessionTag, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv, Version,
 };
 use finstack_ai_kernel::{InteractionResolutionCommand, ToolFailurePolicy};
-use finstack_ai_runtime::{
-    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
-    IdGenerationError, InteractionRouter, JournalStore, JsonSchemaToolValidatorCompiler,
-    LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft,
-    ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits,
-    ModelTaskConfig, ModelToolCall, RandomSource, ResolvedToolCatalog, RunHandle, RunHandleError,
-    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditError, SecurityAuditEvent,
-    SecurityAuditGate, SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink,
-    SideEffectClass, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem,
-    ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration, resolve_model_context_profile,
+use finstack_ai_runtime::audit::{
+    SecurityAuditError, SecurityAuditEvent, SecurityAuditGate, SecurityAuditHealth,
+    SecurityAuditReceipt, SecurityAuditSink,
+};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::{IdGenerationError, RandomSource};
+use finstack_ai_runtime::ingress::InteractionRouter;
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest};
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, LockedModelContextProfile, Model,
+    ModelContextProfile, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
+    ModelStreamItem, ModelStreamLimits, ModelToolCall, SideEffectClass, TokenEstimatorRef,
+    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolSpec,
+    resolve_model_context_profile,
+};
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolResult, ToolStreamItem, ToolStreamLimits, Toolset, ToolsetRegistration,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner,
+    SameIdentityRetryPolicy, ToolTaskConfig,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -49,7 +61,7 @@ pub(crate) fn timestamp(ms: i64) -> Timestamp {
 pub(crate) fn profile() -> ModelContextProfile {
     ModelContextProfile {
         provider: Arc::from("scripted"),
-        model: finstack_ai_runtime::ModelName::try_new("scripted-1").expect("model"),
+        model: finstack_ai_runtime::ports::model::ModelName::try_new("scripted-1").expect("model"),
         hard_input_bytes: 2_000_000,
         context_window_tokens: 3_000_000,
         max_output_tokens: 1_000,
@@ -398,7 +410,7 @@ pub(crate) async fn spawn_owner(
     random: u64,
 ) -> Result<RunTaskOwner, RunHandleError> {
     let model = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(model)
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(model)
             .await
             .map_err(|error| RunHandleError::Model {
                 code: Arc::from(error.code()),
@@ -678,7 +690,8 @@ impl SecurityAuditSink for RecordingSink {
     fn record(
         &self,
         event: SecurityAuditEvent,
-    ) -> finstack_ai_runtime::PortFuture<Result<SecurityAuditReceipt, SecurityAuditError>> {
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<SecurityAuditReceipt, SecurityAuditError>>
+    {
         let event_id = Arc::<str>::from(event.event_id());
         let recorded_at = event.timestamp();
         self.events.lock().expect("lock").push(event);
@@ -692,7 +705,8 @@ impl SecurityAuditSink for RecordingSink {
 
     fn health(
         &self,
-    ) -> finstack_ai_runtime::PortFuture<Result<SecurityAuditHealth, SecurityAuditError>> {
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<SecurityAuditHealth, SecurityAuditError>>
+    {
         Box::pin(async { Ok(SecurityAuditHealth { ready: true }) })
     }
 }

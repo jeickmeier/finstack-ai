@@ -10,9 +10,9 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_net_guard::{HostResolver, UrlPolicy, parse_and_vet_url};
-use finstack_ai_runtime::{
-    ArtifactStore, AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,
-};
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::tool::{ToolError, Toolset};
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -137,8 +137,8 @@ async fn drive_to_success(
             .expect("stream item")
             .expect("expected success")
         {
-            finstack_ai_runtime::ToolStreamItem::Artifact(_) => {}
-            finstack_ai_runtime::ToolStreamItem::Completed(result) => break result,
+            finstack_ai_runtime::ports::tool::ToolStreamItem::Artifact(_) => {}
+            finstack_ai_runtime::ports::tool::ToolStreamItem::Completed(result) => break result,
             _ => panic!("unexpected fetch tool stream item"),
         }
     };

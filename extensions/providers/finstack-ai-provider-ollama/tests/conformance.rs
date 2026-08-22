@@ -10,7 +10,7 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 use finstack_ai_provider_wire::OllamaChatAssembly;
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
     ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTerminal, RunCallContext,
 };
@@ -162,7 +162,7 @@ async fn assert_protocol(content_type: &str, body: &str, expected: ModelTerminal
             model: selected,
             request: request(),
             expected_terminal: expected,
-            stream_limits: finstack_ai_runtime::ModelStreamLimits::default(),
+            stream_limits: finstack_ai_runtime::ports::model::ModelStreamLimits::default(),
         },
     )
     .await

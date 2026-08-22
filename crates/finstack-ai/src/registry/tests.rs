@@ -3,10 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Digest, Metadata, RawJson, Version};
-use finstack_ai_runtime::{
-    JournalStore, Model, ModelContextProfile, ModelName, Observer, ObserverDescriptor,
-    ObserverPayloadMode, PortFuture, TokenEstimatorRef, TokenEstimatorSource,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::{
+    Model, ModelContextProfile, ModelName, TokenEstimatorRef, TokenEstimatorSource,
 };
+use finstack_ai_runtime::ports::observer::{Observer, ObserverDescriptor, ObserverPayloadMode};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
 
@@ -951,12 +953,13 @@ async fn observer_descriptor_must_match_its_registration() {
         }
 
         fn register(&self, registrar: &mut Registrar) -> Result<(), RegistrationError> {
-            let observer: Arc<dyn Observer> =
-                Arc::new(finstack_ai_runtime::NoopObserver::new(ObserverDescriptor {
+            let observer: Arc<dyn Observer> = Arc::new(
+                finstack_ai_runtime::ports::observer::NoopObserver::new(ObserverDescriptor {
                     component: ComponentRef::new(component("test.observer.wrong"), Some(VERSION)),
                     payload_mode: ObserverPayloadMode::MetadataOnly,
                     metadata: Metadata::empty(),
-                }));
+                }),
+            );
             registrar.observer(
                 RegistrationMetadata::new(component("test.observer.noop"), VERSION),
                 ReadyComponent::new(observer),

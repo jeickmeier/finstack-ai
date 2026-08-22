@@ -12,10 +12,10 @@ use finstack_ai_kernel::{
     SessionCreated, SessionTag, Timestamp, TransitionEnv,
 };
 use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
-use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, LoadFromRequest, LoadRequest, LoadWindow, OpaqueSnapshot,
-    SCAN_PAGE_MAX_RECORDS, ScanRequest, SnapshotRequest, StateSnapshotRequest, StoreError,
-    WriteMetadataRequest,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadFromRequest, LoadRequest, LoadWindow, OpaqueSnapshot, SCAN_PAGE_MAX_RECORDS,
+    ScanRequest, SnapshotRequest, StateSnapshotRequest, StoreError, WriteMetadataRequest,
 };
 use finstack_ai_test::store_fixtures::{draft, id, request};
 use finstack_ai_test::{JournalStoreConformanceCase, check_journal_store_conformance};

@@ -1,7 +1,7 @@
 //! Official `OpenAI` Responses SSE event assembly.
 
 use finstack_ai_provider_wire::{OpenAiResponsesAssembly, StreamNormError, StreamNormKind};
-use finstack_ai_runtime::{ModelError, ModelStreamItem};
+use finstack_ai_runtime::ports::model::{ModelError, ModelStreamItem};
 
 use crate::error::{incomplete_error, response_error, stream_error, stream_limit_error};
 
@@ -37,7 +37,7 @@ fn map_norm(error: StreamNormError) -> ModelError {
 #[cfg(test)]
 mod tests {
     use finstack_ai_kernel::ContentBlock;
-    use finstack_ai_runtime::ModelStreamItem;
+    use finstack_ai_runtime::ports::model::ModelStreamItem;
     use serde_json::Value;
 
     use super::*;

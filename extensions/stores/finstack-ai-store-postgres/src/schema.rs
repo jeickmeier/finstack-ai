@@ -15,7 +15,7 @@
 
 use crate::config::SchemaPolicy;
 use crate::error::map_postgres_error;
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 
 /// Schema version written to `fa_schema_version` once v1 DDL has been
 /// applied. Any other stored version is treated as unsupported and fails

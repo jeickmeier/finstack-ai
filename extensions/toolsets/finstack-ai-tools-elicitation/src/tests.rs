@@ -4,9 +4,10 @@ use finstack_ai_kernel::{
     METADATA_MAX_BYTES, OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolFailurePolicy,
 };
-use finstack_ai_runtime::{
-    ApprovalRequirement, AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext,
+use finstack_ai_runtime::ports::model::{
+    ApprovalRequirement, AuthorizationContext, CancellationSignal, RunCallContext,
 };
+use finstack_ai_runtime::ports::tool::ToolCallContext;
 use futures_util::StreamExt;
 use std::sync::Arc;
 
@@ -226,7 +227,7 @@ async fn completed_output(
         .expect("one stream item")
         .expect("stream ok");
     match item {
-        finstack_ai_runtime::ToolStreamItem::Completed(result) => {
+        finstack_ai_runtime::ports::tool::ToolStreamItem::Completed(result) => {
             assert!(!result.is_error);
             serde_json::from_slice(result.output.as_bytes()).expect("output json")
         }

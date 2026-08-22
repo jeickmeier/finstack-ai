@@ -35,10 +35,11 @@ use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ContentBlock, Digest, InvocationRecovery, Metadata,
     Sensitivity, TextBlock, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
     ContextAuthority, ContextCallContext, ContextContribution, ContextError, ContextItem,
     ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, PortFuture,
+    ContextProviderDescriptor, ContextRequest,
 };
 use thiserror::Error;
 
@@ -293,7 +294,7 @@ fn apply_budget(
         if exceeds {
             return match request.budget.overflow {
                 ContextOverflowPolicy::Reject => Err(ContextError::try_new(
-                    finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
+                    finstack_ai_runtime::ports::context::CONTEXT_BUDGET_EXCEEDED,
                     finstack_ai_kernel::ErrorCategory::Limit,
                     "repository contribution exceeds the committed budget",
                     Metadata::empty(),
@@ -327,7 +328,7 @@ fn estimate_tokens(text: &str) -> u64 {
 
 fn contribution_invalid() -> ContextError {
     ContextError::try_new(
-        finstack_ai_runtime::CONTEXT_CONTRIBUTION_INVALID,
+        finstack_ai_runtime::ports::context::CONTEXT_CONTRIBUTION_INVALID,
         finstack_ai_kernel::ErrorCategory::Validation,
         "repository file text is invalid",
         Metadata::empty(),

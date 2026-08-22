@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_runtime::WorkflowDriverError;
+use finstack_ai_runtime::workflow::WorkflowDriverError;
 use finstack_ai_workflow_local::CronError;
 use thiserror::Error;
 

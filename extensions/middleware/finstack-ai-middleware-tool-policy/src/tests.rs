@@ -6,10 +6,11 @@ use finstack_ai_kernel::{
     OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RetrySafety, RunId,
     SessionId, TextBlock, Timestamp, ToolCallBlock, ToolExecutionMode, ToolId,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, BeforeModelInput,
-    CancellationSignal, MiddlewareContext, ModelName, ModelRequestDraft, ModelRequestLimits,
-    ModelSettings, RunCallContext, SideEffectClass, ToolDeferralSupport, ToolSpec,
+use finstack_ai_runtime::ports::middleware::{BeforeModelInput, MiddlewareContext};
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal, ModelName,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, RunCallContext, SideEffectClass,
+    ToolDeferralSupport, ToolSpec,
 };
 
 use crate::{JailbreakAction, ToolPolicyConfig, ToolPolicyError};
@@ -256,7 +257,7 @@ fn config_serialization_is_deterministic_for_digest() {
 
 mod middleware_tests {
     use finstack_ai_kernel::Stage;
-    use finstack_ai_runtime::{Middleware, MiddlewareRole, OrderTier};
+    use finstack_ai_runtime::ports::middleware::{Middleware, MiddlewareRole, OrderTier};
 
     use crate::ToolPolicyMiddleware;
 
@@ -298,7 +299,7 @@ mod middleware_tests {
         use std::collections::{BTreeMap, BTreeSet};
         use std::sync::Arc;
 
-        use finstack_ai_runtime::{StageInput, StageOutcome};
+        use finstack_ai_runtime::ports::middleware::{StageInput, StageOutcome};
 
         use super::{draft, middleware_context, read_tool, tid, write_tool};
 
@@ -331,7 +332,9 @@ mod middleware_tests {
         use std::sync::Arc;
 
         use finstack_ai_kernel::{RawJson, ToolCallBlock, ToolCallId};
-        use finstack_ai_runtime::{BeforeToolBatchInput, StageInput, StageOutcome};
+        use finstack_ai_runtime::ports::middleware::{
+            BeforeToolBatchInput, StageInput, StageOutcome,
+        };
 
         use super::{middleware_context, read_tool, tid, uuid_str, write_tool};
 
@@ -390,9 +393,9 @@ mod eval_tests {
     use finstack_ai_kernel::{
         Metadata, RawJson, RetrySafety, ToolCallBlock, ToolExecutionMode, ToolId,
     };
-    use finstack_ai_runtime::{
-        ApprovalMetadata, ApprovalRequirement, BeforeToolBatchInput, SideEffectClass,
-        ToolDeferralSupport, ToolSpec,
+    use finstack_ai_runtime::ports::middleware::BeforeToolBatchInput;
+    use finstack_ai_runtime::ports::model::{
+        ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
     };
 
     use crate::eval::{

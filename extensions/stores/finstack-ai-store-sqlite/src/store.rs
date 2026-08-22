@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::journal::{
     LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt, PruneReceipt,
     PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
     StoreError, WriteMetadataRequest,
@@ -25,7 +25,7 @@ use crate::worker::{WorkerCtx, WorkerHandle};
 ///
 /// The worker owns the connection and applies jobs in submit order. Records
 /// are append-only and authoritative. Optional
-/// [`JournalStore::prune`](finstack_ai_runtime::JournalStore::prune) deletes
+/// [`JournalStore::prune`](finstack_ai_runtime::ports::journal::JournalStore::prune) deletes
 /// snapshot-covered prefix records while retaining the snapshot-boundary
 /// record, outstanding tail, and settlement indexes.
 pub struct SqliteJournalStore {

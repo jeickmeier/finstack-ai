@@ -10,11 +10,15 @@ use crate::{
 use finstack_ai_kernel::{
     AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, MiddlewareRef,
 };
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::child::ChildRunPolicy;
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::{AgentInvoker, ChildRunStarter};
-use finstack_ai_runtime::{
-    ArtifactStore, ChildRunPolicy, ContextProvider, Middleware, Model, Observer, Toolset,
-};
+use finstack_ai_runtime::child::{AgentInvoker, ChildRunStarter};
+use finstack_ai_runtime::ports::context::ContextProvider;
+use finstack_ai_runtime::ports::middleware::Middleware;
+use finstack_ai_runtime::ports::model::Model;
+use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::tool::Toolset;
 
 use super::PREVIEW_ENGINE_VERSION;
 use super::handle::{Agent, ModelCapabilityVariant};
@@ -73,7 +77,10 @@ pub struct NativeAgentBuilder {
     agent_id: AgentId,
     bundle_id: BundleId,
     model: (ComponentRef, Arc<dyn Model>),
-    store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
+    store: (
+        ComponentRef,
+        Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
+    ),
     toolsets: Vec<PortHandle<dyn Toolset>>,
     context_providers: Vec<PortHandle<dyn ContextProvider>>,
     middleware: Vec<PortHandle<dyn Middleware>>,
@@ -93,7 +100,10 @@ impl NativeAgentBuilder {
         agent_id: AgentId,
         bundle_id: BundleId,
         model: (ComponentRef, Arc<dyn Model>),
-        store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
+        store: (
+            ComponentRef,
+            Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
+        ),
     ) -> Self {
         Self {
             agent_id,

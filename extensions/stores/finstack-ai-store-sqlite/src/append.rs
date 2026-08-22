@@ -1,6 +1,6 @@
 use finstack_ai_kernel::{AppendBatchId, AppendRequest, CommittedBatch, Metadata, RecordEnvelope};
 use finstack_ai_protocol::encode;
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 pub(crate) use finstack_ai_store_common::AppendIdentity;
 #[cfg(test)]
 pub(crate) use finstack_ai_store_common::request_cbor;

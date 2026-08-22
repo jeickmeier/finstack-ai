@@ -41,12 +41,19 @@ use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
     ValidatedToolCall,
 };
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
 #[cfg(unix)]
-use finstack_ai_runtime::ToolStreamItem;
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
-    PortFuture, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
-    ToolResult, ToolSpec, Toolset, ToolsetDescriptor, stage_required_artifact, verify_authority,
+use finstack_ai_runtime::ports::tool::ToolStreamItem;
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, Toolset, ToolsetDescriptor,
+    verify_authority,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -204,7 +211,7 @@ impl FileSystemToolset {
             tools,
             tool_ids,
             limits: FileSystemLimits::default(),
-            max_artifact_bytes: finstack_ai_runtime::MAX_ARTIFACT_BYTES,
+            max_artifact_bytes: finstack_ai_runtime::artifact::MAX_ARTIFACT_BYTES,
             protected: ProtectedPaths::defaults(),
             artifact_store: None,
             sensitivity: Sensitivity::Internal,

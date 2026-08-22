@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Poll, Waker};
 
 use finstack_ai_kernel::{Duration, Id, IdTag, Timestamp};
-use finstack_ai_runtime::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
+use finstack_ai_runtime::ids::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
 
 /// Clock that always returns a fixed semantic timestamp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

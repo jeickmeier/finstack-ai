@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
 

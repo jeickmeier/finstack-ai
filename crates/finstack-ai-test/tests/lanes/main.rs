@@ -8,10 +8,14 @@ use finstack_ai_kernel::{
     AcceptRun, CancellationInitiator, CancellationPropagation, ChildPlacement, KernelInput,
     LaneCreated, LaneMoved, LaneTag, Metadata, RunPhase, SessionTag,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::child::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, ChildCoordinationIds, ChildRunContext, ChildRunCoordinator,
-    ExternalIdentityKey, ExternalIdentityMap, JournalStore, MemoryExternalIdentityMap,
-    SessionError, SessionRuntime, Toolset,
+};
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::tool::Toolset;
+use finstack_ai_runtime::session::{
+    ExternalIdentityKey, ExternalIdentityMap, MemoryExternalIdentityMap, SessionError,
+    SessionRuntime,
 };
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,

@@ -29,9 +29,9 @@ use finstack_ai_kernel::{
     ComponentId, ComponentRef, EffectId, EffectInput, EffectKind, EffectOutputKind, Metadata,
     RunEvent, RunEventBody, RunEventKind, RunId, SessionId, Usage, Version, label_is_valid,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::observer::{
     Observer, ObserverDescriptor, ObserverDiagnostic, ObserverError, ObserverPayloadMode,
-    PortFuture,
 };
 use thiserror::Error;
 

@@ -13,11 +13,10 @@ use finstack_ai_kernel::{
     ChildRunLocator, ChildRunPrepared, Digest, RawJson, ToolCallBlock, ToolFailurePolicy,
     ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, ChildRunHandle, ChildRunRequest, ChildRunStarter,
-    ChildRunStatus, Model, ModelResponse, ModelStreamItem, ModelToolCall, PortFuture,
-    ToolCallDelta, ToolStreamItem, child_relation_digest,
-};
+use finstack_ai_runtime::child::{AgentInvokeError, AgentInvoker, AgentRef, ChildRunHandle, ChildRunRequest, ChildRunStarter, ChildRunStatus, child_relation_digest};
+use finstack_ai_runtime::ports::{PortFuture};
+use finstack_ai_runtime::ports::model::{Model, ModelResponse, ModelStreamItem, ModelToolCall, ToolCallDelta};
+use finstack_ai_runtime::ports::tool::{ToolStreamItem};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction};
 use finstack_ai_tools_subagent::SubagentToolset;
@@ -182,11 +181,11 @@ fn child_ref() -> AgentRef {
     }
 }
 
-fn tool_context(parent: &AgentRun) -> finstack_ai_runtime::ToolCallContext {
-    finstack_ai_runtime::ToolCallContext {
-        run: finstack_ai_runtime::RunCallContext {
+fn tool_context(parent: &AgentRun) -> finstack_ai_runtime::ports::tool::ToolCallContext {
+    finstack_ai_runtime::ports::tool::ToolCallContext {
+        run: finstack_ai_runtime::ports::model::RunCallContext {
             locator: parent.locator().clone(),
-            authorization: finstack_ai_runtime::AuthorizationContext {
+            authorization: finstack_ai_runtime::ports::model::AuthorizationContext {
                 principal: security("decision-v1").principal().clone(),
                 authentication_method: Arc::from("oidc"),
                 assurance_level: Arc::from("high"),
@@ -200,7 +199,7 @@ fn tool_context(parent: &AgentRun) -> finstack_ai_runtime::ToolCallContext {
             attempt: 1,
             deadline: None,
             budget_scope_id: None,
-            cancellation: finstack_ai_runtime::CancellationSignal::new(),
+            cancellation: finstack_ai_runtime::ports::model::CancellationSignal::new(),
             relation_depth: 0,
         },
         tool_batch_id: finstack_ai_kernel::ToolBatchId::from_bytes([8; 16]),
@@ -244,7 +243,7 @@ async fn invoke(
     parent: &AgentRun,
     name: &str,
     arguments: serde_json::Value,
-) -> finstack_ai_runtime::ToolResult {
+) -> finstack_ai_runtime::ports::tool::ToolResult {
     let mut stream = toolset
         .call(tool_context(parent), tool_call(toolset, name, &arguments))
         .await
@@ -349,7 +348,7 @@ async fn subagent_start_await_incorporates_child_text() {
         "child journal must accept and complete: {child_kinds:?}"
     );
     let child_journal = store_port
-        .load(finstack_ai_runtime::LoadRequest {
+        .load(finstack_ai_runtime::ports::journal::LoadRequest {
             session_id: child_session,
         })
         .await

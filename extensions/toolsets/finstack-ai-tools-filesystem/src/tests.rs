@@ -9,10 +9,15 @@ use finstack_ai_kernel::{
     LaneId, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolExecutionMode, ToolFailurePolicy,
 };
-use finstack_ai_runtime::{
-    ApprovalState, ArtifactError, ArtifactScope, ArtifactStore, ArtifactStoreLimits,
-    AuthorizationContext, CancellationSignal, JsonSchemaToolValidatorCompiler, PendingToolEffect,
-    PortFuture, ReconcileContext, ResolvedToolCatalog, RunCallContext, SideEffectClass,
+use finstack_ai_runtime::artifact::{
+    ArtifactError, ArtifactScope, ArtifactStore, ArtifactStoreLimits,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ReconcileContext, RunCallContext, SideEffectClass,
+};
+use finstack_ai_runtime::ports::tool::{
+    ApprovalState, JsonSchemaToolValidatorCompiler, PendingToolEffect, ResolvedToolCatalog,
     ToolCatalogPlan, ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolStreamItem,
     Toolset, ToolsetRegistration,
 };
@@ -515,7 +520,7 @@ impl Default for CaptureArtifactStore {
     fn default() -> Self {
         Self {
             staged: Arc::new(Mutex::new(Vec::new())),
-            max_artifact_bytes: finstack_ai_runtime::MAX_ARTIFACT_BYTES,
+            max_artifact_bytes: finstack_ai_runtime::artifact::MAX_ARTIFACT_BYTES,
         }
     }
 }
@@ -619,7 +624,7 @@ async fn oversized_output_requires_and_uses_exact_scoped_artifact_service() {
 fn try_with_limits_rejects_file_bytes_above_the_default_artifact_ceiling() {
     let root = TempDir::new().expect("root");
     let limits = FileSystemLimits {
-        file_bytes: finstack_ai_runtime::MAX_ARTIFACT_BYTES + 1,
+        file_bytes: finstack_ai_runtime::artifact::MAX_ARTIFACT_BYTES + 1,
         ..FileSystemLimits::default()
     };
     let error = FileSystemToolset::try_new(root.path())

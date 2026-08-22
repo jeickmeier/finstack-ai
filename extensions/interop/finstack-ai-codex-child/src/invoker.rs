@@ -5,10 +5,11 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{ChildPlacement, ChildRunLocator, ContentBlock, RunId};
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest, PortFuture,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest,
     child_relation_digest,
 };
+use finstack_ai_runtime::ports::PortFuture;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 use crate::CodexChildError;

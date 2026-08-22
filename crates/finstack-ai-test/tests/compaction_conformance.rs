@@ -8,13 +8,17 @@ use finstack_ai_kernel::{
     InvocationRecovery, Message, MessageRole, Metadata, OutputSpec, ProviderIds, RawJson,
     Sensitivity, TextBlock, Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+};
+use finstack_ai_runtime::ports::middleware::{
     BeforeModelInput, CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionResult,
-    CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
-    MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelSettings, OrderTier, PromptCacheImpact, StageMask,
-    compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
-    compaction_summary_digest,
+    CompactionSourceEntry, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, OrderTier,
+    PromptCacheImpact, StageMask, compaction_projection_digest, compaction_protected_set_digest,
+    compaction_source_digest, compaction_summary_digest,
+};
+use finstack_ai_runtime::ports::model::{
+    ModelName, ModelRequestDraft, ModelRequestLimits, ModelSettings,
 };
 use finstack_ai_test::{
     CompactionConformanceCase, SharedCompactionProjection, check_compaction_conformance,

@@ -11,7 +11,8 @@ use crate::driver::{
     validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
-use finstack_ai_runtime::{Bytes, PortFuture};
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::ports::PortFuture;
 use futures_util::StreamExt;
 use reqwest::{Method, Response, StatusCode, Url};
 use serde::Deserialize;

@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{BundleId, CapabilityId, ComponentId, RawJson};
-use finstack_ai_runtime::{AgentInvoker, ArtifactStore, BudgetLedger};
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::budget::BudgetLedger;
+use finstack_ai_runtime::child::AgentInvoker;
 
 use crate::{AgentSpec, CapabilitySpec};
 

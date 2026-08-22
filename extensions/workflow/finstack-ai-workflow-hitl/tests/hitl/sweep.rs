@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{Id, InteractionTag};
-use finstack_ai_runtime::{JournalStore, WorkflowWait};
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::workflow::WorkflowWait;
 use finstack_ai_workflow_hitl::{
     HitlInboxStore, HitlRouter, InteractionStatus, MemoryHitlStore, capture,
 };

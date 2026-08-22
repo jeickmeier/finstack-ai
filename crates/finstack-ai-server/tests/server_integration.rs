@@ -13,10 +13,11 @@ use finstack_ai_protocol::{
     PROTOCOL_VERSION_V1, RemoteAgentRef, RemoteAuthMethod, RemoteCommand, RemoteCommandPayload,
     RemoteEventView, RemoteLocator, RemoteStartRequest, VersionOffer,
 };
-use finstack_ai_runtime::{
-    PortFuture, SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
+use finstack_ai_runtime::audit::{
+    SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
     SecurityAuditReceipt, SecurityAuditSink,
 };
+use finstack_ai_runtime::ports::PortFuture;
 
 use finstack_ai_server::{
     CreditLimits, ListenAddr, RemoteClient, Server, ServerError, SessionReplica,

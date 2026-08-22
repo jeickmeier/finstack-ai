@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use crate::driver::{ObjectDriver, ObjectKey, PageToken};
 use finstack_ai_kernel::{Metadata, Sensitivity, SessionId, Timestamp};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
     ARTIFACT_INTEGRITY_FAILURE, ArtifactMetadata, ArtifactOwnerId, ArtifactScope, ArtifactStore,
-    Bytes, stage_required_artifact,
+    stage_required_artifact,
 };
 
 const ARTIFACT_NOT_FOUND: &str = "artifact_not_found";

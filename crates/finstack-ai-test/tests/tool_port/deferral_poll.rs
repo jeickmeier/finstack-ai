@@ -1,5 +1,5 @@
 use finstack_ai_kernel::{ComponentId, ExternalHandleRef, ReconciliationPolicy};
-use finstack_ai_runtime::{ToolDeferral, TOOL_DEFERRAL_EXPIRED};
+use finstack_ai_runtime::ports::tool::{TOOL_DEFERRAL_EXPIRED, ToolDeferral};
 
 fn due_polls(
     state: &finstack_ai_kernel::KernelState,

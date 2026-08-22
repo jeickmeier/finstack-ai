@@ -23,7 +23,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use finstack_ai_kernel::{Digest, RecordEnvelope, SessionId};
 use finstack_ai_protocol::ChainAnchor;
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 
 use crate::window::{FROM_SEQUENCE_WINDOW, verify_full_head, verify_tail_records};
 
@@ -244,7 +244,7 @@ mod tests {
     use super::*;
     use crate::append::build_committed_batch;
     use finstack_ai_kernel::{Digest, RecordEnvelope, SessionTag};
-    use finstack_ai_runtime::StoreError;
+    use finstack_ai_runtime::ports::journal::StoreError;
     use finstack_ai_test::store_fixtures::{draft, id, request};
 
     fn chained_records() -> Vec<RecordEnvelope> {

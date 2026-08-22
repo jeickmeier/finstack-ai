@@ -2,9 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ComponentId, ComponentRef, Digest, RawJson};
-use finstack_ai_runtime::{
-    ContextProvider, JournalStore, Middleware, Model, Observer, ReadyModel, Toolset,
-};
+use finstack_ai_runtime::ports::context::ContextProvider;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::middleware::Middleware;
+use finstack_ai_runtime::ports::model::{Model, ReadyModel};
+use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::tool::Toolset;
 
 use super::errors::{RegisteredComponentDescriptor, RegistrationError, RegistrationEvent};
 use super::extension::{Extension, ExtensionDescriptor};

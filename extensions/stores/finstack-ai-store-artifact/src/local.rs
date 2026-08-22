@@ -25,7 +25,8 @@ use crate::driver::{
     ObjectScope, ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
-use finstack_ai_runtime::{Bytes, PortFuture};
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::ports::PortFuture;
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 

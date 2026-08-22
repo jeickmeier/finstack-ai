@@ -20,9 +20,9 @@ use finstack_ai_kernel::{
     RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SessionTag,
     Timestamp,
 };
-use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, LoadRequest, SCAN_PAGE_MAX_RECORDS, ScanRequest,
-    StateSnapshotRequest,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, SCAN_PAGE_MAX_RECORDS, ScanRequest, StateSnapshotRequest,
 };
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,

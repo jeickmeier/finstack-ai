@@ -33,7 +33,7 @@ async fn repeated_model_runs_settle_and_shutdown_without_stream_or_task_leaks() 
                 same_identity_retry: SameIdentityRetryPolicy::default(),
             },
             Arc::new(
-                finstack_ai_runtime::ReadyModel::prepare(model_port)
+                finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                     .await
                     .expect("model readiness"),
             ),

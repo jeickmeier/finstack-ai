@@ -8,7 +8,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_provider_wire::{AnthropicMessagesAssembly, StreamNormError, StreamNormKind};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
     ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate,
     ReconcileContext, ResolveDraftMediaError, resolve_draft_media,
@@ -68,7 +68,7 @@ impl AnthropicProvider {
     /// use finstack_ai_provider_anthropic::{
     ///     AnthropicConfig, AnthropicModelConfig, AnthropicProvider,
     /// };
-    /// use finstack_ai_runtime::Model;
+    /// use finstack_ai_runtime::ports::model::Model;
     ///
     /// let config = AnthropicConfig::try_new("http://127.0.0.1:9").expect("config");
     /// let model = AnthropicModelConfig::try_new(
@@ -158,7 +158,7 @@ fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
     }
 }
 
-fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
+fn map_resolve(error: finstack_ai_runtime::ports::model::MediaResolveError) -> ModelError {
     match error.kind {
         MediaResolveKind::NotFound => crate::error::request_error(error.message),
         MediaResolveKind::Unavailable => crate::error::error(
@@ -211,14 +211,14 @@ impl Model for AnthropicProvider {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         models.get(model).map_or_else(
             || ModelCapabilities {
-                input: finstack_ai_runtime::InputCapabilities {
+                input: finstack_ai_runtime::ports::model::InputCapabilities {
                     text: false,
                     json: false,
                     images: false,
                     audio: false,
                     files: false,
                 },
-                context_profile: finstack_ai_runtime::ModelContextProfile {
+                context_profile: finstack_ai_runtime::ports::model::ModelContextProfile {
                     provider: Arc::from("anthropic"),
                     model: model.clone(),
                     hard_input_bytes: 0,
@@ -230,7 +230,8 @@ impl Model for AnthropicProvider {
                 },
                 native_tool_calls: false,
                 parallel_tool_calls: false,
-                structured_output: finstack_ai_runtime::StructuredOutputCapability::Prompted,
+                structured_output:
+                    finstack_ai_runtime::ports::model::StructuredOutputCapability::Prompted,
                 reasoning: false,
                 prompt_cache: false,
                 resumable_stream: false,
@@ -267,7 +268,7 @@ impl Model for AnthropicProvider {
     fn request(
         &self,
         request: ModelRequest,
-    ) -> finstack_ai_runtime::PortFuture<Result<ModelEventStream, ModelError>> {
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<ModelEventStream, ModelError>> {
         let client = self.client.clone();
         let endpoint = self.endpoint.clone();
         let model = self.model_config(&request.draft.model);
@@ -333,7 +334,7 @@ impl Model for AnthropicProvider {
         &self,
         _ctx: ReconcileContext,
         _effect: PendingModelEffect,
-    ) -> finstack_ai_runtime::PortFuture<Result<ModelReconcileResult, ModelError>> {
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<ModelReconcileResult, ModelError>> {
         Box::pin(async { Ok(ModelReconcileResult::Unknown) })
     }
 }
@@ -364,7 +365,7 @@ impl Drop for ReceiverModelStream {
 async fn drive_response(
     response: reqwest::Response,
     sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
-    cancellation: finstack_ai_runtime::CancellationSignal,
+    cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
     request_id: String,
     structured: bool,
     max_event_bytes: usize,
@@ -491,10 +492,11 @@ mod tests {
         MessageRole, ModelRequestId, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,
         RawJson, RunId, SessionId, Timestamp,
     };
-    use finstack_ai_runtime::{
+    use finstack_ai_runtime::ports::PortFuture;
+    use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, MediaResolveError, MediaResolver,
         ModelCallContext, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-        PortFuture, ResolvedMedia, RunCallContext,
+        ResolvedMedia, RunCallContext,
     };
 
     use super::*;
@@ -647,7 +649,7 @@ mod tests {
         assert_eq!(capabilities.context_profile.context_window_tokens, 0);
         assert_eq!(
             capabilities.structured_output,
-            finstack_ai_runtime::StructuredOutputCapability::Prompted
+            finstack_ai_runtime::ports::model::StructuredOutputCapability::Prompted
         );
     }
 

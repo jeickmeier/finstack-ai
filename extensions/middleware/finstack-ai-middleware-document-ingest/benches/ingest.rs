@@ -10,7 +10,7 @@ use std::sync::Arc;
 use criterion::{Criterion, criterion_group, criterion_main};
 use finstack_ai_kernel::MessageRole;
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
-use finstack_ai_runtime::{Middleware as _, StageOutcome};
+use finstack_ai_runtime::ports::middleware::{Middleware as _, StageOutcome};
 
 #[path = "../src/test_support.rs"]
 mod test_support;
@@ -40,7 +40,10 @@ fn large_csv() -> Vec<u8> {
     csv.into_bytes()
 }
 
-fn invoke_replaces(middleware: &DocumentIngestMiddleware, input: finstack_ai_runtime::StageInput) {
+fn invoke_replaces(
+    middleware: &DocumentIngestMiddleware,
+    input: finstack_ai_runtime::ports::middleware::StageInput,
+) {
     let outcome = block_on(middleware.invoke(middleware_context(), input)).expect("outcome");
     assert!(matches!(outcome, StageOutcome::Replace(_)));
 }

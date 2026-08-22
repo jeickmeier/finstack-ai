@@ -7,7 +7,7 @@
 
 use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_provider_wire::{SseEvent, SseEventParser, SseParseError};
-use finstack_ai_runtime::ModelError;
+use finstack_ai_runtime::ports::model::ModelError;
 
 use crate::error::{GEMINI_STREAM_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED, error};
 

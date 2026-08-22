@@ -10,7 +10,8 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use finstack_ai_kernel::{ArtifactRef, Digest, Timestamp};
-use finstack_ai_runtime::{ArtifactOwnerId, ArtifactScope, ArtifactStore, PortFuture, PortObject};
+use finstack_ai_runtime::artifact::{ArtifactOwnerId, ArtifactScope, ArtifactStore};
+use finstack_ai_runtime::ports::{PortFuture, PortObject};
 
 use crate::record::{MemoryId, MemoryRecord, MemoryScope};
 

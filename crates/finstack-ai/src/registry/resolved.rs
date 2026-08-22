@@ -2,10 +2,12 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use finstack_ai_kernel::ComponentRef;
-use finstack_ai_runtime::{
-    ContextProvider, JournalStore, Middleware, Observer, ReadyModel, ResolvedMiddlewareChain,
-    Toolset,
-};
+use finstack_ai_runtime::ports::context::ContextProvider;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::middleware::{Middleware, ResolvedMiddlewareChain};
+use finstack_ai_runtime::ports::model::ReadyModel;
+use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::tool::Toolset;
 
 use super::errors::{RegisteredComponentDescriptor, ResolutionReport};
 use super::types::{

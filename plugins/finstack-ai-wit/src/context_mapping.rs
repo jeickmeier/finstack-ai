@@ -2,11 +2,11 @@
 
 use finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS;
 use finstack_ai_kernel::{ContentBlock, Sensitivity};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::context::{
     ContextAuthority, ContextBudget as NativeBudget, ContextItem as NativeItem, ContextItemKind,
     ContextOverflowPolicy, ContextProvenance, ContextProviderDescriptor, ContextRequest,
-    RunCallContext,
 };
+use finstack_ai_runtime::ports::model::RunCallContext;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -345,10 +345,12 @@ mod tests {
         LaneId, Metadata, OperationLocator, PrincipalRef, RunId, Sensitivity, SessionId, TextBlock,
         Version,
     };
-    use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget, ContextItemKind,
-        ContextOverflowPolicy, ContextProvenance, ContextProviderDescriptor, ContextRequest,
-        RunCallContext,
+    use finstack_ai_runtime::ports::context::{
+        ContextAuthority, ContextBudget, ContextItemKind, ContextOverflowPolicy, ContextProvenance,
+        ContextProviderDescriptor, ContextRequest,
+    };
+    use finstack_ai_runtime::ports::model::{
+        AuthorizationContext, CancellationSignal, RunCallContext,
     };
     use serde_json::Value;
     use std::sync::Arc;

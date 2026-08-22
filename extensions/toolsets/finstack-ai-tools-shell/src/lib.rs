@@ -42,16 +42,24 @@ use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, Sensitivity, Timestamp, ToolExecutionMode, ToolId,
     ValidatedToolCall,
 };
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
+};
+use finstack_ai_runtime::confinement::{
+    ConfinedChild, ConfinementError, ConfinementProfile, ProcessConfinement,
+    configure_process_tree, terminate_process_tree,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
 #[cfg(unix)]
-use finstack_ai_runtime::ToolStreamItem;
+use finstack_ai_runtime::ports::tool::ToolStreamItem;
 #[cfg(unix)]
-use finstack_ai_runtime::verify_authority;
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
-    ConfinedChild, ConfinementError, ConfinementProfile, PortFuture, ProcessConfinement,
-    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult,
-    ToolSpec, Toolset, ToolsetDescriptor, configure_process_tree, stage_required_artifact,
-    terminate_process_tree,
+use finstack_ai_runtime::ports::tool::verify_authority;
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, Toolset, ToolsetDescriptor,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -275,7 +283,7 @@ pub trait CommandSandbox: Send + Sync {
     fn run(
         &self,
         request: SandboxedCommand,
-        cancellation: finstack_ai_runtime::CancellationSignal,
+        cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
         deadline: Option<Timestamp>,
     ) -> PortFuture<Result<SandboxedOutput, ToolError>>;
 }
@@ -355,7 +363,7 @@ impl CommandSandbox for ProcessCommandSandbox {
     fn run(
         &self,
         request: SandboxedCommand,
-        cancellation: finstack_ai_runtime::CancellationSignal,
+        cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
         deadline: Option<Timestamp>,
     ) -> PortFuture<Result<SandboxedOutput, ToolError>> {
         let confinement = self.confinement.clone();
@@ -647,7 +655,7 @@ fn authorize_command(
 
 fn run_process(
     request: &SandboxedCommand,
-    cancellation: &finstack_ai_runtime::CancellationSignal,
+    cancellation: &finstack_ai_runtime::ports::model::CancellationSignal,
     deadline: Option<Timestamp>,
     confinement: Option<&(ProcessConfinement, ConfinementProfile)>,
     #[cfg(unix)] root: Option<&rustix::fd::OwnedFd>,
@@ -1124,7 +1132,7 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
 }
 
 fn map_confinement(error: &ConfinementError) -> ToolError {
-    let category = if error.code() == finstack_ai_runtime::CONFINEMENT_UNAVAILABLE {
+    let category = if error.code() == finstack_ai_runtime::confinement::CONFINEMENT_UNAVAILABLE {
         ErrorCategory::Configuration
     } else {
         ErrorCategory::Tool

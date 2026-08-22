@@ -47,7 +47,7 @@ async fn router_rejects_numeric_answer_for_free_text_schema() {
         )
         .await
         .expect_err("numeric free-text answer must not commit");
-    assert_eq!(error, finstack_ai_runtime::ExternalRouteError::InvalidNormalizedCommand);
+    assert_eq!(error, finstack_ai_runtime::ingress::ExternalRouteError::InvalidNormalizedCommand);
     let kinds = record_kinds(&ports.store).await;
     assert!(
         !kinds.contains(&"interaction_resolved"),

@@ -8,9 +8,11 @@ use finstack_ai_kernel::{
     AuthorizationEvidence, EntryId, IdTag, LaneId, Message, MessageRole, PrincipalRef, ProviderIds,
     SessionId, TextBlock, Timestamp,
 };
-use finstack_ai_runtime::{
-    ExternalIdentityKey, ExternalIdentityMap, JournalStore, LaneAppendIds, LaneCreateIds,
-    LaneInspect, SessionCreateIds, SessionError, SessionRuntime, UuidV7Generator,
+use finstack_ai_runtime::ids::UuidV7Generator;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::session::{
+    ExternalIdentityKey, ExternalIdentityMap, LaneAppendIds, LaneCreateIds, LaneInspect,
+    SessionCreateIds, SessionError, SessionRuntime,
 };
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -18,7 +20,7 @@ use finstack_ai_runtime::host_driver::{
     InstalledClock as AgentClock, InstalledRandom as AgentRandom,
 };
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
+use finstack_ai_runtime::ids::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
 
 /// Live handle for one journaled session.
 #[derive(Clone)]
@@ -415,7 +417,7 @@ fn generated_lane_ids(fork: bool) -> Result<LaneCreateIds, SessionError> {
 }
 
 fn generated_timestamp() -> Result<Timestamp, SessionError> {
-    finstack_ai_runtime::Clock::now(&AgentClock).map_err(|_| SessionError::Commit {
+    finstack_ai_runtime::ids::Clock::now(&AgentClock).map_err(|_| SessionError::Commit {
         code: "clock_unavailable",
     })
 }

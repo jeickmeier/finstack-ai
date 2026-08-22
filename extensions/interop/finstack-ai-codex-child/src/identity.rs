@@ -3,7 +3,7 @@
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, Digest, ExternalHandleRef, RawJson, RemoteRouteRef, Version,
 };
-use finstack_ai_runtime::AgentRef;
+use finstack_ai_runtime::child::AgentRef;
 
 use crate::CodexChildError;
 

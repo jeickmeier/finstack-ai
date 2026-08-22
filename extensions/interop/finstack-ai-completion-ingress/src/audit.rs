@@ -6,7 +6,7 @@
 //! idempotent audit event.
 
 use finstack_ai_kernel::{Digest, PrincipalRef, Timestamp};
-use finstack_ai_runtime::{SecurityAuditCategory, SecurityAuditEvent, SecurityAuditGate};
+use finstack_ai_runtime::audit::{SecurityAuditCategory, SecurityAuditEvent, SecurityAuditGate};
 
 use crate::ingress::IngressError;
 
@@ -86,10 +86,11 @@ pub(crate) async fn audit_and_reject(
 mod tests {
     use super::*;
     use finstack_ai_kernel::Timestamp;
-    use finstack_ai_runtime::{
-        PortFuture, SecurityAuditCategory, SecurityAuditError, SecurityAuditHealth,
-        SecurityAuditReceipt, SecurityAuditSink,
+    use finstack_ai_runtime::audit::{
+        SecurityAuditCategory, SecurityAuditError, SecurityAuditHealth, SecurityAuditReceipt,
+        SecurityAuditSink,
     };
+    use finstack_ai_runtime::ports::PortFuture;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;

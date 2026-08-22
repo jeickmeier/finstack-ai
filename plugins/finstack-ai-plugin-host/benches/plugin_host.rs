@@ -14,9 +14,8 @@ use finstack_ai_plugin_host::{
     CacheKeyParts, InstancePolicy, PluginHost, PluginHostConfig, WasmToolsetAdapter, abi_identity,
     cache_key, component_digest, engine_fingerprint, host_target,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, Toolset,
-};
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, Toolset};
 use finstack_ai_wit::{NoopPluginHooks, parse_manifest};
 use futures_util::StreamExt;
 

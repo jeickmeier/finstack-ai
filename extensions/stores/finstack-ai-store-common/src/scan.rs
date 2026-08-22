@@ -1,7 +1,7 @@
 //! Scan-request validation and paging semantics shared by all backends.
 
 use finstack_ai_kernel::RecordEnvelope;
-use finstack_ai_runtime::{SCAN_PAGE_MAX_RECORDS, StoreError};
+use finstack_ai_runtime::ports::journal::{SCAN_PAGE_MAX_RECORDS, StoreError};
 
 /// Validate a scan page size against the port contract.
 ///
@@ -42,7 +42,7 @@ pub fn scan_next_sequence(records: &[RecordEnvelope], has_more: bool) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_runtime::SCAN_PAGE_MAX_RECORDS;
+    use finstack_ai_runtime::ports::journal::SCAN_PAGE_MAX_RECORDS;
 
     use super::*;
     use crate::append::build_committed_batch;

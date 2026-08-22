@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ContentBlock, Digest, EntryId};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::middleware::{
     BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, CompactionCheckpoint, CompactionResult,
     MiddlewareDescriptor, compaction_checkpoint_compatible, compaction_projection_digest,
     validate_compaction_result,
@@ -140,7 +140,7 @@ fn prove_protected_rejection(
         ));
     };
     ensure(
-        error.code() == finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+        error.code() == finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
         "compaction.protected.retained",
         "removing a protected entry did not fail with compaction_result_invalid",
     )
@@ -189,7 +189,7 @@ fn prove_tool_pair_rejection(
         ));
     };
     ensure(
-        error.code() == finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+        error.code() == finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
         "compaction.tool_pair.atomic",
         "orphaning a retained tool call did not fail with compaction_result_invalid",
     )

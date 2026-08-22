@@ -10,10 +10,14 @@ use finstack_ai_kernel::{
     RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext, TextBlock, Timestamp,
     TransitionEnv,
 };
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AuthorizationContext, ChildRunContext, ChildRunHandle,
-    ChildRunRequest, JournalStore, LaneAppendIds, LaneCreateIds, PortFuture, SessionCreateIds,
-    SessionRuntime,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::AuthorizationContext;
+use finstack_ai_runtime::session::{
+    LaneAppendIds, LaneCreateIds, SessionCreateIds, SessionRuntime,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
@@ -204,7 +208,7 @@ impl AgentInvoker for RecordingInvoker {
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
         let relation_digest =
-            finstack_ai_runtime::child_relation_digest(&context, &request).expect("digest");
+            finstack_ai_runtime::child::child_relation_digest(&context, &request).expect("digest");
         let locator = request.locator;
         Box::pin(async move {
             Ok(ChildRunHandle {
@@ -245,7 +249,7 @@ pub(crate) fn child_request(
     run: u64,
 ) -> ChildRunRequest {
     let mut request = ChildRunRequest {
-        agent: finstack_ai_runtime::AgentRef {
+        agent: finstack_ai_runtime::child::AgentRef {
             id: finstack_ai_kernel::AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
@@ -273,9 +277,9 @@ pub(crate) fn child_request(
     request
 }
 
-pub(crate) fn scripted_profile() -> finstack_ai_runtime::ModelContextProfile {
-    use finstack_ai_runtime::{ModelName, TokenEstimatorRef, TokenEstimatorSource};
-    finstack_ai_runtime::ModelContextProfile {
+pub(crate) fn scripted_profile() -> finstack_ai_runtime::ports::model::ModelContextProfile {
+    use finstack_ai_runtime::ports::model::{ModelName, TokenEstimatorRef, TokenEstimatorSource};
+    finstack_ai_runtime::ports::model::ModelContextProfile {
         provider: Arc::from("scripted"),
         model: ModelName::try_new("lanes-1").expect("model name"),
         hard_input_bytes: 1_048_576,
@@ -293,11 +297,11 @@ pub(crate) fn scripted_profile() -> finstack_ai_runtime::ModelContextProfile {
 
 pub(crate) fn completed_plan(text: &str) -> finstack_ai_test::ScriptedModelPlan {
     use finstack_ai_kernel::{ContentBlock, ProviderIds, TextBlock, Usage};
-    use finstack_ai_runtime::{ModelResponse, ModelStreamItem};
+    use finstack_ai_runtime::ports::model::{ModelResponse, ModelStreamItem};
     finstack_ai_test::ScriptedModelPlan {
         actions: vec![
             finstack_ai_test::ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                finstack_ai_runtime::TextDelta {
+                finstack_ai_runtime::ports::model::TextDelta {
                     text: Arc::from(text),
                 },
             ))),
@@ -318,7 +322,7 @@ pub(crate) fn completed_plan(text: &str) -> finstack_ai_test::ScriptedModelPlan 
 }
 
 pub(crate) fn agent_request(input: &str) -> finstack_ai::AgentRunRequest {
-    use finstack_ai_runtime::ModelName;
+    use finstack_ai_runtime::ports::model::ModelName;
     finstack_ai::AgentRunRequest::try_new(
         ModelName::try_new("lanes-1").expect("model name"),
         input,
@@ -336,7 +340,7 @@ pub(crate) async fn scripted_agent(
 ) {
     use finstack_ai::{Agent, RunPolicy};
     use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
-    use finstack_ai_runtime::Model;
+    use finstack_ai_runtime::ports::model::Model;
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
     let version = Version {
@@ -392,7 +396,7 @@ pub(crate) async fn journal_kind_names(
     store: &Arc<dyn JournalStore>,
     session_id: finstack_ai_kernel::SessionId,
 ) -> Vec<String> {
-    use finstack_ai_runtime::LoadRequest;
+    use finstack_ai_runtime::ports::journal::LoadRequest;
     let loaded = store
         .load(LoadRequest { session_id })
         .await

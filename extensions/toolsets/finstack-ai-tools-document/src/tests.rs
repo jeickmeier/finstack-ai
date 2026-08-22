@@ -119,7 +119,7 @@ fn classify_rejects_non_pdf() {
 }
 
 use crate::DocumentToolset;
-use finstack_ai_runtime::Toolset as _;
+use finstack_ai_runtime::ports::tool::Toolset as _;
 
 #[test]
 fn toolset_exposes_two_validated_tools() {
@@ -150,11 +150,15 @@ use finstack_ai_kernel::{
     LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolFailurePolicy,
 };
-use finstack_ai_runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, AuthorizationContext, Bytes,
-    CancellationSignal, PortFuture, RunCallContext, ToolCallContext, ToolError, ToolSpec,
-    ToolStreamItem,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
 };
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, RunCallContext, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError, ToolStreamItem};
 use futures_util::StreamExt;
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {
@@ -239,7 +243,7 @@ fn validated_call(
 }
 
 fn stage(store: &dyn ArtifactStore, bytes: &[u8], media: &str, name: &str) -> ArtifactRef {
-    block_on(finstack_ai_runtime::stage_required_artifact(
+    block_on(finstack_ai_runtime::artifact::stage_required_artifact(
         store,
         test_scope(),
         Bytes::copy_from_slice(bytes),

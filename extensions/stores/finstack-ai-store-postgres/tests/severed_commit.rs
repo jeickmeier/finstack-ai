@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use finstack_ai_kernel::SessionTag;
-use finstack_ai_runtime::{JournalStore, LoadRequest, StoreError, StoreLimits};
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest, StoreError, StoreLimits};
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_test::store_fixtures::{draft, id, request};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

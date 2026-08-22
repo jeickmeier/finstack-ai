@@ -10,7 +10,7 @@ use finstack_ai_kernel::{
     ContentBlock, JsonBlock, LimitKey, OpaqueBlock, OpaquePayload, ProviderIds, RawJson, TextBlock,
     Usage,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ModelResponse, ModelStreamItem, ModelToolCall, ReasoningDelta, TextDelta, ToolCallDelta,
     UsageDelta,
 };

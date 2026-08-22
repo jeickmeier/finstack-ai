@@ -15,7 +15,7 @@ mod helpers;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, SessionTag};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::journal::{
     JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, StoreError, StoreLimits,
 };
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};

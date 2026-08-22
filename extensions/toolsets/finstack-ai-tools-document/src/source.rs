@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::parser::DocumentLimits;
 use finstack_ai_kernel::{ArtifactRef, Sensitivity};
-use finstack_ai_runtime::{ArtifactScope, ArtifactStore, Bytes, ToolCallContext};
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{ArtifactScope, ArtifactStore};
+use finstack_ai_runtime::ports::tool::ToolCallContext;
 
 /// Document bytes resolved from a staged artifact.
 pub(crate) enum ResolvedSource {

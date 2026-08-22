@@ -12,7 +12,7 @@ use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvide
 use finstack_ai_provider_wire::{
     GEMINI_CACHED_TOKENS_KEY, GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, Authentication, AuthorizationContext,
     CancellationSignal, Model, ModelCallContext, ModelRequest, ModelRequestDraft,
     ModelRequestLimits, ModelSettings, ModelStreamItem, RunCallContext, SecretString,
@@ -344,7 +344,8 @@ fn draft(output: OutputSpec, tools: Arc<[ToolSpec]>) -> ModelRequestDraft {
     )
     .expect("message");
     ModelRequestDraft {
-        model: finstack_ai_runtime::ModelName::try_new("fixture-model").expect("model"),
+        model: finstack_ai_runtime::ports::model::ModelName::try_new("fixture-model")
+            .expect("model"),
         messages: Arc::from([message]),
         tools,
         output,
@@ -377,7 +378,7 @@ fn tool(name: &str, input_schema: RawJson) -> ToolSpec {
         },
         max_result_bytes: 1_024,
         metadata: Metadata::empty(),
-        deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
+        deferral: finstack_ai_runtime::ports::model::ToolDeferralSupport::Never,
     }
 }
 

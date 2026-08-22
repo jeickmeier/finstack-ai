@@ -14,7 +14,7 @@ use finstack_ai_kernel::{
     ExternalCommandTarget, Id, IdTag, LaneTag, PrincipalRef, RECORD_FORMAT_VERSION,
     RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordTag, RunTag, SessionTag, Timestamp,
 };
-use finstack_ai_runtime::{JournalStore, LoadRequest, ScanRequest, StoreError};
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest, ScanRequest, StoreError};
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
     SqliteStoreLimits, SqliteSynchronous,

@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn stream_normalization_rejects_invalid_output_duplicates_and_all_oversized_results() {
     let spec = tool_spec("stream");
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([spec]);
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> = Arc::from([spec]);
     let toolset = Arc::new(ScriptedToolset::new(Arc::clone(&tools), Vec::new()));
     let resolved = catalog(toolset, 1)
         .by_name("stream")

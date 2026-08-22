@@ -5,13 +5,19 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, ErrorCategory, Metadata, RunEvent};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
     ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, JournalStore, LoadRequest, LoadedSession,
-    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, Observer,
-    ObserverDescriptor, ObserverError, PortFuture, SnapshotReceipt, SnapshotRequest, StageInput,
-    StageOutcome, StoreError, StoreHealth,
+    ContextProviderDescriptor, ContextRequest,
 };
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
+};
+use finstack_ai_runtime::ports::middleware::{
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, StageInput, StageOutcome,
+};
+use finstack_ai_runtime::ports::observer::{Observer, ObserverDescriptor, ObserverError};
 
 use crate::ManualGate;
 
@@ -324,7 +330,7 @@ impl JournalStore for FaultJournalStore {
 
     fn load_from(
         &self,
-        request: finstack_ai_runtime::LoadFromRequest,
+        request: finstack_ai_runtime::ports::journal::LoadFromRequest,
     ) -> PortFuture<Result<LoadedSession, StoreError>> {
         // Delegate instead of using the trait default so wrapped stores keep
         // their own unified gap/split window semantics.
@@ -353,8 +359,8 @@ impl JournalStore for FaultJournalStore {
 
     fn scan(
         &self,
-        request: finstack_ai_runtime::ScanRequest,
-    ) -> PortFuture<Result<finstack_ai_runtime::ScanPage, StoreError>> {
+        request: finstack_ai_runtime::ports::journal::ScanRequest,
+    ) -> PortFuture<Result<finstack_ai_runtime::ports::journal::ScanPage, StoreError>> {
         if let Some(error) = self.take_fault(StoreOperation::Scan) {
             return Box::pin(async move { Err(error) });
         }
@@ -363,8 +369,8 @@ impl JournalStore for FaultJournalStore {
 
     fn write_metadata(
         &self,
-        request: finstack_ai_runtime::WriteMetadataRequest,
-    ) -> PortFuture<Result<finstack_ai_runtime::MetadataReceipt, StoreError>> {
+        request: finstack_ai_runtime::ports::journal::WriteMetadataRequest,
+    ) -> PortFuture<Result<finstack_ai_runtime::ports::journal::MetadataReceipt, StoreError>> {
         if let Some(error) = self.take_fault(StoreOperation::WriteMetadata) {
             return Box::pin(async move { Err(error) });
         }
@@ -411,7 +417,7 @@ impl JournalStore for AmbiguousAckAfterCommitStore {
 
     fn load_from(
         &self,
-        request: finstack_ai_runtime::LoadFromRequest,
+        request: finstack_ai_runtime::ports::journal::LoadFromRequest,
     ) -> PortFuture<Result<LoadedSession, StoreError>> {
         // Delegate instead of using the trait default so wrapped stores keep
         // their own unified gap/split window semantics.

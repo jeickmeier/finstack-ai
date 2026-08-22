@@ -4,7 +4,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use finstack_ai_kernel::{EffectId, RunPhase};
-use finstack_ai_runtime::{CommitCoordinator, ExternalClock, JournalStore, Model};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::model::Model;
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_local::{
     CronFire, CronSchedule, CronScheduleStore, IntervalSchedule, MemoryCronStore,
@@ -26,8 +29,8 @@ struct BindPorts {
 impl PortsFactory for BindPorts {
     fn bind(
         &self,
-        session: finstack_ai_runtime::WorkflowSession,
-    ) -> Result<finstack_ai_runtime::WorkflowSession, WorkerError> {
+        session: finstack_ai_runtime::workflow::WorkflowSession,
+    ) -> Result<finstack_ai_runtime::workflow::WorkflowSession, WorkerError> {
         Ok(session.with_ports(
             Arc::clone(&self.model),
             crate::helpers::locked_profile(),

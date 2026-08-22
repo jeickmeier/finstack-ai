@@ -11,15 +11,24 @@ use finstack_ai_kernel::{
     RunTag, Sensitivity, SessionId, SessionTag, Stage, StageCursor, StageSettled,
     StructuredResultSource, TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag,
 };
-use finstack_ai_runtime::{
-    ApprovalGrantMode, ContextProvider, EventBatchConfig, EventFilter, EventHubConfig,
-    EventLagPolicy, EventSubscriptionConfig, LaneAppendIds, LockedModelContextProfile, Model,
-    ModelContextProfileOverride, ModelName, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-    ModelTaskConfig, Observer, ProgressCoalescing, ReadyModel, RunHandle, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, SessionCreateIds, SessionError, SessionRuntime,
-    StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig, UuidV7Generator,
+use finstack_ai_runtime::events::{
+    EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionConfig,
+    ProgressCoalescing,
+};
+use finstack_ai_runtime::ids::UuidV7Generator;
+use finstack_ai_runtime::ports::context::ContextProvider;
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, LockedModelContextProfile, Model, ModelContextProfileOverride, ModelName,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, ReadyModel, StructuredOutputCapability,
     resolve_model_context_profile,
 };
+use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::tool::ToolStreamLimits;
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+    ToolTaskConfig,
+};
+use finstack_ai_runtime::session::{LaneAppendIds, SessionCreateIds, SessionError, SessionRuntime};
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;
@@ -28,9 +37,9 @@ use finstack_ai_runtime::host_driver::{
     InstalledClock as AgentClock, InstalledRandom as AgentRandom,
 };
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::native_driver as driver;
+use finstack_ai_runtime::ids::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
+use finstack_ai_runtime::native_driver as driver;
 
 use super::drive::output_from_live_state;
 use super::handle::Agent;
@@ -44,7 +53,7 @@ use super::types::{
 pub(super) struct PreparedAgentRun {
     pub(super) model: Arc<ReadyModel>,
     pub(super) profile: LockedModelContextProfile,
-    pub(super) store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    pub(super) store: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     pub(super) session_id: SessionId,
     pub(super) lane_id: LaneId,
     pub(super) accepted: RunAccepted,
@@ -432,10 +441,10 @@ impl Agent {
         if let Some((runtime, lane_id, run_id)) = acquired_lane {
             let graceful = matches!(
                 shutdown.outcome,
-                finstack_ai_runtime::ShutdownOutcome::Graceful
+                finstack_ai_runtime::run::ShutdownOutcome::Graceful
             ) && !matches!(
                 handle.status(),
-                finstack_ai_runtime::RunStatus::Faulted { .. }
+                finstack_ai_runtime::run::RunStatus::Faulted { .. }
             );
             if graceful {
                 let Some(update) = owner.take_session_head() else {
@@ -522,7 +531,7 @@ pub(super) struct NativeIds;
 
 impl NativeIds {
     pub(super) fn now() -> Result<Timestamp, AgentRunError> {
-        finstack_ai_runtime::Clock::now(&AgentClock).map_err(AgentRunError::from)
+        finstack_ai_runtime::ids::Clock::now(&AgentClock).map_err(AgentRunError::from)
     }
 
     pub(super) fn generate<T: finstack_ai_kernel::IdTag>()
@@ -738,7 +747,10 @@ async fn settle_controller_cancellation(
     if state.terminal.is_some() {
         return Ok(state);
     }
-    if matches!(state.status, finstack_ai_runtime::RunStatus::Faulted { .. }) {
+    if matches!(
+        state.status,
+        finstack_ai_runtime::run::RunStatus::Faulted { .. }
+    ) {
         return Err(runtime_uncertainty(
             "runtime faulted before cancellation acknowledgement became certain",
         ));
@@ -778,8 +790,8 @@ async fn wait_for_terminal(
         }
         if matches!(
             state.status,
-            finstack_ai_runtime::RunStatus::Faulted { .. }
-                | finstack_ai_runtime::RunStatus::Stopped
+            finstack_ai_runtime::run::RunStatus::Faulted { .. }
+                | finstack_ai_runtime::run::RunStatus::Stopped
         ) {
             return Err(runtime_uncertainty(
                 "runtime stopped before cancellation reached a durable terminal state",
@@ -809,7 +821,7 @@ pub(super) async fn wait_for_phase(
         if state.phase.is_some_and(|phase| phases.contains(&phase)) {
             return Ok(state);
         }
-        if let finstack_ai_runtime::RunStatus::Faulted { code } = state.status {
+        if let finstack_ai_runtime::run::RunStatus::Faulted { code } = state.status {
             return Err(AgentRunError::runtime_message(format!(
                 "runtime task faulted: {code}"
             )));
@@ -830,7 +842,7 @@ pub(super) async fn wait_for_cycle(
         if state.cycle > prior_cycle || state.terminal.is_some() {
             return Ok(state);
         }
-        if let finstack_ai_runtime::RunStatus::Faulted { code } = state.status {
+        if let finstack_ai_runtime::run::RunStatus::Faulted { code } = state.status {
             return Err(AgentRunError::runtime_message(format!(
                 "runtime task faulted: {code}"
             )));
@@ -876,7 +888,7 @@ fn validate_model_name(model: &dyn Model, name: &ModelName) -> Result<(), AgentR
 pub(super) fn model_draft(
     model: ModelName,
     messages: Arc<[Message]>,
-    tools: Vec<finstack_ai_runtime::ToolSpec>,
+    tools: Vec<finstack_ai_runtime::ports::model::ToolSpec>,
     output: OutputSpec,
     settings: ModelSettings,
     profile: &LockedModelContextProfile,
@@ -1028,7 +1040,7 @@ async fn append_lane_input(
 }
 
 async fn create_session_runtime(
-    store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    store: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     tenant_scope: &str,
     session_id: SessionId,
     lane_id: LaneId,
@@ -1151,7 +1163,7 @@ fn model_task_config() -> ModelTaskConfig {
     ModelTaskConfig {
         job_capacity: DEFAULT_QUEUE_CAPACITY,
         result_capacity: DEFAULT_QUEUE_CAPACITY,
-        stream_limits: finstack_ai_runtime::ModelStreamLimits::default(),
+        stream_limits: finstack_ai_runtime::ports::model::ModelStreamLimits::default(),
         same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }

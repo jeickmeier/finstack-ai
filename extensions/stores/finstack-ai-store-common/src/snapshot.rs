@@ -2,7 +2,9 @@
 //! shared by all store backends.
 
 use finstack_ai_protocol::{decode_opaque_snapshot, encode_snapshot};
-use finstack_ai_runtime::{AcceleratedRestore, OpaqueSnapshot, StateSnapshotRequest, StoreError};
+use finstack_ai_runtime::ports::journal::{
+    AcceleratedRestore, OpaqueSnapshot, StateSnapshotRequest, StoreError,
+};
 
 /// Encode a [`StateSnapshotRequest`] into an [`OpaqueSnapshot`], enforcing
 /// the caller-supplied byte ceiling.
@@ -129,7 +131,7 @@ pub fn admit_prune_snapshot(snapshot_sequence: u64, head_sequence: u64) -> Resul
 #[cfg(test)]
 mod tests {
     use finstack_ai_kernel::Digest;
-    use finstack_ai_runtime::OpaqueSnapshot;
+    use finstack_ai_runtime::ports::journal::OpaqueSnapshot;
 
     use super::*;
 

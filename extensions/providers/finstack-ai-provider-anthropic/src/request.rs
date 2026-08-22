@@ -7,7 +7,9 @@ use base64::Engine;
 use finstack_ai_kernel::{
     ContentBlock, MediaRef, Message, MessageRole, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL,
 };
-use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia, thinking_level_budget};
+use finstack_ai_runtime::ports::model::{
+    ModelError, ModelRequestDraft, ResolvedMedia, thinking_level_budget,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -404,7 +406,7 @@ mod tests {
 
     use super::*;
     use finstack_ai_kernel::{MessageId, Metadata, ProviderIds, TextBlock, Timestamp};
-    use finstack_ai_runtime::{ModelName, ModelRequestLimits, ModelSettings};
+    use finstack_ai_runtime::ports::model::{ModelName, ModelRequestLimits, ModelSettings};
 
     #[test]
     fn rejects_reserved_settings_and_keeps_system_prefix_stable() {

@@ -39,7 +39,7 @@ async fn runtime_routes_cancel_effect_to_only_the_active_model_task() {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         Arc::new(
-            finstack_ai_runtime::ReadyModel::prepare(model_port)
+            finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
                 .await
                 .expect("model readiness"),
         ),

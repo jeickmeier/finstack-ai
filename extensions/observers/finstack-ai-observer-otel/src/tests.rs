@@ -5,7 +5,7 @@ use finstack_ai_kernel::{
     RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag, Timestamp,
 };
 use finstack_ai_kernel::{RunEvent, Sensitivity};
-use finstack_ai_runtime::Observer;
+use finstack_ai_runtime::ports::observer::Observer;
 use finstack_ai_test::check_observer_conformance;
 
 use super::OtelObserver;

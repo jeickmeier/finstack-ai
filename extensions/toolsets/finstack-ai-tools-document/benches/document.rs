@@ -14,10 +14,13 @@ use finstack_ai_kernel::{
     LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, AuthorizationContext, Bytes,
-    CancellationSignal, PortFuture, RunCallContext, ToolCallContext, ToolStreamItem, Toolset as _,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
 };
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolStreamItem, Toolset as _};
 use finstack_ai_tools_document::DocumentToolset;
 use finstack_ai_tools_document::parser::{self, DocumentLimits};
 use futures_util::StreamExt;
@@ -200,7 +203,7 @@ fn call_context() -> ToolCallContext {
 }
 
 fn stage(store: &dyn ArtifactStore, bytes: &[u8], media: &str, name: &str) -> ArtifactRef {
-    block_on(finstack_ai_runtime::stage_required_artifact(
+    block_on(finstack_ai_runtime::artifact::stage_required_artifact(
         store,
         test_scope(),
         Bytes::copy_from_slice(bytes),

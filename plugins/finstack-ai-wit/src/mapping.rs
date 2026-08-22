@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, RunCallContext, SideEffectClass, ToolDeferralSupport,
     ToolSpec as NativeToolSpec,
 };
@@ -256,7 +256,7 @@ mod tests {
         EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId, SessionId,
         ToolExecutionMode,
     };
-    use finstack_ai_runtime::{
+    use finstack_ai_runtime::ports::model::{
         ApprovalRequirement, AuthorizationContext, CancellationSignal, RunCallContext,
         SideEffectClass,
     };

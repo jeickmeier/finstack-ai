@@ -5,7 +5,7 @@ use finstack_ai_kernel::{
     RecordEnvelope, RecordId, SessionId, Timestamp,
 };
 use finstack_ai_protocol::{ChainAnchor, decode, verify_chain_from};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::journal::{
     LoadWindow, LoadedSession, OpaqueSnapshot, ScanPage, ScanRequest, StoreError,
 };
 use finstack_ai_store_common::{

@@ -11,11 +11,15 @@ use finstack_ai_kernel::ComponentId;
 #[cfg(feature = "linked-providers")]
 use finstack_ai_kernel::{AgentId, BundleId};
 use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
-use finstack_ai_runtime::{
-    ArtifactStore, ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
-};
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ports::context::ContextProvider;
 #[cfg(feature = "linked-providers")]
-use finstack_ai_runtime::{JournalStore, Model};
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::middleware::Middleware;
+use finstack_ai_runtime::ports::model::Model;
+use finstack_ai_runtime::ports::model::{ModelName, ModelSettings};
+use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::tool::Toolset;
 
 use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy, RunPolicy};
 
@@ -295,7 +299,7 @@ impl Agent {
     /// Always targets `https://openrouter.ai/api/v1/responses`. Does not read
     /// environment variables.
     ///
-    /// Does not attach a [`finstack_ai_runtime::MediaResolver`]. Vision, file,
+    /// Does not attach a [`finstack_ai_runtime::ports::model::MediaResolver`]. Vision, file,
     /// and audio input require a host-built provider with
     /// `with_media_resolver`; linked constructors do not accept host callback
     /// resolvers across FFI. `spec.media_tools` registers outbound
@@ -623,7 +627,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
 
 #[cfg(feature = "linked-providers")]
 async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    use finstack_ai_runtime::{Authentication, CredentialReference, CredentialStore};
+    use finstack_ai_runtime::ports::model::{Authentication, CredentialReference, CredentialStore};
 
     let hard_input_bytes = spec.hard_input_bytes.ok_or_else(|| {
         AgentRunError::configuration(
@@ -703,8 +707,8 @@ fn gateway_provider(
     endpoint: &str,
     model: &str,
     hard_input_bytes: u64,
-    store: finstack_ai_runtime::CredentialStore,
-    reference: finstack_ai_runtime::CredentialReference,
+    store: finstack_ai_runtime::ports::model::CredentialStore,
+    reference: finstack_ai_runtime::ports::model::CredentialReference,
 ) -> Result<(Arc<dyn Model>, ModelName), AgentRunError> {
     match wire_protocol {
         "openai_responses" => {
@@ -793,8 +797,8 @@ fn gateway_gemini_provider(
     endpoint: &str,
     model: &str,
     hard_input_bytes: u64,
-    store: finstack_ai_runtime::CredentialStore,
-    reference: finstack_ai_runtime::CredentialReference,
+    store: finstack_ai_runtime::ports::model::CredentialStore,
+    reference: finstack_ai_runtime::ports::model::CredentialReference,
 ) -> Result<(Arc<dyn Model>, ModelName), AgentRunError> {
     use finstack_ai_provider_gemini::{GeminiConfig, GeminiModelConfig, GeminiProvider};
 
@@ -976,7 +980,9 @@ fn register_openrouter_media(
 }
 
 #[cfg(feature = "linked-providers")]
-fn model_configuration_error(error: &finstack_ai_runtime::ModelError) -> AgentRunError {
+fn model_configuration_error(
+    error: &finstack_ai_runtime::ports::model::ModelError,
+) -> AgentRunError {
     AgentRunError::configuration(
         AGENT_RUN_INVALID_CONFIGURATION,
         format!("{}: {}", error.code(), error.message()),
@@ -995,8 +1001,8 @@ fn secret_configuration_error() -> AgentRunError {
 fn gateway_authentication(
     kind: Option<&str>,
     api_key: Option<String>,
-) -> Result<finstack_ai_runtime::Authentication, AgentRunError> {
-    use finstack_ai_runtime::{Authentication, SecretString};
+) -> Result<finstack_ai_runtime::ports::model::Authentication, AgentRunError> {
+    use finstack_ai_runtime::ports::model::{Authentication, SecretString};
 
     match (kind, api_key) {
         (None | Some("none"), None) => Ok(Authentication::None),

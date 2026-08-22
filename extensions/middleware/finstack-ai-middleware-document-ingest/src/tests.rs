@@ -5,11 +5,15 @@ use finstack_ai_kernel::{
     TEXT_MAX_BYTES, ToolCallId, ToolResultBlock,
 };
 use finstack_ai_memory::store::InProcessArtifactStore;
-use finstack_ai_runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
-    MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware as _, MiddlewareError, ModelRequestDraft,
-    PortFuture, StageOutcome,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
 };
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::middleware::{
+    MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware as _, MiddlewareError, StageOutcome,
+};
+use finstack_ai_runtime::ports::model::ModelRequestDraft;
 use finstack_ai_tools_document::parser::DocumentLimits;
 
 use crate::{
@@ -32,7 +36,7 @@ const SCANNED_PDF: &[u8] = include_bytes!("../../../../fixtures/documents/scanne
 /// [`LIMITS_IDENTITY_VERSION`].
 const PINNED_DEFAULT_LIMITS_IDENTITY: &[u8] = br#"{"max_input_bytes":4194304,"max_output_bytes":1048576,"max_pages":500,"version":"document-ingest-limits-v1"}"#;
 
-fn before_model_input_with_dangling_file() -> finstack_ai_runtime::StageInput {
+fn before_model_input_with_dangling_file() -> finstack_ai_runtime::ports::middleware::StageInput {
     let blob = BlobRef::try_new(
         "never-staged-blob",
         "text/csv",
@@ -48,7 +52,7 @@ fn before_model_input_with_dangling_file() -> finstack_ai_runtime::StageInput {
     )])
 }
 
-fn before_model_input_text_only() -> finstack_ai_runtime::StageInput {
+fn before_model_input_text_only() -> finstack_ai_runtime::ports::middleware::StageInput {
     before_model_input(vec![message(
         1,
         MessageRole::User,
@@ -176,7 +180,7 @@ fn descriptor_declares_before_model_context_mutation() {
     );
     assert_eq!(
         descriptor.order.tier,
-        finstack_ai_runtime::OrderTier::ContextMutation
+        finstack_ai_runtime::ports::middleware::OrderTier::ContextMutation
     );
 }
 

@@ -15,7 +15,7 @@ mod helpers;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, Digest, RecordEnvelope};
-use finstack_ai_runtime::{JournalStore, StoreError, StoreLimits};
+use finstack_ai_runtime::ports::journal::{JournalStore, StoreError, StoreLimits};
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_test::store_fixtures::{draft, id, request};
 

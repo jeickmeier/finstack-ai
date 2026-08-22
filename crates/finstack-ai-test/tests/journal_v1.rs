@@ -13,7 +13,8 @@ use finstack_ai_kernel::{
     RecordDraft, RecordTag, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
     RunSecurityContext, RunTag, SessionTag, Timestamp, TransitionEnv,
 };
-use finstack_ai_runtime::{CommitCoordinator, JournalStore, LoadRequest, StoreError};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest, StoreError};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     AmbiguousAckAfterCommitStore, all_activated_record_bodies, discover_journal_v1_fixtures,

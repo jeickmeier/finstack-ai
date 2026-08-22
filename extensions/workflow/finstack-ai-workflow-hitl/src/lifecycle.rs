@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{InteractionRequest, RunSecurityContext, Timestamp};
-use finstack_ai_runtime::{WorkflowCheckpoint, WorkflowWait};
+use finstack_ai_runtime::workflow::{WorkflowCheckpoint, WorkflowWait};
 use finstack_ai_workflow_worker::{InteractionDeliveryOutcome, InteractionLifecycle, WorkerError};
 
 use crate::capture::capture;

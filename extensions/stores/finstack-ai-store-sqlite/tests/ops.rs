@@ -10,7 +10,7 @@ use finstack_ai_kernel::{
     RecordDraft, RecordTag, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
     RunSecurityContext, RunTag, SessionTag, Timestamp,
 };
-use finstack_ai_runtime::JournalStore;
+use finstack_ai_runtime::ports::journal::JournalStore;
 use finstack_ai_store_sqlite::{
     SCHEMA_USER_VERSION, SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits,
 };

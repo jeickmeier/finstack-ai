@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
     ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
     StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
@@ -551,12 +551,15 @@ mod tests {
         fn resolve(
             &self,
             _blob: &finstack_ai_kernel::BlobRef,
-        ) -> finstack_ai_runtime::PortFuture<
-            Result<finstack_ai_runtime::ResolvedMedia, finstack_ai_runtime::MediaResolveError>,
+        ) -> finstack_ai_runtime::ports::PortFuture<
+            Result<
+                finstack_ai_runtime::ports::model::ResolvedMedia,
+                finstack_ai_runtime::ports::model::MediaResolveError,
+            >,
         > {
             Box::pin(async {
-                Err(finstack_ai_runtime::MediaResolveError {
-                    kind: finstack_ai_runtime::MediaResolveKind::NotFound,
+                Err(finstack_ai_runtime::ports::model::MediaResolveError {
+                    kind: finstack_ai_runtime::ports::model::MediaResolveKind::NotFound,
                     message: "canary resolver never resolves",
                 })
             })

@@ -9,7 +9,7 @@ use finstack_ai_kernel::{
     RetrySafety, RunEvent, RunEventBody, RunTag, Sensitivity, SessionTag, Timestamp, ToolBatchTag,
     ToolCallTag, TurnTag, Usage, Version,
 };
-use finstack_ai_runtime::Observer;
+use finstack_ai_runtime::ports::observer::Observer;
 use finstack_ai_test::check_observer_conformance;
 
 use super::BillingObserver;

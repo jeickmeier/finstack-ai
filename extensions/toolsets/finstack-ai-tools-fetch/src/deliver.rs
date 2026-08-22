@@ -9,10 +9,11 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ArtifactRef, ErrorCategory, Metadata, Sensitivity};
-use finstack_ai_runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ToolCallContext,
-    ToolError, stage_required_artifact,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
 };
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 
 use crate::markdown::html_to_markdown;
 use crate::toolset::FetchMode;

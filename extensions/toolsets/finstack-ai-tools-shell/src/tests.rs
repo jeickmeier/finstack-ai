@@ -7,10 +7,14 @@ use finstack_ai_kernel::{
     LaneId, OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolFailurePolicy,
 };
-use finstack_ai_runtime::{
-    ApprovalState, ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
-    AssembledToolStream, AuthorizationContext, Bytes, CancellationSignal,
-    JsonSchemaToolValidatorCompiler, PortFuture, ResolvedToolCatalog, RunCallContext,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::tool::{
+    ApprovalState, AssembledToolStream, JsonSchemaToolValidatorCompiler, ResolvedToolCatalog,
     ToolCatalogPlan, ToolExecutionPolicy, ToolPolicyDecision, ToolStreamItem, ToolStreamLimits,
     ToolTerminal, Toolset, ToolsetRegistration,
 };
@@ -271,7 +275,8 @@ async fn confined_shell_cannot_read_outside_declared_root() {
         .expect("confinement");
     assert_eq!(
         ProcessCommandSandbox::confined(
-            finstack_ai_runtime::ConfinementProfile::try_new(&root_path).expect("profile")
+            finstack_ai_runtime::confinement::ConfinementProfile::try_new(&root_path)
+                .expect("profile")
         )
         .expect("sandbox")
         .kind(),

@@ -17,17 +17,28 @@ use finstack_ai_kernel::{
     ToolCallTag, ToolExecutionMode, ToolFailurePolicy, ToolId, TransitionEnv, Usage,
     ValidationIssue, ValidationOutcome,
 };
-use finstack_ai_runtime::{
-    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
-    IdGenerationError, JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest, LoadedSession,
-    LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft, ModelRequestLimits,
-    ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
-    ModelToolCall, PortFuture, RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision,
-    ToolResult, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, ToolValidator,
-    ToolValidatorCompiler, Toolset, ToolsetRegistration, resolve_model_context_profile,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::events::EventHubConfig;
+use finstack_ai_runtime::ids::{IdGenerationError, RandomSource};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, LoadedSession, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth,
+};
+use finstack_ai_runtime::ports::model::{
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, LockedModelContextProfile, Model,
+    ModelContextProfile, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
+    ModelStreamItem, ModelStreamLimits, ModelToolCall, SideEffectClass, TokenEstimatorRef,
+    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, resolve_model_context_profile,
+};
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolError, ToolEventStream,
+    ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolStreamItem, ToolStreamLimits,
+    ToolValidator, ToolValidatorCompiler, Toolset, ToolsetRegistration,
+};
+use finstack_ai_runtime::run::{
+    ModelTaskConfig, RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+    ToolTaskConfig,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -54,7 +65,7 @@ pub(crate) fn timestamp(ms: i64) -> Timestamp {
 pub(crate) fn profile() -> ModelContextProfile {
     ModelContextProfile {
         provider: Arc::from("scripted"),
-        model: finstack_ai_runtime::ModelName::try_new("scripted-1").expect("model"),
+        model: finstack_ai_runtime::ports::model::ModelName::try_new("scripted-1").expect("model"),
         hard_input_bytes: 2_000_000,
         context_window_tokens: 3_000_000,
         max_output_tokens: 1_000,
@@ -72,8 +83,8 @@ pub(crate) fn locked_profile() -> LockedModelContextProfile {
     resolve_model_context_profile(profile(), None, None, false).expect("locked profile")
 }
 
-pub(crate) fn tool_spec(per_name: &str) -> finstack_ai_runtime::ToolSpec {
-    finstack_ai_runtime::ToolSpec {
+pub(crate) fn tool_spec(per_name: &str) -> finstack_ai_runtime::ports::model::ToolSpec {
+    finstack_ai_runtime::ports::model::ToolSpec {
         id: ToolId::parse(format!("finstack.tools.{per_name}" )).expect("tool id"),
         model_name: Arc::from(per_name),
         title: Arc::from(per_name),
@@ -227,7 +238,7 @@ pub(crate) fn tool_call(ordinal: u64, name: &str, arguments: &[u8]) -> ToolCallB
 
 pub(crate) fn draft(
     messages: Arc<[Message]>,
-    tools: Arc<[finstack_ai_runtime::ToolSpec]>,
+    tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]>,
 ) -> ModelRequestDraft {
     ModelRequestDraft {
         model: profile().model,
@@ -412,7 +423,7 @@ pub(crate) fn stage(stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
 pub(crate) async fn drive_to_after_model<S: JournalStore + 'static>(
     handle: &RunHandle,
     store: &Arc<S>,
-    tools: Arc<[finstack_ai_runtime::ToolSpec]>,
+    tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]>,
 ) {
     handle
         .submit(
@@ -482,7 +493,7 @@ pub(crate) async fn drive_to_after_model<S: JournalStore + 'static>(
 pub(crate) async fn drive_to_tools(
     handle: &RunHandle,
     store: &Arc<MemoryJournalStore>,
-    tools: Arc<[finstack_ai_runtime::ToolSpec]>,
+    tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]>,
 ) {
     drive_to_after_model(handle, store, tools).await;
     handle
@@ -532,7 +543,7 @@ pub(crate) async fn setup_with_failure_policy(
 ) {
     let mut spec = tool_spec("echo");
     spec.execution = execution;
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([spec]);
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> = Arc::from([spec]);
     let toolset = Arc::new(ScriptedToolset::new(Arc::clone(&tools), tool_plans));
     let catalog = catalog_with_failure_policy(Arc::clone(&toolset), per_tool, failure_policy);
     let model = Arc::new(ScriptedModel::from_plans(
@@ -541,7 +552,7 @@ pub(crate) async fn setup_with_failure_policy(
     ));
     let model_port: Arc<dyn Model> = model;
     let model_port = Arc::new(
-        finstack_ai_runtime::ReadyModel::prepare(model_port)
+        finstack_ai_runtime::ports::model::ReadyModel::prepare(model_port)
             .await
             .expect("model readiness"),
     );

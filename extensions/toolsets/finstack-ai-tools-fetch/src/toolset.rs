@@ -12,10 +12,13 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactStore, PortFuture, SideEffectClass,
-    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolSpec, ToolStreamItem,
-    Toolset, ToolsetDescriptor,
+use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolStreamItem, Toolset, ToolsetDescriptor,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -246,7 +249,7 @@ impl Toolset for HttpFetchToolset {
                     "fetch content exceeds the configured byte limit",
                 ));
             }
-            let result = finstack_ai_runtime::ToolResult {
+            let result = finstack_ai_runtime::ports::tool::ToolResult {
                 output: RawJson::parse(output).map_err(|_| {
                     tool_error(
                         FETCH_INVALID_ARGUMENTS,

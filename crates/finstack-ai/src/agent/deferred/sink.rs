@@ -1,7 +1,8 @@
 //! Notification-only child-run event sink.
 
 use finstack_ai_kernel::{ChildRunLocator, EffectId, OperationLocator};
-use finstack_ai_runtime::{EventBatch, PortFuture};
+use finstack_ai_runtime::events::EventBatch;
+use finstack_ai_runtime::ports::PortFuture;
 
 /// Context for one child-run event notification.
 #[derive(Debug, Clone, PartialEq, Eq)]

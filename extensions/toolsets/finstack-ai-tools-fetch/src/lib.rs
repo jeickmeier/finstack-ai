@@ -35,7 +35,8 @@ pub use toolset::HttpFetchToolset;
 // copied from (there they land in the root because `lib.rs` itself imports
 // them for its own `Toolset` impl).
 #[cfg(test)]
-use finstack_ai_runtime::{ToolCallContext, ToolSpec};
+use finstack_ai_runtime::ports::model::ToolSpec;
+use finstack_ai_runtime::ports::tool::ToolCallContext;
 
 /// Stable invalid-arguments error code.
 pub const FETCH_INVALID_ARGUMENTS: &str = "fetch_invalid_arguments";

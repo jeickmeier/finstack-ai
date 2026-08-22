@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, KernelState, SessionTag};
 use finstack_ai_protocol::{CanonicalValue, decode_value, encode_snapshot, encode_value};
-use finstack_ai_runtime::{CommitCoordinator, JournalStore, LoadRequest};
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest};
 
 mod helpers;
 use helpers::*;

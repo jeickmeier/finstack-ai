@@ -28,9 +28,12 @@ use std::sync::{Arc, Mutex};
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, Metadata, RunEvent, RunEventBody, RunEventKind, Version,
 };
-use finstack_ai_runtime::{
-    CompactionEvidence, CompactionResult, Observer, ObserverDescriptor, ObserverError,
-    ObserverPayloadMode, PortFuture, PromptCacheImpact,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::middleware::{
+    CompactionEvidence, CompactionResult, PromptCacheImpact,
+};
+use finstack_ai_runtime::ports::observer::{
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
 };
 use thiserror::Error;
 

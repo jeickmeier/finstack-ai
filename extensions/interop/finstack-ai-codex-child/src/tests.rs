@@ -7,10 +7,10 @@ use finstack_ai_kernel::{
     BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, Digest, EffectId, LaneId,
     Metadata, OperationLocator, PrincipalRef, RunId, SessionId, TextBlock,
 };
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AuthorizationContext, ChildRunContext, ChildRunHandle,
-    ChildRunRequest,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest,
 };
+use finstack_ai_runtime::ports::model::AuthorizationContext;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 

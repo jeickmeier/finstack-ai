@@ -68,11 +68,12 @@ use finstack_ai_kernel::{
     ErrorDescriptor, InvocationRecovery, Message, Metadata, RawJson, Stage, TextBlock,
     ToolResultBlock, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::middleware::{
     BeforeModelInput, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
-    MiddlewareOrder, MiddlewareRole, ModelRequestDraft, OrderTier, PortFuture, StageInput,
-    StageMask, StageOutcome,
+    MiddlewareOrder, MiddlewareRole, OrderTier, StageInput, StageMask, StageOutcome,
 };
+use finstack_ai_runtime::ports::model::ModelRequestDraft;
 use thiserror::Error;
 
 mod detect;

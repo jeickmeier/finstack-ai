@@ -8,7 +8,7 @@ use finstack_ai::registry::{
     ComponentConstructionContext, ComponentHealth, ComponentLifecycle, LifecycleError,
 };
 use finstack_ai_kernel::Timestamp;
-use finstack_ai_runtime::PortFuture;
+use finstack_ai_runtime::ports::PortFuture;
 use thiserror::Error;
 
 /// Stable plugin lifecycle failure. Wrap into [`LifecycleError::failed`] at the SDK boundary.
@@ -211,7 +211,7 @@ mod tests {
     use finstack_ai::AgentConstructionContext;
     use finstack_ai::registry::{ComponentConstructionContext, ComponentLifecycle};
     use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, Timestamp, Version};
-    use finstack_ai_runtime::CancellationSignal;
+    use finstack_ai_runtime::ports::model::CancellationSignal;
     use std::sync::Arc;
 
     fn construction(cancelled: bool) -> ComponentConstructionContext {

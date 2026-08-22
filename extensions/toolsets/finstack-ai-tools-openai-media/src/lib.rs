@@ -35,11 +35,17 @@ use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
     ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
-    PortFuture, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
-    ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, stage_required_artifact,
-    verify_authority,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{
+    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
+};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
+    ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -731,9 +737,12 @@ mod tests {
         ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
     use finstack_ai_memory::store::InProcessArtifactStore;
-    use finstack_ai_runtime::{
-        ApprovalState, ArtifactStore, AuthorizationContext, CancellationSignal,
-        JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, RunCallContext, ToolCatalogPlan,
+    use finstack_ai_runtime::artifact::ArtifactStore;
+    use finstack_ai_runtime::ports::model::{
+        AuthorizationContext, CancellationSignal, RunCallContext,
+    };
+    use finstack_ai_runtime::ports::tool::{
+        ApprovalState, JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolCatalogPlan,
         ToolExecutionPolicy, ToolPolicyDecision, Toolset, ToolsetRegistration,
     };
     use futures_util::StreamExt;

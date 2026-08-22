@@ -35,7 +35,7 @@ use finstack_ai_kernel::{
     EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
     ErrorCategory, ErrorDescriptor, ProviderIds, RawJson, RecordBody, RetrySafety, SessionTag,
 };
-use finstack_ai_runtime::{JournalStore, LoadRequest, PruneRequest, StoreLimits};
+use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest, PruneRequest, StoreLimits};
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_test::store_fixtures::{draft, request};
 use finstack_ai_test::{

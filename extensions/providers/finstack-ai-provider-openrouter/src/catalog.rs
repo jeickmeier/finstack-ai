@@ -4,7 +4,7 @@
 //! [`crate::OpenRouterProvider::fetch_model_catalog`]. Applying a fetched
 //! catalog stays an explicit host decision via `replace_model_catalog`.
 
-use finstack_ai_runtime::ModelError;
+use finstack_ai_runtime::ports::model::ModelError;
 use serde::Deserialize;
 
 use crate::OpenRouterModelConfig;

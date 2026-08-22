@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
-use finstack_ai_runtime::{
-    JournalStore, LoadFromRequest, LoadRequest, LoadedSession, MetadataReceipt, PortFuture,
-    PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
-    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadFromRequest, LoadRequest, LoadedSession, MetadataReceipt, PruneReceipt,
+    PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
+    StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 use crate::store::SqliteJournalStore;

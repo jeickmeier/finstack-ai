@@ -16,9 +16,11 @@ use finstack_ai_kernel::{
     ExternalEffectCompletionCommand, InteractionRequest, InteractionResolutionCommand,
     OperationLocator, RunSecurityContext, SessionId, Timestamp, UNIX_EPOCH,
 };
-use finstack_ai_runtime::{
-    Clock, ExternalClock, ExternalRouteOutcome, JournalStore, SystemClock, WorkflowCheckpoint,
-    WorkflowDriverError, WorkflowSession, WorkflowWait, classify_wait,
+use finstack_ai_runtime::ids::{Clock, ExternalClock, SystemClock};
+use finstack_ai_runtime::ingress::ExternalRouteOutcome;
+use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::workflow::{
+    WorkflowCheckpoint, WorkflowDriverError, WorkflowSession, WorkflowWait, classify_wait,
 };
 use finstack_ai_workflow_local::{CronFire, CronSchedule, CronScheduleStore};
 use serde::Serialize;

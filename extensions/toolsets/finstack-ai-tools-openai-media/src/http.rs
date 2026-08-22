@@ -5,7 +5,7 @@ use finstack_ai_net_guard::{
     BodyReadInterrupt, NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client,
     read_body_bounded_interruptible, reject_literal_destination, resolve_and_pin,
 };
-use finstack_ai_runtime::{ToolCallContext, ToolError};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use serde::Deserialize;
 
 use crate::{

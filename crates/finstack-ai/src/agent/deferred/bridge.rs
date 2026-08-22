@@ -10,9 +10,10 @@ use finstack_ai_kernel::{
     ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome, RawJson,
     TextBlock, ToolResultBlock,
 };
-use finstack_ai_runtime::{
-    AgentInvoker, CommitCoordinator, ExternalRouteOutcome, native_driver as driver,
-};
+use finstack_ai_runtime::child::AgentInvoker;
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ingress::ExternalRouteOutcome;
+use finstack_ai_runtime::native_driver as driver;
 use thiserror::Error;
 
 use super::planner::{ChildPlanContext, ChildRunResolver, DeferredChildPlanner, DeferredPlanError};

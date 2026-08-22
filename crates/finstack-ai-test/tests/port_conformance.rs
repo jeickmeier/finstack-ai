@@ -9,13 +9,17 @@ use finstack_ai_kernel::{
     RecordBody, RecordDraft, RecordTag, RunTag, SessionTag, Timestamp, Version,
 };
 use finstack_ai_kernel::{OperationLocator, RawJson, Stage};
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ContextBudget, ContextCallContext,
-    ContextContribution, ContextOverflowPolicy, ContextProviderDescriptor, ContextRequest,
-    JournalStore, MiddlewareContext, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole,
-    ObserverDescriptor, ObserverPayloadMode, OrderTier, RunCallContext, StageInput, StageMask,
-    StageOutcome, StoreError,
+use finstack_ai_runtime::ports::context::{
+    ContextBudget, ContextCallContext, ContextContribution, ContextOverflowPolicy,
+    ContextProviderDescriptor, ContextRequest,
 };
+use finstack_ai_runtime::ports::journal::{JournalStore, StoreError};
+use finstack_ai_runtime::ports::middleware::{
+    MiddlewareContext, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, OrderTier,
+    StageInput, StageMask, StageOutcome,
+};
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
+use finstack_ai_runtime::ports::observer::{ObserverDescriptor, ObserverPayloadMode};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ContextConformanceCase, FaultJournalStore, JournalStoreConformanceCase,

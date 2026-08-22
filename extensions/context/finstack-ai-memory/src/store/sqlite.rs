@@ -14,7 +14,8 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehav
 use tokio::sync::{mpsc, oneshot};
 
 use finstack_ai_kernel::{ArtifactRef, Digest, Sensitivity, Timestamp};
-use finstack_ai_runtime::{ArtifactScope, PortFuture};
+use finstack_ai_runtime::artifact::ArtifactScope;
+use finstack_ai_runtime::ports::PortFuture;
 
 use crate::record::{
     INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryClock,

@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use finstack_ai_runtime::{ToolCallContext, ToolError};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 

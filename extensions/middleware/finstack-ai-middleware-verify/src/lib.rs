@@ -45,10 +45,13 @@ use finstack_ai_kernel::{
     ErrorDescriptor, InvocationRecovery, LABEL_MAX_BYTES, Message, MessageRole, Metadata, RawJson,
     RetryClassification, RetryDirective, Sensitivity, Stage, TEXT_MAX_BYTES, TextBlock, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
     ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+};
+use finstack_ai_runtime::ports::middleware::{
     MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask,
+    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, StageInput, StageMask,
     StageOutcome,
 };
 use thiserror::Error;

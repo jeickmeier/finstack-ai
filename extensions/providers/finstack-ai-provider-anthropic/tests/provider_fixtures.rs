@@ -15,7 +15,7 @@ use finstack_ai_kernel::{
 use finstack_ai_provider_anthropic::{
     AnthropicConfig, AnthropicModelConfig, AnthropicProvider, Authentication, SecretString,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal, Model,
     ModelCallContext, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits,
     ModelSettings, ModelStreamItem, ReconcileContext, RunCallContext, SideEffectClass, ToolSpec,
@@ -241,7 +241,8 @@ async fn optional_live_smoke() {
     )
     .expect("live provider");
     let mut request = request(draft(OutputSpec::PlainText, Arc::from([])));
-    request.draft.model = finstack_ai_runtime::ModelName::try_new(model_name).expect("live model");
+    request.draft.model =
+        finstack_ai_runtime::ports::model::ModelName::try_new(model_name).expect("live model");
     let mut stream = provider.request(request).await.expect("live request");
     let mut completed = false;
     while let Some(item) = stream.next().await {
@@ -260,7 +261,10 @@ async fn anthropic_reconcile_is_unknown_without_retrieve() {
     let provider = provider("http://127.0.0.1:9", false, false);
     assert!(
         !provider
-            .capabilities(&finstack_ai_runtime::ModelName::try_new("fixture-model").expect("model"))
+            .capabilities(
+                &finstack_ai_runtime::ports::model::ModelName::try_new("fixture-model")
+                    .expect("model")
+            )
             .idempotent_requests
     );
     let pending = PendingModelEffect {
@@ -334,7 +338,8 @@ fn draft(output: OutputSpec, tools: Arc<[ToolSpec]>) -> ModelRequestDraft {
     )
     .expect("message");
     ModelRequestDraft {
-        model: finstack_ai_runtime::ModelName::try_new("fixture-model").expect("model"),
+        model: finstack_ai_runtime::ports::model::ModelName::try_new("fixture-model")
+            .expect("model"),
         messages: Arc::from([message]),
         tools,
         output,
@@ -367,7 +372,7 @@ fn tool(name: &str, input_schema: RawJson) -> ToolSpec {
         },
         max_result_bytes: 1_024,
         metadata: Metadata::empty(),
-        deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
+        deferral: finstack_ai_runtime::ports::model::ToolDeferralSupport::Never,
     }
 }
 

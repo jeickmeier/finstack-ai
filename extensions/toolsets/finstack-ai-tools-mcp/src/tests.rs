@@ -5,11 +5,16 @@ use finstack_ai_kernel::{
     OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId, TextBlock, ToolBatchId,
     ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    AssembledToolStream, AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget,
-    ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider, ContextRequest,
-    NestedSample, PendingToolEffect, ReconcileContext, RunCallContext, SideEffectClass,
-    ToolCallContext, ToolReconcileResult, ToolStreamItem, ToolStreamLimits, ToolTerminal, Toolset,
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy,
+    ContextProvider, ContextRequest,
+};
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, ReconcileContext, RunCallContext, SideEffectClass,
+};
+use finstack_ai_runtime::ports::tool::{
+    AssembledToolStream, NestedSample, PendingToolEffect, ToolCallContext, ToolReconcileResult,
+    ToolStreamItem, ToolStreamLimits, ToolTerminal, Toolset,
 };
 use finstack_ai_test::{
     ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
@@ -193,7 +198,7 @@ fn annotations_alone_never_grant_retry_safety() {
     assert_eq!(spec.retry_safety, RetrySafety::AtMostOnce);
     assert_eq!(
         spec.approval.requirement,
-        finstack_ai_runtime::ApprovalRequirement::Required
+        finstack_ai_runtime::ports::model::ApprovalRequirement::Required
     );
 }
 
@@ -321,12 +326,13 @@ async fn factory_rejects_a_server_that_is_not_allowlisted() {
 #[tokio::test]
 async fn confined_stdio_fails_closed_when_confinement_is_unavailable() {
     let root = std::env::temp_dir();
-    let profile = finstack_ai_runtime::ConfinementProfile::try_new(&root).expect("root");
+    let profile =
+        finstack_ai_runtime::confinement::ConfinementProfile::try_new(&root).expect("root");
     let config = McpConfig::default()
         .allow_command("/bin/echo")
         .stdio_confined(
             StdioConfig::new("/bin/echo", Vec::<String>::new()),
-            finstack_ai_runtime::ProcessConfinement::unavailable(),
+            finstack_ai_runtime::confinement::ProcessConfinement::unavailable(),
             profile,
         )
         .expect("allowlisted");
@@ -334,7 +340,7 @@ async fn confined_stdio_fails_closed_when_confinement_is_unavailable() {
     let Err(error) = result else {
         panic!("requested confinement is unavailable")
     };
-    assert!(format!("{error}").contains(finstack_ai_runtime::CONFINEMENT_UNAVAILABLE));
+    assert!(format!("{error}").contains(finstack_ai_runtime::confinement::CONFINEMENT_UNAVAILABLE));
 }
 
 #[tokio::test]
@@ -358,7 +364,7 @@ async fn toolset_satisfies_the_published_port_conformance_suite() {
         progress: Arc::from([]),
         usage: None,
         artifacts: Arc::from([]),
-        terminal: ToolTerminal::Completed(finstack_ai_runtime::ToolResult {
+        terminal: ToolTerminal::Completed(finstack_ai_runtime::ports::tool::ToolResult {
             output: expected_output,
             is_error: false,
         }),

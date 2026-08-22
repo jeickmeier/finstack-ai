@@ -11,7 +11,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 use finstack_ai_store_common::VerifiedHeadCache;
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 
@@ -20,13 +20,13 @@ use crate::error::map_postgres_error;
 use crate::pool::Pool;
 use crate::schema::ensure_schema;
 
-/// Human-readable, stable [`finstack_ai_runtime::StoreHealth::detail`] text
+/// Human-readable, stable [`finstack_ai_runtime::ports::journal::StoreHealth::detail`] text
 /// for each durability mode (spec D6).
 pub(crate) const DURABLE_DETAIL: &str = "postgres synchronous_commit=on";
 /// See [`DURABLE_DETAIL`].
 pub(crate) const RELAXED_DETAIL: &str = "postgres synchronous_commit=off";
 
-/// Durable, multi-writer `PostgreSQL` [`finstack_ai_runtime::JournalStore`].
+/// Durable, multi-writer `PostgreSQL` [`finstack_ai_runtime::ports::journal::JournalStore`].
 ///
 /// Construct with [`PostgresJournalStore::try_open`]. `Self` is not itself
 /// cheaply `Clone` (its config is, but the store owns the pool outright);
@@ -215,7 +215,7 @@ mod tests {
     fn tls_builder_accepts_public_roots() {
         let config = PostgresStoreConfig::new(
             "postgres://localhost/db",
-            finstack_ai_runtime::StoreLimits {
+            finstack_ai_runtime::ports::journal::StoreLimits {
                 sessions: 1,
                 batches_per_session: 1,
                 records_per_session: 1,

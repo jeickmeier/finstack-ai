@@ -22,9 +22,10 @@ use finstack_ai_kernel::{
     RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SessionTag,
     Timestamp, TransitionEnv,
 };
-use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, LoadRequest, OpaqueSnapshot, ScanRequest, SnapshotRequest,
-    StateSnapshotRequest, StoreError, StoreLimits, WriteMetadataRequest,
+use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::ports::journal::{
+    JournalStore, LoadRequest, OpaqueSnapshot, ScanRequest, SnapshotRequest, StateSnapshotRequest,
+    StoreError, StoreLimits, WriteMetadataRequest,
 };
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_test::store_fixtures::{draft, id, request};

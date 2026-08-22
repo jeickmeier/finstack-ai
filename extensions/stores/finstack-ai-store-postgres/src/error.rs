@@ -1,4 +1,4 @@
-use finstack_ai_runtime::StoreError;
+use finstack_ai_runtime::ports::journal::StoreError;
 
 use crate::pool::PooledClient;
 

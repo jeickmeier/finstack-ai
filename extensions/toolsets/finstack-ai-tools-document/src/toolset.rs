@@ -5,11 +5,15 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactStore, Bytes,
-    PendingToolEffect, PortFuture, SideEffectClass, ToolCallContext, ToolDeferralSupport,
-    ToolError, ToolEventStream, ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor, stage_required_artifact,
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{ArtifactMetadata, ArtifactStore, stage_required_artifact};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    PendingToolEffect, ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult,
+    ToolResult, ToolStreamItem, Toolset, ToolsetDescriptor,
 };
 use serde::Deserialize;
 use thiserror::Error;
@@ -189,7 +193,7 @@ impl Toolset for DocumentToolset {
 
     fn reconcile(
         &self,
-        _ctx: finstack_ai_runtime::ReconcileContext,
+        _ctx: finstack_ai_runtime::ports::model::ReconcileContext,
         _effect: PendingToolEffect,
     ) -> PortFuture<Result<ToolReconcileResult, ToolError>> {
         Box::pin(async { Ok(ToolReconcileResult::Unknown) })

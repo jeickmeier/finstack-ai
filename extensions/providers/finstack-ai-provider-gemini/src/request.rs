@@ -9,7 +9,7 @@ use finstack_ai_kernel::{
     SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId,
 };
 use finstack_ai_provider_wire::GEMINI_CONTINUATION_PROVIDER;
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec, thinking_level_budget,
 };
 use serde::{Deserialize, Serialize};
@@ -589,7 +589,7 @@ mod tests {
         SchemaRef, TextBlock, Timestamp, ToolCallBlock, ToolCallId, ToolExecutionMode, ToolId,
         ToolResultBlock,
     };
-    use finstack_ai_runtime::{
+    use finstack_ai_runtime::ports::model::{
         ApprovalMetadata, ApprovalRequirement, ModelName, ModelRequestLimits, ModelSettings,
         SideEffectClass, ToolSpec,
     };
@@ -1258,7 +1258,7 @@ mod tests {
             },
             max_result_bytes: 1_024,
             metadata: Metadata::empty(),
-            deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
+            deferral: finstack_ai_runtime::ports::model::ToolDeferralSupport::Never,
         }
     }
 

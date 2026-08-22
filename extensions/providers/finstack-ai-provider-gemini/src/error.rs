@@ -1,5 +1,5 @@
 use finstack_ai_kernel::{ErrorCategory, Metadata};
-use finstack_ai_runtime::ModelError;
+use finstack_ai_runtime::ports::model::ModelError;
 
 pub(crate) const GEMINI_CONFIG_INVALID: &str = "gemini_config_invalid";
 pub(crate) const GEMINI_REQUEST_INVALID: &str = "gemini_request_invalid";

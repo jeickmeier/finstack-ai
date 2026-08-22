@@ -11,7 +11,7 @@ use finstack_ai_kernel::{
     RawJson, RunId, SessionId,
 };
 use finstack_ai_provider_anthropic::{AnthropicConfig, AnthropicModelConfig, AnthropicProvider};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::model::{
     AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelRequest,
     ModelRequestDraft, ModelRequestLimits, ModelSettings, RunCallContext,
 };
@@ -78,7 +78,8 @@ fn benchmark_request() -> ModelRequest {
                 .expect("request"),
         },
         draft: ModelRequestDraft {
-            model: finstack_ai_runtime::ModelName::try_new("bench-model").expect("model"),
+            model: finstack_ai_runtime::ports::model::ModelName::try_new("bench-model")
+                .expect("model"),
             messages: Arc::from([]),
             tools: Arc::from([]),
             output: OutputSpec::PlainText,

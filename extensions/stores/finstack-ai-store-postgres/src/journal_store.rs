@@ -26,10 +26,11 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::journal::{
     JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
-    PortFuture, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
-    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
+    PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
+    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 use finstack_ai_store_common::{VerifiedHead, VerifiedHeadCache};

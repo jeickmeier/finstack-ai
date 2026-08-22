@@ -116,11 +116,12 @@ use finstack_ai_kernel::{
     Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, SessionId,
     Stage,
 };
-use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ContextAuthority, ContextItemKind, Middleware,
-    MiddlewareContext, MiddlewareRole, OrderTier, RunCallContext, StageInput, StageOutcome,
+use finstack_ai_runtime::ports::context::{ContextAuthority, ContextItemKind};
+use finstack_ai_runtime::ports::middleware::{
+    Middleware, MiddlewareContext, MiddlewareRole, OrderTier, StageInput, StageOutcome,
     validate_stage_outcome,
 };
+use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
 use finstack_ai_test::{MiddlewareConformanceCase, check_middleware_conformance};
 
 fn id<T>(value: u64, parse: impl FnOnce(&str) -> T) -> T {
@@ -293,7 +294,7 @@ async fn wrong_stage_input_is_rejected() {
         .expect_err("wrong stage");
     assert_eq!(
         error.code(),
-        finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED
+        finstack_ai_runtime::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED
     );
 }
 

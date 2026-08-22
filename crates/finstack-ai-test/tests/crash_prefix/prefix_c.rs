@@ -95,7 +95,7 @@ async fn prefix_c1_through_c5() {
         .expect_err("C4 corrupt");
     assert_eq!(
         match err {
-            finstack_ai_runtime::ArtifactError::Integrity { .. } => err.code(),
+            finstack_ai_runtime::artifact::ArtifactError::Integrity { .. } => err.code(),
             other => panic!("expected integrity, got {other:?}"),
         },
         ARTIFACT_INTEGRITY_FAILURE

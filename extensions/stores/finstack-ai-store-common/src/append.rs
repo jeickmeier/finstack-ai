@@ -2,7 +2,7 @@
 
 use finstack_ai_kernel::{AppendBatchId, AppendRequest, CommittedBatch, Digest};
 use finstack_ai_protocol::{commit_records, encode};
-use finstack_ai_runtime::{StoreError, StoreLimits};
+use finstack_ai_runtime::ports::journal::{StoreError, StoreLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::error::protocol_error;
@@ -293,7 +293,7 @@ pub fn build_committed_batch(
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_runtime::StoreLimits;
+    use finstack_ai_runtime::ports::journal::StoreLimits;
 
     use super::*;
     use finstack_ai_test::store_fixtures::{draft, id, request};

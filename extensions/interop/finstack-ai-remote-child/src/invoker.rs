@@ -1,4 +1,4 @@
-//! Idempotent remote [`AgentInvoker`](finstack_ai_runtime::AgentInvoker).
+//! Idempotent remote [`AgentInvoker`](finstack_ai_runtime::child::AgentInvoker).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -9,10 +9,11 @@ use finstack_ai_kernel::{
     RunAccepted, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
 };
 use finstack_ai_protocol::{RemoteAgentRef, RemoteCommandPayload, RemoteStartRequest};
-use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest, PortFuture,
+use finstack_ai_runtime::child::{
+    AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest,
     child_relation_digest,
 };
+use finstack_ai_runtime::ports::PortFuture;
 
 use crate::route::{RemoteChildRoute, ResolvedRemoteRoute, invalid, resolve_route, unavailable};
 use crate::transport::exchange;

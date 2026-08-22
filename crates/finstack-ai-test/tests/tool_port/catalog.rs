@@ -12,7 +12,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
     host_guard.approval.attributes =
         Metadata::parse(br#"{"approved":true}"#).expect("hostile metadata");
     let deadline_tool = tool_spec("catalog-deadline");
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> =
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> =
         Arc::from([required.clone(), host_guard.clone(), deadline_tool.clone()]);
     let toolset = Arc::new(ScriptedToolset::new(Arc::clone(&tools), Vec::new()));
     let toolset_port: Arc<dyn Toolset> = toolset;
@@ -63,44 +63,44 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
-        finstack_ai_runtime::ApprovalState::Unpaid,
+        finstack_ai_runtime::ports::tool::ApprovalState::Unpaid,
     );
     assert_eq!(validations.load(Ordering::Acquire), 1);
     assert_eq!(
         planned,
-        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+        finstack_ai_runtime::ports::tool::ToolCatalogPlan::RequireApproval
     );
 
     let planned = catalog.decide_plan(
         tool_call(78, "catalog-host-guard", br#"{"value":1}"#),
         None,
         None,
-        finstack_ai_runtime::ApprovalState::Unpaid,
+        finstack_ai_runtime::ports::tool::ApprovalState::Unpaid,
     );
     assert_eq!(validations.load(Ordering::Acquire), 2);
     assert_eq!(
         planned,
-        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+        finstack_ai_runtime::ports::tool::ToolCatalogPlan::RequireApproval
     );
 
     let granted = catalog.decide_plan(
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
-        finstack_ai_runtime::ApprovalState::Granted,
+        finstack_ai_runtime::ports::tool::ApprovalState::Granted,
     );
     assert!(matches!(
         granted,
-        finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::Execute(_))
+        finstack_ai_runtime::ports::tool::ToolCatalogPlan::Ready(ToolCallPlan::Execute(_))
     ));
 
     let refused = catalog.decide_plan(
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
-        finstack_ai_runtime::ApprovalState::Refused,
+        finstack_ai_runtime::ports::tool::ApprovalState::Refused,
     );
-    let finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::SyntheticClosure(closure)) =
+    let finstack_ai_runtime::ports::tool::ToolCatalogPlan::Ready(ToolCallPlan::SyntheticClosure(closure)) =
         refused
     else {
         panic!("refused approval must close diagnostically without execute");
@@ -157,7 +157,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
 fn catalog_policy_floor_cannot_be_weakened_by_host_allow() {
     let mut policy = tool_spec("catalog-policy-floor");
     policy.approval.requirement = ApprovalRequirement::Policy;
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([policy.clone()]);
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> = Arc::from([policy.clone()]);
     let toolset: Arc<dyn Toolset> = Arc::new(ScriptedToolset::new(Arc::clone(&tools), Vec::new()));
     let catalog = ResolvedToolCatalog::try_new(
         [ToolsetRegistration {
@@ -181,18 +181,18 @@ fn catalog_policy_floor_cannot_be_weakened_by_host_allow() {
             tool_call(91, "catalog-policy-floor", br#"{"value":1}"#),
             None,
             None,
-            finstack_ai_runtime::ApprovalState::Unpaid,
+            finstack_ai_runtime::ports::tool::ApprovalState::Unpaid,
         ),
-        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+        finstack_ai_runtime::ports::tool::ToolCatalogPlan::RequireApproval
     );
     assert!(matches!(
         catalog.decide_plan(
             tool_call(91, "catalog-policy-floor", br#"{"value":1}"#),
             None,
             None,
-            finstack_ai_runtime::ApprovalState::Granted,
+            finstack_ai_runtime::ports::tool::ApprovalState::Granted,
         ),
-        finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::Execute(_))
+        finstack_ai_runtime::ports::tool::ToolCatalogPlan::Ready(ToolCallPlan::Execute(_))
     ));
 }
 
@@ -205,7 +205,7 @@ fn default_validator_matches_independent_portable_fixture_outcomes_and_offline_r
         .compile(&schema, &BTreeMap::new())
         .expect("validator");
     let fixture = FixtureInputValidator;
-    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([spec.clone()]);
+    let tools: Arc<[finstack_ai_runtime::ports::model::ToolSpec]> = Arc::from([spec.clone()]);
     let toolset = Arc::new(ScriptedToolset::new(Arc::clone(&tools), Vec::new()));
     let policy = BTreeMap::from([(
         spec.id.clone(),

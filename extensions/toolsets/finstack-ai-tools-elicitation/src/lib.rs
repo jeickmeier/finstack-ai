@@ -33,11 +33,13 @@ use finstack_ai_kernel::{
     InteractionKind, InteractionRequest, Metadata, RawJson, RawJsonError, RetrySafety, TextBlock,
     ToolExecutionMode, ToolId, ValidatedToolCall, ValidationOutcome, Version,
 };
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, JsonSchemaToolValidatorCompiler, PortFuture,
-    SideEffectClass, TOOL_INTERACTION_REQUIRED, ToolCallContext, ToolDeferralSupport, ToolError,
-    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, ToolValidatorCompiler, Toolset,
-    ToolsetDescriptor,
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{
+    JsonSchemaToolValidatorCompiler, TOOL_INTERACTION_REQUIRED, ToolCallContext, ToolError,
+    ToolEventStream, ToolResult, ToolStreamItem, ToolValidatorCompiler, Toolset, ToolsetDescriptor,
 };
 use futures_util::stream;
 use serde::Deserialize;

@@ -5,7 +5,8 @@ use finstack_ai_kernel::{
     RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RunEvent, RunEventBody, RunTag, Sensitivity,
     SessionTag, Timestamp, TurnTag,
 };
-use finstack_ai_runtime::{Observer, PortFuture};
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::observer::Observer;
 
 use crate::extract::{CandidateMemory, MemoryExtractor, RuleBasedExtractor};
 use crate::observer::MemoryObserver;

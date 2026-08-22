@@ -10,7 +10,7 @@ mod helpers;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_runtime::{JournalStore, StoreError, StoreLimits};
+use finstack_ai_runtime::ports::journal::{JournalStore, StoreError, StoreLimits};
 use finstack_ai_store_postgres::{PostgresDurability, PostgresJournalStore, PostgresStoreConfig};
 
 use helpers::{connect, disposable_store, pg_test_url};

@@ -32,12 +32,15 @@ use finstack_ai_kernel::{
     ErrorCategory, InvocationRecovery, Message, Metadata, RawJson, Sensitivity, Stage, TextBlock,
     ToolResultBlock, Version,
 };
-use finstack_ai_runtime::{
+use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+};
+use finstack_ai_runtime::ports::middleware::{
     BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,
     CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionModelRequest,
-    CompactionResult, CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind,
-    ContextProvenance, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
-    MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, PromptCacheImpact, StageInput,
+    CompactionResult, CompactionSourceEntry, Middleware, MiddlewareContext, MiddlewareDescriptor,
+    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, PromptCacheImpact, StageInput,
     StageMask, StageOutcome, compaction_projection_digest, compaction_protected_set_digest,
     compaction_source_digest, compaction_summary_digest, validate_compaction_result,
 };
@@ -308,7 +311,7 @@ impl Middleware for CompactionMiddleware {
             }
             let StageInput::BeforeModel(before) = input else {
                 return Err(MiddlewareError::try_new(
-                    finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                    finstack_ai_runtime::ports::middleware::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
                     ErrorCategory::Middleware,
                     "compaction only runs at before_model",
                     Metadata::empty(),
@@ -445,7 +448,7 @@ fn summarize(
     })?;
     let resume_state = RawJson::parse(b"{}").map_err(|_| {
         middleware_error(
-            finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+            finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
             ErrorCategory::Middleware,
             "compaction resume state is invalid",
         )
@@ -466,7 +469,7 @@ fn summarize_resume(
     descriptor: &MiddlewareDescriptor,
     config: &CompactionConfig,
     input: &BeforeModelInput,
-    resume: &finstack_ai_runtime::CompactionModelResume,
+    resume: &finstack_ai_runtime::ports::middleware::CompactionModelResume,
 ) -> Result<StageOutcome, MiddlewareError> {
     let before = estimate_request(&input.request, &input.request.messages, 0)?;
     let pairs = PairIndex::collect(&input.source_entries);
@@ -492,7 +495,7 @@ fn summarize_resume(
             })
             .map_err(|_| {
                 middleware_error(
-                    finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+                    finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
                     ErrorCategory::Middleware,
                     "compaction summary text is invalid",
                 )
@@ -511,7 +514,7 @@ fn summarize_resume(
     )
     .map_err(|_| {
         middleware_error(
-            finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+            finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
             ErrorCategory::Middleware,
             "compaction derived summary is invalid",
         )
@@ -572,7 +575,7 @@ fn finish(
     let summary_digest = compaction_summary_digest(&checkpoint_summary)?;
     let covered_through_entry_id = *covered_entry_ids.last().ok_or_else(|| {
         middleware_error(
-            finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+            finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
             ErrorCategory::Middleware,
             "compaction source is empty",
         )
@@ -720,7 +723,7 @@ fn truncate_tool_message(message: &Message, limit: usize) -> Result<Message, Mid
                     ToolResultBlock::try_new(*result.tool_call_id(), truncated, result.is_error())
                         .map_err(|_| {
                             middleware_error(
-                                finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+                                finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
                                 ErrorCategory::Middleware,
                                 "truncated tool result is invalid",
                             )
@@ -741,7 +744,7 @@ fn truncate_tool_message(message: &Message, limit: usize) -> Result<Message, Mid
     )
     .map_err(|_| {
         middleware_error(
-            finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+            finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
             ErrorCategory::Middleware,
             "truncated tool message is invalid",
         )
@@ -795,7 +798,7 @@ fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
 }
 
 fn estimate_request(
-    request: &finstack_ai_runtime::ModelRequestDraft,
+    request: &finstack_ai_runtime::ports::model::ModelRequestDraft,
     messages: &[Message],
     additional_tokens: u64,
 ) -> Result<u64, MiddlewareError> {
@@ -803,7 +806,7 @@ fn estimate_request(
     rebuilt.messages = Arc::from(messages.to_vec());
     let bytes = rebuilt.canonical_bytes().map_err(|_| {
         middleware_error(
-            finstack_ai_runtime::COMPACTION_RESULT_INVALID,
+            finstack_ai_runtime::ports::middleware::COMPACTION_RESULT_INVALID,
             ErrorCategory::Middleware,
             "compaction request estimate could not be constructed",
         )

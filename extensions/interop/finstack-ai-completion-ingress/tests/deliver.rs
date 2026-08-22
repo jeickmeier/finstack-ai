@@ -18,14 +18,19 @@ mod helpers {
         ReconciliationPolicy, RetrySafety, RunPhase, RunSecurityContext, TextBlock,
         ToolExecutionMode, ToolId, Version,
     };
-    use finstack_ai_runtime::{
-        ApprovalMetadata, ApprovalRequirement, CommitCoordinator, JournalStore, Model,
-        ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall, PortFuture,
-        SecretString, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
-        SecurityAuditReceipt, SecurityAuditSink, SideEffectClass, TextDelta, TokenEstimatorRef,
-        TokenEstimatorSource, ToolCallDelta, ToolDeferral, ToolDeferralSupport, ToolSpec,
-        ToolStreamItem, Toolset,
+    use finstack_ai_runtime::audit::{
+        SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth, SecurityAuditReceipt,
+        SecurityAuditSink,
     };
+    use finstack_ai_runtime::commit::CommitCoordinator;
+    use finstack_ai_runtime::ports::PortFuture;
+    use finstack_ai_runtime::ports::journal::JournalStore;
+    use finstack_ai_runtime::ports::model::{
+        ApprovalMetadata, ApprovalRequirement, Model, ModelContextProfile, ModelName,
+        ModelResponse, ModelStreamItem, ModelToolCall, SecretString, SideEffectClass, TextDelta,
+        TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolSpec,
+    };
+    use finstack_ai_runtime::ports::tool::{ToolDeferral, ToolStreamItem, Toolset};
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
     use finstack_ai_test::{
         ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction,
@@ -274,9 +279,9 @@ use finstack_ai_completion_ingress::{CompletionGrant, CompletionIngress, Ingress
 use finstack_ai_kernel::{
     AuthorizationEvidence, EffectId, LaneId, OperationLocator, RunId, SessionId, Timestamp,
 };
-use finstack_ai_runtime::{
-    ExternalRouteOutcome, IdempotencyHorizon, SecurityAuditGate, SecurityAuditSink,
-};
+use finstack_ai_runtime::audit::{SecurityAuditGate, SecurityAuditSink};
+use finstack_ai_runtime::ingress::ExternalRouteOutcome;
+use finstack_ai_runtime::ports::journal::IdempotencyHorizon;
 
 fn ts(ms: i64) -> Timestamp {
     Timestamp::from_unix_ms(ms).expect("timestamp")
@@ -439,7 +444,7 @@ async fn horizon_expires_deliveries_regardless_of_token_expiry() {
         "expected an expired_locator audit event, got {:?}",
         events
             .iter()
-            .map(finstack_ai_runtime::SecurityAuditEvent::reason_code)
+            .map(finstack_ai_runtime::audit::SecurityAuditEvent::reason_code)
             .collect::<Vec<_>>()
     );
 }
