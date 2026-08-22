@@ -196,7 +196,7 @@ impl PyMemoryExtension {
         manage: bool,
     ) -> PyResult<Self> {
         let scope = build_scope(py, tenant, user, agent, workspace)?;
-        let store = SqliteMemoryStore::open(Path::new(path))
+        let store = SqliteMemoryStore::try_open(Path::new(path))
             .map_err(|error| memory_py_error(py, &error))?;
         Ok(Self {
             store: Arc::new(store) as Arc<dyn MemoryStore>,

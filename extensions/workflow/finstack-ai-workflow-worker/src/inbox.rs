@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn sqlite_inbox_round_trips() {
         let dir = tempfile::tempdir().expect("dir");
-        let store = crate::SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
+        let store = crate::SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
         exercise_inbox(&store);
     }
 }

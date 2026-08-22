@@ -64,7 +64,7 @@ use finstack_ai_test::{
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
     FireStore, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WorkerBuilder,
-    WorkerError, park,
+    WorkerError, park_for_wake,
 };
 
 use crate::helpers::{
@@ -481,7 +481,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
         .map(|(id, _)| id)
         .expect("tool call id");
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     let worker = WorkerBuilder::new(
@@ -732,7 +732,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
         panic!("expected an interaction wait");
     };
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     let worker = WorkerBuilder::new(

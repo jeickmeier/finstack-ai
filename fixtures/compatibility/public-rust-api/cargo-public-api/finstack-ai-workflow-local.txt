@@ -107,8 +107,8 @@ pub fn finstack_ai_workflow_local::MemoryCronStore::try_claim(&self, &str, &str,
 pub fn finstack_ai_workflow_local::MemoryCronStore::upsert(&self, &finstack_ai_workflow_local::CronSchedule) -> core::result::Result<(), finstack_ai_workflow_local::CronError>
 pub struct finstack_ai_workflow_local::SqliteCronStore
 impl finstack_ai_workflow_local::SqliteCronStore
-pub fn finstack_ai_workflow_local::SqliteCronStore::open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::path(&self) -> &std::path::Path
+pub fn finstack_ai_workflow_local::SqliteCronStore::try_open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_workflow_local::CronError>
 impl finstack_ai_workflow_local::CronScheduleStore for finstack_ai_workflow_local::SqliteCronStore
 pub fn finstack_ai_workflow_local::SqliteCronStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub fn finstack_ai_workflow_local::SqliteCronStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>

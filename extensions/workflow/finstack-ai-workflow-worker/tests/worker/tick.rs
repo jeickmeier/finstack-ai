@@ -14,7 +14,7 @@ use finstack_ai_workflow_local::{
 };
 use finstack_ai_workflow_worker::{
     FireStore, InboxKind, InboxRow, InboxStore, MemoryWorkerStore, PortsFactory, RunStarter,
-    StartedRun, WakeIndexStore, WakeReason, WorkerBuilder, WorkerError, park,
+    StartedRun, WakeIndexStore, WakeReason, WorkerBuilder, WorkerError, park_for_wake,
 };
 
 use crate::helpers::{
@@ -153,7 +153,7 @@ async fn tick_fires_a_due_timer_and_keeps_the_row_when_no_new_wait() {
     let clock = ExternalClock::new(timestamp(2_000));
     let mut session = Box::pin(park_on_retry_timer(&journal, &model, &clock, 800)).await;
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     let recover_from = Arc::clone(&journal) as Arc<dyn JournalStore>;
@@ -223,7 +223,7 @@ async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
     let clock = ExternalClock::new(timestamp(2_000));
     let mut session = Box::pin(park_on_retry_timer(&journal, &model, &clock, 800)).await;
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     // The committed retry timer is due at 2_310. Rewrite the hint row as if
@@ -278,7 +278,7 @@ async fn tick_dead_letters_a_durable_external_ingress_rejection() {
     let clock = ExternalClock::new(timestamp(2_000));
     let mut session = Box::pin(park_on_deferred_effect(&journal, &model, &clock, 740)).await;
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     let row = store.load_tenant("tenant-a").expect("rows").remove(0);

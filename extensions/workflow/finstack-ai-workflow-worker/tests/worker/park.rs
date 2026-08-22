@@ -4,7 +4,7 @@ use finstack_ai_runtime::ids::ExternalClock;
 use finstack_ai_runtime::ports::model::Model;
 use finstack_ai_runtime::workflow::{WorkflowWait, classify_wait};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
-use finstack_ai_workflow_worker::{MemoryWorkerStore, WakeIndexStore, WakeReason, park};
+use finstack_ai_workflow_worker::{MemoryWorkerStore, WakeIndexStore, WakeReason, park_for_wake};
 
 use crate::helpers::{memory_store, park_on_retry_timer, profile, retryable_failure, timestamp};
 
@@ -27,7 +27,7 @@ async fn park_indexes_a_timer_wait_and_drops_the_owner() {
         panic!("expected timer wait");
     };
     let wake = MemoryWorkerStore::new();
-    let checkpoint = park(&mut session, &wake, "research").expect("park");
+    let checkpoint = park_for_wake(&mut session, &wake, "research").expect("park");
     assert!(!session.owner_is_live());
     let rows = wake.load_tenant("tenant-a").expect("rows");
     assert_eq!(rows.len(), 1);

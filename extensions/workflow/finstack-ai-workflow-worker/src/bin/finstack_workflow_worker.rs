@@ -40,8 +40,8 @@ async fn main() {
         eprintln!("usage: finstack_workflow_worker <sqlite-path>");
         std::process::exit(2);
     });
-    let store = Arc::new(SqliteWorkerStore::open(&path).expect("worker store"));
-    let cron = Arc::new(SqliteCronStore::open(&path).expect("cron store"));
+    let store = Arc::new(SqliteWorkerStore::try_open(&path).expect("worker store"));
+    let cron = Arc::new(SqliteCronStore::try_open(&path).expect("cron store"));
     let durability = if path == ":memory:" {
         SqliteDurability::Relaxed {
             synchronous: SqliteSynchronous::Normal,

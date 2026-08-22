@@ -102,7 +102,7 @@ impl SqliteWorkerStore {
     /// Returns [`WorkerError::StoreUnavailable`] when the file cannot be
     /// opened, `busy_timeout`/WAL cannot be configured, or the schema cannot
     /// be created.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, WorkerError> {
+    pub fn try_open(path: impl AsRef<Path>) -> Result<Self, WorkerError> {
         let path = path.as_ref().to_path_buf();
         let conn = Connection::open(&path).map_err(|_| WorkerError::StoreUnavailable {
             code: "sqlite_worker_open",
@@ -1208,8 +1208,8 @@ mod tests {
     fn two_sqlite_stores_claim_exactly_one_lease() {
         let dir = tempfile::tempdir().expect("dir");
         let path = dir.path().join("worker.sqlite");
-        let first = SqliteWorkerStore::open(&path).expect("first");
-        let second = SqliteWorkerStore::open(&path).expect("second");
+        let first = SqliteWorkerStore::try_open(&path).expect("first");
+        let second = SqliteWorkerStore::try_open(&path).expect("second");
         first
             .upsert(&timer_row("tenant-a", 1, 1_000))
             .expect("upsert");
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn sqlite_round_trips_every_column() {
         let dir = tempfile::tempdir().expect("dir");
-        let store = SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
+        let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
         let mut row = timer_row("tenant-a", 1, 2_000);
         row.attempts = 3;
         store.upsert(&row).expect("upsert");
@@ -1238,7 +1238,7 @@ mod tests {
     #[test]
     fn an_interaction_deadline_round_trips_without_gating_dueness() {
         let dir = tempfile::tempdir().expect("dir");
-        let store = SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
+        let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
 
         let mut row = timer_row("tenant-a", 7, 0);
         row.reason = WakeReason::Interaction;
@@ -1286,7 +1286,7 @@ mod tests {
             .expect("legacy schema");
         drop(legacy);
 
-        let Err(error) = SqliteWorkerStore::open(&path) else {
+        let Err(error) = SqliteWorkerStore::try_open(&path) else {
             panic!("legacy schema must fail closed");
         };
         assert_eq!(error.code(), "workflow_schema_reset_required");
@@ -1299,7 +1299,7 @@ mod tests {
     #[test]
     fn sqlite_dueness_matches_the_in_memory_predicate() {
         let dir = tempfile::tempdir().expect("dir");
-        let store = SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
+        let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
 
         let mut fresh = timer_row("tenant-a", 1, 0);
         fresh.reason = WakeReason::Deferred;
@@ -1337,7 +1337,7 @@ mod tests {
     #[test]
     fn expired_lease_is_reclaimed_and_renew_requires_holder() {
         let dir = tempfile::tempdir().expect("dir");
-        let store = SqliteWorkerStore::open(dir.path().join("w.sqlite")).expect("open");
+        let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
         store
             .upsert(&timer_row("tenant-a", 1, 1_000))
             .expect("upsert");

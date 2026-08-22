@@ -180,7 +180,7 @@ impl SqliteCronStore {
     ///
     /// Returns [`CronError::StoreUnavailable`] when the file cannot be opened
     /// or the table cannot be created.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, CronError> {
+    pub fn try_open(path: impl AsRef<Path>) -> Result<Self, CronError> {
         let path = path.as_ref().to_path_buf();
         let conn = Connection::open(&path).map_err(|_| CronError::StoreUnavailable {
             code: "sqlite_cron_open",
@@ -558,7 +558,7 @@ mod tests {
     fn sqlite_load_due_crosses_tenants_and_respects_now() {
         let dir = tempfile::tempdir().expect("dir");
         let path = dir.path().join("cron.sqlite");
-        let store = SqliteCronStore::open(&path).expect("store");
+        let store = SqliteCronStore::try_open(&path).expect("store");
         let origin = Timestamp::from_unix_ms(2_000).expect("origin");
         for (tenant, next) in [("tenant-a", 2_010), ("tenant-b", 2_020)] {
             store
@@ -601,7 +601,7 @@ mod tests {
             .expect("schema");
         drop(legacy);
 
-        let Err(error) = SqliteCronStore::open(&path) else {
+        let Err(error) = SqliteCronStore::try_open(&path) else {
             panic!("unversioned schema must fail closed");
         };
         assert_eq!(error.code(), "cron_schema_reset_required");
@@ -611,8 +611,8 @@ mod tests {
     fn two_sqlite_stores_claim_exactly_one_fire() {
         let dir = tempfile::tempdir().expect("dir");
         let path = dir.path().join("cron.sqlite");
-        let first = SqliteCronStore::open(&path).expect("first");
-        let second = SqliteCronStore::open(&path).expect("second");
+        let first = SqliteCronStore::try_open(&path).expect("first");
+        let second = SqliteCronStore::try_open(&path).expect("second");
         let origin = Timestamp::from_unix_ms(2_000).expect("origin");
         let due = Timestamp::from_unix_ms(2_010).expect("due");
         let schedule = CronSchedule {

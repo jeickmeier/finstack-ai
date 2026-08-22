@@ -28,7 +28,7 @@ use serde::Serialize;
 use crate::error::WorkerError;
 use crate::fires::{FireRow, FireStatus, FireStore, idempotency_key};
 use crate::inbox::{InboxInsertOutcome, InboxKind, InboxRow, InboxStore};
-use crate::park::park;
+use crate::park::park_for_wake;
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
 
 /// Binds host-owned ports onto a bare attached session.
@@ -798,7 +798,8 @@ impl WorkflowWorker {
             .accepted
             .as_ref()
             .map(|accepted| accepted.security().clone());
-        let checkpoint = park(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
+        let checkpoint =
+            park_for_wake(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
         if let (Some(lifecycle), Some(security), WorkflowWait::Interaction { request, .. }) =
             (&self.interaction_lifecycle, security, &wait)
         {

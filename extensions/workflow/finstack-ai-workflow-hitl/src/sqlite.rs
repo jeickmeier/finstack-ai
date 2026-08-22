@@ -75,7 +75,7 @@ impl SqliteHitlStore {
     /// Returns [`HitlError::StoreUnavailable`] when the file cannot be
     /// opened, `busy_timeout`/WAL cannot be configured, or the schema cannot
     /// be created.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, HitlError> {
+    pub fn try_open(path: impl AsRef<Path>) -> Result<Self, HitlError> {
         let path = path.as_ref().to_path_buf();
         let conn = Connection::open(&path).map_err(|_| HitlError::StoreUnavailable {
             code: "sqlite_hitl_open",

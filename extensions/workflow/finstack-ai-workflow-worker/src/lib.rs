@@ -21,7 +21,7 @@ pub use inbox::{
     DeadLetterRow, InboxInsertOutcome, InboxKind, InboxRow, InboxStore, MAX_INBOX_PAYLOAD_BYTES,
 };
 pub use memory::MemoryWorkerStore;
-pub use park::park;
+pub use park::park_for_wake;
 pub use sqlite::{SqliteWorkerStore, is_memory_sqlite_path};
 pub use wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline, lease_open, wake_due};
 pub use worker::{

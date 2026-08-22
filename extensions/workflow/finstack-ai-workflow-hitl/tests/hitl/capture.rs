@@ -21,7 +21,8 @@ use finstack_ai_runtime::workflow::{WorkflowCheckpoint, WorkflowSession, Workflo
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
 use finstack_ai_workflow_hitl::{
-    HitlInboxStore, InteractionStatus, InteractionTransition, MemoryHitlStore, capture, park,
+    HitlInboxStore, InteractionStatus, InteractionTransition, MemoryHitlStore, capture,
+    park_for_interaction,
 };
 use finstack_ai_workflow_worker::{MemoryWorkerStore, WakeIndexStore, WakeReason};
 
@@ -483,7 +484,8 @@ async fn park_indexes_the_wake_row_and_captures_the_inbox_row() {
     let wake = MemoryWorkerStore::new();
     let inbox = MemoryHitlStore::new();
     let checkpoint =
-        park(&mut session, &wake, &inbox, "hitl-demo", timestamp(2_500)).expect("park");
+        park_for_interaction(&mut session, &wake, &inbox, "hitl-demo", timestamp(2_500))
+            .expect("park");
 
     assert!(!session.owner_is_live());
     let wake_rows = wake.load_tenant("tenant-a").expect("wake rows");

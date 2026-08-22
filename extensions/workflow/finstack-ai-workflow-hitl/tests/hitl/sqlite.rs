@@ -48,7 +48,7 @@ fn row(tenant: &str, interaction: &str, session: u64, requested_ms: i64) -> Inte
 #[test]
 fn sqlite_store_round_trips_and_orders() {
     let dir = tempfile::tempdir().expect("dir");
-    let store = SqliteHitlStore::open(dir.path().join("hitl.sqlite")).expect("open");
+    let store = SqliteHitlStore::try_open(dir.path().join("hitl.sqlite")).expect("open");
     exercise_hitl_inbox(&store);
 }
 
@@ -58,7 +58,7 @@ fn rows_and_statuses_survive_reopen() {
     let path = dir.path().join("hitl.sqlite");
 
     {
-        let store = SqliteHitlStore::open(&path).expect("open first");
+        let store = SqliteHitlStore::try_open(&path).expect("open first");
         store
             .upsert(&row("tenant-a", "int-a1", 1, 1_000))
             .expect("upsert");
@@ -77,7 +77,7 @@ fn rows_and_statuses_survive_reopen() {
             .expect("set_status");
     }
 
-    let reopened = SqliteHitlStore::open(&path).expect("reopen");
+    let reopened = SqliteHitlStore::try_open(&path).expect("reopen");
     let loaded = reopened
         .load("tenant-a", "int-a1")
         .expect("load")
@@ -92,8 +92,8 @@ fn worker_and_hitl_stores_share_one_file() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("shared.sqlite");
 
-    let worker_store = SqliteWorkerStore::open(&path).expect("worker open");
-    let hitl_store = SqliteHitlStore::open(&path).expect("hitl open");
+    let worker_store = SqliteWorkerStore::try_open(&path).expect("worker open");
+    let hitl_store = SqliteHitlStore::try_open(&path).expect("hitl open");
 
     hitl_store
         .upsert(&row("tenant-a", "int-a1", 1, 1_000))
@@ -127,7 +127,7 @@ fn unversioned_hitl_table_requires_a_fresh_adapter_database() {
         .expect("schema");
     drop(legacy);
 
-    let Err(error) = SqliteHitlStore::open(&path) else {
+    let Err(error) = SqliteHitlStore::try_open(&path) else {
         panic!("unversioned schema must fail closed");
     };
     assert_eq!(error.code(), "hitl_schema_reset_required");

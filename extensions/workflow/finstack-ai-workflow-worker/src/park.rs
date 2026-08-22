@@ -26,7 +26,11 @@ use crate::wake::{WakeIndexStore, WakeReason, WakeRow};
 ///
 /// Returns [`WorkerError::NotParked`] when no wait is classified, and
 /// store or handoff failures otherwise.
-pub fn park(
+/// Park the session on a timer or external wake.
+///
+/// Distinct from `finstack_ai_workflow_hitl::park_for_interaction`, which
+/// parks on a pending human interaction and also records to an inbox.
+pub fn park_for_wake(
     session: &mut WorkflowSession,
     wake: &dyn WakeIndexStore,
     workflow_kind: &str,

@@ -23,7 +23,7 @@ use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
     FireStore, InboxKind, InboxRow, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore,
-    WakeReason, WakeRow, WorkerBuilder, WorkerError, park,
+    WakeReason, WakeRow, WorkerBuilder, WorkerError, park_for_wake,
 };
 
 use crate::helpers::{
@@ -64,7 +64,7 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
     let clock = ExternalClock::new(timestamp(2_000));
     let mut session = Box::pin(park_on_retry_timer(&journal, &model, &clock, 810)).await;
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     // Rewrite the healthy row's hint as already due before its committed
@@ -163,7 +163,7 @@ async fn a_stale_wake_row_is_corrected_by_the_journal() {
     let clock = ExternalClock::new(timestamp(2_000));
     let mut session = Box::pin(park_on_retry_timer(&journal, &model, &clock, 820)).await;
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     // Resolve out-of-band: jump the clock past the committed timer, attach a
@@ -294,7 +294,7 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
         "expected an interaction wait, got {wait:?}"
     );
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
     let row = store.load_tenant("tenant-a").expect("rows").remove(0);

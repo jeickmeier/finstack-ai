@@ -620,7 +620,7 @@ impl SqliteMemoryStore {
     ///
     /// Returns [`MemoryStoreError::Unavailable`] if the connection cannot be
     /// opened, pragmas cannot be applied, or the schema is missing/mismatched.
-    pub fn open(path: &Path) -> Result<Self, MemoryStoreError> {
+    pub fn try_open(path: &Path) -> Result<Self, MemoryStoreError> {
         let connection = Connection::open(path).map_err(|_| sqlite_unavailable())?;
         let canonical_path = std::fs::canonicalize(path).map_err(|_| sqlite_unavailable())?;
         let path_digest = Digest::domain_separated(
@@ -645,7 +645,7 @@ impl SqliteMemoryStore {
     ///
     /// Returns [`MemoryStoreError::Unavailable`] if the connection cannot be
     /// opened, pragmas cannot be applied, or the schema is missing/mismatched.
-    pub fn open_in_memory() -> Result<Self, MemoryStoreError> {
+    pub fn try_open_in_memory() -> Result<Self, MemoryStoreError> {
         let connection = Connection::open_in_memory().map_err(|_| sqlite_unavailable())?;
         Self::from_connection(
             connection,
@@ -664,7 +664,7 @@ impl SqliteMemoryStore {
     ///
     /// Returns [`MemoryStoreError::Unavailable`] if the connection cannot be
     /// opened, configured, or migrated.
-    pub fn open_in_memory_with(
+    pub fn try_open_in_memory_with(
         clock: MemoryClock,
         limits: MemoryStoreLimits,
     ) -> Result<Self, MemoryStoreError> {

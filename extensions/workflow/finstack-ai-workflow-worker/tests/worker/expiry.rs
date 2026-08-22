@@ -49,7 +49,7 @@ use finstack_ai_test::{
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
     FireStore, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WakeReason, WakeRow,
-    WorkerBuilder, WorkerError, WorkflowWorker, park,
+    WorkerBuilder, WorkerError, WorkflowWorker, park_for_wake,
 };
 
 use crate::helpers::{
@@ -354,7 +354,7 @@ async fn park_on_approval(seed: u64) -> Parked {
         "the run's effective deadline is the approval's deadline"
     );
     let store = Arc::new(MemoryWorkerStore::new());
-    park(&mut session, store.as_ref(), "research").expect("park");
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
     let parked = store.load_tenant("tenant-a").expect("rows");
     assert_eq!(parked.len(), 1);

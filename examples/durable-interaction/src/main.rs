@@ -68,7 +68,8 @@ use finstack_ai_test::{
     ScriptedToolset,
 };
 use finstack_ai_workflow_hitl::{
-    HitlInboxStore, HitlLifecycle, HitlRouter, ResolutionInput, SqliteHitlStore, park,
+    HitlInboxStore, HitlLifecycle, HitlRouter, ResolutionInput, SqliteHitlStore,
+    park_for_interaction,
 };
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
@@ -506,11 +507,11 @@ fn open_store(path: &std::path::Path) -> Result<Arc<SqliteJournalStore>, BoxErro
 /// One shared adapter file holding both the worker's tables (wake index,
 /// cron fires, response inbox) and the HITL inbox.
 fn open_worker_store(path: &std::path::Path) -> Result<Arc<SqliteWorkerStore>, BoxError> {
-    Ok(Arc::new(SqliteWorkerStore::open(path)?))
+    Ok(Arc::new(SqliteWorkerStore::try_open(path)?))
 }
 
 fn open_hitl_store(path: &std::path::Path) -> Result<Arc<SqliteHitlStore>, BoxError> {
-    Ok(Arc::new(SqliteHitlStore::open(path)?))
+    Ok(Arc::new(SqliteHitlStore::try_open(path)?))
 }
 
 /// Stands in for the missing application-level facade: settling an
@@ -704,7 +705,7 @@ async fn main() -> Result<(), BoxError> {
     };
     let wake = open_worker_store(&adapters_path)?;
     let inbox = open_hitl_store(&adapters_path)?;
-    park(
+    park_for_interaction(
         &mut session,
         wake.as_ref(),
         inbox.as_ref(),

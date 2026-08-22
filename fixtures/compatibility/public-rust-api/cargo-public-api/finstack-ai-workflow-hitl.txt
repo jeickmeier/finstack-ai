@@ -137,8 +137,8 @@ impl core::fmt::Debug for finstack_ai_workflow_hitl::ResolutionInput
 pub fn finstack_ai_workflow_hitl::ResolutionInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai_workflow_hitl::SqliteHitlStore
 impl finstack_ai_workflow_hitl::SqliteHitlStore
-pub fn finstack_ai_workflow_hitl::SqliteHitlStore::open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_workflow_hitl::HitlError>
 pub fn finstack_ai_workflow_hitl::SqliteHitlStore::path(&self) -> &std::path::Path
+pub fn finstack_ai_workflow_hitl::SqliteHitlStore::try_open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_workflow_hitl::HitlError>
 impl finstack_ai_workflow_hitl::HitlInboxStore for finstack_ai_workflow_hitl::SqliteHitlStore
 pub fn finstack_ai_workflow_hitl::SqliteHitlStore::load(&self, &str, &str) -> core::result::Result<core::option::Option<finstack_ai_workflow_hitl::InteractionRow>, finstack_ai_workflow_hitl::HitlError>
 pub fn finstack_ai_workflow_hitl::SqliteHitlStore::load_active(&self, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_hitl::InteractionRow>, finstack_ai_workflow_hitl::HitlError>
@@ -196,4 +196,4 @@ pub fn finstack_ai_workflow_hitl::ResolveAuthorizer::authorize(&self, &finstack_
 impl finstack_ai_workflow_hitl::ResolveAuthorizer for finstack_ai_workflow_hitl::TenantAuthorizer
 pub fn finstack_ai_workflow_hitl::TenantAuthorizer::authorize(&self, &finstack_ai_workflow_hitl::InteractionRow, &finstack_ai_kernel::effects::interaction::InteractionRequest, &finstack_ai_kernel::primitives::identity::PrincipalRef) -> core::result::Result<(), finstack_ai_workflow_hitl::HitlError>
 pub fn finstack_ai_workflow_hitl::capture(&dyn finstack_ai_workflow_hitl::HitlInboxStore, &finstack_ai_runtime::driver::workflow::WorkflowCheckpoint, &finstack_ai_runtime::driver::workflow::WorkflowWait, &finstack_ai_kernel::records::run::security::RunSecurityContext, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<bool, finstack_ai_workflow_hitl::HitlError>
-pub fn finstack_ai_workflow_hitl::park(&mut finstack_ai_runtime::driver::workflow::WorkflowSession, &dyn finstack_ai_workflow_worker::wake::WakeIndexStore, &dyn finstack_ai_workflow_hitl::HitlInboxStore, &str, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_runtime::driver::workflow::WorkflowCheckpoint, finstack_ai_workflow_hitl::HitlError>
+pub fn finstack_ai_workflow_hitl::park_for_interaction(&mut finstack_ai_runtime::driver::workflow::WorkflowSession, &dyn finstack_ai_workflow_worker::wake::WakeIndexStore, &dyn finstack_ai_workflow_hitl::HitlInboxStore, &str, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_runtime::driver::workflow::WorkflowCheckpoint, finstack_ai_workflow_hitl::HitlError>

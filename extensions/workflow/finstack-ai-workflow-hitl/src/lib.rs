@@ -22,7 +22,7 @@ mod sqlite;
 mod store;
 
 pub use authorize::{ResolveAuthorizer, TenantAuthorizer};
-pub use capture::{MAX_HITL_REQUEST_BYTES, capture, park};
+pub use capture::{MAX_HITL_REQUEST_BYTES, capture, park_for_interaction};
 pub use error::HitlError;
 pub use lifecycle::HitlLifecycle;
 pub use memory::MemoryHitlStore;

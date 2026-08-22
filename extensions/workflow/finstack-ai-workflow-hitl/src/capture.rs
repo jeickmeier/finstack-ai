@@ -10,7 +10,7 @@ use finstack_ai_kernel::{AuthorizationEvidence, InteractionKind, RunSecurityCont
 use finstack_ai_runtime::workflow::{
     WorkflowCheckpoint, WorkflowSession, WorkflowWait, classify_wait,
 };
-use finstack_ai_workflow_worker::{WakeIndexStore, park as worker_park};
+use finstack_ai_workflow_worker::{WakeIndexStore, park_for_wake as worker_park};
 
 use crate::error::HitlError;
 use crate::row::{InteractionRow, InteractionStatus};
@@ -118,7 +118,11 @@ pub fn capture(
 ///
 /// Returns [`HitlError::Worker`] when the session is not parked or the wake
 /// index rejects the row, and [`capture`]'s errors otherwise.
-pub fn park(
+/// Park the session on a pending human interaction.
+///
+/// Distinct from `finstack_ai_workflow_worker::park_for_wake`, which parks
+/// on a timer or external wake and takes no inbox.
+pub fn park_for_interaction(
     session: &mut WorkflowSession,
     wake: &dyn WakeIndexStore,
     inbox: &dyn HitlInboxStore,
