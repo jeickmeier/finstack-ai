@@ -348,10 +348,11 @@ impl Lane {
         };
         #[cfg(feature = "native-tokio")]
         if let Some(run) = crate::agent::live_run(self)? {
-            return run
-                .cancel_with_initiator(initiator)
-                .await
-                .map_err(|error| SessionError::Commit { code: error.code() });
+            return run.cancel_with_initiator(initiator).await.map_err(|error| {
+                SessionError::Commit {
+                    code: error.static_code(),
+                }
+            });
         }
         runtime
             .cancel_run(run_id, initiator, &mut generated_env)

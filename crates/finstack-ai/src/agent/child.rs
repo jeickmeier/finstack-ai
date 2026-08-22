@@ -594,7 +594,9 @@ impl AgentRun {
                 self.inner.cancellation_initiator.clone(),
                 &mut || {
                     NativeIds::cancellation_environment().map_err(|error| {
-                        finstack_ai_runtime::session::SessionError::Commit { code: error.code() }
+                        finstack_ai_runtime::session::SessionError::Commit {
+                            code: error.static_code(),
+                        }
                     })
                 },
             )

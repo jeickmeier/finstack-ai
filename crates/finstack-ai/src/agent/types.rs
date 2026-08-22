@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ActiveCapability, ArtifactRef, CapabilityId, ContentBlock, Message, OperationLocator, RawJson,
-    RunSecurityContext,
+    ActiveCapability, ArtifactRef, CapabilityId, ContentBlock, ErrorDescriptor, Message,
+    OperationLocator, RawJson, RunSecurityContext,
 };
 use finstack_ai_runtime::ids::IdGenerationError;
 use finstack_ai_runtime::ports::model::{ModelError, ModelName, ModelSettings};
@@ -244,13 +244,24 @@ pub enum AgentRunError {
     /// Explicit durable cancellation reached its terminal state.
     #[error("{}: run was cancelled", AGENT_RUN_CANCELLED)]
     Cancelled,
+    /// A port reported a structured failure.
+    ///
+    /// Carries the full [`ErrorDescriptor`] -- code, category, retryability,
+    /// identifiers and safe details -- instead of flattening it into a
+    /// message. Read it with [`AgentRunError::descriptor`].
+    #[error("{descriptor}")]
+    Failed {
+        /// Structured failure reported by the port that produced it.
+        descriptor: ErrorDescriptor,
+    },
 }
 
 impl AgentRunError {
     /// Stable machine-readable error code.
     #[must_use]
-    pub const fn code(&self) -> &'static str {
+    pub fn code(&self) -> &str {
         match self {
+            Self::Failed { descriptor } => descriptor.code.as_str(),
             Self::Configuration { code, .. } => code,
             Self::Runtime { .. } => AGENT_RUN_RUNTIME_FAILURE,
             Self::Timeout { .. } => AGENT_RUN_TIMEOUT,
@@ -287,7 +298,38 @@ impl AgentRunError {
         reason = "used directly as a Result::map_err adapter"
     )]
     pub(super) fn model(error: ModelError) -> Self {
-        Self::runtime_message(error.to_string())
+        error.to_descriptor().map_or_else(
+            |fallback| Self::runtime_message(fallback.to_string()),
+            |descriptor| Self::Failed { descriptor },
+        )
+    }
+
+    /// Structured failure descriptor, when a port reported one.
+    ///
+    /// Present for [`AgentRunError::Failed`]; `None` for configuration,
+    /// timeout and cancellation failures, which the SDK raises itself.
+    #[must_use]
+    pub const fn descriptor(&self) -> Option<&ErrorDescriptor> {
+        match self {
+            Self::Failed { descriptor } => Some(descriptor),
+            _ => None,
+        }
+    }
+
+    /// Static fault code for callers that structurally require `&'static str`.
+    ///
+    /// `Failed` carries a runtime-owned code, so it reports the generic
+    /// runtime-failure code here. Prefer [`AgentRunError::code`], which
+    /// returns the real one. This exists only for
+    /// `SessionError::{Commit, Recover}`, whose `code` field is still
+    /// `&'static str`; widening it to `ErrorCode` would let this go.
+    pub(crate) const fn static_code(&self) -> &'static str {
+        match self {
+            Self::Configuration { code, .. } => code,
+            Self::Timeout { .. } => AGENT_RUN_TIMEOUT,
+            Self::Cancelled => AGENT_RUN_CANCELLED,
+            Self::Runtime { .. } | Self::Failed { .. } => AGENT_RUN_RUNTIME_FAILURE,
+        }
     }
 
     pub(super) fn runtime_message(message: impl Into<String>) -> Self {
