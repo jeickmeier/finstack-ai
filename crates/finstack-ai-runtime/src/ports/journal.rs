@@ -14,6 +14,18 @@ use crate::ports::{PortFuture, PortObject};
 /// Maximum envelopes returned by one [`JournalStore::scan`] call.
 pub const SCAN_PAGE_MAX_RECORDS: u32 = 256;
 
+/// Immutable journal-store descriptor.
+///
+/// The identity and classification a host records for the store bound to the
+/// journal port, mirroring the descriptor every other primary port carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JournalStoreDescriptor {
+    /// Stable store identity used by configuration digests and diagnostics.
+    pub store_id: Arc<str>,
+    /// Bounded non-secret descriptor metadata.
+    pub metadata: Metadata,
+}
+
 /// Shared resource ceilings for in-process and sqlite journal stores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StoreLimits {
@@ -53,6 +65,19 @@ impl StoreLimits {
 /// replay cache, not a second semantic model. `health().durable` is `true`
 /// only when the leaf actually flushed under its documented pragmas.
 pub trait JournalStore: PortObject {
+    /// Immutable descriptor for this store.
+    ///
+    /// The default reports an unspecified identity and no metadata. Backends
+    /// should override it so a host can tell which store is bound to the
+    /// journal port. Operating state stays on
+    /// [`health`](Self::health); this is identity, not status.
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor {
+            store_id: Arc::from("journal-store.unspecified"),
+            metadata: Metadata::empty(),
+        }
+    }
+
     /// Atomically append one frozen request.
     ///
     /// # Arguments

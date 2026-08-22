@@ -34,9 +34,9 @@ use finstack_ai_kernel::{
 use finstack_ai_protocol::ChainAnchor;
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::journal::{
-    JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
-    OpaqueSnapshot, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
-    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
+    JournalStore, JournalStoreDescriptor, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession,
+    MetadataReceipt, OpaqueSnapshot, PruneReceipt, PruneRequest, ScanPage, ScanRequest,
+    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
     WriteMetadataRequest,
 };
 use finstack_ai_store_common::{
@@ -625,6 +625,13 @@ impl MemoryJournalStore {
 }
 
 impl JournalStore for MemoryJournalStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor {
+            store_id: Arc::from("finstack.store.memory"),
+            metadata: Metadata::empty(),
+        }
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         let result = self.append_sync(request);
         Box::pin(async move { result })

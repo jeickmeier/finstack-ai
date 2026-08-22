@@ -25,12 +25,12 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
+use finstack_ai_kernel::{AppendRequest, CommittedBatch, Metadata, SessionId};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::journal::{
-    JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
-    PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
-    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
+    JournalStore, JournalStoreDescriptor, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession,
+    MetadataReceipt, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
+    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 use finstack_ai_store_common::{VerifiedHead, VerifiedHeadCache};
@@ -47,6 +47,13 @@ use crate::store::{DURABLE_DETAIL, PostgresJournalStore, RELAXED_DETAIL};
     reason = "deadline settlement keeps success and connection-poison paths explicit"
 )]
 impl JournalStore for PostgresJournalStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor {
+            store_id: Arc::from("finstack.store.postgres"),
+            metadata: Metadata::empty(),
+        }
+    }
+
     /// Multi-writer append over one pooled connection (spec D4/D5).
     ///
     /// Never retries internally: a serialization failure or deadlock

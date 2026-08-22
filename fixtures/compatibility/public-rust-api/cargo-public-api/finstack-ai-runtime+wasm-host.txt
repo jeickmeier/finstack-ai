@@ -1282,6 +1282,17 @@ impl core::fmt::Debug for finstack_ai_runtime::ports::journal::IdempotencyHorizo
 pub fn finstack_ai_runtime::ports::journal::IdempotencyHorizon::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::ports::journal::IdempotencyHorizon
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::journal::IdempotencyHorizon
+pub struct finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+pub finstack_ai_runtime::ports::journal::JournalStoreDescriptor::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
+pub finstack_ai_runtime::ports::journal::JournalStoreDescriptor::store_id: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+pub fn finstack_ai_runtime::ports::journal::JournalStoreDescriptor::clone(&self) -> finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+impl core::cmp::Eq for finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+impl core::cmp::PartialEq for finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+pub fn finstack_ai_runtime::ports::journal::JournalStoreDescriptor::eq(&self, &finstack_ai_runtime::ports::journal::JournalStoreDescriptor) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ports::journal::JournalStoreDescriptor
+pub fn finstack_ai_runtime::ports::journal::JournalStoreDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 pub struct finstack_ai_runtime::ports::journal::LoadFromRequest
 pub finstack_ai_runtime::ports::journal::LoadFromRequest::session_id: finstack_ai_kernel::primitives::ids::SessionId
 pub finstack_ai_runtime::ports::journal::LoadFromRequest::window: finstack_ai_runtime::ports::journal::LoadWindow
@@ -1496,6 +1507,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::journal::
 pub const finstack_ai_runtime::ports::journal::SCAN_PAGE_MAX_RECORDS: u32
 pub trait finstack_ai_runtime::ports::journal::JournalStore: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai_runtime::ports::journal::JournalStore::append(&self, finstack_ai_kernel::records::append::AppendRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::reducer::decision::CommittedBatch, finstack_ai_runtime::ports::journal::StoreError>>
+pub fn finstack_ai_runtime::ports::journal::JournalStore::descriptor(&self) -> finstack_ai_runtime::ports::journal::JournalStoreDescriptor
 pub fn finstack_ai_runtime::ports::journal::JournalStore::health(&self) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::StoreHealth, finstack_ai_runtime::ports::journal::StoreError>>
 pub fn finstack_ai_runtime::ports::journal::JournalStore::load(&self, finstack_ai_runtime::ports::journal::LoadRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::LoadedSession, finstack_ai_runtime::ports::journal::StoreError>>
 pub fn finstack_ai_runtime::ports::journal::JournalStore::load_from(&self, finstack_ai_runtime::ports::journal::LoadFromRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::journal::LoadedSession, finstack_ai_runtime::ports::journal::StoreError>>

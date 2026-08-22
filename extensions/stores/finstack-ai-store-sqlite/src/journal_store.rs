@@ -1,16 +1,23 @@
 use std::sync::Arc;
 
-use finstack_ai_kernel::{AppendRequest, CommittedBatch};
+use finstack_ai_kernel::{AppendRequest, CommittedBatch, Metadata};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::journal::{
-    JournalStore, LoadFromRequest, LoadRequest, LoadedSession, MetadataReceipt, PruneReceipt,
-    PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
-    StoreError, StoreHealth, WriteMetadataRequest,
+    JournalStore, JournalStoreDescriptor, LoadFromRequest, LoadRequest, LoadedSession,
+    MetadataReceipt, PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt,
+    SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 use crate::store::SqliteJournalStore;
 
 impl JournalStore for SqliteJournalStore {
+    fn descriptor(&self) -> JournalStoreDescriptor {
+        JournalStoreDescriptor {
+            store_id: Arc::from("finstack.store.sqlite"),
+            metadata: Metadata::empty(),
+        }
+    }
+
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
         self.worker.submit(move |ctx| ctx.append(&request))
     }
