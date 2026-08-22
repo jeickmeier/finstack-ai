@@ -1683,15 +1683,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "finstack-ai-store-artifact-object"
+name = "finstack-ai-store-artifact"
 version = "2.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
+ "futures-util",
+ "hmac 0.12.1",
+ "quick-xml",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
  "tokio",
 ]
 
@@ -1715,37 +1722,6 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-store-common",
  "finstack-ai-test",
-]
-
-[[package]]
-name = "finstack-ai-store-object-local"
-version = "2.0.0"
-dependencies = [
- "finstack-ai-kernel",
- "finstack-ai-runtime",
- "finstack-ai-test",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "finstack-ai-store-object-s3"
-version = "2.0.0"
-dependencies = [
- "finstack-ai-kernel",
- "finstack-ai-runtime",
- "finstack-ai-test",
- "futures-util",
- "hmac 0.12.1",
- "quick-xml",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
 ]
 
 [[package]]
@@ -1794,7 +1770,7 @@ dependencies = [
  "finstack-ai-middleware-tool-policy",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
- "finstack-ai-store-artifact-object",
+ "finstack-ai-store-artifact",
  "finstack-ai-store-memory",
  "finstack-ai-store-postgres",
  "finstack-ai-store-sqlite",

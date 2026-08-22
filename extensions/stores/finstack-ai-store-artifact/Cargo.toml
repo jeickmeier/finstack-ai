@@ -1,5 +1,5 @@
 [package]
-name = "finstack-ai-store-object-local"
+name = "finstack-ai-store-artifact"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,20 +7,33 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Local-filesystem ObjectStore backend for finstack-ai"
+description = "ArtifactStore backed by S3-compatible or local blob storage"
 readme = "README.md"
+
+[features]
+default = []
+s3 = ["dep:futures-util", "dep:hmac", "dep:quick-xml", "dep:reqwest"]
+local = []
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+serde = { workspace = true }
+thiserror = { workspace = true }
 serde_json = { workspace = true }
+serde_json_canonicalizer = { workspace = true }
 sha2 = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util"] }
 
+futures-util = { workspace = true, optional = true }
+hmac = { workspace = true, optional = true }
+quick-xml = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+
 [dev-dependencies]
 finstack-ai-test = { workspace = true }
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 
 [lints]
 workspace = true

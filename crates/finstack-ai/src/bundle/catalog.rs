@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{BundleId, CapabilityId, ComponentId, RawJson};
-use finstack_ai_runtime::{AgentInvoker, ArtifactStore, BudgetLedger, ObjectStore};
+use finstack_ai_runtime::{AgentInvoker, ArtifactStore, BudgetLedger};
 
 use crate::{AgentSpec, CapabilitySpec};
 
@@ -19,8 +19,6 @@ pub struct RuntimeServices {
     pub budget_ledger: Option<Arc<dyn BudgetLedger>>,
     /// Scoped artifact service.
     pub artifact_store: Option<Arc<dyn ArtifactStore>>,
-    /// Scoped object storage service.
-    pub object_store: Option<Arc<dyn ObjectStore>>,
 }
 
 impl RuntimeServices {
@@ -40,11 +38,6 @@ impl RuntimeServices {
                 required.artifact_store,
                 self.artifact_store.is_some(),
                 "artifact_store",
-            ),
-            (
-                required.object_store,
-                self.object_store.is_some(),
-                "object_store",
             ),
         ] {
             if is_required && !is_present {

@@ -13,9 +13,7 @@ members = [
     "extensions/stores/finstack-ai-store-memory",
     "extensions/stores/finstack-ai-store-postgres",
     "extensions/stores/finstack-ai-store-sqlite",
-    "extensions/stores/finstack-ai-store-object-s3",
-    "extensions/stores/finstack-ai-store-object-local",
-    "extensions/stores/finstack-ai-store-artifact-object",
+    "extensions/stores/finstack-ai-store-artifact",
     "extensions/providers/finstack-ai-provider-wire",
     "extensions/providers/finstack-ai-provider-openai",
     "extensions/providers/finstack-ai-provider-ollama",
@@ -135,9 +133,7 @@ finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite"
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 tokio-postgres-rustls = "0.13"
 webpki-roots = "1"
-finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-object-s3", version = "2.0.0" }
-finstack-ai-store-object-local = { path = "extensions/stores/finstack-ai-store-object-local", version = "2.0.0" }
-finstack-ai-store-artifact-object = { path = "extensions/stores/finstack-ai-store-artifact-object", version = "2.0.0" }
+finstack-ai-store-artifact = { path = "extensions/stores/finstack-ai-store-artifact", version = "2.0.0" }
 rusqlite = { version = "0.37.0", default-features = false, features = ["backup", "bundled"] }
 finstack-ai-provider-wire = { path = "extensions/providers/finstack-ai-provider-wire", version = "2.0.0" }
 finstack-ai-provider-openai = { path = "extensions/providers/finstack-ai-provider-openai", version = "2.0.0" }

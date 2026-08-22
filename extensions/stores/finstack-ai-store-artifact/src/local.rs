@@ -1,4 +1,4 @@
-//! Local-filesystem [`ObjectStore`] backend for finstack-ai.
+//! Local-filesystem [`ObjectDriver`] backend for finstack-ai.
 //!
 //! Each object is one atomically published, self-describing envelope beneath
 //! its full scope digest. The logical key is hashed only for the physical
@@ -20,12 +20,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_kernel::Digest;
-use finstack_ai_runtime::{
-    Bytes, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef, ObjectScope,
-    ObjectStore, ObjectStoreLimits, PageToken, PortFuture, PresignedUrl, PutPayload,
-    validate_object_metadata,
+use crate::driver::{
+    ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
+    ObjectScope, ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, validate_object_metadata,
 };
+use finstack_ai_kernel::Digest;
+use finstack_ai_runtime::{Bytes, PortFuture};
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -40,10 +40,10 @@ const FIXED_HEADER_LEN: usize = 8 + 2 + 32 + 4 + 4 + 32 + 8;
 const MAX_STORED_KEY_BYTES: usize = 1024;
 const MAX_MEDIA_TYPE_BYTES: usize = 1024;
 
-/// Local-filesystem `ObjectStore` backend.
+/// Local-filesystem `ObjectDriver` backend.
 ///
 /// Intended for local development and tests. It does not support
-/// [`ObjectStore::presign_get`]. Existing roots written by the former
+/// [`ObjectDriver::presign_get`]. Existing roots written by the former
 /// multi-file layout must be discarded and rebuilt.
 pub struct LocalObjectStore {
     root: PathBuf,
@@ -165,7 +165,7 @@ impl Drop for CleanupGuard {
     }
 }
 
-impl ObjectStore for LocalObjectStore {
+impl ObjectDriver for LocalObjectStore {
     fn put(
         &self,
         scope: ObjectScope,
@@ -975,7 +975,7 @@ mod tests {
         std::fs::write(path, bytes).expect("tamper");
         assert_eq!(
             store.get(scope, key).await.expect_err("must fail").code(),
-            finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE
+            crate::driver::OBJECT_INTEGRITY_FAILURE
         );
     }
 
@@ -1011,7 +1011,7 @@ mod tests {
                 .await
                 .expect_err("must fail")
                 .code(),
-            finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE
+            crate::driver::OBJECT_INTEGRITY_FAILURE
         );
         assert_eq!(
             std::fs::read(destination).expect("read destination"),
@@ -1099,7 +1099,7 @@ mod tests {
             std::fs::write(path, bytes).expect("write");
             assert_eq!(
                 store.head(scope, key).await.expect_err("must fail").code(),
-                finstack_ai_runtime::OBJECT_INTEGRITY_FAILURE
+                crate::driver::OBJECT_INTEGRITY_FAILURE
             );
         }
     }

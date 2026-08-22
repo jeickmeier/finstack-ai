@@ -1,4 +1,9 @@
-//! Scoped unstructured object storage contract shared by store backends.
+//! Private blob-driver contract shared by this crate's storage drivers.
+//!
+//! This is deliberately not public API. Artifact storage is the one public
+//! storage concept (`ArtifactStore`); the driver exists only so the artifact
+//! algorithm in `artifact.rs` -- key scheme, envelope, pin and orphan GC --
+//! is written once over both the S3 and local drivers.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,31 +12,32 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Bytes, Digest, Metadata, PortFuture, PortObject, RunId, Sensitivity, SessionId};
+use finstack_ai_kernel::{Digest, Metadata, RunId, Sensitivity, SessionId};
+use finstack_ai_runtime::{Bytes, PortFuture, PortObject};
 
 /// Stable code for an unavailable object service.
-pub const OBJECT_UNAVAILABLE: &str = "object_unavailable";
+pub(crate) const OBJECT_UNAVAILABLE: &str = "object_unavailable";
 /// Stable code for a missing object.
-pub const OBJECT_NOT_FOUND: &str = "object_not_found";
+pub(crate) const OBJECT_NOT_FOUND: &str = "object_not_found";
 /// Stable code for a scope-binding failure.
-pub const OBJECT_SCOPE_MISMATCH: &str = "object_scope_mismatch";
+pub(crate) const OBJECT_SCOPE_MISMATCH: &str = "object_scope_mismatch";
 /// Stable code for a content integrity failure.
-pub const OBJECT_INTEGRITY_FAILURE: &str = "object_integrity_failure";
+pub(crate) const OBJECT_INTEGRITY_FAILURE: &str = "object_integrity_failure";
 /// Stable code for rejected rather than truncated oversized content.
-pub const OBJECT_TOO_LARGE: &str = "object_too_large";
+pub(crate) const OBJECT_TOO_LARGE: &str = "object_too_large";
 /// Stable code for a malformed logical key.
-pub const OBJECT_INVALID_KEY: &str = "object_invalid_key";
+pub(crate) const OBJECT_INVALID_KEY: &str = "object_invalid_key";
 /// Stable code for malformed object metadata.
-pub const OBJECT_INVALID_METADATA: &str = "object_invalid_metadata";
+pub(crate) const OBJECT_INVALID_METADATA: &str = "object_invalid_metadata";
 /// Stable code for an operation the backend does not support.
-pub const OBJECT_UNSUPPORTED: &str = "object_unsupported";
+pub(crate) const OBJECT_UNSUPPORTED: &str = "object_unsupported";
 /// Stable code for a local I/O failure.
-pub const OBJECT_IO_FAILURE: &str = "object_io_failure";
+pub(crate) const OBJECT_IO_FAILURE: &str = "object_io_failure";
 /// Stable code for a failed conditional object mutation.
-pub const OBJECT_CONFLICT: &str = "object_conflict";
+pub(crate) const OBJECT_CONFLICT: &str = "object_conflict";
 
 /// Maximum logical key length in bytes.
-pub const MAX_OBJECT_KEY_BYTES: usize = 512;
+pub(crate) const MAX_OBJECT_KEY_BYTES: usize = 512;
 
 /// Exact authorization and integrity scope for an object operation.
 ///
@@ -39,7 +45,7 @@ pub const MAX_OBJECT_KEY_BYTES: usize = 512;
 /// outlive a session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ObjectScope {
+pub(crate) struct ObjectScope {
     /// Authenticated tenant scope, never a bearer credential.
     pub tenant_scope: Arc<str>,
     /// Owning session when session-scoped.
@@ -81,7 +87,7 @@ impl ObjectScope {
 /// Validated logical object key: `/`-joined segments of `[A-Za-z0-9._-]`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "Arc<str>", into = "Arc<str>")]
-pub struct ObjectKey(Arc<str>);
+pub(crate) struct ObjectKey(Arc<str>);
 
 impl ObjectKey {
     /// Validate a logical key.
@@ -138,7 +144,7 @@ impl From<ObjectKey> for Arc<str> {
 
 /// Payload for a put: in-memory bytes or a streamed local file.
 #[derive(Debug, Clone)]
-pub enum PutPayload {
+pub(crate) enum PutPayload {
     /// Fully materialized content.
     Bytes(Bytes),
     /// Content streamed from a local file; never fully materialized.
@@ -148,7 +154,7 @@ pub enum PutPayload {
 /// Exact metadata mapped to the returned [`ObjectRef`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ObjectMetadata {
+pub(crate) struct ObjectMetadata {
     /// Object media type.
     pub media_type: Arc<str>,
     /// Optional display name.
@@ -161,7 +167,7 @@ pub struct ObjectMetadata {
 /// Reference to one stored object; carries scope binding and integrity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ObjectRef {
+pub(crate) struct ObjectRef {
     /// Logical key within the scope.
     pub key: ObjectKey,
     /// Frozen scope binding.
@@ -177,7 +183,7 @@ pub struct ObjectRef {
 /// One listing entry; S3 listings carry no user metadata, so neither does this.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ObjectEntry {
+pub(crate) struct ObjectEntry {
     /// Logical key within the scope.
     pub key: ObjectKey,
     /// Content length in bytes.
@@ -187,7 +193,9 @@ pub struct ObjectEntry {
 /// Backend-opaque pagination cursor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PageToken(#[serde(default, skip_serializing_if = "Option::is_none")] Option<Arc<str>>);
+pub(crate) struct PageToken(
+    #[serde(default, skip_serializing_if = "Option::is_none")] Option<Arc<str>>,
+);
 
 impl PageToken {
     /// First page.
@@ -209,7 +217,7 @@ impl PageToken {
 
 /// One page of listing results.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ObjectPage {
+pub(crate) struct ObjectPage {
     /// Entries in this page.
     pub entries: Vec<ObjectEntry>,
     /// Cursor for the next page, when more results exist.
@@ -218,7 +226,7 @@ pub struct ObjectPage {
 
 /// Time-limited download URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PresignedUrl {
+pub(crate) struct PresignedUrl {
     /// Complete presigned URL.
     pub url: Arc<str>,
     /// Requested validity window in seconds.
@@ -227,7 +235,7 @@ pub struct PresignedUrl {
 
 /// Per-store object size ceiling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ObjectStoreLimits {
+pub(crate) struct ObjectStoreLimits {
     /// Reject puts above this size; never truncate.
     pub max_object_bytes: u64,
 }
@@ -242,7 +250,7 @@ impl Default for ObjectStoreLimits {
 }
 
 /// Scoped host-supplied unstructured object service.
-pub trait ObjectStore: PortObject {
+pub(crate) trait ObjectDriver: PortObject {
     /// Durably store exact content under the caller's scope.
     fn put(
         &self,
@@ -342,7 +350,7 @@ pub trait ObjectStore: PortObject {
 
 /// Compose the physical backend key: `{prefix}/{scope-digest-hex}/{key}`.
 #[must_use]
-pub fn physical_object_key(
+pub(crate) fn physical_object_key(
     key_prefix: Option<&str>,
     scope_digest: &Digest,
     key: &ObjectKey,
@@ -359,7 +367,7 @@ pub fn physical_object_key(
 /// # Errors
 ///
 /// Rejects empty or NUL-bearing media type and name fields.
-pub fn validate_object_metadata(metadata: &ObjectMetadata) -> Result<(), ObjectError> {
+pub(crate) fn validate_object_metadata(metadata: &ObjectMetadata) -> Result<(), ObjectError> {
     if metadata.media_type.is_empty()
         || metadata.media_type.as_bytes().contains(&0)
         || metadata
@@ -376,7 +384,7 @@ pub fn validate_object_metadata(metadata: &ObjectMetadata) -> Result<(), ObjectE
 
 /// Object service, integrity, or local I/O failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum ObjectError {
+pub(crate) enum ObjectError {
     /// Service unavailable (transport, auth, or server failure).
     #[error("{}: {message}", OBJECT_UNAVAILABLE)]
     Unavailable {

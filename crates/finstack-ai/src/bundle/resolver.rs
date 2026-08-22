@@ -431,7 +431,6 @@ impl<'a> BundleResolver<'a> {
             required.agent_invoker |= source_required.agent_invoker;
             required.budget_ledger |= source_required.budget_ledger;
             required.artifact_store |= source_required.artifact_store;
-            required.object_store |= source_required.object_store;
             let capability = Arc::new(
                 source_bundle
                     .capabilities
@@ -521,7 +520,6 @@ fn host_feature_name(feature: &HostFeature) -> &str {
         HostFeature::AgentInvoker => "agent_invoker",
         HostFeature::BudgetLedger => "budget_ledger",
         HostFeature::ArtifactStore => "artifact_store",
-        HostFeature::ObjectStore => "object_store",
         HostFeature::Custom { id } => id.as_str(),
     }
 }

@@ -98,9 +98,6 @@ pub struct RequiredServices {
     /// Scoped artifact store required.
     #[serde(default)]
     pub artifact_store: bool,
-    /// Scoped object store required.
-    #[serde(default)]
-    pub object_store: bool,
 }
 
 /// Canonical credential-free reconstruction lock.

@@ -4,7 +4,11 @@ use core::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_runtime::{ObjectError, SecretString};
+use finstack_ai_runtime::ArtifactError;
+
+use crate::artifact::map_object_error;
+use crate::driver::ObjectError;
+use finstack_ai_runtime::SecretString;
 use reqwest::Url;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -69,13 +73,13 @@ impl S3ObjectStoreConfig {
         endpoint: impl AsRef<str>,
         bucket: impl AsRef<str>,
         region: impl AsRef<str>,
-    ) -> Result<Self, ObjectError> {
+    ) -> Result<Self, ArtifactError> {
         let endpoint = endpoint.as_ref();
         let bucket = bucket.as_ref();
         let region = region.as_ref();
-        validate_endpoint(endpoint)?;
-        validate_bucket(bucket)?;
-        validate_region(region)?;
+        validate_endpoint(endpoint).map_err(map_object_error)?;
+        validate_bucket(bucket).map_err(map_object_error)?;
+        validate_region(region).map_err(map_object_error)?;
         Ok(Self {
             endpoint: Arc::from(endpoint),
             bucket: Arc::from(bucket),
@@ -95,7 +99,10 @@ impl S3ObjectStoreConfig {
     /// # Errors
     ///
     /// Rejects empty, oversized, relative, or otherwise unsafe segments.
-    pub fn try_with_key_prefix(mut self, key_prefix: impl AsRef<str>) -> Result<Self, ObjectError> {
+    pub fn try_with_key_prefix(
+        mut self,
+        key_prefix: impl AsRef<str>,
+    ) -> Result<Self, ArtifactError> {
         let key_prefix = key_prefix.as_ref();
         if key_prefix.is_empty()
             || key_prefix.len() > 447
@@ -107,7 +114,7 @@ impl S3ObjectStoreConfig {
                     })
             })
         {
-            return Err(invalid("invalid_key_prefix"));
+            return Err(map_object_error(invalid("invalid_key_prefix")));
         }
         self.key_prefix = Some(Arc::from(key_prefix));
         Ok(self)
@@ -129,10 +136,10 @@ impl S3ObjectStoreConfig {
         mut self,
         access_key_id: impl AsRef<str>,
         secret_access_key: SecretString,
-    ) -> Result<Self, ObjectError> {
+    ) -> Result<Self, ArtifactError> {
         let access_key_id = access_key_id.as_ref();
         if access_key_id.is_empty() || access_key_id.as_bytes().contains(&0) {
-            return Err(invalid("invalid_access_key_id"));
+            return Err(map_object_error(invalid("invalid_access_key_id")));
         }
         self.access_key_id = Some(Arc::from(access_key_id));
         self.secret_access_key = Some(secret_access_key);
@@ -274,7 +281,10 @@ fn validate_region(value: &str) -> Result<(), ObjectError> {
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_runtime::OBJECT_INVALID_METADATA;
+    // `artifact_invalid_metadata` has no reachable constant: it is one of the
+    // runtime codes declared inside a private module. Use the literal until the
+    // codes are surfaced as values.
+    const ARTIFACT_INVALID_METADATA: &str = "artifact_invalid_metadata";
 
     use super::{S3ObjectStoreConfig, SecretString};
 
@@ -287,7 +297,7 @@ mod tests {
         ] {
             let error = S3ObjectStoreConfig::try_new(endpoint, "bucket", "garage")
                 .expect_err("must reject");
-            assert_eq!(error.code(), OBJECT_INVALID_METADATA);
+            assert_eq!(error.code(), ARTIFACT_INVALID_METADATA);
         }
     }
 
@@ -296,12 +306,12 @@ mod tests {
         for bucket in ["", "ab", &"x".repeat(64), "Bad_Bucket", "bad\0bucket"] {
             let error = S3ObjectStoreConfig::try_new("http://127.0.0.1:9000", bucket, "garage")
                 .expect_err("must reject");
-            assert_eq!(error.code(), OBJECT_INVALID_METADATA);
+            assert_eq!(error.code(), ARTIFACT_INVALID_METADATA);
         }
         for region in ["", "bad\0region"] {
             let error = S3ObjectStoreConfig::try_new("http://127.0.0.1:9000", "bucket", region)
                 .expect_err("must reject");
-            assert_eq!(error.code(), OBJECT_INVALID_METADATA);
+            assert_eq!(error.code(), ARTIFACT_INVALID_METADATA);
         }
     }
 

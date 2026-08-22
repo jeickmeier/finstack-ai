@@ -1,5 +1,5 @@
 //! URL construction, payload hashing, and response mapping for
-//! [`crate::store::S3ObjectStore`].
+//! [`crate::s3::store::S3ObjectStore`].
 //!
 //! Everything here is pure or local I/O only; the actual HTTP calls live in
 //! `store.rs`. Keeping URL building and XML parsing free of `reqwest`
@@ -7,12 +7,12 @@
 
 use std::sync::Arc;
 
+use crate::driver::ObjectError;
 use finstack_ai_kernel::Digest;
-use finstack_ai_runtime::ObjectError;
 use reqwest::{StatusCode, Url};
 use sha2::{Digest as Sha2Digest, Sha256};
 
-use crate::config::{Addressing, S3ObjectStoreConfig};
+use crate::s3::config::{Addressing, S3ObjectStoreConfig};
 
 /// Fixed domain name backing [`finstack_ai_kernel::Digest::blob_content`].
 ///
@@ -137,8 +137,8 @@ pub fn list_url(
         .map(|(name, value)| {
             format!(
                 "{}={}",
-                crate::sigv4::uri_encode(name, true),
-                crate::sigv4::uri_encode(value, true)
+                crate::s3::sigv4::uri_encode(name, true),
+                crate::s3::sigv4::uri_encode(value, true)
             )
         })
         .collect::<Vec<_>>()

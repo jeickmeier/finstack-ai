@@ -249,7 +249,6 @@ pub(super) fn required_services(bundle: &BundleSpec) -> RequiredServices {
             HostFeature::AgentInvoker => required.agent_invoker = true,
             HostFeature::BudgetLedger => required.budget_ledger = true,
             HostFeature::ArtifactStore => required.artifact_store = true,
-            HostFeature::ObjectStore => required.object_store = true,
             HostFeature::Custom { .. } => {}
         }
     }

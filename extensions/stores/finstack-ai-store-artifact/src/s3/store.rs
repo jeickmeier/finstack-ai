@@ -1,27 +1,28 @@
-//! [`S3ObjectStore`]: the `ObjectStore` implementation over `SigV4`-signed
+//! [`S3ObjectStore`]: the `ObjectDriver` implementation over `SigV4`-signed
 //! HTTP calls to an S3-compatible bucket.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_kernel::Digest;
-use finstack_ai_runtime::{
-    Bytes, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef, ObjectScope,
-    ObjectStore, ObjectStoreLimits, PageToken, PortFuture, PresignedUrl, PutPayload,
-    physical_object_key, validate_object_metadata,
+use crate::driver::{
+    ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
+    ObjectScope, ObjectStoreLimits, PageToken, PresignedUrl, PutPayload, physical_object_key,
+    validate_object_metadata,
 };
+use finstack_ai_kernel::Digest;
+use finstack_ai_runtime::{Bytes, PortFuture};
 use futures_util::StreamExt;
 use reqwest::{Method, Response, StatusCode, Url};
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-use crate::config::S3ObjectStoreConfig;
-use crate::request::{
+use crate::s3::config::S3ObjectStoreConfig;
+use crate::s3::request::{
     BlobDigestHasher, ListTarget, RequestTarget, StreamingSha256, list_url, map_status_error,
     map_transport_error, object_url, payload_sha256_hex,
 };
-use crate::sigv4::{SigningParams, UtcStamp, presign_url, sign_headers};
+use crate::s3::sigv4::{SigningParams, UtcStamp, presign_url, sign_headers};
 
 /// 64 KiB read chunk used for both hash-pass and streaming-send file reads.
 const FILE_CHUNK_BYTES: usize = 64 * 1024;
@@ -35,8 +36,8 @@ const HEADER_SCOPE: &str = "x-amz-meta-fsai-scope";
 /// Header carrying the optional display name, `SigV4`-URI-encoded.
 const HEADER_NAME: &str = "x-amz-meta-fsai-name";
 
-/// `ObjectStore` backend over an S3-compatible HTTP API, signed with a
-/// hand-rolled `SigV4` client (`crate::sigv4`) and no AWS SDK dependency.
+/// `ObjectDriver` backend over an S3-compatible HTTP API, signed with a
+/// hand-rolled `SigV4` client (`crate::s3::sigv4`) and no AWS SDK dependency.
 pub struct S3ObjectStore {
     client: reqwest::Client,
     config: S3ObjectStoreConfig,
@@ -68,7 +69,7 @@ impl S3ObjectStore {
     }
 }
 
-impl ObjectStore for S3ObjectStore {
+impl ObjectDriver for S3ObjectStore {
     fn put(
         &self,
         scope: ObjectScope,
@@ -434,7 +435,10 @@ async fn put_impl_condition(
         (HEADER_SCOPE.to_owned(), scope_digest.to_hex()),
     ];
     if let Some(name) = &metadata.name {
-        extra_headers.push((HEADER_NAME.to_owned(), crate::sigv4::uri_encode(name, true)));
+        extra_headers.push((
+            HEADER_NAME.to_owned(),
+            crate::s3::sigv4::uri_encode(name, true),
+        ));
     }
     if let Some((name, value)) = condition {
         extra_headers.push((name.to_owned(), value.to_owned()));

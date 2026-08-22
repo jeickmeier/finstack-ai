@@ -1,7 +1,7 @@
-//! `ArtifactStore` adapter over a host-supplied [`ObjectStore`].
+//! `ArtifactStore` adapter over a host-supplied [`ObjectDriver`].
 //!
 //! Bridges the application-level [`ArtifactStore`] contract onto the
-//! infrastructure-level [`ObjectStore`] port so hosts can back artifacts
+//! infrastructure-level [`ObjectDriver`] port so hosts can back artifacts
 //! with the same object storage backend (local filesystem, S3, ...) used
 //! for other unstructured content, instead of the small in-process default.
 //!
@@ -35,12 +35,14 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use crate::driver::{
+    ObjectDriver, ObjectError, ObjectKey, ObjectMetadata, ObjectScope, PageToken, PutPayload,
+};
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Digest, Metadata, Timestamp};
 use finstack_ai_runtime::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
     ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
-    Bytes, ObjectError, ObjectKey, ObjectMetadata, ObjectScope, ObjectStore, PageToken, PortFuture,
-    PutPayload, artifact_storage_key, build_artifact_ref, validate_artifact_scope,
+    Bytes, PortFuture, artifact_storage_key, build_artifact_ref, validate_artifact_scope,
     validate_retrieved_artifact,
 };
 use serde::{Deserialize, Serialize};
@@ -58,20 +60,20 @@ struct ArtifactEnvelopeHeader {
 }
 
 /// Default artifact byte ceiling: 64 MiB, clamped to the backing object
-/// store's [`finstack_ai_runtime::ObjectStoreLimits::max_object_bytes`].
+/// store's [`crate::driver::ObjectStoreLimits::max_object_bytes`].
 pub const DEFAULT_MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 
-/// `ArtifactStore` backed by a host-supplied [`ObjectStore`].
-pub struct ObjectArtifactStore {
-    store: Arc<dyn ObjectStore>,
+/// `ArtifactStore` backed by a host-supplied [`ObjectDriver`].
+pub(crate) struct ObjectArtifactStore {
+    store: Arc<dyn ObjectDriver>,
     max_artifact_bytes: usize,
 }
 
 impl ObjectArtifactStore {
     /// Construct an adapter over `store` with the default 64 MiB ceiling,
-    /// clamped to the store's own [`ObjectStore::limits`].
+    /// clamped to the store's own [`ObjectDriver::limits`].
     #[must_use]
-    pub fn new(store: Arc<dyn ObjectStore>) -> Self {
+    pub(crate) fn new(store: Arc<dyn ObjectDriver>) -> Self {
         let max_artifact_bytes =
             clamp_to_object_limit(DEFAULT_MAX_ARTIFACT_BYTES, store.limits().max_object_bytes);
         Self {
@@ -81,9 +83,9 @@ impl ObjectArtifactStore {
     }
 
     /// Override the artifact byte ceiling, still clamped to the backing
-    /// object store's [`ObjectStore::limits`].
+    /// object store's [`ObjectDriver::limits`].
     #[must_use]
-    pub fn with_max_artifact_bytes(mut self, max_artifact_bytes: usize) -> Self {
+    pub(crate) fn with_max_artifact_bytes(mut self, max_artifact_bytes: usize) -> Self {
         self.max_artifact_bytes =
             clamp_to_object_limit(max_artifact_bytes, self.store.limits().max_object_bytes);
         self
@@ -95,7 +97,7 @@ fn clamp_to_object_limit(requested: usize, object_max_bytes: u64) -> usize {
     requested.min(object_max)
 }
 
-fn to_object_scope(scope: &ArtifactScope) -> ObjectScope {
+pub(crate) fn to_object_scope(scope: &ArtifactScope) -> ObjectScope {
     ObjectScope {
         tenant_scope: Arc::clone(&scope.tenant_scope),
         session_id: Some(scope.session_id),
@@ -178,7 +180,7 @@ fn decode_envelope(envelope: &[u8]) -> Result<(ArtifactEnvelopeHeader, Bytes), A
 
 /// Map an [`ObjectError`] onto the matching [`ArtifactError`] per the
 /// adapter's fixed error table.
-fn map_object_error(error: ObjectError) -> ArtifactError {
+pub(crate) fn map_object_error(error: ObjectError) -> ArtifactError {
     match error {
         ObjectError::NotFound => ArtifactError::NotFound,
         ObjectError::Conflict => ArtifactError::Unavailable {
@@ -238,7 +240,7 @@ impl ArtifactStore for ObjectArtifactStore {
         ArtifactStoreLimits {
             max_artifact_bytes: self.max_artifact_bytes,
             // Aggregate capacity belongs to the external object service and
-            // is not knowable or atomically enforceable through ObjectStore.
+            // is not knowable or atomically enforceable through ObjectDriver.
             // Do not advertise the bounded in-process defaults as guarantees.
             max_artifacts: usize::MAX,
             max_total_bytes: u64::MAX,
@@ -306,7 +308,7 @@ fn object_metadata(name: Option<Arc<str>>) -> ObjectMetadata {
 }
 
 fn validate_object_ref(
-    object_ref: &finstack_ai_runtime::ObjectRef,
+    object_ref: &crate::driver::ObjectRef,
     object_scope: &ObjectScope,
     key: &ObjectKey,
     envelope: &[u8],
@@ -333,7 +335,7 @@ fn validate_object_ref(
 }
 
 async fn stage_put_impl(
-    store: &dyn ObjectStore,
+    store: &dyn ObjectDriver,
     scope: ArtifactScope,
     content: Bytes,
     metadata: ArtifactMetadata,
@@ -381,7 +383,7 @@ async fn stage_put_impl(
 }
 
 async fn load_envelope(
-    store: &dyn ObjectStore,
+    store: &dyn ObjectDriver,
     scope: &ArtifactScope,
     artifact: &ArtifactRef,
 ) -> Result<(Bytes, ArtifactEnvelopeHeader, Bytes), ArtifactError> {
@@ -402,7 +404,7 @@ async fn load_envelope(
 }
 
 async fn get_impl(
-    store: &dyn ObjectStore,
+    store: &dyn ObjectDriver,
     scope: ArtifactScope,
     artifact: ArtifactRef,
 ) -> Result<Bytes, ArtifactError> {
@@ -411,7 +413,7 @@ async fn get_impl(
 }
 
 async fn get_by_blob_impl(
-    store: &dyn ObjectStore,
+    store: &dyn ObjectDriver,
     scope: ArtifactScope,
     blob: BlobRef,
 ) -> Result<ArtifactRead, ArtifactError> {
@@ -459,7 +461,7 @@ async fn get_by_blob_impl(
 }
 
 async fn pin_impl(
-    store: &dyn ObjectStore,
+    store: &dyn ObjectDriver,
     scope: ArtifactScope,
     artifact: ArtifactRef,
     owner: ArtifactOwnerId,
@@ -505,7 +507,7 @@ async fn pin_impl(
 }
 
 async fn unpin_impl(
-    store: &dyn ObjectStore,
+    store: &dyn ObjectDriver,
     scope: ArtifactScope,
     artifact: ArtifactRef,
     owner: ArtifactOwnerId,
@@ -546,7 +548,7 @@ async fn unpin_impl(
 }
 
 async fn collect_orphans_impl(
-    store: &dyn ObjectStore,
+    store: &dyn ObjectDriver,
     scope: ArtifactScope,
     now: Timestamp,
     limit: usize,
@@ -631,6 +633,3 @@ async fn collect_orphans_impl(
     }
     Ok(report)
 }
-
-#[cfg(test)]
-mod tests;

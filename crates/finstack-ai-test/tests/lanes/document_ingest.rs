@@ -224,13 +224,14 @@ async fn document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_fil
 /// pinning the old 4 MiB assumption would reject this attachment outright.
 #[tokio::test]
 async fn large_attachment_stages_through_the_object_backed_artifact_store() {
-    use finstack_ai_store_artifact_object::ObjectArtifactStore;
-    use finstack_ai_test::object_store::FakeObjectStore;
 
     const SIX_MIB: usize = 6 * 1024 * 1024;
 
-    let object_store = Arc::new(FakeObjectStore::default());
-    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(ObjectArtifactStore::new(object_store));
+    let root = tempfile::tempdir().expect("artifact root");
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(
+        finstack_ai_store_artifact::LocalArtifactStore::try_new(root.path().to_path_buf())
+            .expect("local artifact store"),
+    );
 
     let (agent, _store, _model) =
         document_ingest_agent_with_store("large", Arc::clone(&artifact_store)).await;

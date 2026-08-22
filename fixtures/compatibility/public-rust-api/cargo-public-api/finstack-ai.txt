@@ -857,7 +857,6 @@ pub finstack_ai::HostFeature::ArtifactStore
 pub finstack_ai::HostFeature::BudgetLedger
 pub finstack_ai::HostFeature::Custom
 pub finstack_ai::HostFeature::Custom::id: finstack_ai_kernel::primitives::ids::ComponentId
-pub finstack_ai::HostFeature::ObjectStore
 impl core::clone::Clone for finstack_ai::HostFeature
 pub fn finstack_ai::HostFeature::clone(&self) -> finstack_ai::HostFeature
 impl core::cmp::Eq for finstack_ai::HostFeature
@@ -1643,7 +1642,6 @@ pub struct finstack_ai::RequiredServices
 pub finstack_ai::RequiredServices::agent_invoker: bool
 pub finstack_ai::RequiredServices::artifact_store: bool
 pub finstack_ai::RequiredServices::budget_ledger: bool
-pub finstack_ai::RequiredServices::object_store: bool
 impl core::clone::Clone for finstack_ai::RequiredServices
 pub fn finstack_ai::RequiredServices::clone(&self) -> finstack_ai::RequiredServices
 impl core::cmp::Eq for finstack_ai::RequiredServices
@@ -1786,7 +1784,6 @@ pub struct finstack_ai::RuntimeServices
 pub finstack_ai::RuntimeServices::agent_invoker: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>>
 pub finstack_ai::RuntimeServices::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
 pub finstack_ai::RuntimeServices::budget_ledger: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::budget::BudgetLedger>>
-pub finstack_ai::RuntimeServices::object_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::object::ObjectStore>>
 impl core::clone::Clone for finstack_ai::RuntimeServices
 pub fn finstack_ai::RuntimeServices::clone(&self) -> finstack_ai::RuntimeServices
 impl core::default::Default for finstack_ai::RuntimeServices

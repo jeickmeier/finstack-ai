@@ -1,0 +1,16 @@
+pub mod finstack_ai_store_artifact
+pub struct finstack_ai_store_artifact::LocalArtifactStore
+impl finstack_ai_store_artifact::LocalArtifactStore
+pub fn finstack_ai_store_artifact::LocalArtifactStore::try_new(std::path::PathBuf) -> core::result::Result<Self, finstack_ai_runtime::services::artifact::ArtifactError>
+impl finstack_ai_store_artifact::LocalArtifactStore
+pub fn finstack_ai_store_artifact::LocalArtifactStore::with_max_artifact_bytes(self, usize) -> Self
+impl finstack_ai_runtime::services::artifact::ArtifactStore for finstack_ai_store_artifact::LocalArtifactStore
+pub fn finstack_ai_store_artifact::LocalArtifactStore::collect_orphans(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::time::Timestamp, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::artifact::ArtifactGcReport, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_store_artifact::LocalArtifactStore::descriptor(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreDescriptor
+pub fn finstack_ai_store_artifact::LocalArtifactStore::get(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_store_artifact::LocalArtifactStore::get_by_blob(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::content::blob::BlobRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::artifact::ArtifactRead, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_store_artifact::LocalArtifactStore::limits(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreLimits
+pub fn finstack_ai_store_artifact::LocalArtifactStore::pin(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactOwnerId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_store_artifact::LocalArtifactStore::stage_put(&self, finstack_ai_runtime::services::artifact::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactError>>
+pub fn finstack_ai_store_artifact::LocalArtifactStore::unpin(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactOwnerId, finstack_ai_kernel::primitives::time::Timestamp) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::artifact::ArtifactError>>
+pub const finstack_ai_store_artifact::DEFAULT_MAX_ARTIFACT_BYTES: usize
