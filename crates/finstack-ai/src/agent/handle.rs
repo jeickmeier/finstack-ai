@@ -165,12 +165,29 @@ impl Agent {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use finstack_ai::runtime::ports::journal::JournalStore;
+    /// use finstack_ai::runtime::ports::model::Model;
+    /// use finstack_ai::{Agent, AgentId, BundleId, ComponentId, ComponentRef, Version};
+    ///
     /// # async fn compose(
-    /// #     builder: finstack_ai::NativeAgentBuilder,
-    /// # ) -> Result<(), finstack_ai::AgentRunError> {
-    /// let agent = builder.build().await?;
-    /// let _ = agent;
+    /// #     model: Arc<dyn Model>,
+    /// #     store: Arc<dyn JournalStore>,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// const VERSION: Version = Version { major: 0, minor: 1, patch: 0 };
+    ///
+    /// let agent = Agent::builder(
+    ///     AgentId::parse("demo.agent")?,
+    ///     BundleId::parse("demo.bundle")?,
+    ///     (ComponentRef::new(ComponentId::parse("demo.model")?, Some(VERSION)), model),
+    ///     (ComponentRef::new(ComponentId::parse("demo.store")?, Some(VERSION)), store),
+    /// )
+    /// .try_instruction("Answer directly.")?
+    /// .build()
+    /// .await?;
+    /// # let _ = agent;
     /// # Ok(())
     /// # }
     /// ```

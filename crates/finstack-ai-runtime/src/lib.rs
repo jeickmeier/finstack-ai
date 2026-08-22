@@ -8,14 +8,43 @@
 //!
 //! # Module map
 //!
-//! - `ports` — six primary ports (`model`, `tool`, `context`, `middleware`,
-//!   `journal`, `observer`) and shared `PortObject` bounds
-//! - `services` — host-owned session, id generation, interaction, agent
-//!   invoke, artifact, audit, budget, identity, and composition
-//! - `exec` — commit-before-effect, stage fold, run-task owners, and the
-//!   event hub
-//! - `driver` — target I/O: native-tokio drivers, wasm-host driver, ingress,
-//!   workflow, and the SDK native-driver facade
+//! Modules are grouped by who uses them.
+//!
+//! **Implementing a port.** [`ports`] holds one module per primary port, and
+//! that module is the whole contract for it: the trait, its descriptor, its
+//! error and its stream types.
+//!
+//! - [`ports::model`] — [`Model`](ports::model::Model),
+//!   [`ModelRequest`](ports::model::ModelRequest),
+//!   [`ModelError`](ports::model::ModelError)
+//! - [`ports::tool`] — [`Toolset`](ports::tool::Toolset),
+//!   [`ToolResult`](ports::tool::ToolResult),
+//!   [`ToolError`](ports::tool::ToolError)
+//! - [`ports::context`] — [`ContextProvider`](ports::context::ContextProvider),
+//!   [`ContextRequest`](ports::context::ContextRequest)
+//! - [`ports::middleware`] — [`Middleware`](ports::middleware::Middleware),
+//!   [`StageOutcome`](ports::middleware::StageOutcome)
+//! - [`ports::journal`] — [`JournalStore`](ports::journal::JournalStore),
+//!   [`StoreError`](ports::journal::StoreError)
+//! - [`ports::observer`] — [`Observer`](ports::observer::Observer)
+//!
+//! **Driving the engine.** The host modules, named for what they do:
+//!
+//! - [`run`] — run handles, task configuration, retry and shutdown
+//! - [`commit`] — [`CommitCoordinator`](commit::CommitCoordinator) and
+//!   commit-before-effect ordering
+//! - [`events`] — the run-event hub and its subscriptions
+//! - [`session`] — sessions, lanes and external-identity binding
+//! - [`child`] — invoking and coordinating child runs
+//! - [`artifact`] — scoped artifact storage
+//! - [`budget`], [`audit`], [`confinement`] — shared budget, security audit,
+//!   process confinement
+//! - [`ingress`] — external completion and interaction routing
+//! - [`workflow`] — workflow sessions and checkpoints
+//! - [`ids`] — clocks, random sources, UUIDv7
+//!
+//! Target drivers live behind the features: `native_driver` under
+//! `native-tokio`, `host_driver` under `wasm-host`.
 
 #![warn(missing_docs)]
 // Process confinement talks to Landlock, Seatbelt, and Windows job objects.

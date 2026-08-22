@@ -6,17 +6,25 @@
 //! must not perform network, filesystem, database, clock, environment, process,
 //! or host-language I/O.
 //!
-//! # Module map
+//! # What is here
 //!
-//! - `primitives` — IDs, time, JSON, digest, errors, bounds, and shared refs
-//! - `content` — content blocks and blob references
-//! - `conversation` — messages and conversation tree
-//! - `records` — journal envelopes and durable payloads (`run`, `lifecycle`,
-//!   `policy`, `tools`)
-//! - `effects` — effect and interaction envelopes
-//! - `events` — runtime events
-//! - `state` — kernel state and projections
-//! - `reducer` — decide and apply
+//! Every type sits at the crate root; the categories below are a reading
+//! order, not module paths.
+//!
+//! - **Identity and primitives** — [`RunId`], [`SessionId`], [`ComponentRef`],
+//!   [`Timestamp`], [`RawJson`], [`Digest`], [`Metadata`]
+//! - **Failure vocabulary** — [`ErrorCode`], [`ErrorCategory`],
+//!   [`ErrorDescriptor`]
+//! - **Content** — [`ContentBlock`], [`TextBlock`], [`BlobRef`],
+//!   [`ArtifactRef`]
+//! - **Conversation** — [`Message`], [`MessageRole`], [`ConversationEntry`]
+//! - **Durable records** — [`RecordEnvelope`], [`RecordDraft`],
+//!   [`CommittedBatch`]
+//! - **Effects and interactions** — [`EffectRequested`], [`EffectCompleted`],
+//!   [`InteractionRequest`]
+//! - **Events** — [`RunEvent`], [`RunEventKind`]
+//! - **State and reduction** — [`Kernel`], [`KernelState`], [`KernelInput`],
+//!   [`RunPhase`]
 //!
 //! # Examples
 //!

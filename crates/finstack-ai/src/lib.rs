@@ -5,18 +5,81 @@
 //! Tokio driver; browser WASM consumers disable defaults and enable
 //! `wasm-host`.
 //!
-//! Start at [`Agent::builder`]. Kernel, runtime, and protocol crates are not a
-//! second constructor path.
+//! Start at [`Agent::builder`]. Everything its signature needs is re-exported
+//! here, so a consumer needs no direct kernel or runtime dependency.
+//!
+//! # Examples
+//!
+//! One model, one journal store, one run.
+//!
+//! ```
+//! use std::sync::Arc;
+//!
+//! use finstack_ai::runtime::ports::journal::JournalStore;
+//! use finstack_ai::runtime::ports::model::{Model, ModelName};
+//! use finstack_ai::{
+//!     Agent, AgentId, AgentRunRequest, BundleId, ComponentId, ComponentRef, PrincipalRef,
+//!     RunLimits, RunSecurityContext, Version,
+//! };
+//! use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+//!
+//! # async fn compose(model: Arc<dyn Model>) -> Result<(), Box<dyn std::error::Error>> {
+//! const VERSION: Version = Version { major: 0, minor: 1, patch: 0 };
+//!
+//! let store: Arc<dyn JournalStore> = Arc::new(MemoryJournalStore::try_new(MemoryStoreLimits {
+//!     sessions: 4,
+//!     batches_per_session: 64,
+//!     records_per_session: 512,
+//!     snapshot_bytes: 4_096,
+//! })?);
+//!
+//! let agent = Agent::builder(
+//!     AgentId::parse("demo.agent")?,
+//!     BundleId::parse("demo.bundle")?,
+//!     (ComponentRef::new(ComponentId::parse("demo.model")?, Some(VERSION)), model),
+//!     (ComponentRef::new(ComponentId::parse("demo.store")?, Some(VERSION)), store),
+//! )
+//! .try_instruction("Answer directly.")?
+//! .limits(RunLimits::empty())
+//! .build()
+//! .await?;
+//!
+//! let security = RunSecurityContext::try_new(
+//!     "tenant-a",
+//!     PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))?,
+//!     "local",
+//!     "developer",
+//!     "policy-v1",
+//!     "decision-v1",
+//!     None,
+//! )?;
+//! let request = AgentRunRequest::try_new(ModelName::try_new("demo-1")?, "hello", security)?;
+//! let output = agent.run(request).await?;
+//! # let _ = output;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! When a run fails, [`AgentRunError::descriptor`] carries the port's full
+//! [`ErrorDescriptor`] rather than a flattened message.
 //!
 //! # Module map
 //!
-//! - `spec` — declarative `AgentSpec` / [`AgentBuilder`] (data only; start at [`AgentSpec::builder`])
-//! - `agent` — live `Agent` / [`NativeAgentBuilder`] / `AgentRun` (start at [`Agent::builder`])
-//! - `session` — journaled `Session` / `Lane` handles
-//! - `bundle` — catalog, exact lock, resolver
-//! - `registry` — registration, factories, and one-time resolution
-//! - `result` — typed decode of a committed structured result
-//! - `runtime` — alias for `finstack-ai-runtime` port and driver types
+//! Everything below is at the crate root except [`registry`] and the
+//! [`runtime`] alias.
+//!
+//! - **Build and run an agent** — [`Agent::builder`] then
+//!   [`Agent::run`]; [`AgentRunRequest`], [`AgentRunOutput`],
+//!   [`AgentRunError`]
+//! - **Provider shortcuts** — [`Agent::openai`], [`Agent::anthropic`],
+//!   [`Agent::gemini`], [`Agent::ollama`], [`Agent::openrouter`],
+//!   [`Agent::gateway`], each taking one `*AgentSpec` plus [`LinkedCommon`]
+//! - **Declarative form** — [`AgentSpec::builder`], [`AgentSpec`],
+//!   [`RunPolicy`], [`CapabilitySpec`]
+//! - **Journaled handles** — [`Session`], [`Lane`]
+//! - **Bundles** — [`BundleCatalog`], [`BundleResolver`], [`LockedBundle`]
+//! - [`registry`] — registration, factories and one-time resolution
+//! - [`runtime`] — the port and driver types from `finstack-ai-runtime`
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
