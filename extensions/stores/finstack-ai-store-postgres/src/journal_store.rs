@@ -101,7 +101,7 @@ impl JournalStore for PostgresJournalStore {
     }
 
     /// Replace the disposable replay snapshot for one session, per
-    /// [`crate::snapshot::write_snapshot`].
+    /// `crate::snapshot::write_snapshot`.
     fn write_snapshot(
         &self,
         request: SnapshotRequest,
@@ -128,7 +128,7 @@ impl JournalStore for PostgresJournalStore {
     }
 
     /// Encode and replace one session's disposable kernel-state snapshot,
-    /// per [`crate::snapshot::write_state_snapshot`].
+    /// per `crate::snapshot::write_state_snapshot`.
     fn write_state_snapshot(
         &self,
         request: StateSnapshotRequest,
@@ -154,7 +154,7 @@ impl JournalStore for PostgresJournalStore {
         })
     }
 
-    /// Scan committed envelopes of one session, per [`crate::snapshot::scan`].
+    /// Scan committed envelopes of one session, per `crate::snapshot::scan`.
     fn scan(&self, request: ScanRequest) -> PortFuture<Result<ScanPage, StoreError>> {
         let pool = self.pool.clone();
         let checkout_timeout = self.config.checkout_timeout;
@@ -176,7 +176,7 @@ impl JournalStore for PostgresJournalStore {
     }
 
     /// Compare-and-swap session metadata, per
-    /// [`crate::snapshot::write_metadata`].
+    /// `crate::snapshot::write_metadata`.
     fn write_metadata(
         &self,
         request: WriteMetadataRequest,
@@ -201,7 +201,7 @@ impl JournalStore for PostgresJournalStore {
         })
     }
 
-    /// Snapshot-aligned prefix prune, per [`crate::prune::prune`].
+    /// Snapshot-aligned prefix prune, per `crate::prune::prune`.
     ///
     /// Never touches the verified-head cache: prune only ever deletes an
     /// already-pruned prefix a cached suffix proof does not depend on, so

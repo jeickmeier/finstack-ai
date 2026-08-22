@@ -61,7 +61,7 @@ struct ArtifactEnvelopeHeader {
 }
 
 /// Default artifact byte ceiling: 64 MiB, clamped to the backing object
-/// store's [`crate::driver::ObjectStoreLimits::max_object_bytes`].
+/// store's `crate::driver::ObjectStoreLimits::max_object_bytes`.
 pub const DEFAULT_MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 
 /// `ArtifactStore` backed by a host-supplied [`ObjectDriver`].

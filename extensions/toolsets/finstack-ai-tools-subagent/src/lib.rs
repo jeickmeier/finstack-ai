@@ -1,4 +1,4 @@
-//! Subagent Toolset over the host [`AgentInvoker`].
+//! Subagent Toolset over the host [`AgentInvoker`](finstack_ai_runtime::child::AgentInvoker).
 //!
 //! The crate holds no invocation authority. Child-run policy stays a runtime
 //! concern; policy, depth, and budget failures surface as tool results.

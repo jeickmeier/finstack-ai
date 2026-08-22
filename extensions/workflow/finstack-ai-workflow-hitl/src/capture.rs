@@ -1,6 +1,6 @@
 //! Capture interaction parks into the HITL inbox.
 //!
-//! [`capture`] is the pure store write; [`park`] composes the worker's park
+//! [`capture`] is the pure store write; [`park_for_interaction`] composes the worker's park
 //! with it so a single call indexes the wake row and the inbox row from the
 //! same classified wait.
 
@@ -51,9 +51,9 @@ fn kind_token(kind: &InteractionKind) -> Arc<str> {
 /// journal still holds pending, so a `Closed` row here is stale by
 /// definition — the usual cause is a [`crate::HitlRouter::sweep`] that
 /// reconciled the row before its wake row was indexed — and it is reset to
-/// `Open` instead of being pinned closed forever. [`park`] remains the
+/// `Open` instead of being pinned closed forever. [`park_for_interaction`] remains the
 /// recommended entry point: it indexes the wake row (via
-/// [`finstack_ai_workflow_worker::park`]) before capturing, which keeps a
+/// [`finstack_ai_workflow_worker::park_for_wake`]) before capturing, which keeps a
 /// racing sweep from closing the row in the first place.
 ///
 /// # Errors
@@ -110,7 +110,7 @@ pub fn capture(
 /// Park a session for the worker and capture any interaction it parked on.
 ///
 /// Classifies the wait before delegating, because
-/// [`finstack_ai_workflow_worker::park`] consumes the session's state and
+/// [`finstack_ai_workflow_worker::park_for_wake`] consumes the session's state and
 /// aborts its owner. Non-interaction waits are indexed by the worker and
 /// left out of the inbox.
 ///

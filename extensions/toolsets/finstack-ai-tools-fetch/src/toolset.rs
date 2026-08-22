@@ -116,7 +116,7 @@ impl HttpFetchToolset {
     ///
     /// Returns [`HttpFetchError::Configuration`] when the allowlist is
     /// empty, any allowlist or per-host-header-key entry fails
-    /// [`HostPattern::parse`], a per-host-header key is a wildcard pattern
+    /// `HostPattern::parse`, a per-host-header key is a wildcard pattern
     /// rather than an exact host, any numeric limit is zero or exceeds its
     /// hard ceiling, any per-host header name/value is not a valid HTTP
     /// header, or a checked-in identity/schema constant is invalid.

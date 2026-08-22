@@ -341,7 +341,7 @@ impl HttpFetchConfigSnapshot {
     ///
     /// This only parses and shape-checks the document (numeric fields fit
     /// in their target width); the returned config still needs
-    /// [`crate::HttpFetchToolset::try_new`] (which calls [`validate`]) to
+    /// [`crate::HttpFetchToolset::try_new`] (which calls `validate`) to
     /// enforce ceilings and cross-field rules such as the non-empty
     /// allowlist.
     ///

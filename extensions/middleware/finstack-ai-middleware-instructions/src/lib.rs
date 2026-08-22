@@ -43,7 +43,7 @@ pub const MAX_POLICY_ENTRIES: usize = 16;
 /// Longest permitted `PolicyEntry::label`, in bytes.
 ///
 /// The label becomes the item's provenance source id as `policy:{label}`, and
-/// the runtime caps source ids at 256 bytes; [`POLICY_SOURCE_ID_PREFIX`]
+/// the runtime caps source ids at 256 bytes; `POLICY_SOURCE_ID_PREFIX`
 /// occupies 7 of them. A test pins the `prefix + label == 256` relationship.
 pub const MAX_POLICY_LABEL_BYTES: usize = 249;
 

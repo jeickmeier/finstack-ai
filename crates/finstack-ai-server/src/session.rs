@@ -24,7 +24,7 @@ enum ReplicaPhase {
 
 /// Authoritative reconnect plan. Live events are not included.
 ///
-/// Produced by [`SessionReplica::plan_reconnect`] and returned by
+/// Produced by `SessionReplica::plan_reconnect` and returned by
 /// [`crate::RemoteClient::reconnect`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReconnectView {

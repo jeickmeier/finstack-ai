@@ -1,5 +1,5 @@
 //! [`MemoryContextProvider`]: a store-backed `ContextProvider` that recalls
-//! matching [`MemoryRecord`]s into bounded, cache-stable context items.
+//! matching [`MemoryRecord`](crate::record::MemoryRecord)s into bounded, cache-stable context items.
 //!
 //! This provider never mutates conversation history and never writes to the
 //! [`MemoryStore`] — writes belong to the toolset (a later task). It only

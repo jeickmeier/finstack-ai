@@ -100,7 +100,7 @@ impl CodexChildInvoker {
     ///
     /// Returns `None` for runs this process never accepted — all runs from
     /// before a host restart, and settled runs evicted from a full table by
-    /// [`make_room`] — the toolset reports those as `unknown`.
+    /// `make_room` — the toolset reports those as `unknown`.
     #[must_use]
     pub fn run_status(&self, locator: &ChildRunLocator) -> Option<CodexRunReport> {
         let runs = self.runs.lock().ok()?;

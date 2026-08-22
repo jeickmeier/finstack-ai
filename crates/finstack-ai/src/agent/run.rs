@@ -238,12 +238,12 @@ impl AgentRun {
     /// Native-only. Browser WASM list/resolve stays on the worker client.
     ///
     /// The owned handle treats an unpublished or not-yet-accepted journal as
-    /// empty. After accept, listing goes through [`InteractionRouter`].
+    /// empty. After accept, listing goes through [`InteractionRouter`](finstack_ai_runtime::ingress::InteractionRouter).
     ///
     /// # Errors
     ///
     /// Returns a stable runtime failure when the authenticated locator cannot
-    /// be listed through [`InteractionRouter`].
+    /// be listed through [`InteractionRouter`](finstack_ai_runtime::ingress::InteractionRouter).
     #[cfg(feature = "native-tokio")]
     pub async fn list_interactions(&self) -> Result<Vec<InteractionRequest>, AgentRunError> {
         Ok(self
@@ -257,7 +257,7 @@ impl AgentRun {
     /// Resolve the outstanding interaction through the live run handle.
     ///
     /// Native-only. Browser WASM list/resolve stays on the worker client and
-    /// durable inbox path, which enter through [`InteractionRouter`].
+    /// durable inbox path, which enter through [`InteractionRouter`](finstack_ai_runtime::ingress::InteractionRouter).
     ///
     /// The live handle submits through the in-process coordinator rather than
     /// the router, so the parked `response_schema` is compiled and checked

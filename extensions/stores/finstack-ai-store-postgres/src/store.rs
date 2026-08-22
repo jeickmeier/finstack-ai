@@ -51,7 +51,7 @@ impl PostgresJournalStore {
     /// `PostgreSQL` journal store.
     ///
     /// Validates `config`, opens one connection (bounded by
-    /// `config.connect_timeout`), runs [`ensure_schema`] over it, then seeds
+    /// `config.connect_timeout`), runs `ensure_schema` over it, then seeds
     /// the connection pool with that same connection so no extra round trip
     /// is spent opening and discarding a throwaway one.
     ///
@@ -61,7 +61,7 @@ impl PostgresJournalStore {
     /// connection URL that demands TLS (see the module doc comment).
     /// Returns [`StoreError::Unavailable`] if the initial connection cannot
     /// be established within `config.connect_timeout`, or the mapped error
-    /// from [`ensure_schema`] otherwise.
+    /// from `ensure_schema` otherwise.
     pub async fn try_open(config: PostgresStoreConfig) -> Result<Self, StoreError> {
         config.validate()?;
         let client = connect_and_prepare(&config).await?;

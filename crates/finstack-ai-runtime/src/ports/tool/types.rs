@@ -25,7 +25,7 @@ pub struct ToolsetDescriptor {
 /// Committed context for one direct tool call.
 ///
 /// `run.effect_id` is the application-level idempotency key (FR-TLS-004).
-/// [`Toolset::call`], [`Toolset::reconcile`], and same-identity retry all
+/// [`Toolset::call`](crate::ports::tool::Toolset::call), [`Toolset::reconcile`](crate::ports::tool::Toolset::reconcile), and same-identity retry all
 /// receive this frozen identity.
 #[derive(Debug, Clone)]
 pub struct ToolCallContext {

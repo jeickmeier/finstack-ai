@@ -2,7 +2,7 @@
 //!
 //! Extraction is pure and synchronous: it only reads event bodies and never
 //! touches the store. The [`MemoryObserver`](crate::observer::MemoryObserver)
-//! is what turns an extractor's output into persisted [`MemoryRecord`]s.
+//! is what turns an extractor's output into persisted [`MemoryRecord`](crate::record::MemoryRecord)s.
 //!
 //! Runtime `RunEvent` bodies do not carry arbitrary free text on
 //! durable/terminal kinds (`RunCompleted`, `MessageFinalized`, ...) — those
@@ -84,8 +84,8 @@ pub trait MemoryExtractor: Send + Sync {
 /// complete lines and carrying the trailing partial line forward keeps that
 /// case whole. Residual text is therefore retained between `extract` calls,
 /// per `(run_id, model_request_id)`, and is released when the run ends, when
-/// it exceeds [`MAX_RESIDUAL_BYTES`], or when more than
-/// [`MAX_TRACKED_GROUPS`] groups are live. Re-delivery of a batch already
+/// it exceeds `MAX_RESIDUAL_BYTES`, or when more than
+/// `MAX_TRACKED_GROUPS` groups are live. Re-delivery of a batch already
 /// seen resets that group's residual first, so a literal replay extracts
 /// exactly what the original delivery did.
 ///

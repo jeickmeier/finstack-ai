@@ -48,6 +48,7 @@ set -euo pipefail
 mise run check-repository-references
 mise run runtime
 mise run check-rust
+mise run check-docs
 mise run check-public-api
 mise run test-rust
 "$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" check
@@ -425,6 +426,15 @@ mise run build-wasm -- release
 cd bindings/finstack-ai-wasm/js
 npx playwright install --with-deps chromium
 npx playwright test src/benchmark.test.ts --project=chromium
+"""
+
+[tasks.check-docs]
+description = "Build rustdoc with every rustdoc lint denied"
+run = """
+set -euo pipefail
+# finstack-ai-wasm is excluded: it documents only under wasm32.
+RUSTDOCFLAGS="-D warnings -D rustdoc::all" \
+  cargo doc --no-deps --workspace --exclude finstack-ai-wasm --all-features --locked
 """
 
 [tasks.check-public-api]

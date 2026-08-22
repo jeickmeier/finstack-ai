@@ -321,7 +321,7 @@ pub(crate) fn live_run(
 impl crate::Lane {
     /// Start a new root run on this idle lane.
     ///
-    /// `request.input` is the user text. The call uses [`Agent::start_on_lane`]
+    /// `request.input` is the user text. The call uses `Agent::start_on_lane`
     /// so `AcceptRun` lands on this lane rather than bootstrapping a session.
     ///
     /// # Errors

@@ -594,7 +594,7 @@ pub struct HttpConfig {
 impl HttpConfig {
     /// Construct a streamable-HTTP target.
     ///
-    /// The response-body cap defaults to [`DEFAULT_MAX_RESPONSE_BYTES`]
+    /// The response-body cap defaults to `DEFAULT_MAX_RESPONSE_BYTES`
     /// (8 MiB); call [`Self::with_max_response_bytes`] to raise or lower it.
     ///
     /// # Errors
@@ -619,7 +619,7 @@ impl HttpConfig {
     /// # Errors
     ///
     /// Rejects zero (fail closed, never an unbounded read) and anything
-    /// above [`MAX_RESPONSE_BYTES_CEILING`] (64 MiB).
+    /// above `MAX_RESPONSE_BYTES_CEILING` (64 MiB).
     pub fn with_max_response_bytes(mut self, max_response_bytes: usize) -> Result<Self, McpError> {
         if max_response_bytes == 0 {
             return Err(McpError::stable(
