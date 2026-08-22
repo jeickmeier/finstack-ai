@@ -10,6 +10,7 @@ public_items.py.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,8 +19,27 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_DIR = (
     REPO_ROOT / "fixtures" / "compatibility" / "public-rust-api" / "cargo-public-api"
 )
-# cargo-public-api 0.52 rustdoc JSON minimum. Check-only; never crate builds.
-NIGHTLY = "nightly-2025-08-02"
+# Rustdoc JSON builds into its own target directory so the pinned nightly never
+# invalidates the stable `target/debug` artifacts the rest of `ci-rust` builds,
+# and so an interleaved plain `cargo doc` cannot poison the JSON this reads.
+# Covered by the existing `/target/` .gitignore entry.
+DOC_TARGET_DIR = REPO_ROOT / "target" / "public-api"
+# Check-only rustdoc JSON toolchain; never used for crate builds.
+#
+# This pin is load-bearing: the baselines record rendered signatures, and
+# rustdoc rendering moves between toolchains. `ensure_nightly` installs it and
+# `dump_crate` runs under it via RUSTUP_TOOLCHAIN.
+#
+# It must stay at or above the workspace `rust-version` (Cargo.toml). The
+# previous pin, `nightly-2025-08-02`, was rustc 1.90.0-nightly -- below that
+# floor, so it could not document this workspace at all. Because it was only
+# ever installed and never exported, dumps silently came from rustup's floating
+# `nightly` instead, freezing the baselines against a moving producer.
+#
+# Bumping this can shift rendering: rerun `mise run write-public-api` and commit
+# the regenerated baselines in the same change. Keep it in step with the comment
+# beside `cargo:cargo-public-api` in root mise.toml.
+NIGHTLY = "nightly-2026-08-14"
 CORE_CRATES = (
     REPO_ROOT / "crates" / "finstack-ai-kernel",
     REPO_ROOT / "crates" / "finstack-ai-protocol",
@@ -108,6 +128,11 @@ def dump_crate(crate_dir: Path, features: str | None = None) -> str:
         capture_output=True,
         text=True,
         check=False,
+        env={
+            **os.environ,
+            "RUSTUP_TOOLCHAIN": NIGHTLY,
+            "CARGO_TARGET_DIR": str(DOC_TARGET_DIR),
+        },
     )
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr)
@@ -167,6 +192,15 @@ def main() -> int:
                 for line in added:
                     print(f"  + {line}", file=sys.stderr)
                 failed = True
+    if failed:
+        print(
+            "\nPublic Rust API differs from the frozen baselines in"
+            " fixtures/compatibility/public-rust-api/cargo-public-api/."
+            "\nIf the change is intended, regenerate and commit them:"
+            "\n    mise run write-public-api"
+            "\nThese baselines are generated; do not hand-edit them.",
+            file=sys.stderr,
+        )
     return 1 if failed else 0
 
 

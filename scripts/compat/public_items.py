@@ -125,6 +125,10 @@ def main() -> int:
         check=False,
     )
     failed = rust.returncode != 0
+    # Tracked apart from `failed` so the remediation note below describes the
+    # Python/JS name lists only when one of them actually drifted. public_api.py
+    # prints its own note for the Rust baselines.
+    names_failed = False
     for family, extract in EXTRACTORS.items():
         current = extract()
         baseline_path = BASELINES[family]
@@ -140,6 +144,7 @@ def main() -> int:
         if not baseline_path.is_file() or not mutation_path.is_file():
             print(f"{family}: missing baseline or mutation fixture", file=sys.stderr)
             failed = True
+            names_failed = True
             continue
         baseline = read_list(baseline_path)
         missing = compare(current, baseline)
@@ -148,10 +153,12 @@ def main() -> int:
                 f"{family}: removed public items: {', '.join(missing)}", file=sys.stderr
             )
             failed = True
+            names_failed = True
         extra = added(current, baseline)
         if extra:
             print(f"{family}: added public items: {', '.join(extra)}", file=sys.stderr)
             failed = True
+            names_failed = True
         mutation = read_list(mutation_path)
         if not compare(current, mutation):
             print(
@@ -159,6 +166,17 @@ def main() -> int:
                 file=sys.stderr,
             )
             failed = True
+            names_failed = True
+    if names_failed:
+        print(
+            "\nFrozen public-item lists differ. If the change is intended,"
+            " regenerate and commit them:"
+            "\n    mise run write-public-api"
+            "\nThat rewrites the Python and JavaScript export lists under"
+            " fixtures/compatibility/breaking/, and the cargo-public-api"
+            " baselines.",
+            file=sys.stderr,
+        )
     return 1 if failed else 0
 
 

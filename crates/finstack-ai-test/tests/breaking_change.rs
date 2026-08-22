@@ -110,24 +110,10 @@ fn wit_v1_world_rename_is_documented_and_blocked() {
     assert!(unknown_field.contains("ambient_authority"));
 }
 
-#[test]
-fn public_item_lists_reject_renames() {
-    let status = Command::new("uv")
-        .args([
-            "run",
-            "--no-project",
-            "python",
-            "scripts/compat/public_items.py",
-            "--check",
-        ])
-        .current_dir(repo_root())
-        .status()
-        .expect("public items");
-    assert!(
-        status.success(),
-        "public-item baselines must match (Python/JS names + cargo-public-api)"
-    );
-}
+// The frozen public-item baselines are gated by `mise run check-public-api`,
+// which `ci-rust` runs before `test-rust`. It is deliberately not duplicated as
+// a test here: the task fails fast, names the regeneration command, and pins the
+// rustdoc toolchain, none of which a `uv` shell-out from nextest can do.
 
 #[test]
 fn migration_converters_fail_closed_on_unknown_fields() {
