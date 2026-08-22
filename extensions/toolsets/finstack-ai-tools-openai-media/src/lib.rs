@@ -736,8 +736,8 @@ mod tests {
         OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
         ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
-    use finstack_ai_memory::store::InProcessArtifactStore;
     use finstack_ai_runtime::artifact::ArtifactStore;
+    use finstack_ai_runtime::artifact::InProcessArtifactStore;
     use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, RunCallContext,
     };

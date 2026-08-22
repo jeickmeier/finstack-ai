@@ -19,7 +19,8 @@ mod in_process;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 mod sqlite;
 
-pub use in_process::{InProcessArtifactStore, InProcessMemoryStore};
+pub use finstack_ai_runtime::artifact::InProcessArtifactStore;
+pub use in_process::InProcessMemoryStore;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 pub use sqlite::SqliteMemoryStore;
 
@@ -37,6 +38,8 @@ pub const MAX_MEMORY_PAGE_SIZE: usize = 256;
 pub const MAX_MEMORY_ARTIFACT_ACTIONS: usize = 16_384;
 /// Maximum byte length of an idempotency key.
 pub const MEMORY_IDEMPOTENCY_KEY_MAX_BYTES: usize = 256;
+/// Default maximum retained age of an idempotency receipt (30 days).
+pub const MAX_MEMORY_RECEIPT_AGE_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
 /// Effective finite limits for a memory store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +56,11 @@ pub struct MemoryStoreLimits {
     pub max_page_size: usize,
     /// Maximum unacknowledged artifact ownership actions.
     pub max_artifact_actions: usize,
+    /// Maximum retained age of an idempotency receipt, in milliseconds.
+    ///
+    /// Older receipts are pruned on write-path sweeps. Re-sending a pruned
+    /// key is a new operation, not a replay.
+    pub max_receipt_age_ms: u64,
 }
 
 impl Default for MemoryStoreLimits {
@@ -64,6 +72,7 @@ impl Default for MemoryStoreLimits {
             max_search_results: MAX_MEMORY_SEARCH_RESULTS,
             max_page_size: MAX_MEMORY_PAGE_SIZE,
             max_artifact_actions: MAX_MEMORY_ARTIFACT_ACTIONS,
+            max_receipt_age_ms: MAX_MEMORY_RECEIPT_AGE_MS,
         }
     }
 }

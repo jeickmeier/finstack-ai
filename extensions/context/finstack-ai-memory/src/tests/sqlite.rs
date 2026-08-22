@@ -602,6 +602,7 @@ async fn sqlite_enforces_finite_capacity_and_request_limits() {
         max_search_results: 1,
         max_page_size: 1,
         max_artifact_actions: 1,
+        ..MemoryStoreLimits::default()
     };
     let store = controlled_sqlite(Arc::new(AtomicI64::new(0)), limits);
     assert!(store.descriptor().durable);
@@ -630,6 +631,109 @@ async fn sqlite_enforces_finite_capacity_and_request_limits() {
         Err(MemoryStoreError::InvalidRequest {
             reason: "memory_search_limit_exceeded",
         })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_reads_do_not_fail_when_expiry_sweep_would_exceed_artifact_action_capacity() {
+    let now = Arc::new(AtomicI64::new(0));
+    let limits = MemoryStoreLimits {
+        max_artifact_actions: 1,
+        ..MemoryStoreLimits::default()
+    };
+    let store = controlled_sqlite(Arc::clone(&now), limits);
+    let mut record = crate::tests::blob_backed_record("m1", "t1").await;
+    record.retention = RetentionPolicy::ExpireAfterMs(10);
+    store.put(Arc::from("put"), record).await.unwrap();
+    assert_eq!(store.pending_artifact_actions(1).await.unwrap().len(), 1);
+
+    now.store(10, Ordering::SeqCst);
+    let scope = MemoryScope::try_new("t1").unwrap();
+    assert!(
+        store
+            .get(scope.clone(), MemoryId::parse("m1").unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .search(
+                scope.clone(),
+                MemoryQuery::ExactId(MemoryId::parse("m1").unwrap()),
+                1,
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .list(
+                scope.clone(),
+                MemoryPage {
+                    offset: 0,
+                    limit: 1,
+                },
+            )
+            .await
+            .unwrap()
+            .total,
+        0
+    );
+    assert_eq!(
+        store
+            .forget(
+                Arc::from("forget-expired"),
+                scope,
+                MemoryId::parse("m1").unwrap(),
+            )
+            .await,
+        Err(MemoryStoreError::CapacityExceeded {
+            resource: "artifact_actions",
+            limit: 1,
+        })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_prunes_aged_receipts_so_capacity_is_not_a_lifetime_write_cap() {
+    let now = Arc::new(AtomicI64::new(0));
+    let limits = MemoryStoreLimits {
+        max_idempotency_keys: 2,
+        max_receipt_age_ms: 100,
+        ..MemoryStoreLimits::default()
+    };
+    let store = controlled_sqlite(Arc::clone(&now), limits);
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .put(Arc::from("k3"), crate::tests::sample_record("m3", "t1"))
+            .await,
+        Err(MemoryStoreError::CapacityExceeded {
+            resource: "idempotency_keys",
+            limit: 2,
+        })
+    );
+    now.store(100, Ordering::SeqCst);
+    assert_eq!(
+        store
+            .put(Arc::from("k3"), crate::tests::sample_record("m3", "t1"))
+            .await,
+        Ok(PutOutcome::Inserted)
+    );
+    assert_eq!(
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+            .await,
+        Err(MemoryStoreError::IdConflict)
     );
 }
 

@@ -55,7 +55,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_memory::observer::MemoryO
 pub mod finstack_ai_memory::provider
 pub struct finstack_ai_memory::provider::MemoryContextProvider
 impl finstack_ai_memory::provider::MemoryContextProvider
-pub fn finstack_ai_memory::provider::MemoryContextProvider::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::provider::RecallConfig) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+pub fn finstack_ai_memory::provider::MemoryContextProvider::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, &dyn finstack_ai_runtime::services::artifact::ArtifactStore, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::provider::RecallConfig) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
 impl finstack_ai_runtime::ports::context::port::ContextProvider for finstack_ai_memory::provider::MemoryContextProvider
 pub fn finstack_ai_memory::provider::MemoryContextProvider::collect(&self, finstack_ai_runtime::ports::context::port::ContextCallContext, finstack_ai_runtime::ports::context::types::ContextRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::types::ContextContribution, finstack_ai_runtime::ports::context::error::ContextError>>
 pub fn finstack_ai_memory::provider::MemoryContextProvider::descriptor(&self) -> finstack_ai_runtime::ports::context::port::ContextProviderDescriptor
@@ -256,6 +256,7 @@ pub fn finstack_ai_memory::record::preview_of(&str) -> alloc::sync::Arc<str>
 pub fn finstack_ai_memory::record::system_clock() -> finstack_ai_memory::record::MemoryClock
 pub type finstack_ai_memory::record::MemoryClock = alloc::sync::Arc<(dyn core::ops::function::Fn() -> finstack_ai_kernel::primitives::time::Timestamp + core::marker::Send + core::marker::Sync)>
 pub mod finstack_ai_memory::store
+pub use finstack_ai_memory::store::InProcessArtifactStore
 pub enum finstack_ai_memory::store::MatchEvidence
 pub finstack_ai_memory::store::MatchEvidence::ExactId
 pub finstack_ai_memory::store::MatchEvidence::FullText
@@ -343,23 +344,6 @@ impl core::fmt::Debug for finstack_ai_memory::store::PutOutcome
 pub fn finstack_ai_memory::store::PutOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_memory::store::PutOutcome
 impl core::marker::StructuralPartialEq for finstack_ai_memory::store::PutOutcome
-pub struct finstack_ai_memory::store::InProcessArtifactStore
-impl finstack_ai_memory::store::InProcessArtifactStore
-pub fn finstack_ai_memory::store::InProcessArtifactStore::with_limits(self, finstack_ai_runtime::services::artifact::ArtifactStoreLimits) -> Self
-pub fn finstack_ai_memory::store::InProcessArtifactStore::with_max_artifact_bytes(self, usize) -> Self
-impl core::default::Default for finstack_ai_memory::store::InProcessArtifactStore
-pub fn finstack_ai_memory::store::InProcessArtifactStore::default() -> Self
-impl core::fmt::Debug for finstack_ai_memory::store::InProcessArtifactStore
-pub fn finstack_ai_memory::store::InProcessArtifactStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl finstack_ai_runtime::services::artifact::ArtifactStore for finstack_ai_memory::store::InProcessArtifactStore
-pub fn finstack_ai_memory::store::InProcessArtifactStore::collect_orphans(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::time::Timestamp, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::artifact::ArtifactGcReport, finstack_ai_runtime::services::artifact::ArtifactError>>
-pub fn finstack_ai_memory::store::InProcessArtifactStore::descriptor(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreDescriptor
-pub fn finstack_ai_memory::store::InProcessArtifactStore::get(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactError>>
-pub fn finstack_ai_memory::store::InProcessArtifactStore::get_by_blob(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::content::blob::BlobRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::artifact::ArtifactRead, finstack_ai_runtime::services::artifact::ArtifactError>>
-pub fn finstack_ai_memory::store::InProcessArtifactStore::limits(&self) -> finstack_ai_runtime::services::artifact::ArtifactStoreLimits
-pub fn finstack_ai_memory::store::InProcessArtifactStore::pin(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactOwnerId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::artifact::ArtifactError>>
-pub fn finstack_ai_memory::store::InProcessArtifactStore::stage_put(&self, finstack_ai_runtime::services::artifact::ArtifactScope, bytes::bytes::Bytes, finstack_ai_runtime::services::artifact::ArtifactMetadata) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactError>>
-pub fn finstack_ai_memory::store::InProcessArtifactStore::unpin(&self, finstack_ai_runtime::services::artifact::ArtifactScope, finstack_ai_kernel::primitives::handles::ArtifactRef, finstack_ai_runtime::services::artifact::ArtifactOwnerId, finstack_ai_kernel::primitives::time::Timestamp) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::artifact::ArtifactError>>
 pub struct finstack_ai_memory::store::InProcessMemoryStore
 impl finstack_ai_memory::store::InProcessMemoryStore
 pub fn finstack_ai_memory::store::InProcessMemoryStore::new() -> Self
@@ -432,6 +416,7 @@ pub finstack_ai_memory::store::MemoryStoreLimits::max_artifact_actions: usize
 pub finstack_ai_memory::store::MemoryStoreLimits::max_idempotency_keys: usize
 pub finstack_ai_memory::store::MemoryStoreLimits::max_inline_bytes: u64
 pub finstack_ai_memory::store::MemoryStoreLimits::max_page_size: usize
+pub finstack_ai_memory::store::MemoryStoreLimits::max_receipt_age_ms: u64
 pub finstack_ai_memory::store::MemoryStoreLimits::max_records: usize
 pub finstack_ai_memory::store::MemoryStoreLimits::max_search_results: usize
 impl core::clone::Clone for finstack_ai_memory::store::MemoryStoreLimits
@@ -449,6 +434,7 @@ pub const finstack_ai_memory::store::MAX_MEMORY_ARTIFACT_ACTIONS: usize
 pub const finstack_ai_memory::store::MAX_MEMORY_IDEMPOTENCY_KEYS: usize
 pub const finstack_ai_memory::store::MAX_MEMORY_INLINE_BYTES: u64
 pub const finstack_ai_memory::store::MAX_MEMORY_PAGE_SIZE: usize
+pub const finstack_ai_memory::store::MAX_MEMORY_RECEIPT_AGE_MS: u64
 pub const finstack_ai_memory::store::MAX_MEMORY_RECORDS: usize
 pub const finstack_ai_memory::store::MAX_MEMORY_SEARCH_RESULTS: usize
 pub const finstack_ai_memory::store::MEMORY_IDEMPOTENCY_KEY_MAX_BYTES: usize

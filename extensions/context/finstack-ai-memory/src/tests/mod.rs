@@ -7,7 +7,10 @@ mod store;
 mod toolset;
 
 use crate::record::*;
-use finstack_ai_kernel::{Sensitivity, UNIX_EPOCH};
+use crate::store::InProcessArtifactStore;
+use finstack_ai_kernel::{Metadata, RunId, Sensitivity, SessionId, UNIX_EPOCH};
+use finstack_ai_runtime::Bytes;
+use finstack_ai_runtime::artifact::{ArtifactMetadata, ArtifactScope, stage_required_artifact};
 use std::sync::Arc;
 
 pub(crate) fn sample_record(id: &str, tenant: &str) -> MemoryRecord {
@@ -32,4 +35,33 @@ pub(crate) fn sample_record(id: &str, tenant: &str) -> MemoryRecord {
         retention: RetentionPolicy::KeepUntilDeleted,
         tombstoned: false,
     }
+}
+
+pub(crate) async fn blob_backed_record(id: &str, tenant: &str) -> MemoryRecord {
+    let artifacts = InProcessArtifactStore::default();
+    let artifact_scope = ArtifactScope {
+        tenant_scope: Arc::from(tenant),
+        session_id: SessionId::from_bytes([1; 16]),
+        run_id: Some(RunId::from_bytes([2; 16])),
+        sensitivity: Sensitivity::Internal,
+    };
+    let artifact = stage_required_artifact(
+        &artifacts,
+        artifact_scope.clone(),
+        Bytes::from_static(b"memory blob"),
+        ArtifactMetadata {
+            kind: Arc::from("memory-record"),
+            media_type: Arc::from("text/plain"),
+            name: Some(Arc::from(id)),
+            attributes: Metadata::empty(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut record = sample_record(id, tenant);
+    record.body = MemoryBody::Blob {
+        scope: artifact_scope,
+        artifact,
+    };
+    record
 }

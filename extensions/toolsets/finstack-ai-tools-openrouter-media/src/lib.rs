@@ -580,7 +580,7 @@ mod tests {
         VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME,
     };
 
-    use finstack_ai_memory::store::InProcessArtifactStore;
+    use finstack_ai_runtime::artifact::InProcessArtifactStore;
 
     use base64::Engine as _;
 

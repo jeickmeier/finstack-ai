@@ -1292,7 +1292,6 @@ version = "2.0.0"
 dependencies = [
  "criterion",
  "finstack-ai-kernel",
- "finstack-ai-memory",
  "finstack-ai-runtime",
  "finstack-ai-tools-document",
  "serde",
@@ -1766,7 +1765,6 @@ dependencies = [
  "criterion",
  "finstack-ai",
  "finstack-ai-kernel",
- "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-middleware-tool-policy",
  "finstack-ai-protocol",
@@ -1840,7 +1838,6 @@ name = "finstack-ai-tools-fetch"
 version = "2.0.0"
 dependencies = [
  "finstack-ai-kernel",
- "finstack-ai-memory",
  "finstack-ai-net-guard",
  "finstack-ai-runtime",
  "futures-util",
@@ -1896,7 +1893,6 @@ version = "2.0.0"
 dependencies = [
  "base64",
  "finstack-ai-kernel",
- "finstack-ai-memory",
  "finstack-ai-net-guard",
  "finstack-ai-runtime",
  "futures-util",
@@ -1913,7 +1909,6 @@ version = "2.0.0"
 dependencies = [
  "base64",
  "finstack-ai-kernel",
- "finstack-ai-memory",
  "finstack-ai-net-guard",
  "finstack-ai-runtime",
  "futures-util",

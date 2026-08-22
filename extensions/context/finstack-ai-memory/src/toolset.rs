@@ -150,7 +150,10 @@ impl MemoryToolset {
                 REMEMBER_TOOL_ID,
                 REMEMBER_NAME,
                 "Remember",
-                "Store a memory record for later recall.",
+                "Store a memory record for later recall. Bodies over 4096 \
+                 bytes are stored as blob artifacts: only the bounded \
+                 preview is searchable and recallable afterwards, so keep \
+                 bodies that must be readable later under that ceiling.",
                 REMEMBER_INPUT_SCHEMA,
                 Some(REMEMBER_OUTPUT_SCHEMA),
                 SideEffectClass::IdempotentWrite,
@@ -168,7 +171,9 @@ impl MemoryToolset {
                 INSPECT_TOOL_ID,
                 INSPECT_NAME,
                 "Inspect Memory",
-                "Fetch full metadata for one memory record by id.",
+                "Fetch full metadata for one memory record by id. Inline \
+                 bodies are returned in full; blob bodies return only the \
+                 artifact name, not the stored content.",
                 INSPECT_INPUT_SCHEMA,
                 None,
                 SideEffectClass::ReadOnly,
@@ -365,6 +370,7 @@ impl MemoryToolset {
         Arc::from(format!("tool:{}", run.effect_id.to_canonical_string()))
     }
 
+    /// Drain the artifact-ownership outbox. Mutating tools only.
     async fn reconcile_artifacts(&self) -> Result<(), ToolError> {
         let limit = self.store.descriptor().limits.max_artifact_actions.min(256);
         reconcile_memory_artifacts(self.store.as_ref(), self.artifact_store.as_ref(), limit)
@@ -438,6 +444,8 @@ impl MemoryToolset {
         ok_result(&serde_json::json!({ "id": memory_id.as_str(), "outcome": outcome_str }))
     }
 
+    /// Store small bodies inline; stage larger ones as blobs. Blob content
+    /// is not hydrated back through inspect or search.
     async fn build_body(
         &self,
         run: &RunCallContext,
@@ -557,7 +565,6 @@ impl MemoryToolset {
             .search(self.scope.clone(), query, limit)
             .await
             .map_err(|error| map_store_error(&error))?;
-        self.reconcile_artifacts().await?;
         let hits_json: Vec<serde_json::Value> = hits
             .iter()
             .map(|hit| {
@@ -585,7 +592,6 @@ impl MemoryToolset {
             .get(self.scope.clone(), memory_id)
             .await
             .map_err(|error| map_store_error(&error))?;
-        self.reconcile_artifacts().await?;
         match record {
             Some(record) => {
                 let mut value = serde_json::to_value(&record).map_err(|_| {

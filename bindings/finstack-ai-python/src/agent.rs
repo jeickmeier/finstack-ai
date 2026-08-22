@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::approval_grant::PyApprovalGrantMode;
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
-use finstack_ai::runtime::artifact::ArtifactStore;
+use finstack_ai::runtime::artifact::{ArtifactStore, InProcessArtifactStore};
 use finstack_ai::runtime::ports::middleware::Middleware;
 use finstack_ai::runtime::ports::model::{Model, ModelName, ModelSettings};
 use finstack_ai::runtime::ports::tool::Toolset;
@@ -20,7 +20,6 @@ use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
     SessionId, Version,
 };
-use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_tools_document::DocumentToolset;
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -99,10 +98,7 @@ impl PyContextProviderArg {
     )> {
         match self {
             Self::Python(provider) => Ok(provider.bind(py).borrow().registration()),
-            Self::Memory(provider) => provider
-                .bind(py)
-                .borrow()
-                .registration(py, Arc::clone(artifact_store)),
+            Self::Memory(provider) => provider.bind(py).borrow().registration(py, artifact_store),
         }
     }
 }

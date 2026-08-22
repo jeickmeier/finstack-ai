@@ -2,6 +2,7 @@
 
 pub(crate) mod agent_invoker;
 pub(crate) mod artifact;
+pub(crate) mod artifact_in_process;
 pub(crate) mod audit;
 pub(crate) mod budget;
 #[cfg(feature = "native-tokio")]

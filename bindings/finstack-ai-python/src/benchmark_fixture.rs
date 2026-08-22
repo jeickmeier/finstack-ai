@@ -4,6 +4,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::Instant;
 
+use finstack_ai::runtime::artifact::InProcessArtifactStore;
 use finstack_ai::runtime::ports::journal::JournalStore;
 use finstack_ai::runtime::ports::model::{
     Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TextDelta,
@@ -11,7 +12,6 @@ use finstack_ai::runtime::ports::model::{
 };
 use finstack_ai::{Agent, AgentRunError};
 use finstack_ai_kernel::{AgentId, BundleId, ContentBlock, ProviderIds, TextBlock, Usage};
-use finstack_ai_memory::store::InProcessArtifactStore;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,

@@ -196,6 +196,7 @@ pub mod artifact {
     pub use crate::services::artifact::{
         ARTIFACT_INVALID_METADATA, ARTIFACT_NOT_FOUND, ARTIFACT_TOO_LARGE, ARTIFACT_UNAVAILABLE,
     };
+    pub use crate::services::artifact_in_process::InProcessArtifactStore;
 }
 
 /// The run-event hub: subscriptions, batching, filters and lag policy.

@@ -470,7 +470,7 @@ async fn idempotency_key_is_bound_to_the_exact_operation_and_payload() {
 }
 
 #[tokio::test]
-async fn hard_expiry_removes_records_from_every_operation_and_releases_capacity() {
+async fn hard_expiry_hides_records_from_reads_and_releases_capacity_on_write() {
     let now = Arc::new(AtomicI64::new(0));
     let limits = MemoryStoreLimits {
         max_records: 1,
@@ -514,6 +514,7 @@ async fn hard_expiry_removes_records_from_every_operation_and_releases_capacity(
             .total,
         0
     );
+    // First write after expiry: the sweep has already dropped the row.
     assert_eq!(
         store
             .forget(
@@ -535,6 +536,69 @@ async fn hard_expiry_removes_records_from_every_operation_and_releases_capacity(
 }
 
 #[tokio::test]
+async fn reads_do_not_fail_when_expiry_sweep_would_exceed_artifact_action_capacity() {
+    let now = Arc::new(AtomicI64::new(0));
+    let limits = MemoryStoreLimits {
+        max_artifact_actions: 1,
+        ..MemoryStoreLimits::default()
+    };
+    let store = controlled_store(Arc::clone(&now), limits);
+    let mut record = crate::tests::blob_backed_record("m1", "t1").await;
+    record.retention = RetentionPolicy::ExpireAfterMs(10);
+    store.put(Arc::from("put"), record).await.unwrap();
+    assert_eq!(store.pending_artifact_actions(1).await.unwrap().len(), 1);
+
+    now.store(10, Ordering::SeqCst);
+    let scope = MemoryScope::try_new("t1").unwrap();
+    assert!(
+        store
+            .get(scope.clone(), MemoryId::parse("m1").unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .search(
+                scope.clone(),
+                MemoryQuery::ExactId(MemoryId::parse("m1").unwrap()),
+                1,
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .list(
+                scope.clone(),
+                MemoryPage {
+                    offset: 0,
+                    limit: 1,
+                },
+            )
+            .await
+            .unwrap()
+            .total,
+        0
+    );
+    // Write still sweeps, so the full outbox fails closed.
+    assert_eq!(
+        store
+            .forget(
+                Arc::from("forget-expired"),
+                scope,
+                MemoryId::parse("m1").unwrap(),
+            )
+            .await,
+        Err(MemoryStoreError::CapacityExceeded {
+            resource: "artifact_actions",
+            limit: 1,
+        })
+    );
+}
+
+#[tokio::test]
 async fn finite_store_limits_fail_before_mutating_state() {
     let limits = MemoryStoreLimits {
         max_records: 1,
@@ -543,6 +607,7 @@ async fn finite_store_limits_fail_before_mutating_state() {
         max_search_results: 1,
         max_page_size: 1,
         max_artifact_actions: 1,
+        ..MemoryStoreLimits::default()
     };
     let store = controlled_store(Arc::new(AtomicI64::new(0)), limits);
     store
@@ -581,6 +646,48 @@ async fn finite_store_limits_fail_before_mutating_state() {
         Err(MemoryStoreError::InvalidRequest {
             reason: "memory_page_limit_exceeded",
         })
+    );
+}
+
+#[tokio::test]
+async fn aged_receipts_are_pruned_so_capacity_is_not_a_lifetime_write_cap() {
+    let now = Arc::new(AtomicI64::new(0));
+    let limits = MemoryStoreLimits {
+        max_idempotency_keys: 2,
+        max_receipt_age_ms: 100,
+        ..MemoryStoreLimits::default()
+    };
+    let store = controlled_store(Arc::clone(&now), limits);
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .put(Arc::from("k3"), crate::tests::sample_record("m3", "t1"))
+            .await,
+        Err(MemoryStoreError::CapacityExceeded {
+            resource: "idempotency_keys",
+            limit: 2,
+        })
+    );
+    now.store(100, Ordering::SeqCst);
+    assert_eq!(
+        store
+            .put(Arc::from("k3"), crate::tests::sample_record("m3", "t1"))
+            .await,
+        Ok(PutOutcome::Inserted)
+    );
+    // Pruned key is a new operation; the live record surfaces as IdConflict.
+    assert_eq!(
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+            .await,
+        Err(MemoryStoreError::IdConflict)
     );
 }
 

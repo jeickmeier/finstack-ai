@@ -23,6 +23,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use finstack_ai::runtime::artifact::InProcessArtifactStore;
 use finstack_ai::runtime::ports::context::ContextProvider;
 use finstack_ai::runtime::ports::journal::JournalStore;
 use finstack_ai::runtime::ports::middleware::Middleware;
@@ -97,7 +98,7 @@ async fn main() -> Result<(), BoxError> {
     let memory = MemoryScope::try_new("preview-local").and_then(|scope| {
         MemoryContextProvider::try_new(
             Arc::new(InProcessMemoryStore::new()),
-            Arc::new(finstack_ai_memory::store::InProcessArtifactStore::default()),
+            &InProcessArtifactStore::default(),
             scope,
             RecallConfig::default(),
         )

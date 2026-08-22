@@ -3,8 +3,9 @@
 //! One bounded command queue feeds a dedicated worker that exclusively owns
 //! the [`rusqlite::Connection`], so database calls never block an async
 //! executor thread. WAL journaling is used where the backing file supports
-//! it, and each operation applies expiry plus its data and idempotency receipt
-//! in one transaction.
+//! it. Each write applies the expiry/receipt sweep plus its data and
+//! idempotency receipt in one immediate transaction; reads run without a
+//! transaction and filter expired rows by predicate instead of sweeping.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -183,7 +184,7 @@ fn sqlite_put(
     if record_conflicts(&transaction, record)? {
         return Err(MemoryStoreError::IdConflict);
     }
-    let previous = fetch_record(&transaction, &record.scope, &record.id)?;
+    let previous = fetch_record(&transaction, &record.scope, &record.id, now)?;
     let actions = artifact_transition_actions(key, previous.as_ref(), Some(record), now)?;
     reserve_receipt(&transaction, limits)?;
     reserve_record(&transaction, record, limits)?;
@@ -196,24 +197,18 @@ fn sqlite_put(
 }
 
 fn sqlite_get(
-    connection: &mut Connection,
+    connection: &Connection,
     scope: &MemoryScope,
     id: &MemoryId,
     now: Timestamp,
-    limits: MemoryStoreLimits,
 ) -> Result<Option<MemoryRecord>, MemoryStoreError> {
     validate_scope(scope)?;
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| sqlite_unavailable())?;
-    cleanup_expired(&transaction, now, limits)?;
-    let record = fetch_record(&transaction, scope, id)?;
-    transaction.commit().map_err(|_| sqlite_unavailable())?;
+    let record = fetch_record(connection, scope, id, now)?;
     Ok(record.filter(|record| !record.tombstoned && record.superseded_by.is_none()))
 }
 
 fn sqlite_search(
-    connection: &mut Connection,
+    connection: &Connection,
     scope: &MemoryScope,
     query: &MemoryQuery,
     limit: usize,
@@ -222,14 +217,12 @@ fn sqlite_search(
 ) -> Result<Vec<MemoryHit>, MemoryStoreError> {
     validate_scope(scope)?;
     validate_query(query, limit, limits)?;
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| sqlite_unavailable())?;
-    cleanup_expired(&transaction, now, limits)?;
     let mut hits = match query {
-        MemoryQuery::ExactId(id) => search_exact_id(&transaction, scope, id)?,
-        MemoryQuery::Keywords(keywords) => search_keywords(&transaction, scope, keywords, limit)?,
-        MemoryQuery::FullText(text) => search_full_text(&transaction, scope, text, limit)?,
+        MemoryQuery::ExactId(id) => search_exact_id(connection, scope, id, now)?,
+        MemoryQuery::Keywords(keywords) => {
+            search_keywords(connection, scope, keywords, limit, now)?
+        }
+        MemoryQuery::FullText(text) => search_full_text(connection, scope, text, limit, now)?,
     };
     hits.sort_by(|left, right| {
         right
@@ -238,7 +231,6 @@ fn sqlite_search(
             .then_with(|| left.record.id.cmp(&right.record.id))
     });
     hits.truncate(limit);
-    transaction.commit().map_err(|_| sqlite_unavailable())?;
     Ok(hits)
 }
 
@@ -261,7 +253,7 @@ fn sqlite_forget(
         transaction.commit().map_err(|_| sqlite_unavailable())?;
         return Ok(());
     }
-    let record = fetch_record(&transaction, scope, id)?.ok_or(MemoryStoreError::NotFound)?;
+    let record = fetch_record(&transaction, scope, id, now)?.ok_or(MemoryStoreError::NotFound)?;
     if record.tombstoned || record.superseded_by.is_some() {
         return Err(MemoryStoreError::NotFound);
     }
@@ -319,7 +311,8 @@ fn sqlite_correct(
         transaction.commit().map_err(|_| sqlite_unavailable())?;
         return Ok(());
     }
-    let old_record = fetch_record(&transaction, scope, old)?.ok_or(MemoryStoreError::NotFound)?;
+    let old_record =
+        fetch_record(&transaction, scope, old, now)?.ok_or(MemoryStoreError::NotFound)?;
     if old_record.tombstoned || old_record.superseded_by.is_some() {
         return Err(MemoryStoreError::NotFound);
     }
@@ -350,7 +343,7 @@ fn sqlite_correct(
 }
 
 fn sqlite_list(
-    connection: &mut Connection,
+    connection: &Connection,
     scope: &MemoryScope,
     page: MemoryPage,
     now: Timestamp,
@@ -362,22 +355,20 @@ fn sqlite_list(
             reason: "memory_page_limit_exceeded",
         });
     }
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| sqlite_unavailable())?;
-    cleanup_expired(&transaction, now, limits)?;
-    let total: i64 = transaction
+    let total: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM memory_records
-             WHERE scope_digest = ?1 AND tombstoned = 0 AND superseded_by IS NULL",
-            params![scope_key(scope)?],
+             WHERE scope_digest = ?1 AND tombstoned = 0 AND superseded_by IS NULL
+               AND (expires_at IS NULL OR expires_at > ?2)",
+            params![scope_key(scope)?, now.as_unix_ms()],
             |row| row.get(0),
         )
         .map_err(|_| sqlite_unavailable())?;
-    let mut statement = transaction
+    let mut statement = connection
         .prepare(
             "SELECT * FROM memory_records
              WHERE scope_digest = ?1 AND tombstoned = 0 AND superseded_by IS NULL
+               AND (expires_at IS NULL OR expires_at > ?4)
              ORDER BY id LIMIT ?2 OFFSET ?3",
         )
         .map_err(|_| sqlite_unavailable())?;
@@ -387,6 +378,7 @@ fn sqlite_list(
                 scope_key(scope)?,
                 i64::try_from(page.limit).unwrap_or(i64::MAX),
                 i64::try_from(page.offset).unwrap_or(i64::MAX),
+                now.as_unix_ms(),
             ],
             record_from_row,
         )
@@ -395,8 +387,6 @@ fn sqlite_list(
     for row in rows {
         records.push(row.map_err(|_| sqlite_unavailable())?);
     }
-    drop(statement);
-    transaction.commit().map_err(|_| sqlite_unavailable())?;
     Ok(MemoryListing {
         records,
         total: usize::try_from(total).unwrap_or(usize::MAX),
@@ -726,7 +716,7 @@ fn run_worker(
                 let _ = reply.send(sqlite_put(&mut connection, &key, &record, now, limits));
             }
             Command::Get { scope, id, reply } => {
-                let _ = reply.send(sqlite_get(&mut connection, &scope, &id, now, limits));
+                let _ = reply.send(sqlite_get(&connection, &scope, &id, now));
             }
             Command::Search {
                 scope,
@@ -735,7 +725,7 @@ fn run_worker(
                 reply,
             } => {
                 let _ = reply.send(sqlite_search(
-                    &mut connection,
+                    &connection,
                     &scope,
                     &query,
                     limit,
@@ -776,7 +766,7 @@ fn run_worker(
                 ));
             }
             Command::List { scope, page, reply } => {
-                let _ = reply.send(sqlite_list(&mut connection, &scope, page, now, limits));
+                let _ = reply.send(sqlite_list(&connection, &scope, page, now, limits));
             }
             Command::PendingArtifactActions { limit, reply } => {
                 let _ = reply.send(pending_artifact_actions(&connection, limit, limits));
@@ -1236,15 +1226,19 @@ fn delete_fts_row(
     Ok(())
 }
 
+/// Fetch one row by `(scope, id)`, excluding hard-expired rows.
+/// Write paths sweep first, so the `expires_at` predicate is redundant there.
 fn fetch_record(
-    transaction: &Transaction<'_>,
+    connection: &Connection,
     scope: &MemoryScope,
     id: &MemoryId,
+    now: Timestamp,
 ) -> Result<Option<MemoryRecord>, MemoryStoreError> {
-    transaction
+    connection
         .query_row(
-            "SELECT * FROM memory_records WHERE scope_digest = ?1 AND id = ?2",
-            params![scope_key(scope)?, id.as_str()],
+            "SELECT * FROM memory_records WHERE scope_digest = ?1 AND id = ?2
+               AND (expires_at IS NULL OR expires_at > ?3)",
+            params![scope_key(scope)?, id.as_str(), now.as_unix_ms()],
             record_from_row,
         )
         .optional()
@@ -1443,11 +1437,22 @@ fn validate_query(
     }
 }
 
+/// Write-path sweep: drop expired rows (enqueueing artifact unpins) and
+/// age out idempotency receipts. Reads filter on `expires_at` instead.
 fn cleanup_expired(
     transaction: &Transaction<'_>,
     now: Timestamp,
     limits: MemoryStoreLimits,
 ) -> Result<(), MemoryStoreError> {
+    let receipt_cutoff = now
+        .as_unix_ms()
+        .saturating_sub(i64::try_from(limits.max_receipt_age_ms).unwrap_or(i64::MAX));
+    transaction
+        .execute(
+            "DELETE FROM memory_idempotency WHERE applied_at <= ?1",
+            params![receipt_cutoff],
+        )
+        .map_err(|_| sqlite_unavailable())?;
     let expired = {
         let mut statement = transaction
             .prepare(
@@ -1679,13 +1684,15 @@ fn search_exact_id(
     connection: &Connection,
     scope: &MemoryScope,
     id: &MemoryId,
+    now: Timestamp,
 ) -> Result<Vec<MemoryHit>, MemoryStoreError> {
     let record = connection
         .query_row(
             "SELECT * FROM memory_records
              WHERE id = ?1 AND scope_digest = ?2
-               AND tombstoned = 0 AND superseded_by IS NULL",
-            params![id.as_str(), scope_key(scope)?],
+               AND tombstoned = 0 AND superseded_by IS NULL
+               AND (expires_at IS NULL OR expires_at > ?3)",
+            params![id.as_str(), scope_key(scope)?, now.as_unix_ms()],
             record_from_row,
         )
         .optional()
@@ -1708,6 +1715,7 @@ fn search_keywords(
     scope: &MemoryScope,
     keywords: &[Arc<str>],
     limit: usize,
+    now: Timestamp,
 ) -> Result<Vec<MemoryHit>, MemoryStoreError> {
     let folded = keywords
         .iter()
@@ -1727,6 +1735,7 @@ fn search_keywords(
                ON r.scope_digest = k.scope_digest AND r.id = k.id
              WHERE r.scope_digest = ?1
                AND r.tombstoned = 0 AND r.superseded_by IS NULL
+               AND (r.expires_at IS NULL OR r.expires_at > ?4)
              GROUP BY r.scope_digest, r.id
              ORDER BY matched_count DESC, r.id
              LIMIT ?3",
@@ -1737,7 +1746,8 @@ fn search_keywords(
             params![
                 scope_key(scope)?,
                 requested_json,
-                i64::try_from(limit).unwrap_or(i64::MAX)
+                i64::try_from(limit).unwrap_or(i64::MAX),
+                now.as_unix_ms(),
             ],
             |row| {
                 let record = record_from_row(row)?;
@@ -1767,6 +1777,7 @@ fn search_full_text(
     scope: &MemoryScope,
     text: &str,
     limit: usize,
+    now: Timestamp,
 ) -> Result<Vec<MemoryHit>, MemoryStoreError> {
     let sanitized = sanitize_fts_query(text);
     if sanitized.is_empty() {
@@ -1780,6 +1791,7 @@ fn search_full_text(
              WHERE memory_fts MATCH ?1
                AND r.tombstoned = 0 AND r.superseded_by IS NULL
                AND r.scope_digest = ?2
+               AND (r.expires_at IS NULL OR r.expires_at > ?4)
              ORDER BY bm25(memory_fts)
              LIMIT ?3",
         )
@@ -1790,6 +1802,7 @@ fn search_full_text(
                 sanitized,
                 scope_key(scope)?,
                 i64::try_from(limit).unwrap_or(i64::MAX),
+                now.as_unix_ms(),
             ],
             record_from_row,
         )

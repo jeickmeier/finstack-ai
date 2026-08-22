@@ -1,9 +1,9 @@
 //! [`MemoryContextProvider`]: a store-backed `ContextProvider` that recalls
 //! matching [`MemoryRecord`](crate::record::MemoryRecord)s into bounded, cache-stable context items.
 //!
-//! This provider never mutates conversation history and never writes to the
-//! [`MemoryStore`] — writes belong to the toolset (a later task). It only
-//! reads.
+//! This provider never mutates conversation history, never writes to the
+//! [`MemoryStore`], and never reconciles artifact ownership. Writes and
+//! reconciliation belong to the toolset.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,9 +21,7 @@ use finstack_ai_runtime::ports::context::{
 };
 
 use crate::record::{MemoryError, MemoryId, MemoryScope};
-use crate::store::{
-    MatchEvidence, MemoryHit, MemoryQuery, MemoryStore, reconcile_memory_artifacts,
-};
+use crate::store::{MatchEvidence, MemoryHit, MemoryQuery, MemoryStore};
 
 /// Stable component identity for [`MemoryContextProvider`].
 const COMPONENT_ID: &str = "finstack.context.memory";
@@ -51,7 +49,6 @@ impl Default for RecallConfig {
 pub struct MemoryContextProvider {
     descriptor: ContextProviderDescriptor,
     store: Arc<dyn MemoryStore>,
-    artifact_store: Arc<dyn ArtifactStore>,
     scope: MemoryScope,
     config: RecallConfig,
 }
@@ -59,13 +56,17 @@ pub struct MemoryContextProvider {
 impl MemoryContextProvider {
     /// Construct a provider bound to one store, scope, and configuration.
     ///
+    /// `artifact_store` is not retained. Only its `store_id` is hashed into
+    /// the configuration digest; recall items come from [`MemoryStore`]
+    /// records.
+    ///
     /// # Errors
     ///
     /// Returns [`MemoryError::Configuration`] when the checked-in component
     /// identity is invalid.
     pub fn try_new(
         store: Arc<dyn MemoryStore>,
-        artifact_store: Arc<dyn ArtifactStore>,
+        artifact_store: &dyn ArtifactStore,
         scope: MemoryScope,
         config: RecallConfig,
     ) -> Result<Self, MemoryError> {
@@ -109,7 +110,6 @@ impl MemoryContextProvider {
                 metadata: Metadata::empty(),
             },
             store,
-            artifact_store,
             scope,
             config,
         })
@@ -127,7 +127,6 @@ impl ContextProvider for MemoryContextProvider {
         request: ContextRequest,
     ) -> PortFuture<Result<ContextContribution, ContextError>> {
         let store = Arc::clone(&self.store);
-        let artifact_store = Arc::clone(&self.artifact_store);
         let scope = self.scope.clone();
         let config = self.config;
         Box::pin(async move {
@@ -143,13 +142,6 @@ impl ContextProvider for MemoryContextProvider {
             } else {
                 search_candidates(store.as_ref(), &scope, &query, config.max_hits).await?
             };
-            reconcile_memory_artifacts(
-                store.as_ref(),
-                artifact_store.as_ref(),
-                store.descriptor().limits.max_artifact_actions.min(256),
-            )
-            .await
-            .map_err(|_| contribution_invalid("memory artifact reconciliation failed"))?;
 
             let ordered = order_candidates(candidates, config.max_hits);
 

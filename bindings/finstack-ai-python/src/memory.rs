@@ -287,11 +287,11 @@ impl PyMemoryContextProvider {
     pub(crate) fn registration(
         &self,
         py: Python<'_>,
-        artifact_store: Arc<dyn ArtifactStore>,
+        artifact_store: &Arc<dyn ArtifactStore>,
     ) -> PyResult<(ComponentRef, Arc<dyn ContextProvider>)> {
         let provider = MemoryContextProvider::try_new(
             Arc::clone(&self.store),
-            artifact_store,
+            artifact_store.as_ref(),
             self.scope.clone(),
             self.config,
         )
