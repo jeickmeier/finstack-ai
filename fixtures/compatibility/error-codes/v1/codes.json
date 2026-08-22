@@ -1,0 +1,1050 @@
+{
+  "version": 1,
+  "codes": [
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_CANCELLED",
+      "value": "agent_build_cancelled"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_CONFIGURATION_CONFLICT",
+      "value": "agent_build_configuration_conflict"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_DUPLICATE_SELECTION",
+      "value": "agent_build_duplicate_selection"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_FACTORY_FAILED",
+      "value": "agent_build_factory_failed"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_INVALID_DESCRIPTOR",
+      "value": "agent_build_invalid_descriptor"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_KIND_MISMATCH",
+      "value": "agent_build_kind_mismatch"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_MIDDLEWARE_INVALID",
+      "value": "agent_build_middleware_invalid"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_MISSING_COMPONENT",
+      "value": "agent_build_missing_component"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_BUILD_VERSION_MISMATCH",
+      "value": "agent_build_version_mismatch"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_RUN_CANCELLED",
+      "value": "agent_run_cancelled"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_RUN_INVALID_CONFIGURATION",
+      "value": "agent_run_invalid_configuration"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_RUN_RUNTIME_FAILURE",
+      "value": "agent_run_runtime_failure"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_RUN_TIMEOUT",
+      "value": "agent_run_timeout"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "AGENT_RUN_UNSUPPORTED_PLAN",
+      "value": "agent_run_unsupported_plan"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "BUNDLE_RESOLUTION_CONFLICT",
+      "value": "bundle_resolution_conflict"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "BUNDLE_RESOLUTION_INVALID",
+      "value": "bundle_resolution_invalid"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "BUNDLE_RESOLUTION_LOCK_MISMATCH",
+      "value": "bundle_resolution_lock_mismatch"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "BUNDLE_RESOLUTION_MISSING",
+      "value": "bundle_resolution_missing"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "CAPABILITY_ACTIVATION_BOUND",
+      "value": "capability_activation_bound"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "CAPABILITY_ACTIVATION_FAILED",
+      "value": "capability_activation_failed"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "CHILD_RUN_BRIDGE_FAILED",
+      "value": "child_run_bridge_failed"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "CHILD_RUN_BRIDGE_PLANNER_REJECTED",
+      "value": "child_run_bridge_planner_rejected"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE",
+      "value": "child_run_bridge_planner_unavailable"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "RESULT_DECODE_INVALID_VALUE",
+      "value": "result_decode_invalid_value"
+    },
+    {
+      "crate": "finstack-ai",
+      "name": "RESULT_DECODE_SCHEMA_MISMATCH",
+      "value": "result_decode_schema_mismatch"
+    },
+    {
+      "crate": "finstack-ai-codex-child",
+      "name": "CODEX_CHILD_NOT_FOUND",
+      "value": "codex_child_not_found"
+    },
+    {
+      "crate": "finstack-ai-codex-child",
+      "name": "CODEX_CONFIGURATION_INVALID",
+      "value": "codex_configuration_invalid"
+    },
+    {
+      "crate": "finstack-ai-codex-child",
+      "name": "CODEX_INVALID_ARGUMENTS",
+      "value": "codex_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-context-repository",
+      "name": "REPOSITORY_FILE_TOO_LARGE",
+      "value": "repository_file_too_large"
+    },
+    {
+      "crate": "finstack-ai-context-repository",
+      "name": "REPOSITORY_PATH_UNSAFE",
+      "value": "repository_path_unsafe"
+    },
+    {
+      "crate": "finstack-ai-context-repository",
+      "name": "REPOSITORY_READ_FAILED",
+      "value": "repository_read_failed"
+    },
+    {
+      "crate": "finstack-ai-context-repository",
+      "name": "REPOSITORY_TEXT_INVALID",
+      "value": "repository_text_invalid"
+    },
+    {
+      "crate": "finstack-ai-context-repository",
+      "name": "REPOSITORY_UNSUPPORTED",
+      "value": "repository_unsupported"
+    },
+    {
+      "crate": "finstack-ai-memory",
+      "name": "MEMORY_TOOL_ID_CONFLICT",
+      "value": "memory_id_conflict"
+    },
+    {
+      "crate": "finstack-ai-memory",
+      "name": "MEMORY_TOOL_INVALID_ARGUMENTS",
+      "value": "memory_tool_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-memory",
+      "name": "MEMORY_TOOL_NOT_FOUND",
+      "value": "memory_not_found"
+    },
+    {
+      "crate": "finstack-ai-memory",
+      "name": "MEMORY_TOOL_POLICY_DENIED",
+      "value": "memory_policy_denied"
+    },
+    {
+      "crate": "finstack-ai-memory",
+      "name": "MEMORY_TOOL_SELF_SUPERSESSION",
+      "value": "memory_self_supersession"
+    },
+    {
+      "crate": "finstack-ai-memory",
+      "name": "MEMORY_TOOL_UNAVAILABLE",
+      "value": "memory_tool_unavailable"
+    },
+    {
+      "crate": "finstack-ai-middleware-tool-policy",
+      "name": "TOOL_POLICY_JAILBREAK_TRIGGERED",
+      "value": "tool_policy_jailbreak_triggered"
+    },
+    {
+      "crate": "finstack-ai-middleware-tool-policy",
+      "name": "TOOL_POLICY_WRITE_BUDGET_EXCEEDED",
+      "value": "tool_policy_write_budget_exceeded"
+    },
+    {
+      "crate": "finstack-ai-net-guard",
+      "name": "NET_GUARD_DESTINATION_BLOCKED",
+      "value": "net_guard_destination_blocked"
+    },
+    {
+      "crate": "finstack-ai-net-guard",
+      "name": "NET_GUARD_INVALID_URL",
+      "value": "net_guard_invalid_url"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_COMPILE_FAILED",
+      "value": "plugin_compile_failed"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_INSTANCE_LIMIT",
+      "value": "plugin_instance_limit"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_INSTANTIATE_FAILED",
+      "value": "plugin_instantiate_failed"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_LOCK_DIGEST_MISMATCH",
+      "value": "plugin_lock_digest_mismatch"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_LOCK_DISABLED",
+      "value": "plugin_lock_disabled"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_LOCK_DUPLICATE",
+      "value": "plugin_lock_duplicate"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_LOCK_INVALID",
+      "value": "plugin_lock_invalid"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_LOCK_NOT_FOUND",
+      "value": "plugin_lock_not_found"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_PERMISSION_DENIED",
+      "value": "plugin_permission_denied"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_RESOURCE_LIMIT",
+      "value": "plugin_resource_limit"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_SIGNATURE_UNTRUSTED",
+      "value": "plugin_signature_untrusted"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_TRAP",
+      "value": "plugin_trap"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "AGENT_INVOKE_CONFLICT",
+      "value": "agent_invoke_conflict"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "AGENT_INVOKE_INVALID_ACCEPTANCE",
+      "value": "agent_invoke_invalid_acceptance"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "AGENT_INVOKE_UNAVAILABLE",
+      "value": "agent_invoke_unavailable"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "ARTIFACT_CAPACITY_EXCEEDED",
+      "value": "artifact_capacity_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "ARTIFACT_INTEGRITY_FAILURE",
+      "value": "artifact_integrity_failure"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "ARTIFACT_INVALID_METADATA",
+      "value": "artifact_invalid_metadata"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "ARTIFACT_NOT_FOUND",
+      "value": "artifact_not_found"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "ARTIFACT_SCOPE_MISMATCH",
+      "value": "artifact_scope_mismatch"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "ARTIFACT_TOO_LARGE",
+      "value": "artifact_too_large"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "ARTIFACT_UNAVAILABLE",
+      "value": "artifact_unavailable"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "BUDGET_CONFLICT",
+      "value": "budget_conflict"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "BUDGET_INVALID_RECEIPT",
+      "value": "budget_invalid_receipt"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "BUDGET_UNAVAILABLE",
+      "value": "budget_unavailable"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "BUDGET_UNKNOWN",
+      "value": "budget_unknown"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "COMPACTION_BUDGET_EXCEEDED",
+      "value": "context_budget_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "COMPACTION_MODEL_NOT_AUTHORIZED",
+      "value": "compaction_model_not_authorized"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "COMPACTION_RESULT_INVALID",
+      "value": "compaction_result_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONFINEMENT_DENIED",
+      "value": "process_confinement_denied"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONFINEMENT_IO",
+      "value": "process_confinement_io"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONFINEMENT_UNAVAILABLE",
+      "value": "process_confinement_unavailable"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONTEXT_BUDGET_EXCEEDED",
+      "value": "context_budget_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONTEXT_COMMIT_REQUIRED",
+      "value": "context_commit_required"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONTEXT_CONFIGURATION_INVALID",
+      "value": "context_configuration_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONTEXT_CONTRIBUTION_INVALID",
+      "value": "context_contribution_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "CONTEXT_RECOVERY_UNCERTAIN",
+      "value": "context_recovery_uncertain"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "EFFECT_NOT_OUTSTANDING",
+      "value": "effect_not_outstanding"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MCP_SAMPLING_REQUIRED",
+      "value": "mcp_sampling_required"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MCP_SAMPLING_UNAVAILABLE",
+      "value": "mcp_sampling_unavailable"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MCP_SAMPLING_UNSUPPORTED",
+      "value": "mcp_sampling_unsupported"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MIDDLEWARE_COMMIT_REQUIRED",
+      "value": "middleware_commit_required"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MIDDLEWARE_ORDER_CYCLE",
+      "value": "middleware_order_cycle"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MIDDLEWARE_OUTCOME_NOT_ALLOWED",
+      "value": "middleware_outcome_not_allowed"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MIDDLEWARE_RESOLUTION_INVALID",
+      "value": "middleware_resolution_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MIDDLEWARE_STAGE_BOUNDS_EXCEEDED",
+      "value": "middleware_stage_bounds_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MIDDLEWARE_STAGE_UNLANDABLE",
+      "value": "middleware_stage_unlandable"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_CONTEXT_LIMIT_EXCEEDED",
+      "value": "model_context_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_ESTIMATOR_MISMATCH",
+      "value": "model_estimator_mismatch"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_PROFILE_INVALID",
+      "value": "model_profile_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_PROFILE_OVERRIDE_NOT_ALLOWED",
+      "value": "model_profile_override_not_allowed"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_PROFILE_RELAXATION",
+      "value": "model_profile_relaxation"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_RECONCILIATION_UNSUPPORTED",
+      "value": "model_reconciliation_unsupported"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_REQUEST_INVALID",
+      "value": "model_request_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_RESPONSE_MISMATCH",
+      "value": "model_response_mismatch"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_STREAM_DUPLICATE_COMPLETION",
+      "value": "model_stream_duplicate_completion"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_STREAM_ERROR_AFTER_COMPLETION",
+      "value": "model_stream_error_after_completion"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_STREAM_ITEM_AFTER_COMPLETION",
+      "value": "model_stream_item_after_completion"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_STREAM_LIMIT_EXCEEDED",
+      "value": "model_stream_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_STREAM_MISSING_COMPLETION",
+      "value": "model_stream_missing_completion"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_TOOL_CALL_ARGUMENTS_INVALID",
+      "value": "model_tool_call_arguments_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_TOOL_CALL_DELTA_INVALID",
+      "value": "model_tool_call_delta_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_TOOL_CALL_INCOMPLETE",
+      "value": "model_tool_call_incomplete"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "MODEL_USAGE_INVALID",
+      "value": "model_usage_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "OBSERVER_CAPACITY_EXCEEDED",
+      "value": "observer_capacity_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "OBSERVER_CONFIGURATION_INVALID",
+      "value": "observer_configuration_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "OBSERVER_DELIVERY_FAILED",
+      "value": "observer_delivery_failed"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "OBSERVER_SHUTDOWN_TIMEOUT",
+      "value": "observer_shutdown_timeout"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "OBSERVER_SUBSCRIPTION_FAILED",
+      "value": "observer_subscription_failed"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "OBSERVER_UNAVAILABLE",
+      "value": "observer_unavailable"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "RETRY_LIMIT_REACHED",
+      "value": "retry_limit_reached"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "RETRY_NOT_SAFE",
+      "value": "retry_not_safe"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_APPROVAL_REQUIRED",
+      "value": "tool_approval_required"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_ARGUMENTS_INVALID",
+      "value": "tool_arguments_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_CANCELLED",
+      "value": "tool_cancelled"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_DEADLINE_EXCEEDED",
+      "value": "tool_deadline_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_DEFERRAL_EXPIRED",
+      "value": "tool_deferral_expired"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_DEFERRAL_INVALID",
+      "value": "tool_deferral_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_DEFERRAL_NOT_DECLARED",
+      "value": "tool_deferral_not_declared"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_INTERACTION_REQUIRED",
+      "value": "tool_interaction_required"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_OUTPUT_INVALID",
+      "value": "tool_output_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_PANICKED",
+      "value": "tool_panicked"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_POLICY_DENIED",
+      "value": "tool_policy_denied"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_RECONCILIATION_UNSUPPORTED",
+      "value": "tool_reconciliation_unsupported"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_REGISTRATION_INVALID",
+      "value": "tool_registration_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_RESULT_LIMIT_EXCEEDED",
+      "value": "tool_result_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_STREAM_INVALID",
+      "value": "tool_stream_invalid"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "TOOL_STREAM_LIMIT_EXCEEDED",
+      "value": "tool_stream_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-runtime",
+      "name": "UNKNOWN_TOOL",
+      "value": "unknown_tool"
+    },
+    {
+      "crate": "finstack-ai-sandbox-e2b",
+      "name": "E2B_CREDENTIAL_REQUIRED",
+      "value": "e2b_credential_required"
+    },
+    {
+      "crate": "finstack-ai-sandbox-e2b",
+      "name": "E2B_ENDPOINT_INVALID",
+      "value": "e2b_endpoint_invalid"
+    },
+    {
+      "crate": "finstack-ai-sandbox-e2b",
+      "name": "E2B_INVALID_ARGUMENTS",
+      "value": "e2b_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-sandbox-e2b",
+      "name": "E2B_LIMIT_EXCEEDED",
+      "value": "e2b_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-sandbox-e2b",
+      "name": "E2B_TIMEOUT",
+      "value": "e2b_timeout"
+    },
+    {
+      "crate": "finstack-ai-sandbox-e2b",
+      "name": "E2B_TRANSPORT_FAILED",
+      "value": "e2b_transport_failed"
+    },
+    {
+      "crate": "finstack-ai-store-postgres",
+      "name": "DEFAULT_SCHEMA",
+      "value": "finstack_ai"
+    },
+    {
+      "crate": "finstack-ai-tools-calculator",
+      "name": "CALCULATOR_ARITHMETIC_ERROR",
+      "value": "calculator_arithmetic_error"
+    },
+    {
+      "crate": "finstack-ai-tools-calculator",
+      "name": "CALCULATOR_INVALID_ARGUMENTS",
+      "value": "calculator_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-document",
+      "name": "DOCUMENT_INVALID_ARGUMENTS",
+      "value": "document_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-document",
+      "name": "DOCUMENT_PARSE_FAILED",
+      "value": "document_parse_failed"
+    },
+    {
+      "crate": "finstack-ai-tools-document",
+      "name": "DOCUMENT_SOURCE_UNAVAILABLE",
+      "value": "document_source_unavailable"
+    },
+    {
+      "crate": "finstack-ai-tools-document",
+      "name": "DOCUMENT_TOO_LARGE",
+      "value": "document_too_large"
+    },
+    {
+      "crate": "finstack-ai-tools-document",
+      "name": "DOCUMENT_UNSUPPORTED_FORMAT",
+      "value": "document_unsupported_format"
+    },
+    {
+      "crate": "finstack-ai-tools-elicitation",
+      "name": "ELICITATION_INVALID_ARGUMENTS",
+      "value": "elicitation_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-elicitation",
+      "name": "ELICITATION_REQUEST_TOO_LARGE",
+      "value": "elicitation_request_too_large"
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "name": "FETCH_DESTINATION_BLOCKED",
+      "value": "fetch_destination_blocked"
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "name": "FETCH_HOST_NOT_ALLOWLISTED",
+      "value": "fetch_host_not_allowlisted"
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "name": "FETCH_INVALID_ARGUMENTS",
+      "value": "fetch_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "name": "FETCH_LIMIT_EXCEEDED",
+      "value": "fetch_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "name": "FETCH_REDIRECT_DENIED",
+      "value": "fetch_redirect_denied"
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "name": "FETCH_TIMEOUT",
+      "value": "fetch_timeout"
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "name": "FETCH_TRANSPORT_FAILED",
+      "value": "fetch_transport_failed"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_ARTIFACT_REQUIRED",
+      "value": "filesystem_artifact_required"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_INVALID_ARGUMENTS",
+      "value": "filesystem_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_IO_ERROR",
+      "value": "filesystem_io_error"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_LIMIT_EXCEEDED",
+      "value": "filesystem_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_NOT_FOUND",
+      "value": "filesystem_not_found"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_POLICY_DENIED",
+      "value": "filesystem_policy_denied"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_TIMEOUT",
+      "value": "filesystem_timeout"
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "name": "FILESYSTEM_UNSUPPORTED",
+      "value": "filesystem_unsupported"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_ARTIFACT_REQUIRED",
+      "value": "mcp_artifact_required"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_CATALOG_DRIFT",
+      "value": "mcp_catalog_drift"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_LIMIT_EXCEEDED",
+      "value": "mcp_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_PROTOCOL_VIOLATION",
+      "value": "mcp_protocol_violation"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_RESULT_UNSUPPORTED",
+      "value": "mcp_result_unsupported"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_SERVER_NOT_ALLOWLISTED",
+      "value": "mcp_server_not_allowlisted"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_SUBSCRIBE_UNKNOWN",
+      "value": "mcp_subscribe_unknown"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_TIMEOUT",
+      "value": "mcp_timeout"
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_TRANSPORT_ERROR",
+      "value": "mcp_transport_error"
+    },
+    {
+      "crate": "finstack-ai-tools-openai-media",
+      "name": "OPENAI_MEDIA_CREDENTIAL_REQUIRED",
+      "value": "openai_media_credential_required"
+    },
+    {
+      "crate": "finstack-ai-tools-openai-media",
+      "name": "OPENAI_MEDIA_ENDPOINT_INVALID",
+      "value": "openai_media_endpoint_invalid"
+    },
+    {
+      "crate": "finstack-ai-tools-openai-media",
+      "name": "OPENAI_MEDIA_INVALID_ARGUMENTS",
+      "value": "openai_media_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-openai-media",
+      "name": "OPENAI_MEDIA_LIMIT_EXCEEDED",
+      "value": "openai_media_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-tools-openai-media",
+      "name": "OPENAI_MEDIA_TIMEOUT",
+      "value": "openai_media_timeout"
+    },
+    {
+      "crate": "finstack-ai-tools-openai-media",
+      "name": "OPENAI_MEDIA_TRANSPORT_FAILED",
+      "value": "openai_media_transport_failed"
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
+      "name": "OPENROUTER_MEDIA_CREDENTIAL_REQUIRED",
+      "value": "openrouter_media_credential_required"
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
+      "name": "OPENROUTER_MEDIA_ENDPOINT_INVALID",
+      "value": "openrouter_media_endpoint_invalid"
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
+      "name": "OPENROUTER_MEDIA_INVALID_ARGUMENTS",
+      "value": "openrouter_media_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
+      "name": "OPENROUTER_MEDIA_LIMIT_EXCEEDED",
+      "value": "openrouter_media_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
+      "name": "OPENROUTER_MEDIA_TIMEOUT",
+      "value": "openrouter_media_timeout"
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
+      "name": "OPENROUTER_MEDIA_TRANSPORT_FAILED",
+      "value": "openrouter_media_transport_failed"
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "name": "SHELL_ARTIFACT_REQUIRED",
+      "value": "shell_artifact_required"
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "name": "SHELL_INVALID_ARGUMENTS",
+      "value": "shell_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "name": "SHELL_IO_ERROR",
+      "value": "shell_io_error"
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "name": "SHELL_LIMIT_EXCEEDED",
+      "value": "shell_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "name": "SHELL_POLICY_DENIED",
+      "value": "shell_policy_denied"
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "name": "SHELL_TIMEOUT",
+      "value": "shell_timeout"
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "name": "SHELL_UNSUPPORTED",
+      "value": "shell_unsupported"
+    },
+    {
+      "crate": "finstack-ai-tools-skill-import",
+      "name": "SKILL_IMPORT_INVALID",
+      "value": "skill_import_invalid"
+    },
+    {
+      "crate": "finstack-ai-tools-skills",
+      "name": "SKILLS_ACTIVATION_BOUND",
+      "value": "skills_activation_bound"
+    },
+    {
+      "crate": "finstack-ai-tools-skills",
+      "name": "SKILLS_ACTIVATION_FAILED",
+      "value": "skills_activation_failed"
+    },
+    {
+      "crate": "finstack-ai-tools-skills",
+      "name": "SKILLS_CONFIGURATION_INVALID",
+      "value": "skills_configuration_invalid"
+    },
+    {
+      "crate": "finstack-ai-tools-skills",
+      "name": "SKILLS_INVALID_ARGUMENTS",
+      "value": "skills_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-skills",
+      "name": "SKILLS_UNKNOWN_CAPABILITY",
+      "value": "skills_unknown_capability"
+    },
+    {
+      "crate": "finstack-ai-tools-subagent",
+      "name": "SUBAGENT_AGENT_NOT_ALLOWED",
+      "value": "subagent_agent_not_allowed"
+    },
+    {
+      "crate": "finstack-ai-tools-subagent",
+      "name": "SUBAGENT_CHILD_NOT_FOUND",
+      "value": "subagent_child_not_found"
+    },
+    {
+      "crate": "finstack-ai-tools-subagent",
+      "name": "SUBAGENT_CONFIGURATION_INVALID",
+      "value": "subagent_configuration_invalid"
+    },
+    {
+      "crate": "finstack-ai-tools-subagent",
+      "name": "SUBAGENT_INVALID_ARGUMENTS",
+      "value": "subagent_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-subagent",
+      "name": "SUBAGENT_LIMIT_EXCEEDED",
+      "value": "subagent_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-wasm",
+      "name": "CHILD_RUN_PREPARED",
+      "value": "child_run_prepared"
+    },
+    {
+      "crate": "finstack-ai-wasm",
+      "name": "EXTERNAL_EFFECT_COMPLETION",
+      "value": "external_effect_completion"
+    },
+    {
+      "crate": "finstack-ai-wasm",
+      "name": "IMPLEMENTATION",
+      "value": "wasm"
+    },
+    {
+      "crate": "finstack-ai-wasm",
+      "name": "INTERACTION_RESOLUTION",
+      "value": "interaction_resolution"
+    },
+    {
+      "crate": "finstack-ai-wasm",
+      "name": "JS_HOST_CANCELLED",
+      "value": "js_host_cancelled"
+    },
+    {
+      "crate": "finstack-ai-wasm",
+      "name": "JS_HOST_FAILED",
+      "value": "js_host_failed"
+    },
+    {
+      "crate": "finstack-ai-wasm",
+      "name": "JS_HOST_RESULT_INVALID",
+      "value": "js_host_result_invalid"
+    }
+  ]
+}

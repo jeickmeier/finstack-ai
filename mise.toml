@@ -431,6 +431,7 @@ npx playwright test src/benchmark.test.ts --project=chromium
 description = "Compare cargo-public-api dumps and Python/JS name lists to frozen baselines"
 run = """
 set -euo pipefail
+uv run --no-project python scripts/compat/error_codes.py --check
 mise install cargo:cargo-public-api rust@nightly-2026-08-14
 export PATH="$(mise where cargo:cargo-public-api)/bin:${PATH}"
 uv run --no-project python scripts/compat/public_items.py --check
@@ -440,6 +441,7 @@ uv run --no-project python scripts/compat/public_items.py --check
 description = "Regenerate the frozen public-API baselines after an intended surface change"
 run = """
 set -euo pipefail
+uv run --no-project python scripts/compat/error_codes.py --write
 mise install cargo:cargo-public-api rust@nightly-2026-08-14
 export PATH="$(mise where cargo:cargo-public-api)/bin:${PATH}"
 uv run --no-project python scripts/compat/public_items.py --write
