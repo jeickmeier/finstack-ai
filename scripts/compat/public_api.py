@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Compare cargo-public-api dumps to frozen Rust public-API baselines.
 
-Covers finstack-ai-kernel, finstack-ai-runtime, finstack-ai, and every
-extensions/** crate. Runtime also dumps `native-tokio` and `wasm-host`
-because its default feature set is empty. Python/JS name lists stay in
-public_items.py.
+Covers finstack-ai-kernel, finstack-ai-protocol, finstack-ai-runtime,
+finstack-ai, finstack-ai-server, and every extensions/** crate. Runtime also
+dumps `native-tokio` and `wasm-host` because its default feature set is empty.
+Python/JS name lists stay in public_items.py.
 """
 
 from __future__ import annotations
@@ -40,11 +40,17 @@ DOC_TARGET_DIR = REPO_ROOT / "target" / "public-api"
 # the regenerated baselines in the same change. Keep it in step with the comment
 # beside `cargo:cargo-public-api` in root mise.toml.
 NIGHTLY = "nightly-2026-08-14"
+# Named one by one because these are the frozen consumer surface: the core
+# stack plus the reference server. `plugins/` is deliberately not covered --
+# the reference and template plugins are worked examples that must stay free to
+# change without a baseline diff, and the WIT contract itself is frozen
+# separately under fixtures/compatibility/wit/.
 CORE_CRATES = (
     REPO_ROOT / "crates" / "finstack-ai-kernel",
     REPO_ROOT / "crates" / "finstack-ai-protocol",
     REPO_ROOT / "crates" / "finstack-ai-runtime",
     REPO_ROOT / "crates" / "finstack-ai",
+    REPO_ROOT / "crates" / "finstack-ai-server",
 )
 
 

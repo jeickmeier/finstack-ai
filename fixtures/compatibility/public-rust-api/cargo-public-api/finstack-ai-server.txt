@@ -1,0 +1,152 @@
+pub mod finstack_ai_server
+pub enum finstack_ai_server::ListenAddr
+pub finstack_ai_server::ListenAddr::Tcp
+pub finstack_ai_server::ListenAddr::Tcp::addr: core::net::socket_addr::SocketAddr
+pub finstack_ai_server::ListenAddr::Tcp::tls: core::option::Option<alloc::sync::Arc<rustls::server::server_conn::ServerConfig>>
+pub finstack_ai_server::ListenAddr::Unix
+pub finstack_ai_server::ListenAddr::Unix::path: std::path::PathBuf
+impl finstack_ai_server::ListenAddr
+pub const fn finstack_ai_server::ListenAddr::loopback(u16) -> Self
+pub const fn finstack_ai_server::ListenAddr::plaintext_tcp(core::net::socket_addr::SocketAddr) -> Self
+pub fn finstack_ai_server::ListenAddr::tcp_addr(&self) -> core::option::Option<core::net::socket_addr::SocketAddr>
+pub fn finstack_ai_server::ListenAddr::tls(core::net::socket_addr::SocketAddr, alloc::sync::Arc<rustls::server::server_conn::ServerConfig>) -> core::result::Result<Self, finstack_ai_server::ServerError>
+pub fn finstack_ai_server::ListenAddr::tls_config(&self) -> core::option::Option<&alloc::sync::Arc<rustls::server::server_conn::ServerConfig>>
+pub fn finstack_ai_server::ListenAddr::unix(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn finstack_ai_server::ListenAddr::validate(&self) -> core::result::Result<(), finstack_ai_server::ServerError>
+impl core::clone::Clone for finstack_ai_server::ListenAddr
+pub fn finstack_ai_server::ListenAddr::clone(&self) -> finstack_ai_server::ListenAddr
+pub enum finstack_ai_server::ServerError
+pub finstack_ai_server::ServerError::Audit(finstack_ai_runtime::services::audit::SecurityAuditGateError)
+pub finstack_ai_server::ServerError::AuditNotReady
+pub finstack_ai_server::ServerError::AuthenticationFailure
+pub finstack_ai_server::ServerError::CreditTimeout
+pub finstack_ai_server::ServerError::HandshakeTimeout
+pub finstack_ai_server::ServerError::IdempotencyConflict
+pub finstack_ai_server::ServerError::Io(core::io::error::Error)
+pub finstack_ai_server::ServerError::ListenInvalid
+pub finstack_ai_server::ServerError::LiveBeforeBarrier
+pub finstack_ai_server::ServerError::Protocol(finstack_ai_protocol::error::ProtocolError)
+pub finstack_ai_server::ServerError::ReceiptCap
+pub finstack_ai_server::ServerError::ScopeMismatch
+pub finstack_ai_server::ServerError::SessionBusy
+pub finstack_ai_server::ServerError::UnknownLocator
+impl finstack_ai_server::ServerError
+pub const fn finstack_ai_server::ServerError::code(&self) -> &'static str
+impl core::convert::From<core::io::error::Error> for finstack_ai_server::ServerError
+pub fn finstack_ai_server::ServerError::from(core::io::error::Error) -> Self
+impl core::convert::From<finstack_ai_protocol::error::ProtocolError> for finstack_ai_server::ServerError
+pub fn finstack_ai_server::ServerError::from(finstack_ai_protocol::error::ProtocolError) -> Self
+impl core::convert::From<finstack_ai_runtime::services::audit::SecurityAuditGateError> for finstack_ai_server::ServerError
+pub fn finstack_ai_server::ServerError::from(finstack_ai_runtime::services::audit::SecurityAuditGateError) -> Self
+impl core::error::Error for finstack_ai_server::ServerError
+pub fn finstack_ai_server::ServerError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for finstack_ai_server::ServerError
+pub fn finstack_ai_server::ServerError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_server::ServerError
+pub fn finstack_ai_server::ServerError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum finstack_ai_server::TransportKind
+pub finstack_ai_server::TransportKind::LoopbackPlaintext
+pub finstack_ai_server::TransportKind::Tls
+pub finstack_ai_server::TransportKind::Unix
+impl finstack_ai_server::TransportKind
+pub const fn finstack_ai_server::TransportKind::allows_bearer(self) -> bool
+impl core::clone::Clone for finstack_ai_server::TransportKind
+pub fn finstack_ai_server::TransportKind::clone(&self) -> finstack_ai_server::TransportKind
+impl core::cmp::Eq for finstack_ai_server::TransportKind
+impl core::cmp::PartialEq for finstack_ai_server::TransportKind
+pub fn finstack_ai_server::TransportKind::eq(&self, &finstack_ai_server::TransportKind) -> bool
+impl core::fmt::Debug for finstack_ai_server::TransportKind
+pub fn finstack_ai_server::TransportKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_server::TransportKind
+impl core::marker::StructuralPartialEq for finstack_ai_server::TransportKind
+pub struct finstack_ai_server::AuthContext
+impl finstack_ai_server::AuthContext
+pub fn finstack_ai_server::AuthContext::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn finstack_ai_server::AuthContext::principal(&self) -> &str
+pub const fn finstack_ai_server::AuthContext::protocol_version(&self) -> u16
+pub fn finstack_ai_server::AuthContext::tenant_scope(&self) -> &str
+impl core::clone::Clone for finstack_ai_server::AuthContext
+pub fn finstack_ai_server::AuthContext::clone(&self) -> finstack_ai_server::AuthContext
+impl core::cmp::Eq for finstack_ai_server::AuthContext
+impl core::cmp::PartialEq for finstack_ai_server::AuthContext
+pub fn finstack_ai_server::AuthContext::eq(&self, &finstack_ai_server::AuthContext) -> bool
+impl core::fmt::Debug for finstack_ai_server::AuthContext
+pub fn finstack_ai_server::AuthContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_server::AuthContext
+pub struct finstack_ai_server::CreditLimits
+pub finstack_ai_server::CreditLimits::ack_deadline: core::time::Duration
+pub finstack_ai_server::CreditLimits::bytes: u32
+pub finstack_ai_server::CreditLimits::items: u32
+impl core::clone::Clone for finstack_ai_server::CreditLimits
+pub fn finstack_ai_server::CreditLimits::clone(&self) -> finstack_ai_server::CreditLimits
+impl core::cmp::Eq for finstack_ai_server::CreditLimits
+impl core::cmp::PartialEq for finstack_ai_server::CreditLimits
+pub fn finstack_ai_server::CreditLimits::eq(&self, &finstack_ai_server::CreditLimits) -> bool
+impl core::default::Default for finstack_ai_server::CreditLimits
+pub fn finstack_ai_server::CreditLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_server::CreditLimits
+pub fn finstack_ai_server::CreditLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_server::CreditLimits
+impl core::marker::StructuralPartialEq for finstack_ai_server::CreditLimits
+pub struct finstack_ai_server::ReconnectView
+pub finstack_ai_server::ReconnectView::barrier: u64
+pub finstack_ai_server::ReconnectView::snapshot: core::option::Option<finstack_ai_protocol::remote::RemoteSnapshot>
+pub finstack_ai_server::ReconnectView::snapshot_sequence: u64
+pub finstack_ai_server::ReconnectView::tail: alloc::vec::Vec<finstack_ai_protocol::remote::RemoteDurableStep>
+impl core::clone::Clone for finstack_ai_server::ReconnectView
+pub fn finstack_ai_server::ReconnectView::clone(&self) -> finstack_ai_server::ReconnectView
+impl core::cmp::Eq for finstack_ai_server::ReconnectView
+impl core::cmp::PartialEq for finstack_ai_server::ReconnectView
+pub fn finstack_ai_server::ReconnectView::eq(&self, &finstack_ai_server::ReconnectView) -> bool
+impl core::fmt::Debug for finstack_ai_server::ReconnectView
+pub fn finstack_ai_server::ReconnectView::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_server::ReconnectView
+pub struct finstack_ai_server::RemoteClient<S>
+impl<S> finstack_ai_server::RemoteClient<S> where S: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn finstack_ai_server::RemoteClient<S>::ack(&mut self, u64, u32, u32) -> core::result::Result<(), finstack_ai_server::ServerError>
+pub async fn finstack_ai_server::RemoteClient<S>::command(&mut self, finstack_ai_protocol::remote::RemoteCommand) -> core::result::Result<finstack_ai_protocol::remote::RemoteCommandResult, finstack_ai_server::ServerError>
+pub const fn finstack_ai_server::RemoteClient<S>::new(S) -> Self
+pub async fn finstack_ai_server::RemoteClient<S>::next_post_auth(&mut self) -> core::result::Result<finstack_ai_protocol::remote::RemotePostAuth, finstack_ai_server::ServerError>
+pub async fn finstack_ai_server::RemoteClient<S>::reconnect(&mut self, &finstack_ai_protocol::wire::handshake::VersionOffer, finstack_ai_protocol::remote::RemoteAuthMethod, finstack_ai_protocol::remote::RemoteLocator, impl core::convert::Into<alloc::string::String>, core::option::Option<u64>) -> core::result::Result<finstack_ai_server::ReconnectView, finstack_ai_server::ServerError>
+pub struct finstack_ai_server::Server
+impl finstack_ai_server::Server
+pub async fn finstack_ai_server::Server::accept_once(&self) -> core::result::Result<(), finstack_ai_server::ServerError>
+pub async fn finstack_ai_server::Server::bind(finstack_ai_server::ListenAddr, alloc::sync::Arc<dyn finstack_ai_server::AuthVerifier>, core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::audit::SecurityAuditSink>>, core::time::Duration) -> core::result::Result<Self, finstack_ai_server::ServerError>
+pub fn finstack_ai_server::Server::hub(&self) -> &alloc::sync::Arc<finstack_ai_server::SessionHub>
+pub async fn finstack_ai_server::Server::serve<S>(&self, S, finstack_ai_server::TransportKind) -> core::result::Result<(), finstack_ai_server::ServerError> where S: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub fn finstack_ai_server::Server::set_credit_limits(&mut self, finstack_ai_server::CreditLimits)
+impl core::fmt::Debug for finstack_ai_server::Server
+pub fn finstack_ai_server::Server::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_server::SessionHub
+impl finstack_ai_server::SessionHub
+pub fn finstack_ai_server::SessionHub::insert(&self, finstack_ai_server::SessionReplica)
+pub fn finstack_ai_server::SessionHub::with<R>(&self, &str, impl core::ops::function::FnOnce(&mut finstack_ai_server::SessionReplica) -> core::result::Result<R, finstack_ai_server::ServerError>) -> core::result::Result<R, finstack_ai_server::ServerError>
+impl core::default::Default for finstack_ai_server::SessionHub
+pub fn finstack_ai_server::SessionHub::default() -> finstack_ai_server::SessionHub
+impl core::fmt::Debug for finstack_ai_server::SessionHub
+pub fn finstack_ai_server::SessionHub::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_server::SessionReplica
+impl finstack_ai_server::SessionReplica
+pub fn finstack_ai_server::SessionReplica::append_durable(&mut self, finstack_ai_protocol::remote::RemoteEventView)
+pub fn finstack_ai_server::SessionReplica::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn finstack_ai_server::SessionReplica::queue_live(&mut self, finstack_ai_protocol::remote::RemoteEventView) -> core::result::Result<(), finstack_ai_server::ServerError>
+pub fn finstack_ai_server::SessionReplica::release_barrier(&mut self)
+pub fn finstack_ai_server::SessionReplica::with_receipt_cap(self, usize) -> Self
+impl core::fmt::Debug for finstack_ai_server::SessionReplica
+pub fn finstack_ai_server::SessionReplica::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_server::StaticAuthVerifier
+impl finstack_ai_server::StaticAuthVerifier
+pub fn finstack_ai_server::StaticAuthVerifier::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for finstack_ai_server::StaticAuthVerifier
+pub fn finstack_ai_server::StaticAuthVerifier::clone(&self) -> finstack_ai_server::StaticAuthVerifier
+impl core::default::Default for finstack_ai_server::StaticAuthVerifier
+pub fn finstack_ai_server::StaticAuthVerifier::default() -> Self
+impl core::fmt::Debug for finstack_ai_server::StaticAuthVerifier
+pub fn finstack_ai_server::StaticAuthVerifier::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_server::AuthVerifier for finstack_ai_server::StaticAuthVerifier
+pub fn finstack_ai_server::StaticAuthVerifier::verify(&self, &finstack_ai_protocol::remote::RemoteAuthMethod, finstack_ai_server::TransportKind) -> core::result::Result<finstack_ai_server::AuthContext, finstack_ai_server::ServerError>
+pub trait finstack_ai_server::AuthVerifier: core::marker::Send + core::marker::Sync + 'static
+pub fn finstack_ai_server::AuthVerifier::verify(&self, &finstack_ai_protocol::remote::RemoteAuthMethod, finstack_ai_server::TransportKind) -> core::result::Result<finstack_ai_server::AuthContext, finstack_ai_server::ServerError>
+impl finstack_ai_server::AuthVerifier for finstack_ai_server::StaticAuthVerifier
+pub fn finstack_ai_server::StaticAuthVerifier::verify(&self, &finstack_ai_protocol::remote::RemoteAuthMethod, finstack_ai_server::TransportKind) -> core::result::Result<finstack_ai_server::AuthContext, finstack_ai_server::ServerError>
+pub fn finstack_ai_server::tls13_server_config(alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>, rustls_pki_types::PrivateKeyDer<'static>) -> core::result::Result<alloc::sync::Arc<rustls::server::server_conn::ServerConfig>, finstack_ai_server::ServerError>
