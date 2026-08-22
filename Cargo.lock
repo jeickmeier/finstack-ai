@@ -1939,7 +1939,6 @@ dependencies = [
 name = "finstack-ai-tools-skill-import"
 version = "2.0.0"
 dependencies = [
- "finstack-ai",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "serde_json",

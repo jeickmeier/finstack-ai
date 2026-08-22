@@ -71,13 +71,7 @@ FORBIDDEN_EDGES = {
 # Violations that are known, tracked, and not yet fixed. Each entry must cite
 # why it is still here. An entry that no longer corresponds to a real edge is
 # itself an error, so this list cannot rot into a permanent exemption.
-KNOWN_VIOLATIONS = {
-    ("finstack-ai-tools-skill-import", "finstack-ai"): (
-        "needs InstructionSpec/CapabilitySpec/CapabilityActivation from the "
-        "facade's `spec` module; resolved by moving `spec` down into "
-        "finstack-ai-runtime. Remove this entry with that change."
-    ),
-}
+KNOWN_VIOLATIONS: dict[tuple[str, str], str] = {}
 
 
 def tier_of(relative_dir: str) -> int:

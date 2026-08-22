@@ -2,7 +2,7 @@ pub mod finstack_ai_tools_skill_import
 pub struct finstack_ai_tools_skill_import::ImportedSkill
 impl finstack_ai_tools_skill_import::ImportedSkill
 pub const fn finstack_ai_tools_skill_import::ImportedSkill::content_digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
-pub const fn finstack_ai_tools_skill_import::ImportedSkill::spec(&self) -> &finstack_ai::spec::CapabilitySpec
+pub const fn finstack_ai_tools_skill_import::ImportedSkill::spec(&self) -> &finstack_ai_runtime::spec::CapabilitySpec
 impl core::clone::Clone for finstack_ai_tools_skill_import::ImportedSkill
 pub fn finstack_ai_tools_skill_import::ImportedSkill::clone(&self) -> finstack_ai_tools_skill_import::ImportedSkill
 impl core::cmp::Eq for finstack_ai_tools_skill_import::ImportedSkill
@@ -15,7 +15,7 @@ pub struct finstack_ai_tools_skill_import::SkillCatalog
 impl finstack_ai_tools_skill_import::SkillCatalog
 pub fn finstack_ai_tools_skill_import::SkillCatalog::content_digests(&self) -> alloc::vec::Vec<finstack_ai_kernel::primitives::digest::Digest>
 pub fn finstack_ai_tools_skill_import::SkillCatalog::disabled() -> Self
-pub fn finstack_ai_tools_skill_import::SkillCatalog::specs(&self) -> alloc::vec::Vec<&finstack_ai::spec::CapabilitySpec>
+pub fn finstack_ai_tools_skill_import::SkillCatalog::specs(&self) -> alloc::vec::Vec<&finstack_ai_runtime::spec::CapabilitySpec>
 pub fn finstack_ai_tools_skill_import::SkillCatalog::try_import(bool, &[finstack_ai_tools_skill_import::SkillMarkdown]) -> core::result::Result<Self, finstack_ai_tools_skill_import::SkillImportError>
 impl core::clone::Clone for finstack_ai_tools_skill_import::SkillCatalog
 pub fn finstack_ai_tools_skill_import::SkillCatalog::clone(&self) -> finstack_ai_tools_skill_import::SkillCatalog

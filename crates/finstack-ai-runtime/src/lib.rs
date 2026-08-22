@@ -108,6 +108,7 @@ mod driver;
 mod error;
 mod exec;
 pub mod ports;
+pub mod spec;
 
 /// `bytes::Bytes` appears in the port signatures this crate defines
 /// (`ArtifactStore::stage_put`, the model and tool streams), so it is
@@ -131,7 +132,14 @@ pub(crate) use exec::task;
 pub(crate) use exec::{coordinator, event_hub};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use exec::{run_types, settlement, stage_settlement};
-pub(crate) use ports::{context, journal, middleware, model, observer, tool};
+pub(crate) use ports::{context, journal};
+// The remaining port aliases are consumed only by the driver-gated `exec`
+// modules (settlement, coordinator, middleware and compaction drivers), so a
+// `--no-default-features` build would otherwise carry them unused.
+#[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
+pub(crate) use ports::{middleware, model};
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use ports::{observer, tool};
 pub(crate) use services::{id_generation, interaction};
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]

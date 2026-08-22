@@ -379,21 +379,21 @@ pub enum finstack_ai_runtime::child::ChildRunPolicy
 pub finstack_ai_runtime::child::ChildRunPolicy::Allow
 pub finstack_ai_runtime::child::ChildRunPolicy::Allow::max_depth: u16
 pub finstack_ai_runtime::child::ChildRunPolicy::Deny
-impl core::clone::Clone for finstack_ai_runtime::child::ChildRunPolicy
-pub fn finstack_ai_runtime::child::ChildRunPolicy::clone(&self) -> finstack_ai_runtime::child::ChildRunPolicy
-impl core::cmp::Eq for finstack_ai_runtime::child::ChildRunPolicy
-impl core::cmp::PartialEq for finstack_ai_runtime::child::ChildRunPolicy
-pub fn finstack_ai_runtime::child::ChildRunPolicy::eq(&self, &finstack_ai_runtime::child::ChildRunPolicy) -> bool
-impl core::default::Default for finstack_ai_runtime::child::ChildRunPolicy
-pub fn finstack_ai_runtime::child::ChildRunPolicy::default() -> finstack_ai_runtime::child::ChildRunPolicy
-impl core::fmt::Debug for finstack_ai_runtime::child::ChildRunPolicy
-pub fn finstack_ai_runtime::child::ChildRunPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai_runtime::child::ChildRunPolicy
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::child::ChildRunPolicy
-impl serde_core::ser::Serialize for finstack_ai_runtime::child::ChildRunPolicy
-pub fn finstack_ai_runtime::child::ChildRunPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::child::ChildRunPolicy
-pub fn finstack_ai_runtime::child::ChildRunPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::clone::Clone for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::clone(&self) -> finstack_ai_runtime::spec::ChildRunPolicy
+impl core::cmp::Eq for finstack_ai_runtime::spec::ChildRunPolicy
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::eq(&self, &finstack_ai_runtime::spec::ChildRunPolicy) -> bool
+impl core::default::Default for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::default() -> finstack_ai_runtime::spec::ChildRunPolicy
+impl core::fmt::Debug for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::spec::ChildRunPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::ChildRunPolicy
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_runtime::child::ChildRunStatus
 pub finstack_ai_runtime::child::ChildRunStatus::Accepted
 pub finstack_ai_runtime::child::ChildRunStatus::CancellationRequested
@@ -2044,21 +2044,21 @@ pub mod finstack_ai_runtime::ports::model
 pub enum finstack_ai_runtime::ports::model::ApprovalGrantMode
 pub finstack_ai_runtime::ports::model::ApprovalGrantMode::InformedBatch
 pub finstack_ai_runtime::ports::model::ApprovalGrantMode::PerCall
-impl core::clone::Clone for finstack_ai_runtime::ports::model::ApprovalGrantMode
-pub fn finstack_ai_runtime::ports::model::ApprovalGrantMode::clone(&self) -> finstack_ai_runtime::ports::model::ApprovalGrantMode
-impl core::cmp::Eq for finstack_ai_runtime::ports::model::ApprovalGrantMode
-impl core::cmp::PartialEq for finstack_ai_runtime::ports::model::ApprovalGrantMode
-pub fn finstack_ai_runtime::ports::model::ApprovalGrantMode::eq(&self, &finstack_ai_runtime::ports::model::ApprovalGrantMode) -> bool
-impl core::default::Default for finstack_ai_runtime::ports::model::ApprovalGrantMode
-pub fn finstack_ai_runtime::ports::model::ApprovalGrantMode::default() -> finstack_ai_runtime::ports::model::ApprovalGrantMode
-impl core::fmt::Debug for finstack_ai_runtime::ports::model::ApprovalGrantMode
-pub fn finstack_ai_runtime::ports::model::ApprovalGrantMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for finstack_ai_runtime::ports::model::ApprovalGrantMode
-impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::model::ApprovalGrantMode
-impl serde_core::ser::Serialize for finstack_ai_runtime::ports::model::ApprovalGrantMode
-pub fn finstack_ai_runtime::ports::model::ApprovalGrantMode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::ports::model::ApprovalGrantMode
-pub fn finstack_ai_runtime::ports::model::ApprovalGrantMode::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::clone::Clone for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::clone(&self) -> finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::cmp::Eq for finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::eq(&self, &finstack_ai_runtime::spec::ApprovalGrantMode) -> bool
+impl core::default::Default for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::default() -> finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::fmt::Debug for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::ApprovalGrantMode
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_runtime::ports::model::ApprovalRequirement
 pub finstack_ai_runtime::ports::model::ApprovalRequirement::NotRequired
 pub finstack_ai_runtime::ports::model::ApprovalRequirement::Policy
@@ -3555,7 +3555,7 @@ pub async fn finstack_ai_runtime::run::RunHandle::wait_for_live_state(&self, u64
 impl core::clone::Clone for finstack_ai_runtime::run::RunHandle
 pub fn finstack_ai_runtime::run::RunHandle::clone(&self) -> finstack_ai_runtime::run::RunHandle
 pub struct finstack_ai_runtime::run::RunTaskConfig
-pub finstack_ai_runtime::run::RunTaskConfig::approval_grant: finstack_ai_runtime::ports::model::ApprovalGrantMode
+pub finstack_ai_runtime::run::RunTaskConfig::approval_grant: finstack_ai_runtime::spec::ApprovalGrantMode
 pub finstack_ai_runtime::run::RunTaskConfig::command_capacity: usize
 pub finstack_ai_runtime::run::RunTaskConfig::event_hub: finstack_ai_runtime::events::EventHubConfig
 pub finstack_ai_runtime::run::RunTaskConfig::shutdown_deadline: core::time::Duration
@@ -3823,6 +3823,220 @@ pub fn finstack_ai_runtime::session::ExternalIdentityMap::resolve(&self, &finsta
 impl finstack_ai_runtime::session::ExternalIdentityMap for finstack_ai_runtime::session::MemoryExternalIdentityMap
 pub fn finstack_ai_runtime::session::MemoryExternalIdentityMap::bind(&self, finstack_ai_runtime::session::ExternalIdentityKey, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::ids::LaneId) -> core::result::Result<(), finstack_ai_runtime::session::IdentityMapError>
 pub fn finstack_ai_runtime::session::MemoryExternalIdentityMap::resolve(&self, &finstack_ai_runtime::session::ExternalIdentityKey) -> core::option::Option<(finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::ids::LaneId)>
+pub mod finstack_ai_runtime::spec
+pub enum finstack_ai_runtime::spec::AgentSpecError
+pub finstack_ai_runtime::spec::AgentSpecError::DuplicateCapability
+pub finstack_ai_runtime::spec::AgentSpecError::DuplicateCapability::capability: finstack_ai_kernel::primitives::ids::CapabilityId
+pub finstack_ai_runtime::spec::AgentSpecError::DuplicateComponent
+pub finstack_ai_runtime::spec::AgentSpecError::DuplicateComponent::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai_runtime::spec::AgentSpecError::DuplicateComponent::field: &'static str
+pub finstack_ai_runtime::spec::AgentSpecError::InvalidDescription
+pub finstack_ai_runtime::spec::AgentSpecError::InvalidDescription::reason: &'static str
+pub finstack_ai_runtime::spec::AgentSpecError::InvalidInstruction
+pub finstack_ai_runtime::spec::AgentSpecError::InvalidInstruction::reason: &'static str
+pub finstack_ai_runtime::spec::AgentSpecError::InvalidLimits
+pub finstack_ai_runtime::spec::AgentSpecError::InvalidLimits::message: alloc::string::String
+pub finstack_ai_runtime::spec::AgentSpecError::Parse
+pub finstack_ai_runtime::spec::AgentSpecError::Parse::message: alloc::string::String
+pub finstack_ai_runtime::spec::AgentSpecError::Serialize
+pub finstack_ai_runtime::spec::AgentSpecError::Serialize::message: alloc::string::String
+pub finstack_ai_runtime::spec::AgentSpecError::TooManyItems
+pub finstack_ai_runtime::spec::AgentSpecError::TooManyItems::field: &'static str
+pub finstack_ai_runtime::spec::AgentSpecError::TooManyItems::len: usize
+pub finstack_ai_runtime::spec::AgentSpecError::TooManyItems::max: usize
+pub finstack_ai_runtime::spec::AgentSpecError::UnsupportedSchemaVersion
+pub finstack_ai_runtime::spec::AgentSpecError::UnsupportedSchemaVersion::actual: u16
+impl core::clone::Clone for finstack_ai_runtime::spec::AgentSpecError
+pub fn finstack_ai_runtime::spec::AgentSpecError::clone(&self) -> finstack_ai_runtime::spec::AgentSpecError
+impl core::cmp::Eq for finstack_ai_runtime::spec::AgentSpecError
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::AgentSpecError
+pub fn finstack_ai_runtime::spec::AgentSpecError::eq(&self, &finstack_ai_runtime::spec::AgentSpecError) -> bool
+impl core::error::Error for finstack_ai_runtime::spec::AgentSpecError
+impl core::fmt::Debug for finstack_ai_runtime::spec::AgentSpecError
+pub fn finstack_ai_runtime::spec::AgentSpecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_runtime::spec::AgentSpecError
+pub fn finstack_ai_runtime::spec::AgentSpecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::AgentSpecError
+pub enum finstack_ai_runtime::spec::ApprovalGrantMode
+pub finstack_ai_runtime::spec::ApprovalGrantMode::InformedBatch
+pub finstack_ai_runtime::spec::ApprovalGrantMode::PerCall
+impl core::clone::Clone for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::clone(&self) -> finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::cmp::Eq for finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::eq(&self, &finstack_ai_runtime::spec::ApprovalGrantMode) -> bool
+impl core::default::Default for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::default() -> finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::fmt::Debug for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::spec::ApprovalGrantMode
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::ApprovalGrantMode
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::ApprovalGrantMode
+pub fn finstack_ai_runtime::spec::ApprovalGrantMode::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_runtime::spec::CapabilityActivation
+pub finstack_ai_runtime::spec::CapabilityActivation::Always
+pub finstack_ai_runtime::spec::CapabilityActivation::Application
+pub finstack_ai_runtime::spec::CapabilityActivation::Disabled
+pub finstack_ai_runtime::spec::CapabilityActivation::Model
+impl core::clone::Clone for finstack_ai_runtime::spec::CapabilityActivation
+pub fn finstack_ai_runtime::spec::CapabilityActivation::clone(&self) -> finstack_ai_runtime::spec::CapabilityActivation
+impl core::cmp::Eq for finstack_ai_runtime::spec::CapabilityActivation
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::CapabilityActivation
+pub fn finstack_ai_runtime::spec::CapabilityActivation::eq(&self, &finstack_ai_runtime::spec::CapabilityActivation) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::spec::CapabilityActivation
+pub fn finstack_ai_runtime::spec::CapabilityActivation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::spec::CapabilityActivation
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::CapabilityActivation
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::CapabilityActivation
+pub fn finstack_ai_runtime::spec::CapabilityActivation::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::CapabilityActivation
+pub fn finstack_ai_runtime::spec::CapabilityActivation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_runtime::spec::ChildRunPolicy
+pub finstack_ai_runtime::spec::ChildRunPolicy::Allow
+pub finstack_ai_runtime::spec::ChildRunPolicy::Allow::max_depth: u16
+pub finstack_ai_runtime::spec::ChildRunPolicy::Deny
+impl core::clone::Clone for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::clone(&self) -> finstack_ai_runtime::spec::ChildRunPolicy
+impl core::cmp::Eq for finstack_ai_runtime::spec::ChildRunPolicy
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::eq(&self, &finstack_ai_runtime::spec::ChildRunPolicy) -> bool
+impl core::default::Default for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::default() -> finstack_ai_runtime::spec::ChildRunPolicy
+impl core::fmt::Debug for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::spec::ChildRunPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::ChildRunPolicy
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::ChildRunPolicy
+pub fn finstack_ai_runtime::spec::ChildRunPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::spec::AgentBuilder
+impl finstack_ai_runtime::spec::AgentBuilder
+pub fn finstack_ai_runtime::spec::AgentBuilder::build(self) -> core::result::Result<finstack_ai_runtime::spec::AgentSpec, finstack_ai_runtime::spec::AgentSpecError>
+pub fn finstack_ai_runtime::spec::AgentBuilder::capabilities(self, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_runtime::spec::CapabilityRef]>>) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::context_providers(self, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>>) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::extension_config(self, finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::raw_json::RawJson) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::instructions(self, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_runtime::spec::InstructionSpec]>>) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::limits(self, finstack_ai_kernel::records::policy::limits::RunLimits) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::middleware(self, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::MiddlewareRef]>>) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::new(finstack_ai_kernel::primitives::ids::AgentId, finstack_ai_kernel::primitives::identity::ComponentRef, finstack_ai_kernel::primitives::identity::ComponentRef) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::observers(self, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>>) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::policy(self, finstack_ai_runtime::spec::RunPolicy) -> Self
+pub fn finstack_ai_runtime::spec::AgentBuilder::toolsets(self, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>>) -> Self
+impl core::clone::Clone for finstack_ai_runtime::spec::AgentBuilder
+pub fn finstack_ai_runtime::spec::AgentBuilder::clone(&self) -> finstack_ai_runtime::spec::AgentBuilder
+impl core::fmt::Debug for finstack_ai_runtime::spec::AgentBuilder
+pub fn finstack_ai_runtime::spec::AgentBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_runtime::spec::AgentSpec
+pub finstack_ai_runtime::spec::AgentSpec::capabilities: alloc::sync::Arc<[finstack_ai_runtime::spec::CapabilityRef]>
+pub finstack_ai_runtime::spec::AgentSpec::context_providers: alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>
+pub finstack_ai_runtime::spec::AgentSpec::extension_config: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::raw_json::RawJson>
+pub finstack_ai_runtime::spec::AgentSpec::id: finstack_ai_kernel::primitives::ids::AgentId
+pub finstack_ai_runtime::spec::AgentSpec::instructions: alloc::sync::Arc<[finstack_ai_runtime::spec::InstructionSpec]>
+pub finstack_ai_runtime::spec::AgentSpec::limits: finstack_ai_kernel::records::policy::limits::RunLimits
+pub finstack_ai_runtime::spec::AgentSpec::middleware: alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::MiddlewareRef]>
+pub finstack_ai_runtime::spec::AgentSpec::model: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai_runtime::spec::AgentSpec::observers: alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>
+pub finstack_ai_runtime::spec::AgentSpec::policy: finstack_ai_runtime::spec::RunPolicy
+pub finstack_ai_runtime::spec::AgentSpec::schema_version: u16
+pub finstack_ai_runtime::spec::AgentSpec::store: core::option::Option<finstack_ai_kernel::primitives::identity::ComponentRef>
+pub finstack_ai_runtime::spec::AgentSpec::toolsets: alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>
+impl finstack_ai_runtime::spec::AgentSpec
+pub fn finstack_ai_runtime::spec::AgentSpec::builder(finstack_ai_kernel::primitives::ids::AgentId, finstack_ai_kernel::primitives::identity::ComponentRef, finstack_ai_kernel::primitives::identity::ComponentRef) -> finstack_ai_runtime::spec::AgentBuilder
+pub fn finstack_ai_runtime::spec::AgentSpec::canonical_json(&self) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_runtime::spec::AgentSpecError>
+pub fn finstack_ai_runtime::spec::AgentSpec::fingerprint(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_runtime::spec::AgentSpecError>
+pub fn finstack_ai_runtime::spec::AgentSpec::from_json(&[u8]) -> core::result::Result<Self, finstack_ai_runtime::spec::AgentSpecError>
+pub fn finstack_ai_runtime::spec::AgentSpec::validate(&self) -> core::result::Result<(), finstack_ai_runtime::spec::AgentSpecError>
+impl core::clone::Clone for finstack_ai_runtime::spec::AgentSpec
+pub fn finstack_ai_runtime::spec::AgentSpec::clone(&self) -> finstack_ai_runtime::spec::AgentSpec
+impl core::cmp::Eq for finstack_ai_runtime::spec::AgentSpec
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::AgentSpec
+pub fn finstack_ai_runtime::spec::AgentSpec::eq(&self, &finstack_ai_runtime::spec::AgentSpec) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::spec::AgentSpec
+pub fn finstack_ai_runtime::spec::AgentSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::AgentSpec
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::AgentSpec
+pub fn finstack_ai_runtime::spec::AgentSpec::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::AgentSpec
+pub fn finstack_ai_runtime::spec::AgentSpec::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::spec::CapabilityRef
+pub finstack_ai_runtime::spec::CapabilityRef::bundle: core::option::Option<finstack_ai_kernel::primitives::ids::BundleId>
+pub finstack_ai_runtime::spec::CapabilityRef::id: finstack_ai_kernel::primitives::ids::CapabilityId
+impl core::clone::Clone for finstack_ai_runtime::spec::CapabilityRef
+pub fn finstack_ai_runtime::spec::CapabilityRef::clone(&self) -> finstack_ai_runtime::spec::CapabilityRef
+impl core::cmp::Eq for finstack_ai_runtime::spec::CapabilityRef
+impl core::cmp::Ord for finstack_ai_runtime::spec::CapabilityRef
+pub fn finstack_ai_runtime::spec::CapabilityRef::cmp(&self, &finstack_ai_runtime::spec::CapabilityRef) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::CapabilityRef
+pub fn finstack_ai_runtime::spec::CapabilityRef::eq(&self, &finstack_ai_runtime::spec::CapabilityRef) -> bool
+impl core::cmp::PartialOrd for finstack_ai_runtime::spec::CapabilityRef
+pub fn finstack_ai_runtime::spec::CapabilityRef::partial_cmp(&self, &finstack_ai_runtime::spec::CapabilityRef) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai_runtime::spec::CapabilityRef
+pub fn finstack_ai_runtime::spec::CapabilityRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::CapabilityRef
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::CapabilityRef
+pub fn finstack_ai_runtime::spec::CapabilityRef::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::CapabilityRef
+pub fn finstack_ai_runtime::spec::CapabilityRef::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::spec::CapabilitySpec
+pub finstack_ai_runtime::spec::CapabilitySpec::activation: finstack_ai_runtime::spec::CapabilityActivation
+pub finstack_ai_runtime::spec::CapabilitySpec::context_providers: alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>
+pub finstack_ai_runtime::spec::CapabilitySpec::description: alloc::sync::Arc<str>
+pub finstack_ai_runtime::spec::CapabilitySpec::id: finstack_ai_kernel::primitives::ids::CapabilityId
+pub finstack_ai_runtime::spec::CapabilitySpec::instructions: alloc::sync::Arc<[finstack_ai_runtime::spec::InstructionSpec]>
+pub finstack_ai_runtime::spec::CapabilitySpec::middleware: alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>
+pub finstack_ai_runtime::spec::CapabilitySpec::toolsets: alloc::sync::Arc<[finstack_ai_kernel::primitives::identity::ComponentRef]>
+impl finstack_ai_runtime::spec::CapabilitySpec
+pub fn finstack_ai_runtime::spec::CapabilitySpec::validate(&self) -> core::result::Result<(), finstack_ai_runtime::spec::AgentSpecError>
+impl core::clone::Clone for finstack_ai_runtime::spec::CapabilitySpec
+pub fn finstack_ai_runtime::spec::CapabilitySpec::clone(&self) -> finstack_ai_runtime::spec::CapabilitySpec
+impl core::cmp::Eq for finstack_ai_runtime::spec::CapabilitySpec
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::CapabilitySpec
+pub fn finstack_ai_runtime::spec::CapabilitySpec::eq(&self, &finstack_ai_runtime::spec::CapabilitySpec) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::spec::CapabilitySpec
+pub fn finstack_ai_runtime::spec::CapabilitySpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::CapabilitySpec
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::CapabilitySpec
+pub fn finstack_ai_runtime::spec::CapabilitySpec::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::CapabilitySpec
+pub fn finstack_ai_runtime::spec::CapabilitySpec::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::spec::InstructionSpec
+impl finstack_ai_runtime::spec::InstructionSpec
+pub fn finstack_ai_runtime::spec::InstructionSpec::text(&self) -> &str
+pub fn finstack_ai_runtime::spec::InstructionSpec::try_new(impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, finstack_ai_runtime::spec::AgentSpecError>
+impl core::clone::Clone for finstack_ai_runtime::spec::InstructionSpec
+pub fn finstack_ai_runtime::spec::InstructionSpec::clone(&self) -> finstack_ai_runtime::spec::InstructionSpec
+impl core::cmp::Eq for finstack_ai_runtime::spec::InstructionSpec
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::InstructionSpec
+pub fn finstack_ai_runtime::spec::InstructionSpec::eq(&self, &finstack_ai_runtime::spec::InstructionSpec) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::spec::InstructionSpec
+pub fn finstack_ai_runtime::spec::InstructionSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::InstructionSpec
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::InstructionSpec
+pub fn finstack_ai_runtime::spec::InstructionSpec::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::InstructionSpec
+pub fn finstack_ai_runtime::spec::InstructionSpec::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_runtime::spec::RunPolicy
+pub finstack_ai_runtime::spec::RunPolicy::approval_grant: finstack_ai_runtime::spec::ApprovalGrantMode
+pub finstack_ai_runtime::spec::RunPolicy::child_runs: finstack_ai_runtime::spec::ChildRunPolicy
+pub finstack_ai_runtime::spec::RunPolicy::run_override_allowlist: alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ComponentId>
+impl core::clone::Clone for finstack_ai_runtime::spec::RunPolicy
+pub fn finstack_ai_runtime::spec::RunPolicy::clone(&self) -> finstack_ai_runtime::spec::RunPolicy
+impl core::cmp::Eq for finstack_ai_runtime::spec::RunPolicy
+impl core::cmp::PartialEq for finstack_ai_runtime::spec::RunPolicy
+pub fn finstack_ai_runtime::spec::RunPolicy::eq(&self, &finstack_ai_runtime::spec::RunPolicy) -> bool
+impl core::default::Default for finstack_ai_runtime::spec::RunPolicy
+pub fn finstack_ai_runtime::spec::RunPolicy::default() -> finstack_ai_runtime::spec::RunPolicy
+impl core::fmt::Debug for finstack_ai_runtime::spec::RunPolicy
+pub fn finstack_ai_runtime::spec::RunPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::spec::RunPolicy
+impl serde_core::ser::Serialize for finstack_ai_runtime::spec::RunPolicy
+pub fn finstack_ai_runtime::spec::RunPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::spec::RunPolicy
+pub fn finstack_ai_runtime::spec::RunPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const finstack_ai_runtime::spec::AGENT_SPEC_SCHEMA_VERSION: u16
 pub mod finstack_ai_runtime::workflow
 pub enum finstack_ai_runtime::PortErrorInvalid
 pub finstack_ai_runtime::PortErrorInvalid::InvalidClassification

@@ -27,8 +27,8 @@
 
 use std::sync::Arc;
 
-use finstack_ai::{CapabilityActivation, CapabilitySpec, InstructionSpec};
 use finstack_ai_kernel::{CapabilityId, Digest};
+use finstack_ai_runtime::spec::{CapabilityActivation, CapabilitySpec, InstructionSpec};
 use thiserror::Error;
 
 /// Stable parse or catalog failure.

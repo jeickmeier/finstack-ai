@@ -10,8 +10,8 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize, de};
 use thiserror::Error;
 
-pub use finstack_ai_runtime::child::ChildRunPolicy;
-pub use finstack_ai_runtime::ports::model::ApprovalGrantMode;
+pub use crate::child::ChildRunPolicy;
+pub use crate::ports::model::ApprovalGrantMode;
 
 #[cfg(test)]
 mod tests;
@@ -166,14 +166,14 @@ impl<'de> Deserialize<'de> for CapabilitySpec {
 /// Serializable run-policy subset owned by agent composition.
 ///
 /// [`Self::approval_grant`] selects how paid-tool approvals park and
-/// release. It does not relax [`finstack_ai_runtime::ports::model::ApprovalRequirement::Policy`]:
+/// release. It does not relax [`crate::ports::model::ApprovalRequirement::Policy`]:
 /// that floor still applies on every catalog. Existing specs that omit
 /// `approval_grant` deserialize as [`ApprovalGrantMode::PerCall`].
 ///
 /// # Examples
 ///
 /// ```
-/// use finstack_ai::{ApprovalGrantMode, RunPolicy};
+/// use finstack_ai_runtime::spec::{ApprovalGrantMode, RunPolicy};
 ///
 /// let policy = RunPolicy {
 ///     approval_grant: ApprovalGrantMode::InformedBatch,
@@ -195,7 +195,7 @@ pub struct RunPolicy {
     /// [`ApprovalGrantMode::PerCall`] (default) parks once per unpaid
     /// Policy or Required tool call. [`ApprovalGrantMode::InformedBatch`]
     /// parks once listing every remaining unpaid paid tool. Neither mode
-    /// can weaken [`finstack_ai_runtime::ports::model::ApprovalRequirement::Policy`].
+    /// can weaken [`crate::ports::model::ApprovalRequirement::Policy`].
     #[serde(default, skip_serializing_if = "approval_grant_is_per_call")]
     pub approval_grant: ApprovalGrantMode,
 }
@@ -245,7 +245,7 @@ impl AgentSpec {
     /// Start a declarative specification builder.
     ///
     /// This produces an [`AgentSpec`] only. Construct a live agent from ready
-    /// handles with [`crate::Agent::builder`].
+    /// handles with the `finstack-ai` facade's `Agent::builder`.
     #[must_use]
     pub fn builder(id: AgentId, model: ComponentRef, store: ComponentRef) -> AgentBuilder {
         AgentBuilder::new(id, model, store)
@@ -391,9 +391,9 @@ impl<'de> Deserialize<'de> for AgentSpec {
 
 /// Incremental Rust builder that produces the same immutable [`AgentSpec`] as JSON.
 ///
-/// This builder never constructs a live [`crate::Agent`]. Prefer
-/// [`AgentSpec::builder`] for spec data. Prefer [`crate::Agent::builder`]
-/// ([`crate::NativeAgentBuilder`]) when composing ready native port handles.
+/// This builder never constructs a live agent. Prefer
+/// [`AgentSpec::builder`] for spec data. Prefer the `finstack-ai` facade's
+/// `Agent::builder` when composing ready native port handles.
 #[derive(Debug, Clone)]
 pub struct AgentBuilder {
     spec: AgentSpec,

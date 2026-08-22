@@ -113,7 +113,6 @@ pub mod registry;
 mod result;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 mod session;
-mod spec;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use agent::{
@@ -175,7 +174,11 @@ pub use result::{
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use session::{Lane, Session};
-pub use spec::{
+// Declarative agent and capability specifications are runtime contracts, not
+// composition: they name only kernel and runtime types, and leaf crates need
+// them without taking a dependency on this facade. They are re-exported here
+// so the facade's public surface is unchanged.
+pub use finstack_ai_runtime::spec::{
     AGENT_SPEC_SCHEMA_VERSION, AgentBuilder, AgentSpec, AgentSpecError, ApprovalGrantMode,
     CapabilityActivation, CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec,
     RunPolicy,
