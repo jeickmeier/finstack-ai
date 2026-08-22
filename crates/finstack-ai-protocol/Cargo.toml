@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 ciborium = { workspace = true }
 criterion = { workspace = true }
+proptest = { workspace = true }
 
 [[bench]]
 name = "protocol"

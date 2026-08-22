@@ -1494,6 +1494,7 @@ dependencies = [
  "criterion",
  "finstack-ai-kernel",
  "half",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror",

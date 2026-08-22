@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(feature = "linked-providers", feature = "tool-openrouter-media"))]
 use finstack_ai_kernel::ComponentId;
 #[cfg(feature = "linked-providers")]
 use finstack_ai_kernel::{AgentId, BundleId};
@@ -26,7 +26,7 @@ use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy, RunPolicy};
 
 use super::builder::NativeAgentBuilder;
 use super::handle::Agent;
-#[cfg(feature = "linked-providers")]
+#[cfg(any(feature = "linked-providers", feature = "tool-openrouter-media"))]
 use super::types::AGENT_RUN_INVALID_CONFIGURATION;
 #[cfg(not(feature = "linked-providers"))]
 use super::types::AGENT_RUN_UNSUPPORTED_PLAN;
@@ -44,7 +44,10 @@ const LINKED_RESERVED_OUTPUT_TOKENS: u64 = 128_000;
 const LINKED_ANTHROPIC_OUTPUT_TOKENS: u64 = 64_000;
 #[cfg(feature = "linked-providers")]
 const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    all(feature = "linked-providers", feature = "tool-openai-media"),
+    feature = "tool-openrouter-media"
+))]
 const LINKED_MEDIA_MAX_RESULT_BYTES: usize = 262_144;
 #[cfg(feature = "linked-providers")]
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -224,20 +227,21 @@ impl NativeAgentBuilder {
     /// lock, or output-schema compilation fails.
     pub async fn build_linked(
         mut self,
-        #[cfg_attr(not(feature = "linked-providers"), allow(unused_mut))] mut common: LinkedCommon,
+        #[cfg_attr(not(feature = "tool-openrouter-media"), allow(unused_mut))]
+        mut common: LinkedCommon,
         model_name: ModelName,
         settings: ModelSettings,
         default_timeout: Duration,
     ) -> Result<LinkedAgent, AgentRunError> {
-        #[cfg(feature = "linked-providers")]
+        #[cfg(feature = "tool-openrouter-media")]
         if let Some(media) = common.openrouter_media.take() {
             register_openrouter_media(&mut common.ports, media)?;
         }
-        #[cfg(not(feature = "linked-providers"))]
+        #[cfg(not(feature = "tool-openrouter-media"))]
         if common.openrouter_media.is_some() {
             return Err(AgentRunError::configuration(
-                AGENT_RUN_UNSUPPORTED_PLAN,
-                "openrouter_media requires the linked-providers feature",
+                crate::AGENT_RUN_UNSUPPORTED_PLAN,
+                "openrouter_media requires the tool-openrouter-media feature",
             ));
         }
         let LinkedCommon {
@@ -419,13 +423,19 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     .map_err(|error| model_configuration_error(&error))?;
     model_config = model_config.with_reasoning(true);
     let model_name = model_config.name.clone();
-    let provider: Arc<dyn Model> = Arc::new(
-        OpenAiProvider::try_new(config, vec![model_config])
-            .map_err(|error| model_configuration_error(&error))?,
-    );
+    let provider = arc_model(OpenAiProvider::try_new, config, model_config)?;
+    #[cfg_attr(not(feature = "tool-openai-media"), allow(unused_mut))]
     let mut common = spec.common;
+    #[cfg(feature = "tool-openai-media")]
     if let Some(api_key_for_tools) = api_key_for_tools {
         register_openai_media(&mut common.ports, api_key_for_tools)?;
+    }
+    #[cfg(not(feature = "tool-openai-media"))]
+    if api_key_for_tools.is_some() {
+        return Err(AgentRunError::configuration(
+            crate::AGENT_RUN_UNSUPPORTED_PLAN,
+            "media_tools requires the tool-openai-media feature",
+        ));
     }
     build_linked_provider(
         (
@@ -472,10 +482,7 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
     .map_err(|error| model_configuration_error(&error))?
     .with_reasoning(true);
     let model_name = model_config.name().clone();
-    let provider: Arc<dyn Model> = Arc::new(
-        OpenRouterProvider::try_new(config, vec![model_config])
-            .map_err(|error| model_configuration_error(&error))?,
-    );
+    let provider = arc_model(OpenRouterProvider::try_new, config, model_config)?;
     let mut common = spec.common;
     if let Some(api_key_for_tools) = api_key_for_tools {
         if common.openrouter_media.is_some() {
@@ -530,10 +537,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
     )
     .map_err(|error| model_configuration_error(&error))?;
     let model_name = model_config.name.clone();
-    let provider: Arc<dyn Model> = Arc::new(
-        AnthropicProvider::try_new(config, vec![model_config])
-            .map_err(|error| model_configuration_error(&error))?,
-    );
+    let provider = arc_model(AnthropicProvider::try_new, config, model_config)?;
     let common = spec.common;
     build_linked_provider(
         (
@@ -556,12 +560,7 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         Authentication, GeminiConfig, GeminiModelConfig, GeminiProvider, SecretString,
     };
 
-    let model_name = ModelName::try_new(&spec.model).map_err(|error| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            format!("{}: {}", error.code(), error.message()),
-        )
-    })?;
+    let model_name = parse_model_name(&spec.model)?;
     let mut config =
         GeminiConfig::try_new(spec.endpoint).map_err(|error| model_configuration_error(&error))?;
     if let Some(api_key) = spec.api_key {
@@ -579,10 +578,7 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     )
     .map_err(|error| model_configuration_error(&error))?
     .with_provider_overhead_tokens(LINKED_PROVIDER_OVERHEAD_TOKENS);
-    let provider: Arc<dyn Model> = Arc::new(
-        GeminiProvider::try_new(config, vec![model_config])
-            .map_err(|error| model_configuration_error(&error))?,
-    );
+    let provider = arc_model(GeminiProvider::try_new, config, model_config)?;
     let common = spec.common;
     build_linked_provider(
         (
@@ -615,10 +611,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
     )
     .map_err(|error| model_configuration_error(&error))?;
     let model_name = model_config.name.clone();
-    let provider: Arc<dyn Model> = Arc::new(
-        OllamaProvider::try_new(config, vec![model_config])
-            .map_err(|error| model_configuration_error(&error))?,
-    );
+    let provider = arc_model(OllamaProvider::try_new, config, model_config)?;
     let common = spec.common;
     build_linked_provider(
         (
@@ -737,10 +730,7 @@ fn gateway_provider(
             .map_err(|error| model_configuration_error(&error))?;
             let model_name = model.name.clone();
             Ok((
-                Arc::new(
-                    OpenAiProvider::try_new(config, vec![model])
-                        .map_err(|error| model_configuration_error(&error))?,
-                ),
+                arc_model(OpenAiProvider::try_new, config, model)?,
                 model_name,
             ))
         }
@@ -762,10 +752,7 @@ fn gateway_provider(
             .map_err(|error| model_configuration_error(&error))?;
             let model_name = model.name.clone();
             Ok((
-                Arc::new(
-                    AnthropicProvider::try_new(config, vec![model])
-                        .map_err(|error| model_configuration_error(&error))?,
-                ),
+                arc_model(AnthropicProvider::try_new, config, model)?,
                 model_name,
             ))
         }
@@ -785,10 +772,7 @@ fn gateway_provider(
             .map_err(|error| model_configuration_error(&error))?;
             let model_name = model.name.clone();
             Ok((
-                Arc::new(
-                    OllamaProvider::try_new(config, vec![model])
-                        .map_err(|error| model_configuration_error(&error))?,
-                ),
+                arc_model(OllamaProvider::try_new, config, model)?,
                 model_name,
             ))
         }
@@ -815,12 +799,7 @@ fn gateway_gemini_provider(
     let config = GeminiConfig::try_new(endpoint)
         .map_err(|error| model_configuration_error(&error))?
         .with_credentials(store, reference);
-    let model_name = ModelName::try_new(model).map_err(|error| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            format!("{}: {}", error.code(), error.message()),
-        )
-    })?;
+    let model_name = parse_model_name(model)?;
     let model = GeminiModelConfig::try_new(
         model,
         hard_input_bytes,
@@ -829,10 +808,7 @@ fn gateway_gemini_provider(
     )
     .map_err(|error| model_configuration_error(&error))?;
     Ok((
-        Arc::new(
-            GeminiProvider::try_new(config, vec![model])
-                .map_err(|error| model_configuration_error(&error))?,
-        ),
+        arc_model(GeminiProvider::try_new, config, model)?,
         model_name,
     ))
 }
@@ -923,7 +899,7 @@ fn memory_store() -> Result<(ComponentRef, Arc<dyn JournalStore>), AgentRunError
     Ok((component("python.store.memory")?, store))
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(feature = "linked-providers", feature = "tool-openrouter-media"))]
 fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id).map_err(|error| {
@@ -935,7 +911,7 @@ fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
 
 /// Register the `OpenAI` media toolset, attaching the host artifact store
 /// when the linked ports already have one.
-#[cfg(feature = "linked-providers")]
+#[cfg(all(feature = "linked-providers", feature = "tool-openai-media"))]
 fn register_openai_media(
     ports: &mut LinkedAgentPorts,
     api_key: String,
@@ -961,7 +937,7 @@ fn register_openai_media(
 }
 
 /// Register the `OpenRouter` media toolset on any linked constructor.
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "tool-openrouter-media")]
 fn register_openrouter_media(
     ports: &mut LinkedAgentPorts,
     spec: OpenRouterMediaToolsSpec,
@@ -987,6 +963,35 @@ fn register_openrouter_media(
         Arc::new(toolset),
     ));
     Ok(())
+}
+
+/// Construct one provider and erase it to `Arc<dyn Model>`.
+///
+/// Single finish path for every linked and gateway provider so the
+/// construct-wrap-map sequence cannot drift between providers.
+#[cfg(feature = "linked-providers")]
+fn arc_model<C, M, P>(
+    ctor: fn(C, Vec<M>) -> Result<P, finstack_ai_runtime::ports::model::ModelError>,
+    config: C,
+    model_config: M,
+) -> Result<Arc<dyn Model>, AgentRunError>
+where
+    P: Model + 'static,
+{
+    Ok(Arc::new(
+        ctor(config, vec![model_config]).map_err(|error| model_configuration_error(&error))?,
+    ))
+}
+
+/// Parse a provider model name into the shared error shape.
+#[cfg(feature = "linked-providers")]
+fn parse_model_name(model: &str) -> Result<ModelName, AgentRunError> {
+    ModelName::try_new(model).map_err(|error| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            format!("{}: {}", error.code(), error.message()),
+        )
+    })
 }
 
 #[cfg(feature = "linked-providers")]
@@ -1130,25 +1135,15 @@ fn reasoning_settings(
         })
 }
 
-#[cfg(all(test, feature = "native-tokio"))]
+#[cfg(all(test, feature = "linked-providers"))]
 mod tests {
     use super::*;
 
-    fn common() -> LinkedCommon {
+    pub(super) fn common() -> LinkedCommon {
         LinkedCommon::default()
     }
 
-    fn toolset_ids(agent: &Agent) -> Vec<String> {
-        agent
-            .resolved()
-            .run_plan()
-            .toolsets()
-            .iter()
-            .map(|toolset| toolset.descriptor().component.id().to_string())
-            .collect()
-    }
-
-    fn openrouter_media() -> OpenRouterMediaToolsSpec {
+    pub(super) fn openrouter_media() -> OpenRouterMediaToolsSpec {
         OpenRouterMediaToolsSpec {
             api_key: "sk-or-media-canary".into(),
             referer: None,
@@ -1220,71 +1215,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openai_media_tools_register_the_toolset() {
-        let built = Agent::openai(OpenAiAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-openai-secret-canary-056".into(),
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: true,
-            common: LinkedCommon {
-                openrouter_media: Some(OpenRouterMediaToolsSpec {
-                    api_key: "sk-or-media-canary".into(),
-                    referer: None,
-                    title: None,
-                }),
-                ..common()
-            },
-        })
-        .await
-        .expect("openai + media construct");
-        let ids = toolset_ids(&built.agent);
-        assert!(ids.contains(&"python.toolset.openai_media".into()));
-        assert!(ids.contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[tokio::test]
-    async fn openai_agent_registers_the_openrouter_media_toolset() {
-        let built = Agent::openai(OpenAiAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-openai-secret-canary-056".into(),
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: Some(openrouter_media()),
-                ..common()
-            },
-        })
-        .await
-        .expect("openai + openrouter media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[tokio::test]
-    async fn openai_agent_rejects_an_empty_media_api_key() {
-        let error = Agent::openai(OpenAiAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-openai-secret-canary-056".into(),
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: Some(OpenRouterMediaToolsSpec {
-                    api_key: String::new(),
-                    referer: None,
-                    title: None,
-                }),
-                ..common()
-            },
-        })
-        .await
-        .err()
-        .expect("empty media api key");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-    }
-
-    #[tokio::test]
     async fn openrouter_constructs_without_a_network_request() {
         let built = Agent::openrouter(OpenRouterAgentSpec {
             model: "openai/gpt-5".into(),
@@ -1303,43 +1233,6 @@ mod tests {
         .expect("openrouter construct");
         assert!(built.agent.capability_catalog().is_empty());
         assert_eq!(built.default_timeout, OPENAI_TIMEOUT);
-    }
-
-    #[tokio::test]
-    async fn openrouter_media_tools_register_the_toolset() {
-        let built = Agent::openrouter(OpenRouterAgentSpec {
-            model: "openai/gpt-5".into(),
-            api_key: "sk-or-secret-canary-101".into(),
-            referer: None,
-            title: None,
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: true,
-            common: common(),
-        })
-        .await
-        .expect("openrouter + media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[tokio::test]
-    async fn openrouter_registers_common_openrouter_media() {
-        let built = Agent::openrouter(OpenRouterAgentSpec {
-            model: "openai/gpt-5".into(),
-            api_key: "sk-or-secret-canary-101".into(),
-            referer: None,
-            title: None,
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: Some(openrouter_media()),
-                ..common()
-            },
-        })
-        .await
-        .expect("openrouter + common media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
     }
 
     #[tokio::test]
@@ -1483,7 +1376,7 @@ mod tests {
         assert!(built.agent.capability_catalog().is_empty());
     }
 
-    fn gateway_spec() -> GatewayAgentSpec {
+    pub(super) fn gateway_spec() -> GatewayAgentSpec {
         GatewayAgentSpec {
             endpoint: "https://api.example.test/v1/responses".into(),
             model: "fixture-model".into(),
@@ -1503,16 +1396,6 @@ mod tests {
             .expect("gateway construct");
         assert!(built.agent.capability_catalog().is_empty());
         assert_eq!(built.default_timeout, OPENAI_TIMEOUT);
-    }
-
-    #[tokio::test]
-    async fn gateway_registers_common_openrouter_media() {
-        let mut spec = gateway_spec();
-        spec.common.openrouter_media = Some(openrouter_media());
-        let built = Agent::gateway(spec)
-            .await
-            .expect("gateway + openrouter media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
     }
 
     #[tokio::test]
@@ -1608,5 +1491,133 @@ mod tests {
         let error = Agent::gateway(spec).await.err().expect("openai_chat");
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("openai_chat"));
+    }
+}
+
+#[cfg(all(test, feature = "linked-providers", feature = "linked-tools"))]
+mod media_tests {
+    use super::tests::{common, gateway_spec, openrouter_media};
+    use super::*;
+
+    fn toolset_ids(agent: &Agent) -> Vec<String> {
+        agent
+            .resolved()
+            .run_plan()
+            .toolsets()
+            .iter()
+            .map(|toolset| toolset.descriptor().component.id().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn openai_media_tools_register_the_toolset() {
+        let built = Agent::openai(OpenAiAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-openai-secret-canary-056".into(),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: true,
+            common: LinkedCommon {
+                openrouter_media: Some(OpenRouterMediaToolsSpec {
+                    api_key: "sk-or-media-canary".into(),
+                    referer: None,
+                    title: None,
+                }),
+                ..common()
+            },
+        })
+        .await
+        .expect("openai + media construct");
+        let ids = toolset_ids(&built.agent);
+        assert!(ids.contains(&"python.toolset.openai_media".into()));
+        assert!(ids.contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[tokio::test]
+    async fn openai_agent_registers_the_openrouter_media_toolset() {
+        let built = Agent::openai(OpenAiAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-openai-secret-canary-056".into(),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            common: LinkedCommon {
+                openrouter_media: Some(openrouter_media()),
+                ..common()
+            },
+        })
+        .await
+        .expect("openai + openrouter media construct");
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[tokio::test]
+    async fn openai_agent_rejects_an_empty_media_api_key() {
+        let error = Agent::openai(OpenAiAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-openai-secret-canary-056".into(),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            common: LinkedCommon {
+                openrouter_media: Some(OpenRouterMediaToolsSpec {
+                    api_key: String::new(),
+                    referer: None,
+                    title: None,
+                }),
+                ..common()
+            },
+        })
+        .await
+        .err()
+        .expect("empty media api key");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+    }
+
+    #[tokio::test]
+    async fn openrouter_media_tools_register_the_toolset() {
+        let built = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: true,
+            common: common(),
+        })
+        .await
+        .expect("openrouter + media construct");
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[tokio::test]
+    async fn openrouter_registers_common_openrouter_media() {
+        let built = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            common: LinkedCommon {
+                openrouter_media: Some(openrouter_media()),
+                ..common()
+            },
+        })
+        .await
+        .expect("openrouter + common media construct");
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[tokio::test]
+    async fn gateway_registers_common_openrouter_media() {
+        let mut spec = gateway_spec();
+        spec.common.openrouter_media = Some(openrouter_media());
+        let built = Agent::gateway(spec)
+            .await
+            .expect("gateway + openrouter media construct");
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
     }
 }

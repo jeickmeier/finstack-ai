@@ -15,7 +15,10 @@ name = "finstack_ai"
 path = "src/lib.rs"
 
 [features]
-default = ["native-tokio", "linked-all"]
+# Providers and tool extensions are opt-in: a default consumer gets the
+# native runtime only, and enables `provider-*`/`tool-*` (or `linked-all`)
+# for the HTTP stacks it actually ships.
+default = ["native-tokio"]
 native-tokio = [
     "finstack-ai-runtime/native-tokio",
     "dep:finstack-ai-remote-child",

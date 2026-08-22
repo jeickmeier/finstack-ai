@@ -75,7 +75,10 @@
 //!   [`AgentRunError`]
 //! - **Provider shortcuts** — [`Agent::openai`], [`Agent::anthropic`],
 //!   [`Agent::gemini`], [`Agent::ollama`], [`Agent::openrouter`],
-//!   [`Agent::gateway`], each taking one `*AgentSpec` plus [`LinkedCommon`]
+//!   [`Agent::gateway`], each taking one `*AgentSpec` plus [`LinkedCommon`].
+//!   Providers are off by default: enable `linked-providers` (or
+//!   `linked-all`), otherwise these constructors return
+//!   [`AGENT_RUN_UNSUPPORTED_PLAN`]
 //! - **Declarative form** — [`AgentSpec::builder`], [`AgentSpec`],
 //!   [`RunPolicy`], [`CapabilitySpec`]
 //! - **Journaled handles** — [`Session`], [`Lane`]
