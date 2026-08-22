@@ -18,8 +18,8 @@ use std::sync::Arc;
 use finstack_ai_observer_billing::BillingObserver;
 let billing = BillingObserver::try_new(10_000).expect("billing observer");
 // Register with AgentBuilder::observer(component_ref, Arc::new(billing)), then:
-// let snapshot = billing.snapshot();
-// let jsonl = billing.export_jsonl();
+// let snapshot = billing.snapshot()?;
+// let jsonl = billing.export_jsonl()?;
 let _ = Arc::new(billing);
 ```
 

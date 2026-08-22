@@ -226,9 +226,15 @@ impl BillingObserver {
     /// `EffectCompleted` (or `EffectFailed`) for the same effect id is folded
     /// in again and double-counts usage, cost, and effect tallies.
     #[must_use]
-    pub fn snapshot(&self) -> LedgerSnapshot {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObserverError::Unavailable`] when the ledger lock is
+    /// poisoned. An empty snapshot would be indistinguishable from no
+    /// recorded spend, so the failure is reported rather than swallowed.
+    pub fn snapshot(&self) -> Result<LedgerSnapshot, ObserverError> {
         let Ok(state) = self.state.lock() else {
-            return LedgerSnapshot::default();
+            return Err(ObserverError::Unavailable);
         };
         let mut spend = Vec::new();
         let mut usage = Vec::new();
@@ -255,19 +261,24 @@ impl BillingObserver {
                 uncosted_effects: entry.uncosted_effects,
             });
         }
-        LedgerSnapshot {
+        Ok(LedgerSnapshot {
             spend,
             usage,
             unattributed_effects: state.unattributed_effects,
             overflowed_events: state.overflowed_events,
-        }
+        })
     }
 
     /// Export the ledger as JSONL. All numerics are decimal strings; content
     /// payloads are never included.
     #[must_use]
-    pub fn export_jsonl(&self) -> String {
-        let snapshot = self.snapshot();
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObserverError::Unavailable`] when the ledger lock is
+    /// poisoned, matching [`Self::snapshot`].
+    pub fn export_jsonl(&self) -> Result<String, ObserverError> {
+        let snapshot = self.snapshot()?;
         let mut out = String::new();
         for row in &snapshot.spend {
             let line = serde_json::json!({
@@ -302,7 +313,7 @@ impl BillingObserver {
             "overflowed_events": snapshot.overflowed_events.to_string(),
         });
         push_line(&mut out, &summary);
-        out
+        Ok(out)
     }
 
     fn ingest(&self, event: &RunEvent) {

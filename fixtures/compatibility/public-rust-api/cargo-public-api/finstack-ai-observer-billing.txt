@@ -15,9 +15,9 @@ pub fn finstack_ai_observer_billing::BillingObserverError::fmt(&self, &mut core:
 impl core::marker::StructuralPartialEq for finstack_ai_observer_billing::BillingObserverError
 pub struct finstack_ai_observer_billing::BillingObserver
 impl finstack_ai_observer_billing::BillingObserver
-pub fn finstack_ai_observer_billing::BillingObserver::export_jsonl(&self) -> alloc::string::String
+pub fn finstack_ai_observer_billing::BillingObserver::export_jsonl(&self) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ports::observer::ObserverError>
 pub fn finstack_ai_observer_billing::BillingObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::ObserverDiagnostic>
-pub fn finstack_ai_observer_billing::BillingObserver::snapshot(&self) -> finstack_ai_observer_billing::LedgerSnapshot
+pub fn finstack_ai_observer_billing::BillingObserver::snapshot(&self) -> core::result::Result<finstack_ai_observer_billing::LedgerSnapshot, finstack_ai_runtime::ports::observer::ObserverError>
 pub fn finstack_ai_observer_billing::BillingObserver::try_new(usize) -> core::result::Result<Self, finstack_ai_observer_billing::BillingObserverError>
 impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_observer_billing::BillingObserver
 pub fn finstack_ai_observer_billing::BillingObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor

@@ -210,7 +210,7 @@ async fn costed_completions_aggregate_by_unit_and_policy() {
         ]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert_eq!(snapshot.spend.len(), 3);
     let usd_v1 = snapshot
         .spend
@@ -240,7 +240,7 @@ async fn uncosted_completions_are_counted_never_priced() {
         ]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert!(snapshot.spend.is_empty());
     let row = snapshot.usage.first().expect("usage row");
     assert_eq!(row.input_tokens, 10);
@@ -266,7 +266,7 @@ async fn model_and_provider_are_attributed_from_the_request() {
         ]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     let row = snapshot.spend.first().expect("spend row");
     assert_eq!(row.model.as_deref(), Some("demo-model-1"));
     let provider = row.provider.clone().expect("provider");
@@ -285,7 +285,7 @@ async fn untracked_completions_count_as_unattributed() {
         )]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert_eq!(snapshot.unattributed_effects, 1);
     let row = snapshot.spend.first().expect("spend row");
     assert!(row.model.is_none());
@@ -306,7 +306,7 @@ async fn oversized_or_missing_model_names_fall_back_to_none() {
         ]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert_eq!(snapshot.usage.len(), 1);
     assert!(snapshot.usage[0].model.is_none());
     assert_eq!(snapshot.usage[0].effects, 2);
@@ -359,7 +359,7 @@ async fn ledger_saturation_is_counted_and_diagnosed() {
         ]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert_eq!(snapshot.spend.len(), 1);
     assert_eq!(snapshot.overflowed_events, 1);
     assert_eq!(
@@ -376,7 +376,7 @@ async fn ledger_saturation_is_counted_and_diagnosed() {
         )]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert_eq!(snapshot.spend[0].micros, 5);
 }
 
@@ -400,7 +400,7 @@ async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
         ]))
         .await
         .expect("observe");
-    let text = billing.export_jsonl();
+    let text = billing.export_jsonl().expect("export");
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 3);
     let spend: serde_json::Value = serde_json::from_str(lines[0]).expect("spend json");
@@ -469,7 +469,7 @@ async fn pending_map_saturation_evicts_oldest_and_new_origins_still_attribute() 
         ]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert_eq!(snapshot.unattributed_effects, 1);
     let unattributed_row = snapshot
         .usage
@@ -496,7 +496,7 @@ async fn deferred_model_effect_keeps_attribution() {
         ]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     let row = snapshot.usage.first().expect("usage row");
     assert_eq!(row.model.as_deref(), Some("demo-model-1"));
     assert_eq!(snapshot.unattributed_effects, 0);
@@ -513,7 +513,7 @@ async fn tool_effect_settlement_aggregates_as_non_model_and_is_never_unattribute
         )]))
         .await
         .expect("observe");
-    let snapshot = billing.snapshot();
+    let snapshot = billing.snapshot().expect("snapshot");
     assert_eq!(snapshot.unattributed_effects, 0);
     let row = snapshot.usage.first().expect("usage row");
     assert!(row.model.is_none());
