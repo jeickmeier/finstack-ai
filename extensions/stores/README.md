@@ -6,8 +6,7 @@
 | `finstack-ai-store-memory` | Explicitly non-durable in-memory journal |
 | `finstack-ai-store-sqlite` | Durable local SQLite journal; WAL + `synchronous=FULL` |
 | `finstack-ai-store-postgres` | Durable multi-writer PostgreSQL journal with rustls and bounded operations |
-| `finstack-ai-store-artifact` | `ArtifactStore` over local or S3-compatible blob storage (`local` / `s3` features; 64 MiB default ceiling) |
 
-Applications inject the journal and artifact crates. They are not the Agent,
-Python, or WASM default. `finstack-ai-store-common` is a shared helper, not
-an injectable store.
+Applications inject the journal crates. They are not the Agent, Python, or
+WASM default. `finstack-ai-store-common` is a shared helper, not an injectable
+store. Artifact storage lives under `extensions/artifacts/`.

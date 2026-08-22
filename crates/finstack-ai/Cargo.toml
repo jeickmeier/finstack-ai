@@ -22,7 +22,6 @@ default = ["native-tokio"]
 native-tokio = [
     "finstack-ai-runtime/native-tokio",
     "dep:finstack-ai-remote-child",
-    "dep:finstack-ai-store-memory",
 ]
 provider-openai = ["native-tokio", "dep:finstack-ai-provider-openai"]
 provider-openrouter = ["native-tokio", "dep:finstack-ai-provider-openrouter"]
@@ -32,12 +31,17 @@ provider-ollama = ["native-tokio", "dep:finstack-ai-provider-ollama"]
 tool-openrouter-media = ["native-tokio", "dep:finstack-ai-tools-openrouter-media"]
 tool-openai-media = ["native-tokio", "dep:finstack-ai-tools-openai-media"]
 tool-e2b = ["native-tokio", "dep:finstack-ai-sandbox-e2b"]
+# `linked-providers` is the only production path that constructs a journal
+# store on the caller's behalf (see `agent::linked::memory_store`), so the
+# concrete store dependency belongs here rather than on `native-tokio`. A
+# default consumer brings its own store and must not pay for this one.
 linked-providers = [
     "provider-openai",
     "provider-openrouter",
     "provider-anthropic",
     "provider-gemini",
     "provider-ollama",
+    "dep:finstack-ai-store-memory",
 ]
 linked-tools = ["tool-openrouter-media", "tool-openai-media", "tool-e2b"]
 linked-all = ["linked-providers", "linked-tools"]

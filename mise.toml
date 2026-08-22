@@ -215,6 +215,7 @@ run = """
 set -euo pipefail
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy -p finstack-ai-workflow-worker --all-targets --locked --features daemon -- -D warnings
 cargo clippy -p finstack-ai-wasm --all-targets --locked --features scripted-trace -- -D warnings
 """
 

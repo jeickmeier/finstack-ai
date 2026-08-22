@@ -4,6 +4,8 @@
 
 The kernel owns deterministic semantic state, records, events, and effects. The runtime owns ports and effect execution. The SDK owns composition. Protocol codecs and bindings remain outward-facing. Trusted native stores, providers, tools, and observers live under `extensions/`; isolated WIT/Wasmtime hosts live under `plugins/`.
 
+An `extensions/<family>/` directory names a theme, not a contract. The `impl` block is the contract: a crate may implement several ports (`finstack-ai-memory` implements `ContextProvider`, `Observer`, and `Toolset`), and several crates implement none at all because they are shared machinery for a family (`provider-wire`, `store-common`, `net-guard`). Read the crate to learn which seam it fills; do not infer it from the path.
+
 Agent rules:
 
 - `.agents/rules/01-engineering-conformance.md` — architecture, naming, generated artifacts, lifecycle, security, hard stops (always on)

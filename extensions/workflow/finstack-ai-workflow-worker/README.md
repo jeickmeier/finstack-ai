@@ -4,6 +4,17 @@ Leased durable worker for `finstack-ai-workflow-local`. The kernel journal is
 authoritative; the worker owns bounded adapter tables for wake hints, cron
 fires, buffered responses, and response dead letters.
 
+## Stock daemon
+
+`finstack_workflow_worker` opens the worker, cron, and journal sqlite tables
+on one file. It is gated on the `daemon` feature so library consumers do not
+compile `finstack-ai-store-sqlite`. Cargo skips the binary unless that
+feature is enabled.
+
+```sh
+cargo run -p finstack-ai-workflow-worker --features daemon -- <sqlite-path>
+```
+
 ## Safety contract
 
 - Production session attachment uses operating-system entropy. Seeded

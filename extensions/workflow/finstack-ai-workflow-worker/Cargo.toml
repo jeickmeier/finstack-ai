@@ -10,10 +10,18 @@ authors.workspace = true
 description = "Leased worker daemon for the finstack-ai local workflow driver"
 readme = "README.md"
 
+[features]
+# Library consumers (notably finstack-ai-workflow-hitl) use the worker
+# through its own sqlite adapter and must not compile
+# finstack-ai-store-sqlite to get it. The stock daemon binary is the only
+# target that binds a concrete journal store.
+default = []
+daemon = ["dep:finstack-ai-store-sqlite"]
+
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
-finstack-ai-store-sqlite = { workspace = true }
+finstack-ai-store-sqlite = { workspace = true, optional = true }
 finstack-ai-workflow-local = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
@@ -30,6 +38,7 @@ tokio = { workspace = true, features = ["rt", "macros", "signal", "sync", "time"
 [[bin]]
 name = "finstack_workflow_worker"
 path = "src/bin/finstack_workflow_worker.rs"
+required-features = ["daemon"]
 
 [lints]
 workspace = true

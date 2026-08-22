@@ -11,7 +11,9 @@
 //! reached a terminal state, needs host-owned ports (a model, tools,
 //! middleware) that only an embedding host can supply, so every due wake row
 //! is counted as a failure and backed off until such a host runs.
-//! Usage: `finstack_workflow_worker <sqlite-path>`.
+//!
+//! Enable the `daemon` feature to build this binary. Run
+//! `cargo run -p finstack-ai-workflow-worker --features daemon -- <sqlite-path>`.
 
 use std::sync::Arc;
 use std::time::Duration;

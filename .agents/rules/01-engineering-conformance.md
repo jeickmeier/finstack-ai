@@ -72,6 +72,12 @@ permission to skip ahead or weaken a control.
 
 New kernel, runtime, or SDK behavior goes in a sibling module when the natural home already exceeds about 1500 lines. Do not split existing large files solely to relocate unchanged behavior.
 
+These modules are already over the threshold and are closed to new behavior. Extend them only in a sibling module:
+
+- `crates/finstack-ai-runtime/src/services/process_confinement.rs`
+- `crates/finstack-ai/src/agent/linked.rs`
+- `crates/finstack-ai-protocol/src/remote.rs`
+
 ## Hard stops
 
 Stop the affected implementation when it conflicts with a current public
