@@ -26,7 +26,7 @@ use crate::settlement::{
 };
 use crate::stage_settlement::submit_command;
 
-use super::fault::{fault_worker, model_runtime_fault, runtime_fault};
+use super::fault::{fault_worker, finish_worker, model_runtime_fault, runtime_fault};
 use super::owner::{DuePollWake, arm_due_poll_wait};
 use super::shared::{RunCommand, Shared};
 
@@ -55,10 +55,7 @@ pub(super) async fn run_worker(
             shared.publish_lifecycle(RunStatus::Faulted { code });
         }
     }
-    if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
-        shared.publish_lifecycle(RunStatus::Stopped);
-    }
-    shared.events.close().await;
+    finish_worker(&shared).await;
 }
 
 #[expect(
@@ -168,10 +165,7 @@ pub(super) async fn run_worker_with_model<C, R>(
             }
         }
     }
-    if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
-        shared.publish_lifecycle(RunStatus::Stopped);
-    }
-    shared.events.close().await;
+    finish_worker(&shared).await;
 }
 
 #[expect(
@@ -395,10 +389,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
             }
         }
     }
-    if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
-        shared.publish_lifecycle(RunStatus::Stopped);
-    }
-    shared.events.close().await;
+    finish_worker(&shared).await;
 }
 
 async fn process_timer_result<C: Clock, R: RandomSource>(

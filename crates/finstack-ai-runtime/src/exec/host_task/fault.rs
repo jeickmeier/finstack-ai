@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
 use crate::ports::model::ModelError;
-use crate::run_types::{RunHandleError, RunStatus};
+use crate::run_types::{RunHandleError, RunLifecycle, RunStatus};
 
 use super::handle::RunHandle;
 use super::shared::Shared;
@@ -41,15 +41,7 @@ pub(super) fn fault_shared(shared: &Shared, code: &'static str) {
 }
 
 pub(super) fn finish_worker(shared: &Shared) {
-    if !matches!(
-        shared
-            .status
-            .lock()
-            .map_or(RunStatus::Stopped, |status| *status),
-        RunStatus::Faulted { .. }
-    ) {
-        shared.publish_lifecycle(RunStatus::Stopped);
-    }
+    shared.publish_stopped_unless_faulted();
     shared.events.close();
 }
 

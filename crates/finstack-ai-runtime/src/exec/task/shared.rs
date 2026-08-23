@@ -8,7 +8,7 @@ use crate::commit::CommitOutcome;
 use crate::event_hub::EventHubHandle;
 use crate::exec::live_state::{LiveRunState, LiveStatePublisher, session_head_update};
 use crate::observer::ObserverDiagnosticBuffer;
-use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
+use crate::run_types::{RunHandleError, RunLifecycle, RunStatus, ShutdownReport};
 
 pub(super) struct Shared {
     pub(super) sender: Mutex<Option<mpsc::Sender<RunCommand>>>,
@@ -31,6 +31,16 @@ impl Shared {
         self.status.send_replace(status);
         let current = self.live_state.borrow().clone();
         self.live_state.send_replace(current.next_lifecycle(status));
+    }
+}
+
+impl RunLifecycle for Shared {
+    fn lifecycle_status(&self) -> RunStatus {
+        *self.status.borrow()
+    }
+
+    fn set_lifecycle(&self, status: RunStatus) {
+        self.publish_lifecycle(status);
     }
 }
 

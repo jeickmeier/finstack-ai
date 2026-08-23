@@ -12,7 +12,7 @@ use crate::exec::live_state::{LiveRunState, LiveStatePublisher, session_head_upd
 use crate::observer::ObserverDiagnosticBuffer;
 use crate::ports::model::ModelRequest;
 use crate::ports::tool::{ResolvedTool, ToolCallContext};
-use crate::run_types::{RunHandleError, RunStatus, ShutdownReport};
+use crate::run_types::{RunHandleError, RunLifecycle, RunStatus, ShutdownReport};
 
 use super::oneshot::OneshotSender;
 
@@ -71,6 +71,21 @@ impl Shared {
             *current = current.next_lifecycle(status);
         }
         self.live_state_changed.notify_waiters();
+    }
+}
+
+impl RunLifecycle for Shared {
+    fn lifecycle_status(&self) -> RunStatus {
+        self.status.lock().map_or(
+            RunStatus::Faulted {
+                code: "run_status_lock_poisoned",
+            },
+            |status| *status,
+        )
+    }
+
+    fn set_lifecycle(&self, status: RunStatus) {
+        self.publish_lifecycle(status);
     }
 }
 

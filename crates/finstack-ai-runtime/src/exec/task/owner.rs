@@ -28,7 +28,8 @@ use crate::ports::tool::{
 use crate::run::LiveRunState;
 use crate::run::MonotonicDeadline;
 use crate::run_types::{
-    ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
+    ModelTaskConfig, RunHandleError, RunLifecycle, RunStatus, RunTaskConfig, ShutdownOutcome,
+    ShutdownReport,
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
@@ -896,9 +897,7 @@ impl RunTaskOwner {
             aborted_tasks = self.tasks.len();
             self.tasks.abort_all();
             while self.tasks.join_next().await.is_some() {}
-            if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
-                self.handle.shared.publish_lifecycle(RunStatus::Stopped);
-            }
+            self.handle.shared.publish_stopped_unless_faulted();
         }
         let observers_joined = timeout(self.shutdown_deadline, async {
             while self.observer_tasks.join_next().await.is_some() {}
@@ -948,9 +947,7 @@ impl Drop for RunTaskOwner {
             let aborted_tasks = self.tasks.len().saturating_add(self.observer_tasks.len());
             self.tasks.abort_all();
             self.observer_tasks.abort_all();
-            if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
-                self.handle.shared.publish_lifecycle(RunStatus::Stopped);
-            }
+            self.handle.shared.publish_stopped_unless_faulted();
             if let Ok(mut value) = self.handle.shared.shutdown_report.lock() {
                 *value = Some(ShutdownReport {
                     outcome: ShutdownOutcome::OwnerDropped,

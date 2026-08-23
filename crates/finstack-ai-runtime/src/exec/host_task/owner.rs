@@ -19,7 +19,7 @@ use crate::ports::observer::{Observer, ObserverDiagnostic};
 use crate::ports::tool::{ResolvedToolCatalog, ToolResumeAction, ToolStreamAssembler};
 use crate::run::LiveRunState;
 use crate::run_types::{
-    ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
+    ModelTaskConfig, RunHandleError, RunLifecycle, RunTaskConfig, ShutdownOutcome, ShutdownReport,
     ToolTaskConfig,
 };
 use crate::settlement::{
@@ -547,9 +547,7 @@ impl RunTaskOwner {
             }
             host_driver::yield_now().await;
             self.worker.completed().await;
-            if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
-                self.handle.set_status(RunStatus::Stopped);
-            }
+            self.handle.shared.publish_stopped_unless_faulted();
         }
         let observers_stopped = host_driver::timeout(deadline, async {
             for task in &self.observer_tasks {
@@ -601,9 +599,7 @@ impl Drop for RunTaskOwner {
             for task in &self.observer_tasks {
                 task.abort();
             }
-            if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
-                self.handle.set_status(RunStatus::Stopped);
-            }
+            self.handle.shared.publish_stopped_unless_faulted();
             if let Ok(mut value) = self.handle.shared.shutdown_report.lock() {
                 *value = Some(ShutdownReport {
                     outcome: ShutdownOutcome::OwnerDropped,

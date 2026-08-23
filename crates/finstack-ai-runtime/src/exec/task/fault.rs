@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 
 use crate::commit::CommitCoordinatorError;
-use crate::run_types::{RunHandleError, RunStatus};
+use crate::run_types::{RunHandleError, RunLifecycle, RunStatus};
 
 use super::shared::{RunCommand, Shared};
 
@@ -18,6 +18,15 @@ pub(super) fn fault_worker(
     }
     receiver.close();
     shared.publish_lifecycle(RunStatus::Faulted { code });
+}
+
+/// Publish the terminal drain status and close the event hub.
+///
+/// Shares the `Stopped`-unless-`Faulted` rule with the host worker via
+/// [`RunLifecycle`]; only the async event-hub close differs by target.
+pub(super) async fn finish_worker(shared: &Shared) {
+    shared.publish_stopped_unless_faulted();
+    shared.events.close().await;
 }
 
 pub(super) fn model_runtime_fault(error: &RunHandleError) -> &'static str {

@@ -68,6 +68,33 @@ pub enum RunStatus {
     },
 }
 
+/// Lifecycle-status transitions shared by the native and wasm-host run owners.
+///
+/// The native owner reads status through a `watch` channel and the host owner
+/// through a poison-aware `Mutex`, but the transition *rules* must not diverge
+/// across targets: a [`RunStatus::Faulted`] status is terminal and outranks a
+/// normal drain, so a worker that ends after faulting must never overwrite the
+/// fault with [`RunStatus::Stopped`]. Implementors supply the two primitive
+/// accessors; the decision lives here so it has exactly one definition.
+pub(crate) trait RunLifecycle {
+    /// Current observable run status.
+    ///
+    /// A poisoned status lock is reported as [`RunStatus::Faulted`] so the
+    /// drain rule below fails closed and preserves the fault rather than
+    /// clearing it.
+    fn lifecycle_status(&self) -> RunStatus;
+
+    /// Replace the observable status and mirror it into live state.
+    fn set_lifecycle(&self, status: RunStatus);
+
+    /// Publish [`RunStatus::Stopped`] only when no fault has been recorded.
+    fn publish_stopped_unless_faulted(&self) {
+        if !matches!(self.lifecycle_status(), RunStatus::Faulted { .. }) {
+            self.set_lifecycle(RunStatus::Stopped);
+        }
+    }
+}
+
 /// How owned runtime tasks stopped during explicit shutdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownOutcome {
