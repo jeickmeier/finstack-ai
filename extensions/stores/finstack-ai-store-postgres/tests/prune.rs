@@ -447,3 +447,69 @@ async fn scanning_a_pruned_prefix_still_succeeds() {
 
     guard.cleanup(&connect(&url).await).await;
 }
+
+/// After a snapshot-aligned prune deletes the start of a multi-record batch,
+/// retrying that batch id must fail with `append_history_pruned` instead of
+/// reconstructing the leftover tail as a committed replay.
+#[tokio::test]
+async fn pruned_batch_replay_reports_append_history_pruned() {
+    let Some(url) = pg_test_url() else {
+        eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+        return;
+    };
+    let schema = fresh_schema_name();
+    let store = Arc::new(open_store(&url, &schema).await);
+    let guard = SchemaGuard::new(schema);
+    let coordinator = accept_root_run(&store).await;
+    let mut state = coordinator.state().clone();
+    drop(coordinator);
+
+    let committed = store
+        .append(request(10, 1, 2, vec![draft(2, 1), draft(3, 1)]))
+        .await
+        .expect("two-record batch");
+    assert_eq!(committed.first_sequence, 2);
+    assert_eq!(committed.last_sequence, 3);
+    let head_checksum = committed.records.last().expect("records").checksum();
+
+    state.set_last_applied_sequence(3);
+    state.set_state_version(state.state_version().max(6));
+    let (bytes, digest) =
+        encode_snapshot(&state, 3, head_checksum, None, None).expect("encode snapshot");
+    let snapshot = OpaqueSnapshot::try_new(3, digest, bytes, wide_limits().snapshot_bytes)
+        .expect("opaque snapshot");
+    store
+        .write_snapshot(SnapshotRequest {
+            session_id: id::<SessionTag>(1),
+            snapshot,
+        })
+        .await
+        .expect("write snapshot at sequence 3");
+
+    let receipt = store
+        .prune(PruneRequest {
+            session_id: id::<SessionTag>(1),
+            horizon: IdempotencyHorizon {
+                expire_at: Timestamp::from_unix_ms(0).expect("ts"),
+            },
+        })
+        .await
+        .expect("aligned prune succeeds");
+    assert_eq!(receipt.pruned_through_sequence, 3);
+
+    let error = store
+        .append(request(10, 1, 2, vec![draft(2, 1), draft(3, 1)]))
+        .await
+        .expect_err("pruned batch identity must not reconstruct a tail");
+    assert!(
+        matches!(
+            error,
+            StoreError::InvalidRequest {
+                reason_code: "append_history_pruned"
+            }
+        ),
+        "{error:?}"
+    );
+
+    guard.cleanup(&connect(&url).await).await;
+}

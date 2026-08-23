@@ -353,10 +353,20 @@ fn sliding_window(
         if required.contains(&index) || !retained.contains(&index) {
             continue;
         }
+        if pairs
+            .partner
+            .get(index)
+            .copied()
+            .flatten()
+            .is_some_and(|partner| required.contains(&partner))
+        {
+            continue;
+        }
         current = current.saturating_sub(drop_with_pair(
             index,
             &input.source_entries,
             &pairs,
+            &required,
             &mut retained,
         ));
     }
@@ -671,6 +681,7 @@ fn drop_with_pair(
     index: usize,
     entries: &[CompactionSourceEntry],
     pairs: &PairIndex,
+    required: &BTreeSet<usize>,
     retained: &mut BTreeSet<usize>,
 ) -> u64 {
     let mut subtracted = 0_u64;
@@ -678,6 +689,7 @@ fn drop_with_pair(
         subtracted = subtracted.saturating_add(estimate_message(&entries[index].message));
     }
     if let Some(partner) = pairs.partner[index]
+        && !required.contains(&partner)
         && retained.remove(&partner)
     {
         subtracted = subtracted.saturating_add(estimate_message(&entries[partner].message));

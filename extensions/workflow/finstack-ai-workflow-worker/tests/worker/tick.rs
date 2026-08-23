@@ -366,3 +366,25 @@ async fn spawn_ticks_and_shuts_down_cleanly() {
     tokio::time::sleep(Duration::from_millis(30)).await;
     handle.shutdown().await;
 }
+
+/// Dropping the handle must stop the loop without requiring `shutdown()`.
+#[tokio::test]
+async fn dropping_the_handle_aborts_the_tick_loop() {
+    let journal = memory_store();
+    let cron = Arc::new(MemoryCronStore::new());
+    let store = Arc::new(MemoryWorkerStore::new());
+    let worker = Arc::new(
+        WorkerBuilder::new(
+            journal,
+            cron,
+            Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+            Arc::clone(&store) as Arc<dyn FireStore>,
+            Arc::clone(&store) as Arc<dyn InboxStore>,
+        )
+        .build()
+        .expect("worker"),
+    );
+    let handle = Arc::clone(&worker).spawn(Duration::from_millis(5));
+    tokio::time::sleep(Duration::from_millis(15)).await;
+    drop(handle);
+}

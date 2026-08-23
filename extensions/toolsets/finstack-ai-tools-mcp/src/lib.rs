@@ -61,6 +61,7 @@ use finstack_ai_kernel::InteractionRequest;
 use protocol::{CallToolResult, ResultType, content_to_json};
 use transport::{
     HttpTransport, McpTransport, RequestControl, StdioTransport, authorize_http, authorize_stdio,
+    validate_http_url,
 };
 
 /// Stable protocol-violation code.
@@ -161,15 +162,11 @@ impl McpConfig {
     ///
     /// # Errors
     ///
-    /// Rejects an empty URL.
+    /// Rejects an empty URL, credentials, query, fragment, a non-HTTP
+    /// scheme, or plaintext HTTP that is not a literal loopback IP.
     pub fn allow_url(mut self, url: impl AsRef<str>) -> Result<Self, McpError> {
         let url = url.as_ref();
-        if url.is_empty() {
-            return Err(McpError::stable(
-                MCP_PROTOCOL_VIOLATION,
-                "allowlisted url is empty",
-            ));
-        }
+        validate_http_url(url)?;
         self.allowed_urls.insert(Arc::<str>::from(url));
         Ok(self)
     }

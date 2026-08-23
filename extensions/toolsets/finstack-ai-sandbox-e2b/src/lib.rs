@@ -272,23 +272,27 @@ impl Toolset for E2bSandboxToolset {
                 &ctx,
             )
             .await?;
-            if created.sandbox_id.is_empty() {
-                return Err(tool_error(
-                    E2B_TRANSPORT_FAILED,
-                    ErrorCategory::Tool,
-                    "e2b sandbox create omitted sandbox_id",
-                ));
-            }
-            let ran = post_json::<RunCommandResponse>(
+            let sandbox_id = accept_sandbox_id(&created.sandbox_id)?;
+            let encoded_id = percent_encode_path_segment(sandbox_id);
+            let ran = match post_json::<RunCommandResponse>(
                 &client,
                 &api_key,
-                &format!("{endpoint}/sandboxes/{}/run", created.sandbox_id),
+                &format!("{endpoint}/sandboxes/{encoded_id}/run"),
                 &serde_json::json!({ "command": arguments.command }),
                 &ctx,
             )
-            .await?;
+            .await
+            {
+                Ok(ran) => ran,
+                Err(error) => {
+                    if error.code() == E2B_TIMEOUT {
+                        delete_sandbox_best_effort(&client, &api_key, &endpoint, &encoded_id).await;
+                    }
+                    return Err(error);
+                }
+            };
             let output = serde_json::to_vec(&serde_json::json!({
-                "sandbox_id": created.sandbox_id,
+                "sandbox_id": sandbox_id,
                 "stdout": ran.stdout,
                 "exit_code": ran.exit_code,
             }))
@@ -419,6 +423,44 @@ fn now_unix_ms() -> i64 {
     .unwrap_or(i64::MAX)
 }
 
+fn accept_sandbox_id(value: &str) -> Result<&str, ToolError> {
+    if value.is_empty() || value.as_bytes().contains(&0) {
+        return Err(tool_error(
+            E2B_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "e2b sandbox create omitted sandbox_id",
+        ));
+    }
+    Ok(value)
+}
+
+fn percent_encode_path_segment(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => {
+                out.push('%');
+                let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{byte:02X}"));
+            }
+        }
+    }
+    out
+}
+
+async fn delete_sandbox_best_effort(
+    client: &reqwest::Client,
+    api_key: &str,
+    endpoint: &str,
+    encoded_id: &str,
+) {
+    let url = format!("{endpoint}/sandboxes/{encoded_id}");
+    let send = client.delete(&url).header("X-API-Key", api_key).send();
+    let _ = tokio::time::timeout(Duration::from_secs(2), send).await;
+}
+
 fn timeout_error() -> ToolError {
     tool_error(
         E2B_TIMEOUT,
@@ -479,6 +521,7 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use finstack_ai_kernel::{
         Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
@@ -771,6 +814,137 @@ mod tests {
         assert!(first.contains("e2b-secret-canary-045"));
         assert!(second.contains("post /sandboxes/sbx-1/run"));
         server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn sandbox_id_is_percent_encoded_as_one_path_segment() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(
+                &listener,
+                &seen_tx,
+                201,
+                r#"{"sandbox_id":"sbx-1/../admin"}"#,
+            )
+            .await;
+            respond(&listener, &seen_tx, 200, r#"{"stdout":"ok","exit_code":0}"#).await;
+        });
+        let tools = E2bSandboxToolset::try_new(E2bSandboxConfig {
+            api_key: CANARY.into(),
+            endpoint: format!("http://{addr}"),
+            template: None,
+        })
+        .expect("tools");
+        let spec = &tools.tools()[0];
+        let call = ValidatedToolCall {
+            call: ToolCallBlock::try_new(
+                ToolCallId::from_bytes([6; 16]),
+                TOOL_NAME,
+                RawJson::parse(br#"{"command":"echo hi"}"#).expect("args"),
+            )
+            .expect("call"),
+            tool_id: spec.id.clone(),
+            component: None,
+            output_contract: EffectOutputContract {
+                kind: EffectOutputKind::ToolResult,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"{}"),
+            },
+            retry_safety: spec.retry_safety,
+            deadline: None,
+            execution: spec.execution,
+            failure_policy: ToolFailurePolicy::ReturnToModel,
+        };
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(result) = item else {
+            panic!("expected completion");
+        };
+        assert!(!result.is_error);
+        let _ = seen_rx.recv().await.expect("create");
+        let run = seen_rx.recv().await.expect("run").to_ascii_lowercase();
+        assert!(
+            run.contains("post /sandboxes/sbx-1%2f..%2fadmin/run"),
+            "sandbox_id must stay one path segment: {run}"
+        );
+        assert!(!run.contains("post /sandboxes/admin"), "{run}");
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn cancelled_run_deletes_the_sandbox() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let (held_tx, held_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            respond(&listener, &seen_tx, 201, r#"{"sandbox_id":"sbx-1"}"#).await;
+            let (mut stream, _) = listener.accept().await.expect("run accept");
+            let mut buf = vec![0_u8; 8_192];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let _ = seen_tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+            let _ = held_tx.send(());
+            let hold = tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                drop(stream);
+            });
+            respond(&listener, &seen_tx, 204, "").await;
+            hold.abort();
+        });
+        let tools = E2bSandboxToolset::try_new(E2bSandboxConfig {
+            api_key: CANARY.into(),
+            endpoint: format!("http://{addr}"),
+            template: None,
+        })
+        .expect("tools");
+        let spec = &tools.tools()[0];
+        let ctx = tool_context();
+        let cancel = ctx.run.cancellation.clone();
+        let call = ValidatedToolCall {
+            call: ToolCallBlock::try_new(
+                ToolCallId::from_bytes([6; 16]),
+                TOOL_NAME,
+                RawJson::parse(br#"{"command":"echo hi"}"#).expect("args"),
+            )
+            .expect("call"),
+            tool_id: spec.id.clone(),
+            component: None,
+            output_contract: EffectOutputContract {
+                kind: EffectOutputKind::ToolResult,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"{}"),
+            },
+            retry_safety: spec.retry_safety,
+            deadline: None,
+            execution: spec.execution,
+            failure_policy: ToolFailurePolicy::ReturnToModel,
+        };
+        let pending = tokio::spawn(async move { tools.call(ctx, call).await });
+        held_rx.await.expect("run reached fixture");
+        cancel.cancel();
+        let Err(error) = pending.await.expect("join") else {
+            panic!("cancelled");
+        };
+        assert_eq!(error.code(), crate::E2B_TIMEOUT);
+        let create = seen_rx.recv().await.expect("create").to_ascii_lowercase();
+        let run = seen_rx.recv().await.expect("run").to_ascii_lowercase();
+        let delete = tokio::time::timeout(Duration::from_secs(3), seen_rx.recv())
+            .await
+            .expect("delete arrived")
+            .expect("delete")
+            .to_ascii_lowercase();
+        assert!(create.contains("post /sandboxes"));
+        assert!(run.contains("post /sandboxes/sbx-1/run"));
+        assert!(
+            delete.contains("delete /sandboxes/sbx-1"),
+            "cancelled run must DELETE the sandbox: {delete}"
+        );
+        server.abort();
     }
 
     async fn serve_scripted(listener: TcpListener, seen: mpsc::UnboundedSender<String>) {

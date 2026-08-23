@@ -16,6 +16,9 @@
 //! The download client pins the vetted address with
 //! [`reqwest::ClientBuilder::resolve`] so a later DNS answer cannot rebind
 //! the TCP connection to a private address.
+//!
+//! This file is closed to new behavior. Add a media endpoint in the
+//! per-modality modules (`image`, `speech`, `video`, `transcribe`, `http`).
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]

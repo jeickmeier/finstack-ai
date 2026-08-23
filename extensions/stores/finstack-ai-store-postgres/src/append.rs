@@ -261,7 +261,13 @@ async fn append_in_transaction(
         .await?
         {
             return if existing.identity == incoming_identity {
-                Ok(existing.committed)
+                match existing.committed {
+                    Some(committed) => Ok(committed),
+                    None => Err(StoreError::InvalidRequest {
+                        reason_code: "append_history_pruned",
+                    }
+                    .into()),
+                }
             } else {
                 Err(StoreError::Corruption {
                     reason_code: "append_batch_id_reuse",
@@ -437,11 +443,17 @@ async fn replay_by_record_reuse(
         reason_code: "missing_record_batch_index",
     })?;
     let incoming = request_identity(request)?;
+    let Some(committed) = existing.committed else {
+        return Err(StoreError::InvalidRequest {
+            reason_code: "append_history_pruned",
+        }
+        .into());
+    };
     if existing.identity.session_id == incoming.session_id
         && existing.identity.expected_sequence == incoming.expected_sequence
         && existing.identity.draft_cbor == incoming.draft_cbor
     {
-        return Ok(Some(existing.committed));
+        return Ok(Some(committed));
     }
     Err(StoreError::Corruption {
         reason_code: "record_id_reuse",

@@ -149,6 +149,10 @@ unpublished.
 - `finstack-ai::runtime` is a curated production module (`ports`,
   `spec`, `commit`, `ids`, drivers) instead of a crate re-export.
   Hidden `finstack_ai_runtime::testing` drivers stay off the facade.
+- Anthropic, OpenRouter, and MCP streamable-HTTP construction now reject
+  plaintext `http://` unless the host is a literal loopback IP, matching
+  OpenAI / Gemini / Ollama. MCP `allow_url` / `HttpConfig` also reject
+  credentials, query, and fragment.
 - **Breaking workflow hardening (workspace 2.0):** production workflow
   attachment now uses operating-system entropy; deterministic attachment is
   explicit through `*_seeded` constructors. Workflow scheduler reads are
@@ -306,6 +310,12 @@ unpublished.
   existing needles). `oauth_client_id` and `author` stay allowed.
   Values are not scanned; `*_ref` keys remain allowed. Innocuous keys
   that hold credential values stay a host problem (TM-04 residual).
+- Sliding-window compaction no longer drops a protected tool-pair partner.
+- E2B percent-encodes provider `sandbox_id` path segments and best-effort
+  `DELETE`s the sandbox when a run is cancelled or exceeds its deadline.
+- Postgres pruned-batch replay reports `append_history_pruned` instead of
+  reconstructing a leftover tail as a committed batch.
+- `WorkerHandle` drop signals shutdown and aborts the tick loop.
 
 ## [1.0.0] - 2026-08-15
 

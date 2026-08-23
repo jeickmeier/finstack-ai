@@ -234,6 +234,89 @@ fn unpaired_history() -> BeforeModelInput {
     }
 }
 
+fn mixed_protection_history() -> BeforeModelInput {
+    let call_id = id::<ToolCallTag>(70);
+    let entries: Arc<[CompactionSourceEntry]> = Arc::from([
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(40),
+            message: message(10, MessageRole::System, text("system policy")),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"sys"),
+            protected: true,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(41),
+            message: message(11, MessageRole::User, text(&"droppable ".repeat(40))),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"old"),
+            protected: false,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(42),
+            message: message(
+                12,
+                MessageRole::Assistant,
+                vec![ContentBlock::ToolCall(
+                    ToolCallBlock::try_new(
+                        call_id,
+                        "lookup",
+                        RawJson::parse(b"{\"q\":\"mixed\"}").expect("args"),
+                    )
+                    .expect("call"),
+                )],
+            ),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"call"),
+            protected: true,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(43),
+            message: message(
+                13,
+                MessageRole::Tool,
+                vec![ContentBlock::ToolResult(
+                    ToolResultBlock::try_new(call_id, text(&"tool-body-".repeat(40)), false)
+                        .expect("result"),
+                )],
+            ),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"result"),
+            protected: false,
+        },
+        CompactionSourceEntry {
+            entry_id: id::<EntryTag>(44),
+            message: message(14, MessageRole::User, text("current question")),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(b"user"),
+            protected: true,
+        },
+    ]);
+    BeforeModelInput {
+        request: ModelRequestDraft {
+            model: ModelName::try_new("preview-model").expect("model"),
+            messages: entries
+                .iter()
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>()
+                .into(),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 10_000,
+                max_output_tokens: 1_000,
+            },
+        },
+        source_entries: entries,
+        model_context_profile_digest: Digest::raw_json(b"profile"),
+        hard_input_tokens: 10_000,
+        checkpoint: None,
+    }
+}
+
 fn middleware_ctx(resume: Option<CompactionModelResume>) -> MiddlewareContext {
     let principal =
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
@@ -445,6 +528,51 @@ async fn sliding_window_unpaired_call_regression_analyzes_pairs_once() {
         "fixture must drop the complete pair so atomicity is exercised"
     );
 
+    validate_stage_outcome(
+        &middleware.descriptor(),
+        &StageInput::BeforeModel(Box::new(input.clone())),
+        &StageOutcome::CompactContext(result.clone()),
+    )
+    .expect("stage");
+}
+
+#[tokio::test]
+async fn sliding_window_keeps_a_protected_tool_pair_partner() {
+    let middleware =
+        CompactionMiddleware::try_new(CompactionConfig::sliding_window(80, 0)).expect("middleware");
+    let input = mixed_protection_history();
+    let outcome = invoke(&middleware, input.clone(), None)
+        .await
+        .expect("invoke");
+    let StageOutcome::CompactContext(result) = outcome else {
+        panic!("expected compact context");
+    };
+    for entry in input.source_entries.iter().filter(|entry| entry.protected) {
+        let replacement = result
+            .replacement_messages
+            .iter()
+            .find(|message| message.id() == entry.message.id())
+            .expect("protected retained");
+        assert_eq!(
+            serde_json::to_vec(replacement).expect("rep"),
+            serde_json::to_vec(&entry.message).expect("src")
+        );
+    }
+    let call = input.source_entries[2].message.id();
+    let tool_result = input.source_entries[3].message.id();
+    let retained_call = result
+        .replacement_messages
+        .iter()
+        .any(|message| message.id() == call);
+    let retained_result = result
+        .replacement_messages
+        .iter()
+        .any(|message| message.id() == tool_result);
+    assert!(retained_call, "protected tool call must stay");
+    assert!(
+        retained_result,
+        "unprotected partner of a protected tool call must stay"
+    );
     validate_stage_outcome(
         &middleware.descriptor(),
         &StageInput::BeforeModel(Box::new(input.clone())),

@@ -1,168 +1,24 @@
-//! SQLite-backed durable [`MemoryStore`], gated behind the `sqlite` feature.
-//!
-//! One bounded command queue feeds a dedicated worker that exclusively owns
-//! the [`rusqlite::Connection`], so database calls never block an async
-//! executor thread. WAL journaling is used where the backing file supports
-//! it. Each write applies the expiry/receipt sweep plus its data and
-//! idempotency receipt in one immediate transaction; reads run without a
-//! transaction and filter expired rows by predicate instead of sweeping.
+//! Record, receipt, search, and artefact-action queries.
 
-use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
-use tokio::sync::{mpsc, oneshot};
 
 use finstack_ai_kernel::{ArtifactRef, Digest, Sensitivity, Timestamp};
 use finstack_ai_runtime::artifact::ArtifactScope;
-use finstack_ai_runtime::ports::PortFuture;
 
 use crate::record::{
-    INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryClock,
-    MemoryId, MemoryProvenance, MemoryRecord, MemoryScope, RetentionPolicy, system_clock,
+    INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryId,
+    MemoryProvenance, MemoryRecord, MemoryScope, RetentionPolicy,
 };
 
-use super::{
+use super::super::{
     MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction, MemoryHit,
-    MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError,
-    MemoryStoreLimits, PutOutcome, artifact_transition_actions, normalize_search_tokens,
-    validate_new_record_lifecycle,
+    MemoryListing, MemoryPage, MemoryQuery, MemoryStoreError, MemoryStoreLimits, PutOutcome,
+    artifact_transition_actions, normalize_search_tokens, validate_new_record_lifecycle,
 };
 
-/// Applied `PRAGMA user_version` for the current schema.
-const SCHEMA_USER_VERSION: i32 = 2;
-
-/// Lock-wait applied to every opened connection before `SQLITE_BUSY`.
-const BUSY_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// Maximum number of `SQLite` operations awaiting the dedicated worker.
-const WORK_QUEUE_CAPACITY: usize = 64;
-
-const V2_DDL: &str = "
-CREATE TABLE memory_records (
-  scope_digest TEXT NOT NULL,
-  id TEXT NOT NULL,
-  tenant TEXT NOT NULL,
-  user TEXT, agent TEXT, workspace TEXT,
-  body_inline TEXT,
-  blob_ref_json TEXT,
-  preview TEXT NOT NULL,
-  sensitivity TEXT NOT NULL,
-  keywords_json TEXT NOT NULL,
-  provenance_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  last_confirmed_at INTEGER NOT NULL,
-  supersedes TEXT, superseded_by TEXT,
-  retention_json TEXT NOT NULL,
-  expires_at INTEGER,
-  tombstoned INTEGER NOT NULL DEFAULT 0
-    CHECK (tombstoned IN (0, 1)),
-  CHECK ((body_inline IS NULL) != (blob_ref_json IS NULL)),
-  PRIMARY KEY (scope_digest, id)
-);
-CREATE INDEX memory_records_scope ON memory_records(scope_digest, id);
-CREATE INDEX memory_records_expiry ON memory_records(expires_at) WHERE expires_at IS NOT NULL;
-CREATE VIRTUAL TABLE memory_fts USING fts5(
-  scope_digest UNINDEXED, id UNINDEXED, preview, body, keywords
-);
-CREATE TABLE memory_keywords (
-  scope_digest TEXT NOT NULL,
-  id TEXT NOT NULL,
-  ordinal INTEGER NOT NULL,
-  keyword TEXT NOT NULL,
-  keyword_folded TEXT NOT NULL,
-  PRIMARY KEY (scope_digest, id, ordinal)
-);
-CREATE INDEX memory_keywords_lookup
-  ON memory_keywords(scope_digest, keyword_folded, id);
-CREATE TABLE memory_idempotency (
-  scope_digest TEXT NOT NULL,
-  key TEXT NOT NULL,
-  fingerprint TEXT NOT NULL,
-  applied_at INTEGER NOT NULL,
-  PRIMARY KEY (scope_digest, key)
-);
-CREATE TABLE memory_artifact_outbox (
-  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-  action_id TEXT NOT NULL UNIQUE,
-  action_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-";
-
-const MIGRATE_V1_DDL: &str = "
-ALTER TABLE memory_records RENAME TO memory_records_v1;
-DROP INDEX IF EXISTS memory_records_tenant;
-DROP TABLE memory_fts;
-CREATE TABLE memory_records (
-  scope_digest TEXT NOT NULL, id TEXT NOT NULL,
-  tenant TEXT NOT NULL, user TEXT, agent TEXT, workspace TEXT,
-  body_inline TEXT, blob_ref_json TEXT, preview TEXT NOT NULL,
-  sensitivity TEXT NOT NULL, keywords_json TEXT NOT NULL,
-  provenance_json TEXT NOT NULL, created_at INTEGER NOT NULL,
-  last_confirmed_at INTEGER NOT NULL, supersedes TEXT,
-  superseded_by TEXT, retention_json TEXT NOT NULL,
-  expires_at INTEGER, tombstoned INTEGER NOT NULL DEFAULT 0
-    CHECK (tombstoned IN (0, 1)),
-  CHECK ((body_inline IS NULL) != (blob_ref_json IS NULL)),
-  PRIMARY KEY (scope_digest, id)
-);
-CREATE INDEX memory_records_scope ON memory_records(scope_digest, id);
-CREATE INDEX memory_records_expiry
-  ON memory_records(expires_at) WHERE expires_at IS NOT NULL;
-CREATE VIRTUAL TABLE memory_fts USING fts5(
-  scope_digest UNINDEXED, id UNINDEXED, preview, body, keywords
-);
-CREATE TABLE memory_keywords (
-  scope_digest TEXT NOT NULL,
-  id TEXT NOT NULL,
-  ordinal INTEGER NOT NULL,
-  keyword TEXT NOT NULL,
-  keyword_folded TEXT NOT NULL,
-  PRIMARY KEY (scope_digest, id, ordinal)
-);
-CREATE INDEX memory_keywords_lookup
-  ON memory_keywords(scope_digest, keyword_folded, id);
-ALTER TABLE memory_idempotency RENAME TO memory_idempotency_v1;
-CREATE TABLE memory_idempotency (
-  scope_digest TEXT NOT NULL, key TEXT NOT NULL,
-  fingerprint TEXT NOT NULL, applied_at INTEGER NOT NULL,
-  PRIMARY KEY (scope_digest, key)
-);
-INSERT INTO memory_idempotency (scope_digest, key, fingerprint, applied_at)
-SELECT '*', key, 'legacy-unverifiable', applied_at FROM memory_idempotency_v1;
-DROP TABLE memory_idempotency_v1;
-CREATE TABLE memory_artifact_outbox (
-  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-  action_id TEXT NOT NULL UNIQUE,
-  action_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-";
-
-/// Durable [`MemoryStore`] backed by a single `SQLite` connection with an
-/// FTS5 full-text index.
-///
-/// Available only on native targets with the `sqlite` feature enabled.
-#[derive(Debug)]
-pub struct SqliteMemoryStore {
-    sender: Option<mpsc::Sender<Command>>,
-    worker: Option<std::thread::JoinHandle<()>>,
-    store_id: Arc<str>,
-    limits: MemoryStoreLimits,
-}
-
-impl Drop for SqliteMemoryStore {
-    fn drop(&mut self) {
-        self.sender.take();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
-fn sqlite_put(
+pub(super) fn sqlite_put(
     connection: &mut Connection,
     key: &str,
     record: &MemoryRecord,
@@ -196,7 +52,7 @@ fn sqlite_put(
     Ok(PutOutcome::Inserted)
 }
 
-fn sqlite_get(
+pub(super) fn sqlite_get(
     connection: &Connection,
     scope: &MemoryScope,
     id: &MemoryId,
@@ -207,7 +63,7 @@ fn sqlite_get(
     Ok(record.filter(|record| !record.tombstoned && record.superseded_by.is_none()))
 }
 
-fn sqlite_search(
+pub(super) fn sqlite_search(
     connection: &Connection,
     scope: &MemoryScope,
     query: &MemoryQuery,
@@ -234,7 +90,7 @@ fn sqlite_search(
     Ok(hits)
 }
 
-fn sqlite_forget(
+pub(super) fn sqlite_forget(
     connection: &mut Connection,
     key: &str,
     scope: &MemoryScope,
@@ -274,7 +130,7 @@ fn sqlite_forget(
     Ok(())
 }
 
-fn sqlite_correct(
+pub(super) fn sqlite_correct(
     connection: &mut Connection,
     key: &str,
     scope: &MemoryScope,
@@ -342,7 +198,7 @@ fn sqlite_correct(
     Ok(())
 }
 
-fn sqlite_list(
+pub(super) fn sqlite_list(
     connection: &Connection,
     scope: &MemoryScope,
     page: MemoryPage,
@@ -392,537 +248,9 @@ fn sqlite_list(
         total: usize::try_from(total).unwrap_or(usize::MAX),
     })
 }
-
-impl MemoryStore for SqliteMemoryStore {
-    fn descriptor(&self) -> MemoryStoreDescriptor {
-        MemoryStoreDescriptor {
-            store_id: Arc::clone(&self.store_id),
-            durable: true,
-            manages_artifact_ownership: true,
-            limits: self.limits,
-        }
-    }
-
-    fn put(
-        &self,
-        key: Arc<str>,
-        record: MemoryRecord,
-    ) -> PortFuture<Result<PutOutcome, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Put { key, record, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-
-    fn get(
-        &self,
-        scope: MemoryScope,
-        id: MemoryId,
-    ) -> PortFuture<Result<Option<MemoryRecord>, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Get { scope, id, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-
-    fn search(
-        &self,
-        scope: MemoryScope,
-        query: MemoryQuery,
-        limit: usize,
-    ) -> PortFuture<Result<Vec<MemoryHit>, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Search {
-                    scope,
-                    query,
-                    limit,
-                    reply,
-                })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-
-    fn forget(
-        &self,
-        key: Arc<str>,
-        scope: MemoryScope,
-        id: MemoryId,
-    ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Forget {
-                    key,
-                    scope,
-                    id,
-                    reply,
-                })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-
-    fn correct(
-        &self,
-        key: Arc<str>,
-        scope: MemoryScope,
-        old: MemoryId,
-        replacement: MemoryRecord,
-    ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Correct {
-                    key,
-                    scope,
-                    old,
-                    replacement,
-                    reply,
-                })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-
-    fn list(
-        &self,
-        scope: MemoryScope,
-        page: MemoryPage,
-    ) -> PortFuture<Result<MemoryListing, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::List { scope, page, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-
-    fn pending_artifact_actions(
-        &self,
-        limit: usize,
-    ) -> PortFuture<Result<Vec<MemoryArtifactAction>, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::PendingArtifactActions { limit, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-
-    fn acknowledge_artifact_action(
-        &self,
-        action_id: Digest,
-    ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::AcknowledgeArtifactAction { action_id, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
-    }
-}
-
-enum Command {
-    Put {
-        key: Arc<str>,
-        record: MemoryRecord,
-        reply: oneshot::Sender<Result<PutOutcome, MemoryStoreError>>,
-    },
-    Get {
-        scope: MemoryScope,
-        id: MemoryId,
-        reply: oneshot::Sender<Result<Option<MemoryRecord>, MemoryStoreError>>,
-    },
-    Search {
-        scope: MemoryScope,
-        query: MemoryQuery,
-        limit: usize,
-        reply: oneshot::Sender<Result<Vec<MemoryHit>, MemoryStoreError>>,
-    },
-    Forget {
-        key: Arc<str>,
-        scope: MemoryScope,
-        id: MemoryId,
-        reply: oneshot::Sender<Result<(), MemoryStoreError>>,
-    },
-    Correct {
-        key: Arc<str>,
-        scope: MemoryScope,
-        old: MemoryId,
-        replacement: MemoryRecord,
-        reply: oneshot::Sender<Result<(), MemoryStoreError>>,
-    },
-    List {
-        scope: MemoryScope,
-        page: MemoryPage,
-        reply: oneshot::Sender<Result<MemoryListing, MemoryStoreError>>,
-    },
-    PendingArtifactActions {
-        limit: usize,
-        reply: oneshot::Sender<Result<Vec<MemoryArtifactAction>, MemoryStoreError>>,
-    },
-    AcknowledgeArtifactAction {
-        action_id: Digest,
-        reply: oneshot::Sender<Result<(), MemoryStoreError>>,
-    },
-}
-
-impl SqliteMemoryStore {
-    /// Open (creating if absent) a file-backed store at `path`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MemoryStoreError::Unavailable`] if the connection cannot be
-    /// opened, pragmas cannot be applied, or the schema is missing/mismatched.
-    pub fn try_open(path: &Path) -> Result<Self, MemoryStoreError> {
-        let connection = Connection::open(path).map_err(|_| sqlite_unavailable())?;
-        let canonical_path = std::fs::canonicalize(path).map_err(|_| sqlite_unavailable())?;
-        let path_digest = Digest::domain_separated(
-            "memory-sqlite-path",
-            1,
-            canonical_path.to_string_lossy().as_bytes(),
-        )
-        .map_err(|_| sqlite_unavailable())?;
-        let store_id = Arc::from(format!("memory.sqlite-v2.{}", path_digest.to_hex()));
-        Self::from_connection(
-            connection,
-            false,
-            system_clock(),
-            MemoryStoreLimits::default(),
-            &store_id,
-        )
-    }
-
-    /// Open a private in-memory store (not shared across connections).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MemoryStoreError::Unavailable`] if the connection cannot be
-    /// opened, pragmas cannot be applied, or the schema is missing/mismatched.
-    pub fn try_open_in_memory() -> Result<Self, MemoryStoreError> {
-        let connection = Connection::open_in_memory().map_err(|_| sqlite_unavailable())?;
-        Self::from_connection(
-            connection,
-            true,
-            system_clock(),
-            MemoryStoreLimits::default(),
-            "memory.sqlite-v2.in-memory",
-        )
-    }
-
-    /// Open an in-memory store with deterministic time and explicit limits.
-    ///
-    /// Intended for embedders that supply their own clock and for tests.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MemoryStoreError::Unavailable`] if the connection cannot be
-    /// opened, configured, or migrated.
-    pub fn try_open_in_memory_with(
-        clock: MemoryClock,
-        limits: MemoryStoreLimits,
-    ) -> Result<Self, MemoryStoreError> {
-        let connection = Connection::open_in_memory().map_err(|_| sqlite_unavailable())?;
-        Self::from_connection(
-            connection,
-            true,
-            clock,
-            limits,
-            "memory.sqlite-v2.in-memory",
-        )
-    }
-
-    fn from_connection(
-        connection: Connection,
-        memory: bool,
-        clock: MemoryClock,
-        limits: MemoryStoreLimits,
-        store_id: &str,
-    ) -> Result<Self, MemoryStoreError> {
-        connection
-            .busy_timeout(BUSY_TIMEOUT)
-            .map_err(|_| sqlite_unavailable())?;
-        if !memory {
-            connection
-                .pragma_update(None, "journal_mode", "WAL")
-                .map_err(|_| sqlite_unavailable())?;
-        }
-        connection
-            .pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|_| sqlite_unavailable())?;
-        apply_schema(&connection)?;
-        ensure_v2_auxiliary_tables(&connection)?;
-        let store_id = ensure_store_identity(&connection, store_id)?;
-        let (sender, receiver) = mpsc::channel(WORK_QUEUE_CAPACITY);
-        let worker = std::thread::Builder::new()
-            .name(String::from("finstack-memory-sqlite"))
-            .spawn(move || run_worker(connection, receiver, &clock, limits))
-            .map_err(|_| sqlite_unavailable())?;
-        Ok(Self {
-            sender: Some(sender),
-            worker: Some(worker),
-            store_id,
-            limits,
-        })
-    }
-}
-
-fn run_worker(
-    mut connection: Connection,
-    mut receiver: mpsc::Receiver<Command>,
-    clock: &MemoryClock,
-    limits: MemoryStoreLimits,
-) {
-    while let Some(command) = receiver.blocking_recv() {
-        let now = clock();
-        match command {
-            Command::Put { key, record, reply } => {
-                let _ = reply.send(sqlite_put(&mut connection, &key, &record, now, limits));
-            }
-            Command::Get { scope, id, reply } => {
-                let _ = reply.send(sqlite_get(&connection, &scope, &id, now));
-            }
-            Command::Search {
-                scope,
-                query,
-                limit,
-                reply,
-            } => {
-                let _ = reply.send(sqlite_search(
-                    &connection,
-                    &scope,
-                    &query,
-                    limit,
-                    now,
-                    limits,
-                ));
-            }
-            Command::Forget {
-                key,
-                scope,
-                id,
-                reply,
-            } => {
-                let _ = reply.send(sqlite_forget(
-                    &mut connection,
-                    &key,
-                    &scope,
-                    &id,
-                    now,
-                    limits,
-                ));
-            }
-            Command::Correct {
-                key,
-                scope,
-                old,
-                replacement,
-                reply,
-            } => {
-                let _ = reply.send(sqlite_correct(
-                    &mut connection,
-                    &key,
-                    &scope,
-                    &old,
-                    &replacement,
-                    now,
-                    limits,
-                ));
-            }
-            Command::List { scope, page, reply } => {
-                let _ = reply.send(sqlite_list(&connection, &scope, page, now, limits));
-            }
-            Command::PendingArtifactActions { limit, reply } => {
-                let _ = reply.send(pending_artifact_actions(&connection, limit, limits));
-            }
-            Command::AcknowledgeArtifactAction { action_id, reply } => {
-                let _ = reply.send(acknowledge_artifact_action(&connection, action_id));
-            }
-        }
-    }
-}
-
-fn apply_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
-    let version: i32 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|_| sqlite_unavailable())?;
-    match version {
-        0 => create_v2_schema(connection),
-        1 => migrate_v1_schema(connection),
-        SCHEMA_USER_VERSION => Ok(()),
-        _ => Err(MemoryStoreError::Unavailable {
-            message: Arc::from("memory_store_sqlite_schema_unsupported"),
-        }),
-    }
-}
-
-fn create_v2_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
-    let transaction = connection
-        .unchecked_transaction()
-        .map_err(|_| sqlite_unavailable())?;
-    transaction
-        .execute_batch(V2_DDL)
-        .map_err(|_| sqlite_unavailable())?;
-    finish_schema_transaction(transaction)
-}
-
-fn migrate_v1_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
-    let legacy_blobs: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM memory_records WHERE blob_ref_json IS NOT NULL",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| sqlite_unavailable())?;
-    if legacy_blobs != 0 {
-        return Err(MemoryStoreError::Unavailable {
-            message: Arc::from("memory_store_sqlite_legacy_blob_unverifiable"),
-        });
-    }
-    let transaction = connection
-        .unchecked_transaction()
-        .map_err(|_| sqlite_unavailable())?;
-    transaction
-        .execute_batch(
-            "ALTER TABLE memory_records ADD COLUMN expires_at INTEGER;
-             UPDATE memory_records
-             SET expires_at = created_at + CAST(
-               json_extract(retention_json, '$.expire_after_ms') AS INTEGER
-             )
-             WHERE json_type(retention_json, '$.expire_after_ms') IS NOT NULL;",
-        )
-        .map_err(|_| sqlite_unavailable())?;
-    let records = load_legacy_records(&transaction)?;
-    transaction
-        .execute_batch(MIGRATE_V1_DDL)
-        .map_err(|_| sqlite_unavailable())?;
-    for record in &records {
-        write_record(&transaction, record)?;
-    }
-    transaction
-        .execute("DROP TABLE memory_records_v1", [])
-        .map_err(|_| sqlite_unavailable())?;
-    let quick_check: String = transaction
-        .query_row("PRAGMA quick_check", [], |row| row.get(0))
-        .map_err(|_| sqlite_unavailable())?;
-    if quick_check != "ok" {
-        return Err(sqlite_unavailable());
-    }
-    finish_schema_transaction(transaction)
-}
-
-fn load_legacy_records(
-    transaction: &Transaction<'_>,
-) -> Result<Vec<MemoryRecord>, MemoryStoreError> {
-    let mut statement = transaction
-        .prepare("SELECT * FROM memory_records ORDER BY id")
-        .map_err(|_| sqlite_unavailable())?;
-    let rows = statement
-        .query_map([], legacy_record_from_row)
-        .map_err(|_| sqlite_unavailable())?;
-    rows.map(|row| row.map_err(|_| sqlite_unavailable()))
-        .collect()
-}
-
-fn finish_schema_transaction(transaction: Transaction<'_>) -> Result<(), MemoryStoreError> {
-    transaction
-        .pragma_update(None, "user_version", SCHEMA_USER_VERSION)
-        .map_err(|_| sqlite_unavailable())?;
-    transaction.commit().map_err(|_| sqlite_unavailable())
-}
-
-fn ensure_v2_auxiliary_tables(connection: &Connection) -> Result<(), MemoryStoreError> {
-    connection
-        .execute_batch(
-            "CREATE TABLE IF NOT EXISTS memory_keywords (
-               scope_digest TEXT NOT NULL,
-               id TEXT NOT NULL,
-               ordinal INTEGER NOT NULL,
-               keyword TEXT NOT NULL,
-               keyword_folded TEXT NOT NULL,
-               PRIMARY KEY (scope_digest, id, ordinal)
-             );
-             CREATE INDEX IF NOT EXISTS memory_keywords_lookup
-               ON memory_keywords(scope_digest, keyword_folded, id);
-             INSERT OR IGNORE INTO memory_keywords
-               (scope_digest, id, ordinal, keyword, keyword_folded)
-             SELECT r.scope_digest, r.id, CAST(j.key AS INTEGER),
-                    CAST(j.value AS TEXT), lower(CAST(j.value AS TEXT))
-             FROM memory_records r, json_each(r.keywords_json) j;",
-        )
-        .map_err(|_| sqlite_unavailable())
-}
-
-fn ensure_store_identity(
-    connection: &Connection,
-    proposed_store_id: &str,
-) -> Result<Arc<str>, MemoryStoreError> {
-    connection
-        .execute_batch(
-            "CREATE TABLE IF NOT EXISTS memory_meta (
-               singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-               store_id TEXT NOT NULL
-             );",
-        )
-        .map_err(|_| sqlite_unavailable())?;
-    connection
-        .execute(
-            "INSERT OR IGNORE INTO memory_meta (singleton, store_id) VALUES (1, ?1)",
-            params![proposed_store_id],
-        )
-        .map_err(|_| sqlite_unavailable())?;
-    let stored: String = connection
-        .query_row(
-            "SELECT store_id FROM memory_meta WHERE singleton = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| sqlite_unavailable())?;
-    if stored.is_empty() || stored.len() > 256 || stored.as_bytes().contains(&0) {
-        return Err(sqlite_unavailable());
-    }
-    Ok(Arc::from(stored))
-}
-
 /// Stable, non-secret error for any `SQLite` failure. Never carries the
 /// underlying `rusqlite` error text, which may embed file paths or content.
-fn sqlite_unavailable() -> MemoryStoreError {
+pub(super) fn sqlite_unavailable() -> MemoryStoreError {
     MemoryStoreError::Unavailable {
         message: Arc::from("memory_store_sqlite_unavailable"),
     }
@@ -969,7 +297,7 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
     record_from_row_inner(row, true)
 }
 
-fn legacy_record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
+pub(super) fn legacy_record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
     record_from_row_inner(row, false)
 }
 
@@ -1102,7 +430,7 @@ fn body_text(body: &MemoryBody) -> String {
 }
 
 /// Insert (or replace) `record`'s row and FTS entry within `transaction`.
-fn write_record(
+pub(super) fn write_record(
     transaction: &Transaction<'_>,
     record: &MemoryRecord,
 ) -> Result<(), MemoryStoreError> {
@@ -1565,7 +893,7 @@ fn enqueue_artifact_actions(
     Ok(())
 }
 
-fn pending_artifact_actions(
+pub(super) fn pending_artifact_actions(
     connection: &Connection,
     limit: usize,
     limits: MemoryStoreLimits,
@@ -1595,7 +923,7 @@ fn pending_artifact_actions(
     Ok(actions)
 }
 
-fn acknowledge_artifact_action(
+pub(super) fn acknowledge_artifact_action(
     connection: &Connection,
     action_id: Digest,
 ) -> Result<(), MemoryStoreError> {

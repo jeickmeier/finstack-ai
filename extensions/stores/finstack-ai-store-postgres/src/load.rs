@@ -175,7 +175,10 @@ pub(crate) struct LoadedBatch {
     /// Decoded identity, used for idempotent replay comparison.
     pub(crate) identity: AppendIdentity,
     /// The batch as it was returned when first committed.
-    pub(crate) committed: CommittedBatch,
+    ///
+    /// `None` when remaining records no longer cover `first_sequence`
+    /// (a snapshot-aligned prefix prune deleted the start of the batch).
+    pub(crate) committed: Option<CommittedBatch>,
 }
 
 /// Load `window` of `session_id` on `client`, verifying the chain (spec D9).
@@ -760,10 +763,23 @@ pub(crate) async fn load_batch(
         .map(reconstruct_envelope)
         .collect::<Result<Vec<_>, _>>()?;
 
-    let committed = CommittedBatch::try_new(batch_id, first_sequence, last_sequence, envelopes)
-        .map_err(|_| StoreError::Integrity {
-            reason_code: "committed_batch_invalid",
-        })?;
+    let committed = if envelopes
+        .first()
+        .is_some_and(|record| record.sequence() > first_sequence)
+        && envelopes
+            .last()
+            .is_some_and(|record| record.sequence() == last_sequence)
+    {
+        None
+    } else {
+        Some(
+            CommittedBatch::try_new(batch_id, first_sequence, last_sequence, envelopes).map_err(
+                |_| StoreError::Integrity {
+                    reason_code: "committed_batch_invalid",
+                },
+            )?,
+        )
+    };
     Ok(Some(LoadedBatch {
         identity,
         committed,

@@ -1041,7 +1041,7 @@ impl WorkflowWorker {
         });
         WorkerHandle {
             shutdown: shutdown_tx,
-            join,
+            join: Some(join),
         }
     }
 }
@@ -1063,13 +1063,24 @@ pub struct WorkerHandle {
     /// Signals the loop to stop after its current tick.
     shutdown: tokio::sync::watch::Sender<bool>,
     /// Join handle for the spawned loop task.
-    join: tokio::task::JoinHandle<()>,
+    join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl WorkerHandle {
     /// Signal shutdown and wait for the loop to finish the current tick.
-    pub async fn shutdown(self) {
+    pub async fn shutdown(mut self) {
         let _ = self.shutdown.send(true);
-        let _ = self.join.await;
+        if let Some(join) = self.join.take() {
+            let _ = join.await;
+        }
+    }
+}
+
+impl Drop for WorkerHandle {
+    fn drop(&mut self) {
+        let _ = self.shutdown.send(true);
+        if let Some(join) = self.join.take() {
+            join.abort();
+        }
     }
 }

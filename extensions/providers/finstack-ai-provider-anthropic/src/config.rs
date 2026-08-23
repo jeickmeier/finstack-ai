@@ -2,6 +2,7 @@
 
 use core::fmt;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -318,6 +319,16 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
             "provider base URL contains forbidden components",
         ));
     }
+    if url.scheme() == "http"
+        && !url
+            .host_str()
+            .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
+            .is_some_and(|address| address.is_loopback())
+    {
+        return Err(config_error(
+            "plaintext provider base URL must use a loopback IP",
+        ));
+    }
     Ok(())
 }
 
@@ -628,6 +639,26 @@ mod tests {
         assert!(!rendered.contains(CANARY));
         assert!(rendered.contains("[resolver]"));
         assert!(!rendered.contains("FixtureResolver"));
+    }
+
+    #[test]
+    fn plaintext_http_requires_a_literal_loopback_ip() {
+        for url in [
+            "http://example.test",
+            "http://192.0.2.1",
+            "http://localhost",
+        ] {
+            assert_eq!(
+                AnthropicConfig::try_new(url)
+                    .expect_err("remote plaintext")
+                    .code(),
+                crate::error::CONFIG_INVALID
+            );
+        }
+        for url in ["http://127.0.0.1:8080", "http://[::1]:8080"] {
+            assert!(AnthropicConfig::try_new(url).is_ok());
+        }
+        assert!(AnthropicConfig::try_new("https://example.test").is_ok());
     }
 
     #[test]

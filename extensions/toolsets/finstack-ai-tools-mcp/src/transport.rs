@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 use std::collections::VecDeque;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use futures_util::future::BoxFuture;
+use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -631,15 +633,11 @@ impl HttpConfig {
     ///
     /// # Errors
     ///
-    /// Rejects an empty URL.
+    /// Rejects an empty URL, credentials, query, fragment, a non-HTTP
+    /// scheme, or plaintext HTTP that is not a literal loopback IP.
     pub fn try_new(url: impl Into<String>) -> Result<Self, McpError> {
         let url = url.into();
-        if url.is_empty() {
-            return Err(McpError::stable(
-                MCP_PROTOCOL_VIOLATION,
-                "http url is empty",
-            ));
-        }
+        validate_http_url(&url)?;
         Ok(Self {
             url,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
@@ -1009,6 +1007,40 @@ pub(crate) fn authorize_stdio(allowed: &[Arc<str>], program: &Path) -> Result<()
     ))
 }
 
+pub(crate) fn validate_http_url(value: &str) -> Result<(), McpError> {
+    if value.is_empty() {
+        return Err(McpError::stable(
+            MCP_PROTOCOL_VIOLATION,
+            "http url is empty",
+        ));
+    }
+    let url = Url::parse(value)
+        .map_err(|_| McpError::stable(MCP_PROTOCOL_VIOLATION, "http url is invalid"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(McpError::stable(
+            MCP_PROTOCOL_VIOLATION,
+            "http url contains forbidden components",
+        ));
+    }
+    if url.scheme() == "http"
+        && !url
+            .host_str()
+            .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
+            .is_some_and(|address| address.is_loopback())
+    {
+        return Err(McpError::stable(
+            MCP_PROTOCOL_VIOLATION,
+            "plaintext http url must use a loopback IP",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn authorize_http(allowed: &[Arc<str>], url: &str) -> Result<(), McpError> {
     if allowed.iter().any(|entry| entry.as_ref() == url) {
         return Ok(());
@@ -1286,5 +1318,30 @@ mod tests {
                 .is_ok();
         assert!(!followed, "the 302 redirect must not be followed");
         target_server.abort();
+    }
+
+    #[test]
+    fn plaintext_http_requires_a_literal_loopback_ip() {
+        for url in [
+            "http://example.test",
+            "http://192.0.2.1",
+            "http://localhost",
+            "https://user:pass@example.test",
+            "https://example.test?token=nope",
+            "https://example.test/#fragment",
+            "",
+        ] {
+            assert_eq!(
+                HttpConfig::try_new(url).expect_err("rejected").code(),
+                MCP_PROTOCOL_VIOLATION
+            );
+        }
+        for url in [
+            "http://127.0.0.1:8080",
+            "http://[::1]:8080",
+            "https://example.test",
+        ] {
+            assert!(HttpConfig::try_new(url).is_ok());
+        }
     }
 }

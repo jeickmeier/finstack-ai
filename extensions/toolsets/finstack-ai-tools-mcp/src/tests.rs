@@ -1481,3 +1481,31 @@ async fn sampling_journals_a_nested_model_under_the_parent_tool() {
         "nested model must be a child of the open tool"
     );
 }
+
+#[test]
+fn allow_url_requires_a_literal_loopback_ip_for_plaintext_http() {
+    for url in [
+        "http://example.test",
+        "http://192.0.2.1",
+        "http://localhost",
+        "https://user:pass@example.test",
+        "https://example.test?token=nope",
+        "https://example.test/#fragment",
+        "",
+    ] {
+        assert_eq!(
+            McpConfig::default()
+                .allow_url(url)
+                .expect_err("rejected")
+                .code(),
+            MCP_PROTOCOL_VIOLATION
+        );
+    }
+    for url in [
+        "http://127.0.0.1:8080",
+        "http://[::1]:8080",
+        "https://example.test",
+    ] {
+        assert!(McpConfig::default().allow_url(url).is_ok());
+    }
+}
