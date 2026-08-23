@@ -37,8 +37,8 @@
 //! - [`session`] — sessions, lanes and external-identity binding
 //! - [`child`] — invoking and coordinating child runs
 //! - [`artifact`] — scoped artifact storage
-//! - [`budget`], [`audit`], [`confinement`] — shared budget, security audit,
-//!   process confinement
+//! - [`budget`], [`audit`] — shared budget and security audit
+//! - [`confinement`] — process confinement (`native-tokio` / `confinement` only)
 //! - [`ingress`] — external completion and interaction routing
 //! - [`workflow`] — workflow sessions and checkpoints
 //! - [`ids`] — clocks, random sources, `UUIDv7`
@@ -242,7 +242,11 @@ pub mod audit {
 }
 
 /// Process confinement profiles and backends for spawned children.
-#[cfg(not(target_arch = "wasm32"))]
+///
+/// Compiled only when the `confinement` feature is on (enabled by
+/// `native-tokio`) and the target is not `wasm32`. Contract-only leaves
+/// that disable drivers do not compile this service or pull `rustix`.
+#[cfg(all(feature = "confinement", not(target_arch = "wasm32")))]
 pub mod confinement {
     pub use crate::services::process_confinement::{
         CONFINEMENT_DENIED, CONFINEMENT_IO, CONFINEMENT_UNAVAILABLE, ConfinedChild,

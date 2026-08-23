@@ -12,7 +12,11 @@ description = "Runtime ports and effect execution for finstack-ai"
 
 [features]
 default = []
-native-tokio = ["dep:getrandom", "dep:tokio"]
+# OS process-group / Landlock / Seatbelt / job-object service. Enabled by
+# `native-tokio`. Contract-only leaves (`default = []`) must not enable this:
+# `rustix` and the confinement FFI stay off that graph.
+confinement = ["dep:rustix"]
+native-tokio = ["dep:getrandom", "dep:tokio", "confinement"]
 wasm-host = []
 
 [dependencies]
@@ -29,10 +33,10 @@ jsonschema = { workspace = true }
 tokio = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["fs", "process"] }
+rustix = { workspace = true, features = ["fs", "process"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-rustix = { workspace = true, features = ["thread"] }
+rustix = { workspace = true, features = ["thread"], optional = true }
 
 [dev-dependencies]
 futures-util = { workspace = true }

@@ -142,6 +142,13 @@ unpublished.
 
 ### Changed
 
+- `finstack-ai-runtime` process confinement (`rustix`, Landlock, Seatbelt,
+  job objects) is now behind the `confinement` feature, enabled by
+  `native-tokio`. Contract-only leaves (`default-features = false`) no
+  longer compile the service or pull `rustix`.
+- `finstack-ai::runtime` is a curated production module (`ports`,
+  `spec`, `commit`, `ids`, drivers) instead of a crate re-export.
+  Hidden `finstack_ai_runtime::testing` drivers stay off the facade.
 - **Breaking workflow hardening (workspace 2.0):** production workflow
   attachment now uses operating-system entropy; deterministic attachment is
   explicit through `*_seeded` constructors. Workflow scheduler reads are

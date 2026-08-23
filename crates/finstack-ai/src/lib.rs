@@ -68,7 +68,7 @@
 //! # Module map
 //!
 //! Everything below is at the crate root except [`registry`] and the
-//! [`runtime`] alias.
+//! [`runtime`] module.
 //!
 //! - **Build and run an agent** — [`Agent::builder`] then
 //!   [`Agent::run`]; [`AgentRunRequest`], [`AgentRunOutput`],
@@ -83,7 +83,7 @@
 //! - **Journaled handles** — [`Session`], [`Lane`]
 //! - **Bundles** — [`BundleCatalog`], [`BundleResolver`], [`LockedBundle`]
 //! - [`registry`] — registration, factories and one-time resolution
-//! - [`runtime`] — the port and driver types from `finstack-ai-runtime`
+//! - [`runtime`] — production port and driver types from `finstack-ai-runtime`
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -146,12 +146,35 @@ pub use finstack_ai_kernel::{
     ErrorDescriptor, InteractionRequest, InteractionResolution, OperationLocator, PrincipalRef,
     RunLimits, RunSecurityContext, SessionId, Version,
 };
-/// Runtime port contracts and drivers (`finstack-ai-runtime`).
+/// Production runtime port contracts and drivers (`finstack-ai-runtime`).
 ///
-/// This crate re-exports the runtime crate so SDK consumers can name port
-/// types without a second direct dependency. Kernel types stay on
-/// `finstack-ai-kernel`.
-pub use finstack_ai_runtime as runtime;
+/// Re-exports the documented runtime surface so SDK consumers can name port
+/// and driver types without a second direct dependency. Kernel types stay
+/// on `finstack-ai-kernel`. Hidden test drivers (`finstack_ai_runtime::testing`)
+/// are not part of this facade.
+pub mod runtime {
+    pub use finstack_ai_runtime::Bytes;
+    pub use finstack_ai_runtime::PortErrorInvalid;
+    pub use finstack_ai_runtime::artifact;
+    pub use finstack_ai_runtime::audit;
+    pub use finstack_ai_runtime::budget;
+    pub use finstack_ai_runtime::child;
+    pub use finstack_ai_runtime::commit;
+    #[cfg(all(feature = "native-tokio", not(target_arch = "wasm32")))]
+    pub use finstack_ai_runtime::confinement;
+    pub use finstack_ai_runtime::events;
+    #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+    pub use finstack_ai_runtime::host_driver;
+    pub use finstack_ai_runtime::ids;
+    pub use finstack_ai_runtime::ingress;
+    #[cfg(feature = "native-tokio")]
+    pub use finstack_ai_runtime::native_driver;
+    pub use finstack_ai_runtime::ports;
+    pub use finstack_ai_runtime::run;
+    pub use finstack_ai_runtime::session;
+    pub use finstack_ai_runtime::spec;
+    pub use finstack_ai_runtime::workflow;
+}
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use finstack_ai_runtime::session::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, LaneInspect,

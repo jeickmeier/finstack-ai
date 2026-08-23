@@ -2,6 +2,9 @@
 //!
 //! This is composition over the existing journal store. It is not a seventh
 //! port and does not add `KernelState` fields.
+//!
+//! This file is closed to new behavior (already near the 1500-line gate).
+//! Add session behavior in a sibling module.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

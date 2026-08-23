@@ -36,7 +36,6 @@ pub use finstack_ai::RunSecurityContext
 pub use finstack_ai::SessionError
 pub use finstack_ai::SessionId
 pub use finstack_ai::Version
-pub use finstack_ai::runtime
 pub mod finstack_ai::registry
 pub enum finstack_ai::registry::AgentBuildError
 pub finstack_ai::registry::AgentBuildError::Cancelled
@@ -546,6 +545,24 @@ pub fn finstack_ai::registry::Extension::register(&self, &mut finstack_ai::Regis
 impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
 pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub mod finstack_ai::runtime
+pub use finstack_ai::runtime::Bytes
+pub use finstack_ai::runtime::PortErrorInvalid
+pub use finstack_ai::runtime::artifact
+pub use finstack_ai::runtime::audit
+pub use finstack_ai::runtime::budget
+pub use finstack_ai::runtime::child
+pub use finstack_ai::runtime::commit
+pub use finstack_ai::runtime::confinement
+pub use finstack_ai::runtime::events
+pub use finstack_ai::runtime::ids
+pub use finstack_ai::runtime::ingress
+pub use finstack_ai::runtime::native_driver
+pub use finstack_ai::runtime::ports
+pub use finstack_ai::runtime::run
+pub use finstack_ai::runtime::session
+pub use finstack_ai::runtime::spec
+pub use finstack_ai::runtime::workflow
 pub enum finstack_ai::ActivationHostError
 pub finstack_ai::ActivationHostError::Bound
 pub finstack_ai::ActivationHostError::Failed

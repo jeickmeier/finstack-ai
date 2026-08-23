@@ -11,7 +11,7 @@ pub(crate) mod composition;
 pub(crate) mod id_generation;
 pub(crate) mod identity_map;
 pub(crate) mod interaction;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "confinement", not(target_arch = "wasm32")))]
 pub(crate) mod process_confinement;
 pub(crate) mod session;
 mod session_intern;

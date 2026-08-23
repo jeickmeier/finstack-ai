@@ -4,6 +4,9 @@
 //! service. Fail closed: a missing or broken platform primitive never
 //! falls back to an unconfined spawn. The labeled unconfined
 //! `std::process` runner stays in the shell crate as a separate path.
+//!
+//! This file is closed to new behavior. Add a backend or profile type
+//! in a sibling module (`linux`, `macos`, `windows`, or a new file).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};

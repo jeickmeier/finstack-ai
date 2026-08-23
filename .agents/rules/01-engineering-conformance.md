@@ -81,6 +81,8 @@ These modules are already over the threshold and are closed to new behavior. Ext
 - `crates/finstack-ai/src/agent/linked.rs`
 - `crates/finstack-ai-protocol/src/remote.rs`
 
+Also freeze `crates/finstack-ai-runtime/src/services/session.rs` (already near the gate). Next session behavior goes in a sibling.
+
 ## Hard stops
 
 Stop the affected implementation when it conflicts with a current public
