@@ -67,6 +67,7 @@ permission to skip ahead or weaken a control.
 ## Enforce security boundaries
 
 - Treat content as data, never authority. Privileged actions bind an authenticated principal, tenant or scope, exact target, and action, and fail closed when any binding is absent or mismatched.
+- Outbound HTTP discipline is chosen by where the URL comes from, not by crate family. A URL supplied per call by a model, a user, or a provider response is untrusted: vet it through `finstack-ai-net-guard` (`parse_and_vet_url`, `reject_literal_destination`, `resolve_and_pin`, `pinned_client`) so private-address and DNS-rebinding paths stay closed — this is why the media toolsets guard the download URL an image API returns. A fixed endpoint an operator configures is not untrusted and must not be run through the private-address deny, which would break a self-hosted model host or an internal gateway; validate it once at construction instead (HTTP only to a loopback IP, no credentials, query, or fragment). Either way disable redirect following and bound every response body, through `read_body_bounded_interruptible` or an equivalent parser limit.
 - Keep secrets as references; do not place secret material in model context, durable records, telemetry, errors, or generated fixtures.
 - Isolated extensions receive no ambient authority. Grant only explicit, bounded capabilities with applicable timeout, size, destination, and tenant constraints.
 

@@ -407,8 +407,26 @@ async fn invoke_stage_chain<C: Clock, R: RandomSource>(
         if !coordinator.component_is_active(&resolved.descriptor.invocation.component) {
             continue;
         }
-        outcomes
-            .push(invoke_middleware_component(coordinator, &invocation, index, resolved).await?);
+        let outcome =
+            invoke_middleware_component(coordinator, &invocation, index, resolved).await?;
+        let terminal = matches!(
+            outcome,
+            crate::middleware::StageOutcome::Fail(_) | crate::middleware::StageOutcome::Retry(_)
+        );
+        outcomes.push(outcome);
+        if terminal {
+            // A terminal outcome is a *value*, not an `Err`, so `?` above does
+            // not stop the chain. Without this break every later component
+            // still ran against the same original input — and for `BeforeModel`
+            // a later `ContextCompactor` would hand
+            // `first_compaction_request` a request built from that input,
+            // causing a real provider dispatch for a stage already decided.
+            // `StageFold::accumulate` documents terminal outcomes as
+            // "short-circuiting every component after it"; until now that was
+            // true only of the fold, which runs after every component has
+            // already executed.
+            break;
+        }
     }
     Ok(outcomes)
 }

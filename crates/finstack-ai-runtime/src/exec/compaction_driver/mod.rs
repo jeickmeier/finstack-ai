@@ -367,13 +367,25 @@ fn compaction_settlement_env<C: Clock, R: RandomSource>(
     })
 }
 
+/// First actionable compaction request in an ordered stage chain.
+///
+/// A request that appears *after* a terminal outcome is not actionable: the
+/// stage is already decided, and fulfilling it would perform a real provider
+/// dispatch — with whatever context that later component built from the
+/// original, unmodified stage input — for a stage that is going to fail.
+/// `invoke_stage_chain` now stops at the first terminal outcome, so this should
+/// not arise; the scan stops here too so the invariant does not depend on a
+/// single caller.
 pub(crate) fn first_compaction_request(
     outcomes: &[StageOutcome],
 ) -> Option<&CompactionModelRequest> {
-    outcomes.iter().find_map(|outcome| match outcome {
-        StageOutcome::RequestCompactionModel(request) => Some(request.as_ref()),
-        _ => None,
-    })
+    outcomes
+        .iter()
+        .take_while(|outcome| !matches!(outcome, StageOutcome::Fail(_) | StageOutcome::Retry(_)))
+        .find_map(|outcome| match outcome {
+            StageOutcome::RequestCompactionModel(request) => Some(request.as_ref()),
+            _ => None,
+        })
 }
 
 /// Compaction is a middleware-owned model call. Map provider errors to

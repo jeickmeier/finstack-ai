@@ -9,7 +9,12 @@ pub(super) fn configuration_error(message: impl Into<String>) -> AgentRunError {
 }
 
 pub(super) fn session_error(error: &finstack_ai::SessionError) -> JsValue {
-    let object = js_sys::Object::new();
+    // Must be a real `Error`, not a plain object: `FinstackError.fromUnknown`
+    // reads `code`/`retryable` only off values that are `instanceof Error`, and
+    // falls back to `String(value)` otherwise — which renders a plain object as
+    // the literal "[object Object]", losing the stable code *and* the message.
+    // This mirrors `agent_error` below.
+    let object = js_sys::Error::new(&error.to_string());
     let _ = js_sys::Reflect::set(
         &object,
         &JsValue::from_str("name"),
@@ -19,11 +24,6 @@ pub(super) fn session_error(error: &finstack_ai::SessionError) -> JsValue {
         &object,
         &JsValue::from_str("code"),
         &JsValue::from_str(error.code()),
-    );
-    let _ = js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("message"),
-        &JsValue::from_str(&error.to_string()),
     );
     let _ = js_sys::Reflect::set(&object, &JsValue::from_str("retryable"), &JsValue::FALSE);
     object.into()

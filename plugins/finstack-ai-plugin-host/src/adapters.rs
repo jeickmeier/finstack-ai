@@ -675,7 +675,7 @@ async fn list_tools(
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, deadline, async {
+            with_cancellation(cancel, deadline, async {
                 let mut live = instantiate_toolset(host, ready, cancel).await?;
                 list_tools_on(&mut live, cancel).await
             })
@@ -685,7 +685,7 @@ async fn list_tools(
             let mut slot = serialized
                 .try_lock()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, deadline, async {
+            with_cancellation(cancel, deadline, async {
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
@@ -716,7 +716,7 @@ async fn call_tool(
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, deadline, async {
+            with_cancellation(cancel, deadline, async {
                 let mut live = instantiate_toolset(host, ready, cancel).await?;
                 call_tool_on(&mut live, cancel, context, tool_id, args).await
             })
@@ -726,7 +726,7 @@ async fn call_tool(
             let mut slot = serialized
                 .try_lock()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, deadline, async {
+            with_cancellation(cancel, deadline, async {
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
@@ -754,7 +754,7 @@ async fn collect_items(
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, deadline, async {
+            with_cancellation(cancel, deadline, async {
                 let mut live = instantiate_context(host, ready, cancel).await?;
                 collect_items_on(&mut live, cancel, query).await
             })
@@ -764,7 +764,7 @@ async fn collect_items(
             let mut slot = serialized
                 .try_lock()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, deadline, async {
+            with_cancellation(cancel, deadline, async {
                 if slot.is_none() {
                     *slot = Some(instantiate_context(host, ready, cancel).await?);
                 }

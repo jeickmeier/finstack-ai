@@ -31,11 +31,25 @@ use crate::limits::{EffectiveLimits, store_limits};
 /// (`RefCell`) from `finstack-ai-wit`.
 pub struct HostState {
     logs: Vec<(String, String)>,
+    log_bytes: usize,
     blob: Vec<u8>,
     limits: StoreLimits,
     wasi: WasiCtx,
     table: ResourceTable,
+    /// Capability names this guest was actually granted.
+    ///
+    /// `finstack:ai-host/logging` and `blobs` are structural imports of the
+    /// guest world, so the host must link them for any component to
+    /// instantiate at all — they cannot be withheld at link time the way
+    /// `link_granted_wasi` withholds a WASI interface. Enforcement therefore
+    /// lives in the host function bodies, and needs the granted set here.
+    granted: BTreeSet<String>,
 }
+
+/// Maximum retained log lines per store.
+const MAX_LOG_LINES: usize = 1_024;
+/// Maximum retained log bytes per store.
+const MAX_LOG_BYTES: usize = 1024 * 1024;
 
 impl HostState {
     /// Construct deny-by-default host import state with `limits`.
@@ -43,10 +57,12 @@ impl HostState {
     pub fn new(limits: StoreLimits) -> Self {
         Self {
             logs: Vec::new(),
+            log_bytes: 0,
             blob: Vec::new(),
             limits,
             wasi: WasiCtxBuilder::new().build(),
             table: ResourceTable::new(),
+            granted: BTreeSet::new(),
         }
     }
 
@@ -65,10 +81,12 @@ impl HostState {
     ) -> Result<Self, PluginHostError> {
         Ok(Self {
             logs: Vec::new(),
+            log_bytes: 0,
             blob: Vec::new(),
             limits,
             wasi: wasi_ctx(granted, resources)?,
             table: ResourceTable::new(),
+            granted: granted.clone(),
         })
     }
 
@@ -77,10 +95,14 @@ impl HostState {
     pub fn with_blob(limits: StoreLimits, bytes: Vec<u8>) -> Self {
         Self {
             logs: Vec::new(),
+            log_bytes: 0,
             blob: bytes,
             limits,
             wasi: WasiCtxBuilder::new().build(),
             table: ResourceTable::new(),
+            // This constructor exists to serve one blob body, so the blobs
+            // capability is its whole reason to be.
+            granted: ["blobs".to_owned()].into_iter().collect(),
         }
     }
 
@@ -88,6 +110,39 @@ impl HostState {
     #[must_use]
     pub fn logs(&self) -> &[(String, String)] {
         &self.logs
+    }
+
+    /// Denial parts for a host import the guest was not granted.
+    ///
+    /// Returns `(code, message)` so each world version can build its own
+    /// generated `PluginError` type. Every `logging`/`blobs` host impl —
+    /// current and `v1` — must consult this before doing any work.
+    fn deny_ungranted(&self, capability: &str) -> Option<(String, String)> {
+        if self.granted.contains(capability) {
+            return None;
+        }
+        Some((
+            "plugin_permission_denied".to_owned(),
+            format!("host capability `{capability}` was not granted"),
+        ))
+    }
+
+    /// Record one log line, dropping the oldest past the retained window.
+    ///
+    /// Under `InstancePolicy::Serialized` one store is reused for the life of
+    /// the host, so an unbounded sink grows forever. Nothing reads past the
+    /// window, so drop rather than fail the guest's call.
+    fn push_log(&mut self, level: String, message: String) {
+        let cost = message.len();
+        self.logs.push((level, message));
+        self.log_bytes = self.log_bytes.saturating_add(cost);
+        while self.logs.len() > MAX_LOG_LINES || self.log_bytes > MAX_LOG_BYTES {
+            let Some((_, dropped)) = self.logs.first() else {
+                break;
+            };
+            self.log_bytes = self.log_bytes.saturating_sub(dropped.len());
+            self.logs.remove(0);
+        }
     }
 }
 
@@ -109,6 +164,13 @@ impl logging::Host for HostState {
         level: Level,
         message: String,
     ) -> Result<(), PluginError> {
+        if let Some((code, message)) = self.deny_ungranted("logging") {
+            return Err(PluginError {
+                code,
+                message,
+                retryable: false,
+            });
+        }
         reject_before_allocation(message.as_bytes(), MAX_STRING_BYTES, "log.message").map_err(
             |error| PluginError {
                 code: error.code().to_owned(),
@@ -116,7 +178,7 @@ impl logging::Host for HostState {
                 retryable: false,
             },
         )?;
-        self.logs.push((format!("{level:?}"), message));
+        self.push_log(format!("{level:?}"), message);
         Ok(())
     }
 }
@@ -129,6 +191,13 @@ impl blobs::Host for HostState {
         offset: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, PluginError> {
+        if let Some((code, message)) = self.deny_ungranted("blobs") {
+            return Err(PluginError {
+                code,
+                message,
+                retryable: false,
+            });
+        }
         reject_declared_len(max_bytes, MAX_STRING_BYTES, "blobs.read").map_err(|error| {
             PluginError {
                 code: error.code().to_owned(),
@@ -155,6 +224,13 @@ impl logging_v1::Host for HostState {
         level: logging_v1::Level,
         message: String,
     ) -> Result<(), types_v1::PluginError> {
+        if let Some((code, message)) = self.deny_ungranted("logging") {
+            return Err(types_v1::PluginError {
+                code,
+                message,
+                retryable: false,
+            });
+        }
         reject_before_allocation(message.as_bytes(), MAX_STRING_BYTES, "log.message").map_err(
             |error| types_v1::PluginError {
                 code: error.code().to_owned(),
@@ -162,7 +238,7 @@ impl logging_v1::Host for HostState {
                 retryable: false,
             },
         )?;
-        self.logs.push((format!("{level:?}"), message));
+        self.push_log(format!("{level:?}"), message);
         Ok(())
     }
 }
@@ -175,6 +251,13 @@ impl blobs_v1::Host for HostState {
         offset: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, types_v1::PluginError> {
+        if let Some((code, message)) = self.deny_ungranted("blobs") {
+            return Err(types_v1::PluginError {
+                code,
+                message,
+                retryable: false,
+            });
+        }
         reject_declared_len(max_bytes, MAX_STRING_BYTES, "blobs.read").map_err(|error| {
             types_v1::PluginError {
                 code: error.code().to_owned(),
@@ -261,7 +344,14 @@ fn is_resource_limit(message: &str) -> bool {
         || lower.contains("growing table")
 }
 
-/// Prepare a store with fuel, limiter, and epoch interruption.
+/// Fuel units a guest may burn between cooperative yields.
+///
+/// Small enough that a cancelled or timed-out call is abandoned promptly, large
+/// enough that the yield itself is not a measurable tax: at
+/// [`DEFAULT_FUEL`](crate::limits::DEFAULT_FUEL) this is ~100 yields per budget.
+const FUEL_YIELD_INTERVAL: u64 = 10_000;
+
+/// Prepare a store with fuel, a limiter, and per-store cooperative yielding.
 ///
 /// # Errors
 ///
@@ -276,7 +366,17 @@ pub fn new_store(
     store
         .set_fuel(fuel)
         .map_err(|error| PluginHostError::ResourceLimit(format!("fuel: {error}")))?;
+    // `epoch_interruption` is enabled on the engine, so a store with no
+    // deadline would trap immediately. Nothing increments the engine epoch any
+    // more (see `with_cancellation`), so this is an inert safety net rather
+    // than the interruption mechanism.
     store.set_epoch_deadline(1);
+    // This is what actually lets a guest be abandoned. Yielding is per-store,
+    // unlike `Engine::increment_epoch`, which is engine-global and would trap
+    // every other in-flight guest sharing this host.
+    store
+        .fuel_async_yield_interval(Some(FUEL_YIELD_INTERVAL))
+        .map_err(|error| PluginHostError::ResourceLimit(format!("fuel yield: {error}")))?;
     Ok(store)
 }
 
@@ -444,15 +544,24 @@ pub fn host_state_for(
     HostState::try_with_grants(store_limits(limits), granted, resources)
 }
 
-/// Run `work` until it completes or `cancel` fires. Firing increments the
-/// engine epoch so guest code can leave.
+/// Run `work` until it completes or `cancel` fires.
+///
+/// Cancelling drops the `work` future, which abandons that store's guest call.
+/// This is safe to do mid-execution because [`new_store`] arms every store with
+/// `fuel_async_yield_interval`, so a compute-bound guest yields periodically
+/// instead of blocking the poll forever.
+///
+/// This deliberately does **not** call `Engine::increment_epoch`. That counter
+/// is engine-global while every store's deadline is armed against it, so
+/// incrementing it to cancel one call trapped every other guest already running
+/// on the same host — and concurrent calls on one host are a supported,
+/// asserted property.
 ///
 /// # Errors
 ///
 /// Returns [`PluginHostError::Timeout`] when the signal is already cancelled or
 /// fires during `work`.
 pub async fn with_cancellation<T, F>(
-    engine: &Engine,
     cancel: &CancellationSignal,
     deadline: Option<Timestamp>,
     work: F,
@@ -465,11 +574,9 @@ where
     }
     tokio::select! {
         () = cancel.cancelled() => {
-            engine.increment_epoch();
             Err(PluginHostError::Timeout)
         }
         () = sleep_until_deadline(deadline) => {
-            engine.increment_epoch();
             Err(PluginHostError::Timeout)
         }
         result = work => match result {
@@ -530,9 +637,73 @@ pub async fn instantiate_with_host_imports(
 
 #[cfg(test)]
 mod tests {
-    use super::{HostState, instantiate_with_host_imports, map_wasmtime_error, new_store};
+    use super::{
+        CallContext, HostState, Level, MAX_LOG_LINES, instantiate_with_host_imports, logging,
+        map_wasmtime_error, new_store,
+    };
     use crate::host::{InstancePolicy, PluginHost, PluginHostConfig};
+    use std::collections::BTreeSet;
     use wasmtime::component::Component;
+
+    fn call_context() -> CallContext {
+        CallContext {
+            effect_id: "effect".to_owned(),
+            session_id: "session".to_owned(),
+            lane_id: "lane".to_owned(),
+            run_id: "run".to_owned(),
+            tenant_scope: "tenant".to_owned(),
+            principal_issuer: "issuer".to_owned(),
+            principal_subject: "subject".to_owned(),
+            authorization_decision_id: "decision".to_owned(),
+            permitted_scopes: Vec::new(),
+            budget_scope_id: None,
+            deadline_unix_ms: None,
+        }
+    }
+
+    #[test]
+    fn ungranted_logging_and_blobs_are_denied_at_call_time() {
+        // `logging` and `blobs` are structural world imports, so the host must
+        // link them for any guest to instantiate. A guest that was not granted
+        // them must still be refused when it calls.
+        let limits = crate::limits::store_limits(crate::limits::EffectiveLimits::default());
+        let mut state = HostState::new(limits);
+        let denied =
+            logging::Host::log(&mut state, call_context(), Level::Info, "hello".to_owned())
+                .expect_err("ungranted logging must be denied");
+        assert_eq!(denied.code, "plugin_permission_denied");
+
+        let limits = crate::limits::store_limits(crate::limits::EffectiveLimits::default());
+        let granted: BTreeSet<String> = ["logging".to_owned()].into_iter().collect();
+        let mut state =
+            HostState::try_with_grants(limits, &granted, &crate::grants::GrantResources::default())
+                .expect("state");
+        logging::Host::log(&mut state, call_context(), Level::Info, "hello".to_owned())
+            .expect("granted logging must be permitted");
+    }
+
+    #[test]
+    fn the_log_sink_is_bounded() {
+        let limits = crate::limits::store_limits(crate::limits::EffectiveLimits::default());
+        let granted: BTreeSet<String> = ["logging".to_owned()].into_iter().collect();
+        let mut state =
+            HostState::try_with_grants(limits, &granted, &crate::grants::GrantResources::default())
+                .expect("state");
+        for index in 0..(MAX_LOG_LINES * 2) {
+            logging::Host::log(
+                &mut state,
+                call_context(),
+                Level::Info,
+                format!("line {index}"),
+            )
+            .expect("log");
+        }
+        assert!(
+            state.logs().len() <= MAX_LOG_LINES,
+            "retained {} lines, ceiling is {MAX_LOG_LINES}",
+            state.logs().len()
+        );
+    }
 
     fn host() -> PluginHost {
         PluginHost::try_new(

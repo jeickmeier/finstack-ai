@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
+import finstack_ai
 import pytest
 
-import finstack_ai
+_FIXTURE_PRESENT = hasattr(finstack_ai._finstack_ai, "_callback_port_conformance")
 
+# This suite is a conformance gate, so a missing fixture is a build error, not a
+# reason to pass quietly. `mise run test-python` builds with
+# `--features callback-fixture`; a developer building without it can opt out
+# explicitly with FINSTACK_ALLOW_MISSING_FIXTURES=1.
+if not _FIXTURE_PRESENT and os.environ.get("FINSTACK_ALLOW_MISSING_FIXTURES") != "1":
+    raise RuntimeError(
+        "callback conformance fixture is missing: rebuild with "
+        "`--features callback-fixture`, or set "
+        "FINSTACK_ALLOW_MISSING_FIXTURES=1 to skip this suite deliberately"
+    )
 
 pytestmark = pytest.mark.skipif(
-    not hasattr(finstack_ai._finstack_ai, "_callback_port_conformance"),
-    reason="callback conformance fixture feature is not enabled",
+    not _FIXTURE_PRESENT,
+    reason="callback conformance fixture skipped via FINSTACK_ALLOW_MISSING_FIXTURES",
 )
 
 

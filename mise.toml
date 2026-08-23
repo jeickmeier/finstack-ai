@@ -47,6 +47,7 @@ run = """
 set -euo pipefail
 mise run check-repository-references
 mise run check-layering
+mise run check-generated-wit
 mise run runtime
 mise run check-rust
 mise run check-docs
@@ -67,6 +68,10 @@ cargo nextest run -p finstack-ai-runtime --locked --no-default-features --featur
 cargo test -p finstack-ai-runtime --doc --locked --no-default-features --features native-tokio
 cargo check -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host
 cargo clippy -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host -- -D warnings
+# `host_driver` and its tests are gated `all(test, not(target_arch = "wasm32"))`
+# precisely so the wasm-host lane can be exercised on the host target. Without
+# this line that whole configuration is only ever compile-checked.
+cargo nextest run -p finstack-ai-runtime --locked --no-default-features --features wasm-host
 """
 
 [tasks.check-repository-references]
@@ -76,6 +81,14 @@ run = "python scripts/ci/check_stale_references.py"
 [tasks.check-layering]
 description = "Reject workspace dependency edges that violate the package tier law"
 run = "python scripts/ci/check_layering.py"
+
+[tasks.check-generated-wit]
+description = "Reject a hand-edited or stale plugins/finstack-ai-wit/src/generated.rs"
+run = "uv run --no-project python scripts/wit_bindgen/generate.py --check"
+
+[tasks.check-generated-plugin-wasm]
+description = "Reject drift between the guest/reference component.wasm fixtures and their sources"
+run = "uv run --no-project python scripts/plugin_wasm/generate.py --check"
 
 [tasks.ci-python]
 description = "Format, lint, typecheck, and test Python bindings"
@@ -100,6 +113,9 @@ uv run --no-project python scripts/wasm_package/check.py graph
 uv run --no-project python scripts/wasm_package/check.py secrets
 echo "controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13"
 mise run check-wasm
+# Runs here rather than in ci-rust: it needs the wasm32 target and does six
+# release builds plus six encoder runs, and this job already has that toolchain.
+mise run check-generated-plugin-wasm
 if wasm_repro_needed; then
   export FINSTACK_WASM_REPRO=1
 else
@@ -269,6 +285,7 @@ test_fast() {
   cargo test --workspace --doc --locked --exclude finstack-ai-plugin-host --exclude finstack-ai-wasm
   cargo nextest run -p finstack-ai-wasm --locked
   cargo test -p finstack-ai-wasm --doc --locked
+  cargo nextest run -p finstack-ai-store-artifact --locked --features s3
   export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
   uv run pytest -q
   if [ "${FINSTACK_WASM_SKIP_BUILD:-0}" != "1" ]; then
@@ -295,6 +312,11 @@ test_rust() {
   cargo test -p finstack-ai-plugin-host --locked -- --test-threads=1
   cargo nextest run -p finstack-ai-wasm --locked
   cargo test -p finstack-ai-wasm --doc --locked
+  # `s3` is reachable from no workspace dependency edge, so `--workspace`
+  # resolves this crate as {local} and its SigV4, request-construction, and
+  # fail-closed integrity tests never compile. They only run from here.
+  cargo nextest run -p finstack-ai-store-artifact --locked --features s3
+  cargo test -p finstack-ai-store-artifact --doc --locked --features s3
 }
 test_rust
 """
@@ -304,9 +326,11 @@ description = "Run Python binding tests"
 run = """
 set -euo pipefail
 export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
+# `callback-fixture` registers `_callback_port_conformance`. Without it the
+# six-port callback conformance suite skips itself silently on every run.
 uv run --no-project --with maturin==1.14.1 \
   maturin develop --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
-  --features extension-module
+  --features extension-module,callback-fixture
 uv run pytest -q
 """
 
@@ -334,13 +358,17 @@ test_wasm
 """
 
 [tasks.coverage-all]
-description = "Write diagnostic Rust, Python, and WASM coverage reports"
+description = "Write diagnostic Rust and Python coverage reports"
 run = """
 set -euo pipefail
 mise run coverage-rust
 mise run coverage-python
-mise run coverage-wasm
 """
+# `coverage-wasm` is deliberately NOT called here. It emits a PENDING.md
+# scaffold and no measurement, and including it made an aggregate named
+# "coverage" report a placeholder as though it were a result. Run it directly
+# if you want the scaffold; wire it back in once a wasm-bindgen-test suite
+# makes it produce real numbers.
 
 [tasks.coverage-rust]
 description = "Write diagnostic Rust workspace coverage (HTML + LCOV)"
@@ -382,6 +410,23 @@ for `finstack-ai-wasm` and kernel-on-wasm execution.
 `mise run check-wasm` remains the compile gate.
 `mise run test-wasm` remains the package harness.
 EOF
+"""
+
+[tasks.fuzz-smoke]
+description = "Short libFuzzer smoke run over every fuzz target"
+run = """
+set -euo pipefail
+export PATH="$(mise where cargo:cargo-fuzz)/bin:${PATH}"
+# fuzz/ is its own workspace, so root --workspace never builds these. Without a
+# run they are decoration: the corpus never grows and a broken target is never
+# noticed. Duration is per target and deliberately short; this is a smoke gate,
+# not a fuzzing campaign.
+seconds="${FINSTACK_FUZZ_SECONDS:-60}"
+for target in record_replay_json kernel_transition_json run_event_json message_json \\
+              remote_frame wit_input recovery_sequence canonical_cbor; do
+  echo "fuzz-smoke: ${target} (${seconds}s)"
+  cargo fuzz run --fuzz-dir fuzz "${target}" -- -max_total_time="${seconds}"
+done
 """
 
 [tasks.bench-all]

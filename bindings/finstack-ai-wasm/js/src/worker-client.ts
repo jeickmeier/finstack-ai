@@ -756,7 +756,18 @@ export class WorkerClient {
           message.lastSequence,
           message.droppedProgress,
         );
-        if (state.iterating) {
+        // A durable-derived batch is never dropped, whether or not a consumer
+        // has entered the iterator yet. `iterating` only flips true inside
+        // `[Symbol.asyncIterator]()`, so the idiomatic
+        // `await run.liveState(); for await (…)` leaves it false across the
+        // liveState round trip — during which the worker's pump is already
+        // posting. Acking there told the worker the batch was delivered, so it
+        // was never resent and never counted as dropped progress.
+        //
+        // This mirrors the rule Rust's `EventLagPolicy::DropProgress` and the
+        // worker's own `enqueue` already apply: drop transient, protect
+        // durable. The worker stamps `durable` on the wire for exactly this.
+        if (state.iterating || message.durable) {
           state.inbox.push(batch);
           this.#wake(state);
         } else {

@@ -136,22 +136,31 @@ export interface ObserverDiagnostics {
 /** Canonical Rust-owned message wire shape. */
 export type MessageWire = Readonly<Record<string, unknown>>;
 
-/** Latest confirmed semantic and runtime lifecycle state. */
+/**
+ * Latest confirmed semantic and runtime lifecycle state.
+ *
+ * Every field the Rust producer models as `Option<T>` is declared `T | null`,
+ * not `T?`. `live_state_object` serializes through `serde_json::json!`, which
+ * always emits the key with an explicit JSON `null` — it never omits it — and
+ * under `exactOptionalPropertyTypes` a `?` field would type as absent-or-`T`,
+ * so a `!== undefined` guard would narrow a real `null` to `T`. The Python
+ * stub for the same producer declares these as `T | None` for the same reason.
+ */
 export interface RunStateSnapshot {
   readonly revision: number;
   readonly journalSequence: number;
   readonly status: "running" | "shutting_down" | "stopped" | "faulted";
-  readonly faultCode?: string;
-  readonly phase?: string;
+  readonly faultCode: string | null;
+  readonly phase: string | null;
   readonly cycle: number;
   readonly preparedContextMessages: readonly MessageWire[];
   readonly committedRunMessages: readonly MessageWire[];
   readonly activeCapabilities: readonly Readonly<Record<string, unknown>>[];
-  readonly resolvedPlanDigest?: string;
-  readonly pendingInteraction?: Readonly<Record<string, unknown>>;
-  readonly validationFailure?: Readonly<Record<string, unknown>>;
+  readonly resolvedPlanDigest: string | null;
+  readonly pendingInteraction: Readonly<Record<string, unknown>> | null;
+  readonly validationFailure: Readonly<Record<string, unknown>> | null;
   readonly retryAttempts: number;
-  readonly terminal?: Readonly<Record<string, unknown>>;
+  readonly terminal: Readonly<Record<string, unknown>> | null;
 }
 
 /**

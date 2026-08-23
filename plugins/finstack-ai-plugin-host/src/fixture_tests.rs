@@ -528,6 +528,63 @@ async fn exclusive_concurrent_calls_succeed() {
 }
 
 #[tokio::test]
+async fn cancelling_one_call_does_not_trap_a_concurrent_call() {
+    // Regression: cancellation used to fire `Engine::increment_epoch()`, which
+    // is engine-global, while every store is armed `set_epoch_deadline(1)`.
+    // Cancelling one call therefore trapped every other guest already running
+    // on the same host. Interruption is now per-store cooperative yielding.
+    let adapter = Arc::new(
+        WasmToolsetAdapter::try_new(
+            host(InstancePolicy::Exclusive, 2),
+            &fixture_wasm("echo-toolset"),
+            parse_manifest(&manifest_bytes(
+                "finstack.plugin.echo.toolset",
+                &["toolset-plugin"],
+            ))
+            .expect("manifest"),
+            &construction("finstack.plugin.echo.toolset"),
+            Arc::new(NoopPluginHooks),
+        )
+        .await
+        .expect("adapter"),
+    );
+
+    // Scope note: this covers the pre-cancelled path, which returns before
+    // `with_cancellation`'s `select!`. The cross-store trap itself fired from
+    // the `select!` arms, and reproducing it deterministically needs a guest
+    // that blocks predictably — echo returns in microseconds and fuel-burner
+    // in a few milliseconds, so a timing-based test would be flaky. What holds
+    // that invariant is structural: no `Engine::increment_epoch` call remains
+    // anywhere in the crate, and each store is interrupted through its own
+    // `fuel_async_yield_interval`.
+    let cancelled_ctx = tool_ctx();
+    cancelled_ctx.run.cancellation.cancel();
+    let survivor_ctx = tool_ctx();
+
+    let cancelled = Arc::clone(&adapter);
+    let survivor = Arc::clone(&adapter);
+    let (cancelled_result, survivor_result) = tokio::join!(
+        cancelled.call(
+            cancelled_ctx,
+            validated_call("finstack.plugin.echo", br#"{"text":"nope"}"#)
+        ),
+        survivor.call(
+            survivor_ctx,
+            validated_call("finstack.plugin.add", br#"{"a":2,"b":3}"#)
+        )
+    );
+
+    let Err(cancelled_error) = cancelled_result else {
+        panic!("the cancelled call must fail");
+    };
+    assert_eq!(cancelled_error.code(), "plugin_lifecycle_timeout");
+    assert!(
+        survivor_result.is_ok(),
+        "a concurrent, un-cancelled call must still succeed"
+    );
+}
+
+#[tokio::test]
 async fn fuel_burner_trips_resource_limit_and_echo_still_runs() {
     let shared = host(InstancePolicy::Exclusive, 2);
     let burner = WasmToolsetAdapter::try_new(

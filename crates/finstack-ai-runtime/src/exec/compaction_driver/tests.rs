@@ -1098,3 +1098,111 @@ fn authorize_compaction_model_request_rejects_sensitivity_and_digest_mismatches(
             .is_err()
     );
 }
+
+/// A `BeforeModel` component that fails the stage as a *value*, not an `Err`.
+///
+/// This is the shape a policy middleware takes when it rejects a turn, and the
+/// shape `RedactionMiddleware::redact_inner_outcome` passes through untouched.
+struct FailingPolicy {
+    descriptor: MiddlewareDescriptor,
+}
+
+impl crate::middleware::Middleware for FailingPolicy {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn invoke(
+        &self,
+        _ctx: crate::middleware::MiddlewareContext,
+        _input: StageInput,
+    ) -> PortFuture<Result<StageOutcome, crate::middleware::MiddlewareError>> {
+        Box::pin(async move {
+            Ok(StageOutcome::Fail(Box::new(
+                finstack_ai_kernel::ErrorDescriptor::new(
+                    "policy_rejected",
+                    "fixture policy rejected the turn",
+                    finstack_ai_kernel::ErrorCategory::Middleware,
+                    false,
+                )
+                .expect("descriptor"),
+            )))
+        })
+    }
+}
+
+fn policy_descriptor(component: &str) -> MiddlewareDescriptor {
+    MiddlewareDescriptor {
+        invocation: finstack_ai_kernel::ComponentInvocation {
+            component: finstack_ai_kernel::ComponentId::parse(component).expect("component"),
+            version: Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            },
+            configuration_digest: Digest::raw_json(b"{}"),
+            recovery: finstack_ai_kernel::InvocationRecovery::RecomputeSafe,
+        },
+        stages: StageMask::from_stages([Stage::BeforeModel]),
+        order: MiddlewareOrder {
+            // Orders ahead of the ContextCompaction tier, so the compactor runs
+            // second — the deployment shape that made this reachable.
+            tier: OrderTier::RequestShaping,
+            priority: 0,
+            before: Arc::from([]),
+            after: Arc::from([]),
+        },
+        role: MiddlewareRole::Standard,
+        metadata: Metadata::empty(),
+    }
+}
+
+#[test]
+fn a_failed_stage_does_not_dispatch_the_compaction_model() {
+    // Regression: `invoke_stage_chain` had no value-level short-circuit, so a
+    // compactor ordered after a terminally-failing component still ran against
+    // the same original stage input, and `first_compaction_request` handed that
+    // request to `fulfill_compaction_model`, which performs a real provider
+    // call. For a redaction-wrapped deployment that call carried unredacted
+    // context off the process for a stage already decided.
+    let store = Arc::new(MemoryStore::new());
+    let mut coordinator = accepted_on(Arc::clone(&store) as Arc<MemoryStore>);
+    let sources = test_sources();
+
+    let policy: Arc<dyn crate::middleware::Middleware> = Arc::new(FailingPolicy {
+        descriptor: policy_descriptor("finstack.middleware.policy"),
+    });
+    let compactor: Arc<dyn crate::middleware::Middleware> = Arc::new(SummarizeCompactor {
+        descriptor: descriptor("finstack.middleware.compaction"),
+    });
+    let driver = StageDriver::new(
+        Arc::new(
+            ResolvedMiddlewareChain::try_new(vec![
+                MiddlewareRegistration { middleware: policy },
+                MiddlewareRegistration {
+                    middleware: compactor,
+                },
+            ])
+            .expect("chain"),
+        ),
+        CancellationSignal::new(),
+    );
+
+    let model = ScriptedModel::new(false);
+    let draft = request_draft(vec![user_message(4, "hi")]);
+    let _ = block_on(settle_facade_stage_with_model(
+        &mut coordinator,
+        Some(&driver),
+        &sources,
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+        Some(&model),
+    ));
+
+    assert_eq!(
+        model.requests.load(Ordering::SeqCst),
+        0,
+        "a stage already failed by an earlier component must not dispatch a compaction model call"
+    );
+}
