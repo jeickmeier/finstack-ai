@@ -65,7 +65,8 @@ fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
 
 fn manifest_bytes_for(identity: &str, version: &str, worlds: &[&str]) -> Vec<u8> {
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-    let digest = manifest_digest_hex(identity, version, &owned).expect("digest");
+    let digest =
+        manifest_digest_hex(identity, version, &owned, &["logging".to_owned()]).expect("digest");
     serde_json::to_vec(&serde_json::json!({
         "identity": identity,
         "version": version,

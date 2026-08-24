@@ -492,7 +492,8 @@ mod tests {
     fn world_from_manifest_requires_exactly_one_world() {
         let identity = "finstack.plugin.calculator";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
         let manifest = parse_manifest(
             &serde_json::to_vec(&serde_json::json!({
                 "identity": identity,

@@ -4,5 +4,5 @@
   "worlds": ["toolset-plugin"],
   "permissions": ["logging"],
   "configuration_schema": {},
-  "digest": "204b2658cff5fdbbbdd80583a5909e0a09be03cb744bb2436dd52cf1a3ed84b8"
+  "digest": "2dd6fc2dff712b55e4da1837cda5c4d27ab34711a3c5083c80a9a46d0257eb45"
 }

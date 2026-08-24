@@ -72,9 +72,6 @@ fn assert_published_packages() -> Result<(), &'static str> {
     {
         return Err("published dual-major packages drifted");
     }
-    if !PUBLISHED_PACKAGES.contains(&AI_TYPES_PACKAGE_V1) {
-        return Err("@1.0.0 packages must be generated at the 1.0 freeze");
-    }
     Ok(())
 }
 

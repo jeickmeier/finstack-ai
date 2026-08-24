@@ -78,10 +78,6 @@ pub(crate) fn wit_plugin_error(error: ty::PluginError) -> PluginError {
     }
 }
 
-pub(crate) fn format_plugin_error(error: &PluginError) -> String {
-    format!("{}: {}", error.code, error.message)
-}
-
 pub(crate) fn wit_context_item(item: ctx::ContextItem) -> ContextItem {
     ContextItem {
         item_json: item.item_json,

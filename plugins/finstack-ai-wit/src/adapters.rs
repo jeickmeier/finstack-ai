@@ -113,7 +113,10 @@ impl<G: GuestContextProvider + Send + Sync + 'static> ContextProvider for WitCon
         let items = match self.guest.collect(&query) {
             Ok(items) => items,
             Err(error) => {
-                let error = guest_context_error(error);
+                let (code, message) = guest_error_parts(&error);
+                let error =
+                    ContextError::try_new(&code, ErrorCategory::Plugin, message, Metadata::empty())
+                        .unwrap_or_else(Into::into);
                 return Box::pin(async move { Err(error) });
             }
         };
@@ -202,12 +205,8 @@ impl<G: GuestToolset + Send + Sync + 'static> Toolset for WitToolsetAdapter<G> {
         );
         Box::pin(async move {
             let result = result.map_err(|error| {
-                let code = if error.code.is_empty() {
-                    "plugin_lifecycle_failed"
-                } else {
-                    error.code.as_str()
-                };
-                tool_error(code, &error.message)
+                let (code, message) = guest_error_parts(&error);
+                tool_error(&code, &message)
             })?;
             let output = RawJson::parse(&result.content_json)
                 .map_err(|_| tool_error("plugin_result_invalid", "tool result JSON is invalid"))?;
@@ -236,16 +235,16 @@ impl WitPluginExtension {
     ///
     /// # Errors
     ///
-    /// Returns [`WitMapError`] when the manifest does not declare `context-plugin`.
-    pub fn reference_context(manifest: PluginManifest) -> Result<Self, WitMapError> {
+    /// Returns [`PluginLifecycleError`] when the manifest does not declare
+    /// `context-plugin` or construction fails.
+    pub fn reference_context(manifest: PluginManifest) -> Result<Self, PluginLifecycleError> {
         let construction = construction_context(&manifest);
         let adapter = WitContextAdapter::try_new(
             ReferenceContextProvider::new(),
             &manifest,
             &construction,
             Arc::new(NoopPluginHooks),
-        )
-        .map_err(|error| map_wit(&error))?;
+        )?;
         Ok(Self {
             context_lifecycle: Some(adapter.lifecycle()),
             context: Some(Arc::new(adapter)),
@@ -259,16 +258,16 @@ impl WitPluginExtension {
     ///
     /// # Errors
     ///
-    /// Returns [`WitMapError`] when the manifest does not declare `toolset-plugin`.
-    pub fn reference_toolset(manifest: PluginManifest) -> Result<Self, WitMapError> {
+    /// Returns [`PluginLifecycleError`] when the manifest does not declare
+    /// `toolset-plugin` or construction fails.
+    pub fn reference_toolset(manifest: PluginManifest) -> Result<Self, PluginLifecycleError> {
         let construction = construction_context(&manifest);
         let adapter = WitToolsetAdapter::try_new(
             ReferenceToolset::new(),
             &manifest,
             &construction,
             Arc::new(NoopPluginHooks),
-        )
-        .map_err(|error| map_wit(&error))?;
+        )?;
         Ok(Self {
             toolset_lifecycle: Some(adapter.lifecycle()),
             toolset: Some(Arc::new(adapter)),
@@ -354,27 +353,17 @@ fn construction_context(manifest: &PluginManifest) -> ComponentConstructionConte
         metadata: Metadata::empty(),
     }
 }
-
 fn map_lifecycle_registration(error: &WitMapError) -> PluginLifecycleError {
-    match error {
-        WitMapError::ManifestInvalid(_) => {
-            PluginLifecycleError::InitializeFailed("kind/world mismatch")
-        }
-        _ => PluginLifecycleError::InitializeFailed("plugin registration is invalid"),
-    }
-}
-
-fn map_wit(error: &PluginLifecycleError) -> WitMapError {
-    match error {
-        PluginLifecycleError::InitializeFailed(_) => {
-            WitMapError::ManifestInvalid("plugin initialize failed")
-        }
-        PluginLifecycleError::WarmupFailed(_) => {
-            WitMapError::ManifestInvalid("plugin warmup failed")
-        }
-        PluginLifecycleError::Timeout => WitMapError::ManifestInvalid("plugin lifecycle timed out"),
-        PluginLifecycleError::Failed(_) => WitMapError::ManifestInvalid("plugin lifecycle failed"),
-    }
+    PluginLifecycleError::InitializeFailed(match error {
+        WitMapError::ManifestInvalid(reason)
+        | WitMapError::RegistrationInvalid(reason)
+        | WitMapError::ToolSpecInvalid(reason)
+        | WitMapError::ContextItemInvalid(reason) => reason,
+        WitMapError::CatalogDigestMismatch => "guest catalog digest mismatch",
+        WitMapError::ManifestDigestMismatch => "manifest digest mismatch",
+        WitMapError::PrivateSuspension => "private suspension",
+        WitMapError::PayloadTooLarge { .. } => "payload exceeds its ceiling",
+    })
 }
 
 fn context_error(error: &WitMapError) -> ContextError {
@@ -391,19 +380,22 @@ fn context_error(error: &WitMapError) -> ContextError {
     .unwrap_or_else(Into::into)
 }
 
-fn guest_context_error(error: crate::generated::PluginError) -> ContextError {
-    let code = if error.code.is_empty() {
-        "plugin_lifecycle_failed"
+/// Split a guest-supplied `plugin-error` into a stable host code and message.
+///
+/// The `plugin_` prefix is reserved for host-stable codes. A guest code in
+/// that namespace is demoted under `plugin_guest_error` with its original
+/// text kept in the message, so a guest can never impersonate e.g.
+/// `plugin_catalog_digest_mismatch`. Guest-owned domain codes outside the
+/// reserved namespace pass through verbatim.
+fn guest_error_parts(error: &crate::generated::PluginError) -> (String, String) {
+    if error.code.starts_with("plugin_") {
+        (
+            "plugin_guest_error".to_owned(),
+            format!("{}: {}", error.code, error.message),
+        )
     } else {
-        error.code.as_str()
-    };
-    ContextError::try_new(
-        code,
-        ErrorCategory::Plugin,
-        error.message,
-        Metadata::empty(),
-    )
-    .unwrap_or_else(Into::into)
+        (error.code.clone(), error.message.clone())
+    }
 }
 
 fn tool_error(code: &str, message: &str) -> ToolError {
@@ -450,7 +442,8 @@ mod tests {
 
     fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
         let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-        let digest = manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &owned, &["logging".to_owned()])
+            .expect("digest");
         serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",
@@ -601,7 +594,7 @@ mod tests {
         let Err(error) = WitPluginExtension::reference_context(toolset_manifest()) else {
             panic!("kind/world mismatch must fail");
         };
-        assert_eq!(error.code(), "plugin_registration_invalid");
+        assert_eq!(error.code(), "plugin_initialize_failed");
     }
 
     #[tokio::test]

@@ -27,7 +27,9 @@ pub const PLUGIN_LOCK_DISABLED: &str = "plugin_lock_disabled";
 pub const PLUGIN_LOCK_DIGEST_MISMATCH: &str = "plugin_lock_digest_mismatch";
 /// Lockfile, component, or manifest path is missing.
 pub const PLUGIN_LOCK_NOT_FOUND: &str = "plugin_lock_not_found";
-
+/// Guest-supplied failure, namespaced so it can never impersonate a host code.
+pub const PLUGIN_GUEST_ERROR: &str = "plugin_guest_error";
+/// Lockfile JSON, version, or path is invalid.
 /// Fail-closed error for the isolated Wasmtime host.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PluginHostError {
@@ -58,7 +60,20 @@ pub enum PluginHostError {
     /// Host configuration rejected before the engine was built.
     #[error("plugin_registration_invalid: {0}")]
     ConfigInvalid(&'static str),
-    /// Manifest, catalog, or payload mapping failed.
+    /// The guest returned a `plugin-error`. Codes in the host-reserved
+    /// `plugin_` namespace are demoted under [`PLUGIN_GUEST_ERROR`] with the
+    /// original text kept in the message; other guest domain codes pass
+    /// through verbatim, so a guest can never impersonate e.g.
+    /// `plugin_signature_untrusted`.
+    #[error("{code}: {message}")]
+    Guest {
+        /// Guest-supplied non-secret failure code.
+        code: String,
+        /// Guest-supplied non-secret explanation.
+        message: String,
+    },
+    /// Host-side manifest, catalog, or payload mapping failed. The message
+    /// always begins with a stable code emitted by this host.
     #[error("{0}")]
     Mapped(String),
     /// Lockfile JSON, version, or path failed closed.
@@ -93,6 +108,7 @@ impl PluginHostError {
             Self::SignatureUntrusted(_) => PLUGIN_SIGNATURE_UNTRUSTED,
             Self::ConfigInvalid(_) => "plugin_registration_invalid",
             Self::Mapped(message) => mapped_code(message),
+            Self::Guest { .. } => PLUGIN_GUEST_ERROR,
             Self::LockInvalid(_) => PLUGIN_LOCK_INVALID,
             Self::LockDuplicate => PLUGIN_LOCK_DUPLICATE,
             Self::LockDisabled => PLUGIN_LOCK_DISABLED,

@@ -11,9 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::WitMapError;
-use crate::generated::{
-    CallContext, ContextBudget as WitBudget, ContextItem as WitItem, ContextQuery,
-};
+use crate::generated::{ContextBudget as WitBudget, ContextItem as WitItem, ContextQuery};
 use crate::limits::{
     MAX_RAW_JSON_BYTES, MAX_STRING_BYTES, reject_before_allocation, reject_declared_len,
 };
@@ -90,7 +88,6 @@ pub fn map_query(
         .to_raw_json()
         .map_err(|_| WitMapError::ContextItemInvalid("context request could not be normalized"))?;
     reject_before_allocation(request_json.as_bytes(), MAX_RAW_JSON_BYTES, "request-json")?;
-    validate_request_json(request_json.as_bytes(), request)?;
     let max_items = u32::try_from(budget.max_items)
         .map_err(|_| WitMapError::ContextItemInvalid("max-items exceeds u32"))?;
     Ok(ContextQuery {
@@ -102,30 +99,6 @@ pub fn map_query(
             max_items,
         },
     })
-}
-
-/// Reject a request-json payload that replaces host-owned identity.
-///
-/// # Errors
-///
-/// Returns [`WitMapError`] when the payload exceeds its ceiling, fails native
-/// decode, or changes session, lane, or run identity.
-pub fn validate_request_json(
-    bytes: &[u8],
-    host: &ContextRequest,
-) -> Result<ContextRequest, WitMapError> {
-    reject_before_allocation(bytes, MAX_RAW_JSON_BYTES, "request-json")?;
-    let parsed: ContextRequest = serde_json::from_slice(bytes)
-        .map_err(|_| WitMapError::ContextItemInvalid("request-json is invalid"))?;
-    if parsed.session_id != host.session_id
-        || parsed.lane_id != host.lane_id
-        || parsed.run_id != host.run_id
-    {
-        return Err(WitMapError::ContextItemInvalid(
-            "request-json replaced host identity",
-        ));
-    }
-    Ok(parsed)
 }
 
 /// Map one WIT context item onto a native attributed item.
@@ -214,12 +187,6 @@ pub fn encode_guest_item(
         estimated_tokens: native.estimated_tokens,
         bytes: native.bytes,
     })
-}
-
-/// Borrow the sanitized call-context from a mapped query.
-#[must_use]
-pub fn query_call_context(query: &ContextQuery) -> &CallContext {
-    &query.context
 }
 
 fn reject_private_protocol(value: &Value) -> Result<(), WitMapError> {
@@ -333,9 +300,7 @@ struct ItemJson<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        encode_guest_item, map_budget, map_context_item, map_query, validate_request_json,
-    };
+    use super::{encode_guest_item, map_budget, map_context_item, map_query};
     use crate::generated::ContextItem as WitItem;
     use crate::limits::MAX_RAW_JSON_BYTES;
     use crate::manifest::PluginResourceLimits;
@@ -480,17 +445,6 @@ mod tests {
         let query = map_query(&run_context(), &request(), None).expect("query");
         assert_eq!(query.context.tenant_scope, "tenant-a");
         assert!(!format!("{:?}", query.context).contains("secret-method"));
-        let host = request();
-        validate_request_json(&query.request_json, &host).expect("host json");
-        let mut tampered = host.clone();
-        tampered.run_id = RunId::from_bytes([9; 16]);
-        let bytes = serde_json::to_vec(&tampered).expect("json");
-        assert_eq!(
-            validate_request_json(&bytes, &host)
-                .expect_err("replaced")
-                .code(),
-            "plugin_context_item_invalid"
-        );
     }
 
     #[test]

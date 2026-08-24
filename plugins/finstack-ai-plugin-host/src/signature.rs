@@ -59,6 +59,7 @@ fn verify_present(
         manifest.identity.as_str(),
         &manifest.version,
         &manifest.worlds,
+        &manifest.permissions,
     )
     .map_err(|error| PluginHostError::from_map(&error))?;
     let verifying = VerifyingKey::from_bytes(root).map_err(|_| {
@@ -112,8 +113,10 @@ mod tests {
         let signing = SigningKey::from_bytes(secret);
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
-        let payload = manifest_signing_payload(identity, "0.0.4", &worlds).expect("payload");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
+        let payload = manifest_signing_payload(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("payload");
         let signature = signing.sign(&payload);
         let bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
@@ -138,7 +141,8 @@ mod tests {
     fn unsigned_manifest() -> PluginManifest {
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
         let bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",
@@ -205,7 +209,8 @@ mod tests {
         std::fs::create_dir_all(&root).expect("mkdir");
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
         let unsigned = serde_json::json!({
             "identity": identity,
             "version": "0.0.4",
@@ -221,7 +226,8 @@ mod tests {
         .expect("write unsigned");
 
         let signing = SigningKey::from_bytes(&[7; 32]);
-        let payload = manifest_signing_payload(identity, "0.0.4", &worlds).expect("payload");
+        let payload = manifest_signing_payload(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("payload");
         let signature = signing.sign(&payload);
         let valid = serde_json::json!({
             "identity": identity,

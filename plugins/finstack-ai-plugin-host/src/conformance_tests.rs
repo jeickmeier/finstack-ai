@@ -174,7 +174,9 @@ fn echo_manifest_bytes() -> Vec<u8> {
 
 fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-    let digest = finstack_ai_wit::manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+    let digest =
+        finstack_ai_wit::manifest_digest_hex(identity, "0.0.4", &owned, &["logging".to_owned()])
+            .expect("digest");
     serde_json::to_vec(&serde_json::json!({
         "identity": identity,
         "version": "0.0.4",
@@ -253,7 +255,13 @@ fn permission_denial_without_host_grant() {
     .expect("host");
     let identity = "finstack.plugin.filesystem.sandbox";
     let worlds = vec!["toolset-plugin".to_owned()];
-    let digest = finstack_ai_wit::manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+    let digest = finstack_ai_wit::manifest_digest_hex(
+        identity,
+        "0.0.4",
+        &worlds,
+        &["logging".to_owned(), "filesystem".to_owned()],
+    )
+    .expect("digest");
     let manifest = parse_manifest(
         &serde_json::to_vec(&serde_json::json!({
             "identity": identity,
@@ -458,7 +466,9 @@ fn abi_mismatch_calculator_as_context_fails() {
     .expect("host");
     let identity = "finstack.plugin.calculator";
     let worlds = vec!["toolset-plugin".to_owned()];
-    let digest = finstack_ai_wit::manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+    let digest =
+        finstack_ai_wit::manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
     let manifest = parse_manifest(
         &serde_json::to_vec(&serde_json::json!({
             "identity": identity,

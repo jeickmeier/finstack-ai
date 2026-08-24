@@ -4,5 +4,5 @@
   "worlds": ["context-plugin"],
   "permissions": ["logging", "blobs"],
   "configuration_schema": {},
-  "digest": "c7bc8afaf90ddea8c9c2861df849da2645d367ccd2ca1d3415665064f75081ee"
+  "digest": "4a2749b133dcf2507ee0b66b094663d617a3bf713207dda003f462dc0fe1cbf8"
 }

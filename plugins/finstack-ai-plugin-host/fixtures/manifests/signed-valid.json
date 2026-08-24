@@ -1,6 +1,6 @@
 {
   "configuration_schema": {},
-  "digest": "184e5d57e155d8a60267ff1ab834b72592ead667e1b4e30e18848a9f2860f517",
+  "digest": "4039044c51bd69248b0eb8f5b76bb1f55bb481e82c6962f68a1d6465221785ad",
   "identity": "finstack.plugin.echo.toolset",
   "permissions": [
     "logging"
@@ -8,7 +8,7 @@
   "signature": {
     "algorithm": "ed25519",
     "key_id": "test-root",
-    "signature": "d211c9555afc0c5bc3b0f429d5279ec92e800ea60fe820b9e188671acb0e0024bef522462c67ae1e156388ed56607f34ac21c2c8f3a453e95701b611892a950a"
+    "signature": "36448c971a60c56ca21489db42fdabbb6b97fe10ec0bcedbe7d4d177a184358b0b9acbbf0992da68c6b74471732a435fb09910374110fe6d0b1e6b03d65a690b"
   },
   "version": "0.0.4",
   "worlds": [

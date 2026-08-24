@@ -60,7 +60,12 @@ fn published_wasm(name: &str) -> Vec<u8> {
 
 fn manifest_bytes(identity: &str, worlds: &[&str], permissions: &[&str]) -> Vec<u8> {
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-    let digest = manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+    let owned_permissions: Vec<String> = permissions
+        .iter()
+        .map(|permission| (*permission).to_owned())
+        .collect();
+    let digest =
+        manifest_digest_hex(identity, "0.0.4", &owned, &owned_permissions).expect("digest");
     serde_json::to_vec(&serde_json::json!({
         "identity": identity,
         "version": "0.0.4",
@@ -92,7 +97,13 @@ fn sandbox_manifest_bytes() -> Vec<u8> {
     let identity = "finstack.plugin.filesystem.sandbox";
     let worlds = ["toolset-plugin"];
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-    let digest = manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+    let digest = manifest_digest_hex(
+        identity,
+        "0.0.4",
+        &owned,
+        &["logging".to_owned(), "filesystem".to_owned()],
+    )
+    .expect("digest");
     serde_json::to_vec(&serde_json::json!({
         "identity": identity,
         "version": "0.0.4",
@@ -268,21 +279,24 @@ fn completed_result(assembled: &AssembledToolStream) -> &ToolResult {
 
 #[test]
 fn on_disk_reference_manifests_use_host_digests() {
-    for (name, identity, worlds) in [
+    for (name, identity, worlds, permissions) in [
         (
             "calculator",
             "finstack.plugin.calculator",
             vec!["toolset-plugin".to_owned()],
+            vec!["logging".to_owned()],
         ),
         (
             "context-provider",
             "finstack.plugin.reference.context",
             vec!["context-plugin".to_owned()],
+            vec!["logging".to_owned()],
         ),
         (
             "filesystem-sandbox",
             "finstack.plugin.filesystem.sandbox",
             vec!["toolset-plugin".to_owned()],
+            vec!["logging".to_owned(), "filesystem".to_owned()],
         ),
     ] {
         let path = format!(
@@ -290,7 +304,8 @@ fn on_disk_reference_manifests_use_host_digests() {
             env!("CARGO_MANIFEST_DIR")
         );
         let manifest = parse_manifest(&std::fs::read(&path).expect("read")).expect("parse");
-        let expected = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let expected =
+            manifest_digest_hex(identity, "0.0.4", &worlds, &permissions).expect("digest");
         assert_eq!(manifest.digest, expected, "{name}");
         assert_eq!(manifest.identity.as_str(), identity);
     }
@@ -701,7 +716,8 @@ async fn template_project_builds_and_runs() {
     let identity = "finstack.plugin.template.toolset";
     let worlds = ["toolset-plugin"];
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-    let digest = manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+    let digest =
+        manifest_digest_hex(identity, "0.0.4", &owned, &["logging".to_owned()]).expect("digest");
     let manifest = parse_manifest(
         &serde_json::to_vec(&serde_json::json!({
             "identity": identity,

@@ -29,6 +29,7 @@ pub mod adapters;
 pub mod context_mapping;
 pub mod error;
 pub mod generated;
+#[cfg(test)]
 pub mod host;
 pub mod inventory;
 pub mod lifecycle;
@@ -46,7 +47,6 @@ pub use generated::{
     ContextQuery, GuestContextProvider, GuestToolset, HOST_IMPORTS, HostBlobs, HostLogging, Level,
     PluginError, TOOLSET_FUNCS, TOOLSET_WORLD_EXPORTS, ToolCatalog, ToolResult, ToolSpec,
 };
-pub use host::{CeilingBlobStore, RecordingLogger};
 pub use inventory::assert_experimental_surface;
 pub use lifecycle::{
     NoopPluginHooks, PluginGuestHooks, PluginLifecycle, PluginLifecycleError, honor_deadline,
@@ -89,7 +89,12 @@ mod tests {
             ])
             .current_dir(repo_root())
             .status()
-            .expect("run check-wit");
+            .unwrap_or_else(|error| {
+                panic!(
+                    "the bindings drift check requires `uv` on PATH (spawn failed: {error}); \
+                     install uv or run scripts/wit_bindgen/generate.py --check manually"
+                )
+            });
         assert!(
             status.success(),
             "scripts/wit_bindgen/generate.py --check equivalent failed"

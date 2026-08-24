@@ -33,12 +33,11 @@ use crate::bindings::toolset::ToolsetPlugin;
 use crate::bindings::v1::context::ContextPlugin as ContextPluginV1;
 use crate::bindings::v1::toolset::ToolsetPlugin as ToolsetPluginV1;
 use crate::convert::{
-    format_plugin_error, wasm_call_context, wasm_call_context_v1, wasm_context_query,
-    wasm_context_query_v1, wit_context_item, wit_context_item_v1, wit_plugin_error,
-    wit_plugin_error_v1, wit_tool_catalog, wit_tool_catalog_v1, wit_tool_result,
-    wit_tool_result_v1,
+    wasm_call_context, wasm_call_context_v1, wasm_context_query, wasm_context_query_v1,
+    wit_context_item, wit_context_item_v1, wit_plugin_error, wit_plugin_error_v1, wit_tool_catalog,
+    wit_tool_catalog_v1, wit_tool_result, wit_tool_result_v1,
 };
-use crate::error::PluginHostError;
+use crate::error::{PLUGIN_GUEST_ERROR, PluginHostError};
 use crate::host::{InstancePolicy, PluginHost, PluginWorld, ReadyWasm};
 use crate::instantiate::{
     HostState, host_state_for, map_wasmtime_error, new_store, with_cancellation,
@@ -550,9 +549,7 @@ fn map_guest_result<T, U>(
 ) -> Result<U, PluginHostError> {
     match result {
         Ok(Ok(value)) => Ok(ok(value)),
-        Ok(Err(error)) => Err(PluginHostError::Mapped(format_plugin_error(
-            &wit_plugin_error(error),
-        ))),
+        Ok(Err(error)) => Err(guest_plugin_error(wit_plugin_error(error))),
         Err(error) => Err(map_wasmtime_error(&error, cancel.is_cancelled())),
     }
 }
@@ -567,10 +564,29 @@ fn map_guest_result_v1<T, U>(
 ) -> Result<U, PluginHostError> {
     match result {
         Ok(Ok(value)) => Ok(ok(value)),
-        Ok(Err(error)) => Err(PluginHostError::Mapped(format_plugin_error(
-            &wit_plugin_error_v1(error),
-        ))),
+        Ok(Err(error)) => Err(guest_plugin_error(wit_plugin_error_v1(error))),
         Err(error) => Err(map_wasmtime_error(&error, cancel.is_cancelled())),
+    }
+}
+
+/// Classify a guest-supplied `plugin-error`.
+///
+/// The `plugin_` prefix is reserved for host-stable codes. A guest code in
+/// that namespace is demoted under [`PluginHostError::Guest`] with its
+/// original text kept in the message, so a guest can never impersonate e.g.
+/// `plugin_signature_untrusted`. Guest-owned domain codes outside the
+/// reserved namespace pass through verbatim.
+fn guest_plugin_error(error: finstack_ai_wit::generated::PluginError) -> PluginHostError {
+    if error.code.starts_with("plugin_") {
+        PluginHostError::Guest {
+            code: PLUGIN_GUEST_ERROR.to_owned(),
+            message: format!("{}: {}", error.code, error.message),
+        }
+    } else {
+        PluginHostError::Guest {
+            code: error.code,
+            message: error.message,
+        }
     }
 }
 
@@ -779,24 +795,20 @@ async fn collect_items(
 }
 
 fn tool_error(error: &PluginHostError, metadata: Metadata) -> ToolError {
-    ToolError::try_new(
-        error.code(),
-        ErrorCategory::Plugin,
-        false,
-        error.to_string(),
-        metadata,
-    )
-    .unwrap_or_else(Into::into)
+    let (code, message) = match error {
+        PluginHostError::Guest { code, message } => (code.as_str(), format!("{code}: {message}")),
+        _ => (error.code(), error.to_string()),
+    };
+    ToolError::try_new(code, ErrorCategory::Plugin, false, message, metadata)
+        .unwrap_or_else(Into::into)
 }
 
 fn context_error(error: &PluginHostError, metadata: Metadata) -> ContextError {
-    ContextError::try_new(
-        error.code(),
-        ErrorCategory::Plugin,
-        error.to_string(),
-        metadata,
-    )
-    .unwrap_or_else(Into::into)
+    let (code, message) = match error {
+        PluginHostError::Guest { code, message } => (code.as_str(), format!("{code}: {message}")),
+        _ => (error.code(), error.to_string()),
+    };
+    ContextError::try_new(code, ErrorCategory::Plugin, message, metadata).unwrap_or_else(Into::into)
 }
 
 fn plugin_metadata(ready: &ReadyWasm) -> Metadata {
@@ -820,7 +832,8 @@ mod tests {
 
     fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
         let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-        let digest = manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &owned, &["logging".to_owned()])
+            .expect("digest");
         serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",

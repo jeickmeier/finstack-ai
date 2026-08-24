@@ -4,6 +4,16 @@
 //! Guests invoke [`toolset_plugin!`] or [`context_plugin!`] in their own crate
 //! so `export!` stays in the cdylib. Host-import calls stay in the guest after
 //! those macros expand.
+//!
+//! # Guest traps
+//!
+//! A panic, arithmetic overflow (in debug builds), allocation abort, or
+//! capacity overflow inside guest code traps the component. The isolated host
+//! contains the trap — the failing call returns a stable `plugin_trap` error
+//! and the host process survives — but the plugin instance is dead and every
+//! later call fails until the host reinstantiates. Guests that must not die
+//! on malformed input should validate first (`parse_args`, `reject_log_message`)
+//! and avoid panicking paths such as indexing slices.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -28,13 +38,6 @@
 
 /// Pinned `wit-bindgen` re-export so guests do not list the crate themselves.
 pub use wit_bindgen;
-
-/// Pinned `wit-bindgen` crate version used by the guest macros.
-pub const WIT_BINDGEN_VERSION: &str = "0.57.1";
-/// Experimental WIT package version guests must pin unless they retarget.
-pub const WIT_PACKAGE_VERSION: &str = "0.0.4";
-/// Frozen WIT package version for guests that retarget to `@1.0.0`.
-pub const WIT_PACKAGE_VERSION_V1: &str = "1.0.0";
 
 /// Individual text or byte-string ceiling (contract section 6.5).
 pub const MAX_STRING_BYTES: usize = 4 * 1024 * 1024;
@@ -116,6 +119,7 @@ pub struct ToolSpecParts {
 ///
 /// The algorithm matches `finstack_ai_wit::catalog_digest_hex`: JCS over
 /// `{ "tools": [ canonical tool objects ] }`, then the `raw-json` digest.
+/// The ceiling is enforced on the exact canonical bytes the digest covers.
 ///
 /// # Errors
 ///
@@ -126,17 +130,10 @@ pub fn catalog_digest(tools: &[ToolSpecParts]) -> Result<String, GuestError> {
     for tool in tools {
         items.push(canonical_tool_value(tool)?);
     }
-    let encoded = serde_json::to_vec(&serde_json::json!({ "tools": items })).map_err(|_| {
-        plugin_error(
-            "plugin_registration_invalid",
-            "catalog canonicalization failed",
-        )
-    })?;
-    reject_len(&encoded, MAX_RAW_JSON_BYTES, "catalog-json")?;
-    let value: serde_json::Value = serde_json::from_slice(&encoded)
-        .map_err(|_| plugin_error("plugin_registration_invalid", "catalog JSON is invalid"))?;
+    let value = serde_json::json!({ "tools": items });
     let canonical = serde_json_canonicalizer::to_vec(&value)
         .map_err(|_| plugin_error("plugin_registration_invalid", "catalog JCS failed"))?;
+    reject_len(&canonical, MAX_RAW_JSON_BYTES, "catalog-json")?;
     Ok(raw_json_digest_hex(&canonical))
 }
 
@@ -175,21 +172,6 @@ pub fn schema_bytes(value: &serde_json::Value) -> Result<Vec<u8>, GuestError> {
     Ok(bytes)
 }
 
-/// WIT logging levels. Guests pass the generated enum after [`toolset_plugin!`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    /// Trace.
-    Trace,
-    /// Debug.
-    Debug,
-    /// Info.
-    Info,
-    /// Warn.
-    Warn,
-    /// Error.
-    Error,
-}
-
 /// Reject an oversized log message before the guest calls the host import.
 ///
 /// # Errors
@@ -198,18 +180,6 @@ pub enum LogLevel {
 /// [`MAX_STRING_BYTES`].
 pub fn reject_log_message(message: &str) -> Result<(), GuestError> {
     reject_len(message.as_bytes(), MAX_STRING_BYTES, "log.message")
-}
-
-/// Fixture tenant scope used by guest-sdk tests and templates.
-#[must_use]
-pub const fn fixture_tenant_scope() -> &'static str {
-    "tenant-a"
-}
-
-/// Fixture authorization decision id used by guest-sdk tests and templates.
-#[must_use]
-pub const fn fixture_decision_id() -> &'static str {
-    "decision-v1"
 }
 
 /// Expand `wit_bindgen::generate!` for `toolset-plugin` from the crate `wit/`
@@ -326,12 +296,19 @@ fn raw_json_digest_hex(canonical: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        GuestError, LogLevel, MAX_RAW_JSON_BYTES, MAX_STRING_BYTES, ToolSpecParts,
-        WIT_BINDGEN_VERSION, WIT_PACKAGE_VERSION, WIT_PACKAGE_VERSION_V1, catalog_digest,
-        encode_json_result, fixture_decision_id, fixture_tenant_scope, parse_args, plugin_error,
-        reject_log_message, require_sanitized_context, schema_bytes,
+        GuestError, MAX_RAW_JSON_BYTES, MAX_STRING_BYTES, ToolSpecParts, catalog_digest,
+        encode_json_result, parse_args, plugin_error, reject_log_message,
+        require_sanitized_context, schema_bytes,
     };
     use serde::Deserialize;
+
+    fn fixture_tenant_scope() -> &'static str {
+        "tenant-a"
+    }
+
+    fn fixture_decision_id() -> &'static str {
+        "decision-v1"
+    }
 
     #[derive(Debug, Deserialize, PartialEq, Eq)]
     struct EchoArgs {
@@ -355,13 +332,6 @@ mod tests {
             max_result_bytes: 1024,
             metadata_json: b"{}".to_vec(),
         }
-    }
-
-    #[test]
-    fn versions_are_pinned() {
-        assert_eq!(WIT_BINDGEN_VERSION, "0.57.1");
-        assert_eq!(WIT_PACKAGE_VERSION, "0.0.4");
-        assert_eq!(WIT_PACKAGE_VERSION_V1, "1.0.0");
     }
 
     #[test]
@@ -453,7 +423,6 @@ mod tests {
             reject_log_message(&message).expect_err("log").code,
             "plugin_payload_too_large"
         );
-        let _ = LogLevel::Info;
         let _ = plugin_error("plugin_unknown_tool", "unknown");
         let _ = GuestError {
             code: "x".into(),

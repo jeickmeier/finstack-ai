@@ -698,7 +698,8 @@ mod tests {
         assert!(host.cache_hit(&parts), "tampered file still names a hit");
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
         let manifest_bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",
@@ -726,7 +727,8 @@ mod tests {
         .expect("host");
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
         let bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",
@@ -753,7 +755,13 @@ mod tests {
         .expect("host");
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(
+            identity,
+            "0.0.4",
+            &worlds,
+            &["logging".to_owned(), "filesystem".to_owned()],
+        )
+        .expect("digest");
         let bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",

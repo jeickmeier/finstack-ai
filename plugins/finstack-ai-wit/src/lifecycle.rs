@@ -106,24 +106,16 @@ impl PluginLifecycle {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            self.hooks
+            let outcome = self
+                .hooks
                 .initialize(context)
-                .map_err(|error| match error {
-                    PluginLifecycleError::Timeout | PluginLifecycleError::InitializeFailed(_) => {
-                        error
-                    }
-                    PluginLifecycleError::WarmupFailed(reason)
-                    | PluginLifecycleError::Failed(reason) => {
-                        PluginLifecycleError::InitializeFailed(reason)
-                    }
-                })?;
-            self.hooks.warmup(context).map_err(|error| match error {
-                PluginLifecycleError::Timeout | PluginLifecycleError::WarmupFailed(_) => error,
-                PluginLifecycleError::InitializeFailed(reason)
-                | PluginLifecycleError::Failed(reason) => {
-                    PluginLifecycleError::WarmupFailed(reason)
-                }
-            })?;
+                .and_then(|()| self.hooks.warmup(context));
+            if outcome.is_err() {
+                // A failed construction must not leave the component
+                // reporting healthy; release the claim so a retry can run.
+                self.initialized.store(false, Ordering::Release);
+            }
+            return outcome;
         }
         Ok(())
     }
@@ -291,6 +283,23 @@ mod tests {
         let wrapped = PluginLifecycleError::Failed("late").into_lifecycle_error();
         assert_eq!(wrapped.code(), "component_lifecycle_failed");
         assert!(wrapped.message().contains("plugin_lifecycle_failed"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_construction_does_not_report_ready() {
+        let failing = PluginLifecycle::new(Arc::new(FailingInit));
+        assert!(
+            failing.run_construction(&construction(false)).is_err(),
+            "construction fails"
+        );
+        let health = failing.health().await.expect("health");
+        assert!(!health.ready, "failed construction must not report ready");
+
+        // A retry after the failure may run hooks again.
+        let retried = PluginLifecycle::new(Arc::new(NoopPluginHooks));
+        assert!(retried.run_construction(&construction(false)).is_ok());
+        let health = retried.health().await.expect("health");
+        assert!(health.ready);
     }
 
     #[tokio::test]

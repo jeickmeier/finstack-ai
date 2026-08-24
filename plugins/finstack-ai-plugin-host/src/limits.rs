@@ -137,7 +137,8 @@ mod tests {
     fn manifest_with_limits(limits: &serde_json::Value) -> finstack_ai_wit::PluginManifest {
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
         let bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",
@@ -216,7 +217,8 @@ mod tests {
     fn omitted_resource_limits_use_host_defaults() {
         let identity = "finstack.plugin.echo.toolset";
         let worlds = vec!["toolset-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds, &["logging".to_owned()])
+            .expect("digest");
         let bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",

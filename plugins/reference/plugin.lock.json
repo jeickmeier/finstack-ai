@@ -7,7 +7,7 @@
       "enabled": true,
       "identity": "finstack.plugin.calculator",
       "manifest": "calculator/plugin.manifest.json",
-      "manifest_digest": "204b2658cff5fdbbbdd80583a5909e0a09be03cb744bb2436dd52cf1a3ed84b8",
+      "manifest_digest": "2dd6fc2dff712b55e4da1837cda5c4d27ab34711a3c5083c80a9a46d0257eb45",
       "version": "0.0.4"
     },
     {
@@ -16,7 +16,7 @@
       "enabled": true,
       "identity": "finstack.plugin.reference.context",
       "manifest": "context-provider/plugin.manifest.json",
-      "manifest_digest": "c7bc8afaf90ddea8c9c2861df849da2645d367ccd2ca1d3415665064f75081ee",
+      "manifest_digest": "e3a56fb6c88af6aabf478954ba3211cebb6498528b57719da6777d69221c2c9b",
       "version": "0.0.4"
     },
     {
@@ -25,7 +25,7 @@
       "enabled": false,
       "identity": "finstack.plugin.filesystem.sandbox",
       "manifest": "filesystem-sandbox/plugin.manifest.json",
-      "manifest_digest": "20c42b83488c05e2f54556e4ddcd887e83ecf6a182cb960278a3d2de0a6b42b6",
+      "manifest_digest": "cad8c6406fafec41c12d8ae0b81ac09d2a86aef3ed8a98b4874695aa13ea6f21",
       "version": "0.0.4"
     }
   ]

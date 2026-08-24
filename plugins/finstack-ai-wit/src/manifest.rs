@@ -112,23 +112,47 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<PluginManifest, WitMapError> {
     validate_wire(wire)
 }
 
-/// Validate an already-decoded manifest value.
+/// Validate an already-decoded manifest value against the full wire rule set.
+///
+/// Enforces everything [`parse_manifest`] enforces except the raw-JSON shape
+/// of `configuration_schema`, whose bytes are already canonical output of the
+/// wire parse. Call this before trusting any `PluginManifest` that was not
+/// produced by [`parse_manifest`].
 ///
 /// # Errors
 ///
-/// Same as [`parse_manifest`].
+/// Returns [`WitMapError`] for undeclared worlds or permissions, duplicate
+/// entries, zero-valued resource limits, malformed signature metadata, or a
+/// digest mismatch.
 pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), WitMapError> {
+    validate_worlds(&manifest.worlds)?;
+    validate_permissions(&manifest.permissions)?;
+    if let Some(limits) = &manifest.resource_limits {
+        validate_resource_limits(limits)?;
+    }
+    if manifest.digest.is_empty() {
+        return Err(WitMapError::ManifestInvalid("digest is omitted"));
+    }
+    if let Some(signature) = &manifest.signature
+        && (signature.algorithm.is_empty()
+            || signature.key_id.is_empty()
+            || signature.signature.is_empty())
+    {
+        return Err(WitMapError::ManifestInvalid(
+            "signature metadata is malformed",
+        ));
+    }
     let expected = manifest_digest_hex(
         manifest.identity.as_str(),
         &manifest.version,
         &manifest.worlds,
+        &manifest.permissions,
     )?;
     if manifest.digest != expected {
         return Err(WitMapError::ManifestDigestMismatch);
     }
     Ok(())
 }
-
 /// Reject duplicate identities across a candidate set.
 ///
 /// # Errors
@@ -144,7 +168,16 @@ pub fn reject_duplicate_identities(manifests: &[PluginManifest]) -> Result<(), W
     Ok(())
 }
 
-/// Canonical `{identity, version, worlds}` bytes used for digest and signatures.
+/// Canonical bytes used for the manifest digest and the ed25519 signing
+/// payload: `{identity, version, worlds, permissions}` with both lists
+/// sorted and deduplicated.
+///
+/// The payload covers every field that drives a host trust decision — in
+/// particular `permissions`, so a re-signed manifest file cannot escalate
+/// capabilities without breaking verification. Two fields are excluded on
+/// purpose: `resource_limits` is untrusted request data the host clamps to
+/// its own ceilings regardless of value, and `configuration_schema` is
+/// informational metadata no host enforcement path consults.
 ///
 /// # Errors
 ///
@@ -153,12 +186,17 @@ pub fn manifest_signing_payload(
     identity: &str,
     version: &str,
     worlds: &[String],
+    permissions: &[String],
 ) -> Result<Vec<u8>, WitMapError> {
     let mut worlds = worlds.to_vec();
     worlds.sort();
     worlds.dedup();
+    let mut permissions = permissions.to_vec();
+    permissions.sort();
+    permissions.dedup();
     let encoded = serde_json::to_vec(&serde_json::json!({
         "identity": identity,
+        "permissions": permissions,
         "version": version,
         "worlds": worlds,
     }))
@@ -169,7 +207,7 @@ pub fn manifest_signing_payload(
     Ok(raw.as_bytes().to_vec())
 }
 
-/// Host-computed digest over canonical `{identity, version, worlds}`.
+/// Host-computed digest over the canonical signing payload.
 ///
 /// # Errors
 ///
@@ -178,8 +216,9 @@ pub fn manifest_digest_hex(
     identity: &str,
     version: &str,
     worlds: &[String],
+    permissions: &[String],
 ) -> Result<String, WitMapError> {
-    let payload = manifest_signing_payload(identity, version, worlds)?;
+    let payload = manifest_signing_payload(identity, version, worlds, permissions)?;
     Ok(Digest::raw_json(&payload).to_hex())
 }
 
@@ -196,25 +235,8 @@ fn validate_wire(wire: ManifestWire) -> Result<PluginManifest, WitMapError> {
             "version must be 0.0.4 or 1.0.0",
         ));
     }
-    if wire.worlds.is_empty() {
-        return Err(WitMapError::ManifestInvalid("worlds must be non-empty"));
-    }
-    let mut worlds = BTreeSet::new();
-    for world in &wire.worlds {
-        if !ALLOWED_WORLDS.contains(&world.as_str()) {
-            return Err(WitMapError::ManifestInvalid("undeclared capability world"));
-        }
-        if !worlds.insert(world.clone()) {
-            return Err(WitMapError::ManifestInvalid("worlds contain a duplicate"));
-        }
-    }
-    let mut permissions = BTreeSet::new();
-    for permission in &wire.permissions {
-        if !ALLOWED_PERMISSIONS.contains(&permission.as_str()) {
-            return Err(WitMapError::ManifestInvalid("undeclared host permission"));
-        }
-        permissions.insert(permission.clone());
-    }
+    validate_worlds(&wire.worlds)?;
+    validate_permissions(&wire.permissions)?;
     if !wire.configuration_schema.is_object() {
         return Err(WitMapError::ManifestInvalid(
             "configuration_schema must be a JSON object",
@@ -240,22 +262,22 @@ fn validate_wire(wire: ManifestWire) -> Result<PluginManifest, WitMapError> {
             "signature metadata is malformed",
         ));
     }
-    if let Some(limits) = &wire.resource_limits
-        && (limits.max_output_bytes == 0
-            || limits.call_timeout_ms == 0
-            || limits.max_memory_bytes == Some(0)
-            || limits.max_tables == Some(0)
-            || limits.max_instances == Some(0)
-            || limits.fuel == Some(0))
-    {
-        return Err(WitMapError::ManifestInvalid(
-            "resource limit fields must be non-zero",
-        ));
+    if let Some(limits) = &wire.resource_limits {
+        validate_resource_limits(limits)?;
     }
-    let expected = manifest_digest_hex(identity.as_str(), &wire.version, &wire.worlds)?;
+    let expected = manifest_digest_hex(
+        identity.as_str(),
+        &wire.version,
+        &wire.worlds,
+        &wire.permissions,
+    )?;
     if wire.digest != expected {
         return Err(WitMapError::ManifestDigestMismatch);
     }
+    let mut worlds = BTreeSet::new();
+    worlds.extend(wire.worlds);
+    let mut permissions = BTreeSet::new();
+    permissions.extend(wire.permissions);
     Ok(PluginManifest {
         identity,
         version: wire.version,
@@ -268,13 +290,67 @@ fn validate_wire(wire: ManifestWire) -> Result<PluginManifest, WitMapError> {
     })
 }
 
+fn validate_worlds(worlds: &[String]) -> Result<(), WitMapError> {
+    if worlds.is_empty() {
+        return Err(WitMapError::ManifestInvalid("worlds must be non-empty"));
+    }
+    let mut seen = BTreeSet::new();
+    for world in worlds {
+        if !ALLOWED_WORLDS.contains(&world.as_str()) {
+            return Err(WitMapError::ManifestInvalid("undeclared capability world"));
+        }
+        if !seen.insert(world.as_str()) {
+            return Err(WitMapError::ManifestInvalid("worlds contain a duplicate"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_permissions(permissions: &[String]) -> Result<(), WitMapError> {
+    let mut seen = BTreeSet::new();
+    for permission in permissions {
+        if !ALLOWED_PERMISSIONS.contains(&permission.as_str()) {
+            return Err(WitMapError::ManifestInvalid("undeclared host permission"));
+        }
+        if !seen.insert(permission.as_str()) {
+            return Err(WitMapError::ManifestInvalid(
+                "permissions contain a duplicate",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Reject the zero-valued limits [`crate::limits`] clamping cannot repair:
+/// a zero request would honour "lower to zero" and starve the guest store.
+fn validate_resource_limits(limits: &PluginResourceLimits) -> Result<(), WitMapError> {
+    if limits.max_output_bytes == 0
+        || limits.call_timeout_ms == 0
+        || limits.max_memory_bytes == Some(0)
+        || limits.max_tables == Some(0)
+        || limits.max_instances == Some(0)
+        || limits.fuel == Some(0)
+    {
+        return Err(WitMapError::ManifestInvalid(
+            "resource limit fields must be non-zero",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{manifest_digest_hex, parse_manifest, reject_duplicate_identities};
 
     fn valid_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
         let world_owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-        let digest = manifest_digest_hex(identity, "0.0.4", &world_owned).expect("digest");
+        let digest = manifest_digest_hex(
+            identity,
+            "0.0.4",
+            &world_owned,
+            &["logging".to_owned(), "blobs".to_owned()],
+        )
+        .expect("digest");
         serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",
@@ -290,7 +366,17 @@ mod tests {
     fn catalog_permissions_parse_without_sandboxing() {
         let identity = "finstack.plugin.reference.context";
         let worlds = vec!["context-plugin".to_owned()];
-        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let digest = manifest_digest_hex(
+            identity,
+            "0.0.4",
+            &worlds,
+            &[
+                "logging".to_owned(),
+                "filesystem".to_owned(),
+                "clock".to_owned(),
+            ],
+        )
+        .expect("digest");
         let bytes = serde_json::to_vec(&serde_json::json!({
             "identity": identity,
             "version": "0.0.4",

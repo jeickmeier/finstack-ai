@@ -34,6 +34,16 @@ Then implement the generated `Guest` trait. After the macro, call
 `reject_log_message` first. Do not import `wasi:*` unless the host
 grants the matching capability and concrete resource.
 
+## Guest traps
+
+A panic, arithmetic overflow (debug builds), allocation abort, or capacity
+overflow inside guest code traps the component. The isolated host contains
+the trap — the failing call returns a stable `plugin_trap` error and the
+host process survives — but the plugin instance is dead and every later call
+fails until the host reinstantiates. Validate untrusted input first
+(`parse_args`, `reject_log_message`) instead of unwrapping, and avoid
+panicking paths such as out-of-bounds slicing.
+
 ## Local host test commands
 
 ```text

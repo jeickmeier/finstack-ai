@@ -43,7 +43,9 @@ fn published_wasm(name: &str) -> Vec<u8> {
 
 fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-    let digest = finstack_ai_wit::manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+    let digest =
+        finstack_ai_wit::manifest_digest_hex(identity, "0.0.4", &owned, &["logging".to_owned()])
+            .expect("digest");
     serde_json::to_vec(&serde_json::json!({
         "identity": identity,
         "version": "0.0.4",
