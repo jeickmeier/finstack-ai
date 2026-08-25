@@ -9,6 +9,7 @@ node = "22.18.0"
 "github:EmbarkStudios/cargo-deny" = "0.20.2"
 "github:taiki-e/cargo-llvm-cov" = { version = "0.8.7", version_prefix = "v" }
 "cargo:cargo-public-api" = "0.52.0"
+"github:WebAssembly/wasi-sdk" = "wasi-sdk-33"
 # rust@nightly-2026-08-14 is the check-only rustdoc JSON pin for
 # cargo-public-api 0.52. `NIGHTLY` in scripts/compat/public_api.py is the
 # source of truth and both must move together. Installed and exported by
@@ -72,6 +73,18 @@ cargo clippy -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --n
 # precisely so the wasm-host lane can be exercised on the host target. Without
 # this line that whole configuration is only ever compile-checked.
 cargo nextest run -p finstack-ai-runtime --locked --no-default-features --features wasm-host
+"""
+
+[tasks.check-native-platform]
+description = "Compile, lint, and smoke-test native confinement on the host OS"
+run = """
+set -euo pipefail
+cargo clippy -p finstack-ai-runtime --all-targets --locked \
+  --no-default-features --features native-tokio -- -D warnings
+cargo clippy -p finstack-ai-tools-shell --all-targets --locked -- -D warnings
+cargo test -p finstack-ai-runtime --locked \
+  --no-default-features --features native-tokio process_confinement
+cargo test -p finstack-ai-tools-shell --locked confinement
 """
 
 [tasks.check-repository-references]
@@ -358,17 +371,13 @@ test_wasm
 """
 
 [tasks.coverage-all]
-description = "Write diagnostic Rust and Python coverage reports"
+description = "Write diagnostic Rust, Python, and WASM coverage reports"
 run = """
 set -euo pipefail
 mise run coverage-rust
 mise run coverage-python
+mise run coverage-wasm
 """
-# `coverage-wasm` is deliberately NOT called here. It emits a PENDING.md
-# scaffold and no measurement, and including it made an aggregate named
-# "coverage" report a placeholder as though it were a result. Run it directly
-# if you want the scaffold; wire it back in once a wasm-bindgen-test suite
-# makes it produce real numbers.
 
 [tasks.coverage-rust]
 description = "Write diagnostic Rust workspace coverage (HTML + LCOV)"
@@ -397,19 +406,17 @@ uv run --with pytest-cov==7.1.0 \
 """
 
 [tasks.coverage-wasm]
-description = "Write the pending WASM coverage scaffold artifact"
+description = "Write kernel-on-WASM Rust source coverage (HTML + LCOV)"
 run = """
 set -euo pipefail
-mkdir -p target/coverage/wasm
-cat > target/coverage/wasm/PENDING.md <<'EOF'
-# WASM coverage pending
-
-Real WASM coverage waits on a `wasm-bindgen-test` (or equivalent) suite
-for `finstack-ai-wasm` and kernel-on-wasm execution.
-
-`mise run check-wasm` remains the compile gate.
-`mise run test-wasm` remains the package harness.
-EOF
+nightly=nightly-2026-08-14
+mise install "rust@${nightly}"
+mise install github:WebAssembly/wasi-sdk
+rustup target add wasm32-unknown-unknown --toolchain "${nightly}"
+rustup component add llvm-tools-preview --toolchain "${nightly}"
+export FINSTACK_WASM_CLANG="$(mise where github:WebAssembly/wasi-sdk)/bin/clang"
+FINSTACK_COVERAGE_NIGHTLY="${nightly}" \
+  uv run --no-project python scripts/perf/wasm_coverage.py
 """
 
 [tasks.fuzz-smoke]

@@ -3,13 +3,15 @@
  *
  * Persistence is origin-scoped and not crash-durable. `health().detail` stays
  * `js_indexeddb_experimental` and does not claim crash durability.
- * Schema version 2 stores exact scoped artifact references.
+ * Schema version 3 stores typed byte arrays plus indexed artifact metadata.
+ * Upgrading from an earlier provisional schema discards snapshots and artifacts;
+ * committed journal batches remain available for replay.
  */
 import type { HostArtifactStore, HostJournalStore } from "../host.js";
 /** Default experimental database name. */
 export declare const INDEXED_DB_NAME = "finstack-ai-experimental";
 /** Provisional IndexedDB schema version. */
-export declare const INDEXED_DB_SCHEMA_VERSION = 2;
+export declare const INDEXED_DB_SCHEMA_VERSION = 3;
 /**
  * Options for the experimental IndexedDB batteries.
  */

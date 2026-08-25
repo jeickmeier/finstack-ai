@@ -1,13 +1,14 @@
 //! Live session, lane, and in-process external-identity handles.
 
 use finstack_ai::{
-    ExternalIdentityKey, ExternalIdentityMap, Lane, MemoryExternalIdentityMap, Session,
+    DEFAULT_MAX_CYCLES, ExternalIdentityKey, ExternalIdentityMap, Lane, MemoryExternalIdentityMap,
+    Session,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::ConfigurationError;
-use crate::agent::{DEFAULT_MAX_CYCLES, PyAgent};
+use crate::agent::PyAgent;
 use crate::errors::{agent_error, session_py_error};
 use crate::run::PyRun;
 
@@ -193,6 +194,9 @@ impl PyLane {
 
     /// Start a new root run on this idle lane.
     #[pyo3(signature = (agent, input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
+    #[pyo3(
+        text_signature = "($self, agent, input, *, timeout_seconds=None, max_cycles=16, max_output_retries=1, capability=None, attachments=None)"
+    )]
     #[expect(
         clippy::too_many_arguments,
         reason = "lane run forwards the same bounded run inputs as Agent.start"

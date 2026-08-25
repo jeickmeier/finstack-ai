@@ -150,6 +150,9 @@ impl PyMemoryExtension {
     /// `remember`, and `manage` covers `forget_memory`/`correct_memory`.
     #[staticmethod]
     #[pyo3(signature = (*, tenant = DEFAULT_TENANT, user = None, agent = None, workspace = None, read = true, write = true, manage = false))]
+    #[pyo3(
+        text_signature = "(*, tenant='python-local', user=None, agent=None, workspace=None, read=True, write=True, manage=False)"
+    )]
     #[expect(
         clippy::too_many_arguments,
         reason = "scope narrowing and policy flags are distinct keyword parameters"
@@ -180,6 +183,9 @@ impl PyMemoryExtension {
     /// the runs that recall from this store.
     #[staticmethod]
     #[pyo3(signature = (*, path, tenant = DEFAULT_TENANT, user = None, agent = None, workspace = None, read = true, write = true, manage = false))]
+    #[pyo3(
+        text_signature = "(*, path, tenant='python-local', user=None, agent=None, workspace=None, read=True, write=True, manage=False)"
+    )]
     #[expect(
         clippy::too_many_arguments,
         reason = "scope narrowing and policy flags are distinct keyword parameters"

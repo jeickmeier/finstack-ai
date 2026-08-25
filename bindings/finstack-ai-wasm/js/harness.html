@@ -45,6 +45,7 @@
       import { connectWorker } from "./dist/worker.js";
       import {
         applyScriptedCoordinatorCommands,
+        benchmarkRoundTrip,
         compilePortProxies,
         driveScriptedJournalHealth,
         driveScriptedModelRequest,
@@ -68,6 +69,7 @@
           health,
           buildMetadata,
           compilePortProxies,
+          benchmarkRoundTrip,
           runNoopTrace,
           Agent,
           ApprovalGrantMode,

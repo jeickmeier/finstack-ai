@@ -108,7 +108,7 @@ impl Run {
     /// # Errors
     ///
     /// Returns a structured host error when cancellation cannot be committed.
-    pub fn cancel(&self, _reason: Option<String>) -> js_sys::Promise {
+    pub fn cancel(&self) -> js_sys::Promise {
         let run = self.inner.clone();
         executor::drive(async move {
             let locator = run.locator().clone();
@@ -145,13 +145,17 @@ impl Run {
     #[wasm_bindgen(js_name = startChild)]
     #[expect(
         clippy::too_many_arguments,
-        reason = "wasm-bindgen start_child forwards placement and optional remote route args"
+        reason = "wasm-bindgen start_child forwards run bounds, placement, and remote route args"
     )]
     pub fn start_child(
         &self,
         child: &Agent,
         input: String,
         placement: String,
+        timeout_seconds: Option<f64>,
+        max_cycles: Option<f64>,
+        max_output_retries: Option<f64>,
+        capability: Option<String>,
         route_endpoint: Option<String>,
         route_service: Option<String>,
         route_id: Option<String>,
@@ -163,7 +167,15 @@ impl Run {
         executor::drive(async move {
             let placement = parse_child_placement(&placement)?;
             let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
-            let request = run_request(&model, input, None, None, None, None, Vec::new())?;
+            let request = run_request(
+                &model,
+                input,
+                timeout_seconds,
+                max_cycles,
+                max_output_retries,
+                capability,
+                Vec::new(),
+            )?;
             parent
                 .start_child(child_agent.as_ref(), request, placement, remote)
                 .await
@@ -181,6 +193,10 @@ impl Run {
 }
 
 fn live_state_object(state: &finstack_ai::runtime::run::LiveRunState) -> Result<JsValue, JsValue> {
+    super::errors::js_safe_integer(state.revision, "live-state revision")
+        .map_err(|error| agent_error(&error, None))?;
+    super::errors::js_safe_integer(state.journal_sequence, "journal sequence")
+        .map_err(|error| agent_error(&error, None))?;
     let status = match state.status {
         finstack_ai::runtime::run::RunStatus::Running => "running",
         finstack_ai::runtime::run::RunStatus::ShuttingDown => "shutting_down",

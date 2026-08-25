@@ -1,6 +1,70 @@
 /// <reference path="./harness.d.ts" />
 
 import { expect, test } from "@playwright/test";
+import { decodeMainToWorker, decodeWorkerToMain } from "./worker-protocol.js";
+
+test("worker protocol rejects non-integral and unbounded counters", () => {
+  for (const queueCapacity of [Infinity, Number.NaN, 0, 1.5, 1025]) {
+    expect(() =>
+      decodeMainToWorker({
+        v: 1,
+        type: "init",
+        id: "init-1",
+        queueCapacity,
+      }),
+    ).toThrow(/invalid queueCapacity/);
+  }
+  expect(() =>
+    decodeMainToWorker({
+      v: 1,
+      type: "ack",
+      agentId: "agent-1",
+      runId: "run-1",
+      lastSequence: -1.5,
+    }),
+  ).toThrow(/invalid lastSequence/);
+  expect(() =>
+    decodeWorkerToMain({
+      v: 1,
+      type: "batch",
+      agentId: "agent-1",
+      runId: "run-1",
+      firstSequence: Number.MAX_SAFE_INTEGER + 1,
+      lastSequence: Number.MAX_SAFE_INTEGER + 1,
+      droppedProgress: 0,
+      durable: true,
+    }),
+  ).toThrow(/invalid firstSequence/);
+});
+
+test("worker returns correlated errors for invalid initialization bounds", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(() => window.finstackReady instanceof Promise);
+  await page.evaluate(() => window.finstackReady);
+
+  const code = await page.evaluate(async () => {
+    const worker = window.finstackTest.createAgentWorker();
+    try {
+      await window.finstackTest.connectWorker(worker, {
+        queueCapacity: Number.POSITIVE_INFINITY,
+      });
+      return "unexpected_success";
+    } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        typeof error.code === "string"
+      ) {
+        return error.code;
+      }
+      return "";
+    } finally {
+      worker.terminate();
+    }
+  });
+  expect(code).toBe("agent_run_invalid_configuration");
+});
 
 test("thousand-chunk worker stream does not lock the UI thread", async ({
   page,

@@ -92,7 +92,7 @@ test("completed worker session survives reload as inspect", async ({ page }) => 
     await client.create({ scenario: "persist", dbName: "pr037-a01" });
     const snapshot = await client.inspectSession(sessionId);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("pr037-a01", 2);
+      const request = indexedDB.open("pr037-a01", 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("open failed"));
     });
@@ -207,6 +207,17 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
 
   const result = await page.evaluate(async () => {
     const dbName = "pr037-a03";
+    const errorCode = (error: unknown): string => {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        typeof error.code === "string"
+      ) {
+        return error.code;
+      }
+      return "";
+    };
     await window.finstackTest.deleteIndexedDbStores({ dbName });
     const store = window.finstackTest.createIndexedDbJournalStore({ dbName });
     const health = await store.health();
@@ -258,7 +269,7 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
         }),
       );
     } catch (error) {
-      conflictCode = (error as { code?: string }).code ?? "";
+      conflictCode = errorCode(error);
     }
     const second = {
       batch_id: "01234567-89ab-7cde-89ab-0123456789b3",
@@ -284,7 +295,7 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
     };
 
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(dbName, 2);
+      const request = indexedDB.open(dbName, 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("open failed"));
     });
@@ -308,17 +319,17 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
     try {
       await store.load?.(JSON.stringify({ session_id: sessionId }));
     } catch (error) {
-      corruptCode = (error as { code?: string }).code ?? "";
+      corruptCode = errorCode(error);
     }
 
     await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open(dbName, 2);
+      const request = indexedDB.open(dbName, 3);
       request.onsuccess = () => {
         const opened = request.result;
         const write = opened
           .transaction("meta", "readwrite")
           .objectStore("meta")
-          .put({ key: "schemaVersion", value: 3 });
+          .put({ key: "schemaVersion", value: 4 });
         write.onsuccess = () => {
           opened.close();
           resolve();
@@ -331,7 +342,7 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
     try {
       await window.finstackTest.createIndexedDbJournalStore({ dbName }).health();
     } catch (error) {
-      schemaCode = (error as { code?: string }).code ?? "";
+      schemaCode = errorCode(error);
     }
 
     await window.finstackTest.deleteIndexedDbStores({ dbName: "pr037-a03-blobs" });
@@ -344,11 +355,64 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
     await artifacts.stagePut("{}", new Uint8Array([1, 2, 3]), "{}", artifact, "blob-1");
     const firstGet = Array.from(await artifacts.get("{}", artifact, "blob-1"));
     const [, byBlobBytes] = await artifacts.getByBlob("{}", blob);
+    const artifactDbOpen = Promise.withResolvers<IDBDatabase>();
+    const artifactDbRequest = indexedDB.open("pr037-a03-blobs", 3);
+    artifactDbRequest.onsuccess = () => artifactDbOpen.resolve(artifactDbRequest.result);
+    artifactDbRequest.onerror = () =>
+      artifactDbOpen.reject(artifactDbRequest.error ?? new Error("open failed"));
+    const artifactDb = await artifactDbOpen.promise;
+
+    const storedRead = Promise.withResolvers<{
+      bytes: Uint8Array;
+      blobKey: string;
+    }>();
+    const storedRequest = artifactDb
+      .transaction("artifacts", "readonly")
+      .objectStore("artifacts")
+      .get("blob-1");
+    storedRequest.onsuccess = () =>
+      storedRead.resolve(storedRequest.result as { bytes: Uint8Array; blobKey: string });
+    storedRequest.onerror = () =>
+      storedRead.reject(storedRequest.error ?? new Error("artifact read failed"));
+    const stored = await storedRead.promise;
+
+    const statsRead = Promise.withResolvers<{ count: number; totalBytes: number }>();
+    const statsRequest = artifactDb
+      .transaction("meta", "readonly")
+      .objectStore("meta")
+      .get("artifactStats");
+    statsRequest.onsuccess = () =>
+      statsRead.resolve(statsRequest.result as { count: number; totalBytes: number });
+    statsRequest.onerror = () =>
+      statsRead.reject(statsRequest.error ?? new Error("stats read failed"));
+    const stats = await statsRead.promise;
+    artifactDb.close();
     let oversizeCode = "";
     try {
       await artifacts.stagePut("{}", new Uint8Array(32), "{}", "ref-big", "blob-big");
     } catch (error) {
-      oversizeCode = (error as { code?: string }).code ?? "";
+      oversizeCode = errorCode(error);
+    }
+    let invalidLimitCode = "";
+    try {
+      window.finstackTest.createIndexedDbArtifactStore({
+        dbName: "invalid-limit",
+        maxBlobBytes: Number.POSITIVE_INFINITY,
+      });
+    } catch (error) {
+      invalidLimitCode = errorCode(error);
+    }
+    let unsafeSequenceCode = "";
+    try {
+      await store.append?.(
+        JSON.stringify({
+          ...first,
+          batch_id: "01234567-89ab-7cde-89ab-0123456789ee",
+          expected_sequence: Number.MAX_SAFE_INTEGER + 1,
+        }),
+      );
+    } catch (error) {
+      unsafeSequenceCode = errorCode(error);
     }
     return {
       healthDetail: health.detail,
@@ -363,6 +427,12 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
       firstGet,
       byBlob: Array.from(byBlobBytes),
       oversizeCode,
+      typedArtifactBytes: stored.bytes instanceof Uint8Array,
+      indexedBlobKey: stored.blobKey,
+      artifactCount: stats.count,
+      artifactBytes: stats.totalBytes,
+      invalidLimitCode,
+      unsafeSequenceCode,
     };
   });
 
@@ -377,6 +447,12 @@ test("indexeddb journal enforces CAS, integrity, order, and artifact ceilings", 
   expect(result.firstGet).toEqual([1, 2, 3]);
   expect(result.byBlob).toEqual([1, 2, 3]);
   expect(result.oversizeCode).toBe("store_limit_exceeded");
+  expect(result.typedArtifactBytes).toBe(true);
+  expect(result.indexedBlobKey).toBe(JSON.stringify({ id: "blob-1" }));
+  expect(result.artifactCount).toBe(1);
+  expect(result.artifactBytes).toBe(3);
+  expect(result.invalidLimitCode).toBe("agent_run_invalid_configuration");
+  expect(result.unsafeSequenceCode).toBe("store_integrity_failure");
 
   await page.reload();
   await page.waitForFunction(() => window.finstackReady instanceof Promise);

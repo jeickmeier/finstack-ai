@@ -11,8 +11,8 @@
     {
       "id": "wasm-bg",
       "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm_bg.wasm",
-      "max_bytes": 8650752,
-      "max_gzip_bytes": 2621440,
+      "max_bytes": 17825792,
+      "max_gzip_bytes": 6291456,
       "required": true
     },
     {

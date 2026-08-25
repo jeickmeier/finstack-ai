@@ -282,7 +282,6 @@ export class WorkerRun {
     /**
      * Submit idempotent durable cancellation.
      *
-     * @param reason - Optional non-secret reason. Not persisted as raw host text.
      * @returns A promise that settles when cancellation is accepted.
      * @example
      * ```ts
@@ -290,7 +289,7 @@ export class WorkerRun {
      * await run.cancel();
      * ```
      */
-    async cancel(reason) {
+    async cancel() {
         await this.#state.started.catch(() => undefined);
         if (this.#state.runId === undefined) {
             return;
@@ -301,7 +300,6 @@ export class WorkerRun {
             id: this.#client.nextId(),
             agentId: this.#state.agentId,
             runId: this.#state.runId,
-            ...(reason === undefined ? {} : { reason }),
         });
     }
     /**
@@ -634,7 +632,18 @@ export class WorkerClient {
                     return;
                 }
                 const batch = new WorkerEventBatch(bytes, message.firstSequence, message.lastSequence, message.droppedProgress);
-                if (state.iterating) {
+                // A durable-derived batch is never dropped, whether or not a consumer
+                // has entered the iterator yet. `iterating` only flips true inside
+                // `[Symbol.asyncIterator]()`, so the idiomatic
+                // `await run.liveState(); for await (…)` leaves it false across the
+                // liveState round trip — during which the worker's pump is already
+                // posting. Acking there told the worker the batch was delivered, so it
+                // was never resent and never counted as dropped progress.
+                //
+                // This mirrors the rule Rust's `EventLagPolicy::DropProgress` and the
+                // worker's own `enqueue` already apply: drop transient, protect
+                // durable. The worker stamps `durable` on the wire for exactly this.
+                if (state.iterating || message.durable) {
                     state.inbox.push(batch);
                     this.#wake(state);
                 }

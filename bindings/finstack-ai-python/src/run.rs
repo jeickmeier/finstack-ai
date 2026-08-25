@@ -8,8 +8,8 @@ use finstack_ai::runtime::artifact::{ArtifactMetadata, ArtifactStore, stage_requ
 use finstack_ai::runtime::ingress::ExternalRouteOutcome;
 use finstack_ai::runtime::ports::model::{ModelName, ModelSettings};
 use finstack_ai::{
-    AgentRunError, AgentRunOutput, AgentRunRequest, AttachmentInput, MAX_RUN_ATTACHMENTS,
-    PrincipalRef, RemoteChildRouteSpec, RunSecurityContext,
+    AgentRunError, AgentRunOutput, AgentRunRequest, AttachmentInput, DEFAULT_MAX_CYCLES,
+    MAX_RUN_ATTACHMENTS, PrincipalRef, RemoteChildRouteSpec, RunSecurityContext,
 };
 use finstack_ai_kernel::{
     CapabilityId, ChildPlacement, Metadata, OperationLocator, RawJson, Sensitivity, SessionId,
@@ -25,8 +25,6 @@ use crate::events::PyEventIterator;
 use crate::json_bridge::{json_to_py, py_to_json};
 use crate::locator::{PyLocator, locator_dict};
 use crate::session::PySession;
-
-pub(crate) const MAX_TIMEOUT_SECONDS: f64 = 86_400.0;
 
 /// Shared control handle for one Rust-owned run.
 #[pyclass(module = "finstack_ai._finstack_ai", name = "Run", frozen)]
@@ -152,7 +150,7 @@ impl PyRun {
     }
 
     /// Prepare and accept one child run through the Rust child-run router.
-    #[pyo3(signature = (agent, input, *, placement = "isolated_child_session", timeout_seconds = None, max_cycles = crate::agent::DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, route_endpoint = None, route_service = None, route_id = None, route_token = None))]
+    #[pyo3(signature = (agent, input, *, placement = "isolated_child_session", timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, route_endpoint = None, route_service = None, route_id = None, route_token = None))]
     #[pyo3(
         text_signature = "($self, agent, input, *, placement='isolated_child_session', timeout_seconds=None, max_cycles=16, max_output_retries=1, capability=None, route_endpoint=None, route_service=None, route_id=None, route_token=None)"
     )]
@@ -608,14 +606,13 @@ pub(crate) fn run_request(
             "run attachments exceed MAX_RUN_ATTACHMENTS",
         ));
     }
-    if !timeout_seconds.is_finite()
-        || timeout_seconds <= 0.0
-        || timeout_seconds > MAX_TIMEOUT_SECONDS
-    {
+    if !timeout_seconds.is_finite() || timeout_seconds <= 0.0 {
         return Err(configuration_error(
-            "timeout_seconds must be finite and in (0, 86400]",
+            "timeout_seconds must be finite and positive",
         ));
     }
+    let timeout = Duration::try_from_secs_f64(timeout_seconds)
+        .map_err(|_| configuration_error("timeout_seconds is out of range"))?;
     let security = RunSecurityContext::try_new(
         tenant_scope,
         PrincipalRef::try_new("finstack-ai-python", "local-user", Some(tenant_scope))
@@ -629,7 +626,7 @@ pub(crate) fn run_request(
     .map_err(|error| configuration_error(error.to_string()))?;
     let mut request = AgentRunRequest::try_new(model.clone(), input, security)?;
     request.settings = settings;
-    request.timeout = Duration::from_secs_f64(timeout_seconds);
+    request.timeout = timeout;
     request.max_cycles = max_cycles;
     request.max_output_retries = max_output_retries;
     if let Some(capability) = capability {

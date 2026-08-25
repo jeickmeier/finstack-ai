@@ -37,6 +37,7 @@ export type {
   Capability,
   CapabilityActivation,
   CapabilityCatalogItem,
+  ChildRunOptions,
   EventOptions,
   ExternalIdentitySnapshot,
   LaneInspectSnapshot,

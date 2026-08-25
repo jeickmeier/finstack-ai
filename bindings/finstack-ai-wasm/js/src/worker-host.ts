@@ -24,7 +24,7 @@ export interface WorkerHostRun {
   result(): Promise<WorkerHostRunResult>;
   liveState(): Promise<RunStateSnapshot>;
   waitForLiveState(revision: number): Promise<RunStateSnapshot>;
-  cancel(reason?: string): Promise<void>;
+  cancel(): Promise<void>;
   closeEvents(): Promise<void>;
 }
 
@@ -70,7 +70,7 @@ interface RunSlot {
   queueCapacity: number;
   blockTimeoutMs: number;
   durableTimeoutMs: number;
-  pending: number;
+  outstandingSequences: number[];
   dropped: number;
   waiters: Array<() => void>;
   closed: boolean;
@@ -111,35 +111,35 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
 
   async function handle(data: unknown): Promise<void> {
     let requestId: string | undefined;
+    if (
+      data !== null &&
+      typeof data === "object" &&
+      "id" in data &&
+      typeof data.id === "string"
+    ) {
+      requestId = data.id;
+    }
     try {
-      await dispatch(data, (id) => {
-        requestId = id;
-      });
+      await dispatch(data);
     } catch (error) {
       postError(undefined, FinstackError.fromUnknown(error), requestId);
     }
   }
 
-  async function dispatch(
-    data: unknown,
-    captureId: (id: string) => void,
-  ): Promise<void> {
+  async function dispatch(data: unknown): Promise<void> {
     const message = decodeMainToWorker(data);
-    if ("id" in message && message.id !== undefined) {
-      captureId(message.id);
-    }
     switch (message.type) {
       case "init":
         if (message.lagPolicy !== undefined) {
           defaults.policy = message.lagPolicy;
         }
-        if (message.queueCapacity !== undefined && message.queueCapacity > 0) {
+        if (message.queueCapacity !== undefined) {
           defaults.queueCapacity = message.queueCapacity;
         }
-        if (message.blockTimeoutMs !== undefined && message.blockTimeoutMs > 0) {
+        if (message.blockTimeoutMs !== undefined) {
           defaults.blockTimeoutMs = message.blockTimeoutMs;
         }
-        if (message.durableTimeoutMs !== undefined && message.durableTimeoutMs > 0) {
+        if (message.durableTimeoutMs !== undefined) {
           defaults.durableTimeoutMs = message.durableTimeoutMs;
         }
         post({ v: 1, type: "ready", id: message.id });
@@ -171,7 +171,7 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
           queueCapacity: defaults.queueCapacity,
           blockTimeoutMs: defaults.blockTimeoutMs,
           durableTimeoutMs: defaults.durableTimeoutMs,
-          pending: 0,
+          outstandingSequences: [],
           dropped: 0,
           waiters: [],
           closed: false,
@@ -190,7 +190,7 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
       }
       case "cancel": {
         const slot = requireRun(message.agentId, message.runId);
-        await slot.run.cancel(message.reason);
+        await slot.run.cancel();
         post({ v: 1, type: "ready", id: message.id });
         return;
       }
@@ -213,9 +213,10 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
       }
       case "ack": {
         const slot = requireRun(message.agentId, message.runId);
-        if (slot.pending > 0) {
-          slot.pending -= 1;
+        if (slot.outstandingSequences[0] !== message.lastSequence) {
+          return;
         }
+        slot.outstandingSequences.shift();
         const waiter = slot.waiters.shift();
         waiter?.();
         return;
@@ -242,7 +243,7 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
       case "shutdown":
         for (const slot of runs.values()) {
           slot.closed = true;
-          await slot.run.cancel("worker_shutdown").catch(() => undefined);
+          await slot.run.cancel().catch(() => undefined);
         }
         post({ v: 1, type: "terminated", reason: "shutdown" });
         return;
@@ -296,7 +297,7 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
   ): Promise<"sent" | "dropped" | "disconnected"> {
     const timeoutMs = durable ? slot.durableTimeoutMs : slot.blockTimeoutMs;
     const started = Date.now();
-    while (slot.pending >= slot.queueCapacity) {
+    while (slot.outstandingSequences.length >= slot.queueCapacity) {
       if (slot.policy === "disconnect") {
         return "disconnected";
       }
@@ -322,7 +323,7 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
     const bytes = copyBuffer(batch.toJsonBytes());
     const droppedProgress = batch.droppedProgress + slot.dropped;
     slot.dropped = 0;
-    slot.pending += 1;
+    slot.outstandingSequences.push(batch.lastSequence);
     post(
       {
         v: 1,
@@ -363,7 +364,7 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
       type: "backpressure",
       agentId: slot.agentId,
       runId: slot.runId,
-      queuedBatches: slot.pending,
+      queuedBatches: slot.outstandingSequences.length,
       droppedProgress: slot.dropped,
       policy: slot.policy,
     });

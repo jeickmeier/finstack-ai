@@ -1,6 +1,7 @@
 import { Agent as WasmAgent, HistoryCachePolicy as WasmHistoryCachePolicy, Event as WasmEvent, EventBatch as WasmEventBatch, Lane as WasmLane, Locator as WasmLocator, MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession, } from "../generated/finstack_ai_wasm.js";
 import { requireWasm, wasmContextProviderHandle, wasmJournalStoreHandle, wasmMiddlewareHandle, wasmModelHandle, wasmObserverHandle, wasmToolsetHandle, } from "./adapters.js";
 import { FinstackError } from "./errors.js";
+const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 export { FinstackError } from "./errors.js";
 /** Bounded process-local compaction checkpoint cache policy. */
 export class HistoryCachePolicy {
@@ -196,7 +197,7 @@ export class Agent {
             const snapshot = (await WasmAgent.inspectSession(wasmJournalStoreHandle(store), sessionId));
             return {
                 ...snapshot,
-                headSequence: Number(snapshot.headSequence),
+                headSequence: asSafeInteger(snapshot.headSequence, "head sequence"),
             };
         }
         catch (error) {
@@ -397,7 +398,7 @@ export class Run {
     /** Wait until the latest-only view advances beyond `revision`. */
     async waitForLiveState(revision) {
         try {
-            return (await this.#handle.waitForLiveState(BigInt(revision)));
+            return (await this.#handle.waitForLiveState(BigInt(asSafeInteger(revision, "live-state revision"))));
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);
@@ -424,7 +425,6 @@ export class Run {
     /**
      * Submit idempotent durable cancellation.
      *
-     * @param reason - Optional non-secret reason. Not persisted as raw host text.
      * @returns A promise that settles when cancellation is accepted.
      * @throws {FinstackError} When cancellation cannot be committed.
      * @example
@@ -433,9 +433,9 @@ export class Run {
      * await run.cancel();
      * ```
      */
-    async cancel(reason) {
+    async cancel() {
         try {
-            await this.#handle.cancel(reason);
+            await this.#handle.cancel();
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);
@@ -448,8 +448,9 @@ export class Run {
      *
      * @param agent - Child agent composition.
      * @param input - Child user text.
-     * @param options - Placement and optional remote route. Remote placement
-     * requires `routeEndpoint`, `routeService`, and `routeId`.
+     * @param options - Run bounds, capability, placement, and optional remote
+     * route. Remote placement requires `routeEndpoint`, `routeService`, and
+     * `routeId`.
      * @returns The live child run handle on native hosts.
      * @throws {FinstackError} When prepare or accept fails.
      * @example
@@ -465,7 +466,7 @@ export class Run {
     async startChild(agent, input, options) {
         requireWasm();
         try {
-            const handle = await this.#handle.startChild(agent.handle(), input, options?.placement ?? "isolated_child_session", options?.routeEndpoint, options?.routeService, options?.routeId, options?.routeToken);
+            const handle = await this.#handle.startChild(agent.handle(), input, options?.placement ?? "isolated_child_session", options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability, options?.routeEndpoint, options?.routeService, options?.routeId, options?.routeToken);
             return new Run(handle);
         }
         catch (error) {
@@ -594,6 +595,21 @@ export class Session {
         }
     }
     /**
+     * Look up one lane by durable identity.
+     *
+     * @param laneId - Durable lane identity.
+     * @returns The live lane handle.
+     * @throws {FinstackError} When the identity is invalid or missing.
+     */
+    async laneById(laneId) {
+        try {
+            return new Lane(await this.#handle.laneById(laneId));
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
      * Bind a host-owned external identity to one lane.
      *
      * @param map - In-process identity map owned by the host.
@@ -676,6 +692,21 @@ export class Lane {
     async inspect() {
         try {
             return (await this.#handle.inspect());
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
+     * Append one user text message without starting a run.
+     *
+     * @param text - Non-empty user text.
+     * @returns The durable entry identity.
+     * @throws {FinstackError} When the lane is busy or text is invalid.
+     */
+    async appendText(text) {
+        try {
+            return await this.#handle.appendText(text);
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);
@@ -801,12 +832,14 @@ export class Event {
     }
     /** Transient sequence. */
     get transientSequence() {
-        return asNumber(this.#handle.transientSequence);
+        return asSafeInteger(this.#handle.transientSequence, "transient sequence");
     }
     /** Durable sequence, when the event is durable-derived. */
     get durableSequence() {
         const value = this.#handle.durableSequence;
-        return value === undefined || value === null ? undefined : asNumber(value);
+        return value === undefined || value === null
+            ? undefined
+            : asSafeInteger(value, "durable sequence");
     }
     /**
      * Serialize the complete event explicitly.
@@ -834,15 +867,15 @@ export class EventBatch {
     }
     /** First contained sequence. */
     get firstSequence() {
-        return asNumber(this.#handle.firstSequence);
+        return asSafeInteger(this.#handle.firstSequence, "batch first sequence");
     }
     /** Last contained sequence. */
     get lastSequence() {
-        return asNumber(this.#handle.lastSequence);
+        return asSafeInteger(this.#handle.lastSequence, "batch last sequence");
     }
     /** Lag-dropped transient events since the previous batch. */
     get droppedProgress() {
-        return asNumber(this.#handle.droppedProgress);
+        return asSafeInteger(this.#handle.droppedProgress, "dropped progress");
     }
     /**
      * Expand the batch into individual immutable event handles.
@@ -881,7 +914,22 @@ export class EventBatch {
         return this.#handle.toJsonBytes();
     }
 }
-function asNumber(value) {
-    return typeof value === "bigint" ? Number(value) : value;
+function asSafeInteger(value, field) {
+    if (typeof value === "bigint") {
+        if (value < 0n || value > MAX_SAFE_INTEGER_BIGINT) {
+            throw new FinstackError(`${field} exceeds the JavaScript safe-integer range`, {
+                code: "agent_run_invalid_configuration",
+                retryable: false,
+            });
+        }
+        return Number(value);
+    }
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw new FinstackError(`${field} exceeds the JavaScript safe-integer range`, {
+            code: "agent_run_invalid_configuration",
+            retryable: false,
+        });
+    }
+    return value;
 }
 //# sourceMappingURL=agent.js.map

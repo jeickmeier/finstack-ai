@@ -165,6 +165,19 @@ def test_rust_backed_run_batches_events_and_retains_result() -> None:
     assert texts == ["hello world"] * 16
 
 
+def test_run_bounds_are_canonical_across_python_and_rust() -> None:
+    async def exercise(server: _FixtureServer) -> None:
+        agent = await _agent(server)
+        completed = await agent.run("long deadline", timeout_seconds=100_000)
+        assert completed.text == "canonical bounds"
+        with pytest.raises(finstack_ai.ConfigurationError) as caught:
+            agent.start("invalid cycles", max_cycles=1_025)
+        assert caught.value.code == "agent_run_invalid_configuration"
+
+    with _server(_ollama_ndjson(["canonical bounds"])) as server:
+        asyncio.run(exercise(server))
+
+
 def test_independent_rust_runs_reach_io_without_gil_serialization() -> None:
     async def exercise(server: _FixtureServer) -> None:
         agent = await _agent(server)

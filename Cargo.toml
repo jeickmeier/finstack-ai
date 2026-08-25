@@ -242,6 +242,7 @@ pyo3-build-config = { version = "=0.29.0" }
 pyo3-async-runtimes = { version = "=0.29.0" }
 wasm-bindgen = "=0.2.127"
 wasm-bindgen-futures = "=0.4.77"
+wasm-bindgen-test = "=0.3.77"
 js-sys = "=0.3.104"
 
 [workspace.lints.rust]

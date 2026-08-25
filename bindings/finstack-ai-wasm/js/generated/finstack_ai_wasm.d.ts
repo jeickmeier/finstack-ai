@@ -256,23 +256,6 @@ export class JsJournalStore {
 }
 
 /**
- * Trusted JS memory-store wrapper. Missing `memory_*` methods on the
- * adapter are `Unavailable` per operation, not a construction failure.
- */
-export class JsMemoryStore {
-    free(): void;
-    [Symbol.dispose](): void;
-    /**
-     * Clone the wrapper without moving the caller's handle.
-     */
-    cloneHandle(): JsMemoryStore;
-    /**
-     * Construct a memory-store wrapper around a trusted host adapter.
-     */
-    constructor(adapter: any);
-}
-
-/**
  * Trusted JS middleware wrapper.
  */
 export class JsMiddleware {
@@ -363,6 +346,14 @@ export class Lane {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * Append one user text message on this idle lane without starting a run.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane is busy or text is invalid.
+     */
+    appendText(text: string): Promise<any>;
     /**
      * Inspect name, leaf, and history length.
      *
@@ -469,7 +460,7 @@ export class Run {
      *
      * Returns a structured host error when cancellation cannot be committed.
      */
-    cancel(_reason?: string | null): Promise<any>;
+    cancel(): Promise<any>;
     /**
      * Close event delivery without cancelling the run.
      */
@@ -508,7 +499,7 @@ export class Run {
      *
      * wasm-host fails closed with `agent_run_unsupported_plan`.
      */
-    startChild(child: Agent, input: string, placement: string, route_endpoint?: string | null, route_service?: string | null, route_id?: string | null, route_token?: string | null): Promise<any>;
+    startChild(child: Agent, input: string, placement: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null, capability?: string | null, route_endpoint?: string | null, route_service?: string | null, route_id?: string | null, route_token?: string | null): Promise<any>;
     /**
      * Wait until the latest-only view advances beyond `revision`.
      */
@@ -601,6 +592,14 @@ export class Session {
      */
     lane(name: string): Promise<any>;
     /**
+     * Look up one lane by durable identity.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the identity is invalid or missing.
+     */
+    laneById(lane_id: string): Promise<any>;
+    /**
      * List restored lanes.
      *
      * # Errors
@@ -628,6 +627,11 @@ export class Session {
  * Returns a TypeError-equivalent when any command fails DTO validation.
  */
 export function applyScriptedCoordinatorCommands(encoded: string): string;
+
+/**
+ * Copy one byte payload through the generated WASM boundary for benchmark calibration.
+ */
+export function benchmarkRoundTrip(payload: Uint8Array): Uint8Array;
 
 /**
  * Lockstep version metadata for the wasm package.
@@ -749,7 +753,6 @@ export interface InitOutput {
     readonly __wbg_jsclock_free: (a: number, b: number) => void;
     readonly __wbg_jscontextprovider_free: (a: number, b: number) => void;
     readonly __wbg_jsjournalstore_free: (a: number, b: number) => void;
-    readonly __wbg_jsmemorystore_free: (a: number, b: number) => void;
     readonly __wbg_jsmiddleware_free: (a: number, b: number) => void;
     readonly __wbg_jsmodel_free: (a: number, b: number) => void;
     readonly __wbg_jsobserver_free: (a: number, b: number) => void;
@@ -771,6 +774,7 @@ export interface InitOutput {
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;
     readonly agent_withHistoryCache: (a: number, b: number) => number;
     readonly applyScriptedCoordinatorCommands: (a: number, b: number, c: number) => void;
+    readonly benchmarkRoundTrip: (a: number, b: number, c: number) => void;
     readonly buildMetadata: (a: number) => void;
     readonly compilePortProxies: () => void;
     readonly event_durableSequence: (a: number, b: number) => void;
@@ -795,14 +799,13 @@ export interface InitOutput {
     readonly jscontextprovider_new: (a: number, b: number, c: number) => void;
     readonly jsjournalstore_cloneHandle: (a: number) => number;
     readonly jsjournalstore_new: (a: number, b: number, c: number) => void;
-    readonly jsmemorystore_cloneHandle: (a: number) => number;
-    readonly jsmemorystore_new: (a: number) => number;
     readonly jsmiddleware_new: (a: number, b: number, c: number) => void;
     readonly jsmodel_new: (a: number, b: number, c: number) => void;
     readonly jsobserver_new: (a: number, b: number, c: number) => void;
     readonly jsrandomsource_new: (a: number, b: number) => void;
     readonly jstoolset_cloneHandle: (a: number) => number;
     readonly jstoolset_new: (a: number, b: number, c: number) => void;
+    readonly lane_appendText: (a: number, b: number, c: number) => number;
     readonly lane_inspect: (a: number) => number;
     readonly lane_laneId: (a: number, b: number) => void;
     readonly lane_navigate: (a: number, b: number, c: number) => number;
@@ -819,7 +822,7 @@ export interface InitOutput {
     readonly parseDocument: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly parseDocumentMarkdown: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly runNoopTrace: (a: number) => void;
-    readonly run_cancel: (a: number, b: number, c: number) => number;
+    readonly run_cancel: (a: number) => number;
     readonly run_closeEvents: (a: number) => number;
     readonly run_liveState: (a: number) => number;
     readonly run_locator: (a: number) => number;
@@ -827,7 +830,7 @@ export interface InitOutput {
     readonly run_observerDiagnostics: (a: number) => number;
     readonly run_result: (a: number) => number;
     readonly run_session: (a: number) => number;
-    readonly run_startChild: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
+    readonly run_startChild: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => number;
     readonly run_waitForLiveState: (a: number, b: bigint) => number;
     readonly runresult_activeCapabilities: (a: number, b: number) => void;
     readonly runresult_locator: (a: number) => number;
@@ -838,6 +841,7 @@ export interface InitOutput {
     readonly session_bindExternalIdentity: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly session_createLane: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly session_lane: (a: number, b: number, c: number) => number;
+    readonly session_laneById: (a: number, b: number, c: number) => number;
     readonly session_listLanes: (a: number) => number;
     readonly session_sessionId: (a: number, b: number) => void;
     readonly session_tenantScope: (a: number, b: number) => void;
@@ -847,9 +851,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_5209: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_5223: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_464: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_5215: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5229: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_476: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

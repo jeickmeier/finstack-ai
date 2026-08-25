@@ -14,9 +14,9 @@ metadata, and undeclared exports are rejected. There is no permissive
 default for `execution-mode`, `side-effect`, `retry-safety`,
 `approval-policy-json`, or `max-result-bytes`.
 
-The workspace crate version is lockstep `1.0.0`. Local tag `v1.0.0`
-exists. Registries stay unpublished. Plugin alpha `@0.x` guests keep
-loading. `@1.0.0` worlds are generated beside `@0.0.4`.
+The workspace crate version is staged at lockstep `2.0.0`; no `v2.0.0` tag
+exists yet. Registries stay unpublished. Plugin alpha `@0.x` guests keep
+loading. Permanent `@1.0.0` worlds are generated beside `@0.0.4`.
 `uv run --no-project python scripts/wit_bindgen/generate.py` emits both majors.
 
 ## Deprecation

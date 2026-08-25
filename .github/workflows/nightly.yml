@@ -20,7 +20,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   SOURCE_DATE_EPOCH: "0"
-  FINSTACK_CANARY_LABEL: "0.1.0-canary"
+  FINSTACK_CANARY_LABEL: "2.0.0-canary"
 
 jobs:
   nightly:

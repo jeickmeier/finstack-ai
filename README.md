@@ -5,7 +5,8 @@ bindings. The kernel owns semantic state, records, events, and effects. The
 runtime owns ports and effect execution. Leaf providers, tools, stores, and
 observers stay outward-facing.
 
-Workspace version is **1.0.0**. Local tag `v1.0.0` exists. The last pushed
+Workspace manifests are staged at **2.0.0**. No `v2.0.0` tag exists yet;
+local tag `v1.0.0` remains the latest local release, and the last pushed
 GitHub tag is `v0.1.0`. crates.io / PyPI / npm packages are not published.
 Install from this repository until those registries publish.
 

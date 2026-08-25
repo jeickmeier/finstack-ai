@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify two-run checksum identity for an unpublished 1.0.0 staging build."""
+"""Verify two-run checksum identity for the current unpublished staging build."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from release_stage import REPO_ROOT, checksum_text, stage
+from release_stage import REPO_ROOT, WORKSPACE_VERSION, checksum_text, stage
 
 WORK = REPO_ROOT / "target" / "release-staging" / "recreate"
 RECORD = WORK / "records"
@@ -20,8 +20,8 @@ def main() -> int:
         shutil.rmtree(WORK)
     first = WORK / "run-a"
     second = WORK / "run-b"
-    stage(first, label="1.0.0")
-    stage(second, label="1.0.0")
+    stage(first, label=WORKSPACE_VERSION)
+    stage(second, label=WORKSPACE_VERSION)
     left = checksum_text(first)
     right = checksum_text(second)
     RECORD.mkdir(parents=True, exist_ok=True)

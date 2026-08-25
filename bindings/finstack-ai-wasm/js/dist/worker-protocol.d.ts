@@ -37,7 +37,6 @@ export type MainToWorker = {
     id: string;
     agentId: string;
     runId: string;
-    reason?: string;
 } | {
     v: 1;
     type: "liveState";

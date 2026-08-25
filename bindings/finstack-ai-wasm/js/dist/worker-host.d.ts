@@ -17,7 +17,7 @@ export interface WorkerHostRun {
     result(): Promise<WorkerHostRunResult>;
     liveState(): Promise<RunStateSnapshot>;
     waitForLiveState(revision: number): Promise<RunStateSnapshot>;
-    cancel(reason?: string): Promise<void>;
+    cancel(): Promise<void>;
     closeEvents(): Promise<void>;
 }
 /** Structural terminal result used inside the worker. */

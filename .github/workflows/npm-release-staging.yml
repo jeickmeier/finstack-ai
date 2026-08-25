@@ -1,4 +1,4 @@
-# Stage signed @finstack/ai 0.0.2 artifacts. Does not publish.
+# Stage signed @finstack/ai 2.0.0 canary artifacts. Does not publish.
 # Owner: me@jeickmeier.com
 
 name: npm-release-staging
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   stage:
-    name: stage-npm-alpha
+    name: stage-npm-canary
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout

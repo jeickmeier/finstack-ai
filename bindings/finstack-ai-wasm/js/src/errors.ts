@@ -19,7 +19,7 @@ export interface AttachmentOption {
  * Options for {@link Agent.start} and {@link Agent.run}.
  */
 export interface RunOptions {
-  /** Operational deadline in seconds. Defaults to 30; maximum 86400. */
+  /** Positive finite operational deadline in seconds. Defaults to 30. */
   timeoutSeconds?: number;
   /** Maximum model cycles. Defaults to 16. */
   maxCycles?: number;

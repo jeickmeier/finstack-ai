@@ -4,7 +4,14 @@
   "commit": "0123456789ab",
   "platform": { "system": "Darwin", "release": "25.5.0", "machine": "arm64" },
   "browser": "chromium",
-  "parameters": { "deltas_per_run": 32, "runs_per_sample": 1, "samples": 1 },
+  "parameters": {
+    "deltas_per_run": 32,
+    "runs_per_sample": 1,
+    "samples": 1,
+    "comparison": "batched_typed_array_copy_vs_wasm_round_trip",
+    "crossing_payload_bytes": 65536,
+    "crossing_iterations": 256
+  },
   "timing_ns": {
     "init_median": 1000,
     "create_median": 1000,
@@ -14,8 +21,8 @@
     "wasm_drive_median": 1900
   },
   "binding": {
-    "overhead_percent": 5.0,
-    "target_percent": 10.0,
+    "overhead_percent": 90.0,
+    "target_percent": 200.0,
     "within_target": true
   },
   "event_delivery": {

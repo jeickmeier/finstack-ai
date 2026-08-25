@@ -25,10 +25,16 @@ pub const AGENT_RUN_TIMEOUT: &str = "agent_run_timeout";
 pub const AGENT_RUN_CANCELLED: &str = "agent_run_cancelled";
 
 pub(super) const DEFAULT_QUEUE_CAPACITY: usize = 32;
-pub(super) const DEFAULT_MAX_CYCLES: u64 = 16;
-pub(super) const MAX_CONFIGURED_CYCLES: u64 = 1_024;
-pub(super) const DEFAULT_MAX_OUTPUT_RETRIES: u32 = 1;
-pub(super) const MAX_CONFIGURED_OUTPUT_RETRIES: u32 = 1_024;
+/// Default maximum model cycles for one run.
+pub const DEFAULT_MAX_CYCLES: u64 = 16;
+/// Largest caller-configured model-cycle limit.
+pub const MAX_CONFIGURED_CYCLES: u64 = 1_024;
+/// Default maximum structured-output validation retries.
+pub const DEFAULT_MAX_OUTPUT_RETRIES: u32 = 1;
+/// Largest caller-configured structured-output retry limit.
+pub const MAX_CONFIGURED_OUTPUT_RETRIES: u32 = 1_024;
+/// Default operational deadline for one run.
+pub const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) const DEFAULT_EVENT_BATCH_COUNT: usize = 32;
 pub(super) const DEFAULT_EVENT_BATCH_BYTES: usize = 64 * 1_024;
 pub(super) const DEFAULT_EVENT_BATCH_INTERVAL: Duration = Duration::from_millis(10);
@@ -130,7 +136,7 @@ impl AgentRunRequest {
                 values: RawJson::parse(b"{}")
                     .map_err(|error| AgentRunError::runtime_message(error.to_string()))?,
             },
-            timeout: Duration::from_secs(30),
+            timeout: DEFAULT_RUN_TIMEOUT,
             max_cycles: DEFAULT_MAX_CYCLES,
             max_output_retries: DEFAULT_MAX_OUTPUT_RETRIES,
             capability: None,

@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Semantic core crates, Python/JavaScript binding distributions, and
 bundled first-party leaf crates share one lockstep workspace version.
+Workspace manifests are staged at `2.0.0`; no `v2.0.0` tag exists yet.
 Local tag `v1.0.0` exists at `6e9ec39fae89a70f696ee740de2d2094670cba3e`.
 The last pushed GitHub tag remains `v0.1.0`. crates.io / PyPI / npm stay
 unpublished.
@@ -15,6 +16,8 @@ unpublished.
 
 ### Added
 
+- Kernel-on-WASM source coverage now runs through `wasm-bindgen-test` and emits
+  HTML plus LCOV reports; hosted CI adds macOS and Windows confinement lanes.
 - `finstack-ai-completion-ingress`: new `extensions/interop` leaf that mints signed
   opaque callback tokens for deferred effects and delivers authenticated external
   completions through `ExternalCompletionRouter` (TM-10; the workflow webhook path).
@@ -269,6 +272,25 @@ unpublished.
 
 ### Fixed
 
+- Browser worker configuration now rejects unbounded or fractional queue
+  values, ACKs release only the matching oldest batch, and every `u64` sequence
+  conversion fails closed above JavaScript's exact integer range.
+- Experimental IndexedDB schema v3 stores typed byte arrays, indexes blob and
+  orphan lookups, maintains transactional capacity totals, and validates every
+  configured resource ceiling.
+- The WASM crossing benchmark now compares batched identical typed-array copies
+  across JS and wasm-bindgen instead of deriving a zero-cost baseline by
+  subtraction.
+- Public API/error-code fixtures and staged `2.0.0` release/support metadata are
+  synchronized with the current workspace.
+- Python runtime signatures now expose the same concrete defaults as the
+  shipped stubs. A permanent parity test checks native names, members,
+  parameter kinds, and defaults against `_finstack_ai.pyi` and `__all__`.
+- Run defaults and cycle/retry ceilings are Rust-owned public constants used by
+  both bindings. Python and WASM no longer impose a binding-only one-day run
+  timeout. WASM also exposes `Session.laneById`, `Lane.appendText`, and
+  child-run options matching native Python; the ignored cancellation-reason
+  parameter and unused raw `JsMemoryStore` wrapper are removed.
 - `finstack-ai-server` hashes reference bearer secrets and compares the
   32-byte digests instead of short-circuiting string inequality. Command
   receipts are indexed by `command_id`, fail closed at a retention cap

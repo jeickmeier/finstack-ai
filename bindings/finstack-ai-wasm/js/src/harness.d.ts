@@ -64,6 +64,7 @@ declare global {
       ApprovalGrantMode: typeof ApprovalGrantMode;
       FinstackError: typeof FinstackError;
       compilePortProxies: () => void;
+      benchmarkRoundTrip: (payload: Uint8Array) => Uint8Array;
       runNoopTrace: () => string;
       JsModel: new (adapter: HostModel, options: JsModelOptions) => JsModel;
       JsToolset: new (adapter: HostToolset, options: JsToolsetOptions) => JsToolset;

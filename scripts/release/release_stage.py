@@ -8,9 +8,13 @@ import json
 import os
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_VERSION = tomllib.loads(
+    (REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8")
+)["workspace"]["package"]["version"]
 CRATES = (
     "finstack-ai",
     "finstack-ai-kernel",
@@ -104,7 +108,7 @@ def crate_sbom() -> dict[str, object]:
             "component": {
                 "type": "application",
                 "name": "finstack-ai",
-                "version": "1.0.0",
+                "version": WORKSPACE_VERSION,
             }
         },
         "components": components,
@@ -112,7 +116,7 @@ def crate_sbom() -> dict[str, object]:
 
 
 def stage(
-    work: Path, *, label: str = "1.0.0", extra: dict[str, str] | None = None
+    work: Path, *, label: str = WORKSPACE_VERSION, extra: dict[str, str] | None = None
 ) -> None:
     if work.exists():
         shutil.rmtree(work)
@@ -247,7 +251,7 @@ def stage(
     statement = {
         "format_version": 1,
         "kind": "release recreate",
-        "version": "1.0.0",
+        "version": WORKSPACE_VERSION,
         "label": label,
         "staged_not_published": True,
         "source_revision": revision,

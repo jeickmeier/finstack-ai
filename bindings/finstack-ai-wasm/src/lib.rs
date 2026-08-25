@@ -48,6 +48,7 @@ mod host;
 mod host_artifact;
 mod host_clock;
 mod host_context;
+#[cfg(not(target_arch = "wasm32"))]
 mod host_memory;
 mod host_middleware;
 mod host_model;
@@ -76,6 +77,14 @@ pub use finstack_ai_memory::store::InProcessMemoryStore;
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
     crate::agent::install_host_driver();
+}
+
+/// Copy one byte payload through the generated WASM boundary for benchmark calibration.
+#[cfg(all(target_arch = "wasm32", feature = "scripted-trace"))]
+#[wasm_bindgen(js_name = benchmarkRoundTrip)]
+#[must_use]
+pub fn benchmark_round_trip(payload: &[u8]) -> Vec<u8> {
+    payload.to_vec()
 }
 
 /// Process-local health token. Does not create a runtime, open a store, or spawn work.
@@ -479,47 +488,6 @@ impl JsJournalStore {
     ) -> std::sync::Arc<dyn finstack_ai::runtime::ports::journal::JournalStore> {
         std::sync::Arc::clone(&self.inner)
             as std::sync::Arc<dyn finstack_ai::runtime::ports::journal::JournalStore>
-    }
-}
-
-/// Trusted JS memory-store wrapper. Missing `memory_*` methods on the
-/// adapter are `Unavailable` per operation, not a construction failure.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = JsMemoryStore)]
-pub struct JsMemoryStore {
-    inner: std::sync::Arc<host_memory::HostMemoryStore>,
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_class = JsMemoryStore)]
-impl JsMemoryStore {
-    /// Construct a memory-store wrapper around a trusted host adapter.
-    #[wasm_bindgen(constructor)]
-    #[must_use]
-    pub fn new(adapter: JsValue) -> JsMemoryStore {
-        Self {
-            inner: std::sync::Arc::new(host_memory::HostMemoryStore::from_js(adapter)),
-        }
-    }
-
-    /// Clone the wrapper without moving the caller's handle.
-    #[wasm_bindgen(js_name = cloneHandle)]
-    pub fn clone_handle(&self) -> JsMemoryStore {
-        Self {
-            inner: std::sync::Arc::clone(&self.inner),
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl JsMemoryStore {
-    // Not yet wired into `JsAgent`: the memory extension is not part of the
-    // Agent port bundle. Kept for the coming memory-extension task and for
-    // direct Rust composition.
-    #[allow(dead_code)]
-    pub(crate) fn port(&self) -> std::sync::Arc<dyn finstack_ai_memory::store::MemoryStore> {
-        std::sync::Arc::clone(&self.inner)
-            as std::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>
     }
 }
 

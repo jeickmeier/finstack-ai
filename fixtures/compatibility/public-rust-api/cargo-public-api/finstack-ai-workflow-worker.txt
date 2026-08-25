@@ -301,6 +301,8 @@ pub fn finstack_ai_workflow_worker::WorkerBuilder::worker_id(self, &str) -> Self
 pub struct finstack_ai_workflow_worker::WorkerHandle
 impl finstack_ai_workflow_worker::WorkerHandle
 pub async fn finstack_ai_workflow_worker::WorkerHandle::shutdown(self)
+impl core::ops::drop::Drop for finstack_ai_workflow_worker::WorkerHandle
+pub fn finstack_ai_workflow_worker::WorkerHandle::drop(&mut self)
 pub struct finstack_ai_workflow_worker::WorkflowWorker
 impl finstack_ai_workflow_worker::WorkflowWorker
 pub const fn finstack_ai_workflow_worker::WorkflowWorker::clock(&self) -> &finstack_ai_runtime::services::id_generation::ExternalClock

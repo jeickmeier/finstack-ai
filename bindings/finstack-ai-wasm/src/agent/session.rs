@@ -132,6 +132,25 @@ impl Session {
         })
     }
 
+    /// Look up one lane by durable identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the identity is invalid or missing.
+    #[wasm_bindgen(js_name = laneById)]
+    pub fn lane_by_id(&self, lane_id: String) -> js_sys::Promise {
+        let session = self.inner.clone();
+        executor::drive(async move {
+            let lane_id = finstack_ai_kernel::LaneId::parse(&lane_id)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            session
+                .lane_by_id(lane_id)
+                .await
+                .map(|inner| JsValue::from(Lane { inner }))
+                .map_err(|error| session_error(&error))
+        })
+    }
+
     /// Bind a host-owned external identity to one lane.
     ///
     /// # Errors
@@ -226,6 +245,22 @@ impl Lane {
                     );
                     JsValue::from(object)
                 })
+                .map_err(|error| session_error(&error))
+        })
+    }
+
+    /// Append one user text message on this idle lane without starting a run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the lane is busy or text is invalid.
+    #[wasm_bindgen(js_name = appendText)]
+    pub fn append_text(&self, text: String) -> js_sys::Promise {
+        let lane = self.inner.clone();
+        executor::drive(async move {
+            lane.append_text(&text)
+                .await
+                .map(|entry_id| JsValue::from_str(&entry_id.to_string()))
                 .map_err(|error| session_error(&error))
         })
     }

@@ -69,22 +69,31 @@ export interface ObserverDiagnostics {
 }
 /** Canonical Rust-owned message wire shape. */
 export type MessageWire = Readonly<Record<string, unknown>>;
-/** Latest confirmed semantic and runtime lifecycle state. */
+/**
+ * Latest confirmed semantic and runtime lifecycle state.
+ *
+ * Every field the Rust producer models as `Option<T>` is declared `T | null`,
+ * not `T?`. `live_state_object` serializes through `serde_json::json!`, which
+ * always emits the key with an explicit JSON `null` — it never omits it — and
+ * under `exactOptionalPropertyTypes` a `?` field would type as absent-or-`T`,
+ * so a `!== undefined` guard would narrow a real `null` to `T`. The Python
+ * stub for the same producer declares these as `T | None` for the same reason.
+ */
 export interface RunStateSnapshot {
     readonly revision: number;
     readonly journalSequence: number;
     readonly status: "running" | "shutting_down" | "stopped" | "faulted";
-    readonly faultCode?: string;
-    readonly phase?: string;
+    readonly faultCode: string | null;
+    readonly phase: string | null;
     readonly cycle: number;
     readonly preparedContextMessages: readonly MessageWire[];
     readonly committedRunMessages: readonly MessageWire[];
     readonly activeCapabilities: readonly Readonly<Record<string, unknown>>[];
-    readonly resolvedPlanDigest?: string;
-    readonly pendingInteraction?: Readonly<Record<string, unknown>>;
-    readonly validationFailure?: Readonly<Record<string, unknown>>;
+    readonly resolvedPlanDigest: string | null;
+    readonly pendingInteraction: Readonly<Record<string, unknown>> | null;
+    readonly validationFailure: Readonly<Record<string, unknown>> | null;
     readonly retryAttempts: number;
-    readonly terminal?: Readonly<Record<string, unknown>>;
+    readonly terminal: Readonly<Record<string, unknown>> | null;
 }
 /**
  * How a run parks and releases paid-tool approvals.
@@ -317,6 +326,19 @@ export declare class Agent {
      */
     run(input: string, options?: RunOptions): Promise<RunResult>;
 }
+/** Child-run options shared with the native Python binding. */
+export interface ChildRunOptions extends Omit<RunOptions, "attachments"> {
+    /** Child placement. Defaults to `isolated_child_session`. */
+    placement?: string;
+    /** Loopback `host:port` or `unix:/path` for remote placement. */
+    routeEndpoint?: string;
+    /** Remote service component identity. */
+    routeService?: string;
+    /** Opaque non-secret remote route handle. */
+    routeId?: string;
+    /** Optional bearer token for the authenticated remote route. */
+    routeToken?: string;
+}
 /**
  * Shared control and observation handle for one Rust-owned run.
  *
@@ -379,7 +401,6 @@ export declare class Run {
     /**
      * Submit idempotent durable cancellation.
      *
-     * @param reason - Optional non-secret reason. Not persisted as raw host text.
      * @returns A promise that settles when cancellation is accepted.
      * @throws {FinstackError} When cancellation cannot be committed.
      * @example
@@ -388,7 +409,7 @@ export declare class Run {
      * await run.cancel();
      * ```
      */
-    cancel(reason?: string): Promise<void>;
+    cancel(): Promise<void>;
     /**
      * Prepare and accept one child through the Rust router.
      *
@@ -396,8 +417,9 @@ export declare class Run {
      *
      * @param agent - Child agent composition.
      * @param input - Child user text.
-     * @param options - Placement and optional remote route. Remote placement
-     * requires `routeEndpoint`, `routeService`, and `routeId`.
+     * @param options - Run bounds, capability, placement, and optional remote
+     * route. Remote placement requires `routeEndpoint`, `routeService`, and
+     * `routeId`.
      * @returns The live child run handle on native hosts.
      * @throws {FinstackError} When prepare or accept fails.
      * @example
@@ -410,13 +432,7 @@ export declare class Run {
      * });
      * ```
      */
-    startChild(agent: Agent, input: string, options?: {
-        placement?: string;
-        routeEndpoint?: string;
-        routeService?: string;
-        routeId?: string;
-        routeToken?: string;
-    }): Promise<Run>;
+    startChild(agent: Agent, input: string, options?: ChildRunOptions): Promise<Run>;
     /**
      * Close event delivery without cancelling the run.
      *
@@ -517,6 +533,14 @@ export declare class Session {
      */
     lane(name: string): Promise<Lane>;
     /**
+     * Look up one lane by durable identity.
+     *
+     * @param laneId - Durable lane identity.
+     * @returns The live lane handle.
+     * @throws {FinstackError} When the identity is invalid or missing.
+     */
+    laneById(laneId: string): Promise<Lane>;
+    /**
      * Bind a host-owned external identity to one lane.
      *
      * @param map - In-process identity map owned by the host.
@@ -570,6 +594,14 @@ export declare class Lane {
      * ```
      */
     inspect(): Promise<LaneInspectSnapshot>;
+    /**
+     * Append one user text message without starting a run.
+     *
+     * @param text - Non-empty user text.
+     * @returns The durable entry identity.
+     * @throws {FinstackError} When the lane is busy or text is invalid.
+     */
+    appendText(text: string): Promise<string>;
     /**
      * Start a new root run on this idle lane.
      *

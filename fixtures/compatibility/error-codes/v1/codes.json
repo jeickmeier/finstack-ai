@@ -223,6 +223,11 @@
     },
     {
       "crate": "finstack-ai-plugin-host",
+      "name": "PLUGIN_GUEST_ERROR",
+      "value": "plugin_guest_error"
+    },
+    {
+      "crate": "finstack-ai-plugin-host",
       "name": "PLUGIN_INSTANCE_LIMIT",
       "value": "plugin_instance_limit"
     },

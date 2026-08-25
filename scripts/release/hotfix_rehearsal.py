@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from release_stage import REPO_ROOT, checksum_text, sha256, stage
+from release_stage import REPO_ROOT, WORKSPACE_VERSION, checksum_text, sha256, stage
 
 WORK = REPO_ROOT / "target" / "release-staging" / "hotfix"
 RECORD = WORK / "records"
@@ -21,10 +21,10 @@ def main() -> int:
         shutil.rmtree(WORK)
     baseline = WORK / "B"
     hotfix = WORK / "H"
-    stage(baseline, label="1.0.0")
+    stage(baseline, label=WORKSPACE_VERSION)
     stage(
         hotfix,
-        label="1.0.0-hotfix",
+        label=f"{WORKSPACE_VERSION}-hotfix",
         extra={
             "hotfix-line.txt": (
                 "Patch-line rehearsal. Consumers pin SHA256SUMS-B. "

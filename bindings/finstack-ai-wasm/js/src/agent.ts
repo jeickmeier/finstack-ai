@@ -37,6 +37,8 @@ import type {
   SessionSnapshot,
 } from "./errors.js";
 
+const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
 export { FinstackError } from "./errors.js";
 export type {
   AttachmentOption,
@@ -440,7 +442,7 @@ export class Agent {
       )) as SessionInspectSnapshot;
       return {
         ...snapshot,
-        headSequence: Number(snapshot.headSequence),
+        headSequence: asSafeInteger(snapshot.headSequence, "head sequence"),
       };
     } catch (error) {
       throw FinstackError.fromUnknown(error);
@@ -552,6 +554,20 @@ export class Agent {
   }
 }
 
+/** Child-run options shared with the native Python binding. */
+export interface ChildRunOptions extends Omit<RunOptions, "attachments"> {
+  /** Child placement. Defaults to `isolated_child_session`. */
+  placement?: string;
+  /** Loopback `host:port` or `unix:/path` for remote placement. */
+  routeEndpoint?: string;
+  /** Remote service component identity. */
+  routeService?: string;
+  /** Opaque non-secret remote route handle. */
+  routeId?: string;
+  /** Optional bearer token for the authenticated remote route. */
+  routeToken?: string;
+}
+
 /**
  * Shared control and observation handle for one Rust-owned run.
  *
@@ -661,7 +677,9 @@ export class Run {
   /** Wait until the latest-only view advances beyond `revision`. */
   async waitForLiveState(revision: number): Promise<RunStateSnapshot> {
     try {
-      return (await this.#handle.waitForLiveState(BigInt(revision))) as RunStateSnapshot;
+      return (await this.#handle.waitForLiveState(
+        BigInt(asSafeInteger(revision, "live-state revision")),
+      )) as RunStateSnapshot;
     } catch (error) {
       throw FinstackError.fromUnknown(error);
     }
@@ -688,7 +706,6 @@ export class Run {
   /**
    * Submit idempotent durable cancellation.
    *
-   * @param reason - Optional non-secret reason. Not persisted as raw host text.
    * @returns A promise that settles when cancellation is accepted.
    * @throws {FinstackError} When cancellation cannot be committed.
    * @example
@@ -697,9 +714,9 @@ export class Run {
    * await run.cancel();
    * ```
    */
-  async cancel(reason?: string): Promise<void> {
+  async cancel(): Promise<void> {
     try {
-      await this.#handle.cancel(reason);
+      await this.#handle.cancel();
     } catch (error) {
       throw FinstackError.fromUnknown(error);
     }
@@ -712,8 +729,9 @@ export class Run {
    *
    * @param agent - Child agent composition.
    * @param input - Child user text.
-   * @param options - Placement and optional remote route. Remote placement
-   * requires `routeEndpoint`, `routeService`, and `routeId`.
+   * @param options - Run bounds, capability, placement, and optional remote
+   * route. Remote placement requires `routeEndpoint`, `routeService`, and
+   * `routeId`.
    * @returns The live child run handle on native hosts.
    * @throws {FinstackError} When prepare or accept fails.
    * @example
@@ -729,13 +747,7 @@ export class Run {
   async startChild(
     agent: Agent,
     input: string,
-    options?: {
-      placement?: string;
-      routeEndpoint?: string;
-      routeService?: string;
-      routeId?: string;
-      routeToken?: string;
-    },
+    options?: ChildRunOptions,
   ): Promise<Run> {
     requireWasm();
     try {
@@ -743,6 +755,10 @@ export class Run {
         agent.handle(),
         input,
         options?.placement ?? "isolated_child_session",
+        options?.timeoutSeconds,
+        options?.maxCycles,
+        options?.maxOutputRetries,
+        options?.capability,
         options?.routeEndpoint,
         options?.routeService,
         options?.routeId,
@@ -910,6 +926,21 @@ export class Session {
   }
 
   /**
+   * Look up one lane by durable identity.
+   *
+   * @param laneId - Durable lane identity.
+   * @returns The live lane handle.
+   * @throws {FinstackError} When the identity is invalid or missing.
+   */
+  async laneById(laneId: string): Promise<Lane> {
+    try {
+      return new Lane(await this.#handle.laneById(laneId));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
    * Bind a host-owned external identity to one lane.
    *
    * @param map - In-process identity map owned by the host.
@@ -1002,6 +1033,21 @@ export class Lane {
   async inspect(): Promise<LaneInspectSnapshot> {
     try {
       return (await this.#handle.inspect()) as LaneInspectSnapshot;
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Append one user text message without starting a run.
+   *
+   * @param text - Non-empty user text.
+   * @returns The durable entry identity.
+   * @throws {FinstackError} When the lane is busy or text is invalid.
+   */
+  async appendText(text: string): Promise<string> {
+    try {
+      return await this.#handle.appendText(text);
     } catch (error) {
       throw FinstackError.fromUnknown(error);
     }
@@ -1162,13 +1208,15 @@ export class Event {
 
   /** Transient sequence. */
   get transientSequence(): number {
-    return asNumber(this.#handle.transientSequence);
+    return asSafeInteger(this.#handle.transientSequence, "transient sequence");
   }
 
   /** Durable sequence, when the event is durable-derived. */
   get durableSequence(): number | undefined {
     const value = this.#handle.durableSequence;
-    return value === undefined || value === null ? undefined : asNumber(value);
+    return value === undefined || value === null
+      ? undefined
+      : asSafeInteger(value, "durable sequence");
   }
 
   /**
@@ -1200,17 +1248,17 @@ export class EventBatch {
 
   /** First contained sequence. */
   get firstSequence(): number {
-    return asNumber(this.#handle.firstSequence);
+    return asSafeInteger(this.#handle.firstSequence, "batch first sequence");
   }
 
   /** Last contained sequence. */
   get lastSequence(): number {
-    return asNumber(this.#handle.lastSequence);
+    return asSafeInteger(this.#handle.lastSequence, "batch last sequence");
   }
 
   /** Lag-dropped transient events since the previous batch. */
   get droppedProgress(): number {
-    return asNumber(this.#handle.droppedProgress);
+    return asSafeInteger(this.#handle.droppedProgress, "dropped progress");
   }
 
   /**
@@ -1253,6 +1301,58 @@ export class EventBatch {
   }
 }
 
-function asNumber(value: number | bigint): number {
-  return typeof value === "bigint" ? Number(value) : value;
+function asSafeInteger(value: unknown, field: string): number {
+  if (typeof value === "bigint") {
+    if (value < 0n || value > MAX_SAFE_INTEGER_BIGINT) {
+      throw new FinstackError(`${field} exceeds the JavaScript safe-integer range`, {
+        code: "agent_run_invalid_configuration",
+        retryable: false,
+      });
+    }
+    return Number(value);
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new FinstackError(`${field} exceeds the JavaScript safe-integer range`, {
+      code: "agent_run_invalid_configuration",
+      retryable: false,
+    });
+  }
+  return value;
 }
+
+type AssertNoFacadeDrift<T extends never> = T;
+type GeneratedFacadeKey<T> = Exclude<Extract<keyof T, string>, "free">;
+type MissingFacadeMember<Generated, Facade, Mapped extends string = never> = Exclude<
+  GeneratedFacadeKey<Generated>,
+  Extract<keyof Facade, string> | Mapped
+>;
+type _AgentFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmAgent, Agent>
+>;
+type _RunFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmRun, Run, "nextEventBatch">
+>;
+type _RunResultFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmRunResult, RunResult>
+>;
+type _SessionFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmSession, Session>
+>;
+type _LaneFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmLane, Lane>
+>;
+type _LocatorFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmLocator, Locator>
+>;
+type _EventFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmEvent, Event>
+>;
+type _EventBatchFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmEventBatch, EventBatch>
+>;
+type _HistoryCacheFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmHistoryCachePolicy, HistoryCachePolicy>
+>;
+type _IdentityMapFacadeParity = AssertNoFacadeDrift<
+  MissingFacadeMember<WasmMemoryExternalIdentityMap, MemoryExternalIdentityMap>
+>;

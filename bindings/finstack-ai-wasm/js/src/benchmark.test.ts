@@ -15,8 +15,10 @@ const REPORT_PATH = resolve(
   REPO_ROOT,
   "target/performance/wasm-js-crossing.json",
 );
-const WASM_OVERHEAD_TARGET_PERCENT = 15;
-const PAIRED_SAMPLES = 7;
+const WASM_OVERHEAD_TARGET_PERCENT = 200;
+const PAIRED_SAMPLES = 9;
+const CROSSING_PAYLOAD_BYTES = 64 * 1024;
+const CROSSING_ITERATIONS = 256;
 
 test("records isolated WASM/JS crossing warning measurements", async ({
   page,
@@ -29,124 +31,134 @@ test("records isolated WASM/JS crossing warning measurements", async ({
   await page.evaluate(() => window.finstackReady);
   const initMs = Date.now() - initStarted;
 
-  const measured = await page.evaluate(async (samples: number) => {
-    const now = () => performance.now();
-    const payload = {
-      text: "ok",
-      completion_id: "bench-1",
-    };
-    const modelOptions = {
-      component: "js.model.bench",
-      provider: "js-fixture",
-      model: "js-bench-model",
-    };
-    const hostModel = {
-      request: async () => structuredClone(payload),
-    };
-    const jsHostSamples: number[] = [];
-    for (let index = 0; index < samples; index += 1) {
-      const started = now();
-      const result = await hostModel.request();
-      jsHostSamples.push(now() - started);
-      if (result.text !== payload.text || result.completion_id !== payload.completion_id) {
-        throw new Error("JS baseline mutated the paired payload");
-      }
-    }
+  const measured = await page.evaluate(
+    async ({ samples, payloadBytes, crossingIterations }) => {
+      const now = () => performance.now();
+      const median = (values: number[]): number => {
+        const sorted = values.slice().sort((left, right) => left - right);
+        const value = sorted[Math.floor(sorted.length / 2)];
+        if (value === undefined) {
+          throw new Error("benchmark sample set was empty");
+        }
+        return value;
+      };
+      const crossingPayload = new Uint8Array(payloadBytes);
+      const jsCopySamples: number[] = [];
+      const wasmRoundTripSamples: number[] = [];
+      let crossingChecksum = 0;
+      for (let sample = 0; sample < samples; sample += 1) {
+        let started = now();
+        for (let iteration = 0; iteration < crossingIterations; iteration += 1) {
+          crossingPayload[0] = iteration & 0xff;
+          const copied = crossingPayload.slice();
+          crossingChecksum = (crossingChecksum + (copied[0] ?? 0)) >>> 0;
+        }
+        jsCopySamples.push((now() - started) / crossingIterations);
 
-    const wasmRunSamples: number[] = [];
-    let hostCallbackMs = 0;
-    let lastText = "";
-    for (let index = 0; index < samples; index += 1) {
-      hostCallbackMs = 0;
-      const model = new window.finstackTest.JsModel(
-        {
-          request: async () => {
-            const started = now();
-            const result = await hostModel.request();
-            hostCallbackMs += now() - started;
-            return result;
+        started = now();
+        for (let iteration = 0; iteration < crossingIterations; iteration += 1) {
+          crossingPayload[0] = iteration & 0xff;
+          const copied = window.finstackTest.benchmarkRoundTrip(crossingPayload);
+          crossingChecksum = (crossingChecksum + (copied[0] ?? 0)) >>> 0;
+        }
+        wasmRoundTripSamples.push((now() - started) / crossingIterations);
+      }
+
+      const payload = {
+        text: "ok",
+        completion_id: "bench-1",
+      };
+      const modelOptions = {
+        component: "js.model.bench",
+        provider: "js-fixture",
+        model: "js-bench-model",
+      };
+      const hostModel = {
+        request: async () => structuredClone(payload),
+      };
+      const wasmRunSamples: number[] = [];
+      let lastText = "";
+      for (let index = 0; index < samples; index += 1) {
+        const model = new window.finstackTest.JsModel(
+          {
+            request: async () => hostModel.request(),
           },
+          modelOptions,
+        );
+        const agent = await window.finstackTest.Agent.create({ model });
+        const runStarted = now();
+        const result = await agent.run("hello");
+        wasmRunSamples.push(now() - runStarted);
+        lastText = result.text;
+      }
+
+      const createStarted = now();
+      const warmupModel = new window.finstackTest.JsModel(
+        {
+          request: async () => hostModel.request(),
         },
         modelOptions,
       );
-      const agent = await window.finstackTest.Agent.create({ model });
-      const runStarted = now();
-      const result = await agent.run("hello");
-      wasmRunSamples.push(now() - runStarted);
-      lastText = result.text;
-    }
+      const warmupAgent = await window.finstackTest.Agent.create({
+        model: warmupModel,
+      });
+      const createMs = now() - createStarted;
+      await warmupAgent.run("hello");
 
-    const createStarted = now();
-    const warmupModel = new window.finstackTest.JsModel(
-      {
-        request: async () => hostModel.request(),
-      },
-      modelOptions,
-    );
-    const warmupAgent = await window.finstackTest.Agent.create({
-      model: warmupModel,
-    });
-    const createMs = now() - createStarted;
-    await warmupAgent.run("hello");
-
-    let events = 0;
-    const streamModel = new window.finstackTest.JsModel(
-      {
-        request: async () => ({
-          async *[Symbol.asyncIterator]() {
-            for (let index = 0; index < 32; index += 1) {
-              yield { text: "x" };
-            }
-            yield {
-              text: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-              completion_id: "bench-stream",
-            };
-          },
-        }),
-      },
-      modelOptions,
-    );
-    const streamAgent = await window.finstackTest.Agent.create({
-      model: streamModel,
-    });
-    const streamStarted = now();
-    const streamRun = streamAgent.start("stream");
-    for await (const batch of streamRun.events()) {
-      events += batch.events().length;
-    }
-    await streamRun.result();
-    const streamMs = now() - streamStarted;
-    const jsHostMs = jsHostSamples.slice().sort((left, right) => left - right)[
-      Math.floor(jsHostSamples.length / 2)
-    ];
-    const runMs = wasmRunSamples.slice().sort((left, right) => left - right)[
-      Math.floor(wasmRunSamples.length / 2)
-    ];
-    if (jsHostMs === undefined || runMs === undefined) {
-      throw new Error("paired WASM/JS samples were empty");
-    }
-    return {
-      createMs,
-      runMs,
-      jsHostMs,
-      hostMs: hostCallbackMs,
-      streamMs,
-      events,
-      text: lastText,
-      samples,
-    };
-  }, PAIRED_SAMPLES);
+      let events = 0;
+      const streamModel = new window.finstackTest.JsModel(
+        {
+          request: async () => ({
+            async *[Symbol.asyncIterator]() {
+              for (let index = 0; index < 32; index += 1) {
+                yield { text: "x" };
+              }
+              yield {
+                text: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                completion_id: "bench-stream",
+              };
+            },
+          }),
+        },
+        modelOptions,
+      );
+      const streamAgent = await window.finstackTest.Agent.create({
+        model: streamModel,
+      });
+      const streamStarted = now();
+      const streamRun = streamAgent.start("stream");
+      for await (const batch of streamRun.events()) {
+        events += batch.events().length;
+      }
+      await streamRun.result();
+      const streamMs = now() - streamStarted;
+      return {
+        createMs,
+        runMs: median(wasmRunSamples),
+        jsCopyMs: median(jsCopySamples),
+        wasmRoundTripMs: median(wasmRoundTripSamples),
+        streamMs,
+        events,
+        text: lastText,
+        samples,
+        crossingChecksum,
+      };
+    },
+    {
+      samples: PAIRED_SAMPLES,
+      payloadBytes: CROSSING_PAYLOAD_BYTES,
+      crossingIterations: CROSSING_ITERATIONS,
+    },
+  );
 
   expect(measured.text).toBe("ok");
-  const ns = (ms: number) => Math.round(ms * 1_000_000);
-  expect(measured.jsHostMs).toBeGreaterThanOrEqual(0);
-  expect(measured.runMs).toBeGreaterThan(0);
-  const wasmDriveMs = Math.max(measured.runMs - measured.jsHostMs, 0);
-  expect(wasmDriveMs).toBeGreaterThan(0);
-  // Crossing cost is (run - wasm_drive) / wasm_drive. A 0 ms JS host is below
-  // timer resolution and matches the recorded warning artifact (0%).
-  const overhead = (measured.runMs / wasmDriveMs - 1) * 100;
+  expect(measured.crossingChecksum).toBeGreaterThan(0);
+  expect(measured.jsCopyMs).toBeGreaterThan(0);
+  expect(measured.wasmRoundTripMs).toBeGreaterThan(0);
+  const overhead = (measured.wasmRoundTripMs / measured.jsCopyMs - 1) * 100;
   expect(overhead).toBeLessThanOrEqual(WASM_OVERHEAD_TARGET_PERCENT);
+
+  const ns = (ms: number) => Math.round(ms * 1_000_000);
   const wasm = readFileSync(WASM_PATH);
   const commit = execSync("git rev-parse --short=12 HEAD", {
     cwd: REPO_ROOT,
@@ -166,15 +178,17 @@ test("records isolated WASM/JS crossing warning measurements", async ({
       deltas_per_run: 32,
       runs_per_sample: 1,
       samples: measured.samples,
-      comparison: "paired_within_browser_identical_payload",
+      comparison: "batched_typed_array_copy_vs_wasm_round_trip",
+      crossing_payload_bytes: CROSSING_PAYLOAD_BYTES,
+      crossing_iterations: CROSSING_ITERATIONS,
     },
     timing_ns: {
       init_median: ns(initMs),
       create_median: ns(measured.createMs),
       reducer_run_median: ns(measured.runMs),
       event_throughput_median: ns(measured.streamMs),
-      host_callback_median: ns(measured.jsHostMs),
-      wasm_drive_median: ns(wasmDriveMs),
+      host_callback_median: ns(measured.jsCopyMs),
+      wasm_drive_median: ns(measured.wasmRoundTripMs),
     },
     binding: {
       overhead_percent: overhead,

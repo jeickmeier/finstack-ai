@@ -33,32 +33,33 @@ export function exposeWorkerHost(factory) {
     });
     async function handle(data) {
         let requestId;
+        if (data !== null &&
+            typeof data === "object" &&
+            "id" in data &&
+            typeof data.id === "string") {
+            requestId = data.id;
+        }
         try {
-            await dispatch(data, (id) => {
-                requestId = id;
-            });
+            await dispatch(data);
         }
         catch (error) {
             postError(undefined, FinstackError.fromUnknown(error), requestId);
         }
     }
-    async function dispatch(data, captureId) {
+    async function dispatch(data) {
         const message = decodeMainToWorker(data);
-        if ("id" in message && message.id !== undefined) {
-            captureId(message.id);
-        }
         switch (message.type) {
             case "init":
                 if (message.lagPolicy !== undefined) {
                     defaults.policy = message.lagPolicy;
                 }
-                if (message.queueCapacity !== undefined && message.queueCapacity > 0) {
+                if (message.queueCapacity !== undefined) {
                     defaults.queueCapacity = message.queueCapacity;
                 }
-                if (message.blockTimeoutMs !== undefined && message.blockTimeoutMs > 0) {
+                if (message.blockTimeoutMs !== undefined) {
                     defaults.blockTimeoutMs = message.blockTimeoutMs;
                 }
-                if (message.durableTimeoutMs !== undefined && message.durableTimeoutMs > 0) {
+                if (message.durableTimeoutMs !== undefined) {
                     defaults.durableTimeoutMs = message.durableTimeoutMs;
                 }
                 post({ v: 1, type: "ready", id: message.id });
@@ -90,7 +91,7 @@ export function exposeWorkerHost(factory) {
                     queueCapacity: defaults.queueCapacity,
                     blockTimeoutMs: defaults.blockTimeoutMs,
                     durableTimeoutMs: defaults.durableTimeoutMs,
-                    pending: 0,
+                    outstandingSequences: [],
                     dropped: 0,
                     waiters: [],
                     closed: false,
@@ -109,7 +110,7 @@ export function exposeWorkerHost(factory) {
             }
             case "cancel": {
                 const slot = requireRun(message.agentId, message.runId);
-                await slot.run.cancel(message.reason);
+                await slot.run.cancel();
                 post({ v: 1, type: "ready", id: message.id });
                 return;
             }
@@ -132,9 +133,10 @@ export function exposeWorkerHost(factory) {
             }
             case "ack": {
                 const slot = requireRun(message.agentId, message.runId);
-                if (slot.pending > 0) {
-                    slot.pending -= 1;
+                if (slot.outstandingSequences[0] !== message.lastSequence) {
+                    return;
                 }
+                slot.outstandingSequences.shift();
                 const waiter = slot.waiters.shift();
                 waiter?.();
                 return;
@@ -161,7 +163,7 @@ export function exposeWorkerHost(factory) {
             case "shutdown":
                 for (const slot of runs.values()) {
                     slot.closed = true;
-                    await slot.run.cancel("worker_shutdown").catch(() => undefined);
+                    await slot.run.cancel().catch(() => undefined);
                 }
                 post({ v: 1, type: "terminated", reason: "shutdown" });
                 return;
@@ -210,7 +212,7 @@ export function exposeWorkerHost(factory) {
     async function enqueue(slot, batch, durable) {
         const timeoutMs = durable ? slot.durableTimeoutMs : slot.blockTimeoutMs;
         const started = Date.now();
-        while (slot.pending >= slot.queueCapacity) {
+        while (slot.outstandingSequences.length >= slot.queueCapacity) {
             if (slot.policy === "disconnect") {
                 return "disconnected";
             }
@@ -236,7 +238,7 @@ export function exposeWorkerHost(factory) {
         const bytes = copyBuffer(batch.toJsonBytes());
         const droppedProgress = batch.droppedProgress + slot.dropped;
         slot.dropped = 0;
-        slot.pending += 1;
+        slot.outstandingSequences.push(batch.lastSequence);
         post({
             v: 1,
             type: "batch",
@@ -272,7 +274,7 @@ export function exposeWorkerHost(factory) {
             type: "backpressure",
             agentId: slot.agentId,
             runId: slot.runId,
-            queuedBatches: slot.pending,
+            queuedBatches: slot.outstandingSequences.length,
             droppedProgress: slot.dropped,
             policy: slot.policy,
         });

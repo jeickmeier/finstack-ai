@@ -41,16 +41,16 @@ Severity may be raised or lowered after triage when impact, exploitability, or d
 
 ## Supported versions
 
-Supported-version policy for tagged local `1.0.0` and the `0.1.0`
-preview line. Local tag `v1.0.0` is
+Supported-version policy for the staged `2.0.0` default branch, tagged local
+`1.0.0`, and the `0.1.0` preview line. Local tag `v1.0.0` is
 `6e9ec39fae89a70f696ee740de2d2094670cba3e`.
 The last pushed GitHub tag remains `v0.1.0`. crates.io / PyPI / npm
 stay unpublished. This is not LTS.
 
 | Version | Supported |
 | --- | --- |
+| `2.0.x` staging line (`main` / trunk) | Security fixes accepted before the first `v2.0.0` tag |
 | `1.0.x` (local tag `v1.0.0`) | Security fixes accepted on this lockstep line |
-| Default branch (`main` / trunk) | Security fixes accepted while it carries `1.0.0` |
 | `0.1.x` preview (tag `v0.1.0`) | Security-only for 90 days after 2026-08-15 |
 | Historical unpublished snapshots (`0.0.4` and earlier) | Not supported |
 

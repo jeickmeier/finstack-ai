@@ -16,11 +16,11 @@ export interface WorkerConnectOptions {
      *   disconnect.
      */
     lagPolicy?: LagPolicy;
-    /** Unacked outbound batch bound. Defaults to 32. */
+    /** Unacked outbound batch bound. Integer in `1..=1024`; defaults to 32. */
     queueCapacity?: number;
-    /** Maximum wait for `block-bounded` before disconnect. */
+    /** Maximum `block-bounded` wait in milliseconds. Integer in `1..=60000`. */
     blockTimeoutMs?: number;
-    /** Maximum wait to protect a durable batch under `drop-progress`. */
+    /** Maximum durable-batch wait in milliseconds. Integer in `1..=60000`. */
     durableTimeoutMs?: number;
 }
 /**
@@ -191,7 +191,6 @@ export declare class WorkerRun {
     /**
      * Submit idempotent durable cancellation.
      *
-     * @param reason - Optional non-secret reason. Not persisted as raw host text.
      * @returns A promise that settles when cancellation is accepted.
      * @example
      * ```ts
@@ -199,7 +198,7 @@ export declare class WorkerRun {
      * await run.cancel();
      * ```
      */
-    cancel(reason?: string): Promise<void>;
+    cancel(): Promise<void>;
     /**
      * Close event delivery without cancelling the run.
      *

@@ -259,14 +259,12 @@ fn inspect_object(
         &JsValue::from_str("sessionId"),
         &JsValue::from_str(&session_id.to_string()),
     )?;
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "inspect sequences stay well below the 2^53 JS integer limit"
-    )]
+    let head_sequence = super::errors::js_safe_integer(head_sequence, "head sequence")
+        .map_err(|error| agent_error(&error, None))?;
     js_sys::Reflect::set(
         &object,
         &JsValue::from_str("headSequence"),
-        &JsValue::from(head_sequence as f64),
+        &JsValue::from(head_sequence),
     )?;
     js_sys::Reflect::set(
         &object,

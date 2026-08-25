@@ -17,7 +17,8 @@ Required fields include compiler, target, commit, feature set, and machine
 metadata. Benchmark regression remains diagnostic unless a current task
 explicitly makes a budget blocking.
 The Python fast-path report separates import, construction, FFI, external I/O,
-throughput, allocation, and idle-memory evidence. The WASM/JS
-crossing report isolates init, create, scripted reducer, event throughput, and
-host-callback costs. The versioned `size-budgets.json` document owns the
-current artifact limits.
+throughput, allocation, and idle-memory evidence. The WASM/JS crossing report
+isolates init, create, scripted reducer, event throughput, and a calibrated
+typed-array boundary round trip. The versioned `size-budgets.json` document
+owns the current artifact limits; the WASM budget includes the intentional
+in-browser document parser stack.

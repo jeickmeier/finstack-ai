@@ -1,7 +1,6 @@
 //! Rust-owned resolved agent handle and linked-provider builders.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::approval_grant::PyApprovalGrantMode;
 use crate::child_policy::PyChildRunPolicy;
@@ -12,9 +11,9 @@ use finstack_ai::runtime::ports::model::{Model, ModelName, ModelSettings};
 use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
-    GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, LinkedProviderSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
-    OpenRouterMediaToolsSpec, Session,
+    DEFAULT_MAX_CYCLES, DEFAULT_RUN_TIMEOUT, GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy,
+    LinkedAgent, LinkedAgentPorts, LinkedCommon, LinkedProviderSpec, OllamaAgentSpec,
+    OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
 };
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
@@ -127,8 +126,6 @@ impl PyObserverArg {
     }
 }
 
-const DEFAULT_TIMEOUT_SECONDS: f64 = 30.0;
-pub(crate) const DEFAULT_MAX_CYCLES: u64 = 16;
 const PREVIEW_VERSION: Version = Version {
     major: 0,
     minor: 0,
@@ -151,6 +148,7 @@ pub(crate) struct PyHistoryCachePolicy {
 impl PyHistoryCachePolicy {
     #[new]
     #[pyo3(signature = (max_entries = HistoryCachePolicy::DEFAULT_MAX_ENTRIES, max_bytes = HistoryCachePolicy::DEFAULT_MAX_BYTES))]
+    #[pyo3(text_signature = "(max_entries=64, max_bytes=16777216)")]
     fn new(max_entries: usize, max_bytes: usize) -> PyResult<Self> {
         HistoryCachePolicy::try_new(max_entries, max_bytes)
             .map(|inner| Self { inner })
@@ -794,6 +792,9 @@ impl PyAgent {
 
     /// Start a run and return its shared control handle immediately.
     #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
+    #[pyo3(
+        text_signature = "($self, input, *, timeout_seconds=None, max_cycles=16, max_output_retries=1, capability=None, attachments=None)"
+    )]
     #[expect(
         clippy::too_many_arguments,
         reason = "run start forwards the same bounded run inputs plus staged attachments"
@@ -885,6 +886,9 @@ impl PyAgent {
 
     /// Execute one run and await its committed result.
     #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
+    #[pyo3(
+        text_signature = "($self, input, *, timeout_seconds=None, max_cycles=16, max_output_retries=1, capability=None, attachments=None)"
+    )]
     #[expect(
         clippy::too_many_arguments,
         reason = "run forwards the same bounded run inputs plus staged attachments"
@@ -1206,7 +1210,7 @@ async fn build_python_agent(
         },
         model_name,
         empty_model_settings()?,
-        Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
+        DEFAULT_RUN_TIMEOUT,
     )
     .await?;
     Ok(PyAgent {

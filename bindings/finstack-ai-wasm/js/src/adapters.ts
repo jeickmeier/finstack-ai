@@ -9,6 +9,7 @@ import {
   JsRandomSource as WasmJsRandomSource,
   JsToolset as WasmJsToolset,
 } from "../generated/finstack_ai_wasm.js";
+import type * as GeneratedWasm from "../generated/finstack_ai_wasm.js";
 
 import type {
   HostArtifactStore,
@@ -21,6 +22,28 @@ import type {
   HostRandomSource,
   HostToolset,
 } from "./host.js";
+
+type AssertNoDrift<T extends never> = T;
+type GeneratedHostExportName = Extract<
+  keyof typeof GeneratedWasm,
+  `Js${string}`
+>;
+type FacadeHostExportName =
+  | "JsArtifactStore"
+  | "JsClock"
+  | "JsContextProvider"
+  | "JsJournalStore"
+  | "JsMiddleware"
+  | "JsModel"
+  | "JsObserver"
+  | "JsRandomSource"
+  | "JsToolset";
+type _MissingHostFacade = AssertNoDrift<
+  Exclude<GeneratedHostExportName, FacadeHostExportName>
+>;
+type _UnexpectedHostFacade = AssertNoDrift<
+  Exclude<FacadeHostExportName, GeneratedHostExportName>
+>;
 
 /**
  * Constructor options for {@link JsModel}.

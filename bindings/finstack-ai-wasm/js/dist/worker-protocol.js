@@ -7,6 +7,8 @@ export const MAX_CONTROL_BYTES = 16 * 1024;
 export const MAX_TRANSFER_BYTES = 256 * 1024;
 /** Maximum transferred message-bearing live-state snapshot bytes. */
 export const MAX_LIVE_STATE_BYTES = 16 * 1024 * 1024;
+const MAX_WORKER_QUEUE_CAPACITY = 1024;
+const MAX_WORKER_TIMEOUT_MS = 60_000;
 /**
  * Encode a control envelope and reject oversized payloads.
  *
@@ -44,14 +46,14 @@ export function decodeMainToWorker(data) {
                 record.lagPolicy === "block-bounded") {
                 message.lagPolicy = record.lagPolicy;
             }
-            if (typeof record.queueCapacity === "number") {
-                message.queueCapacity = record.queueCapacity;
+            if (record.queueCapacity !== undefined) {
+                message.queueCapacity = requiredBoundedInteger(record, "queueCapacity", 1, MAX_WORKER_QUEUE_CAPACITY);
             }
-            if (typeof record.blockTimeoutMs === "number") {
-                message.blockTimeoutMs = record.blockTimeoutMs;
+            if (record.blockTimeoutMs !== undefined) {
+                message.blockTimeoutMs = requiredBoundedInteger(record, "blockTimeoutMs", 1, MAX_WORKER_TIMEOUT_MS);
             }
-            if (typeof record.durableTimeoutMs === "number") {
-                message.durableTimeoutMs = record.durableTimeoutMs;
+            if (record.durableTimeoutMs !== undefined) {
+                message.durableTimeoutMs = requiredBoundedInteger(record, "durableTimeoutMs", 1, MAX_WORKER_TIMEOUT_MS);
             }
             return message;
         }
@@ -75,19 +77,14 @@ export function decodeMainToWorker(data) {
             }
             return message;
         }
-        case "cancel": {
-            const message = {
+        case "cancel":
+            return {
                 v: 1,
                 type,
                 id: requiredString(record, "id"),
                 agentId: requiredString(record, "agentId"),
                 runId: requiredString(record, "runId"),
             };
-            if (typeof record.reason === "string") {
-                message.reason = record.reason;
-            }
-            return message;
-        }
         case "liveState":
             return {
                 v: 1,
@@ -103,7 +100,7 @@ export function decodeMainToWorker(data) {
                 id: requiredString(record, "id"),
                 agentId: requiredString(record, "agentId"),
                 runId: requiredString(record, "runId"),
-                revision: requiredNumber(record, "revision"),
+                revision: requiredSafeInteger(record, "revision"),
             };
         case "closeEvents":
             return {
@@ -119,7 +116,7 @@ export function decodeMainToWorker(data) {
                 type,
                 agentId: requiredString(record, "agentId"),
                 runId: requiredString(record, "runId"),
-                lastSequence: requiredNumber(record, "lastSequence"),
+                lastSequence: requiredSafeInteger(record, "lastSequence"),
             };
         case "inspect":
             return {
@@ -172,9 +169,9 @@ export function decodeWorkerToMain(data) {
                 type,
                 agentId: requiredString(record, "agentId"),
                 runId: requiredString(record, "runId"),
-                firstSequence: requiredNumber(record, "firstSequence"),
-                lastSequence: requiredNumber(record, "lastSequence"),
-                droppedProgress: requiredNumber(record, "droppedProgress"),
+                firstSequence: requiredSafeInteger(record, "firstSequence"),
+                lastSequence: requiredSafeInteger(record, "lastSequence"),
+                droppedProgress: requiredSafeInteger(record, "droppedProgress"),
                 durable: record.durable === true,
             };
         case "result": {
@@ -219,8 +216,8 @@ export function decodeWorkerToMain(data) {
                 type,
                 agentId: requiredString(record, "agentId"),
                 runId: requiredString(record, "runId"),
-                queuedBatches: requiredNumber(record, "queuedBatches"),
-                droppedProgress: requiredNumber(record, "droppedProgress"),
+                queuedBatches: requiredSafeInteger(record, "queuedBatches"),
+                droppedProgress: requiredSafeInteger(record, "droppedProgress"),
                 policy: requiredPolicy(record.policy),
             };
         case "terminated":
@@ -303,10 +300,16 @@ function requiredString(record, key) {
     }
     return value;
 }
-function requiredNumber(record, key) {
+function requiredSafeInteger(record, key) {
+    return requiredBoundedInteger(record, key, 0, Number.MAX_SAFE_INTEGER);
+}
+function requiredBoundedInteger(record, key, minimum, maximum) {
     const value = record[key];
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        throw new FinstackError(`worker message missing ${key}`, {
+    if (typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < minimum ||
+        value > maximum) {
+        throw new FinstackError(`worker message has invalid ${key}`, {
             code: "agent_run_invalid_configuration",
             retryable: false,
         });
@@ -349,9 +352,11 @@ function requiredInspect(value) {
     }
     const record = value;
     const phase = record.phase;
-    const headSequence = Number(record.headSequence);
+    const headSequence = record.headSequence;
     if (typeof record.sessionId !== "string" ||
-        !Number.isFinite(headSequence) ||
+        typeof headSequence !== "number" ||
+        !Number.isSafeInteger(headSequence) ||
+        headSequence < 0 ||
         (phase !== "empty" &&
             phase !== "in_progress" &&
             phase !== "completed" &&

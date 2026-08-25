@@ -136,10 +136,36 @@ jobs:
         # is a same-host `check.py dirty` obligation; rustc/wasm-bindgen
         # output is not cross-OS identical.
 
+  ci-native-platforms:
+    name: ci-native-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Native confinement checks
+        run: mise run check-native-platform
+
   ci:
     name: ci
     if: always()
-    needs: [ci-rust, ci-python, ci-wasm]
+    needs: [ci-rust, ci-python, ci-wasm, ci-native-platforms]
     runs-on: ubuntu-24.04
     steps:
       - name: Require language jobs
@@ -147,7 +173,8 @@ jobs:
           set -euo pipefail
           if [ "${{ needs.ci-rust.result }}" != "success" ] \
             || [ "${{ needs.ci-python.result }}" != "success" ] \
-            || [ "${{ needs.ci-wasm.result }}" != "success" ]; then
-            echo "ci-rust=${{ needs.ci-rust.result }} ci-python=${{ needs.ci-python.result }} ci-wasm=${{ needs.ci-wasm.result }}"
+            || [ "${{ needs.ci-wasm.result }}" != "success" ] \
+            || [ "${{ needs.ci-native-platforms.result }}" != "success" ]; then
+            echo "ci-rust=${{ needs.ci-rust.result }} ci-python=${{ needs.ci-python.result }} ci-wasm=${{ needs.ci-wasm.result }} ci-native-platforms=${{ needs.ci-native-platforms.result }}"
             exit 1
           fi

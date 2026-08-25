@@ -1,7 +1,11 @@
 use std::time::Duration;
 
 use finstack_ai::runtime::ports::model::ModelName;
-use finstack_ai::{AgentRunRequest, AttachmentInput, PrincipalRef, RunSecurityContext};
+use finstack_ai::{
+    AgentRunRequest, AttachmentInput, DEFAULT_MAX_CYCLES, DEFAULT_MAX_OUTPUT_RETRIES,
+    DEFAULT_RUN_TIMEOUT, MAX_CONFIGURED_CYCLES, MAX_CONFIGURED_OUTPUT_RETRIES, PrincipalRef,
+    RunSecurityContext,
+};
 use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, Version};
 use wasm_bindgen::prelude::*;
 
@@ -12,12 +16,6 @@ const PREVIEW_VERSION: Version = Version {
     minor: 0,
     patch: 1,
 };
-const DEFAULT_TIMEOUT_SECONDS: f64 = 30.0;
-const MAX_TIMEOUT_SECONDS: f64 = 86_400.0;
-const DEFAULT_MAX_CYCLES: u64 = 16;
-const MAX_MAX_CYCLES: u64 = 1_024;
-const DEFAULT_MAX_OUTPUT_RETRIES: u32 = 1;
-const MAX_MAX_OUTPUT_RETRIES: u32 = 1_024;
 
 #[expect(
     clippy::too_many_arguments,
@@ -32,21 +30,30 @@ pub(super) fn run_request(
     capability: Option<String>,
     attachments: Vec<AttachmentInput>,
 ) -> Result<AgentRunRequest, JsValue> {
-    let timeout_seconds = timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
-    if !timeout_seconds.is_finite()
-        || timeout_seconds <= 0.0
-        || timeout_seconds > MAX_TIMEOUT_SECONDS
-    {
-        return Err(agent_error(
-            &configuration_error("timeoutSeconds must be finite and in (0, 86400]"),
-            None,
-        ));
-    }
-    let max_cycles = optional_u64(max_cycles, DEFAULT_MAX_CYCLES, MAX_MAX_CYCLES, "maxCycles")?;
+    let timeout = match timeout_seconds {
+        None => DEFAULT_RUN_TIMEOUT,
+        Some(value) => {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(agent_error(
+                    &configuration_error("timeoutSeconds must be finite and positive"),
+                    None,
+                ));
+            }
+            Duration::try_from_secs_f64(value).map_err(|_| {
+                agent_error(&configuration_error("timeoutSeconds is out of range"), None)
+            })?
+        }
+    };
+    let max_cycles = optional_u64(
+        max_cycles,
+        DEFAULT_MAX_CYCLES,
+        MAX_CONFIGURED_CYCLES,
+        "maxCycles",
+    )?;
     let max_output_retries = u32::try_from(optional_u64(
         max_output_retries,
         u64::from(DEFAULT_MAX_OUTPUT_RETRIES),
-        u64::from(MAX_MAX_OUTPUT_RETRIES),
+        u64::from(MAX_CONFIGURED_OUTPUT_RETRIES),
         "maxOutputRetries",
     )?)
     .map_err(|_| {
@@ -68,7 +75,7 @@ pub(super) fn run_request(
     .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
     let mut request = AgentRunRequest::try_new(model.clone(), input, security)
         .map_err(|error| agent_error(&error, None))?;
-    request.timeout = Duration::from_secs_f64(timeout_seconds);
+    request.timeout = timeout;
     request.max_cycles = max_cycles;
     request.max_output_retries = max_output_retries;
     if let Some(capability) = capability {

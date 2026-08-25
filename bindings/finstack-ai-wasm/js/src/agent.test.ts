@@ -80,6 +80,107 @@ test("runs a model-only scripted Agent to a text result", async ({ page }) => {
   });
 });
 
+test("uses canonical run bounds without a binding-only one-day timeout cap", async ({
+  page,
+}) => {
+  const result = await page.evaluate(async ({ modelOptions }) => {
+    const model = new window.finstackTest.JsModel(
+      {
+        request: async () => ({
+          text: "canonical bounds",
+          completion_id: "js-canonical-bounds-1",
+        }),
+      },
+      modelOptions,
+    );
+    const agent = await window.finstackTest.Agent.create({ model });
+    const completed = await agent.run("hello", { timeoutSeconds: 100_000 });
+    let limitCode = "";
+    try {
+      agent.start("invalid", { maxCycles: 1_025 });
+    } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        typeof error.code === "string"
+      ) {
+        limitCode = error.code;
+      }
+    }
+    return { text: completed.text, limitCode };
+  }, { modelOptions: MODEL_OPTIONS });
+
+  expect(result.text).toBe("canonical bounds");
+  expect(result.limitCode).toBe("agent_run_invalid_configuration");
+});
+
+test("mirrors native session and child-run control surfaces", async ({ page }) => {
+  const result = await page.evaluate(async ({ modelOptions }) => {
+    const model = new window.finstackTest.JsModel(
+      {
+        request: async () => ({
+          text: "surface parity",
+          completion_id: "js-surface-parity-1",
+        }),
+      },
+      modelOptions,
+    );
+    const agent = await window.finstackTest.Agent.create({ model });
+    const session = await agent.createSession("tenant-parity");
+    const main = await session.lane("main");
+    const entryId = await main.appendText("seed");
+    const byId = await session.laneById(main.laneId);
+    const inspect = await byId.inspect();
+
+    const parent = agent.start("parent");
+    let supportedCode = "";
+    try {
+      await parent.startChild(agent, "child", {
+        timeoutSeconds: 100_000,
+        maxCycles: 16,
+      });
+    } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        typeof error.code === "string"
+      ) {
+        supportedCode = error.code;
+      }
+    }
+    let limitCode = "";
+    try {
+      await parent.startChild(agent, "child", { maxCycles: 1_025 });
+    } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        typeof error.code === "string"
+      ) {
+        limitCode = error.code;
+      }
+    }
+    await parent.result();
+    return {
+      entryId,
+      laneId: main.laneId,
+      restoredLaneId: byId.laneId,
+      historyLen: inspect.historyLen,
+      supportedCode,
+      limitCode,
+    };
+  }, { modelOptions: MODEL_OPTIONS });
+
+  expect(result.entryId).not.toBe("");
+  expect(result.restoredLaneId).toBe(result.laneId);
+  expect(result.historyLen).toBe(1);
+  expect(result.supportedCode).toBe("agent_run_unsupported_plan");
+  expect(result.limitCode).toBe("agent_run_invalid_configuration");
+});
+
 test("reports bounded redacted observer diagnostics without affecting results", async ({
   page,
 }) => {

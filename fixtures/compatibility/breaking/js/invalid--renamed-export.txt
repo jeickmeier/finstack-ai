@@ -5,6 +5,7 @@ ApprovalGrantMode
 Capability
 CapabilityActivation
 CapabilityCatalogItem
+ChildRunOptions
 Event
 EventBatch
 EventOptions
