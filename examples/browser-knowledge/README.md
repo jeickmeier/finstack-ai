@@ -10,9 +10,10 @@ Part of the three-surface knowledge agent; the parity matrix lives in
 [`apps/finstack-knowledge/README.md`](../../apps/finstack-knowledge/README.md).
 Parity deltas for this surface: the journal is IndexedDB (origin-local),
 so cross-surface means **inspect/export only** — the CLI and Python
-notebooks share a sqlite file this page cannot reach; memory is
-host-backed rather than the native extension; confinement/net-guard does
-not apply inside the browser sandbox.
+notebooks share a sqlite file this page cannot reach; document ingest is
+a TS retrieval toolset over a bundled corpus (File API upload is not in
+v1); memory is not wired in v1 (the host-adapter seam is available);
+confinement/net-guard does not apply inside the browser sandbox.
 
 Trust class: JS host adapters are T2 — trusted, not isolated. Do not embed
 provider credentials in a browser bundle.

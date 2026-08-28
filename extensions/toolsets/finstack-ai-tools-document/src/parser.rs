@@ -77,6 +77,39 @@ impl DocumentFormat {
     pub fn is_supported_media_type(media_type: &str) -> bool {
         Self::from_media_type(media_type) != Self::Unknown
     }
+
+    /// Media-type hint for a file extension (case-insensitive), for callers
+    /// staging attachments from paths.
+    ///
+    /// Covers the parser's supported formats plus the plain-text kinds a
+    /// knowledge surface commonly attaches (`md`, `txt`). Returns `None`
+    /// for unknown extensions; content sniffing still decides the real
+    /// format at parse time (the hint only breaks ties).
+    #[must_use]
+    pub fn media_type_for_extension(extension: &str) -> Option<&'static str> {
+        match extension.to_ascii_lowercase().as_str() {
+            "pdf" => Some("application/pdf"),
+            "docx" => {
+                Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            }
+            "doc" => Some("application/msword"),
+            "pptx" => {
+                Some("application/vnd.openxmlformats-officedocument.presentationml.presentation")
+            }
+            "ppt" => Some("application/vnd.ms-powerpoint"),
+            "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            "xls" => Some("application/vnd.ms-excel"),
+            "odt" => Some("application/vnd.oasis.opendocument.text"),
+            "ods" => Some("application/vnd.oasis.opendocument.spreadsheet"),
+            "odp" => Some("application/vnd.oasis.opendocument.presentation"),
+            "rtf" => Some("application/rtf"),
+            "epub" => Some("application/epub+zip"),
+            "csv" => Some("text/csv"),
+            "md" | "markdown" => Some("text/markdown"),
+            "txt" => Some("text/plain"),
+            _ => None,
+        }
+    }
 }
 
 /// PDF page-content classification.

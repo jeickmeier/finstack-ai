@@ -36,6 +36,7 @@ pub finstack_ai_tools_document::parser::DocumentFormat::Xlsx
 impl finstack_ai_tools_document::parser::DocumentFormat
 pub fn finstack_ai_tools_document::parser::DocumentFormat::from_media_type(&str) -> Self
 pub fn finstack_ai_tools_document::parser::DocumentFormat::is_supported_media_type(&str) -> bool
+pub fn finstack_ai_tools_document::parser::DocumentFormat::media_type_for_extension(&str) -> core::option::Option<&'static str>
 impl core::clone::Clone for finstack_ai_tools_document::parser::DocumentFormat
 pub fn finstack_ai_tools_document::parser::DocumentFormat::clone(&self) -> finstack_ai_tools_document::parser::DocumentFormat
 impl core::cmp::Eq for finstack_ai_tools_document::parser::DocumentFormat

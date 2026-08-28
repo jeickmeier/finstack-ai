@@ -16,10 +16,61 @@ pub mod sessions;
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
+
+use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai_kernel::SessionId;
 use rich_rust::console::Console;
 use rich_rust::markup::escape;
 
 use crate::{KnowledgeError, SELF_DOCS};
+
+/// Open an existing session's `main` lane, or create a fresh session.
+///
+/// Every CLI command that runs turns shares this: `None` creates a session
+/// (whose seeded `main` lane is opened), `Some(id)` opens it under the
+/// `local` tenant scope. The `bool` reports whether this call created the
+/// session, so the binary knows to print the new id.
+///
+/// # Errors
+///
+/// [`KnowledgeError::Config`] for an unparseable id and
+/// [`KnowledgeError::Compose`] when the session cannot be created/opened.
+pub async fn session_lane(
+    journal: Arc<dyn JournalStore>,
+    session: Option<&str>,
+) -> Result<(finstack_ai::Session, finstack_ai::Lane, bool), KnowledgeError> {
+    let (session, created) = match session {
+        None => (
+            finstack_ai::Session::create(journal, "local")
+                .await
+                .map_err(|error| KnowledgeError::Compose {
+                    reason: error.to_string(),
+                })?,
+            true,
+        ),
+        Some(id) => {
+            let id = SessionId::parse(id).map_err(|_| KnowledgeError::Config {
+                reason: "session_id_invalid",
+            })?;
+            (
+                finstack_ai::Session::open(journal, id, "local")
+                    .await
+                    .map_err(|error| KnowledgeError::Compose {
+                        reason: error.to_string(),
+                    })?,
+                false,
+            )
+        }
+    };
+    let lane = session
+        .lane("main")
+        .await
+        .map_err(|error| KnowledgeError::Compose {
+            reason: error.to_string(),
+        })?;
+    Ok((session, lane, created))
+}
 
 /// Render the `docs` command output: a topic listing, or one topic body.
 ///

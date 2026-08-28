@@ -1,8 +1,6 @@
 //! The `ask` command: one question on a new or existing session.
 
 use finstack_ai::AgentRunRequest;
-use finstack_ai_kernel::SessionId;
-
 use super::render::EventSink;
 use crate::{KnowledgeConfig, KnowledgeError, build_agent_with_journal, model_name, open_journal, security};
 
@@ -46,27 +44,7 @@ async fn run_ask_inner(
 ) -> Result<AskOutcome, KnowledgeError> {
     let journal = open_journal(config)?;
     let agent = build_agent_with_journal(config, journal.clone()).await?;
-
-    let (session, lane, created) = match session {
-        None => {
-            let session = finstack_ai::Session::create(journal, "local")
-                .await
-                .map_err(compose)?;
-            // `Session::create` seeds the `main` lane; open it.
-            let lane = session.lane("main").await.map_err(compose)?;
-            (session, lane, true)
-        }
-        Some(id) => {
-            let id = SessionId::parse(id).map_err(|_| KnowledgeError::Config {
-                reason: "session_id_invalid",
-            })?;
-            let session = finstack_ai::Session::open(journal, id, "local")
-                .await
-                .map_err(compose)?;
-            let lane = session.lane("main").await.map_err(compose)?;
-            (session, lane, false)
-        }
-    };
+    let (session, lane, created) = super::session_lane(journal, session).await?;
 
     let request = AgentRunRequest::try_new(model_name(config)?, question, security(os_user)?)
         .map_err(compose)?;

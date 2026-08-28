@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use finstack_ai::{Agent, AgentRunRequest, Lane};
 use finstack_ai_kernel::{
     AuthorizationEvidence, ContentBlock, InteractionResolution, RawJson, RunEventBody,
-    RunSecurityContext, SessionId,
+    RunSecurityContext,
 };
 
 use super::render::render_markup_plain;
@@ -53,25 +53,7 @@ async fn run_repl_inner(
     let agent = build_agent_with_journal(config, journal.clone()).await?;
     let security = security(os_user)?;
 
-    let (session, lane) = match session {
-        None => {
-            let session = finstack_ai::Session::create(journal, "local")
-                .await
-                .map_err(compose)?;
-            let lane = session.lane("main").await.map_err(compose)?;
-            (session, lane)
-        }
-        Some(id) => {
-            let id = SessionId::parse(id).map_err(|_| KnowledgeError::Config {
-                reason: "session_id_invalid",
-            })?;
-            let session = finstack_ai::Session::open(journal, id, "local")
-                .await
-                .map_err(compose)?;
-            let lane = session.lane("main").await.map_err(compose)?;
-            (session, lane)
-        }
-    };
+    let (session, lane, _created) = super::session_lane(journal, session).await?;
     let session_id = session.session_id().to_string();
     write_line(output, &format!("session: {session_id}"));
 

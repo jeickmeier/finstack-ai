@@ -535,3 +535,29 @@ fn document_parse_spills_oversized_output_to_artifact() {
         "the spilled artifact must carry more content than the truncated inline copy"
     );
 }
+
+#[test]
+fn media_type_for_extension_round_trips_supported_formats() {
+    for extension in [
+        "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls", "odt", "ods", "odp", "rtf",
+        "epub", "csv",
+    ] {
+        let media_type = DocumentFormat::media_type_for_extension(extension)
+            .unwrap_or_else(|| panic!("{extension} maps"));
+        assert_ne!(
+            DocumentFormat::from_media_type(media_type),
+            DocumentFormat::Unknown,
+            "{extension} -> {media_type} round-trips to a supported format"
+        );
+    }
+    // Case-insensitive; text kinds map without being parser formats.
+    assert_eq!(
+        DocumentFormat::media_type_for_extension("PDF"),
+        Some("application/pdf")
+    );
+    assert_eq!(
+        DocumentFormat::media_type_for_extension("md"),
+        Some("text/markdown")
+    );
+    assert_eq!(DocumentFormat::media_type_for_extension("exe"), None);
+}

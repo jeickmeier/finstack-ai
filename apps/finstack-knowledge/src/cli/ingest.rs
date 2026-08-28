@@ -12,6 +12,7 @@ use finstack_ai::runtime::artifact::{ArtifactMetadata, stage_required_artifact};
 use finstack_ai::runtime::artifact::ArtifactScope;
 use finstack_ai::{AgentRunRequest, AttachmentInput};
 use finstack_ai_kernel::{Metadata, Sensitivity, SessionId};
+use finstack_ai_tools_document::parser::{DocumentFormat, DocumentLimits};
 
 use super::ask::AskOutcome;
 use super::render::EventSink;
@@ -19,10 +20,6 @@ use crate::{
     KnowledgeConfig, KnowledgeError, build_agent_with_stores, model_name, open_artifact_store,
     open_journal, security,
 };
-
-/// Ceiling on ingested file size; the document parser's own input ceiling
-/// is 4 MiB, so anything larger can only fail later.
-const MAX_INGEST_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Instruction sent with the attachment.
 const INGEST_INSTRUCTION: &str = "A document is attached. Summarize it in one paragraph, \
@@ -89,25 +86,7 @@ async fn run_ingest_inner(
     .await
     .map_err(compose)?;
 
-    let (session, lane, created) = match session {
-        None => {
-            let session = finstack_ai::Session::create(journal, "local")
-                .await
-                .map_err(compose)?;
-            let lane = session.lane("main").await.map_err(compose)?;
-            (session, lane, true)
-        }
-        Some(id) => {
-            let id = SessionId::parse(id).map_err(|_| KnowledgeError::Config {
-                reason: "session_id_invalid",
-            })?;
-            let session = finstack_ai::Session::open(journal, id, "local")
-                .await
-                .map_err(compose)?;
-            let lane = session.lane("main").await.map_err(compose)?;
-            (session, lane, false)
-        }
-    };
+    let (session, lane, created) = super::session_lane(journal, session).await?;
 
     let mut request =
         AgentRunRequest::try_new(model_name(config)?, INGEST_INSTRUCTION, security(os_user)?)
@@ -128,10 +107,13 @@ async fn run_ingest_inner(
 }
 
 fn read_bounded(path: &Path) -> Result<Vec<u8>, KnowledgeError> {
+    // The size ceiling is the document parser's own input limit; the app
+    // adds no policy of its own here.
+    let max_bytes = DocumentLimits::default().max_input_bytes;
     let metadata = std::fs::metadata(path).map_err(|_| KnowledgeError::Config {
         reason: "ingest_file_unreadable",
     })?;
-    if !metadata.is_file() || metadata.len() > MAX_INGEST_BYTES {
+    if !metadata.is_file() || metadata.len() > max_bytes {
         return Err(KnowledgeError::Config {
             reason: "ingest_file_invalid_or_oversized",
         });
@@ -141,28 +123,13 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, KnowledgeError> {
     })
 }
 
-/// Media type from the file extension; the parser sniffs content anyway,
-/// this is only a hint.
+/// Media type from the file extension via the document toolset's own
+/// mapping; content sniffing still decides the real format at parse time.
 fn media_type_for(path: &Path) -> &'static str {
-    match path
-        .extension()
+    path.extension()
         .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("pdf") => "application/pdf",
-        Some("docx") => {
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        }
-        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        Some("pptx") => {
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        }
-        Some("csv") => "text/csv",
-        Some("md" | "markdown") => "text/markdown",
-        Some("txt") => "text/plain",
-        _ => "application/octet-stream",
-    }
+        .and_then(DocumentFormat::media_type_for_extension)
+        .unwrap_or("application/octet-stream")
 }
 
 fn compose(error: impl std::fmt::Display) -> KnowledgeError {
