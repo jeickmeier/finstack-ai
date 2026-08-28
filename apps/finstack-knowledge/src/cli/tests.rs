@@ -37,6 +37,122 @@ async fn capture_run(answer: &str) -> (Vec<RunEvent>, String) {
 }
 
 #[tokio::test]
+async fn ask_creates_a_session_then_resumes_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(vec![
+        loopback::text_response("first answer"),
+        loopback::text_response("second answer"),
+    ])
+    .await
+    .expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+
+    // Fresh ask: creates a session and answers.
+    let mut sink = TextRenderer::new();
+    let first = super::ask::run_ask(
+        &config,
+        "what is a lane?",
+        None,
+        "ask-test",
+        &mut sink,
+    )
+    .await
+    .expect("first ask");
+    assert!(first.created);
+    assert!(!first.session_id.is_empty());
+    let plain = render_markup_plain(&sink.into_markup());
+    assert!(plain.contains("first answer"), "answer rendered: {plain}");
+
+    // Second ask with the printed id continues the same session.
+    let mut sink = TextRenderer::new();
+    let second = super::ask::run_ask(
+        &config,
+        "and a session?",
+        Some(&first.session_id),
+        "ask-test",
+        &mut sink,
+    )
+    .await
+    .expect("second ask");
+    assert!(!second.created);
+    assert_eq!(second.session_id, first.session_id);
+    server.await.expect("join").expect("served");
+
+    // History grew: both turns live on the same main lane.
+    let journal = crate::open_journal(&config).expect("journal");
+    let session = finstack_ai::Session::open(
+        journal,
+        finstack_ai_kernel::SessionId::parse(&first.session_id).expect("id parses"),
+        "local",
+    )
+    .await
+    .expect("session opens");
+    let lane = session.lane("main").await.expect("main lane");
+    let inspect = lane.inspect().await.expect("inspect");
+    assert!(
+        inspect.history.len() >= 4,
+        "two user turns and two answers, got {}",
+        inspect.history.len()
+    );
+}
+
+#[tokio::test]
+async fn ask_json_mode_emits_expected_event_kinds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) =
+        loopback::serve_ndjson(vec![loopback::text_response("json mode answer")])
+            .await
+            .expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+    let mut sink = JsonRenderer::new();
+    super::ask::run_ask(&config, "kinds?", None, "ask-test", &mut sink)
+        .await
+        .expect("ask");
+    server.await.expect("join").expect("served");
+    let output = sink.into_markup();
+    for expected in ["message_finalized", "run_completed"] {
+        assert!(
+            output.contains(&format!("\"kind\":\"{expected}\"")),
+            "ndjson contains {expected}: {output}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn ask_unknown_session_id_is_a_config_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+    let mut sink = TextRenderer::new();
+    let error = super::ask::run_ask(&config, "q", Some("not-a-session-id"), "ask-test", &mut sink)
+        .await
+        .expect_err("bad id rejected");
+    drop(server);
+    assert!(matches!(
+        error,
+        crate::KnowledgeError::Config { .. } | crate::KnowledgeError::Compose { .. }
+    ));
+}
+
+#[tokio::test]
 async fn text_renderer_streams_deltas_and_result() {
     let (events, answer) = capture_run("rendered answer text").await;
     let mut renderer = TextRenderer::new();

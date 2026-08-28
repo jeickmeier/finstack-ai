@@ -34,6 +34,12 @@ pub enum KnowledgeError {
         /// Bounded non-secret diagnostic from the failing component.
         reason: String,
     },
+    /// A run started but failed; maps to CLI exit code 1.
+    #[error("knowledge_run_failed: {reason}")]
+    Run {
+        /// Bounded non-secret diagnostic from the runtime.
+        reason: String,
+    },
 }
 
 /// Which model provider backs the agent.

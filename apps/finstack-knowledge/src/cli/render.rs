@@ -21,7 +21,9 @@ pub trait EventSink {
     fn events_seen(&self) -> u64;
     /// Yield the accumulated output (markup for the text renderer, NDJSON
     /// for the json renderer).
-    fn into_markup(self) -> String;
+    fn into_markup(self) -> String
+    where
+        Self: Sized;
 }
 
 /// Render accumulated rich markup to plain text (no ANSI).

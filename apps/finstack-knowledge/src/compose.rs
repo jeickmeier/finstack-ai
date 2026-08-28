@@ -92,20 +92,49 @@ pub fn model_name(config: &KnowledgeConfig) -> Result<ModelName, KnowledgeError>
 /// allowlist pattern is invalid, or a released component rejects its
 /// composition inputs.
 pub async fn build_agent(config: &KnowledgeConfig) -> Result<Agent, KnowledgeError> {
+    let journal = open_journal(config)?;
+    build_agent_with_journal(config, journal).await
+}
+
+/// Open the shared sqlite journal at `<data_dir>/journal.sqlite3`.
+///
+/// The CLI session commands and the agent composition share this store, so
+/// sessions created by one are visible to the other (and to the Python
+/// notebooks pointed at the same file).
+///
+/// # Errors
+///
+/// Returns [`KnowledgeError`] when the data directory or the store cannot
+/// be opened.
+pub fn open_journal(config: &KnowledgeConfig) -> Result<Arc<dyn JournalStore>, KnowledgeError> {
     std::fs::create_dir_all(&config.data_dir).map_err(|_| KnowledgeError::Config {
         reason: "data_dir_unwritable",
     })?;
-    let self_docs_root = materialize_self_docs(&config.data_dir)?;
-
-    let provider = provider(config)?;
-    let journal: Arc<dyn JournalStore> = Arc::new(
+    Ok(Arc::new(
         SqliteJournalStore::try_open(SqliteStoreConfig::new(
             config.data_dir.join("journal.sqlite3"),
             SqliteDurability::Durable,
             journal_limits(),
         ))
         .map_err(compose_error)?,
-    );
+    ))
+}
+
+/// Build the composed knowledge agent over an already-open journal store.
+///
+/// # Errors
+///
+/// Returns [`KnowledgeError`] as for [`build_agent`].
+pub async fn build_agent_with_journal(
+    config: &KnowledgeConfig,
+    journal: Arc<dyn JournalStore>,
+) -> Result<Agent, KnowledgeError> {
+    std::fs::create_dir_all(&config.data_dir).map_err(|_| KnowledgeError::Config {
+        reason: "data_dir_unwritable",
+    })?;
+    let self_docs_root = materialize_self_docs(&config.data_dir)?;
+
+    let provider = provider(config)?;
 
     let artifact_store: Arc<dyn finstack_ai::runtime::artifact::ArtifactStore> =
         Arc::new(finstack_ai::runtime::artifact::InProcessArtifactStore::default());
