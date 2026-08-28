@@ -136,6 +136,77 @@ async fn fetch_allowlist_gates_the_fetch_toolset() {
 }
 
 #[test]
+fn golden_fixture_loads_and_validates() {
+    let entries = crate::golden_entries().expect("fixture loads");
+    assert!(entries.len() >= 10, "at least ten entries");
+    let mut ids: Vec<&str> = entries.iter().map(|entry| entry.id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), entries.len(), "ids are unique");
+    for entry in &entries {
+        assert!(!entry.question.trim().is_empty(), "{}: question", entry.id);
+        assert!(
+            !entry.scripted_response.trim().is_empty(),
+            "{}: scripted_response",
+            entry.id
+        );
+        assert!(!entry.must_contain.is_empty(), "{}: must_contain", entry.id);
+        assert!(
+            !entry.event_kinds_expected.is_empty(),
+            "{}: event_kinds_expected",
+            entry.id
+        );
+    }
+}
+
+#[tokio::test]
+async fn golden_entries_hold_offline() {
+    let entries = crate::golden_entries().expect("fixture loads");
+    for entry in entries {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (base_url, server) =
+            loopback::serve_ndjson(vec![loopback::text_response(&entry.scripted_response)])
+                .await
+                .expect("loopback");
+        let config = loopback_config(dir.path(), base_url);
+        let agent = build_agent(&config).await.expect("agent builds");
+        let request = finstack_ai::AgentRunRequest::try_new(
+            model_name(&config).expect("model name"),
+            entry.question.as_str(),
+            security("golden").expect("security"),
+        )
+        .expect("request");
+        let run = agent.start(request).expect("run starts");
+        let mut observed_kinds: Vec<String> = Vec::new();
+        while let Some(batch) = run.next_event_batch().await.expect("batch") {
+            for event in batch.events() {
+                let kind = serde_json::to_value(event.kind()).expect("kind serializes");
+                if let Some(kind) = kind.as_str() {
+                    observed_kinds.push(kind.to_owned());
+                }
+            }
+        }
+        let output = run.result().await.expect("run result");
+        server.await.expect("server task").expect("server ok");
+        for needle in &entry.must_contain {
+            assert!(
+                output.text().contains(needle),
+                "{}: answer must contain {needle:?}: {}",
+                entry.id,
+                output.text()
+            );
+        }
+        for expected in &entry.event_kinds_expected {
+            assert!(
+                observed_kinds.iter().any(|kind| kind == expected),
+                "{}: expected event kind {expected}; observed {observed_kinds:?}",
+                entry.id
+            );
+        }
+    }
+}
+
+#[test]
 fn self_docs_cover_the_promised_topics() {
     let topics: Vec<&str> = SELF_DOCS.iter().map(|(topic, _)| *topic).collect();
     for expected in ["architecture", "sessions", "memory", "ingestion", "cli"] {

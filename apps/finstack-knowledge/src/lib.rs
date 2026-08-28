@@ -31,8 +31,10 @@
 mod compose;
 mod config;
 mod docs;
+mod golden;
 
 pub use compose::{build_agent, model_name};
+pub use golden::{GoldenEntry, golden_entries};
 pub use config::{
     KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security,
 };

@@ -27,6 +27,8 @@ finstack-ai-provider-ollama = { workspace = true }
 finstack-ai-provider-anthropic = { workspace = true }
 finstack-ai-provider-openai = { workspace = true }
 finstack-ai-provider-openrouter = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

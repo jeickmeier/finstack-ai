@@ -1,0 +1,74 @@
+{
+  "entries": [
+    {
+      "id": "ports-overview",
+      "question": "What are the six runtime ports in finstack-ai?",
+      "scripted_response": "The six runtime ports are model, tool, context, middleware, observer, and journal (see the architecture self-doc).",
+      "must_contain": ["model", "journal"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "self-docs-sessions",
+      "question": "How do sessions and lanes relate?",
+      "scripted_response": "A session is a durable conversation; lanes are its independent ordered histories, with main as the default lane (sessions self-doc).",
+      "must_contain": ["lane"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "ingest-formats",
+      "question": "Which document formats can I ingest?",
+      "scripted_response": "Ingestion converts pdf, docx, xlsx, pptx, odf, rtf, epub, and csv documents to Markdown via the document toolset (ingestion self-doc).",
+      "must_contain": ["pdf", "Markdown"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "ingest-scanned-pdf",
+      "question": "What happens when I ingest a scanned PDF?",
+      "scripted_response": "A scanned PDF parses successfully with requires_ocr set to true; OCR itself is not enabled, so the agent tells you the text is not extractable.",
+      "must_contain": ["requires_ocr"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "memory-recall",
+      "question": "How does the agent remember facts across sessions?",
+      "scripted_response": "The memory extension stores facts durably and recalls them through a context provider before each turn; recall is keyword ranked (memory self-doc).",
+      "must_contain": ["memory"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "citations-discipline",
+      "question": "How should answers cite their sources?",
+      "scripted_response": "Answers name the source document or memory record for each claim, per the citations skill in the capability catalog.",
+      "must_contain": ["citations"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "journal-cross-surface",
+      "question": "Can Python open a CLI-created session?",
+      "scripted_response": "Yes: the CLI and Python notebooks share one sqlite journal, so either surface can open sessions the other created.",
+      "must_contain": ["sqlite"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "fetch-deny-default",
+      "question": "Can the agent browse the web?",
+      "scripted_response": "Network fetch is deny-by-default: the fetch toolset is only registered when an explicit host allowlist is configured.",
+      "must_contain": ["allowlist"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "event-contract",
+      "question": "What do all three surfaces have in common?",
+      "scripted_response": "Every surface consumes the same RunEventKind stream from the journal-backed runtime; the renderers differ, the events do not.",
+      "must_contain": ["RunEventKind"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "unknown-honesty",
+      "question": "What is the share price of Acme Corp?",
+      "scripted_response": "I do not know: nothing ingested or remembered covers Acme Corp share prices.",
+      "must_contain": ["do not know"],
+      "event_kinds_expected": ["message_finalized", "run_completed"]
+    }
+  ]
+}

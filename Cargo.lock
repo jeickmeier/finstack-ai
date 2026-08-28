@@ -1277,6 +1277,8 @@ dependencies = [
  "finstack-ai-tools-document",
  "finstack-ai-tools-fetch",
  "finstack-ai-tools-skills",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
