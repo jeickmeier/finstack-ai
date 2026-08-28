@@ -1,6 +1,7 @@
 # Python learning notebooks
 
-Eleven notebooks that teach `finstack_ai.Agent` as the composition root.
+Eleven notebooks that teach `finstack_ai.Agent` as the composition root,
+plus the five-notebook **k-track** product narrative (see below).
 There is no Python `Harness` type. A harness is the recipe: pick a
 provider factory, attach trusted Python ports, run, and inspect events.
 
@@ -60,6 +61,33 @@ uv run jupyter notebook examples/python-notebooks
 
 T1 native providers and T2 Python callbacks run in-process. They are not
 isolated. See trust levels.
+
+## The k-track: the knowledge agent as a product
+
+Five narrative notebooks that tell the knowledge-agent story on this
+binding — the analyst path of the three-surface product defined in
+[`apps/finstack-knowledge/README.md`](../../apps/finstack-knowledge/README.md)
+(which also carries the cross-surface parity matrix). All five run
+offline and deterministically (scripted models); the shared composition
+lives in [`_knowledge.py`](_knowledge.py), whose docstring lists its
+honest divergences from the Rust definition.
+
+| Notebook | Story beat |
+| --- | --- |
+| [k01_knowledge_ingest.ipynb](k01_knowledge_ingest.ipynb) | Build the composition, ingest a document, ask, cite |
+| [k02_events_and_trace.ipynb](k02_events_and_trace.ipynb) | The `RunEventKind` stream every surface shares; `RunResult.trace` |
+| [k03_memory_across_sessions.ipynb](k03_memory_across_sessions.ipynb) | Remember in one session, recall in a fresh one, budget behavior |
+| [k04_provenance.ipynb](k04_provenance.ipynb) | Attribute one answer to memory, instructions, and the ingested doc |
+| [k05_cross_surface.ipynb](k05_cross_surface.ipynb) | Open a CLI-created sqlite session, continue it, hand it back |
+
+The golden-questions conformance test
+([test_knowledge_golden.py](test_knowledge_golden.py)) runs the shared
+fixture `apps/finstack-knowledge/fixtures/golden.json` against this
+composition:
+
+```bash
+uv run pytest examples/python-notebooks/test_knowledge_golden.py -q
+```
 
 ## Live cells
 
