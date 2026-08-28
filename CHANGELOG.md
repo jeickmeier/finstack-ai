@@ -145,6 +145,11 @@ unpublished.
 
 ### Changed
 
+- `ChildRunRequest` is now immutable and digest-bound at construction through
+  `try_new`; all callers use accessors and only the current digest schema is
+  accepted. Pre-beta shape normalization now lives in `finstack-ai-protocol`,
+  portable JSON Schema policy in `finstack-ai-runtime`, and session errors
+  expose a binding-neutral configuration/runtime category.
 - `finstack-ai-runtime` process confinement (`rustix`, Landlock, Seatbelt,
   job objects) is now behind the `confinement` feature, enabled by
   `native-tokio`. Contract-only leaves (`default-features = false`) no
@@ -247,6 +252,9 @@ unpublished.
 
 ### Removed
 
+- Removed the `McpToolsetFactory::reconstruct*` aliases and the public
+  `native_tokio_enabled` test probe. An isolated CI fixture now verifies the
+  `wasm-host`-only feature graph directly.
 - `finstack-ai-middleware-tool-policy`: public `RoleAllowlist`,
   `WriteBudget`, `JailbreakTriggers`, `ChildDepthGate`, their inspection
   accessors, and `ToolPolicyConfig::default`. Construct with
@@ -272,6 +280,18 @@ unpublished.
 
 ### Fixed
 
+- Remote-server authentication now rejects invalid local verifier/session
+  configuration at construction, enforces bearer and loopback transport policy
+  before custom verification, normalizes verifier failures at the connection
+  boundary, and masks cross-tenant session access while retaining scope-mismatch
+  audit evidence.
+- Remote child invocation now releases active capacity for terminal children,
+  retains bounded idempotency tombstones, reports observed lifecycle state, and
+  wakes all pending attachers if a detached start worker terminates.
+- OpenAI Responses stream assembly is consumed directly from the shared
+  provider-wire normalizer by OpenAI and OpenRouter. The stock workflow daemon
+  and OpenRouter error construction now propagate or normalize failures instead
+  of panicking.
 - Browser worker configuration now rejects unbounded or fractional queue
   values, ACKs release only the matching oldest batch, and every `u64` sequence
   conversion fails closed above JavaScript's exact integer range.

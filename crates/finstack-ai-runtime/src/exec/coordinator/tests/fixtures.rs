@@ -572,9 +572,9 @@ impl AgentInvoker for IdempotentChildInvoker {
         let relation_digest = child_relation_digest(&context, &request).expect("relation");
         let mut accepted = self.accepted.lock().expect("accepted");
         match accepted.get(&context.parent_effect_id) {
-            Some(existing) if *existing != request.request_digest => {
+            Some(existing) if *existing != request.request_digest() => {
                 let existing = *existing;
-                let submitted = request.request_digest;
+                let submitted = request.request_digest();
                 return Box::pin(async move {
                     Err(AgentInvokeError::Conflict {
                         existing,
@@ -584,11 +584,11 @@ impl AgentInvoker for IdempotentChildInvoker {
             }
             Some(_) => {}
             None => {
-                accepted.insert(context.parent_effect_id, request.request_digest);
+                accepted.insert(context.parent_effect_id, request.request_digest());
                 *self.physical_starts.lock().expect("starts") += 1;
             }
         }
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,

@@ -119,6 +119,7 @@ set -euo pipefail
 cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --features wasm-host
 cargo check -p finstack-ai --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host
+cargo run -p finstack-ai-wasm-host-feature-fixture --locked
 cargo check -p finstack-ai-model-port-leaf-fixture --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-toolset-port-leaf-fixture --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --locked

@@ -58,6 +58,7 @@ members = [
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
     "fixtures/ci/extension-port-leaf",
+    "fixtures/ci/wasm-host-feature",
     "plugins/finstack-ai-wit",
     "plugins/finstack-ai-plugin-host",
     "plugins/finstack-ai-guest-sdk",

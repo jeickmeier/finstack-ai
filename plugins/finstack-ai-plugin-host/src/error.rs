@@ -61,7 +61,7 @@ pub enum PluginHostError {
     #[error("plugin_registration_invalid: {0}")]
     ConfigInvalid(&'static str),
     /// The guest returned a `plugin-error`. Codes in the host-reserved
-    /// `plugin_` namespace are demoted under [`PLUGIN_GUEST_ERROR`] with the
+    /// `plugin_` namespace are demoted under `plugin_guest_error` with the
     /// original text kept in the message; other guest domain codes pass
     /// through verbatim, so a guest can never impersonate e.g.
     /// `plugin_signature_untrusted`.

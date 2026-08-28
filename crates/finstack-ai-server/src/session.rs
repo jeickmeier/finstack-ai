@@ -54,12 +54,26 @@ pub struct SessionReplica {
 }
 
 impl SessionReplica {
-    /// Create an empty replica.
-    #[must_use]
-    pub fn new(session_id: impl Into<String>, tenant_scope: impl Into<String>) -> Self {
-        Self {
-            session_id: session_id.into(),
-            tenant_scope: tenant_scope.into(),
+    /// Create an empty replica with validated identity and scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError::SessionInvalid`] when `session_id` or
+    /// `tenant_scope` is not a bounded semantic label.
+    pub fn try_new(
+        session_id: impl Into<String>,
+        tenant_scope: impl Into<String>,
+    ) -> Result<Self, ServerError> {
+        let session_id = session_id.into();
+        let tenant_scope = tenant_scope.into();
+        if !finstack_ai_kernel::label_is_valid(&session_id)
+            || !finstack_ai_kernel::label_is_valid(&tenant_scope)
+        {
+            return Err(ServerError::SessionInvalid);
+        }
+        Ok(Self {
+            session_id,
+            tenant_scope,
             durable: Vec::new(),
             live: Vec::new(),
             last_transient_sequence: None,
@@ -68,7 +82,7 @@ impl SessionReplica {
             phase: ReplicaPhase::Idle,
             receipts: HashMap::new(),
             receipt_cap: DEFAULT_RECEIPT_CAP,
-        }
+        })
     }
 
     /// Fail closed when a new command would exceed `cap` retained receipts.
@@ -159,7 +173,7 @@ impl SessionReplica {
             return Err(ServerError::UnknownLocator);
         }
         if auth.tenant_scope() != self.tenant_scope {
-            return Err(ServerError::UnknownLocator);
+            return Err(ServerError::ScopeMismatch);
         }
         let head = self.head_sequence();
         let last_known = last_known.unwrap_or(0);
@@ -381,7 +395,7 @@ mod tests {
     }
 
     fn auth() -> AuthContext {
-        AuthContext::new("tenant-a", "loopback")
+        AuthContext::try_new("tenant-a", "loopback").expect("valid auth context")
     }
 
     fn start_payload() -> RemoteCommandPayload {
@@ -449,8 +463,24 @@ mod tests {
     }
 
     #[test]
+    fn replica_rejects_empty_or_malformed_identity() {
+        for (session, tenant) in [
+            ("", "tenant-a"),
+            (SESSION_ID, ""),
+            ("session\0id", "tenant-a"),
+            (SESSION_ID, "tenant\0a"),
+        ] {
+            let error = SessionReplica::try_new(session, tenant).expect_err("invalid replica");
+            assert!(matches!(error, ServerError::SessionInvalid));
+            assert_eq!(error.code(), "session_invalid");
+        }
+    }
+
+    #[test]
     fn receipt_map_fails_closed_at_cap() {
-        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a").with_receipt_cap(1);
+        let mut replica = SessionReplica::try_new(SESSION_ID, "tenant-a")
+            .expect("valid session replica")
+            .with_receipt_cap(1);
         replica
             .apply_command(&auth(), &command("cmd-1", 0, start_payload()))
             .expect("first");
@@ -467,7 +497,8 @@ mod tests {
 
     #[test]
     fn receipt_conflict_is_constant_time_lookup() {
-        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
+        let mut replica =
+            SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica");
         replica
             .apply_command(&auth(), &command("cmd-1", 0, start_payload()))
             .expect("start");
@@ -484,7 +515,8 @@ mod tests {
 
     #[test]
     fn apply_command_honors_payload_transitions() {
-        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
+        let mut replica =
+            SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica");
         assert_eq!(replica.phase, ReplicaPhase::Idle);
         let start = replica
             .apply_command(&auth(), &command("c1", 0, start_payload()))
@@ -514,7 +546,8 @@ mod tests {
 
     #[test]
     fn cancel_from_idle_is_rejected() {
-        let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
+        let mut replica =
+            SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica");
         let result = replica
             .apply_command(&auth(), &command("c1", 0, cancel_payload()))
             .expect("receipt");

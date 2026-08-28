@@ -122,6 +122,15 @@ pub struct SessionHeadUpdate {
     pub projection: SessionProjection,
 }
 
+/// Binding-neutral class for session failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionErrorCategory {
+    /// Caller input or a requested session object is invalid.
+    Configuration,
+    /// Persistence, concurrency, security, or recovered state failed.
+    Runtime,
+}
+
 /// Session-writer failures that fail closed.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SessionError {
@@ -186,6 +195,28 @@ impl SessionError {
             Self::Identity(IdentityMapError::Conflict) => "identity_conflict",
             Self::Identity(IdentityMapError::InvalidKey { .. }) => "invalid_identity_key",
             Self::Conversation(_) => "conversation_invalid",
+        }
+    }
+
+    /// Binding-neutral error class.
+    #[must_use]
+    pub const fn category(&self) -> SessionErrorCategory {
+        match self {
+            Self::UnknownLane
+            | Self::UnknownEntry
+            | Self::InvalidLaneName
+            | Self::InvalidMessageText
+            | Self::DuplicateLaneName
+            | Self::Identity(IdentityMapError::InvalidKey { .. }) => {
+                SessionErrorCategory::Configuration
+            }
+            Self::Recover { .. }
+            | Self::Commit { .. }
+            | Self::LaneBusy
+            | Self::Poisoned
+            | Self::TenantScopeMismatch
+            | Self::Identity(IdentityMapError::Conflict)
+            | Self::Conversation(_) => SessionErrorCategory::Runtime,
         }
     }
 
@@ -1246,6 +1277,35 @@ mod tests {
             "duplicate_lane_name"
         );
         assert_eq!(SessionError::Poisoned.code(), "session_lock_poisoned");
+    }
+
+    #[test]
+    fn session_error_categories_preserve_configuration_and_runtime_failures() {
+        for error in [
+            SessionError::UnknownLane,
+            SessionError::UnknownEntry,
+            SessionError::InvalidLaneName,
+            SessionError::InvalidMessageText,
+            SessionError::DuplicateLaneName,
+            SessionError::Identity(IdentityMapError::InvalidKey { field: "channel" }),
+        ] {
+            assert_eq!(error.category(), SessionErrorCategory::Configuration);
+        }
+        for error in [
+            SessionError::Recover {
+                code: session_error_code("store_unavailable"),
+            },
+            SessionError::Commit {
+                code: session_error_code("store_conflict"),
+            },
+            SessionError::LaneBusy,
+            SessionError::Poisoned,
+            SessionError::TenantScopeMismatch,
+            SessionError::Identity(IdentityMapError::Conflict),
+            SessionError::Conversation(ConversationError::Cycle),
+        ] {
+            assert_eq!(error.category(), SessionErrorCategory::Runtime);
+        }
     }
 
     struct UnavailableStore;

@@ -12,9 +12,9 @@ use finstack_ai_kernel::ExternalEffectCompletionCommand;
 use finstack_ai_kernel::{AppendBatchTag, EffectTag, RecordTag, RunTag};
 use finstack_ai_kernel::{
     BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement, ChildRunLocator,
-    ChildRunPrepared, ContentBlock, DeadlinePropagation, Digest, EffectId, Metadata,
-    OperationLocator, PrincipalPropagation, RunAccepted, RunPropagationPolicy, RunRelation,
-    RunRelationKind, TextBlock, Timestamp,
+    ChildRunPrepared, ContentBlock, DeadlinePropagation, EffectId, Metadata, OperationLocator,
+    PrincipalPropagation, RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind,
+    TextBlock, Timestamp,
 };
 use finstack_ai_runtime::child::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext,
@@ -59,7 +59,7 @@ impl AgentInvoker for RecordingChildInvoker {
                 });
             }
         };
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,
@@ -841,24 +841,17 @@ pub(super) fn child_run_request(
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?,
     )]);
-    let mut child_request = ChildRunRequest {
+    ChildRunRequest::try_new(
         agent,
         input,
         placement,
         locator,
-        requested_deadline: None,
-        requested_budget: BudgetRequest::default(),
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    child_request.request_digest = child_request
-        .canonical_digest()
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-    child_request
-        .validate()
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-    Ok(child_request)
+        None,
+        BudgetRequest::default(),
+        None,
+        Metadata::empty(),
+    )
+    .map_err(|error| AgentRunError::runtime_message(error.to_string()))
 }
 
 pub(super) fn child_run_context(

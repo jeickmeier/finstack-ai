@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use finstack_ai_kernel::label_is_valid;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -63,42 +65,162 @@ pub struct ChildRunContext {
 /// Immutable child request paired with a precommitted locator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildRunRequest {
-    /// Exact locked agent.
-    pub agent: AgentRef,
-    /// Child input blocks.
-    pub input: Arc<[ContentBlock]>,
-    /// Selected placement.
-    pub placement: ChildPlacement,
-    /// Complete parent-prepared locator.
-    pub locator: ChildRunLocator,
-    /// Optional attenuated deadline.
-    pub requested_deadline: Option<Timestamp>,
-    /// Optional shared-budget request.
-    pub requested_budget: BudgetRequest,
-    /// Optional non-secret delegation reference.
-    pub delegation_id: Option<Arc<str>>,
-    /// Bounded non-authoritative metadata.
-    pub metadata: Metadata,
-    /// Canonical digest binding every normalized request field.
-    pub request_digest: Digest,
+    agent: AgentRef,
+    input: Arc<[ContentBlock]>,
+    placement: ChildPlacement,
+    locator: ChildRunLocator,
+    requested_deadline: Option<Timestamp>,
+    requested_budget: BudgetRequest,
+    delegation_id: Option<Arc<str>>,
+    metadata: Metadata,
+    request_digest: Digest,
 }
 
 impl ChildRunRequest {
+    /// Construct and validate a digest-bound child request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-request error when placement, budget, delegation, or
+    /// canonical digest construction fails.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the request digest binds these eight independent protocol fields"
+    )]
+    pub fn try_new(
+        agent: AgentRef,
+        input: Arc<[ContentBlock]>,
+        placement: ChildPlacement,
+        locator: ChildRunLocator,
+        requested_deadline: Option<Timestamp>,
+        requested_budget: BudgetRequest,
+        delegation_id: Option<Arc<str>>,
+        metadata: Metadata,
+    ) -> Result<Self, AgentInvokeError> {
+        Self::validate_fields(
+            placement,
+            &locator,
+            &requested_budget,
+            delegation_id.as_deref(),
+        )?;
+        let request_digest = Self::digest_fields(
+            &agent,
+            &input,
+            placement,
+            &locator,
+            requested_deadline,
+            &requested_budget,
+            delegation_id.as_ref(),
+            &metadata,
+        )?;
+        Ok(Self {
+            agent,
+            input,
+            placement,
+            locator,
+            requested_deadline,
+            requested_budget,
+            delegation_id,
+            metadata,
+            request_digest,
+        })
+    }
+
+    /// Borrow the exact locked agent.
+    #[must_use]
+    pub const fn agent(&self) -> &AgentRef {
+        &self.agent
+    }
+
+    /// Borrow the child input blocks without copying their shared storage.
+    #[must_use]
+    pub const fn input(&self) -> &Arc<[ContentBlock]> {
+        &self.input
+    }
+
+    /// Return the selected placement.
+    #[must_use]
+    pub const fn placement(&self) -> ChildPlacement {
+        self.placement
+    }
+
+    /// Borrow the complete parent-prepared locator.
+    #[must_use]
+    pub const fn locator(&self) -> &ChildRunLocator {
+        &self.locator
+    }
+
+    /// Return the optional attenuated deadline.
+    #[must_use]
+    pub const fn requested_deadline(&self) -> Option<Timestamp> {
+        self.requested_deadline
+    }
+
+    /// Borrow the optional shared-budget request.
+    #[must_use]
+    pub const fn requested_budget(&self) -> &BudgetRequest {
+        &self.requested_budget
+    }
+
+    /// Borrow the optional non-secret delegation reference.
+    #[must_use]
+    pub fn delegation_id(&self) -> Option<&str> {
+        self.delegation_id.as_deref()
+    }
+
+    /// Borrow the bounded non-authoritative metadata.
+    #[must_use]
+    pub const fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+
+    /// Return the canonical digest binding every normalized request field.
+    #[must_use]
+    pub const fn request_digest(&self) -> Digest {
+        self.request_digest
+    }
+
     /// Compute the current canonical digest binding every normalized field.
     ///
     /// # Errors
     ///
     /// Returns an invalid-request error if canonical serialization fails.
     pub fn canonical_digest(&self) -> Result<Digest, AgentInvokeError> {
-        let canonical = serde_json_canonicalizer::to_vec(&(
+        Self::digest_fields(
             &self.agent,
             &self.input,
             self.placement,
             &self.locator,
             self.requested_deadline,
             &self.requested_budget,
-            &self.delegation_id,
+            self.delegation_id.as_ref(),
             &self.metadata,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the digest schema intentionally binds all request fields"
+    )]
+    fn digest_fields(
+        agent: &AgentRef,
+        input: &[ContentBlock],
+        placement: ChildPlacement,
+        locator: &ChildRunLocator,
+        requested_deadline: Option<Timestamp>,
+        requested_budget: &BudgetRequest,
+        delegation_id: Option<&Arc<str>>,
+        metadata: &Metadata,
+    ) -> Result<Digest, AgentInvokeError> {
+        let canonical = serde_json_canonicalizer::to_vec(&(
+            agent,
+            input,
+            placement,
+            locator,
+            requested_deadline,
+            requested_budget,
+            delegation_id,
+            metadata,
         ))
         .map_err(|_| AgentInvokeError::InvalidRequest {
             message: Arc::from("child request is not canonically serializable"),
@@ -113,62 +235,46 @@ impl ChildRunRequest {
         })
     }
 
-    fn legacy_sdk_digest(&self) -> Result<Digest, AgentInvokeError> {
-        let canonical = serde_json_canonicalizer::to_vec(&(
-            &self.agent.id,
-            &self.agent.bundle,
-            &self.agent.spec_digest,
-            &self.input,
-            self.placement,
-            &self.locator,
-            self.locator.operation.tenant_scope.as_ref(),
-        ))
-        .map_err(|_| AgentInvokeError::InvalidRequest {
-            message: Arc::from("legacy child request is not canonically serializable"),
-        })?;
-        Digest::domain_separated(CHILD_RUN_REQUEST_DIGEST_DOMAIN, 1, &canonical).map_err(|_| {
-            AgentInvokeError::InvalidRequest {
-                message: Arc::from("legacy child request digest domain is invalid"),
-            }
-        })
+    fn validate_fields(
+        placement: ChildPlacement,
+        locator: &ChildRunLocator,
+        requested_budget: &BudgetRequest,
+        delegation_id: Option<&str>,
+    ) -> Result<(), AgentInvokeError> {
+        locator
+            .validate_for(placement)
+            .map_err(|error| AgentInvokeError::InvalidRequest {
+                message: Arc::from(error.to_string()),
+            })?;
+        requested_budget
+            .validate()
+            .map_err(|error| AgentInvokeError::InvalidRequest {
+                message: Arc::from(error.to_string()),
+            })?;
+        if delegation_id.is_some_and(|value| !label_is_valid(value)) {
+            return Err(AgentInvokeError::InvalidRequest {
+                message: Arc::from("invalid_delegation_id"),
+            });
+        }
+        Ok(())
     }
 
-    /// Validate intrinsic placement and budget bounds.
+    /// Validate placement, budget, delegation, and digest integrity.
     ///
     /// # Errors
     ///
     /// Returns a strict request error before calling an invoker.
     pub fn validate(&self) -> Result<(), AgentInvokeError> {
-        self.locator.validate_for(self.placement).map_err(|error| {
-            AgentInvokeError::InvalidRequest {
-                message: Arc::from(error.to_string()),
-            }
-        })?;
-        self.requested_budget
-            .validate()
-            .map_err(|error| AgentInvokeError::InvalidRequest {
-                message: Arc::from(error.to_string()),
-            })?;
-        if self
-            .delegation_id
-            .as_deref()
-            .is_some_and(|value| value.is_empty() || value.as_bytes().contains(&0))
-        {
+        Self::validate_fields(
+            self.placement,
+            &self.locator,
+            &self.requested_budget,
+            self.delegation_id.as_deref(),
+        )?;
+        if self.request_digest != self.canonical_digest()? {
             return Err(AgentInvokeError::InvalidRequest {
-                message: Arc::from("invalid_delegation_id"),
+                message: Arc::from("child request digest does not bind normalized request"),
             });
-        }
-        let current = self.canonical_digest()?;
-        if self.request_digest != current {
-            let legacy_fields_are_default = self.requested_deadline.is_none()
-                && self.requested_budget == BudgetRequest::default()
-                && self.delegation_id.is_none()
-                && self.metadata == Metadata::empty();
-            if !legacy_fields_are_default || self.request_digest != self.legacy_sdk_digest()? {
-                return Err(AgentInvokeError::InvalidRequest {
-                    message: Arc::from("child request digest does not bind normalized request"),
-                });
-            }
         }
         Ok(())
     }
@@ -361,5 +467,31 @@ mod tests {
                 .validate_for(ChildPlacement::IsolatedChildSession)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn child_request_rejects_oversized_delegation_id() {
+        let locator = ChildRunLocator {
+            operation: operation(),
+            remote: None,
+        };
+        let error = ChildRunRequest::try_new(
+            AgentRef {
+                id: crate::AgentId::parse("test.child").expect("agent"),
+                bundle: None,
+                spec_digest: Digest::raw_json(b"agent"),
+            },
+            Arc::<[ContentBlock]>::from([]),
+            ChildPlacement::CompatibleLaneInParentSession,
+            locator,
+            None,
+            BudgetRequest::default(),
+            Some(Arc::from(
+                "x".repeat(finstack_ai_kernel::LABEL_MAX_BYTES + 1),
+            )),
+            Metadata::empty(),
+        )
+        .expect_err("oversized delegation id");
+        assert!(error.to_string().contains("invalid_delegation_id"));
     }
 }

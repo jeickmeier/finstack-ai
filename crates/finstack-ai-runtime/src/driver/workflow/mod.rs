@@ -55,7 +55,7 @@ pub const EFFECT_NOT_OUTSTANDING: &str = "effect_not_outstanding";
 
 /// Parked workflow wait reconstructed from authoritative kernel state.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[expect(
+#[allow(
     clippy::large_enum_variant,
     reason = "Interaction carries the committed request envelope"
 )]
@@ -924,6 +924,10 @@ impl WorkflowSession {
         self.owner.is_some()
     }
 
+    #[allow(
+        clippy::arc_with_non_send_sync,
+        reason = "wasm-host ports are intentionally single-threaded while workflow models retain shared identity"
+    )]
     async fn spawn_owner(&mut self) -> Result<(), WorkflowDriverError> {
         let model = match self.model.as_ref() {
             Some(WorkflowModel::Ready(model)) => Arc::clone(model),

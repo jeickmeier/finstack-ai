@@ -84,10 +84,10 @@ impl ChildRunCoordinator {
         request.validate().map_err(CompositionError::Agent)?;
         validate_parent(commit, &context.parent)?;
         validate_child_placement(&context.parent, &request)?;
-        if request.placement == crate::ChildPlacement::CompatibleLaneInParentSession
+        if request.placement() == crate::ChildPlacement::CompatibleLaneInParentSession
             && commit
                 .session()
-                .lane_by_id(request.locator.operation.lane_id)
+                .lane_by_id(request.locator().operation.lane_id)
                 .is_none()
         {
             return Err(CompositionError::InvalidRequest {
@@ -99,9 +99,9 @@ impl ChildRunCoordinator {
             .session()
             .child_mapping(context.parent.run_id, context.parent_effect_id)
         {
-            if existing.child != request.locator
-                || existing.request_digest != request.request_digest
-                || existing.placement != request.placement
+            if &existing.child != request.locator()
+                || existing.request_digest != request.request_digest()
+                || existing.placement != request.placement()
             {
                 return Err(CompositionError::Commit(
                     CommitCoordinatorError::SidecarConflict,
@@ -115,9 +115,9 @@ impl ChildRunCoordinator {
         let prepared = ChildRunPrepared {
             parent_run_id: context.parent.run_id,
             parent_effect_id: context.parent_effect_id,
-            child: request.locator.clone(),
-            request_digest: request.request_digest,
-            placement: request.placement,
+            child: request.locator().clone(),
+            request_digest: request.request_digest(),
+            placement: request.placement(),
             budget_reservation_id: reservation.as_ref().map(|value| value.reservation_id),
         };
         prepared
@@ -164,7 +164,7 @@ impl ChildRunCoordinator {
             .start_or_attach(context, request.clone())
             .await
             .map_err(CompositionError::Agent)?;
-        if handle.locator != request.locator || handle.relation_digest != expected_relation {
+        if &handle.locator != request.locator() || handle.relation_digest != expected_relation {
             return Err(CompositionError::Agent(AgentInvokeError::InvalidRequest {
                 message: Arc::from("child acceptance does not match committed relation"),
             }));
@@ -381,8 +381,8 @@ pub fn child_relation_digest(
     let canonical = serde_json_canonicalizer::to_vec(&(
         &context.parent,
         context.parent_effect_id,
-        &request.locator,
-        request.request_digest,
+        request.locator(),
+        request.request_digest(),
     ))
     .map_err(|_| CompositionError::InvalidRequest {
         code: "child_relation_not_serializable",
@@ -417,7 +417,7 @@ fn validate_reservation_shape(
     reservation: Option<&BudgetReserveRequest>,
     ids: ChildCoordinationIds,
 ) -> Result<(), CompositionError> {
-    let budget_requested = child.requested_budget != BudgetRequest::default();
+    let budget_requested = child.requested_budget() != &BudgetRequest::default();
     if budget_requested != reservation.is_some()
         || reservation.is_some() != ids.reservation_request_record_id.is_some()
         || reservation.is_some() != ids.reservation_settlement.is_some()
@@ -432,8 +432,8 @@ fn validate_reservation_shape(
             .map_err(|_| CompositionError::InvalidRequest {
                 code: "budget_reserve_request_invalid",
             })?;
-        if request.run_id != child.locator.operation.run_id
-            || request.amount != child.requested_budget
+        if request.run_id != child.locator().operation.run_id
+            || &request.amount != child.requested_budget()
         {
             return Err(CompositionError::InvalidRequest {
                 code: "child_budget_request_mismatch",
@@ -447,10 +447,10 @@ fn validate_child_placement(
     parent: &OperationLocator,
     child: &ChildRunRequest,
 ) -> Result<(), CompositionError> {
-    let same_session = child.locator.operation.session_id == parent.session_id;
-    let valid = match child.placement {
+    let same_session = child.locator().operation.session_id == parent.session_id;
+    let valid = match child.placement() {
         crate::ChildPlacement::CompatibleLaneInParentSession => {
-            same_session && child.locator.operation.lane_id != parent.lane_id
+            same_session && child.locator().operation.lane_id != parent.lane_id
         }
         crate::ChildPlacement::IsolatedChildSession | crate::ChildPlacement::RemoteChildSession => {
             !same_session
@@ -477,9 +477,9 @@ fn ensure_prepared_for_invoke(
             code: "child_preparation_not_committed",
         })?;
     if prepared.parent_run_id != context.parent.run_id
-        || prepared.child != request.locator
-        || prepared.request_digest != request.request_digest
-        || prepared.placement != request.placement
+        || &prepared.child != request.locator()
+        || prepared.request_digest != request.request_digest()
+        || prepared.placement != request.placement()
     {
         return Err(CompositionError::Conflict {
             code: "child_preparation_conflict",

@@ -138,24 +138,23 @@ fn budget_charge_and_release_are_post_commit_and_idempotent() {
             decision_id: Arc::from("decision-v1"),
         },
     };
-    let mut child_request = ChildRunRequest {
-        agent: AgentRef {
+    let child_request = ChildRunRequest::try_new(
+        AgentRef {
             id: crate::AgentId::parse("finstack.agent.budget-child").expect("agent id"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"budget-child"}"#),
         },
-        input: Arc::from([ContentBlock::Text(
+        Arc::from([ContentBlock::Text(
             TextBlock::try_new("budgeted work").expect("text"),
         )]),
-        placement: ChildPlacement::CompatibleLaneInParentSession,
-        locator: child_locator,
-        requested_deadline: None,
-        requested_budget: budget,
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    child_request.request_digest = child_request.canonical_digest().expect("digest");
+        ChildPlacement::CompatibleLaneInParentSession,
+        child_locator,
+        None,
+        budget,
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request");
     block_on(child_coordinator.start_or_attach(
         &mut commit,
         child_context,

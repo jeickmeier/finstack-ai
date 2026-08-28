@@ -1,6 +1,6 @@
 //! Application-supplied authentication and transport restrictions.
 
-use finstack_ai_kernel::Digest;
+use finstack_ai_kernel::{Digest, label_is_valid};
 use finstack_ai_protocol::{PROTOCOL_VERSION_V1, RemoteAuthMethod};
 
 use crate::ServerError;
@@ -33,14 +33,26 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    /// Construct an authenticated context.
-    #[must_use]
-    pub fn new(tenant_scope: impl Into<String>, principal: impl Into<String>) -> Self {
-        Self {
-            tenant_scope: tenant_scope.into(),
-            principal: principal.into(),
-            protocol_version: PROTOCOL_VERSION_V1,
+    /// Construct a validated authenticated context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError::AuthenticationConfigurationInvalid`] when the
+    /// tenant scope or principal is not a bounded semantic label.
+    pub fn try_new(
+        tenant_scope: impl Into<String>,
+        principal: impl Into<String>,
+    ) -> Result<Self, ServerError> {
+        let tenant_scope = tenant_scope.into();
+        let principal = principal.into();
+        if !label_is_valid(&tenant_scope) || !label_is_valid(&principal) {
+            return Err(ServerError::AuthenticationConfigurationInvalid);
         }
+        Ok(Self {
+            tenant_scope,
+            principal,
+            protocol_version: PROTOCOL_VERSION_V1,
+        })
     }
 
     /// Authenticated tenant scope.
@@ -64,6 +76,10 @@ impl AuthContext {
     pub(crate) const fn with_protocol_version(mut self, protocol_version: u16) -> Self {
         self.protocol_version = protocol_version;
         self
+    }
+
+    pub(crate) fn is_valid(&self) -> bool {
+        label_is_valid(&self.tenant_scope) && label_is_valid(&self.principal)
     }
 }
 
@@ -94,18 +110,24 @@ pub struct StaticAuthVerifier {
 
 impl StaticAuthVerifier {
     /// Construct a verifier that accepts `bearer` on Unix/TLS.
-    #[must_use]
-    pub fn new(bearer: impl Into<String>, tenant_scope: impl Into<String>) -> Self {
-        Self {
-            bearer_digest: bearer_digest(bearer.into().as_bytes()),
-            tenant_scope: tenant_scope.into(),
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError::AuthenticationConfigurationInvalid`] when the
+    /// bearer is empty or `tenant_scope` is not a bounded semantic label.
+    pub fn try_new(
+        bearer: impl Into<String>,
+        tenant_scope: impl Into<String>,
+    ) -> Result<Self, ServerError> {
+        let bearer = bearer.into();
+        let tenant_scope = tenant_scope.into();
+        if bearer.is_empty() || !label_is_valid(&tenant_scope) {
+            return Err(ServerError::AuthenticationConfigurationInvalid);
         }
-    }
-}
-
-impl Default for StaticAuthVerifier {
-    fn default() -> Self {
-        Self::new("", "")
+        Ok(Self {
+            bearer_digest: bearer_digest(bearer.as_bytes()),
+            tenant_scope,
+        })
     }
 }
 
@@ -126,13 +148,15 @@ impl AuthVerifier for StaticAuthVerifier {
                 ) {
                     return Err(ServerError::AuthenticationFailure);
                 }
-                Ok(AuthContext::new(&self.tenant_scope, "bearer"))
+                AuthContext::try_new(&self.tenant_scope, "bearer")
+                    .map_err(|_| ServerError::AuthenticationFailure)
             }
             RemoteAuthMethod::Loopback => {
                 if transport != TransportKind::LoopbackPlaintext {
                     return Err(ServerError::AuthenticationFailure);
                 }
-                Ok(AuthContext::new(&self.tenant_scope, "loopback"))
+                AuthContext::try_new(&self.tenant_scope, "loopback")
+                    .map_err(|_| ServerError::AuthenticationFailure)
             }
         }
     }
@@ -152,13 +176,43 @@ fn constant_time_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthVerifier, StaticAuthVerifier, TransportKind};
+    use super::{AuthContext, AuthVerifier, StaticAuthVerifier, TransportKind};
     use crate::ServerError;
     use finstack_ai_protocol::RemoteAuthMethod;
 
     #[test]
+    fn auth_context_rejects_empty_or_malformed_identity() {
+        for (tenant, principal) in [
+            ("", "principal"),
+            ("tenant-a", ""),
+            ("tenant\0a", "principal"),
+            ("tenant-a", "principal\0label"),
+        ] {
+            let error = AuthContext::try_new(tenant, principal).expect_err("invalid identity");
+            assert!(matches!(
+                error,
+                ServerError::AuthenticationConfigurationInvalid
+            ));
+            assert_eq!(error.code(), "authentication_configuration_invalid");
+        }
+    }
+
+    #[test]
+    fn static_verifier_rejects_empty_credentials_or_scope() {
+        for (bearer, tenant) in [("", "tenant-a"), ("secret", ""), ("secret", "tenant\0a")] {
+            let error = StaticAuthVerifier::try_new(bearer, tenant).expect_err("invalid verifier");
+            assert!(matches!(
+                error,
+                ServerError::AuthenticationConfigurationInvalid
+            ));
+            assert_eq!(error.code(), "authentication_configuration_invalid");
+        }
+    }
+
+    #[test]
     fn bearer_digest_compare_accepts_exact_secret() {
-        let verifier = StaticAuthVerifier::new("secret", "tenant-a");
+        let verifier =
+            StaticAuthVerifier::try_new("secret", "tenant-a").expect("valid static verifier");
         let ctx = verifier
             .verify(
                 &RemoteAuthMethod::Bearer {
@@ -172,8 +226,9 @@ mod tests {
 
     #[test]
     fn bearer_digest_compare_rejects_prefix_and_wrong_length() {
-        let verifier = StaticAuthVerifier::new("secret", "tenant-a");
-        for token in ["secre", "secret-extra", "other"] {
+        let verifier =
+            StaticAuthVerifier::try_new("secret", "tenant-a").expect("valid static verifier");
+        for token in ["", "secre", "secret-extra", "other"] {
             let err = verifier
                 .verify(
                     &RemoteAuthMethod::Bearer {
@@ -184,5 +239,32 @@ mod tests {
                 .expect_err(token);
             assert!(matches!(err, ServerError::AuthenticationFailure), "{token}");
         }
+    }
+
+    #[test]
+    fn verifier_enforces_transport_specific_methods() {
+        let verifier =
+            StaticAuthVerifier::try_new("secret", "tenant-a").expect("valid static verifier");
+        assert!(matches!(
+            verifier.verify(&RemoteAuthMethod::Loopback, TransportKind::Unix),
+            Err(ServerError::AuthenticationFailure)
+        ));
+        assert!(matches!(
+            verifier.verify(
+                &RemoteAuthMethod::Bearer {
+                    token: "secret".into(),
+                },
+                TransportKind::LoopbackPlaintext,
+            ),
+            Err(ServerError::AuthenticationFailure)
+        ));
+        let context = verifier
+            .verify(
+                &RemoteAuthMethod::Loopback,
+                TransportKind::LoopbackPlaintext,
+            )
+            .expect("loopback");
+        assert_eq!(context.tenant_scope(), "tenant-a");
+        assert_eq!(context.principal(), "loopback");
     }
 }

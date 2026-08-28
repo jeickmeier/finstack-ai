@@ -225,7 +225,7 @@ pub mod session {
     };
     pub use crate::services::session::{
         LaneAppendIds, LaneCreateIds, LaneInspect, LaneRunContext, SessionCreateIds, SessionError,
-        SessionHeadUpdate, SessionRuntime,
+        SessionErrorCategory, SessionHeadUpdate, SessionRuntime,
     };
     pub use crate::services::session_inspect::{
         SessionInspectPhase, SessionInspectSnapshot, inspect_session,

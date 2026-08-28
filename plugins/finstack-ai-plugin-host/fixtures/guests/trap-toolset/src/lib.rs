@@ -1,6 +1,6 @@
 //! Test-only trap guest. `call` executes `unreachable`. Not a published SDK.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![warn(clippy::float_cmp)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
@@ -20,14 +20,17 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-wit_bindgen::generate!({
-    world: "toolset-plugin",
-    path: "../../../wit",
-    generate_all,
-});
+mod bindings {
+    #![allow(unsafe_code, reason = "generated WIT ABI bindings")]
 
-use exports::finstack::ai_toolset::toolset::{Guest, ToolCatalog, ToolResult, ToolSpec};
-use finstack::ai_types::types::{CallContext, PluginError};
+    wit_bindgen::generate!({
+        world: "toolset-plugin",
+        path: "../../../wit",
+        generate_all,
+    });
+}
+use bindings::exports::finstack::ai_toolset::toolset::{Guest, ToolCatalog, ToolResult, ToolSpec};
+use bindings::finstack::ai_types::types::{CallContext, PluginError};
 
 struct TrapToolset;
 
@@ -51,12 +54,22 @@ impl Guest for TrapToolset {
         Ok(ToolCatalog { digest, tools })
     }
 
-    fn call(_context: CallContext, _tool_id: String, _args_json: Vec<u8>) -> Result<ToolResult, PluginError> {
+    fn call(
+        _context: CallContext,
+        _tool_id: String,
+        _args_json: Vec<u8>,
+    ) -> Result<ToolResult, PluginError> {
         unreachable_trap();
     }
 }
 
-export!(TrapToolset);
+mod generated_export {
+    #![allow(unsafe_code, reason = "generated WIT ABI export")]
+
+    use super::{TrapToolset, bindings};
+
+    bindings::export!(TrapToolset with_types_in bindings);
+}
 
 fn unreachable_trap() -> ! {
     #[cfg(target_arch = "wasm32")]
@@ -91,8 +104,12 @@ fn catalog_digest(tools: &[ToolSpec]) -> Result<String, PluginError> {
                 .map_err(|_| plugin_error("plugin_registration_invalid", "tool JSON is invalid"))?,
         }));
     }
-    let encoded = serde_json::to_vec(&serde_json::json!({ "tools": items }))
-        .map_err(|_| plugin_error("plugin_registration_invalid", "catalog canonicalization failed"))?;
+    let encoded = serde_json::to_vec(&serde_json::json!({ "tools": items })).map_err(|_| {
+        plugin_error(
+            "plugin_registration_invalid",
+            "catalog canonicalization failed",
+        )
+    })?;
     let value: serde_json::Value = serde_json::from_slice(&encoded)
         .map_err(|_| plugin_error("plugin_registration_invalid", "catalog JSON is invalid"))?;
     let canonical = serde_json_canonicalizer::to_vec(&value)
@@ -106,10 +123,13 @@ fn catalog_digest(tools: &[ToolSpec]) -> Result<String, PluginError> {
     hasher.update(1_u32.to_be_bytes());
     hasher.update([0]);
     hasher.update(&canonical);
-    Ok(hasher.finalize().iter().fold(String::new(), |mut hex, byte| {
-        hex.push_str(&format!("{byte:02x}"));
-        hex
-    }))
+    Ok(hasher
+        .finalize()
+        .iter()
+        .fold(String::new(), |mut hex, byte| {
+            hex.push_str(&format!("{byte:02x}"));
+            hex
+        }))
 }
 
 fn plugin_error(code: &str, message: &str) -> PluginError {

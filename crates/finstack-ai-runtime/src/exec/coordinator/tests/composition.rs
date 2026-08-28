@@ -91,24 +91,23 @@ fn child_retry_reconciles_ambiguous_reservation_before_invoke() {
             decision_id: Arc::from("decision-v1"),
         },
     };
-    let mut request = ChildRunRequest {
-        agent: AgentRef {
+    let request = ChildRunRequest::try_new(
+        AgentRef {
             id: crate::AgentId::parse("finstack.agent.child").expect("agent id"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
         },
-        input: Arc::from([ContentBlock::Text(
+        Arc::from([ContentBlock::Text(
             TextBlock::try_new("do the work").expect("text"),
         )]),
-        placement: ChildPlacement::CompatibleLaneInParentSession,
-        locator: child_locator,
-        requested_deadline: Some(timestamp(5_000)),
-        requested_budget: budget,
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    request.request_digest = request.canonical_digest().expect("digest");
+        ChildPlacement::CompatibleLaneInParentSession,
+        child_locator,
+        Some(timestamp(5_000)),
+        budget,
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request");
     let ids = ChildCoordinationIds {
         preparation_batch_id: id(201),
         preparation_record_id: id(202),
@@ -167,9 +166,17 @@ fn child_retry_reconciles_ambiguous_reservation_before_invoke() {
         ]
     );
 
-    let mut conflicting = request;
-    conflicting.delegation_id = Some(Arc::from("different-delegation"));
-    conflicting.request_digest = conflicting.canonical_digest().expect("digest");
+    let conflicting = ChildRunRequest::try_new(
+        request.agent().clone(),
+        Arc::clone(request.input()),
+        request.placement(),
+        request.locator().clone(),
+        request.requested_deadline(),
+        request.requested_budget().clone(),
+        Some(Arc::from("different-delegation")),
+        request.metadata().clone(),
+    )
+    .expect("conflicting request");
     assert!(matches!(
         block_on(coordinator.start_or_attach(
             &mut commit,
@@ -286,22 +293,21 @@ fn every_child_placement_converges_and_rejects_conflicting_digest() {
                 decision_id: Arc::from("decision-v1"),
             },
         };
-        let mut request = ChildRunRequest {
-            agent: AgentRef {
+        let request = ChildRunRequest::try_new(
+            AgentRef {
                 id: crate::AgentId::parse("finstack.agent.placement").expect("agent id"),
                 bundle: None,
                 spec_digest: Digest::raw_json(br#"{"agent":"placement"}"#),
             },
-            input: Arc::from([]),
+            Arc::from([]),
             placement,
             locator,
-            requested_deadline: None,
-            requested_budget: BudgetRequest::default(),
-            delegation_id: None,
-            metadata: Metadata::empty(),
-            request_digest: Digest::raw_json(b"null"),
-        };
-        request.request_digest = request.canonical_digest().expect("digest");
+            None,
+            BudgetRequest::default(),
+            None,
+            Metadata::empty(),
+        )
+        .expect("valid child request");
         let ordinal = 500 + u64::try_from(index).expect("index") * 10;
         let ids = ChildCoordinationIds {
             preparation_batch_id: id(ordinal),
@@ -335,12 +341,20 @@ fn every_child_placement_converges_and_rejects_conflicting_digest() {
                 .child_preparations()
                 .get(&context.parent_effect_id)
                 .map(|prepared| &prepared.child),
-            Some(&request.locator)
+            Some(request.locator())
         );
 
-        let mut conflicting = request;
-        conflicting.delegation_id = Some(Arc::from("different-delegation"));
-        conflicting.request_digest = conflicting.canonical_digest().expect("digest");
+        let conflicting = ChildRunRequest::try_new(
+            request.agent().clone(),
+            Arc::clone(request.input()),
+            request.placement(),
+            request.locator().clone(),
+            request.requested_deadline(),
+            request.requested_budget().clone(),
+            Some(Arc::from("different-delegation")),
+            request.metadata().clone(),
+        )
+        .expect("conflicting request");
         assert!(matches!(
             block_on(coordinator.start_or_attach(
                 &mut commit,

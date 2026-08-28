@@ -1,5 +1,6 @@
 //! Reference server integration coverage.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,8 +21,8 @@ use finstack_ai_runtime::audit::{
 use finstack_ai_runtime::ports::PortFuture;
 
 use finstack_ai_server::{
-    CreditLimits, ListenAddr, RemoteClient, Server, ServerError, SessionReplica,
-    StaticAuthVerifier, TransportKind,
+    AuthContext, AuthVerifier, CreditLimits, ListenAddr, RemoteClient, Server, ServerError,
+    SessionReplica, StaticAuthVerifier, TransportKind,
 };
 
 const SESSION_ID: &str = "01234567-89ab-7cde-89ab-0123456789ab";
@@ -121,6 +122,15 @@ impl RecordingSink {
             .expect("events")
             .iter()
             .map(SecurityAuditEvent::category)
+            .collect()
+    }
+
+    fn reasons(&self) -> Vec<String> {
+        self.events
+            .lock()
+            .expect("events")
+            .iter()
+            .map(|event| event.reason_code().to_owned())
             .collect()
     }
 
@@ -225,7 +235,7 @@ fn live_event(sequence: u64) -> RemoteEventView {
 async fn ready_server(sink: RecordingSink) -> Server {
     Server::bind(
         ListenAddr::loopback(0),
-        Arc::new(StaticAuthVerifier::new("secret", "tenant-a")),
+        Arc::new(StaticAuthVerifier::try_new("secret", "tenant-a").expect("valid static verifier")),
         Some(Arc::new(sink)),
         Duration::from_millis(100),
     )
@@ -233,11 +243,151 @@ async fn ready_server(sink: RecordingSink) -> Server {
     .expect("bind")
 }
 
+struct PermissiveVerifier {
+    called: Arc<AtomicBool>,
+}
+
+impl AuthVerifier for PermissiveVerifier {
+    fn verify(
+        &self,
+        _method: &RemoteAuthMethod,
+        _transport: TransportKind,
+    ) -> Result<AuthContext, ServerError> {
+        self.called.store(true, Ordering::Release);
+        AuthContext::try_new("tenant-a", "permissive")
+    }
+}
+
+struct ConfigurationErrorVerifier;
+
+impl AuthVerifier for ConfigurationErrorVerifier {
+    fn verify(
+        &self,
+        _method: &RemoteAuthMethod,
+        _transport: TransportKind,
+    ) -> Result<AuthContext, ServerError> {
+        Err(ServerError::AuthenticationConfigurationInvalid)
+    }
+}
+
+#[tokio::test]
+async fn empty_bearer_is_rejected_before_custom_verification() {
+    let called = Arc::new(AtomicBool::new(false));
+    let server = Server::bind(
+        ListenAddr::loopback(0),
+        Arc::new(PermissiveVerifier {
+            called: Arc::clone(&called),
+        }),
+        Some(Arc::new(RecordingSink::ready())),
+        Duration::from_millis(100),
+    )
+    .await
+    .expect("bind");
+    let (client_end, server_end) = tokio::io::duplex(16 * 1024);
+    let serve = tokio::spawn(async move { server.serve(server_end, TransportKind::Unix).await });
+    let mut client = RemoteClient::new(client_end);
+    let error = client
+        .reconnect(
+            &offer(),
+            RemoteAuthMethod::Bearer {
+                token: String::new(),
+            },
+            locator(SESSION_ID),
+            "tenant-a",
+            None,
+        )
+        .await
+        .expect_err("empty bearer");
+    assert!(matches!(error, ServerError::AuthenticationFailure));
+    assert!(!called.load(Ordering::Acquire));
+    assert!(matches!(
+        serve.await.expect("serve task"),
+        Err(ServerError::AuthenticationFailure)
+    ));
+}
+
+#[tokio::test]
+async fn loopback_auth_is_rejected_before_custom_verification_on_non_loopback_transports() {
+    for transport in [TransportKind::Unix, TransportKind::Tls] {
+        let called = Arc::new(AtomicBool::new(false));
+        let server = Server::bind(
+            ListenAddr::loopback(0),
+            Arc::new(PermissiveVerifier {
+                called: Arc::clone(&called),
+            }),
+            Some(Arc::new(RecordingSink::ready())),
+            Duration::from_millis(100),
+        )
+        .await
+        .expect("bind");
+        let (client_end, server_end) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(async move { server.serve(server_end, transport).await });
+        let mut client = RemoteClient::new(client_end);
+        let error = client
+            .reconnect(
+                &offer(),
+                RemoteAuthMethod::Loopback,
+                locator(SESSION_ID),
+                "tenant-a",
+                None,
+            )
+            .await
+            .expect_err("loopback over non-loopback transport");
+        assert!(matches!(error, ServerError::AuthenticationFailure));
+        assert!(!called.load(Ordering::Acquire));
+        assert!(matches!(
+            serve.await.expect("serve task"),
+            Err(ServerError::AuthenticationFailure)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn verifier_configuration_errors_are_normalized_at_the_connection_boundary() {
+    let sink = RecordingSink::ready();
+    let server = Server::bind(
+        ListenAddr::loopback(0),
+        Arc::new(ConfigurationErrorVerifier),
+        Some(Arc::new(sink.clone())),
+        Duration::from_millis(100),
+    )
+    .await
+    .expect("bind");
+    let (client_end, server_end) = tokio::io::duplex(16 * 1024);
+    let serve = tokio::spawn(async move { server.serve(server_end, TransportKind::Unix).await });
+    let mut client = RemoteClient::new(client_end);
+    let error = client
+        .reconnect(
+            &offer(),
+            RemoteAuthMethod::Bearer {
+                token: "secret".into(),
+            },
+            locator(SESSION_ID),
+            "tenant-a",
+            None,
+        )
+        .await
+        .expect_err("verifier failure");
+    assert!(matches!(error, ServerError::AuthenticationFailure));
+    assert!(
+        sink.reasons()
+            .iter()
+            .any(|reason| reason == "authentication_failure")
+    );
+    assert!(
+        !sink
+            .reasons()
+            .iter()
+            .any(|reason| reason == "authentication_configuration_invalid")
+    );
+    serve.abort();
+}
+
 #[tokio::test]
 async fn unhealthy_sink_is_not_ready() {
     let err = Server::bind(
         ListenAddr::loopback(0),
-        Arc::new(StaticAuthVerifier::new("secret", "tenant-a")),
+        Arc::new(StaticAuthVerifier::try_new("secret", "tenant-a").expect("valid static verifier")),
         Some(Arc::new(RecordingSink::unhealthy())),
         Duration::from_millis(50),
     )
@@ -250,7 +400,7 @@ async fn unhealthy_sink_is_not_ready() {
 async fn missing_sink_is_not_ready() {
     let err = Server::bind(
         ListenAddr::loopback(0),
-        Arc::new(StaticAuthVerifier::new("secret", "tenant-a")),
+        Arc::new(StaticAuthVerifier::try_new("secret", "tenant-a").expect("valid static verifier")),
         None,
         Duration::from_millis(50),
     )
@@ -262,7 +412,8 @@ async fn missing_sink_is_not_ready() {
 #[tokio::test]
 async fn reconnect_snapshot_tail_barrier_then_live() {
     let server = ready_server(RecordingSink::ready()).await;
-    let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
+    let mut replica =
+        SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica");
     replica.append_durable(durable(1, "run_accepted"));
     replica.append_durable(durable(2, "run_completed"));
     server.hub().insert(replica);
@@ -297,7 +448,8 @@ async fn reconnect_snapshot_tail_barrier_then_live() {
 
 #[tokio::test]
 async fn live_event_before_barrier_fails_replica() {
-    let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
+    let mut replica =
+        SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica");
     let err = replica.queue_live(live_event(1)).expect_err("early live");
     assert!(matches!(err, ServerError::LiveBeforeBarrier));
     replica.release_barrier();
@@ -309,7 +461,7 @@ async fn unknown_version_fails_before_session() {
     let server = ready_server(RecordingSink::ready()).await;
     server
         .hub()
-        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica"));
     let (client_end, server_end) = tokio::io::duplex(16 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -341,7 +493,7 @@ async fn bearer_over_plaintext_is_rejected_and_audited() {
     let server = ready_server(sink.clone()).await;
     server
         .hub()
-        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica"));
     let (client_end, server_end) = tokio::io::duplex(16 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -405,12 +557,55 @@ async fn unknown_locator_does_not_reveal_existence() {
 }
 
 #[tokio::test]
+async fn cross_tenant_session_is_masked_and_audited_as_scope_mismatch() {
+    let sink = RecordingSink::ready();
+    let server = ready_server(sink.clone()).await;
+    server
+        .hub()
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-b").expect("valid session replica"));
+    let (client_end, server_end) = tokio::io::duplex(16 * 1024);
+    let serve = tokio::spawn(async move {
+        server
+            .serve(server_end, TransportKind::LoopbackPlaintext)
+            .await
+    });
+    let mut client = RemoteClient::new(client_end);
+    let error = client
+        .reconnect(
+            &offer(),
+            RemoteAuthMethod::Loopback,
+            locator(SESSION_ID),
+            "tenant-a",
+            None,
+        )
+        .await
+        .expect_err("cross-tenant session");
+    assert!(
+        matches!(error, ServerError::UnknownLocator | ServerError::Io(_)),
+        "{error:?}"
+    );
+    assert!(matches!(
+        serve.await.expect("serve task"),
+        Err(ServerError::UnknownLocator)
+    ));
+    assert!(
+        sink.categories()
+            .contains(&SecurityAuditCategory::ScopeMismatch)
+    );
+    assert!(
+        sink.reasons()
+            .iter()
+            .any(|reason| reason == "scope_mismatch")
+    );
+}
+
+#[tokio::test]
 async fn second_writer_is_busy_without_confirming_session() {
     let sink = RecordingSink::ready();
     let server = Arc::new(ready_server(sink.clone()).await);
     server
         .hub()
-        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica"));
     let (first_client, first_server) = tokio::io::duplex(16 * 1024);
     let serve_first = tokio::spawn({
         let server = Arc::clone(&server);
@@ -465,7 +660,7 @@ async fn command_idempotency_replays_and_conflicts() {
     let server = ready_server(RecordingSink::ready()).await;
     server
         .hub()
-        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica"));
     let (client_end, server_end) = tokio::io::duplex(32 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -517,7 +712,7 @@ async fn command_start_then_cancel_accepts() {
     let server = ready_server(RecordingSink::ready()).await;
     server
         .hub()
-        .insert(SessionReplica::new(SESSION_ID, "tenant-a"));
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica"));
     let (client_end, server_end) = tokio::io::duplex(32 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -561,9 +756,11 @@ async fn command_start_then_cancel_accepts() {
 #[tokio::test]
 async fn receipt_cap_fails_closed_on_new_command() {
     let server = ready_server(RecordingSink::ready()).await;
-    server
-        .hub()
-        .insert(SessionReplica::new(SESSION_ID, "tenant-a").with_receipt_cap(1));
+    server.hub().insert(
+        SessionReplica::try_new(SESSION_ID, "tenant-a")
+            .expect("valid session replica")
+            .with_receipt_cap(1),
+    );
     let (client_end, server_end) = tokio::io::duplex(32 * 1024);
     let serve = tokio::spawn(async move {
         server
@@ -614,7 +811,8 @@ async fn slow_client_disconnects_and_keeps_terminal() {
         bytes: 64,
         ack_deadline: Duration::from_millis(20),
     });
-    let mut replica = SessionReplica::new(SESSION_ID, "tenant-a");
+    let mut replica =
+        SessionReplica::try_new(SESSION_ID, "tenant-a").expect("valid session replica");
     replica.append_durable(durable(1, "run_completed"));
     server.hub().insert(replica);
     let (client_end, server_end) = tokio::io::duplex(16 * 1024);

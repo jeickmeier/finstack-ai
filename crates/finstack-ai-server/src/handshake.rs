@@ -86,36 +86,76 @@ where
                     .await?;
                     return Err(ServerError::AuthenticationFailure);
                 }
-                match auth.verify(&method, transport) {
-                    Ok(ctx) => {
-                        write_pre_auth(
-                            stream,
-                            &RemotePreAuth::AuthResult {
-                                accepted: true,
-                                reason_code: None,
-                            },
-                        )
-                        .await?;
-                        return Ok(ctx.with_protocol_version(selected));
-                    }
-                    Err(err) => {
-                        audit_only(
-                            audit,
-                            SecurityAuditCategory::AuthenticationFailure,
-                            err.code(),
-                            None,
-                        )
-                        .await?;
-                        write_pre_auth(
-                            stream,
-                            &RemotePreAuth::AuthResult {
-                                accepted: false,
-                                reason_code: Some(err.code().into()),
-                            },
-                        )
-                        .await?;
-                    }
+                if matches!(method, RemoteAuthMethod::Loopback)
+                    && transport != TransportKind::LoopbackPlaintext
+                {
+                    audit_only(
+                        audit,
+                        SecurityAuditCategory::AuthenticationFailure,
+                        "loopback_over_non_loopback_transport",
+                        None,
+                    )
+                    .await?;
+                    write_pre_auth(
+                        stream,
+                        &RemotePreAuth::AuthResult {
+                            accepted: false,
+                            reason_code: Some("authentication_failure".into()),
+                        },
+                    )
+                    .await?;
+                    return Err(ServerError::AuthenticationFailure);
                 }
+                if matches!(&method, RemoteAuthMethod::Bearer { token } if token.is_empty()) {
+                    audit_only(
+                        audit,
+                        SecurityAuditCategory::AuthenticationFailure,
+                        "empty_bearer",
+                        None,
+                    )
+                    .await?;
+                    write_pre_auth(
+                        stream,
+                        &RemotePreAuth::AuthResult {
+                            accepted: false,
+                            reason_code: Some("authentication_failure".into()),
+                        },
+                    )
+                    .await?;
+                    return Err(ServerError::AuthenticationFailure);
+                }
+                if let Ok(ctx) = auth.verify(&method, transport).and_then(|ctx| {
+                    if ctx.is_valid() {
+                        Ok(ctx)
+                    } else {
+                        Err(ServerError::AuthenticationFailure)
+                    }
+                }) {
+                    write_pre_auth(
+                        stream,
+                        &RemotePreAuth::AuthResult {
+                            accepted: true,
+                            reason_code: None,
+                        },
+                    )
+                    .await?;
+                    return Ok(ctx.with_protocol_version(selected));
+                }
+                audit_only(
+                    audit,
+                    SecurityAuditCategory::AuthenticationFailure,
+                    "authentication_failure",
+                    None,
+                )
+                .await?;
+                write_pre_auth(
+                    stream,
+                    &RemotePreAuth::AuthResult {
+                        accepted: false,
+                        reason_code: Some("authentication_failure".into()),
+                    },
+                )
+                .await?;
             }
             RemotePreAuth::Close { .. } => return Err(ServerError::AuthenticationFailure),
             _ => {

@@ -8,8 +8,8 @@ use finstack_ai_codex_child::{
     codex_agent_ref, codex_route_ref,
 };
 use finstack_ai_kernel::{
-    BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, Digest, EffectId, LaneId,
-    Metadata, OperationLocator, PrincipalRef, RunId, SessionId, TextBlock,
+    BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, EffectId, LaneId, Metadata,
+    OperationLocator, PrincipalRef, RunId, SessionId, TextBlock,
 };
 use finstack_ai_runtime::child::{
     AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunRequest,
@@ -71,19 +71,17 @@ fn request_for(prompt: &str, placement: ChildPlacement) -> ChildRunRequest {
     let input: Arc<[ContentBlock]> = Arc::from([ContentBlock::Text(
         TextBlock::try_new(prompt).expect("text"),
     )]);
-    let mut request = ChildRunRequest {
-        agent: codex_agent_ref().expect("agent"),
+    ChildRunRequest::try_new(
+        codex_agent_ref().expect("agent"),
         input,
         placement,
         locator,
-        requested_deadline: None,
-        requested_budget: BudgetRequest::default(),
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    request.request_digest = request.canonical_digest().expect("digest");
-    request
+        None,
+        BudgetRequest::default(),
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request")
 }
 
 fn codex_request(prompt: &str) -> ChildRunRequest {
@@ -114,7 +112,7 @@ async fn success_run_completes_with_message_and_usage() {
     let dir = tempfile::tempdir().expect("tempdir");
     let invoker = fake_invoker("success", dir.path());
     let request = codex_request("fix the failing test");
-    let run_id = request.locator.operation.run_id;
+    let run_id = request.locator().operation.run_id;
     let handle = invoker
         .start_or_attach(child_context(), request)
         .await
@@ -133,7 +131,7 @@ async fn failing_run_reports_failed() {
     let dir = tempfile::tempdir().expect("tempdir");
     let invoker = fake_invoker("fail", dir.path());
     let request = codex_request("do the impossible");
-    let run_id = request.locator.operation.run_id;
+    let run_id = request.locator().operation.run_id;
     invoker
         .start_or_attach(child_context(), request)
         .await
@@ -150,7 +148,7 @@ async fn failing_run_surfaces_the_stderr_tail() {
     let dir = tempfile::tempdir().expect("tempdir");
     let invoker = fake_invoker("fail-noisy", dir.path());
     let request = codex_request("do the impossible loudly");
-    let run_id = request.locator.operation.run_id;
+    let run_id = request.locator().operation.run_id;
     invoker
         .start_or_attach(child_context(), request)
         .await
@@ -169,7 +167,7 @@ async fn flag_shaped_prompt_is_passed_after_the_separator() {
     let dir = tempfile::tempdir().expect("tempdir");
     let invoker = fake_invoker("success", dir.path());
     let request = codex_request("--dangerously-bypass-approvals-and-sandbox");
-    let run_id = request.locator.operation.run_id;
+    let run_id = request.locator().operation.run_id;
     invoker
         .start_or_attach(child_context(), request)
         .await
@@ -194,11 +192,7 @@ async fn equal_digest_attaches_and_different_digest_conflicts() {
         .expect("attached");
     assert_eq!(first, second);
 
-    let mut altered = request;
-    altered.input = Arc::from([ContentBlock::Text(
-        TextBlock::try_new("task two").expect("text"),
-    )]);
-    altered.request_digest = altered.canonical_digest().expect("digest");
+    let altered = codex_request("task two");
     let error = invoker
         .start_or_attach(child_context(), altered)
         .await
@@ -226,7 +220,7 @@ async fn concurrent_equal_requests_accept_one_run() {
     let dir = tempfile::tempdir().expect("tempdir");
     let invoker = Arc::new(fake_invoker("hang", dir.path()));
     let request = codex_request("race me");
-    let run_id = request.locator.operation.run_id;
+    let run_id = request.locator().operation.run_id;
     let mut tasks = Vec::new();
     for _ in 0..4 {
         let invoker = Arc::clone(&invoker);
@@ -260,7 +254,7 @@ async fn cancel_kills_a_hanging_run() {
     let dir = tempfile::tempdir().expect("tempdir");
     let invoker = fake_invoker("hang", dir.path());
     let request = codex_request("never finish");
-    let run_id = request.locator.operation.run_id;
+    let run_id = request.locator().operation.run_id;
     let handle = invoker
         .start_or_attach(child_context(), request)
         .await
@@ -276,7 +270,7 @@ async fn cancel_of_unknown_locator_fails_closed() {
     let invoker = fake_invoker("success", dir.path());
     let request = codex_request("never started");
     let error = invoker
-        .cancel(&request.locator)
+        .cancel(request.locator())
         .await
         .expect_err("unaccepted");
     assert!(matches!(error, AgentInvokeError::Unavailable { .. }));

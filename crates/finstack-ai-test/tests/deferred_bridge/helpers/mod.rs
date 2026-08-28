@@ -213,9 +213,9 @@ impl AgentInvoker for RecordingInvoker {
             }
         };
         if let Ok(mut children) = self.children.lock() {
-            children.insert(request.locator.operation.run_id, child);
+            children.insert(request.locator().operation.run_id, child);
         }
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,
@@ -406,17 +406,17 @@ pub(crate) async fn isolated_child_request(
     let lane = session.lane("main").await.expect("child lane");
     let run_id = finstack_ai_kernel::RunId::parse("01234567-89ab-7cde-89ab-0123456789ad")
         .expect("child run");
-    let mut request = ChildRunRequest {
-        agent: AgentRef {
+    ChildRunRequest::try_new(
+        AgentRef {
             id: AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
         },
-        input: Arc::from([ContentBlock::Text(
+        Arc::from([ContentBlock::Text(
             TextBlock::try_new("work").expect("text"),
         )]),
-        placement: ChildPlacement::IsolatedChildSession,
-        locator: ChildRunLocator {
+        ChildPlacement::IsolatedChildSession,
+        ChildRunLocator {
             operation: OperationLocator::try_new(
                 parent.locator().tenant_scope.as_ref(),
                 session.session_id(),
@@ -426,14 +426,12 @@ pub(crate) async fn isolated_child_request(
             .expect("child locator"),
             remote: None,
         },
-        requested_deadline: None,
-        requested_budget: BudgetRequest::default(),
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    request.request_digest = request.canonical_digest().expect("child request digest");
-    request
+        None,
+        BudgetRequest::default(),
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request")
 }
 
 pub(crate) fn failed_command(

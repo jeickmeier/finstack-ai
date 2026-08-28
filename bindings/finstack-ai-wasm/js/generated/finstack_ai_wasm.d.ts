@@ -891,9 +891,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_5856: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_5870: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_744: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_5894: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5908: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_740: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_provider_wire::{OpenAiResponsesAssembly, StreamNormError, StreamNormKind};
 use finstack_ai_runtime::ports::model::{
     Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
     ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
@@ -20,9 +21,9 @@ use crate::config::estimator_ref;
 use crate::error::{
     CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR, error,
 };
+use crate::error::{incomplete_error, response_error, stream_error, stream_limit_error};
 use crate::request::{ResponsesRequest, serialize_request};
 use crate::sse::SseParser;
-use crate::stream::CompletionAssembly;
 use crate::{OpenAiConfig, OpenAiModelConfig};
 
 const STREAM_CHANNEL_CAPACITY: usize = 32;
@@ -346,7 +347,7 @@ async fn drive_response(
 ) {
     let mut body = response.bytes_stream();
     let mut parser = SseParser::new(max_event_bytes, max_stream_bytes);
-    let mut assembly = CompletionAssembly::new(request_id, structured);
+    let mut assembly = OpenAiResponsesAssembly::new(request_id, structured);
     loop {
         let chunk = tokio::select! {
             () = cancellation.cancelled() => {
@@ -385,7 +386,10 @@ async fn drive_response(
             }
         };
         for event in events {
-            match assembly.consume(&event.data) {
+            match assembly
+                .consume(&event.data)
+                .map_err(|error| map_norm(&error))
+            {
                 Ok(items) => {
                     let mut completed = false;
                     for item in items {
@@ -404,6 +408,15 @@ async fn drive_response(
                 }
             }
         }
+    }
+}
+
+fn map_norm(error: &StreamNormError) -> ModelError {
+    match error.kind {
+        StreamNormKind::Limit => stream_limit_error(),
+        StreamNormKind::Stream => stream_error(error.message),
+        StreamNormKind::Response => response_error(error.message),
+        StreamNormKind::Incomplete => incomplete_error(),
     }
 }
 

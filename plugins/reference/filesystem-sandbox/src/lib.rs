@@ -1,6 +1,6 @@
 //! Read-only filesystem sandbox fixture. Not the trusted native filesystem battery.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![warn(clippy::float_cmp)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
@@ -20,22 +20,25 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-finstack_ai_guest_sdk::wit_bindgen::generate!({
-    world: "filesystem-sandbox",
-    path: "wit",
-    generate_all,
-    runtime_path: "finstack_ai_guest_sdk::wit_bindgen::rt",
-});
+mod bindings {
+    #![allow(unsafe_code, reason = "generated WIT and WASI ABI bindings")]
 
-use exports::finstack::ai_toolset::toolset::{Guest, ToolCatalog, ToolResult, ToolSpec};
-use finstack::ai_types::types::{CallContext, PluginError};
+    finstack_ai_guest_sdk::wit_bindgen::generate!({
+        world: "filesystem-sandbox",
+        path: "wit",
+        generate_all,
+        runtime_path: "finstack_ai_guest_sdk::wit_bindgen::rt",
+    });
+}
+use bindings::exports::finstack::ai_toolset::toolset::{Guest, ToolCatalog, ToolResult, ToolSpec};
+use bindings::finstack::ai_types::types::{CallContext, PluginError};
+use bindings::wasi::filesystem::preopens;
+use bindings::wasi::filesystem::types::{Descriptor, DescriptorFlags, OpenFlags, PathFlags};
 use finstack_ai_guest_sdk::{
     ToolSpecParts, catalog_digest, encode_json_result, parse_args, plugin_error,
     require_sanitized_context,
 };
 use serde::Deserialize;
-use wasi::filesystem::preopens;
-use wasi::filesystem::types::{DescriptorFlags, OpenFlags, PathFlags};
 
 const LIST_ID: &str = "finstack.plugin.filesystem.list";
 const READ_ID: &str = "finstack.plugin.filesystem.read";
@@ -71,7 +74,13 @@ impl Guest for FilesystemSandbox {
     }
 }
 
-export!(FilesystemSandbox);
+mod generated_export {
+    #![allow(unsafe_code, reason = "generated WIT ABI export")]
+
+    use super::{FilesystemSandbox, bindings};
+
+    bindings::export!(FilesystemSandbox with_types_in bindings);
+}
 
 #[derive(Deserialize)]
 struct PathArgs {
@@ -131,7 +140,7 @@ fn read_file(path: &str) -> Result<ToolResult, PluginError> {
 fn open_at(
     path: &str,
     directory: bool,
-) -> Result<wasi::filesystem::types::Descriptor, PluginError> {
+) -> Result<Descriptor, PluginError> {
     let dirs = preopens::get_directories();
     let Some((root, _)) = dirs.into_iter().next() else {
         return Err(map_err(plugin_error(

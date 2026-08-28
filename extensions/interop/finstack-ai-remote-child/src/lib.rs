@@ -47,7 +47,9 @@ mod tests {
         RemotePreAuth, VersionOffer, decode_envelope, decode_frame_len, encode_envelope,
         encode_frame,
     };
-    use finstack_ai_runtime::child::{AgentInvoker, ChildRunContext, ChildRunRequest};
+    use finstack_ai_runtime::child::{
+        AgentInvoker, ChildRunContext, ChildRunRequest, ChildRunStatus,
+    };
     use finstack_ai_runtime::ports::model::AuthorizationContext;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -81,7 +83,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_or_attach_is_idempotent_and_cancel_is_not_a_noop() {
+    async fn start_attach_and_concurrent_cancel_are_idempotent() {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let endpoint = listener.local_addr().expect("addr").to_string();
         let server = tokio::spawn(async move {
@@ -109,7 +111,29 @@ mod tests {
             .await
             .expect("attach");
         assert_eq!(first, second);
-        invoker.cancel(&request.locator).await.expect("cancel");
+        assert_eq!(
+            invoker.status(request.locator()).await.expect("status"),
+            ChildRunStatus::Accepted
+        );
+        let (first_cancel, second_cancel) = tokio::join!(
+            invoker.cancel(request.locator()),
+            invoker.cancel(request.locator())
+        );
+        first_cancel.expect("first cancel");
+        second_cancel.expect("second cancel");
+        assert_eq!(
+            invoker.status(request.locator()).await.expect("status"),
+            ChildRunStatus::Cancelled
+        );
+        let after_cancel = invoker
+            .start_or_attach(child_context(), request.clone())
+            .await
+            .expect("attach after cancel");
+        assert_eq!(after_cancel, first);
+        invoker
+            .cancel(request.locator())
+            .await
+            .expect("repeat cancel");
         server.await.expect("server");
     }
 
@@ -122,8 +146,9 @@ mod tests {
             token: None,
         })
         .expect("invoker");
+        let request = child_request();
         let error = invoker
-            .cancel(&child_request().locator)
+            .cancel(request.locator())
             .await
             .expect_err("never accepted");
         assert!(error.to_string().contains("never accepted"));
@@ -220,19 +245,17 @@ mod tests {
         let input = Arc::from([ContentBlock::Text(
             TextBlock::try_new("hello").expect("text"),
         )]);
-        let mut request = ChildRunRequest {
+        ChildRunRequest::try_new(
             agent,
             input,
-            placement: ChildPlacement::RemoteChildSession,
+            ChildPlacement::RemoteChildSession,
             locator,
-            requested_deadline: None,
-            requested_budget: BudgetRequest::default(),
-            delegation_id: None,
-            metadata: Metadata::empty(),
-            request_digest: Digest::raw_json(b"null"),
-        };
-        request.request_digest = request.canonical_digest().expect("digest");
-        request
+            None,
+            BudgetRequest::default(),
+            None,
+            Metadata::empty(),
+        )
+        .expect("valid child request")
     }
 
     fn child_context() -> ChildRunContext {

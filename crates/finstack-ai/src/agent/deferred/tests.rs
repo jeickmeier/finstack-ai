@@ -138,7 +138,7 @@ impl AgentInvoker for RecordingInvoker {
                 });
             }
         };
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,
@@ -303,25 +303,23 @@ async fn isolated_child_request(
         .expect("child locator"),
         remote: None,
     };
-    let mut request = ChildRunRequest {
-        agent: AgentRef {
+    ChildRunRequest::try_new(
+        AgentRef {
             id: AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
         },
-        input: Arc::from([ContentBlock::Text(
+        Arc::from([ContentBlock::Text(
             TextBlock::try_new("work").expect("text"),
         )]),
-        placement: ChildPlacement::IsolatedChildSession,
+        ChildPlacement::IsolatedChildSession,
         locator,
-        requested_deadline: None,
-        requested_budget: BudgetRequest::default(),
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    request.request_digest = request.canonical_digest().expect("digest");
-    request
+        None,
+        BudgetRequest::default(),
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request")
 }
 
 #[tokio::test]

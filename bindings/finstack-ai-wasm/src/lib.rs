@@ -156,7 +156,7 @@ pub fn journal_known_answer(kind: &str, encoded: &str) -> Result<String, JsValue
 /// Returns a TypeError-equivalent when `kind` is unsupported or `value` is invalid.
 #[wasm_bindgen(js_name = normalizePrebetaShape)]
 pub fn normalize_prebeta_shape(kind: &str, encoded: &str) -> Result<String, JsValue> {
-    prebeta::normalize_prebeta_shape(kind, encoded)
+    finstack_ai_protocol::normalize_prebeta_shape(kind, encoded)
         .map_err(|error| js_sys::TypeError::new(error.reason()).into())
 }
 
@@ -757,142 +757,12 @@ fn compile_native_port_adapters() {
 
 #[cfg(test)]
 mod tests {
-    use std::future::Future;
-    use std::task::{Context, Poll, Waker};
-
-    use finstack_ai::{
-        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec,
-        LinkedCommon, LinkedProviderSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
-    };
 
     use super::{health, parse_document_markdown};
-
-    fn ready<T>(future: impl Future<Output = T>) -> T {
-        let mut future = std::pin::pin!(future);
-        match future
-            .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-        {
-            Poll::Ready(value) => value,
-            Poll::Pending => panic!("expected a ready wasm-host constructor error"),
-        }
-    }
 
     #[test]
     fn wasm_bindgen_health_matches_rust_token() {
         assert_eq!(health(), "ok");
-    }
-
-    #[test]
-    fn linked_constructors_are_fail_closed_on_wasm_host() {
-        // `finstack-ai-wasm` depends on the `finstack-ai` facade with
-        // `default-features = false, features = ["wasm-host"]` (see this
-        // crate's `Cargo.toml`), and on that build the facade's linked
-        // constructors dispatch to a fail-closed `wasm-host`-only stub
-        // (`AGENT_RUN_UNSUPPORTED_PLAN`) rather than the real native
-        // providers (`crates/finstack-ai/src/agent/linked.rs`,
-        // `#[cfg(all(feature = "wasm-host", not(feature =
-        // "native-tokio")))]`).
-        //
-        // Cargo unifies features per package-per-target across an entire
-        // build, not per dependency edge. `cargo test --workspace` also
-        // builds several other members (`finstack-ai-provider-anthropic`,
-        // `finstack-ai-tools-mcp`, `finstack-ai-test`, `finstack-ai-wit`,
-        // `finstack-ai-plugin-host`, `examples/rust-minimal`, ...) that
-        // depend on `finstack-ai/native-tokio`, for the same host target
-        // this crate's tests build for. That unions `native-tokio` onto
-        // the single `finstack-ai` unit used everywhere in that build,
-        // including here, so the linked constructors resolve to the real
-        // native providers instead of the stub — expected Cargo behavior,
-        // not a wiring mistake in any one member's Cargo.toml. It cannot
-        // be detected here with a plain `#[cfg(feature = "native-tokio")]`
-        // — this crate never declares that feature itself, so such a cfg
-        // would be permanently dead code, not a reflection of what got
-        // unified into its `finstack-ai` dependency. It also never
-        // happens for an actual `wasm32-unknown-unknown` build (`mise run
-        // build-wasm`), where `finstack-ai-wasm` is compiled alone and
-        // nothing pulls in `native-tokio`.
-        //
-        // `finstack_ai::native_tokio_enabled()` reports the facade's own,
-        // post-unification `native-tokio` feature state (it's `cfg!` runs
-        // inside that crate, where the real value is visible), so this
-        // test uses it to skip the fail-closed assertions only when they
-        // do not apply — keeping the assertions themselves exercised by
-        // `cargo test -p finstack-ai-wasm --lib` and real wasm-target
-        // builds, which are the configurations where the fail-closed
-        // behavior is actually load-bearing.
-        if finstack_ai::native_tokio_enabled() {
-            return;
-        }
-        let openai = ready(Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-unused".into(),
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon::default(),
-        })))
-        .err()
-        .expect("openai");
-        let openrouter = ready(Agent::linked(LinkedProviderSpec::OpenRouter(
-            OpenRouterAgentSpec {
-                model: "fixture-model".into(),
-                api_key: "sk-unused".into(),
-                referer: None,
-                title: None,
-                reasoning_effort: None,
-                reasoning_summary: None,
-                media_tools: false,
-                common: LinkedCommon::default(),
-            },
-        )))
-        .err()
-        .expect("openrouter");
-        let anthropic = ready(Agent::linked(LinkedProviderSpec::Anthropic(
-            AnthropicAgentSpec {
-                base_url: "https://api.anthropic.com".into(),
-                model: "fixture-model".into(),
-                api_key: None,
-                common: LinkedCommon::default(),
-            },
-        )))
-        .err()
-        .expect("anthropic");
-        let gemini = ready(Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
-            endpoint: "https://generativelanguage.googleapis.com".into(),
-            model: "fixture-model".into(),
-            api_key: None,
-            common: LinkedCommon::default(),
-        })))
-        .err()
-        .expect("gemini");
-        let ollama = ready(Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
-            base_url: "http://127.0.0.1:11434".into(),
-            model: "fixture-model".into(),
-            common: LinkedCommon::default(),
-        })))
-        .err()
-        .expect("ollama");
-        let gateway = ready(Agent::linked(LinkedProviderSpec::Gateway(
-            GatewayAgentSpec {
-                endpoint: "https://api.example.test/v1/responses".into(),
-                model: "fixture-model".into(),
-                wire_protocol: "openai_responses".into(),
-                credential_name: "prod".into(),
-                hard_input_bytes: Some(1_000_000),
-                auth_kind: Some("bearer".into()),
-                api_key: Some("sk-unused".into()),
-                common: LinkedCommon::default(),
-            },
-        )))
-        .err()
-        .expect("gateway");
-        assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);
-        assert_eq!(openrouter.code(), AGENT_RUN_UNSUPPORTED_PLAN);
-        assert_eq!(anthropic.code(), AGENT_RUN_UNSUPPORTED_PLAN);
-        assert_eq!(gemini.code(), AGENT_RUN_UNSUPPORTED_PLAN);
-        assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
-        assert_eq!(gateway.code(), AGENT_RUN_UNSUPPORTED_PLAN);
     }
 
     const SAMPLE_CSV: &[u8] = b"quarter,revenue\nQ1,1250\nQ2,1310\n";

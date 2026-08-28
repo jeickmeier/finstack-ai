@@ -414,18 +414,6 @@ impl McpToolsetFactory {
         McpToolset::connect(transport, self.config.clone(), self.list_changed.clone()).await
     }
 
-    /// Build a new frozen catalog from a fresh `tools/list`.
-    ///
-    /// In-flight agents keep the previous lock. The new toolset is a new
-    /// composition snapshot.
-    ///
-    /// # Errors
-    ///
-    /// Fails when construction would fail.
-    pub async fn reconstruct(&self) -> Result<McpToolset, McpError> {
-        self.construct().await
-    }
-
     /// Enumerate `resources/list` once and freeze the context-provider snapshot.
     ///
     /// Mid-run list changes are ignored. The provider never sets
@@ -438,15 +426,6 @@ impl McpToolsetFactory {
     pub async fn construct_context_provider(&self) -> Result<McpContextProvider, McpError> {
         let transport = self.open_transport()?;
         McpContextProvider::connect(transport, &self.config, self.list_changed.clone()).await
-    }
-
-    /// Build a new frozen resource snapshot from a fresh `resources/list`.
-    ///
-    /// # Errors
-    ///
-    /// Fails when construction would fail.
-    pub async fn reconstruct_context_provider(&self) -> Result<McpContextProvider, McpError> {
-        self.construct_context_provider().await
     }
 
     /// Enumerate tools and resources on one shared transport.

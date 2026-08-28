@@ -86,8 +86,6 @@ pub async fn finstack_ai_tools_mcp::McpToolsetFactory::construct(&self) -> core:
 pub async fn finstack_ai_tools_mcp::McpToolsetFactory::construct_context_provider(&self) -> core::result::Result<finstack_ai_tools_mcp::McpContextProvider, finstack_ai_tools_mcp::McpError>
 pub async fn finstack_ai_tools_mcp::McpToolsetFactory::construct_with_context(&self) -> core::result::Result<(finstack_ai_tools_mcp::McpToolset, finstack_ai_tools_mcp::McpContextProvider), finstack_ai_tools_mcp::McpError>
 pub const fn finstack_ai_tools_mcp::McpToolsetFactory::new(finstack_ai_tools_mcp::McpConfig) -> Self
-pub async fn finstack_ai_tools_mcp::McpToolsetFactory::reconstruct(&self) -> core::result::Result<finstack_ai_tools_mcp::McpToolset, finstack_ai_tools_mcp::McpError>
-pub async fn finstack_ai_tools_mcp::McpToolsetFactory::reconstruct_context_provider(&self) -> core::result::Result<finstack_ai_tools_mcp::McpContextProvider, finstack_ai_tools_mcp::McpError>
 pub fn finstack_ai_tools_mcp::McpToolsetFactory::with_list_changed_observer(self, alloc::sync::Arc<dyn finstack_ai_tools_mcp::McpListChangedObserver>) -> Self
 impl core::clone::Clone for finstack_ai_tools_mcp::McpToolsetFactory
 pub fn finstack_ai_tools_mcp::McpToolsetFactory::clone(&self) -> finstack_ai_tools_mcp::McpToolsetFactory

@@ -3,29 +3,10 @@
 use finstack_ai_kernel::{
     ChildRunPrepared, ExternalEffectCompletionCommand, InteractionResolutionCommand,
 };
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-
-/// Supported pre-beta command kinds.
-pub const CHILD_RUN_PREPARED: &str = "child_run_prepared";
-/// Interaction-resolution command kind.
-pub const INTERACTION_RESOLUTION: &str = "interaction_resolution";
-/// Authenticated external-effect completion kind.
-pub const EXTERNAL_EFFECT_COMPLETION: &str = "external_effect_completion";
-
-/// Normalize one pre-beta lineage or authenticated external-command shape.
-///
-/// # Errors
-///
-/// Returns a stable reason when `kind` is unsupported or `value` fails DTO validation.
-pub fn normalize_prebeta_shape(kind: &str, encoded: &str) -> Result<String, PrebetaError> {
-    match kind {
-        CHILD_RUN_PREPARED => normalize_shape::<ChildRunPrepared>(encoded),
-        INTERACTION_RESOLUTION => normalize_shape::<InteractionResolutionCommand>(encoded),
-        EXTERNAL_EFFECT_COMPLETION => normalize_shape::<ExternalEffectCompletionCommand>(encoded),
-        _ => Err(PrebetaError::UnsupportedKind),
-    }
-}
+use finstack_ai_protocol::{
+    CHILD_RUN_PREPARED, EXTERNAL_EFFECT_COMPLETION, INTERACTION_RESOLUTION, PrebetaError,
+    normalize_prebeta_shape,
+};
 
 /// Apply one already-normalized command and return a semantic identity trace.
 ///
@@ -72,34 +53,6 @@ pub fn apply_prebeta_command(kind: &str, encoded: &str) -> Result<serde_json::Va
         }
         _ => Err(PrebetaError::UnsupportedKind),
     }
-}
-
-/// Stable pre-beta normalization failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrebetaError {
-    /// Unknown kind string.
-    UnsupportedKind,
-    /// JSON failed Rust DTO validation.
-    InvalidShape,
-}
-
-impl PrebetaError {
-    /// Stable reason suitable for a TypeError-equivalent.
-    #[must_use]
-    pub const fn reason(self) -> &'static str {
-        match self {
-            Self::UnsupportedKind => "unsupported pre-beta shape",
-            Self::InvalidShape => "invalid pre-beta shape",
-        }
-    }
-}
-
-fn normalize_shape<T>(encoded: &str) -> Result<String, PrebetaError>
-where
-    T: DeserializeOwned + Serialize,
-{
-    let value: T = serde_json::from_str(encoded).map_err(|_| PrebetaError::InvalidShape)?;
-    serde_json::to_string(&value).map_err(|_| PrebetaError::InvalidShape)
 }
 
 #[cfg(test)]

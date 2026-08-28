@@ -110,18 +110,16 @@ impl ChildRunStarter {
                 .map_or(allocated, |existing| existing.child.clone())
         };
 
-        let mut prepared = ChildRunRequest {
-            agent: request.agent,
-            input: request.input,
-            placement: request.placement,
+        let prepared = ChildRunRequest::try_new(
+            request.agent,
+            request.input,
+            request.placement,
             locator,
-            requested_deadline: request.requested_deadline,
-            requested_budget: request.requested_budget,
-            delegation_id: request.delegation_id,
-            metadata: request.metadata,
-            request_digest: finstack_ai_kernel::Digest::raw_json(b"null"),
-        };
-        prepared.request_digest = prepared.canonical_digest()?;
+            request.requested_deadline,
+            request.requested_budget,
+            request.delegation_id,
+            request.metadata,
+        )?;
         let context = ChildRunContext {
             parent: ctx.run.locator.clone(),
             parent_effect_id: ctx.run.effect_id,

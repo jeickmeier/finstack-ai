@@ -54,7 +54,7 @@ impl AgentInvoker for RecordingInvoker {
                 });
             }
         };
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,

@@ -209,25 +209,3 @@ pub use finstack_ai_runtime::spec::{
     CapabilityActivation, CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec,
     RunPolicy,
 };
-
-/// Whether this build of the facade has the `native-tokio` feature
-/// compiled in.
-///
-/// A `wasm-host`-only consumer (`default-features = false, features =
-/// ["wasm-host"]`, e.g. `finstack-ai-wasm`) cannot see this by writing its
-/// own `#[cfg(feature = "native-tokio")]` — Cargo features are resolved
-/// per dependency edge, and that consumer never declares or requests
-/// `native-tokio` itself. But `cargo test --workspace` (and any other
-/// build that also compiles a sibling depending on
-/// `finstack-ai/native-tokio`, such as
-/// `finstack-ai-provider-anthropic`) unifies features onto the single
-/// `finstack-ai` unit built for that target, so this crate's *own*
-/// `native-tokio` feature can end up enabled even for a `wasm-host`-only
-/// consumer. Exposing the outcome here — where `cfg!` sees this crate's
-/// real, post-unification feature set — lets such consumers write tests
-/// that stay correct in both configurations rather than assuming
-/// `wasm-host` alone determines which constructor bodies were compiled.
-#[must_use]
-pub const fn native_tokio_enabled() -> bool {
-    cfg!(feature = "native-tokio")
-}

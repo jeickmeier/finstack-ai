@@ -517,17 +517,18 @@ pub fn finstack_ai_runtime::child::ChildRunHandle::serialize<__S>(&self, __S) ->
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_runtime::child::ChildRunHandle
 pub fn finstack_ai_runtime::child::ChildRunHandle::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_runtime::child::ChildRunRequest
-pub finstack_ai_runtime::child::ChildRunRequest::agent: finstack_ai_runtime::child::AgentRef
-pub finstack_ai_runtime::child::ChildRunRequest::delegation_id: core::option::Option<alloc::sync::Arc<str>>
-pub finstack_ai_runtime::child::ChildRunRequest::input: alloc::sync::Arc<[finstack_ai_kernel::content::content_block::ContentBlock]>
-pub finstack_ai_runtime::child::ChildRunRequest::locator: finstack_ai_kernel::records::run::child::ChildRunLocator
-pub finstack_ai_runtime::child::ChildRunRequest::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
-pub finstack_ai_runtime::child::ChildRunRequest::placement: finstack_ai_kernel::records::run::child::ChildPlacement
-pub finstack_ai_runtime::child::ChildRunRequest::request_digest: finstack_ai_kernel::primitives::digest::Digest
-pub finstack_ai_runtime::child::ChildRunRequest::requested_budget: finstack_ai_kernel::records::policy::budget::BudgetRequest
-pub finstack_ai_runtime::child::ChildRunRequest::requested_deadline: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
 impl finstack_ai_runtime::child::ChildRunRequest
+pub const fn finstack_ai_runtime::child::ChildRunRequest::agent(&self) -> &finstack_ai_runtime::child::AgentRef
 pub fn finstack_ai_runtime::child::ChildRunRequest::canonical_digest(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_runtime::child::AgentInvokeError>
+pub fn finstack_ai_runtime::child::ChildRunRequest::delegation_id(&self) -> core::option::Option<&str>
+pub const fn finstack_ai_runtime::child::ChildRunRequest::input(&self) -> &alloc::sync::Arc<[finstack_ai_kernel::content::content_block::ContentBlock]>
+pub const fn finstack_ai_runtime::child::ChildRunRequest::locator(&self) -> &finstack_ai_kernel::records::run::child::ChildRunLocator
+pub const fn finstack_ai_runtime::child::ChildRunRequest::metadata(&self) -> &finstack_ai_kernel::primitives::raw_json::Metadata
+pub const fn finstack_ai_runtime::child::ChildRunRequest::placement(&self) -> finstack_ai_kernel::records::run::child::ChildPlacement
+pub const fn finstack_ai_runtime::child::ChildRunRequest::request_digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+pub const fn finstack_ai_runtime::child::ChildRunRequest::requested_budget(&self) -> &finstack_ai_kernel::records::policy::budget::BudgetRequest
+pub const fn finstack_ai_runtime::child::ChildRunRequest::requested_deadline(&self) -> core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub fn finstack_ai_runtime::child::ChildRunRequest::try_new(finstack_ai_runtime::child::AgentRef, alloc::sync::Arc<[finstack_ai_kernel::content::content_block::ContentBlock]>, finstack_ai_kernel::records::run::child::ChildPlacement, finstack_ai_kernel::records::run::child::ChildRunLocator, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>, finstack_ai_kernel::records::policy::budget::BudgetRequest, core::option::Option<alloc::sync::Arc<str>>, finstack_ai_kernel::primitives::raw_json::Metadata) -> core::result::Result<Self, finstack_ai_runtime::child::AgentInvokeError>
 pub fn finstack_ai_runtime::child::ChildRunRequest::validate(&self) -> core::result::Result<(), finstack_ai_runtime::child::AgentInvokeError>
 impl core::clone::Clone for finstack_ai_runtime::child::ChildRunRequest
 pub fn finstack_ai_runtime::child::ChildRunRequest::clone(&self) -> finstack_ai_runtime::child::ChildRunRequest
@@ -2900,6 +2901,21 @@ impl core::fmt::Debug for finstack_ai_runtime::ports::tool::ApprovalState
 pub fn finstack_ai_runtime::ports::tool::ApprovalState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_runtime::ports::tool::ApprovalState
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::tool::ApprovalState
+pub enum finstack_ai_runtime::ports::tool::PortableSchemaKind
+pub finstack_ai_runtime::ports::tool::PortableSchemaKind::StructuredOutput
+pub finstack_ai_runtime::ports::tool::PortableSchemaKind::ToolInput
+pub finstack_ai_runtime::ports::tool::PortableSchemaKind::ToolOutput
+impl finstack_ai_runtime::ports::tool::PortableSchemaKind
+pub const fn finstack_ai_runtime::ports::tool::PortableSchemaKind::as_str(self) -> &'static str
+impl core::clone::Clone for finstack_ai_runtime::ports::tool::PortableSchemaKind
+pub fn finstack_ai_runtime::ports::tool::PortableSchemaKind::clone(&self) -> finstack_ai_runtime::ports::tool::PortableSchemaKind
+impl core::cmp::Eq for finstack_ai_runtime::ports::tool::PortableSchemaKind
+impl core::cmp::PartialEq for finstack_ai_runtime::ports::tool::PortableSchemaKind
+pub fn finstack_ai_runtime::ports::tool::PortableSchemaKind::eq(&self, &finstack_ai_runtime::ports::tool::PortableSchemaKind) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::ports::tool::PortableSchemaKind
+pub fn finstack_ai_runtime::ports::tool::PortableSchemaKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::ports::tool::PortableSchemaKind
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::tool::PortableSchemaKind
 pub enum finstack_ai_runtime::ports::tool::ToolCatalogPlan
 pub finstack_ai_runtime::ports::tool::ToolCatalogPlan::Ready(finstack_ai_kernel::records::tools::ToolCallPlan)
 pub finstack_ai_runtime::ports::tool::ToolCatalogPlan::RequireApproval
@@ -3039,6 +3055,18 @@ pub fn finstack_ai_runtime::ports::tool::PendingToolEffect::eq(&self, &finstack_
 impl core::fmt::Debug for finstack_ai_runtime::ports::tool::PendingToolEffect
 pub fn finstack_ai_runtime::ports::tool::PendingToolEffect::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::tool::PendingToolEffect
+pub struct finstack_ai_runtime::ports::tool::PortableSchemaError
+impl core::clone::Clone for finstack_ai_runtime::ports::tool::PortableSchemaError
+pub fn finstack_ai_runtime::ports::tool::PortableSchemaError::clone(&self) -> finstack_ai_runtime::ports::tool::PortableSchemaError
+impl core::cmp::Eq for finstack_ai_runtime::ports::tool::PortableSchemaError
+impl core::cmp::PartialEq for finstack_ai_runtime::ports::tool::PortableSchemaError
+pub fn finstack_ai_runtime::ports::tool::PortableSchemaError::eq(&self, &finstack_ai_runtime::ports::tool::PortableSchemaError) -> bool
+impl core::error::Error for finstack_ai_runtime::ports::tool::PortableSchemaError
+impl core::fmt::Debug for finstack_ai_runtime::ports::tool::PortableSchemaError
+pub fn finstack_ai_runtime::ports::tool::PortableSchemaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_runtime::ports::tool::PortableSchemaError
+pub fn finstack_ai_runtime::ports::tool::PortableSchemaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::ports::tool::PortableSchemaError
 pub struct finstack_ai_runtime::ports::tool::ResolvedTool
 pub finstack_ai_runtime::ports::tool::ResolvedTool::component: core::option::Option<finstack_ai_kernel::effects::kinds::ComponentInvocation>
 pub finstack_ai_runtime::ports::tool::ResolvedTool::input_validator: alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::ToolValidator>
@@ -3230,6 +3258,7 @@ pub fn finstack_ai_runtime::ports::tool::Toolset::reconcile(&self, finstack_ai_r
 pub fn finstack_ai_runtime::ports::tool::Toolset::reconstruct(&self) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::Toolset>>, finstack_ai_runtime::ports::tool::ToolError>>
 pub fn finstack_ai_runtime::ports::tool::Toolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::ToolSpec]>
 pub fn finstack_ai_runtime::ports::tool::map_tool_reconcile_result(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId, &finstack_ai_runtime::ports::tool::ToolReconcileResult, bool) -> finstack_ai_runtime::ports::tool::ToolResumeAction
+pub fn finstack_ai_runtime::ports::tool::normalize_portable_schema(serde_json::value::Value, finstack_ai_runtime::ports::tool::PortableSchemaKind) -> core::result::Result<serde_json::value::Value, finstack_ai_runtime::ports::tool::PortableSchemaError>
 pub fn finstack_ai_runtime::ports::tool::normalize_tool_result(finstack_ai_kernel::primitives::ids::ToolCallId, finstack_ai_runtime::ports::tool::ToolResult) -> core::result::Result<finstack_ai_kernel::content::tool::ToolResultBlock, finstack_ai_runtime::ports::tool::ToolError>
 pub fn finstack_ai_runtime::ports::tool::tool_resume_action(&finstack_ai_kernel::state::KernelState, finstack_ai_kernel::primitives::ids::EffectId) -> finstack_ai_runtime::ports::tool::ToolResumeAction
 pub fn finstack_ai_runtime::ports::tool::tool_retry_allowed(&finstack_ai_kernel::effects::lifecycle::EffectRequested, &finstack_ai_runtime::ports::model::ToolSpec) -> bool
@@ -3272,6 +3301,7 @@ pub finstack_ai_runtime::session::SessionError::TenantScopeMismatch
 pub finstack_ai_runtime::session::SessionError::UnknownEntry
 pub finstack_ai_runtime::session::SessionError::UnknownLane
 impl finstack_ai_runtime::session::SessionError
+pub const fn finstack_ai_runtime::session::SessionError::category(&self) -> finstack_ai_runtime::session::SessionErrorCategory
 pub fn finstack_ai_runtime::session::SessionError::code(&self) -> &str
 impl core::clone::Clone for finstack_ai_runtime::session::SessionError
 pub fn finstack_ai_runtime::session::SessionError::clone(&self) -> finstack_ai_runtime::session::SessionError
@@ -3284,6 +3314,18 @@ pub fn finstack_ai_runtime::session::SessionError::fmt(&self, &mut core::fmt::Fo
 impl core::fmt::Display for finstack_ai_runtime::session::SessionError
 pub fn finstack_ai_runtime::session::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::session::SessionError
+pub enum finstack_ai_runtime::session::SessionErrorCategory
+pub finstack_ai_runtime::session::SessionErrorCategory::Configuration
+pub finstack_ai_runtime::session::SessionErrorCategory::Runtime
+impl core::clone::Clone for finstack_ai_runtime::session::SessionErrorCategory
+pub fn finstack_ai_runtime::session::SessionErrorCategory::clone(&self) -> finstack_ai_runtime::session::SessionErrorCategory
+impl core::cmp::Eq for finstack_ai_runtime::session::SessionErrorCategory
+impl core::cmp::PartialEq for finstack_ai_runtime::session::SessionErrorCategory
+pub fn finstack_ai_runtime::session::SessionErrorCategory::eq(&self, &finstack_ai_runtime::session::SessionErrorCategory) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::session::SessionErrorCategory
+pub fn finstack_ai_runtime::session::SessionErrorCategory::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::session::SessionErrorCategory
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::session::SessionErrorCategory
 pub enum finstack_ai_runtime::session::SessionInspectPhase
 pub finstack_ai_runtime::session::SessionInspectPhase::Cancelled
 pub finstack_ai_runtime::session::SessionInspectPhase::Completed

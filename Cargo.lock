@@ -2005,6 +2005,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-wasm-host-feature-fixture"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai",
+]
+
+[[package]]
 name = "finstack-ai-wit"
 version = "2.0.0"
 dependencies = [

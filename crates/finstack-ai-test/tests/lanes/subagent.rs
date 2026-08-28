@@ -50,7 +50,7 @@ impl AgentInvoker for ParentStartInvoker {
                 message: Arc::from("parent run is not attached"),
             })?;
             let input = request
-                .input
+                .input()
                 .iter()
                 .find_map(|block| match block {
                     ContentBlock::Text(text) => Some(text.text().to_string()),
@@ -60,9 +60,9 @@ impl AgentInvoker for ParentStartInvoker {
             let prepared = ChildRunPrepared {
                 parent_run_id: context.parent.run_id,
                 parent_effect_id: context.parent_effect_id,
-                child: request.locator.clone(),
-                request_digest: request.request_digest,
-                placement: request.placement,
+                child: request.locator().clone(),
+                request_digest: request.request_digest(),
+                placement: request.placement(),
                 budget_reservation_id: None,
             };
             let run = parent
@@ -81,7 +81,7 @@ impl AgentInvoker for ParentStartInvoker {
                 }
             })?;
             Ok(ChildRunHandle {
-                locator: request.locator,
+                locator: request.locator().clone(),
                 relation_digest,
             })
         })
@@ -589,7 +589,7 @@ impl AgentInvoker for ApprovalLoopInvoker {
                 });
             }
         };
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,

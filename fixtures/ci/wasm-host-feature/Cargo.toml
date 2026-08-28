@@ -1,0 +1,13 @@
+[package]
+name = "finstack-ai-wasm-host-feature-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+finstack-ai = { workspace = true, default-features = false, features = ["wasm-host"] }
+
+[lints]
+workspace = true

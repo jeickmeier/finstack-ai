@@ -1,6 +1,6 @@
 //! Map Rust agent and session errors onto the stable `FinstackError` hierarchy.
 
-use finstack_ai::runtime::session::SessionError;
+use finstack_ai::runtime::session::{SessionError, SessionErrorCategory};
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, AgentRunError,
 };
@@ -47,9 +47,11 @@ pub(crate) fn agent_error(
 }
 
 pub(crate) fn session_py_error(py: Python<'_>, error: &SessionError) -> PyErr {
-    let value = py
-        .get_type::<ConfigurationError>()
-        .call1((error.to_string(),));
+    let exception = match error.category() {
+        SessionErrorCategory::Configuration => py.get_type::<ConfigurationError>(),
+        SessionErrorCategory::Runtime => py.get_type::<RuntimeError>(),
+    };
+    let value = exception.call1((error.to_string(),));
     match value {
         Ok(value) => {
             let _ = value.setattr("code", error.code());

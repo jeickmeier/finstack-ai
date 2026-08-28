@@ -31,6 +31,7 @@
 mod cbor;
 mod error;
 mod journal;
+mod prebeta;
 mod process;
 mod remote;
 mod snapshot;
@@ -46,6 +47,10 @@ pub use error::ProtocolError;
 pub use journal::{
     ChainAnchor, JournalKnownAnswer, commit_record, commit_records, envelope_checksum,
     journal_known_answer, payload_digest, verify_chain, verify_chain_from, verify_envelope,
+};
+pub use prebeta::{
+    CHILD_RUN_PREPARED, EXTERNAL_EFFECT_COMPLETION, INTERACTION_RESOLUTION, PrebetaError,
+    normalize_prebeta_shape,
 };
 pub use process::ProcessPreAuth;
 pub use remote::{

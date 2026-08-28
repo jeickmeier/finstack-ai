@@ -6,6 +6,7 @@ pub fn finstack_ai_remote_child::RemoteChildInvoker::try_new(finstack_ai_remote_
 impl finstack_ai_runtime::services::agent_invoker::AgentInvoker for finstack_ai_remote_child::RemoteChildInvoker
 pub fn finstack_ai_remote_child::RemoteChildInvoker::cancel(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::agent_invoker::AgentInvokeError>>
 pub fn finstack_ai_remote_child::RemoteChildInvoker::start_or_attach(&self, finstack_ai_runtime::services::agent_invoker::ChildRunContext, finstack_ai_runtime::services::agent_invoker::ChildRunRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::agent_invoker::ChildRunHandle, finstack_ai_runtime::services::agent_invoker::AgentInvokeError>>
+pub fn finstack_ai_remote_child::RemoteChildInvoker::status(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::agent_invoker::ChildRunStatus, finstack_ai_runtime::services::agent_invoker::AgentInvokeError>>
 pub struct finstack_ai_remote_child::RemoteChildRoute
 pub finstack_ai_remote_child::RemoteChildRoute::endpoint: alloc::string::String
 pub finstack_ai_remote_child::RemoteChildRoute::route: alloc::string::String

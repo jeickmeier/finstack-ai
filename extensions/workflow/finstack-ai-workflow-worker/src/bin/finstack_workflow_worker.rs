@@ -15,6 +15,8 @@
 //! Enable the `daemon` feature to build this binary. Run
 //! `cargo run -p finstack-ai-workflow-worker --features daemon -- <sqlite-path>`.
 
+use std::error::Error;
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,13 +39,15 @@ const JOURNAL_LIMITS: SqliteStoreLimits = SqliteStoreLimits {
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("usage: finstack_workflow_worker <sqlite-path>");
-        std::process::exit(2);
-    });
-    let store = Arc::new(SqliteWorkerStore::try_open(&path).expect("worker store"));
-    let cron = Arc::new(SqliteCronStore::try_open(&path).expect("cron store"));
+async fn main() -> Result<(), Box<dyn Error>> {
+    let path = std::env::args().nth(1).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: finstack_workflow_worker <sqlite-path>",
+        )
+    })?;
+    let store = Arc::new(SqliteWorkerStore::try_open(&path)?);
+    let cron = Arc::new(SqliteCronStore::try_open(&path)?);
     let durability = if path == ":memory:" {
         SqliteDurability::Relaxed {
             synchronous: SqliteSynchronous::Normal,
@@ -51,15 +55,12 @@ async fn main() {
     } else {
         SqliteDurability::Durable
     };
-    let journal = Arc::new(
-        SqliteJournalStore::try_open(SqliteStoreConfig {
-            path: path.clone().into(),
-            durability,
-            limits: JOURNAL_LIMITS,
-            busy_timeout: DEFAULT_BUSY_TIMEOUT,
-        })
-        .expect("journal"),
-    );
+    let journal = Arc::new(SqliteJournalStore::try_open(SqliteStoreConfig {
+        path: path.clone().into(),
+        durability,
+        limits: JOURNAL_LIMITS,
+        busy_timeout: DEFAULT_BUSY_TIMEOUT,
+    })?);
     let worker = Arc::new(
         WorkerBuilder::new(
             journal,
@@ -68,10 +69,10 @@ async fn main() {
             Arc::clone(&store) as _,
             Arc::clone(&store) as _,
         )
-        .build()
-        .expect("worker"),
+        .build()?,
     );
     let handle = worker.spawn(POLL_INTERVAL);
-    tokio::signal::ctrl_c().await.expect("signal");
+    tokio::signal::ctrl_c().await?;
     handle.shutdown().await;
+    Ok(())
 }

@@ -545,7 +545,7 @@ impl AgentInvoker for RecordingInvoker {
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
         let relation_digest =
             finstack_ai_runtime::child::child_relation_digest(&context, &request).expect("digest");
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,
@@ -802,17 +802,17 @@ pub(crate) fn child_request(
     lane: u64,
     run: u64,
 ) -> ChildRunRequest {
-    let mut request = ChildRunRequest {
-        agent: AgentRef {
+    ChildRunRequest::try_new(
+        AgentRef {
             id: finstack_ai_kernel::AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
         },
-        input: Arc::from([ContentBlock::Text(
+        Arc::from([ContentBlock::Text(
             TextBlock::try_new("work").expect("text"),
         )]),
         placement,
-        locator: ChildRunLocator {
+        ChildRunLocator {
             operation: OperationLocator {
                 tenant_scope: Arc::from("tenant-a"),
                 session_id: id(session),
@@ -821,23 +821,27 @@ pub(crate) fn child_request(
             },
             remote: None,
         },
-        requested_deadline: None,
-        requested_budget: BudgetRequest::default(),
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    request.request_digest = request.canonical_digest().expect("child request digest");
-    request
+        None,
+        BudgetRequest::default(),
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request")
 }
 
 pub(crate) fn budget_child_request() -> ChildRunRequest {
-    let mut request = child_request(ChildPlacement::CompatibleLaneInParentSession, 1, 50, 51);
-    request.requested_budget = reserve_request().amount;
-    request.request_digest = request
-        .canonical_digest()
-        .expect("budget child request digest");
-    request
+    let request = child_request(ChildPlacement::CompatibleLaneInParentSession, 1, 50, 51);
+    ChildRunRequest::try_new(
+        request.agent().clone(),
+        Arc::clone(request.input()),
+        request.placement(),
+        request.locator().clone(),
+        request.requested_deadline(),
+        reserve_request().amount,
+        request.delegation_id().map(Arc::from),
+        request.metadata().clone(),
+    )
+    .expect("valid budget child request")
 }
 
 pub(crate) fn coordination_ids(batch: u64, record: u64) -> ChildCoordinationIds {

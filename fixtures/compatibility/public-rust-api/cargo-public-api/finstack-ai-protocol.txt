@@ -33,6 +33,23 @@ impl serde_core::ser::Serialize for finstack_ai_protocol::PayloadFamily
 pub fn finstack_ai_protocol::PayloadFamily::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_protocol::PayloadFamily
 pub fn finstack_ai_protocol::PayloadFamily::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_protocol::PrebetaError
+pub finstack_ai_protocol::PrebetaError::InvalidShape
+pub finstack_ai_protocol::PrebetaError::UnsupportedKind
+impl finstack_ai_protocol::PrebetaError
+pub const fn finstack_ai_protocol::PrebetaError::reason(self) -> &'static str
+impl core::clone::Clone for finstack_ai_protocol::PrebetaError
+pub fn finstack_ai_protocol::PrebetaError::clone(&self) -> finstack_ai_protocol::PrebetaError
+impl core::cmp::Eq for finstack_ai_protocol::PrebetaError
+impl core::cmp::PartialEq for finstack_ai_protocol::PrebetaError
+pub fn finstack_ai_protocol::PrebetaError::eq(&self, &finstack_ai_protocol::PrebetaError) -> bool
+impl core::error::Error for finstack_ai_protocol::PrebetaError
+impl core::fmt::Debug for finstack_ai_protocol::PrebetaError
+pub fn finstack_ai_protocol::PrebetaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_protocol::PrebetaError
+pub fn finstack_ai_protocol::PrebetaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_protocol::PrebetaError
+impl core::marker::StructuralPartialEq for finstack_ai_protocol::PrebetaError
 pub enum finstack_ai_protocol::ProcessPreAuth
 pub finstack_ai_protocol::ProcessPreAuth::ProcessAuthResult
 pub finstack_ai_protocol::ProcessPreAuth::ProcessAuthResult::accepted: bool
@@ -459,7 +476,10 @@ pub const finstack_ai_protocol::CANONICAL_ENVELOPE_MAX_BYTES: usize
 pub const finstack_ai_protocol::CANONICAL_MAP_MAX_ENTRIES: usize
 pub const finstack_ai_protocol::CANONICAL_NESTING_DEPTH: usize
 pub const finstack_ai_protocol::CANONICAL_STRING_MAX_BYTES: usize
+pub const finstack_ai_protocol::CHILD_RUN_PREPARED: &str
+pub const finstack_ai_protocol::EXTERNAL_EFFECT_COMPLETION: &str
 pub const finstack_ai_protocol::FRAME_LENGTH_BYTES: usize
+pub const finstack_ai_protocol::INTERACTION_RESOLUTION: &str
 pub const finstack_ai_protocol::POST_AUTH_FRAME_MAX_BYTES: usize
 pub const finstack_ai_protocol::PRE_AUTH_FRAME_MAX_BYTES: usize
 pub const finstack_ai_protocol::PROTOCOL_VERSION_V1: u16
@@ -481,6 +501,7 @@ pub fn finstack_ai_protocol::encode_value(&finstack_ai_protocol::CanonicalValue)
 pub fn finstack_ai_protocol::envelope_checksum(&finstack_ai_kernel::records::envelope::RecordEnvelope) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_protocol::ProtocolError>
 pub fn finstack_ai_protocol::from_diagnostic_json<T: serde_core::de::DeserializeOwned>(&str) -> core::result::Result<T, finstack_ai_protocol::ProtocolError>
 pub fn finstack_ai_protocol::journal_known_answer(&str, &str) -> core::result::Result<finstack_ai_protocol::JournalKnownAnswer, finstack_ai_protocol::ProtocolError>
+pub fn finstack_ai_protocol::normalize_prebeta_shape(&str, &str) -> core::result::Result<alloc::string::String, finstack_ai_protocol::PrebetaError>
 pub fn finstack_ai_protocol::payload_digest(&finstack_ai_kernel::records::body::RecordBody) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_protocol::ProtocolError>
 pub fn finstack_ai_protocol::require_features(&finstack_ai_protocol::VersionOffer, &[&str]) -> core::result::Result<(), finstack_ai_protocol::ProtocolError>
 pub fn finstack_ai_protocol::select_version(&finstack_ai_protocol::VersionOffer, &finstack_ai_protocol::VersionOffer) -> core::result::Result<u16, finstack_ai_protocol::ProtocolError>

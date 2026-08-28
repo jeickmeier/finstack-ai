@@ -282,6 +282,21 @@
       "value": "plugin_trap"
     },
     {
+      "crate": "finstack-ai-protocol",
+      "name": "CHILD_RUN_PREPARED",
+      "value": "child_run_prepared"
+    },
+    {
+      "crate": "finstack-ai-protocol",
+      "name": "EXTERNAL_EFFECT_COMPLETION",
+      "value": "external_effect_completion"
+    },
+    {
+      "crate": "finstack-ai-protocol",
+      "name": "INTERACTION_RESOLUTION",
+      "value": "interaction_resolution"
+    },
+    {
       "crate": "finstack-ai-runtime",
       "name": "AGENT_INVOKE_CONFLICT",
       "value": "agent_invoke_conflict"
@@ -1038,23 +1053,8 @@
     },
     {
       "crate": "finstack-ai-wasm",
-      "name": "CHILD_RUN_PREPARED",
-      "value": "child_run_prepared"
-    },
-    {
-      "crate": "finstack-ai-wasm",
-      "name": "EXTERNAL_EFFECT_COMPLETION",
-      "value": "external_effect_completion"
-    },
-    {
-      "crate": "finstack-ai-wasm",
       "name": "IMPLEMENTATION",
       "value": "wasm"
-    },
-    {
-      "crate": "finstack-ai-wasm",
-      "name": "INTERACTION_RESOLUTION",
-      "value": "interaction_resolution"
     },
     {
       "crate": "finstack-ai-wasm",

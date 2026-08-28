@@ -18,6 +18,7 @@ pub fn finstack_ai_server::ListenAddr::clone(&self) -> finstack_ai_server::Liste
 pub enum finstack_ai_server::ServerError
 pub finstack_ai_server::ServerError::Audit(finstack_ai_runtime::services::audit::SecurityAuditGateError)
 pub finstack_ai_server::ServerError::AuditNotReady
+pub finstack_ai_server::ServerError::AuthenticationConfigurationInvalid
 pub finstack_ai_server::ServerError::AuthenticationFailure
 pub finstack_ai_server::ServerError::CreditTimeout
 pub finstack_ai_server::ServerError::HandshakeTimeout
@@ -29,6 +30,7 @@ pub finstack_ai_server::ServerError::Protocol(finstack_ai_protocol::error::Proto
 pub finstack_ai_server::ServerError::ReceiptCap
 pub finstack_ai_server::ServerError::ScopeMismatch
 pub finstack_ai_server::ServerError::SessionBusy
+pub finstack_ai_server::ServerError::SessionInvalid
 pub finstack_ai_server::ServerError::UnknownLocator
 impl finstack_ai_server::ServerError
 pub const fn finstack_ai_server::ServerError::code(&self) -> &'static str
@@ -61,10 +63,10 @@ impl core::marker::Copy for finstack_ai_server::TransportKind
 impl core::marker::StructuralPartialEq for finstack_ai_server::TransportKind
 pub struct finstack_ai_server::AuthContext
 impl finstack_ai_server::AuthContext
-pub fn finstack_ai_server::AuthContext::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn finstack_ai_server::AuthContext::principal(&self) -> &str
 pub const fn finstack_ai_server::AuthContext::protocol_version(&self) -> u16
 pub fn finstack_ai_server::AuthContext::tenant_scope(&self) -> &str
+pub fn finstack_ai_server::AuthContext::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, finstack_ai_server::ServerError>
 impl core::clone::Clone for finstack_ai_server::AuthContext
 pub fn finstack_ai_server::AuthContext::clone(&self) -> finstack_ai_server::AuthContext
 impl core::cmp::Eq for finstack_ai_server::AuthContext
@@ -128,19 +130,17 @@ pub fn finstack_ai_server::SessionHub::fmt(&self, &mut core::fmt::Formatter<'_>)
 pub struct finstack_ai_server::SessionReplica
 impl finstack_ai_server::SessionReplica
 pub fn finstack_ai_server::SessionReplica::append_durable(&mut self, finstack_ai_protocol::remote::RemoteEventView)
-pub fn finstack_ai_server::SessionReplica::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn finstack_ai_server::SessionReplica::queue_live(&mut self, finstack_ai_protocol::remote::RemoteEventView) -> core::result::Result<(), finstack_ai_server::ServerError>
 pub fn finstack_ai_server::SessionReplica::release_barrier(&mut self)
+pub fn finstack_ai_server::SessionReplica::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, finstack_ai_server::ServerError>
 pub fn finstack_ai_server::SessionReplica::with_receipt_cap(self, usize) -> Self
 impl core::fmt::Debug for finstack_ai_server::SessionReplica
 pub fn finstack_ai_server::SessionReplica::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai_server::StaticAuthVerifier
 impl finstack_ai_server::StaticAuthVerifier
-pub fn finstack_ai_server::StaticAuthVerifier::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn finstack_ai_server::StaticAuthVerifier::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, finstack_ai_server::ServerError>
 impl core::clone::Clone for finstack_ai_server::StaticAuthVerifier
 pub fn finstack_ai_server::StaticAuthVerifier::clone(&self) -> finstack_ai_server::StaticAuthVerifier
-impl core::default::Default for finstack_ai_server::StaticAuthVerifier
-pub fn finstack_ai_server::StaticAuthVerifier::default() -> Self
 impl core::fmt::Debug for finstack_ai_server::StaticAuthVerifier
 pub fn finstack_ai_server::StaticAuthVerifier::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl finstack_ai_server::AuthVerifier for finstack_ai_server::StaticAuthVerifier

@@ -4,6 +4,7 @@ mod authority;
 mod catalog;
 mod error;
 mod port;
+mod portable_schema;
 mod resume;
 mod stream;
 mod types;
@@ -26,6 +27,7 @@ pub use error::{
     TOOL_STREAM_INVALID, TOOL_STREAM_LIMIT_EXCEEDED, ToolError, UNKNOWN_TOOL,
 };
 pub use port::Toolset;
+pub use portable_schema::{PortableSchemaError, PortableSchemaKind, normalize_portable_schema};
 pub use resume::{map_tool_reconcile_result, tool_resume_action, tool_retry_allowed};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use stream::AssembledToolTerminal;

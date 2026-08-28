@@ -209,7 +209,7 @@ impl AgentInvoker for RecordingInvoker {
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
         let relation_digest =
             finstack_ai_runtime::child::child_relation_digest(&context, &request).expect("digest");
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,
@@ -248,17 +248,17 @@ pub(crate) fn child_request(
     lane: u64,
     run: u64,
 ) -> ChildRunRequest {
-    let mut request = ChildRunRequest {
-        agent: finstack_ai_runtime::child::AgentRef {
+    ChildRunRequest::try_new(
+        finstack_ai_runtime::child::AgentRef {
             id: finstack_ai_kernel::AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
         },
-        input: Arc::from([ContentBlock::Text(
+        Arc::from([ContentBlock::Text(
             TextBlock::try_new("work").expect("text"),
         )]),
         placement,
-        locator: ChildRunLocator {
+        ChildRunLocator {
             operation: OperationLocator {
                 tenant_scope: Arc::from("tenant-a"),
                 session_id: id(session),
@@ -267,14 +267,12 @@ pub(crate) fn child_request(
             },
             remote: None,
         },
-        requested_deadline: None,
-        requested_budget: finstack_ai_kernel::BudgetRequest::default(),
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(br"null"),
-    };
-    request.request_digest = request.canonical_digest().expect("child request digest");
-    request
+        None,
+        finstack_ai_kernel::BudgetRequest::default(),
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request")
 }
 
 pub(crate) fn scripted_profile() -> finstack_ai_runtime::ports::model::ModelContextProfile {

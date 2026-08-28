@@ -16,6 +16,9 @@ pub enum ServerError {
     /// Authentication failed or used bearer over plaintext TCP.
     #[error("server authentication failed")]
     AuthenticationFailure,
+    /// Authentication verifier or context configuration was invalid.
+    #[error("server authentication configuration invalid")]
+    AuthenticationConfigurationInvalid,
     /// Locator was unknown or unauthorized; the two cases are not distinguished.
     #[error("unknown locator")]
     UnknownLocator,
@@ -34,6 +37,9 @@ pub enum ServerError {
     /// Replica reached the command-receipt retention cap.
     #[error("receipt cap exceeded")]
     ReceiptCap,
+    /// Session replica identity or tenant scope was invalid.
+    #[error("server session invalid")]
+    SessionInvalid,
     /// Ack deadline elapsed, or an outbound batch could not fit in the
     /// remaining window. Both use the stable code `credit_timeout`.
     #[error("credit window timeout")]
@@ -60,12 +66,14 @@ impl ServerError {
             Self::ListenInvalid => "server_listen_invalid",
             Self::AuditNotReady => "server_audit_not_ready",
             Self::AuthenticationFailure => "authentication_failure",
+            Self::AuthenticationConfigurationInvalid => "authentication_configuration_invalid",
             Self::UnknownLocator => "unknown_locator",
             Self::ScopeMismatch => "scope_mismatch",
             Self::SessionBusy => "session_busy",
             Self::LiveBeforeBarrier => "live_before_barrier",
             Self::IdempotencyConflict => "idempotency_conflict",
             Self::ReceiptCap => "receipt_cap",
+            Self::SessionInvalid => "session_invalid",
             Self::CreditTimeout => "credit_timeout",
             Self::HandshakeTimeout => "handshake_timeout",
             Self::Protocol(_) => "protocol",

@@ -65,20 +65,8 @@ pub(crate) fn normalize_prebeta_shape(
 ) -> PyResult<Py<PyAny>> {
     let encoded = serde_json::to_string(&py_to_json(value)?)
         .map_err(|_| PyTypeError::new_err("value is not JSON serializable"))?;
-    let normalized = match kind {
-        "child_run_prepared" => normalize_shape::<finstack_ai_kernel::ChildRunPrepared>(&encoded),
-        "interaction_resolution" => {
-            normalize_shape::<finstack_ai_kernel::InteractionResolutionCommand>(&encoded)
-        }
-        "external_effect_completion" => {
-            normalize_shape::<finstack_ai_kernel::ExternalEffectCompletionCommand>(&encoded)
-        }
-        _ => {
-            return Err(PyTypeError::new_err(format!(
-                "unsupported pre-beta shape: {kind}"
-            )));
-        }
-    }?;
+    let normalized = finstack_ai_protocol::normalize_prebeta_shape(kind, &encoded)
+        .map_err(|error| PyTypeError::new_err(error.reason()))?;
     let value: serde_json::Value = serde_json::from_str(&normalized)
         .map_err(|_| PyException::new_err("pre-beta shape serialization failed"))?;
     json_to_py(py, &value)
@@ -94,23 +82,6 @@ pub(crate) fn _normalize_pydantic_schema(
     let value = py_to_json(schema)?;
     let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
     json_to_py(py, &normalized)
-}
-
-pub(crate) fn normalize_encoded_shape<T>(encoded: &str) -> PyResult<String>
-where
-    T: serde::de::DeserializeOwned + serde::Serialize,
-{
-    normalize_shape::<T>(encoded)
-}
-
-fn normalize_shape<T>(encoded: &str) -> PyResult<String>
-where
-    T: serde::de::DeserializeOwned + serde::Serialize,
-{
-    let value: T = serde_json::from_str(encoded)
-        .map_err(|error| PyTypeError::new_err(format!("invalid pre-beta shape: {error}")))?;
-    serde_json::to_string(&value)
-        .map_err(|_| PyException::new_err("pre-beta shape serialization failed"))
 }
 
 #[pyfunction]

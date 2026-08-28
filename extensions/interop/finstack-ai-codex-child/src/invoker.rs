@@ -373,31 +373,31 @@ impl AgentInvoker for CodexChildInvoker {
             request.validate()?;
             let expected_agent =
                 codex_agent_ref().map_err(|_| invalid("codex peer identity is unavailable"))?;
-            if request.agent != expected_agent {
+            if request.agent() != &expected_agent {
                 return Err(invalid("codex child agent identity does not match"));
             }
-            if request.placement != ChildPlacement::RemoteChildSession {
+            if request.placement() != ChildPlacement::RemoteChildSession {
                 return Err(invalid(
                     "codex child invoker only accepts remote_child_session",
                 ));
             }
             let expected_route =
                 codex_route_ref().map_err(|_| invalid("codex peer route is unavailable"))?;
-            if request.locator.remote.as_ref() != Some(&expected_route) {
+            if request.locator().remote.as_ref() != Some(&expected_route) {
                 return Err(invalid("codex child locator route does not match"));
             }
-            if request.locator.operation.tenant_scope != ctx.parent.tenant_scope {
+            if request.locator().operation.tenant_scope != ctx.parent.tenant_scope {
                 return Err(invalid("codex child tenant does not match parent"));
             }
-            let run_id = request.locator.operation.run_id;
-            let prompt = prompt_text(&request.input)?;
+            let run_id = request.locator().operation.run_id;
+            let prompt = prompt_text(request.input())?;
             let relation_digest = child_relation_digest(&ctx, &request).map_err(|error| {
                 AgentInvokeError::InvalidRequest {
                     message: Arc::from(error.to_string()),
                 }
             })?;
             let handle = ChildRunHandle {
-                locator: request.locator.clone(),
+                locator: request.locator().clone(),
                 relation_digest,
             };
             // Attach check, spawn, and insert share one critical section.
@@ -411,15 +411,15 @@ impl AgentInvoker for CodexChildInvoker {
                 .lock()
                 .map_err(|_| unavailable("codex run table is poisoned"))?;
             if let Some(existing) = guard.get(&run_id) {
-                if existing.handle.locator != request.locator || existing.parent != ctx.parent {
+                if &existing.handle.locator != request.locator() || existing.parent != ctx.parent {
                     return Err(invalid("codex run id is bound to a different locator"));
                 }
-                if existing.request_digest == request.request_digest {
+                if existing.request_digest == request.request_digest() {
                     return Ok(existing.handle.clone());
                 }
                 return Err(AgentInvokeError::Conflict {
                     existing: existing.request_digest,
-                    submitted: request.request_digest,
+                    submitted: request.request_digest(),
                 });
             }
             // The evicted-tombstone map is locked strictly after the run
@@ -429,10 +429,10 @@ impl AgentInvoker for CodexChildInvoker {
                 .lock()
                 .map_err(|_| unavailable("codex eviction table is poisoned"))?;
             if let Some(prior) = evicted_guard.get(&run_id) {
-                if prior.handle.locator != request.locator || prior.parent != ctx.parent {
+                if &prior.handle.locator != request.locator() || prior.parent != ctx.parent {
                     return Err(invalid("codex run id is bound to a different locator"));
                 }
-                if prior.request_digest == request.request_digest {
+                if prior.request_digest == request.request_digest() {
                     // The run settled and was evicted; the equal replay
                     // attaches to that acceptance instead of spawning a
                     // second child. State is gone, so status is `unknown`.
@@ -440,7 +440,7 @@ impl AgentInvoker for CodexChildInvoker {
                 }
                 return Err(AgentInvokeError::Conflict {
                     existing: prior.request_digest,
-                    submitted: request.request_digest,
+                    submitted: request.request_digest(),
                 });
             }
             if !make_room(&mut guard, &mut evicted_guard, max_accepted) {
@@ -452,7 +452,7 @@ impl AgentInvoker for CodexChildInvoker {
                 run_id,
                 CodexRun {
                     parent: ctx.parent,
-                    request_digest: request.request_digest,
+                    request_digest: request.request_digest(),
                     handle: handle.clone(),
                     state,
                     child: slot,

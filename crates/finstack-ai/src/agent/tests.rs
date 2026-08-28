@@ -1804,7 +1804,7 @@ impl AgentInvoker for RecordingEffectInvoker {
                 });
             }
         };
-        let locator = request.locator;
+        let locator = request.locator().clone();
         Box::pin(async move {
             Ok(ChildRunHandle {
                 locator,
@@ -1852,25 +1852,23 @@ async fn isolated_child_request(
         .expect("child locator"),
         remote: None,
     };
-    let mut request = ChildRunRequest {
-        agent: AgentRef {
+    ChildRunRequest::try_new(
+        AgentRef {
             id: AgentId::parse("finstack.agent.child").expect("agent"),
             bundle: None,
             spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
         },
-        input: Arc::from([ContentBlock::Text(
+        Arc::from([ContentBlock::Text(
             TextBlock::try_new("work").expect("text"),
         )]),
-        placement: ChildPlacement::IsolatedChildSession,
+        ChildPlacement::IsolatedChildSession,
         locator,
-        requested_deadline: None,
-        requested_budget: BudgetRequest::default(),
-        delegation_id: None,
-        metadata: Metadata::empty(),
-        request_digest: Digest::raw_json(b"null"),
-    };
-    request.request_digest = request.canonical_digest().expect("digest");
-    request
+        None,
+        BudgetRequest::default(),
+        None,
+        Metadata::empty(),
+    )
+    .expect("valid child request")
 }
 
 fn echo_tool_spec() -> ToolSpec {
@@ -2018,9 +2016,17 @@ async fn start_or_attach_child_rejects_a_conflicting_digest() {
         )
         .await
         .expect("first start_or_attach_child");
-    let mut conflicting = child_request;
-    conflicting.delegation_id = Some(Arc::from("different-delegation"));
-    conflicting.request_digest = conflicting.canonical_digest().expect("digest");
+    let conflicting = ChildRunRequest::try_new(
+        child_request.agent().clone(),
+        Arc::clone(child_request.input()),
+        child_request.placement(),
+        child_request.locator().clone(),
+        child_request.requested_deadline(),
+        child_request.requested_budget().clone(),
+        Some(Arc::from("different-delegation")),
+        child_request.metadata().clone(),
+    )
+    .expect("conflicting request");
     let error = parent
         .start_or_attach_child(invoker, effect_id, conflicting)
         .await

@@ -82,7 +82,7 @@ impl Server {
     /// # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
     /// let server = Server::bind(
     ///     ListenAddr::loopback(0),
-    ///     Arc::new(StaticAuthVerifier::new("secret", "tenant-a")),
+    ///     Arc::new(StaticAuthVerifier::try_new("secret", "tenant-a").expect("valid verifier")),
     ///     Some(Arc::new(Ready)),
     ///     Duration::from_millis(100),
     /// )
