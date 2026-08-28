@@ -11,6 +11,10 @@ description = "Knowledge agent: ingest, remember, and answer with citations"
 publish = false
 
 [dependencies]
+finstack-ai = { workspace = true, features = ["native-tokio"] }
+finstack-ai-kernel = { workspace = true }
+finstack-ai-tools-fetch = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

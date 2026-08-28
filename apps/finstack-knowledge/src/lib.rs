@@ -27,3 +27,12 @@
 )]
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
+
+mod config;
+
+pub use config::{
+    KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security,
+};
+
+#[cfg(test)]
+mod tests;

@@ -1260,6 +1260,12 @@ dependencies = [
 [[package]]
 name = "finstack-ai-knowledge"
 version = "2.0.0"
+dependencies = [
+ "finstack-ai",
+ "finstack-ai-kernel",
+ "finstack-ai-tools-fetch",
+ "thiserror",
+]
 
 [[package]]
 name = "finstack-ai-memory"
