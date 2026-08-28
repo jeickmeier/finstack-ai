@@ -10,6 +10,7 @@ pub mod args;
 pub mod ask;
 pub mod ingest;
 pub mod render;
+pub mod repl;
 pub mod sessions;
 
 #[cfg(test)]

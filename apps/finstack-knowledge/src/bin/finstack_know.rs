@@ -112,10 +112,40 @@ fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
                 Ok(ExitCode::SUCCESS)
             })
         }
-        Command::Repl { .. } => Err(KnowledgeError::Config {
-            reason: "command_not_implemented_yet",
-        }),
+        Command::Repl { session } => run_repl_command(cli, session.clone()),
     }
+}
+
+fn run_repl_command(cli: &Cli, session: Option<String>) -> Result<ExitCode, KnowledgeError> {
+    let config = config_from(cli)?;
+    let interrupt = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let signal_flag = std::sync::Arc::clone(&interrupt);
+    runtime()?.block_on(async move {
+        tokio::spawn(async move {
+            loop {
+                if tokio::signal::ctrl_c().await.is_err() {
+                    break;
+                }
+                // Second Ctrl-C at the prompt exits the process.
+                if signal_flag.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    std::process::exit(130);
+                }
+            }
+        });
+        let stdin = std::io::stdin();
+        let mut input = stdin.lock();
+        let mut output = std::io::stdout();
+        finstack_ai_knowledge::cli::repl::run_repl(
+            &config,
+            session.as_deref(),
+            &os_user(),
+            &mut input,
+            &mut output,
+            interrupt,
+        )
+        .await?;
+        Ok(ExitCode::SUCCESS)
+    })
 }
 
 /// Render accumulated markup to the real terminal (ANSI when attached).

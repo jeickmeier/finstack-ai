@@ -248,6 +248,17 @@ pub async fn build_agent_with_stores(
     )
     .toolset(component("finstack.know.tools.memory")?, Arc::new(memory_toolset))
     .toolset(component("finstack.know.tools.skills")?, Arc::new(skills))
+    // The repl resolves ask_user interactions; spec §8 names elicitation as
+    // the interaction surface.
+    .toolset(
+        component("finstack.know.tools.elicitation")?,
+        Arc::new(
+            finstack_ai_tools_elicitation::ElicitationToolset::builder()
+                .with_ask_user()
+                .build()
+                .map_err(compose_error)?,
+        ),
+    )
     .observer(
         versioned("finstack.observer.log", 0, 0, 4)?,
         Arc::new(log_observer()?),

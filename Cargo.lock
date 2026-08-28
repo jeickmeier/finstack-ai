@@ -1370,6 +1370,7 @@ dependencies = [
  "finstack-ai-store-artifact",
  "finstack-ai-store-sqlite",
  "finstack-ai-tools-document",
+ "finstack-ai-tools-elicitation",
  "finstack-ai-tools-fetch",
  "finstack-ai-tools-skills",
  "rich_rust",

@@ -248,6 +248,93 @@ async fn ingest_missing_file_is_a_config_error() {
     assert!(matches!(error, crate::KnowledgeError::Config { .. }));
 }
 
+/// Ollama NDJSON body carrying one `ask_user` elicitation call.
+fn ask_user_response(prompt: &str) -> String {
+    format!(
+        "{{\"message\":{{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{{\"function\":{{\"name\":\"ask_user\",\"arguments\":{{\"prompt\":\"{prompt}\",\"kind\":null,\"options\":null,\"response_schema\":null}}}}}}]}},\"done\":false}}\n{{\"message\":{{\"role\":\"assistant\",\"content\":\"\"}},\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}}\n"
+    )
+}
+
+#[tokio::test]
+async fn repl_resolves_elicitation_and_quits() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(vec![
+        ask_user_response("Which position limit applies?"),
+        loopback::text_response("The limit is 42 contracts."),
+    ])
+    .await
+    .expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+    // One question; the elicitation answer; quit.
+    let mut input = std::io::Cursor::new(b"what limit?\n42 contracts\n:q\n".to_vec());
+    let mut output = Vec::new();
+    super::repl::run_repl(
+        &config,
+        None,
+        "repl-test",
+        &mut input,
+        &mut output,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .await
+    .expect("repl completes");
+    server.await.expect("join").expect("served");
+    let output = String::from_utf8_lossy(&output);
+    assert!(
+        output.contains("[interaction] Which position limit applies?"),
+        "interaction rendered: {output}"
+    );
+    assert!(
+        output.contains("The limit is 42 contracts."),
+        "final answer rendered: {output}"
+    );
+}
+
+#[tokio::test]
+async fn repl_cancel_settles_run_and_loop_survives() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // No scripted responses: the cancelled run must never need one.
+    let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+    let interrupt = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let mut input = std::io::Cursor::new(b"doomed question\n:session\n:q\n".to_vec());
+    let mut output = Vec::new();
+    super::repl::run_repl(
+        &config,
+        None,
+        "repl-test",
+        &mut input,
+        &mut output,
+        std::sync::Arc::clone(&interrupt),
+    )
+    .await
+    .expect("loop survives cancellation");
+    drop(server);
+    let output = String::from_utf8_lossy(&output);
+    assert!(
+        output.contains("run cancelled") || output.contains("cancelled"),
+        "cancellation reported: {output}"
+    );
+    // The loop kept going: `:session` printed the id again after the cancel.
+    let id = output
+        .lines()
+        .find_map(|line| line.strip_prefix("session: "))
+        .expect("session banner");
+    assert!(output.matches(id).count() >= 2, "loop survived: {output}");
+}
+
 #[tokio::test]
 async fn sessions_list_show_and_name_round_trip() {
     let dir = tempfile::tempdir().expect("tempdir");
