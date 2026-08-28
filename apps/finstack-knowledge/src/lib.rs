@@ -29,10 +29,12 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 mod config;
+mod docs;
 
 pub use config::{
     KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security,
 };
+pub use docs::{SELF_DOCS, materialize_self_docs};
 
 #[cfg(test)]
 mod tests;

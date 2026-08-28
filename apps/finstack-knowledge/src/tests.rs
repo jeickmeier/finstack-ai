@@ -1,6 +1,10 @@
+use std::fs;
 use std::path::PathBuf;
 
-use crate::{KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security};
+use crate::{
+    KnowledgeConfig, KnowledgeError, ProviderChoice, SELF_DOCS, default_data_dir,
+    materialize_self_docs, security,
+};
 
 fn ollama() -> ProviderChoice {
     ProviderChoice::Ollama {
@@ -61,6 +65,46 @@ fn security_builds_local_context_for_os_user() {
     let debug = format!("{context:?}");
     assert!(debug.contains("local"), "tenant label present: {debug}");
     assert!(debug.contains("jeickmeier"), "principal present: {debug}");
+}
+
+#[test]
+fn self_docs_cover_the_promised_topics() {
+    let topics: Vec<&str> = SELF_DOCS.iter().map(|(topic, _)| *topic).collect();
+    for expected in ["architecture", "sessions", "memory", "ingestion", "cli"] {
+        assert!(topics.contains(&expected), "missing topic {expected}");
+    }
+    for (topic, body) in SELF_DOCS {
+        assert!(!body.trim().is_empty(), "empty body for {topic}");
+    }
+}
+
+#[test]
+fn materialize_writes_once_and_repairs_drift() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = materialize_self_docs(dir.path()).expect("materialize");
+    assert_eq!(root, dir.path().join("self-docs"));
+    for (topic, body) in SELF_DOCS {
+        let path = root.join(format!("{topic}.md"));
+        assert_eq!(&fs::read_to_string(&path).expect("readable"), body);
+    }
+
+    // Second call is a no-op: mtimes unchanged.
+    let stamp = |topic: &str| {
+        fs::metadata(root.join(format!("{topic}.md")))
+            .and_then(|meta| meta.modified())
+            .expect("mtime")
+    };
+    let before = stamp("architecture");
+    let root_again = materialize_self_docs(dir.path()).expect("second materialize");
+    assert_eq!(root_again, root);
+    assert_eq!(stamp("architecture"), before);
+
+    // Drifted on-disk content is repaired to the embedded body.
+    let drifted = root.join("memory.md");
+    fs::write(&drifted, "stale local edit").expect("write drift");
+    materialize_self_docs(dir.path()).expect("repair");
+    let repaired = fs::read_to_string(&drifted).expect("read");
+    assert_ne!(repaired, "stale local edit");
 }
 
 #[test]

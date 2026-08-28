@@ -16,5 +16,8 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-tools-fetch = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
