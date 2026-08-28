@@ -41,4 +41,4 @@ pub use config::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,
 };
 pub use schema::SCHEMA_USER_VERSION;
-pub use store::SqliteJournalStore;
+pub use store::{SessionListRow, SqliteJournalStore};

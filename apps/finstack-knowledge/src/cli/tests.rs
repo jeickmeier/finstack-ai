@@ -153,6 +153,64 @@ async fn ask_unknown_session_id_is_a_config_error() {
 }
 
 #[tokio::test]
+async fn sessions_list_show_and_name_round_trip() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(vec![
+        loopback::text_response("answer one"),
+        loopback::text_response("answer two"),
+    ])
+    .await
+    .expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+    // Two sessions via ask.
+    let mut sink = TextRenderer::new();
+    let first = super::ask::run_ask(&config, "one?", None, "sess-test", &mut sink)
+        .await
+        .expect("first");
+    let mut sink = TextRenderer::new();
+    let second = super::ask::run_ask(&config, "two?", None, "sess-test", &mut sink)
+        .await
+        .expect("second");
+    server.await.expect("join").expect("served");
+
+    // list shows both.
+    let listing = super::sessions::run_list(&config).await.expect("list");
+    assert!(listing.contains(&first.session_id), "list has first: {listing}");
+    assert!(listing.contains(&second.session_id), "list has second: {listing}");
+
+    // name round-trips into the listing.
+    super::sessions::run_name(&config, &first.session_id, "quarterly-review")
+        .await
+        .expect("name");
+    let listing = super::sessions::run_list(&config).await.expect("list again");
+    assert!(listing.contains("quarterly-review"), "named: {listing}");
+
+    // show renders the main lane history with the question text.
+    let shown = super::sessions::run_show(&config, &second.session_id)
+        .await
+        .expect("show");
+    assert!(shown.contains("main"), "lane name shown: {shown}");
+    assert!(shown.contains("two?"), "user turn shown: {shown}");
+    assert!(shown.contains("answer two"), "assistant turn shown: {shown}");
+
+    // Unknown id is a config/compose error (exit 2 at the bin).
+    assert!(super::sessions::run_show(&config, "definitely-not-an-id").await.is_err());
+
+    // Renaming again replaces the name (CAS against the fresh head).
+    super::sessions::run_name(&config, &first.session_id, "renamed-again")
+        .await
+        .expect("rename");
+    let listing = super::sessions::run_list(&config).await.expect("list third");
+    assert!(listing.contains("renamed-again"), "renamed: {listing}");
+}
+
+#[tokio::test]
 async fn text_renderer_streams_deltas_and_result() {
     let (events, answer) = capture_run("rendered answer text").await;
     let mut renderer = TextRenderer::new();

@@ -107,6 +107,20 @@ pub async fn build_agent(config: &KnowledgeConfig) -> Result<Agent, KnowledgeErr
 /// Returns [`KnowledgeError`] when the data directory or the store cannot
 /// be opened.
 pub fn open_journal(config: &KnowledgeConfig) -> Result<Arc<dyn JournalStore>, KnowledgeError> {
+    Ok(open_journal_sqlite(config)? as Arc<dyn JournalStore>)
+}
+
+/// Open the shared journal as the concrete sqlite store.
+///
+/// The CLI's `sessions list` uses the store's `list_sessions` convenience,
+/// which lives beyond the `JournalStore` port.
+///
+/// # Errors
+///
+/// As for [`open_journal`].
+pub fn open_journal_sqlite(
+    config: &KnowledgeConfig,
+) -> Result<Arc<SqliteJournalStore>, KnowledgeError> {
     std::fs::create_dir_all(&config.data_dir).map_err(|_| KnowledgeError::Config {
         reason: "data_dir_unwritable",
     })?;

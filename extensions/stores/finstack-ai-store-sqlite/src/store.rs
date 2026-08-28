@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
+use finstack_ai_kernel::{AppendRequest, CommittedBatch, Metadata, SessionId};
+use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::journal::{
     LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt, PruneReceipt,
     PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
@@ -20,6 +21,18 @@ use crate::load::{
     tombstone_count,
 };
 use crate::worker::{WorkerCtx, WorkerHandle};
+
+/// One row from [`SqliteJournalStore::list_sessions`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionListRow {
+    /// Stored session identity.
+    pub session_id: SessionId,
+    /// Current committed head sequence; zero denotes an empty journal.
+    pub head_sequence: u64,
+    /// Session metadata (names live under application keys). Never grants
+    /// authority.
+    pub metadata: Metadata,
+}
 
 /// File-backed or in-memory sqlite journal with one dedicated worker thread.
 ///
@@ -92,6 +105,67 @@ impl SqliteJournalStore {
             durable,
             detail,
             worker: WorkerHandle::spawn(opened)?,
+        })
+    }
+
+    /// Enumerate stored sessions with their committed heads and metadata.
+    ///
+    /// A store-level convenience beyond the `JournalStore` port (the port's
+    /// `scan` is deliberately session-local): surfaces such as the
+    /// `finstack-know` CLI and notebooks need "what sessions exist in this
+    /// file". Rows come back in unspecified order; `limit` bounds the page
+    /// and must be non-zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InvalidRequest`] for a zero limit and storage
+    /// errors from the underlying connection.
+    pub fn list_sessions(
+        &self,
+        limit: u32,
+    ) -> PortFuture<Result<Vec<SessionListRow>, StoreError>> {
+        self.worker.submit(move |ctx| {
+            if limit == 0 {
+                return Err(StoreError::InvalidRequest {
+                    reason_code: "list_sessions_zero_limit",
+                });
+            }
+            let mut statement = ctx
+                .connection
+                .prepare(
+                    "SELECT session_id, current_sequence, metadata FROM sessions LIMIT ?1",
+                )
+                .map_err(map_sqlite_error)?;
+            let rows = statement
+                .query_map([i64::from(limit)], |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                })
+                .map_err(map_sqlite_error)?;
+            let mut sessions = Vec::new();
+            for row in rows {
+                let (session_id, current_sequence, metadata) =
+                    row.map_err(map_sqlite_error)?;
+                let session_id: [u8; 16] =
+                    session_id
+                        .as_slice()
+                        .try_into()
+                        .map_err(|_| StoreError::Integrity {
+                            reason_code: "session_id_bytes_invalid",
+                        })?;
+                let metadata = Metadata::parse(metadata).map_err(|_| StoreError::Integrity {
+                    reason_code: "session_metadata_invalid",
+                })?;
+                sessions.push(SessionListRow {
+                    session_id: SessionId::from_bytes(session_id),
+                    head_sequence: u64::try_from(current_sequence).unwrap_or_default(),
+                    metadata,
+                });
+            }
+            Ok(sessions)
         })
     }
 

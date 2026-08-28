@@ -34,7 +34,9 @@ mod config;
 mod docs;
 mod golden;
 
-pub use compose::{build_agent, build_agent_with_journal, model_name, open_journal};
+pub use compose::{
+    build_agent, build_agent_with_journal, model_name, open_journal, open_journal_sqlite,
+};
 pub use golden::{GoldenEntry, golden_entries};
 pub use config::{
     KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security,

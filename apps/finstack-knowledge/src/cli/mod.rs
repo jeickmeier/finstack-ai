@@ -9,6 +9,7 @@
 pub mod args;
 pub mod ask;
 pub mod render;
+pub mod sessions;
 
 #[cfg(test)]
 mod tests;

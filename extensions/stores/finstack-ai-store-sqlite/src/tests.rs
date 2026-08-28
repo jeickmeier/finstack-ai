@@ -336,6 +336,25 @@ fn scan_verifies_page_from_stored_checkpoint() {
 }
 
 #[test]
+fn list_sessions_enumerates_rows_with_heads_and_metadata() {
+    let store = memory_store();
+    block_on(store.append(request(70, 7, 1, vec![draft(70, 7)]))).expect("session 7");
+    block_on(store.append(request(80, 8, 1, vec![draft(80, 8), draft(81, 8)])))
+        .expect("session 8");
+    let mut rows = block_on(store.list_sessions(16)).expect("list");
+    rows.sort_by_key(|row| row.head_sequence);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].session_id, id::<SessionTag>(7));
+    assert_eq!(rows[0].head_sequence, 1);
+    assert_eq!(rows[1].session_id, id::<SessionTag>(8));
+    assert_eq!(rows[1].head_sequence, 2);
+    // Empty store lists empty; zero limit is invalid.
+    let empty = memory_store();
+    assert!(block_on(empty.list_sessions(16)).expect("empty list").is_empty());
+    assert!(block_on(store.list_sessions(0)).is_err());
+}
+
+#[test]
 fn structural_session_and_lane_records_commit_without_run_id() {
     let store = memory_store();
     let session = RecordDraft::try_new(

@@ -24,9 +24,22 @@ impl core::fmt::Debug for finstack_ai_store_sqlite::SqliteSynchronous
 pub fn finstack_ai_store_sqlite::SqliteSynchronous::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_store_sqlite::SqliteSynchronous
 impl core::marker::StructuralPartialEq for finstack_ai_store_sqlite::SqliteSynchronous
+pub struct finstack_ai_store_sqlite::SessionListRow
+pub finstack_ai_store_sqlite::SessionListRow::head_sequence: u64
+pub finstack_ai_store_sqlite::SessionListRow::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
+pub finstack_ai_store_sqlite::SessionListRow::session_id: finstack_ai_kernel::primitives::ids::SessionId
+impl core::clone::Clone for finstack_ai_store_sqlite::SessionListRow
+pub fn finstack_ai_store_sqlite::SessionListRow::clone(&self) -> finstack_ai_store_sqlite::SessionListRow
+impl core::cmp::Eq for finstack_ai_store_sqlite::SessionListRow
+impl core::cmp::PartialEq for finstack_ai_store_sqlite::SessionListRow
+pub fn finstack_ai_store_sqlite::SessionListRow::eq(&self, &finstack_ai_store_sqlite::SessionListRow) -> bool
+impl core::fmt::Debug for finstack_ai_store_sqlite::SessionListRow
+pub fn finstack_ai_store_sqlite::SessionListRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_store_sqlite::SessionListRow
 pub struct finstack_ai_store_sqlite::SqliteJournalStore
 impl finstack_ai_store_sqlite::SqliteJournalStore
 pub fn finstack_ai_store_sqlite::SqliteJournalStore::discard_snapshot(&self, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_sqlite::SqliteJournalStore::list_sessions(&self, u32) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_store_sqlite::SessionListRow>, finstack_ai_runtime::ports::journal::StoreError>>
 pub fn finstack_ai_store_sqlite::SqliteJournalStore::path(&self) -> &std::path::Path
 pub fn finstack_ai_store_sqlite::SqliteJournalStore::try_open(finstack_ai_store_sqlite::SqliteStoreConfig) -> core::result::Result<Self, finstack_ai_runtime::ports::journal::StoreError>
 impl finstack_ai_runtime::ports::journal::JournalStore for finstack_ai_store_sqlite::SqliteJournalStore

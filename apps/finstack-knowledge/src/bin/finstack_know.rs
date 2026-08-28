@@ -63,11 +63,34 @@ fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
                 }
             })
         }
-        Command::Ingest(_) | Command::Sessions { .. } | Command::Repl { .. } => {
-            Err(KnowledgeError::Config {
-                reason: "command_not_implemented_yet",
+        Command::Sessions { command } => {
+            let config = config_from(cli)?;
+            runtime()?.block_on(async move {
+                use finstack_ai_knowledge::cli::args::SessionsCommand;
+                use finstack_ai_knowledge::cli::sessions;
+                match command {
+                    SessionsCommand::List => {
+                        let rendered = if cli.json {
+                            sessions::run_list_json(&config).await?
+                        } else {
+                            sessions::run_list(&config).await?
+                        };
+                        print!("{rendered}");
+                    }
+                    SessionsCommand::Show { id } => {
+                        print!("{}", sessions::run_show(&config, id).await?);
+                    }
+                    SessionsCommand::Name { id, name } => {
+                        sessions::run_name(&config, id, name).await?;
+                        eprintln!("named {id}");
+                    }
+                }
+                Ok(ExitCode::SUCCESS)
             })
         }
+        Command::Ingest(_) | Command::Repl { .. } => Err(KnowledgeError::Config {
+            reason: "command_not_implemented_yet",
+        }),
     }
 }
 
