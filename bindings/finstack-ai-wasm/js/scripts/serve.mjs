@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const exampleRoot = resolve(root, "../../../examples/browser-minimal");
+const knowledgeRoot = resolve(root, "../../../examples/browser-knowledge");
+const knowledgeGolden = resolve(
+  root,
+  "../../../apps/finstack-knowledge/fixtures/golden.json",
+);
 const fixtureRoot = resolve(root, "../../../fixtures/compatibility/golden-trace");
 const port = Number(process.env.FINSTACK_WASM_HARNESS_PORT ?? 4173);
 
@@ -117,6 +122,55 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/examples/browser-minimal" || url.pathname === "/examples/browser-minimal/") {
     url.pathname = "/examples/browser-minimal/index.html";
+  }
+  if (
+    url.pathname === "/examples/browser-knowledge" ||
+    url.pathname === "/examples/browser-knowledge/"
+  ) {
+    url.pathname = "/examples/browser-knowledge/index.html";
+  }
+  // The shared golden fixture, staged from the app crate so the example and
+  // its spec never duplicate it.
+  if (url.pathname === "/examples/browser-knowledge/golden.json") {
+    try {
+      const body = await readFile(knowledgeGolden);
+      response.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      response.end(body);
+    } catch {
+      response.writeHead(404);
+      response.end("not found");
+    }
+    return;
+  }
+  if (url.pathname.startsWith("/examples/browser-knowledge/")) {
+    const relative =
+      url.pathname.slice("/examples/browser-knowledge/".length) || "index.html";
+    const resolved = resolve(join(knowledgeRoot, normalize(relative)));
+    if (!resolved.startsWith(knowledgeRoot)) {
+      response.writeHead(403);
+      response.end("forbidden");
+      return;
+    }
+    try {
+      const info = await stat(resolved);
+      if (!info.isFile()) {
+        response.writeHead(404);
+        response.end("not found");
+        return;
+      }
+      response.writeHead(200, {
+        "content-type": types.get(extname(resolved)) ?? "application/octet-stream",
+        "cache-control": "no-store",
+      });
+      createReadStream(resolved).pipe(response);
+    } catch {
+      response.writeHead(404);
+      response.end("not found");
+    }
+    return;
   }
   if (url.pathname.startsWith("/examples/browser-minimal/")) {
     const relative = url.pathname.slice("/examples/browser-minimal/".length) || "index.html";

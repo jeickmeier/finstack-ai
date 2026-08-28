@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>finstack-ai browser-knowledge</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 1.5rem;
+        max-width: 52rem;
+      }
+      button {
+        margin-right: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      input {
+        width: 28rem;
+        margin-right: 0.5rem;
+      }
+      pre {
+        background: #f4f4f4;
+        padding: 0.75rem;
+        overflow: auto;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "@finstack/ai": "/dist/index.js",
+          "@finstack/ai/worker": "/dist/worker.js",
+          "@finstack/ai/adapters/indexeddb": "/dist/adapters/indexeddb.js",
+          "@finstack/ai/adapters/openai": "/dist/adapters/openai.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Knowledge agent, embedded</h1>
+    <p>
+      The knowledge agent running in a worker with an IndexedDB journal and
+      a TypeScript retrieval toolset over an in-page corpus (excerpts of the
+      bundled self-docs). Scripted model by default — no provider, no
+      network. Browser storage is origin-local, so cross-surface here means
+      inspect/export, not shared sessions.
+    </p>
+    <p>
+      <input id="question" type="text" value="What are the six runtime ports?" />
+      <button id="ask" type="button">Ask</button>
+    </p>
+    <p>
+      <button id="inspect" type="button">Inspect last session</button>
+      <button id="golden" type="button">Run golden set</button>
+      <button id="clear" type="button">Clear local data</button>
+    </p>
+    <h2>Answer</h2>
+    <pre id="answer">none</pre>
+    <h2>Events</h2>
+    <pre id="events"></pre>
+    <h2>Golden questions</h2>
+    <pre id="golden-results">not run</pre>
+    <h2>Inspect</h2>
+    <pre id="inspect-panel">none</pre>
+    <script type="module" src="./dist/main.js"></script>
+  </body>
+</html>
