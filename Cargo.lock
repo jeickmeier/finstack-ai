@@ -1258,6 +1258,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-knowledge"
+version = "2.0.0"
+
+[[package]]
 name = "finstack-ai-memory"
 version = "2.0.0"
 dependencies = [

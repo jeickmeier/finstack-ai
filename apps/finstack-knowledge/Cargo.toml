@@ -1,0 +1,16 @@
+[package]
+name = "finstack-ai-knowledge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Knowledge agent: ingest, remember, and answer with citations"
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

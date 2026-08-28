@@ -53,6 +53,7 @@ members = [
     "extensions/workflow/finstack-ai-workflow-hitl",
     "extensions/workflow/finstack-ai-workflow-local",
     "extensions/workflow/finstack-ai-workflow-worker",
+    "apps/finstack-knowledge",
     "examples/rust-minimal",
     "examples/durable-interaction",
     "fixtures/ci/model-port-leaf",
@@ -179,6 +180,7 @@ finstack-ai-net-guard = { path = "extensions/net/finstack-ai-net-guard", version
 finstack-ai-workflow-hitl = { path = "extensions/workflow/finstack-ai-workflow-hitl", version = "2.0.0" }
 finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "2.0.0" }
 finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "2.0.0" }
+finstack-ai-knowledge = { path = "apps/finstack-knowledge", version = "2.0.0" }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
 finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "2.0.0" }
