@@ -6,7 +6,7 @@ use crate::{
     materialize_self_docs, model_name, security,
 };
 
-mod loopback;
+pub(crate) mod loopback;
 
 fn ollama() -> ProviderChoice {
     ProviderChoice::Ollama {

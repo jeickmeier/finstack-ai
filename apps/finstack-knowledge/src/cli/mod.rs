@@ -7,6 +7,7 @@
 //! attached to a terminal).
 
 pub mod args;
+pub mod render;
 
 #[cfg(test)]
 mod tests;
