@@ -1,7 +1,7 @@
 # Examples
 
-Public-API examples for finstack-ai bindings. Workspace version is
-**2.0.0** unpublished (last public tag `v0.1.0`; registries unpublished).
+Public-API examples for finstack-ai bindings. Workspace manifests are staged at
+**2.0.0**; build from the repository until a 2.0 release is published.
 
 - [`rust-minimal/`](rust-minimal/) — T1 native binaries (`minimal`, `coding`,
   `service`, `diagnostic`).

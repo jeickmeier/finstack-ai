@@ -12,7 +12,8 @@ Trust class: JS host adapters are T2.
 They are not isolated. Stored prompts and results are
 T5.
 
-Workspace version is **2.0.0** unpublished (last public tag `v0.1.0`; not on npm).
+Workspace manifests are staged at **2.0.0**. The latest local release tag is
+`v1.0.0`; build this example from the repository until 2.0 is published.
 
 ## Quick start
 
@@ -26,8 +27,9 @@ The wasm harness serves this directory at `/examples/browser-minimal/` after
   origin can.
 - Shared-device browsers keep the journal until the user clears site data or
   clicks **Clear local data**.
-- Schema v1 is provisional. A later upgrade may refuse to open this database
-  (`journal_schema_unsupported`). Schema version remains 1.
+- Schema v3 is provisional. Upgrading an earlier provisional database discards
+  snapshots and artifacts but preserves committed journal batches for replay.
+  Opening a newer unsupported schema fails with `journal_schema_unsupported`.
 - Deleting the database discards inspect history. That is not run cancellation.
 
 ## Topology

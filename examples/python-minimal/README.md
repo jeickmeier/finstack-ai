@@ -1,8 +1,8 @@
 # Python starter projects
 
 Three deliberately small starters against the typed public `finstack_ai`
-package. Workspace pin is `finstack-ai==2.0.0` (unpublished; last public
-tag `v0.1.0`; not on PyPI).
+package. The workspace pins `finstack-ai==2.0.0`; build from the repository
+until a 2.0 package is published.
 
 - [`rust-backed/`](rust-backed/) — curated Rust-backed native Ollama provider
   (T1). Default path performs no

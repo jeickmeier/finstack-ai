@@ -20,11 +20,13 @@ pub(crate) struct PySession {
 
 #[pymethods]
 impl PySession {
+    /// Tenant scope that owns this session.
     #[getter]
     fn tenant_scope(&self) -> &str {
         self.inner.tenant_scope()
     }
 
+    /// Durable identity of this session.
     #[getter]
     fn session_id(&self) -> String {
         self.inner.session_id().to_string()
@@ -134,11 +136,13 @@ pub(crate) struct PyLane {
 
 #[pymethods]
 impl PyLane {
+    /// Durable identity of this lane.
     #[getter]
     fn lane_id(&self) -> String {
         self.inner.lane_id().to_string()
     }
 
+    /// Live session handle that owns this lane.
     #[getter]
     fn session(&self) -> PySession {
         PySession {

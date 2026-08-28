@@ -1,6 +1,30 @@
-//! Reference Unix-socket / loopback session server (session-server framing contract).
+//! Reference Unix-socket, loopback, and TLS session server.
 //!
-//! Default SDK and runtime stay free of this crate and of `rustls`.
+//! The server implements the bounded session framing contract from
+//! `finstack-ai-protocol`. It owns transport policy, authentication, security
+//! audit gating, reconnect projection, command receipts, and per-connection
+//! credit limits. It does not execute agents or act as production execution
+//! authority.
+//!
+//! # Security model
+//!
+//! - Loopback plaintext accepts only the loopback authentication method.
+//! - Bearer credentials are accepted only over Unix sockets or TLS 1.3.
+//! - [`AuthVerifier`] returns a validated [`AuthContext`] containing no raw
+//!   credential.
+//! - [`Server::bind`] requires a healthy security-audit sink before accepting
+//!   external ingress.
+//! - Scope mismatches are audited and masked at the connection boundary.
+//!
+//! [`StaticAuthVerifier`] is a test/reference verifier, not an application
+//! credential store. Applications own credential storage, rotation, and
+//! authorization policy.
+//!
+//! # Reference lifecycle
+//!
+//! [`Server::accept_once`] binds, accepts, and serves one connection. It is
+//! intentionally not a production accept loop. The default SDK and runtime
+//! remain independent of this crate and of `rustls`.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]

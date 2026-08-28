@@ -86,6 +86,7 @@ export class WorkerEventBatch {
   readonly lastSequence: number;
   readonly droppedProgress: number;
 
+  /** @internal */
   constructor(
     bytes: ArrayBuffer,
     firstSequence: number,
@@ -145,6 +146,7 @@ export class WorkerEvent {
   readonly #value: Record<string, unknown>;
   readonly #json: string;
 
+  /** @internal */
   constructor(value: unknown) {
     if (value === null || typeof value !== "object") {
       throw new FinstackError("worker event snapshot is not an object", {
@@ -199,6 +201,7 @@ export class WorkerAgent {
   readonly #client: WorkerClient;
   readonly #agentId: string;
 
+  /** @internal */
   constructor(client: WorkerClient, agentId: string) {
     this.#client = client;
     this.#agentId = agentId;
@@ -250,6 +253,7 @@ export class WorkerRun {
   readonly #client: WorkerClient;
   readonly #state: RunState;
 
+  /** @internal */
   constructor(client: WorkerClient, state: RunState) {
     this.#client = client;
     this.#state = state;
@@ -258,6 +262,7 @@ export class WorkerRun {
   /**
    * Session locator captured when the worker accepted the run.
    *
+   * @returns The tenant, session, lane, and run identities.
    * @throws {FinstackError} When start has not been acknowledged yet.
    */
   get session(): SessionSnapshot {
@@ -342,7 +347,12 @@ export class WorkerRun {
     return this.#state.finished;
   }
 
-  /** Read the worker-hosted run's latest confirmed state. */
+  /**
+   * Read the worker-hosted run's latest confirmed state.
+   *
+   * @returns The latest semantic and lifecycle state.
+   * @throws {FinstackError} When the worker cannot return a valid snapshot.
+   */
   async liveState(): Promise<RunStateSnapshot> {
     await this.#state.started;
     const message = await this.#client.request({
@@ -361,7 +371,13 @@ export class WorkerRun {
     return message.snapshot;
   }
 
-  /** Wait until the worker-hosted latest-only view advances. */
+  /**
+   * Wait until the worker-hosted latest-only view advances.
+   *
+   * @param revision - Last revision already observed.
+   * @returns The first newer confirmed state.
+   * @throws {FinstackError} When the worker cannot return a valid snapshot.
+   */
   async waitForLiveState(revision: number): Promise<RunStateSnapshot> {
     await this.#state.started;
     const message = await this.#client.request({
@@ -447,6 +463,7 @@ export class WorkerClient {
   #closed = false;
   readonly #policy: LagPolicy;
 
+  /** @internal */
   constructor(worker: Worker, policy: LagPolicy) {
     this.#worker = worker;
     this.#policy = policy;
@@ -475,23 +492,17 @@ export class WorkerClient {
     });
   }
 
-  /** Allocate a unique protocol request id. */
+  /**
+   * Allocate a unique protocol request id.
+   *
+   * @returns A client-scoped correlation id.
+   * @internal
+   */
   nextId(): string {
     this.#next += 1;
     return `c-${this.#next}`;
   }
 
-  /**
-   * Construct one Agent inside the worker.
-   *
-   * @param options - Serializable factory payload. Do not pass JS handles.
-   * @returns A main-thread Agent proxy.
-   * @throws {FinstackError} When the worker rejects construction.
-   * @example
-   * ```ts
-   * const agent = await client.create({ scenario: "model-only" });
-   * ```
-   */
   /**
    * Inspect one stored session inside the worker.
    *
@@ -521,6 +532,17 @@ export class WorkerClient {
     return inspected.snapshot;
   }
 
+  /**
+   * Construct one Agent inside the worker.
+   *
+   * @param options - Serializable factory payload. Do not pass JS handles.
+   * @returns A main-thread Agent proxy.
+   * @throws {FinstackError} When the worker rejects construction.
+   * @example
+   * ```ts
+   * const agent = await client.create({ scenario: "model-only" });
+   * ```
+   */
   async create(options?: unknown): Promise<WorkerAgent> {
     const created = await this.request({
       v: 1,
@@ -576,6 +598,7 @@ export class WorkerClient {
     this.#failAll(cancelled);
   }
 
+  /** @internal */
   startRun(agentId: string, input: string, options?: RunOptions): WorkerRun {
     let resolveStarted!: (session: SessionSnapshot) => void;
     let rejectStarted!: (error: FinstackError) => void;
@@ -643,6 +666,7 @@ export class WorkerClient {
     return new WorkerRun(this, state);
   }
 
+  /** @internal */
   ack(state: RunState, lastSequence: number): void {
     if (state.runId === undefined || this.#closed) {
       return;
@@ -656,6 +680,7 @@ export class WorkerClient {
     });
   }
 
+  /** @internal */
   async closeEvents(state: RunState): Promise<void> {
     state.closed = true;
     state.iterating = false;
@@ -671,6 +696,7 @@ export class WorkerClient {
     }).catch(() => undefined);
   }
 
+  /** @internal */
   async request(message: MainToWorker): Promise<WorkerToMain> {
     if (!("id" in message) || message.id === undefined) {
       throw new FinstackError("worker request missing id", {

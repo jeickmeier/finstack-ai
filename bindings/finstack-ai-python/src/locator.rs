@@ -14,21 +14,25 @@ pub(crate) struct PyLocator {
 
 #[pymethods]
 impl PyLocator {
+    /// Tenant scope that owns the accepted operation.
     #[getter]
     fn tenant_scope(&self) -> &str {
         &self.locator.tenant_scope
     }
 
+    /// Durable session identity.
     #[getter]
     fn session_id(&self) -> String {
         self.locator.session_id.to_string()
     }
 
+    /// Durable lane identity.
     #[getter]
     fn lane_id(&self) -> String {
         self.locator.lane_id.to_string()
     }
 
+    /// Durable run identity.
     #[getter]
     fn run_id(&self) -> String {
         self.locator.run_id.to_string()

@@ -84,7 +84,8 @@ instruction prefix.
 - `EventBatch` is the primary transport unit; expanding to individual `Event`
   values is explicit.
 - `RunResult.text`, `output`, `retry_attempts`, `active_capabilities`, `trace`,
-  and `session` are immutable snapshots.
+  and `locator` are immutable snapshots. `session` is a locator-shaped alias
+  retained on the result object; live session operations use `Run.session`.
 
 ## Trusted callback ports
 
@@ -115,4 +116,35 @@ and expose `code`, `retryable`, and safe locator `context` where available.
 | `CancelledError` | `agent_run_cancelled` |
 | `TimeoutError` | `agent_run_timeout` |
 
-See troubleshooting.
+## Troubleshooting
+
+### Native module does not import
+
+Run `mise run build-python-dev`, then execute Python through the repository
+environment (`uv run python`). The package requires the native
+`finstack_ai._finstack_ai` extension; importing the source directory with an
+unbuilt or stale extension is unsupported.
+
+### Pydantic adapters are unavailable
+
+Install the optional dependency set used by the workspace. `@tool`,
+`pydantic_toolset()`, and `output_type=` import Pydantic lazily and raise a
+`TypeError` naming the missing `finstack-ai[pydantic]` extra.
+
+### Dropping a run did not cancel it
+
+This is intentional. Dropping `Run` detaches observation. Call
+`await run.cancel()` to commit cancellation, or `await run.close_events()` to
+stop only event observation.
+
+### An opened session did not resume work
+
+`Agent.open_session()` is inspect-only. Find the suspended lane and call
+`await lane.resume(agent)` explicitly. This prevents journal replay from
+silently re-executing effects.
+
+### A callback context raises `python_callback_context_settled`
+
+`CallbackContext` is invocation-scoped. Copy required identity fields with
+`to_dict()` before the callback returns; retained contexts deliberately reject
+later access.

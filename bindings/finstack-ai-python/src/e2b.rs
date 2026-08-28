@@ -51,11 +51,13 @@ impl PyE2bSandboxToolset {
         })
     }
 
+    /// Stable component identifier for the E2B sandbox toolset.
     #[getter]
     fn component(&self) -> String {
         self.component.id().to_string()
     }
 
+    /// Number of E2B sandbox tools exposed to the model.
     #[getter]
     fn tool_count(&self) -> usize {
         self.inner.tools().len()

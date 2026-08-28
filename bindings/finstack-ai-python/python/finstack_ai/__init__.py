@@ -62,6 +62,10 @@ def health() -> str:
     Returns:
         The constant health status. This function performs no I/O and does not
         initialize an async runtime.
+
+    Examples:
+        >>> health()
+        'ok'
     """
 
     return _native.health()
@@ -72,6 +76,11 @@ def build_metadata() -> BuildMetadata:
 
     Returns:
         Metadata for the loaded extension and Rust semantic engine.
+
+    Examples:
+        >>> metadata = build_metadata()
+        >>> {"version", "engine_version"} <= metadata.keys()
+        True
     """
 
     return cast(BuildMetadata, _native.build_metadata())
@@ -83,6 +92,10 @@ def linked_providers() -> tuple[str, ...]:
     Returns:
         Provider identifiers. Provider clients are not constructed by this
         query or during package import.
+
+    Examples:
+        >>> isinstance(linked_providers(), tuple)
+        True
     """
 
     return _native.linked_providers()

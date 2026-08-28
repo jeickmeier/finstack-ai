@@ -84,19 +84,29 @@ export interface CapabilityCatalogItem {
 export class HistoryCachePolicy {
   readonly #handle: WasmHistoryCachePolicy;
 
+  /**
+   * Create a bounded checkpoint-cache policy.
+   *
+   * @param maxEntries - Maximum retained checkpoint count.
+   * @param maxBytes - Maximum aggregate retained bytes.
+   * @throws {Error} When WASM is not initialized or either bound is invalid.
+   */
   constructor(maxEntries = 64, maxBytes = 16 * 1024 * 1024) {
     requireWasm();
     this.#handle = new WasmHistoryCachePolicy(maxEntries, maxBytes);
   }
 
+  /** @returns A policy that retains no process-local checkpoints. */
   static disabled(): HistoryCachePolicy {
     return new HistoryCachePolicy(0, 0);
   }
 
+  /** @returns Maximum retained checkpoint count. */
   get maxEntries(): number {
     return this.#handle.maxEntries;
   }
 
+  /** @returns Maximum aggregate retained bytes. */
   get maxBytes(): number {
     return this.#handle.maxBytes;
   }
@@ -305,6 +315,7 @@ export interface SessionInspectSnapshot {
 export class Agent {
   readonly #handle: WasmAgent;
 
+  /** @internal */
   constructor(handle: WasmAgent) {
     this.#handle = handle;
   }
@@ -314,7 +325,12 @@ export class Agent {
     return this.#handle;
   }
 
-  /** Compose an agent with a fresh bounded process-local history cache. */
+  /**
+   * Compose an agent with a fresh bounded process-local history cache.
+   *
+   * @param policy - Cache bounds for the new immutable composition.
+   * @returns A new agent handle; this agent is unchanged.
+   */
   withHistoryCache(policy: HistoryCachePolicy): Agent {
     requireWasm();
     return new Agent(this.#handle.withHistoryCache(policy.handle()));
@@ -440,6 +456,10 @@ export class Agent {
    *
    * In-flight runs keep the previous lock. wasm-host fail-closed is a Rust
    * platform error, not a missing method.
+   *
+   * @returns A newly resolved immutable agent handle.
+   * @throws {FinstackError} When reconstruction fails or this agent was not
+   * builder-composed.
    */
   async reResolve(): Promise<Agent> {
     requireWasm();
@@ -611,12 +631,15 @@ export interface ChildRunOptions extends Omit<RunOptions, "attachments"> {
 export class Run {
   readonly #handle: WasmRun;
 
+  /** @internal */
   constructor(handle: WasmRun) {
     this.#handle = handle;
   }
 
   /**
    * Live session handle for this run.
+   *
+   * @returns The owning live session.
    */
   get session(): Session {
     return new Session(this.#handle.session);
@@ -624,6 +647,8 @@ export class Run {
 
   /**
    * Immutable operation locator snapshot.
+   *
+   * @returns Tenant, session, lane, and run identities.
    */
   get locator(): Locator {
     return new Locator(this.#handle.locator);
@@ -700,7 +725,12 @@ export class Run {
     }
   }
 
-  /** Read the latest confirmed run-state snapshot. */
+  /**
+   * Read the latest confirmed run-state snapshot.
+   *
+   * @returns The latest semantic and lifecycle state.
+   * @throws {FinstackError} When the live runtime handle is unavailable.
+   */
   async liveState(): Promise<RunStateSnapshot> {
     try {
       return (await this.#handle.liveState()) as RunStateSnapshot;
@@ -709,7 +739,13 @@ export class Run {
     }
   }
 
-  /** Wait until the latest-only view advances beyond `revision`. */
+  /**
+   * Wait until the latest-only view advances beyond `revision`.
+   *
+   * @param revision - Last revision already observed.
+   * @returns The first newer confirmed state.
+   * @throws {FinstackError} When the revision is unsafe or the runtime stops.
+   */
   async waitForLiveState(revision: number): Promise<RunStateSnapshot> {
     try {
       return (await this.#handle.waitForLiveState(
@@ -757,7 +793,12 @@ export class Run {
     }
   }
 
-  /** List the outstanding typed interaction for this run (zero or one). */
+  /**
+   * List the outstanding typed interaction for this run.
+   *
+   * @returns Zero or one persisted interaction request.
+   * @throws {FinstackError} When the authenticated locator cannot be listed.
+   */
   async listInteractions(): Promise<Readonly<Record<string, unknown>>[]> {
     try {
       return (await this.#handle.listInteractions()) as Readonly<
@@ -772,6 +813,9 @@ export class Run {
    * Resolve the outstanding interaction through the live Rust-owned run.
    *
    * @param resolution - Canonical interaction resolution object.
+   * @returns A promise that settles after the resolution is committed.
+   * @throws {FinstackError} When the resolution conflicts, is expired, or is
+   * unauthorized.
    */
   async resolveInteraction(
     resolution: Readonly<Record<string, unknown>>,
@@ -872,6 +916,7 @@ export class Run {
 export class Locator {
   readonly #handle: WasmLocator;
 
+  /** @internal */
   constructor(handle: WasmLocator) {
     this.#handle = handle;
   }
@@ -938,6 +983,7 @@ export interface ExternalIdentitySnapshot {
 export class Session {
   readonly #handle: WasmSession;
 
+  /** @internal */
   constructor(handle: WasmSession) {
     this.#handle = handle;
   }
@@ -1071,6 +1117,7 @@ export class Session {
 export class Lane {
   readonly #handle: WasmLane;
 
+  /** @internal */
   constructor(handle: WasmLane) {
     this.#handle = handle;
   }
@@ -1167,7 +1214,12 @@ export class Lane {
     }
   }
 
-  /** Park the in-process driver without dropping the journal. */
+  /**
+   * Park the in-process driver without dropping the journal.
+   *
+   * @returns A promise that settles after the driver parks.
+   * @throws {FinstackError} When the journal cannot be loaded.
+   */
   async suspend(): Promise<void> {
     try {
       await this.#handle.suspend();
@@ -1176,7 +1228,13 @@ export class Lane {
     }
   }
 
-  /** Recover the parked run and respawn its Rust-owned task. */
+  /**
+   * Recover the parked run and respawn its Rust-owned task.
+   *
+   * @param agent - Resolved agent that supplies model and tool ports.
+   * @returns A promise that settles after the owner respawns.
+   * @throws {FinstackError} When no run is suspended or restore fails.
+   */
   async resume(agent: Agent): Promise<void> {
     try {
       await this.#handle.resume(agent.handle());
@@ -1235,6 +1293,7 @@ export class MemoryExternalIdentityMap {
 export class RunResult {
   readonly #handle: WasmRunResult;
 
+  /** @internal */
   constructor(handle: WasmRunResult) {
     this.#handle = handle;
   }
@@ -1298,6 +1357,7 @@ export class RunResult {
 export class Event {
   readonly #handle: WasmEvent;
 
+  /** @internal */
   constructor(handle: WasmEvent) {
     this.#handle = handle;
   }
@@ -1348,6 +1408,7 @@ export class Event {
 export class EventBatch {
   readonly #handle: WasmEventBatch;
 
+  /** @internal */
   constructor(handle: WasmEventBatch) {
     this.#handle = handle;
   }

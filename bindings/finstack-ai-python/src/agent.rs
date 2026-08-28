@@ -163,11 +163,13 @@ impl PyHistoryCachePolicy {
         }
     }
 
+    /// Maximum number of retained checkpoints.
     #[getter]
     fn max_entries(&self) -> usize {
         self.inner.max_entries()
     }
 
+    /// Maximum aggregate bytes retained by the cache.
     #[getter]
     fn max_bytes(&self) -> usize {
         self.inner.max_bytes()

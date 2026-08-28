@@ -1,11 +1,34 @@
-//! Canonical-CBOR journal codec and shared remote/process framing.
+//! Canonical journal codec and bounded remote/process framing for `finstack-ai`.
 //!
-//! Production encode validates a value tree, recursively RFC 8949-sorts map
-//! keys, then writes definite lengths and shortest lossless integer/float
-//! forms. The project-owned writer is canonical (ADR-015 / ADR-038).
-//! `ciborium` is test-only interop and is not the profile writer. Runtime
-//! and default SDK stay protocol-free: they do not depend on this crate for
-//! in-process work.
+//! This crate owns wire representation only. The runtime and default SDK do
+//! not depend on it for in-process values or semantic decisions.
+//!
+//! # Canonical journal data
+//!
+//! [`encode`] validates a value tree, recursively applies RFC 8949 map-key
+//! ordering, and writes definite lengths plus shortest lossless integer and
+//! float forms. [`decode`] rejects non-canonical or over-limit input before
+//! allocating declared collections. [`payload_digest`], [`envelope_checksum`],
+//! and [`verify_chain`] bind journal records to the same canonical bytes used
+//! by persistence and cross-language known-answer fixtures.
+//!
+//! # Remote framing
+//!
+//! [`ProtocolEnvelope`] and [`RemotePostAuth`] define the versioned session
+//! framing contract. Frame, collection, string, and nesting limits are public
+//! constants and are enforced during decoding. Version and feature negotiation
+//! fail closed through [`select_version`] and [`require_features`].
+//!
+//! # Pre-beta shapes
+//!
+//! [`normalize_prebeta_shape`] is the shared Rust validator used by Python and
+//! WASM for child-lineage, interaction-resolution, and authenticated external
+//! completion DTOs. It validates data only and does not route a live command.
+//!
+//! # Diagnostics
+//!
+//! [`to_diagnostic_json`] and [`to_diagnostic_jsonl`] are explicit diagnostic
+//! projections. They are not alternate canonical encodings.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]

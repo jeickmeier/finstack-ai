@@ -54,21 +54,25 @@ pub(crate) struct PyEvent {
 
 #[pymethods]
 impl PyEvent {
+    /// Stable runtime event-kind name.
     #[getter]
     fn kind(&self) -> &'static str {
         self.inner.kind().kind_name()
     }
 
+    /// Delivery class: durable semantic event or transient progress.
     #[getter]
     fn event_class(&self) -> &'static str {
         self.inner.class().class_name()
     }
 
+    /// Monotonic sequence assigned by the live transport.
     #[getter]
     fn transient_sequence(&self) -> u64 {
         self.inner.transient_sequence()
     }
 
+    /// Journal sequence for durable events, otherwise `None`.
     #[getter]
     fn durable_sequence(&self) -> Option<u64> {
         self.inner.durable_sequence()
@@ -90,16 +94,19 @@ pub(crate) struct PyEventBatch {
 
 #[pymethods]
 impl PyEventBatch {
+    /// First transient sequence included in this batch.
     #[getter]
     fn first_sequence(&self) -> u64 {
         self.inner.first_sequence()
     }
 
+    /// Last transient sequence included in this batch.
     #[getter]
     fn last_sequence(&self) -> u64 {
         self.inner.last_sequence()
     }
 
+    /// Count of transient progress events dropped before this batch.
     #[getter]
     fn dropped_progress(&self) -> u64 {
         self.inner.dropped_progress()

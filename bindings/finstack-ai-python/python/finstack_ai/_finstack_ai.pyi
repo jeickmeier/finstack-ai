@@ -114,6 +114,14 @@ class Capability:
     ``instructions``, and ``activation``. Native bundle specifications
     may additionally contribute registered Toolset, ContextProvider, and
     Middleware references.
+
+    Examples:
+        >>> capability = Capability(
+        ...     "summarize", "Summarize source material",
+        ...     ["Cite the supplied source."], activation="model"
+        ... )
+        >>> capability.id
+        'summarize'
     """
 
     def __init__(
@@ -125,11 +133,14 @@ class Capability:
         activation: CapabilityActivation = "application",
     ) -> None: ...
     @property
-    def id(self) -> str: ...
+    def id(self) -> str:
+        """Stable capability identifier used for activation."""
     @property
-    def description(self) -> str: ...
+    def description(self) -> str:
+        """Compact model-visible capability description."""
     @property
-    def activation(self) -> CapabilityActivation: ...
+    def activation(self) -> CapabilityActivation:
+        """Activation owner selected when the capability was declared."""
 
 class PythonModel:
     """Trusted coarse Python implementation of the Rust Model port.
@@ -152,9 +163,11 @@ class PythonModel:
         max_output_tokens: int = 1_024,
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier registered with the agent."""
     @property
-    def model(self) -> str: ...
+    def model(self) -> str:
+        """Provider-specific model identifier."""
 
 class ElicitationToolset:
     """Human-in-the-loop elicitation toolset backed by the Rust implementation.
@@ -172,9 +185,11 @@ class ElicitationToolset:
         tools: list[dict[str, Any]] | None = None,
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier for the native elicitation toolset."""
     @property
-    def tool_count(self) -> int: ...
+    def tool_count(self) -> int:
+        """Number of elicitation tools exposed to the model."""
 
 class MemoryExtension:
     """Native memory composition: one store, one scope, one policy.
@@ -183,6 +198,13 @@ class MemoryExtension:
     factories' ``toolsets``, ``context_providers``, and ``observers``
     parameters. All handles share the extension's store, so one extension
     can back several agents.
+
+    Examples:
+        >>> memory = MemoryExtension.in_process(tenant="python-local")
+        >>> memory.tenant
+        'python-local'
+        >>> memory.context_provider().component
+        'finstack.memory.context'
     """
 
     @staticmethod
@@ -231,7 +253,8 @@ class MemoryExtension:
         """
 
     @property
-    def tenant(self) -> str: ...
+    def tenant(self) -> str:
+        """Tenant scope shared by every handle from this extension."""
     def context_provider(self, *, max_hits: int | None = None) -> MemoryContextProvider:
         """Return the recall provider handle for ``context_providers``."""
 
@@ -245,7 +268,8 @@ class MemoryContextProvider:
     """Recall provider handle produced by :meth:`MemoryExtension.context_provider`."""
 
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier for the recall provider."""
 
 class MemoryToolset:
     """Memory toolset handle produced by :meth:`MemoryExtension.toolset`.
@@ -255,9 +279,11 @@ class MemoryToolset:
     """
 
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier for the memory toolset."""
     @property
-    def tool_count(self) -> int: ...
+    def tool_count(self) -> int:
+        """Number of memory tools exposed to the model."""
 
 class HttpFetchToolset:
     """Bounded, allowlisted HTTP fetch toolset backed by the Rust implementation.
@@ -281,9 +307,11 @@ class HttpFetchToolset:
         self, config_json: str, *, insecure_allow_loopback_http: bool = False
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier for the HTTP fetch toolset."""
     @property
-    def tool_count(self) -> int: ...
+    def tool_count(self) -> int:
+        """Number of HTTP fetch tools exposed to the model."""
 
 class E2bSandboxToolset:
     """Composable T4 E2B sandbox toolset for a real model-backed agent."""
@@ -296,15 +324,18 @@ class E2bSandboxToolset:
         template: str | None = None,
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier for the E2B sandbox toolset."""
     @property
-    def tool_count(self) -> int: ...
+    def tool_count(self) -> int:
+        """Number of E2B sandbox tools exposed to the model."""
 
 class MemoryObserver:
     """Capture observer handle produced by :meth:`MemoryExtension.observer`."""
 
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier for the memory observer."""
 
 class PythonToolset:
     """Trusted coarse Python implementation of the Rust Toolset port.
@@ -324,9 +355,11 @@ class PythonToolset:
         callback_timeout_seconds: float = 30.0,
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier registered with the agent."""
     @property
-    def tool_count(self) -> int: ...
+    def tool_count(self) -> int:
+        """Number of normalized Python tools exposed to the model."""
 
 class PythonContextProvider:
     """Trusted coarse Python implementation of the ContextProvider port.
@@ -345,7 +378,8 @@ class PythonContextProvider:
         trusted_application_instructions: bool = False,
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier registered with the agent."""
 
 class PythonMiddleware:
     """Trusted coarse Python implementation of selected middleware stages.
@@ -365,7 +399,8 @@ class PythonMiddleware:
         callback_timeout_seconds: float = 30.0,
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier registered with the agent."""
 
 ObserverCallback = Callable[[list[dict[str, Any]]], None | Awaitable[None]]
 
@@ -386,19 +421,24 @@ class PythonObserver:
         callback_timeout_seconds: float = 30.0,
     ) -> None: ...
     @property
-    def component(self) -> str: ...
+    def component(self) -> str:
+        """Stable component identifier registered with the agent."""
 
 class Locator:
     """Immutable identifiers for one accepted operation."""
 
     @property
-    def tenant_scope(self) -> str: ...
+    def tenant_scope(self) -> str:
+        """Tenant scope that owns the accepted operation."""
     @property
-    def session_id(self) -> str: ...
+    def session_id(self) -> str:
+        """Durable session identity."""
     @property
-    def lane_id(self) -> str: ...
+    def lane_id(self) -> str:
+        """Durable lane identity."""
     @property
-    def run_id(self) -> str: ...
+    def run_id(self) -> str:
+        """Durable run identity."""
     def to_dict(self) -> dict[str, str]:
         """Serialize the identifier snapshot explicitly.
 
@@ -410,9 +450,11 @@ class Session:
     """Live handle for one journaled session."""
 
     @property
-    def tenant_scope(self) -> str: ...
+    def tenant_scope(self) -> str:
+        """Tenant scope that owns this session."""
     @property
-    def session_id(self) -> str: ...
+    def session_id(self) -> str:
+        """Durable identity of this session."""
     def create_lane(self, name: str, fork: str | None = None) -> Awaitable[Lane]:
         """Create a named lane, optionally forking from an existing entry.
 
@@ -523,9 +565,11 @@ class Lane:
     """Live handle for one lane in a session."""
 
     @property
-    def lane_id(self) -> str: ...
+    def lane_id(self) -> str:
+        """Durable identity of this lane."""
     @property
-    def session(self) -> Session: ...
+    def session(self) -> Session:
+        """Live session handle that owns this lane."""
     def navigate(self, entry_id: str) -> Awaitable[None]:
         """Point this idle lane at an existing entry without copying.
 
@@ -636,8 +680,13 @@ class ChildRunPolicy:
     The default for every factory is :meth:`deny`. Pass
     :meth:`allow` to admit isolated or compatible children up to an
     inclusive depth.
-    """
 
+    Examples:
+        >>> ChildRunPolicy.deny() is not None
+        True
+        >>> ChildRunPolicy.allow(max_depth=2) is not None
+        True
+    """
     @staticmethod
     def deny() -> ChildRunPolicy:
         """Reject every child invocation.
@@ -718,13 +767,17 @@ class Event:
     """Immutable runtime event snapshot."""
 
     @property
-    def kind(self) -> str: ...
+    def kind(self) -> str:
+        """Stable runtime event-kind name."""
     @property
-    def event_class(self) -> str: ...
+    def event_class(self) -> str:
+        """Delivery class: durable semantic event or transient progress."""
     @property
-    def transient_sequence(self) -> int: ...
+    def transient_sequence(self) -> int:
+        """Monotonic sequence assigned by the live transport."""
     @property
-    def durable_sequence(self) -> int | None: ...
+    def durable_sequence(self) -> int | None:
+        """Journal sequence for durable events, otherwise ``None``."""
     def to_json(self) -> str:
         """Serialize the complete event explicitly."""
 
@@ -732,11 +785,14 @@ class EventBatch:
     """Immutable bounded transport batch."""
 
     @property
-    def first_sequence(self) -> int: ...
+    def first_sequence(self) -> int:
+        """First transient sequence included in this batch."""
     @property
-    def last_sequence(self) -> int: ...
+    def last_sequence(self) -> int:
+        """Last transient sequence included in this batch."""
     @property
-    def dropped_progress(self) -> int: ...
+    def dropped_progress(self) -> int:
+        """Count of transient progress events dropped before this batch."""
     def __len__(self) -> int: ...
     def events(self) -> list[Event]:
         """Expand the batch into individual immutable event snapshots."""
@@ -759,7 +815,8 @@ class RunResult:
     """Immutable successful terminal result snapshot."""
 
     @property
-    def text(self) -> str: ...
+    def text(self) -> str:
+        """Final assistant text committed by the successful run."""
     @property
     def output(self) -> Any | None:
         """Typed structured output selected by ``output_type``."""
@@ -773,9 +830,11 @@ class RunResult:
     def trace(self) -> list[str]:
         """Stable Rust-owned committed record-kind trace in journal order."""
     @property
-    def locator(self) -> Locator: ...
+    def locator(self) -> Locator:
+        """Complete immutable locator for the completed run."""
     @property
-    def session(self) -> Locator: ...
+    def session(self) -> Locator:
+        """Locator-shaped alias for :attr:`locator`."""
     def to_dict(self) -> dict[str, Any]:
         """Serialize locator fields plus text and structured output."""
 
@@ -785,6 +844,11 @@ class Attachment:
     Exactly one of ``data``/``path`` is required. A ``path`` is read
     (bounded to 4 MiB) at construction time; its basename becomes the
     default ``name`` when ``name`` is not given explicitly.
+
+    Examples:
+        >>> attachment = Attachment("text/plain", data=b"source text")
+        >>> attachment is not None
+        True
     """
 
     def __init__(
@@ -844,9 +908,11 @@ class Run:
     """Shared control and observation handle for one Rust-owned run."""
 
     @property
-    def session(self) -> Session: ...
+    def session(self) -> Session:
+        """Live session that owns this run."""
     @property
-    def locator(self) -> Locator: ...
+    def locator(self) -> Locator:
+        """Immutable tenant, session, lane, and run identifiers."""
     async def result(self) -> RunResult:
         """Wait for the retained terminal result.
 
@@ -991,15 +1057,26 @@ class Run:
         """Close event observation without cancelling execution."""
 
 class HistoryCachePolicy:
-    """Bounded process-local compaction checkpoint cache policy."""
+    """Bounded process-local compaction checkpoint cache policy.
+
+    Examples:
+        >>> policy = HistoryCachePolicy(max_entries=8, max_bytes=1_048_576)
+        >>> policy.max_entries
+        8
+        >>> HistoryCachePolicy.disabled().max_bytes
+        0
+    """
 
     def __init__(self, max_entries: int = 64, max_bytes: int = 16777216) -> None: ...
     @staticmethod
-    def disabled() -> HistoryCachePolicy: ...
+    def disabled() -> HistoryCachePolicy:
+        """Return a policy that retains no process-local checkpoints."""
     @property
-    def max_entries(self) -> int: ...
+    def max_entries(self) -> int:
+        """Maximum number of retained checkpoints."""
     @property
-    def max_bytes(self) -> int: ...
+    def max_bytes(self) -> int:
+        """Maximum aggregate bytes retained by the cache."""
 
 class Agent:
     """Immutable Rust-owned resolved agent handle."""
@@ -1725,6 +1802,10 @@ def health() -> str:
 
     Returns:
         The literal ``ok``.
+
+    Examples:
+        >>> health()
+        'ok'
     """
 
 def build_metadata() -> dict[str, str | bool | int]:
@@ -1732,6 +1813,11 @@ def build_metadata() -> dict[str, str | bool | int]:
 
     Returns:
         Version, engine, and feature flags. No secrets.
+
+    Examples:
+        >>> metadata = build_metadata()
+        >>> {"version", "engine_version"} <= metadata.keys()
+        True
     """
 
 def linked_providers() -> tuple[str, str, str, str, str]:
@@ -1740,6 +1826,10 @@ def linked_providers() -> tuple[str, str, str, str, str]:
     Returns:
         A tuple such as
         ``(\"openai\", \"anthropic\", \"gemini\", \"ollama\", \"openrouter\")``.
+
+    Examples:
+        >>> isinstance(linked_providers(), tuple)
+        True
     """
 
 def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:
@@ -1753,7 +1843,7 @@ def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, objec
         Digest, checksum, and hex fields computed by Rust.
 
     Raises:
-        ConfigurationError: ``kind`` or ``value`` is not a known fixture.
+        TypeError: ``kind`` or ``value`` is not a known fixture.
     """
 
 def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, object]:
@@ -1762,16 +1852,15 @@ def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, ob
     This does not route a live agent command.
 
     Args:
-        kind: ``child_lineage``, ``interaction_resolution``, or
-            ``external_completion``.
+        kind: ``child_run_prepared``, ``interaction_resolution``, or
+            ``external_effect_completion``.
         value: Binding-neutral mapping for that kind.
 
     Returns:
         The normalized mapping when valid.
 
     Raises:
-        ConfigurationError: The shape is rejected.
-        TypeError: ``value`` is not a mapping.
+        TypeError: The shape is rejected or ``value`` is not a mapping.
     """
 
 def _normalize_pydantic_schema(schema: dict[str, Any], kind: str) -> dict[str, Any]:

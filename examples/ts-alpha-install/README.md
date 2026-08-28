@@ -6,7 +6,8 @@ map repository `src/` or `js/dist` paths. Do not embed provider credentials.
 Trust class: T2 when host
 adapters are registered. Not isolated.
 
-Workspace version is **2.0.0** unpublished (last public tag `v0.1.0`; not on npm).
+Workspace manifests are staged at **2.0.0**; this example installs the package
+tarball staged from the repository.
 
 ## Quick start
 

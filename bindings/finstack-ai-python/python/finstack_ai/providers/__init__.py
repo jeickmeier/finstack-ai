@@ -18,6 +18,11 @@ class _ProviderAvailability:
 
         Returns:
             ``True`` when the native module reports the linked provider name.
+
+        Examples:
+            >>> from finstack_ai.providers import openai
+            >>> isinstance(openai.is_available(), bool)
+            True
         """
 
         return self._linked_name in linked_providers()

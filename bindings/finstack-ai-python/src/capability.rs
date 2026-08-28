@@ -61,16 +61,19 @@ impl PyCapability {
         Ok(Self { inner })
     }
 
+    /// Stable capability identifier used for activation.
     #[getter]
     fn id(&self) -> &str {
         self.inner.id.as_str()
     }
 
+    /// Compact model-visible capability description.
     #[getter]
     fn description(&self) -> &str {
         &self.inner.description
     }
 
+    /// Activation owner selected when the capability was declared.
     #[getter]
     fn activation(&self) -> &'static str {
         match self.inner.activation {

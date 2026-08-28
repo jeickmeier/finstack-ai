@@ -625,6 +625,7 @@ export function createMemoryArtifactStore(options: MemoryArtifactStoreOptions): 
  * Host clock backed by `Date.now`, or an injected millisecond source.
  *
  * @param now - Optional Unix-ms source for tests.
+ * @returns A host clock using the selected Unix-millisecond source.
  */
 export function createHostClock(now: () => number = Date.now): HostClock {
   return { now };
@@ -632,6 +633,8 @@ export function createHostClock(now: () => number = Date.now): HostClock {
 
 /**
  * Host random source backed by `crypto.getRandomValues`.
+ *
+ * @returns A cryptographically strong host random source.
  */
 export function createHostRandomSource(): HostRandomSource {
   return {

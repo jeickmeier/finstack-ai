@@ -45,6 +45,15 @@ class PydanticTool:
 
     The decorated callable remains directly callable. Use
     :func:`pydantic_toolset` to publish it through the Rust Toolset port.
+
+    Examples:
+        >>> from finstack_ai import tool
+        >>> @tool
+        ... def add(left: int, right: int) -> int:
+        ...     \"\"\"Add two integers.\"\"\"
+        ...     return left + right
+        >>> add(left=2, right=3)
+        5
     """
 
     def __init__(
@@ -242,6 +251,15 @@ def tool(
     Raises:
         TypeError: The target is not callable, Pydantic is missing, or the
             annotation set is unsupported.
+
+    Examples:
+        >>> from finstack_ai import tool
+        >>> @tool(name="add")
+        ... def add(left: int, right: int) -> int:
+        ...     \"\"\"Add two integers.\"\"\"
+        ...     return left + right
+        >>> add.name
+        'add'
     """
 
     def decorate(target: Function) -> PydanticTool:
@@ -280,6 +298,18 @@ def pydantic_toolset(
     Raises:
         TypeError: No tools, a non-``@tool`` value, a duplicate name, or a
             missing Pydantic extra.
+
+    Examples:
+        >>> from finstack_ai import pydantic_toolset, tool
+        >>> @tool
+        ... def ping(value: str) -> str:
+        ...     \"\"\"Return one value.\"\"\"
+        ...     return value
+        >>> toolset = pydantic_toolset(
+        ...     ping, component="python.tools", name="python-tools"
+        ... )
+        >>> toolset.tool_count
+        1
     """
 
     if not tools:

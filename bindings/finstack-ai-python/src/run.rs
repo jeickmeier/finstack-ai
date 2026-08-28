@@ -511,6 +511,7 @@ fn raw_pydantic_schema(schema: &Bound<'_, PyAny>, kind: &str) -> PyResult<RawJso
 
 #[pymethods]
 impl PyRunResult {
+    /// Final assistant text committed by the successful run.
     #[getter]
     fn text(&self) -> String {
         self.inner.text()
@@ -560,6 +561,7 @@ impl PyRunResult {
             .collect()
     }
 
+    /// Complete immutable locator for the completed run.
     #[getter]
     fn locator(&self) -> PyLocator {
         PyLocator {
@@ -567,6 +569,7 @@ impl PyRunResult {
         }
     }
 
+    /// Locator-shaped alias for [`Self::locator`].
     #[getter]
     fn session(&self) -> PyLocator {
         PyLocator {
