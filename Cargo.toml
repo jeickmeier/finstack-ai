@@ -181,6 +181,10 @@ finstack-ai-workflow-hitl = { path = "extensions/workflow/finstack-ai-workflow-h
 finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "2.0.0" }
 finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "2.0.0" }
 finstack-ai-knowledge = { path = "apps/finstack-knowledge", version = "2.0.0" }
+clap = { version = "4", features = ["derive"] }
+# Terminal formatting for app-tier CLIs only; default features (no syntax
+# highlighting or markdown deps). Never enters crates/ or extensions/.
+rich_rust = { version = "0.2.3", default-features = false }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
 finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "2.0.0" }

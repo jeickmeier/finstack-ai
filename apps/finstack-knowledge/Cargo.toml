@@ -30,6 +30,13 @@ finstack-ai-provider-openrouter = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+clap = { workspace = true }
+rich_rust = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
+
+[[bin]]
+name = "finstack-know"
+path = "src/bin/finstack_know.rs"
 
 [dev-dependencies]
 tempfile = { workspace = true }
