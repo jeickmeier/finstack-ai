@@ -10,6 +10,12 @@ Public-API examples for finstack-ai bindings. Workspace manifests are staged at
 - [`python-notebooks/`](python-notebooks/) — the learning notebooks.
 - [`browser-minimal/`](browser-minimal/) — experimental same-origin IndexedDB
   inspect demo (T2 host / T5 content). Not crash-durable.
+- [`browser-knowledge/`](browser-knowledge/) — the knowledge agent's embedded
+  path: a worker-hosted agent with an IndexedDB journal and a TypeScript
+  retrieval toolset over an in-page corpus (T2 host adapters), with
+  golden-questions conformance under Playwright. See
+  [`apps/finstack-knowledge/README.md`](../apps/finstack-knowledge/README.md)
+  for the cross-surface parity matrix.
 - [`ts-alpha-install/`](ts-alpha-install/) — TypeScript consumer that
   typechecks against a staged `@finstack/ai` tarball.
 - [`durable-interaction/`](durable-interaction/) — full UC-05 story on a
