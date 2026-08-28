@@ -10,7 +10,6 @@ use std::fmt;
 use std::path::PathBuf;
 
 use finstack_ai::{PrincipalRef, RunSecurityContext};
-use finstack_ai_tools_fetch::HostPattern;
 use thiserror::Error;
 
 /// Knowledge-agent failure with stable, non-secret reasons.
@@ -27,6 +26,12 @@ pub enum KnowledgeError {
     #[error("knowledge_identity_invalid: {reason}")]
     Identity {
         /// Bounded non-secret diagnostic.
+        reason: String,
+    },
+    /// A released component rejected its composition inputs.
+    #[error("knowledge_compose_failed: {reason}")]
+    Compose {
+        /// Bounded non-secret diagnostic from the failing component.
         reason: String,
     },
 }
@@ -102,8 +107,12 @@ pub struct KnowledgeConfig {
     pub data_dir: PathBuf,
     /// Model provider selection.
     pub provider: ProviderChoice,
-    /// Hosts the fetch toolset may reach; empty disables fetch entirely.
-    pub fetch_allowlist: Vec<HostPattern>,
+    /// Optional repository root offered as a second instruction source.
+    pub project_root: Option<PathBuf>,
+    /// Host patterns the fetch toolset may reach; empty disables fetch
+    /// entirely. Patterns are validated against the fetch toolset's
+    /// grammar when the agent is built.
+    pub fetch_allowlist: Vec<String>,
 }
 
 impl KnowledgeConfig {
@@ -113,14 +122,22 @@ impl KnowledgeConfig {
         Self {
             data_dir,
             provider,
+            project_root: None,
             fetch_allowlist: Vec::new(),
         }
     }
 
     /// Replace the fetch allowlist.
     #[must_use]
-    pub fn with_fetch_allowlist(mut self, allowlist: Vec<HostPattern>) -> Self {
+    pub fn with_fetch_allowlist(mut self, allowlist: Vec<String>) -> Self {
         self.fetch_allowlist = allowlist;
+        self
+    }
+
+    /// Offer a repository root as a second instruction source.
+    #[must_use]
+    pub fn with_project_root(mut self, root: PathBuf) -> Self {
+        self.project_root = Some(root);
         self
     }
 }

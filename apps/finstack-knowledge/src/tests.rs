@@ -2,9 +2,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::{
-    KnowledgeConfig, KnowledgeError, ProviderChoice, SELF_DOCS, default_data_dir,
-    materialize_self_docs, security,
+    KnowledgeConfig, KnowledgeError, ProviderChoice, SELF_DOCS, build_agent, default_data_dir,
+    materialize_self_docs, model_name, security,
 };
+
+mod loopback;
 
 fn ollama() -> ProviderChoice {
     ProviderChoice::Ollama {
@@ -65,6 +67,72 @@ fn security_builds_local_context_for_os_user() {
     let debug = format!("{context:?}");
     assert!(debug.contains("local"), "tenant label present: {debug}");
     assert!(debug.contains("jeickmeier"), "principal present: {debug}");
+}
+
+fn loopback_config(dir: &std::path::Path, base_url: String) -> KnowledgeConfig {
+    KnowledgeConfig::new(
+        dir.to_path_buf(),
+        ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    )
+}
+
+#[tokio::test]
+async fn agent_builds_and_answers_offline() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) =
+        loopback::serve_ndjson(vec![loopback::text_response("knowledge answer")])
+            .await
+            .expect("loopback");
+    let config = loopback_config(dir.path(), base_url);
+    let agent = build_agent(&config).await.expect("agent builds");
+    let request = finstack_ai::AgentRunRequest::try_new(
+        model_name(&config).expect("model name"),
+        "Say hello.",
+        security("tester").expect("security"),
+    )
+    .expect("request");
+    let output = agent.run(request).await.expect("run succeeds");
+    server.await.expect("server task").expect("server ok");
+    assert!(output.text().contains("knowledge answer"));
+    // The journal landed in the data dir.
+    assert!(dir.path().join("journal.sqlite3").exists());
+    // Self-docs were materialized for the repository provider.
+    assert!(dir.path().join("self-docs/architecture.md").exists());
+}
+
+#[tokio::test]
+async fn capability_catalog_lists_citation_skill() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
+    let config = loopback_config(dir.path(), base_url);
+    let agent = build_agent(&config).await.expect("agent builds");
+    drop(server);
+    let catalog = agent.compact_capability_catalog();
+    assert!(
+        catalog.contains("finstack.know.skill.citations"),
+        "catalog: {catalog}"
+    );
+}
+
+#[tokio::test]
+async fn fetch_allowlist_gates_the_fetch_toolset() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
+    // Invalid pattern is rejected at build time.
+    let bad = loopback_config(dir.path(), base_url.clone())
+        .with_fetch_allowlist(vec!["not a host pattern!!".to_owned()]);
+    assert!(matches!(
+        build_agent(&bad).await,
+        Err(KnowledgeError::Config { .. } | KnowledgeError::Compose { .. })
+    ));
+    // Valid allowlist builds.
+    let good = loopback_config(dir.path(), base_url)
+        .with_fetch_allowlist(vec!["docs.example.com".to_owned()]);
+    build_agent(&good).await.expect("fetch-enabled agent builds");
+    drop(server);
 }
 
 #[test]

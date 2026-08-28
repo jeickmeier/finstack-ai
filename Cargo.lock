@@ -1262,10 +1262,24 @@ name = "finstack-ai-knowledge"
 version = "2.0.0"
 dependencies = [
  "finstack-ai",
+ "finstack-ai-context-repository",
  "finstack-ai-kernel",
+ "finstack-ai-memory",
+ "finstack-ai-middleware-compaction",
+ "finstack-ai-middleware-document-ingest",
+ "finstack-ai-middleware-instructions",
+ "finstack-ai-observer-log",
+ "finstack-ai-provider-anthropic",
+ "finstack-ai-provider-ollama",
+ "finstack-ai-provider-openai",
+ "finstack-ai-provider-openrouter",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-tools-document",
  "finstack-ai-tools-fetch",
+ "finstack-ai-tools-skills",
  "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

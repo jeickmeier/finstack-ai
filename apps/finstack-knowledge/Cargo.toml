@@ -13,11 +13,25 @@ publish = false
 [dependencies]
 finstack-ai = { workspace = true, features = ["native-tokio"] }
 finstack-ai-kernel = { workspace = true }
+finstack-ai-store-sqlite = { workspace = true }
+finstack-ai-context-repository = { workspace = true }
+finstack-ai-memory = { workspace = true, features = ["sqlite"] }
+finstack-ai-middleware-instructions = { workspace = true }
+finstack-ai-middleware-document-ingest = { workspace = true }
+finstack-ai-middleware-compaction = { workspace = true }
+finstack-ai-tools-document = { workspace = true }
 finstack-ai-tools-fetch = { workspace = true }
+finstack-ai-tools-skills = { workspace = true }
+finstack-ai-observer-log = { workspace = true }
+finstack-ai-provider-ollama = { workspace = true }
+finstack-ai-provider-anthropic = { workspace = true }
+finstack-ai-provider-openai = { workspace = true }
+finstack-ai-provider-openrouter = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
 
 [lints]
 workspace = true
