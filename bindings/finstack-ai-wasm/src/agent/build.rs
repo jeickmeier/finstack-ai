@@ -2,16 +2,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai::runtime::artifact::ArtifactStore;
-use finstack_ai::runtime::commit::CommitCoordinator;
-use finstack_ai::runtime::ports::journal::{JournalStore, LoadRequest, StoreError};
+use finstack_ai::runtime::ports::journal::JournalStore;
 use finstack_ai::runtime::ports::middleware::Middleware;
 use finstack_ai::runtime::ports::model::{ModelName, ModelSettings};
 use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{
     Agent as FacadeAgent, CapabilitySpec, ChildRunPolicy, LinkedAgentPorts, LinkedCommon,
 };
-use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, RawJson, Version};
-use finstack_ai_kernel::{ContentBlock, SessionId, TerminalState};
+use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, RawJson, SessionId, Version};
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_tools_document::DocumentToolset;
@@ -20,7 +18,7 @@ use wasm_bindgen::prelude::*;
 use crate::document_store::DocumentArtifactStore;
 
 use super::agent::Agent;
-use super::errors::{agent_error, configuration_error};
+use super::errors::{agent_error, configuration_error, session_error};
 use super::request::component;
 
 /// `DocumentIngestMiddleware`'s checked-in invocation version
@@ -108,7 +106,22 @@ pub(super) async fn build_agent(
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
     approval_grant: finstack_ai::ApprovalGrantMode,
+    output_schema_json: Option<String>,
+    child_runs_json: Option<String>,
 ) -> Result<Agent, JsValue> {
+    let output_schema = output_schema_json
+        .map(|schema| {
+            RawJson::parse(schema)
+                .map_err(|error| agent_error(&configuration_error(error.to_string()), None))
+        })
+        .transpose()?;
+    let child_runs = child_runs_json
+        .map(|policy| {
+            serde_json::from_str::<ChildRunPolicy>(&policy)
+                .map_err(|error| agent_error(&configuration_error(error.to_string()), None))
+        })
+        .transpose()?
+        .unwrap_or_default();
     let document_ingest = document_ingest_ports()?;
     toolsets.push(document_ingest.toolset);
     middleware.push(document_ingest.middleware);
@@ -151,9 +164,9 @@ pub(super) async fn build_agent(
                 middleware,
                 observers,
                 artifact_store: Some(Arc::clone(&document_ingest.artifact_store)),
-                output_schema: None,
+                output_schema,
             },
-            child_runs: ChildRunPolicy::Deny,
+            child_runs,
             approval_grant,
             openrouter_media: None,
         },
@@ -193,73 +206,22 @@ pub(super) async fn inspect_session_inner(
 ) -> Result<JsValue, JsValue> {
     let session_id = SessionId::parse(&session_id)
         .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
-    let loaded = store
-        .load(LoadRequest { session_id })
+    let snapshot = finstack_ai::runtime::session::inspect_session(store, session_id)
         .await
-        .map_err(store_error_js)?;
-    if loaded.head_sequence == 0 && loaded.committed_batches.is_empty() {
-        return inspect_object(&session_id, 0, "empty", None, None);
-    }
-    let recovered = CommitCoordinator::recover(Arc::clone(&store), session_id)
-        .await
-        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
-    let state = recovered.state();
-    let phase = match state.terminal() {
-        Some(TerminalState::Completed(_)) => "completed",
-        Some(TerminalState::Failed(_)) => "failed",
-        Some(TerminalState::Cancelled(_)) => "cancelled",
-        None if state.phase().is_none() && loaded.head_sequence == 0 => "empty",
-        None => "in_progress",
-    };
-    let result_text = match state.terminal() {
-        Some(TerminalState::Completed(completed)) => state
-            .messages()
-            .iter()
-            .find(|message| message.id() == &completed.result_message_id)
-            .map(message_text),
-        _ => None,
-    };
-    let last_record_kind = loaded
-        .committed_batches
-        .iter()
-        .rev()
-        .flat_map(|batch| batch.records.iter().rev())
-        .next()
-        .map(|record| record.body().kind_name().to_owned());
-    inspect_object(
-        &session_id,
-        loaded.head_sequence,
-        phase,
-        result_text.as_deref(),
-        last_record_kind.as_deref(),
-    )
-}
-
-fn message_text(message: &finstack_ai_kernel::Message) -> String {
-    message
-        .content()
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text(text) => Some(text.text()),
-            _ => None,
-        })
-        .collect()
+        .map_err(|error| session_error(&error))?;
+    inspect_object(&snapshot)
 }
 
 fn inspect_object(
-    session_id: &SessionId,
-    head_sequence: u64,
-    phase: &str,
-    result_text: Option<&str>,
-    last_record_kind: Option<&str>,
+    snapshot: &finstack_ai::runtime::session::SessionInspectSnapshot,
 ) -> Result<JsValue, JsValue> {
     let object = js_sys::Object::new();
     js_sys::Reflect::set(
         &object,
         &JsValue::from_str("sessionId"),
-        &JsValue::from_str(&session_id.to_string()),
+        &JsValue::from_str(&snapshot.session_id.to_string()),
     )?;
-    let head_sequence = super::errors::js_safe_integer(head_sequence, "head sequence")
+    let head_sequence = super::errors::js_safe_integer(snapshot.head_sequence, "head sequence")
         .map_err(|error| agent_error(&error, None))?;
     js_sys::Reflect::set(
         &object,
@@ -269,16 +231,16 @@ fn inspect_object(
     js_sys::Reflect::set(
         &object,
         &JsValue::from_str("phase"),
-        &JsValue::from_str(phase),
+        &JsValue::from_str(snapshot.phase.as_str()),
     )?;
-    if let Some(result_text) = result_text {
+    if let Some(result_text) = snapshot.result_text.as_deref() {
         js_sys::Reflect::set(
             &object,
             &JsValue::from_str("resultText"),
             &JsValue::from_str(result_text),
         )?;
     }
-    if let Some(last_record_kind) = last_record_kind {
+    if let Some(last_record_kind) = snapshot.last_record_kind.as_deref() {
         js_sys::Reflect::set(
             &object,
             &JsValue::from_str("lastRecordKind"),
@@ -286,64 +248,4 @@ fn inspect_object(
         )?;
     }
     Ok(object.into())
-}
-
-fn store_error_js(error: StoreError) -> JsValue {
-    let object = js_sys::Error::new(&error.to_string());
-    let _ = js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("name"),
-        &JsValue::from_str("FinstackError"),
-    );
-    let _ = js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("code"),
-        &JsValue::from_str(error.code()),
-    );
-    let _ = js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("retryable"),
-        &JsValue::from_bool(false),
-    );
-    match &error {
-        StoreError::Conflict {
-            expected_sequence,
-            actual_next_sequence,
-        } => {
-            let _ = js_sys::Reflect::set(
-                &object,
-                &JsValue::from_str("expectedSequence"),
-                &JsValue::from(*expected_sequence),
-            );
-            let _ = js_sys::Reflect::set(
-                &object,
-                &JsValue::from_str("actualNextSequence"),
-                &JsValue::from(*actual_next_sequence),
-            );
-        }
-        StoreError::Corruption { reason_code }
-        | StoreError::InvalidRequest { reason_code }
-        | StoreError::Unavailable { reason_code }
-        | StoreError::Integrity { reason_code } => {
-            let _ = js_sys::Reflect::set(
-                &object,
-                &JsValue::from_str("reasonCode"),
-                &JsValue::from_str(reason_code),
-            );
-        }
-        StoreError::LimitExceeded { resource, limit } => {
-            let _ = js_sys::Reflect::set(
-                &object,
-                &JsValue::from_str("resource"),
-                &JsValue::from_str(resource),
-            );
-            let _ = js_sys::Reflect::set(
-                &object,
-                &JsValue::from_str("limit"),
-                &JsValue::from(u64::try_from(*limit).unwrap_or(u64::MAX)),
-            );
-        }
-        StoreError::AmbiguousAcknowledgement => {}
-    }
-    object.into()
 }

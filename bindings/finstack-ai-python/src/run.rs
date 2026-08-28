@@ -582,6 +582,10 @@ impl PyRunResult {
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let value = locator_dict(py, &self.inner.locator)?;
         value.bind(py).set_item("text", self.inner.text())?;
+        value.bind(py).set_item(
+            "output",
+            self.output.as_ref().map(|output| output.clone_ref(py)),
+        )?;
         Ok(value)
     }
 }

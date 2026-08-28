@@ -203,7 +203,6 @@ impl Agent {
         Ok(prepared)
     }
 
-    #[cfg(feature = "native-tokio")]
     pub(super) fn prepare_accepted(
         &self,
         request: AgentRunRequest,
@@ -568,7 +567,6 @@ impl NativeIds {
         })
     }
 
-    #[cfg(feature = "native-tokio")]
     pub(super) fn interaction_resolve_environment() -> Result<TransitionEnv, AgentRunError> {
         Ok(TransitionEnv {
             now: Self::now()?,

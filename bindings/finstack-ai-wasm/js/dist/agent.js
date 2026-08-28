@@ -90,6 +90,22 @@ export class Agent {
         return new Agent(this.#handle.withHistoryCache(policy.handle()));
     }
     /**
+     * Read bytes behind an artifact reference returned by a tool.
+     *
+     * @param artifact - Serialized Rust artifact reference.
+     * @returns Exact staged bytes.
+     * @throws {FinstackError} When the reference is invalid or unavailable.
+     */
+    async readArtifact(artifact) {
+        requireWasm();
+        try {
+            return await this.#handle.readArtifact(JSON.stringify(artifact));
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
      * Construct an Agent over a trusted {@link JsModel} and optional toolsets.
      *
      * The default journal is the Rust in-memory store. Pass {@link AgentOptions.store}
@@ -128,7 +144,13 @@ export class Agent {
                 ? undefined
                 : JSON.stringify(options.capabilities), options.activeCapabilities === undefined
                 ? undefined
-                : JSON.stringify(options.activeCapabilities), (options.contextProviders ?? []).map((provider) => wasmContextProviderHandle(provider)), (options.middleware ?? []).map((middleware) => wasmMiddlewareHandle(middleware)), (options.observers ?? []).map((observer) => wasmObserverHandle(observer)), approvalGrantWire(options.approvalGrant));
+                : JSON.stringify(options.activeCapabilities), (options.contextProviders ?? []).map((provider) => wasmContextProviderHandle(provider)), (options.middleware ?? []).map((middleware) => wasmMiddlewareHandle(middleware)), (options.observers ?? []).map((observer) => wasmObserverHandle(observer)), approvalGrantWire(options.approvalGrant), options.outputSchema === undefined
+                ? undefined
+                : JSON.stringify(options.outputSchema), options.childRuns === undefined
+                ? undefined
+                : JSON.stringify(options.childRuns.mode === "allow"
+                    ? { mode: "allow", max_depth: options.childRuns.maxDepth }
+                    : { mode: "deny" }));
             return new Agent(handle);
         }
         catch (error) {
@@ -441,6 +463,42 @@ export class Run {
             throw FinstackError.fromUnknown(error);
         }
     }
+    /** List the outstanding typed interaction for this run (zero or one). */
+    async listInteractions() {
+        try {
+            return (await this.#handle.listInteractions());
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
+     * Resolve the outstanding interaction through the live Rust-owned run.
+     *
+     * @param resolution - Canonical interaction resolution object.
+     */
+    async resolveInteraction(resolution) {
+        try {
+            await this.#handle.resolveInteraction(JSON.stringify(resolution));
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
+     * Route one authenticated external completion through Rust ingress.
+     *
+     * @param command - Canonical external completion command.
+     * @returns Rust-owned ingress status.
+     */
+    async completeExternal(command) {
+        try {
+            return (await this.#handle.completeExternal(JSON.stringify(command)));
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
     /**
      * Prepare and accept one child through the Rust router.
      *
@@ -643,10 +701,8 @@ export class Session {
 /**
  * Live handle for one lane in a session.
  *
- * Durable lane park/respawn (`suspend`/`resume`) and direct interaction
- * management (`listInteractions`/`resolveInteraction`) are native-only.
- * Browser WASM has no truthful respawn path; use the host session/inbox
- * path instead.
+ * Suspend and resume retain journal-authoritative state and respawn the
+ * Rust-owned run task in the same browser process.
  */
 export class Lane {
     #handle;
@@ -733,6 +789,24 @@ export class Lane {
             throw FinstackError.fromUnknown(error);
         }
     }
+    /** Park the in-process driver without dropping the journal. */
+    async suspend() {
+        try {
+            await this.#handle.suspend();
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /** Recover the parked run and respawn its Rust-owned task. */
+    async resume(agent) {
+        try {
+            await this.#handle.resume(agent.handle());
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
 }
 const identityMapHandles = new WeakMap();
 /**
@@ -777,6 +851,10 @@ export class RunResult {
     get text() {
         return this.#handle.text;
     }
+    /** Structured JSON output, or `null` when the run returned text only. */
+    get output() {
+        return this.#handle.output;
+    }
     /** Durable retry attempts consumed by this run. */
     get retryAttempts() {
         return this.#handle.retryAttempts;
@@ -804,7 +882,7 @@ export class RunResult {
     /**
      * Serialize the terminal result explicitly.
      *
-     * @returns Locator fields plus `text`.
+     * @returns Locator fields plus `text` and `output`.
      * @example
      * ```ts
      * const snapshot = result.toDict();

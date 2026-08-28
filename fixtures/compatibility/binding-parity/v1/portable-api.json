@@ -1,0 +1,123 @@
+{
+  "format_version": 1,
+  "functions": [
+    {"rust": "health", "python": "health", "js": "health"},
+    {"rust": "build_metadata", "python": "build_metadata", "js": "buildMetadata"},
+    {"rust": "journal_known_answer", "python": "journal_known_answer", "js": "journalKnownAnswer"},
+    {"rust": "normalize_prebeta_shape", "python": "normalize_prebeta_shape", "js": "normalizePrebetaShape"},
+    {"rust": "parse_document", "python": "parse_document", "js": "parseDocument"},
+    {"rust": "parse_document_markdown", "python": "parse_document_markdown", "js": "parseDocumentMarkdown"}
+  ],
+  "types": [
+    {
+      "rust": "Agent",
+      "python": "Agent",
+      "js": "Agent",
+      "members": [
+        {"rust": "capability_catalog", "python": "capability_catalog", "js": "capabilityCatalog"},
+        {"rust": "compact_capability_catalog", "python": "compact_capability_catalog", "js": "compactCapabilityCatalog"},
+        {"rust": "with_history_cache_policy", "python": "with_history_cache", "js": "withHistoryCache"},
+        {"rust": "re_resolve", "python": "re_resolve", "js": "reResolve"},
+        {"rust": "inspect_session", "python": "inspect_session", "js": "inspectSession"},
+        {"rust": "create_session", "python": "create_session", "js": "createSession"},
+        {"rust": "open_session", "python": "open_session", "js": "openSession"},
+        {"rust": "start", "python": "start", "js": "start"},
+        {"rust": "run", "python": "run", "js": "run"},
+        {"rust": "read_artifact", "python": "read_artifact", "js": "readArtifact"}
+      ]
+    },
+    {
+      "rust": "Session",
+      "python": "Session",
+      "js": "Session",
+      "members": [
+        {"rust": "tenant_scope", "python": "tenant_scope", "js": "tenantScope"},
+        {"rust": "session_id", "python": "session_id", "js": "sessionId"},
+        {"rust": "create_lane", "python": "create_lane", "js": "createLane"},
+        {"rust": "list_lanes", "python": "list_lanes", "js": "listLanes"},
+        {"rust": "lane", "python": "lane", "js": "lane"},
+        {"rust": "lane_by_id", "python": "lane_by_id", "js": "laneById"},
+        {"rust": "bind_external_identity", "python": "bind_external_identity", "js": "bindExternalIdentity"}
+      ]
+    },
+    {
+      "rust": "Lane",
+      "python": "Lane",
+      "js": "Lane",
+      "members": [
+        {"rust": "lane_id", "python": "lane_id", "js": "laneId"},
+        {"rust": "session", "python": "session", "js": "session"},
+        {"rust": "navigate", "python": "navigate", "js": "navigate"},
+        {"rust": "inspect", "python": "inspect", "js": "inspect"},
+        {"rust": "append_text", "python": "append_text", "js": "appendText"},
+        {"rust": "run", "python": "run", "js": "run"},
+        {"rust": "suspend", "python": "suspend", "js": "suspend"},
+        {"rust": "resume", "python": "resume", "js": "resume"}
+      ]
+    },
+    {
+      "rust": "AgentRun",
+      "python": "Run",
+      "js": "Run",
+      "members": [
+        {"rust": "session", "python": "session", "js": "session"},
+        {"rust": "locator", "python": "locator", "js": "locator"},
+        {"rust": "result", "python": "result", "js": "result"},
+        {"rust": "live_state", "python": "live_state", "js": "liveState"},
+        {"rust": "wait_for_live_state", "python": "wait_for_live_state", "js": "waitForLiveState"},
+        {"rust": "observer_diagnostics", "python": "observer_diagnostics", "js": "observerDiagnostics"},
+        {"rust": "list_interactions", "python": "list_interactions", "js": "listInteractions"},
+        {"rust": "resolve_interaction", "python": "resolve_interaction", "js": "resolveInteraction"},
+        {"rust": "start_child", "python": "start_child", "js": "startChild"},
+        {"rust": "complete_external", "python": "complete_external", "js": "completeExternal"},
+        {"rust": "cancel", "python": "cancel", "js": "cancel"},
+        {"rust": "events", "python": "events", "js": "events"},
+        {"rust": "close_events", "python": "close_events", "js": "closeEvents"}
+      ]
+    },
+    {
+      "rust": "AgentRunOutput",
+      "python": "RunResult",
+      "js": "RunResult",
+      "members": [
+        {"rust": "text", "python": "text", "js": "text"},
+        {"rust": "structured_json", "python": "output", "js": "output"},
+        {"rust": "retry_attempts", "python": "retry_attempts", "js": "retryAttempts"},
+        {"rust": "active_capabilities", "python": "active_capabilities", "js": "activeCapabilities"},
+        {"rust": "trace", "python": "trace", "js": "trace"},
+        {"rust": "locator", "python": "locator", "js": "locator"},
+        {"rust": "session", "python": "session", "js": "session"},
+        {"rust": "to_dict", "python": "to_dict", "js": "toDict"}
+      ]
+    },
+    {"rust": "RunEvent", "python": "Event", "js": "Event", "members": []},
+    {"rust": "RunEventBatch", "python": "EventBatch", "js": "EventBatch", "members": []},
+    {"rust": "OperationLocator", "python": "Locator", "js": "Locator", "members": []},
+    {"rust": "HistoryCachePolicy", "python": "HistoryCachePolicy", "js": "HistoryCachePolicy", "members": []},
+    {"rust": "MemoryExternalIdentityMap", "python": "MemoryExternalIdentityMap", "js": "MemoryExternalIdentityMap", "members": []},
+    {"rust": "ApprovalGrantMode", "python": "ApprovalGrantMode", "js": "ApprovalGrantMode", "members": []}
+  ],
+  "portable_child_placements": [
+    "isolated_child_session",
+    "compatible_lane_in_parent_session"
+  ],
+  "host_specific": {
+    "python": [
+      "provider_factories",
+      "pydantic_adapters",
+      "filesystem_paths",
+      "sqlite_store",
+      "e2b_sandbox"
+    ],
+    "js": [
+      "init",
+      "workers",
+      "indexeddb",
+      "same_origin_provider_adapters",
+      "remote_frame_codec"
+    ],
+    "native": [
+      "remote_child_session"
+    ]
+  }
+}

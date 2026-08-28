@@ -687,6 +687,7 @@ fn compile_native_port_adapters() {
             hard_input_bytes: 1_024,
             context_window_tokens: 1_024,
             max_output_tokens: 128,
+            idempotent_requests: false,
         },
         |_| {
             Ok(NativeHostResult::Object(

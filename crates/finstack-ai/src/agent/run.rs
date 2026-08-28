@@ -1,20 +1,17 @@
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-#[cfg(feature = "native-tokio")]
-use finstack_ai_kernel::ValidationOutcome;
-use finstack_ai_kernel::{CancelRequested, CancellationInitiator, KernelInput, OperationLocator};
+use finstack_ai_kernel::{
+    CancelRequested, CancellationInitiator, InteractionRequest, InteractionResolution,
+    InteractionSettled, KernelInput, OperationLocator, RawJson, ValidationOutcome,
+};
 use finstack_ai_runtime::events::EventBatch;
 use finstack_ai_runtime::events::EventSubscription;
-use finstack_ai_runtime::run::RunHandle;
-
-#[cfg(feature = "native-tokio")]
-use finstack_ai_kernel::{InteractionRequest, InteractionResolution, InteractionSettled, RawJson};
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::native_driver as driver;
-#[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::ports::tool::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
+use finstack_ai_runtime::run::RunHandle;
 
 use super::prepare::{NativeIds, submit};
 use super::types::{AgentRunError, AgentRunOutput};
@@ -73,7 +70,6 @@ fn events_fault(inner: &AgentRunInner) -> Result<(), AgentRunError> {
     }
 }
 
-#[cfg(feature = "native-tokio")]
 fn validate_resolution_response(schema: &RawJson, response: &RawJson) -> Result<(), AgentRunError> {
     let validator = JsonSchemaToolValidatorCompiler
         .compile(schema, &std::collections::BTreeMap::new())
@@ -235,16 +231,14 @@ impl AgentRun {
 
     /// List the outstanding typed interaction for this run (0 or 1).
     ///
-    /// Native-only. Browser WASM list/resolve stays on the worker client.
-    ///
     /// The owned handle treats an unpublished or not-yet-accepted journal as
-    /// empty. After accept, listing goes through [`InteractionRouter`](finstack_ai_runtime::ingress::InteractionRouter).
+    /// empty. Listing reads the Rust-owned latest state and never maintains a
+    /// binding-local queue.
     ///
     /// # Errors
     ///
     /// Returns a stable runtime failure when the authenticated locator cannot
     /// be listed through [`InteractionRouter`](finstack_ai_runtime::ingress::InteractionRouter).
-    #[cfg(feature = "native-tokio")]
     pub async fn list_interactions(&self) -> Result<Vec<InteractionRequest>, AgentRunError> {
         Ok(self
             .live_state()
@@ -256,12 +250,9 @@ impl AgentRun {
 
     /// Resolve the outstanding interaction through the live run handle.
     ///
-    /// Native-only. Browser WASM list/resolve stays on the worker client and
-    /// durable inbox path, which enter through [`InteractionRouter`](finstack_ai_runtime::ingress::InteractionRouter).
-    ///
-    /// The live handle submits through the in-process coordinator rather than
-    /// the router, so the parked `response_schema` is compiled and checked
-    /// here before [`KernelInput::InteractionSettled`].
+    /// The live handle submits through the in-process coordinator, so the
+    /// parked `response_schema` is compiled and checked here before
+    /// [`KernelInput::InteractionSettled`].
     ///
     /// # Arguments
     ///
@@ -271,7 +262,6 @@ impl AgentRun {
     ///
     /// Returns a stable runtime failure when the handle is unavailable, the
     /// response fails the parked schema, or the settlement is rejected.
-    #[cfg(feature = "native-tokio")]
     pub async fn resolve_interaction(
         &self,
         resolution: InteractionResolution,

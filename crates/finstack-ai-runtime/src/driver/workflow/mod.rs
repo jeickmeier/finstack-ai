@@ -18,10 +18,19 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(feature = "native-tokio")]
 use crate::audit::SecurityAuditGate;
 use crate::commit::CommitCoordinator;
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+use crate::driver::host_driver as workflow_driver;
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+use crate::driver::host_driver::InstalledRandom as WorkflowHostRandom;
+#[cfg(feature = "native-tokio")]
+use crate::driver::sdk as workflow_driver;
 use crate::events::EventHubConfig;
-use crate::ids::{ExternalClock, IdGenerationError, OsRandomSource, RandomSource};
+#[cfg(feature = "native-tokio")]
+use crate::ids::OsRandomSource as WorkflowHostRandom;
+use crate::ids::{ExternalClock, IdGenerationError, RandomSource};
 use crate::ingress::{
     ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, InteractionRouter,
 };
@@ -371,8 +380,8 @@ impl RandomSource for SeededRandom {
 /// Entropy policy retained by an attached workflow session.
 #[derive(Debug, Clone)]
 enum WorkflowRandom {
-    /// Cryptographic-quality entropy for production attachments.
-    Native(OsRandomSource),
+    /// Host-provided production entropy.
+    Native(WorkflowHostRandom),
     /// Reproducible entropy for explicitly deterministic tests and examples.
     Seeded(SeededRandom),
 }
@@ -386,6 +395,11 @@ impl RandomSource for WorkflowRandom {
     }
 }
 
+#[cfg(feature = "native-tokio")]
+type WorkflowAudit = Arc<SecurityAuditGate>;
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+type WorkflowAudit = ();
+
 /// Native workflow driver over one recovered run.
 ///
 /// The driver never plans model or tool batches. It spawns [`RunTaskOwner`]
@@ -396,7 +410,8 @@ pub struct WorkflowSession {
     locator: OperationLocator,
     clock: ExternalClock,
     random: WorkflowRandom,
-    audit: Arc<SecurityAuditGate>,
+    #[cfg(feature = "native-tokio")]
+    audit: WorkflowAudit,
     model: Option<WorkflowModel>,
     catalog: Option<Arc<ResolvedToolCatalog>>,
     capability_owners: Option<Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>>,
@@ -424,6 +439,7 @@ impl WorkflowSession {
     ///
     /// Returns [`WorkflowDriverError::UnknownLocator`] when the locator tenant
     /// does not match the session handle, and recover failures otherwise.
+    #[cfg(feature = "native-tokio")]
     pub async fn attach(
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
@@ -435,7 +451,7 @@ impl WorkflowSession {
             locator,
             clock,
             audit,
-            WorkflowRandom::Native(OsRandomSource),
+            WorkflowRandom::Native(WorkflowHostRandom),
         )
         .await
     }
@@ -448,6 +464,7 @@ impl WorkflowSession {
     /// # Errors
     ///
     /// Returns the same failures as [`Self::attach`].
+    #[cfg(feature = "native-tokio")]
     pub async fn attach_seeded(
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
@@ -469,7 +486,8 @@ impl WorkflowSession {
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
         clock: ExternalClock,
-        audit: Arc<SecurityAuditGate>,
+        #[cfg(feature = "native-tokio")] audit: WorkflowAudit,
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))] _audit: WorkflowAudit,
         random: WorkflowRandom,
     ) -> Result<Self, WorkflowDriverError> {
         let coordinator = CommitCoordinator::recover(Arc::clone(&store), locator.session_id)
@@ -492,6 +510,7 @@ impl WorkflowSession {
             locator,
             clock,
             random,
+            #[cfg(feature = "native-tokio")]
             audit,
             model: None,
             catalog: None,
@@ -517,10 +536,20 @@ impl WorkflowSession {
         locator: OperationLocator,
         clock: ExternalClock,
     ) -> Result<Self, WorkflowDriverError> {
+        #[cfg(feature = "native-tokio")]
         let audit = SecurityAuditGate::enable_noop()
             .await
             .map_err(|_| WorkflowDriverError::AuditNotReady)?;
-        Self::attach(store, locator, clock, audit).await
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        let audit = ();
+        Self::attach_with_random(
+            store,
+            locator,
+            clock,
+            audit,
+            WorkflowRandom::Native(WorkflowHostRandom),
+        )
+        .await
     }
 
     /// Attach with deterministic entropy and an in-process no-op audit gate.
@@ -535,10 +564,20 @@ impl WorkflowSession {
         clock: ExternalClock,
         random_seed: u64,
     ) -> Result<Self, WorkflowDriverError> {
+        #[cfg(feature = "native-tokio")]
         let audit = SecurityAuditGate::enable_noop()
             .await
             .map_err(|_| WorkflowDriverError::AuditNotReady)?;
-        Self::attach_seeded(store, locator, clock, random_seed, audit).await
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        let audit = ();
+        Self::attach_with_random(
+            store,
+            locator,
+            clock,
+            audit,
+            WorkflowRandom::Seeded(SeededRandom::new(random_seed)),
+        )
+        .await
     }
 
     /// Bind model/tool ports used when the driver must spawn [`RunTaskOwner`].
@@ -648,7 +687,7 @@ impl WorkflowSession {
     ///
     /// Returns recover, spawn, port, or poll-bound failures.
     pub async fn drive_until_wait(&mut self) -> Result<WorkflowWait, WorkflowDriverError> {
-        tokio::time::timeout(self.drive_timeout, async {
+        workflow_driver::timeout(self.drive_timeout, async {
             loop {
                 if let Some(owner) = self.owner.as_ref() {
                     let handle = owner.handle();
@@ -686,6 +725,7 @@ impl WorkflowSession {
     /// # Errors
     ///
     /// Returns locator or recover failures.
+    #[cfg(feature = "native-tokio")]
     pub async fn resume(
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
@@ -707,6 +747,7 @@ impl WorkflowSession {
     /// # Errors
     ///
     /// Returns the same failures as [`Self::resume`].
+    #[cfg(feature = "native-tokio")]
     pub async fn resume_seeded(
         store: Arc<dyn JournalStore>,
         locator: OperationLocator,
@@ -736,8 +777,13 @@ impl WorkflowSession {
         submitted_at: Timestamp,
     ) -> Result<ExternalRouteOutcome, WorkflowDriverError> {
         self.require_locator(&command.locator)?;
+        #[cfg(feature = "native-tokio")]
         let router =
             ExternalCompletionRouter::new(Arc::clone(&self.store), Arc::clone(&self.audit));
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        let router = ExternalCompletionRouter::trusted(Arc::clone(&self.store))
+            .await
+            .map_err(WorkflowDriverError::Ingress)?;
         Box::pin(router.route(command, submitted_at))
             .await
             .map_err(WorkflowDriverError::Ingress)
@@ -755,7 +801,12 @@ impl WorkflowSession {
         submitted_at: Timestamp,
     ) -> Result<ExternalRouteOutcome, WorkflowDriverError> {
         self.require_locator(&command.locator)?;
+        #[cfg(feature = "native-tokio")]
         let router = InteractionRouter::new(Arc::clone(&self.store), Arc::clone(&self.audit));
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        let router = InteractionRouter::trusted(Arc::clone(&self.store))
+            .await
+            .map_err(WorkflowDriverError::Ingress)?;
         router
             .route(command, submitted_at)
             .await
@@ -932,7 +983,7 @@ impl WorkflowSession {
             same_identity_retry: SameIdentityRetryPolicy::default(),
         };
         let owner = if let Some(catalog) = self.catalog.clone() {
-            RunTaskOwner::spawn_with_model_and_tools(
+            Box::pin(RunTaskOwner::spawn_with_model_and_tools(
                 coordinator,
                 run_config,
                 model_config,
@@ -947,10 +998,10 @@ impl WorkflowSession {
                 catalog,
                 self.clock.clone(),
                 self.random.clone(),
-            )
+            ))
             .await
         } else {
-            RunTaskOwner::spawn_with_model(
+            Box::pin(RunTaskOwner::spawn_with_model(
                 coordinator,
                 run_config,
                 model_config,
@@ -958,7 +1009,7 @@ impl WorkflowSession {
                 profile,
                 self.clock.clone(),
                 self.random.clone(),
-            )
+            ))
             .await
         }
         .map_err(|error| WorkflowDriverError::Spawn {
@@ -1011,5 +1062,5 @@ fn spawn_code(error: &crate::run::RunHandleError) -> &'static str {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native-tokio"))]
 mod tests;

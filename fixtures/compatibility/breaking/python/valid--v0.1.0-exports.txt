@@ -22,6 +22,8 @@ MemoryExtension
 MemoryExternalIdentityMap
 MemoryObserver
 MemoryToolset
+ParsedDocument
+PydanticTool
 PythonContextProvider
 PythonMiddleware
 PythonModel
@@ -31,6 +33,8 @@ Run
 RunResult
 RuntimeError
 Session
+SessionInspectPhase
+SessionInspectSnapshot
 SqliteDurability
 TimeoutError
 __version__
@@ -41,3 +45,5 @@ linked_providers
 normalize_prebeta_shape
 parse_document
 parse_document_markdown
+pydantic_toolset
+tool

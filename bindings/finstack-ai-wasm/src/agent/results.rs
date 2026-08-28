@@ -19,6 +19,19 @@ impl RunResult {
         self.inner.text()
     }
 
+    /// Structured JSON output, or `null` when the run returned text only.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JavaScript exception only if the canonical JSON cannot be materialized.
+    #[wasm_bindgen(getter)]
+    pub fn output(&self) -> Result<JsValue, JsValue> {
+        self.inner.structured_json().map_or_else(
+            || Ok(JsValue::NULL),
+            |value| js_sys::JSON::parse(value.as_str()),
+        )
+    }
+
     /// Durable retry attempts consumed by this run.
     #[wasm_bindgen(getter, js_name = retryAttempts)]
     pub fn retry_attempts(&self) -> u32 {
@@ -74,6 +87,7 @@ impl RunResult {
             &JsValue::from_str("text"),
             &JsValue::from_str(&self.inner.text()),
         )?;
+        js_sys::Reflect::set(&object, &JsValue::from_str("output"), &self.output()?)?;
         Ok(object)
     }
 }

@@ -73,7 +73,7 @@ impl HostModel {
             reasoning: false,
             prompt_cache: false,
             resumable_stream: false,
-            idempotent_requests: false,
+            idempotent_requests: options.idempotent_requests,
             native_capabilities: BTreeSet::new(),
         };
         let descriptor = ModelDescriptor {
@@ -367,6 +367,7 @@ mod tests {
             hard_input_bytes: 1_048_576,
             context_window_tokens: 8_192,
             max_output_tokens: 1_024,
+            idempotent_requests: false,
         }
     }
 

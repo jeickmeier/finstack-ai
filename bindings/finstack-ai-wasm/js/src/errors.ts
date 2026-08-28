@@ -68,6 +68,8 @@ export interface SessionSnapshot {
 export interface RunResultSnapshot extends SessionSnapshot {
   /** Concatenated final assistant text. */
   text: string;
+  /** Structured JSON output, or `null` when the run returned text only. */
+  output: unknown | null;
 }
 
 /**

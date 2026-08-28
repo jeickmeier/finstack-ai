@@ -126,6 +126,13 @@ export declare class ApprovalGrantMode {
      */
     toWire(): "per_call" | "informed_batch";
 }
+/** Child-run admission policy frozen into agent composition. */
+export type ChildRunPolicyOptions = {
+    mode: "deny";
+} | {
+    mode: "allow";
+    maxDepth: number;
+};
 /**
  * Options for {@link Agent.create}.
  *
@@ -164,6 +171,10 @@ export interface AgentOptions {
      * {@link ApprovalGrantMode.perCall}.
      */
     approvalGrant?: ApprovalGrantMode | "per_call" | "informed_batch";
+    /** Optional JSON Schema for canonical Rust-owned structured output validation. */
+    outputSchema?: unknown;
+    /** Child-run admission policy. Defaults to deny. */
+    childRuns?: ChildRunPolicyOptions;
 }
 /**
  * Provisional inspect phase for a stored session.
@@ -197,6 +208,14 @@ export declare class Agent {
     handle(): WasmAgent;
     /** Compose an agent with a fresh bounded process-local history cache. */
     withHistoryCache(policy: HistoryCachePolicy): Agent;
+    /**
+     * Read bytes behind an artifact reference returned by a tool.
+     *
+     * @param artifact - Serialized Rust artifact reference.
+     * @returns Exact staged bytes.
+     * @throws {FinstackError} When the reference is invalid or unavailable.
+     */
+    readArtifact(artifact: unknown): Promise<Uint8Array>;
     /**
      * Construct an Agent over a trusted {@link JsModel} and optional toolsets.
      *
@@ -410,6 +429,23 @@ export declare class Run {
      * ```
      */
     cancel(): Promise<void>;
+    /** List the outstanding typed interaction for this run (zero or one). */
+    listInteractions(): Promise<Readonly<Record<string, unknown>>[]>;
+    /**
+     * Resolve the outstanding interaction through the live Rust-owned run.
+     *
+     * @param resolution - Canonical interaction resolution object.
+     */
+    resolveInteraction(resolution: Readonly<Record<string, unknown>>): Promise<void>;
+    /**
+     * Route one authenticated external completion through Rust ingress.
+     *
+     * @param command - Canonical external completion command.
+     * @returns Rust-owned ingress status.
+     */
+    completeExternal(command: Readonly<Record<string, unknown>>): Promise<Readonly<{
+        status: "committed" | "idempotent" | "rejected";
+    }>>;
     /**
      * Prepare and accept one child through the Rust router.
      *
@@ -476,6 +512,10 @@ export interface LaneInspectSnapshot {
     name: string;
     /** History length ending at the current leaf. */
     historyLen: number;
+    /** Current conversation leaf, when one exists. */
+    leafId?: string;
+    /** Active run identity, when the lane is not idle. */
+    activeRunId?: string;
 }
 /**
  * Host-owned `(channel, account, thread)` resolution.
@@ -560,10 +600,8 @@ export declare class Session {
 /**
  * Live handle for one lane in a session.
  *
- * Durable lane park/respawn (`suspend`/`resume`) and direct interaction
- * management (`listInteractions`/`resolveInteraction`) are native-only.
- * Browser WASM has no truthful respawn path; use the host session/inbox
- * path instead.
+ * Suspend and resume retain journal-authoritative state and respawn the
+ * Rust-owned run task in the same browser process.
  */
 export declare class Lane {
     #private;
@@ -616,6 +654,10 @@ export declare class Lane {
      * ```
      */
     run(agent: Agent, input: string, options?: RunOptions): Run;
+    /** Park the in-process driver without dropping the journal. */
+    suspend(): Promise<void>;
+    /** Recover the parked run and respawn its Rust-owned task. */
+    resume(agent: Agent): Promise<void>;
 }
 /**
  * In-process external identity map.
@@ -645,6 +687,8 @@ export declare class RunResult {
     constructor(handle: WasmRunResult);
     /** Concatenated final assistant text. */
     get text(): string;
+    /** Structured JSON output, or `null` when the run returned text only. */
+    get output(): unknown | null;
     /** Durable retry attempts consumed by this run. */
     get retryAttempts(): number;
     /**
@@ -662,7 +706,7 @@ export declare class RunResult {
     /**
      * Serialize the terminal result explicitly.
      *
-     * @returns Locator fields plus `text`.
+     * @returns Locator fields plus `text` and `output`.
      * @example
      * ```ts
      * const snapshot = result.toDict();

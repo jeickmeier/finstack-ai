@@ -1,7 +1,7 @@
 """Native Rust-backed finstack-ai control and observation handles."""
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 __version__: str
 __engine_version__: str
@@ -502,6 +502,23 @@ class Session:
             ``None``.
         """
 
+SessionInspectPhase = Literal[
+    "empty",
+    "in_progress",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+class SessionInspectSnapshot(TypedDict):
+    """Replay-derived provisional session inspection snapshot."""
+
+    session_id: str
+    head_sequence: int
+    phase: SessionInspectPhase
+    result_text: NotRequired[str]
+    last_record_kind: NotRequired[str]
+
 class Lane:
     """Live handle for one lane in a session."""
 
@@ -759,8 +776,8 @@ class RunResult:
     def locator(self) -> Locator: ...
     @property
     def session(self) -> Locator: ...
-    def to_dict(self) -> dict[str, str]:
-        """Serialize the terminal result explicitly."""
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize locator fields plus text and structured output."""
 
 class Attachment:
     """One in-memory run attachment staged at submit time.
@@ -1600,6 +1617,19 @@ class Agent:
         Raises:
             ConfigurationError: The session id is invalid or the journal
                 cannot be replayed.
+        """
+    def inspect_session(self, session_id: str) -> Awaitable[SessionInspectSnapshot]:
+        """Replay one stored session into a provisional Rust-owned snapshot.
+
+        Args:
+            session_id: Durable session identity.
+
+        Returns:
+            Replay-derived phase, head sequence, and optional terminal fields.
+
+        Raises:
+            ConfigurationError: The session id is invalid.
+            RuntimeError: The journal cannot be recovered.
         """
     def start(
         self,

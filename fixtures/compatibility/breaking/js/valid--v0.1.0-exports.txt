@@ -2,10 +2,12 @@ ActiveCapability
 Agent
 AgentOptions
 ApprovalGrantMode
+BuildMetadata
 Capability
 CapabilityActivation
 CapabilityCatalogItem
 ChildRunOptions
+ChildRunPolicyOptions
 Event
 EventBatch
 EventOptions
@@ -48,6 +50,7 @@ ObserverDiagnostic
 ObserverDiagnostics
 POST_AUTH_FRAME_MAX_BYTES
 PRE_AUTH_FRAME_MAX_BYTES
+ParsedDocument
 PrebetaKind
 Run
 RunOptions

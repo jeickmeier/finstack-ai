@@ -513,7 +513,6 @@ impl Agent {
     /// # Errors
     ///
     /// Returns a configuration or runtime failure when the child cannot start.
-    #[cfg(feature = "native-tokio")]
     pub(super) fn start_prepared(
         &self,
         request: AgentRunRequest,
@@ -568,6 +567,21 @@ impl Agent {
     #[must_use]
     pub fn journal_store(&self) -> Arc<dyn finstack_ai_runtime::ports::journal::JournalStore> {
         Arc::clone(self.resolved.run_plan().store().handle())
+    }
+
+    /// Replay one stored session into a provisional Rust-owned inspect snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recover failure when the journal cannot be loaded or replayed.
+    pub async fn inspect_session(
+        &self,
+        session_id: finstack_ai_kernel::SessionId,
+    ) -> Result<
+        finstack_ai_runtime::session::SessionInspectSnapshot,
+        finstack_ai_runtime::session::SessionError,
+    > {
+        finstack_ai_runtime::session::inspect_session(self.journal_store(), session_id).await
     }
 
     fn select_for_request(&self, request: &AgentRunRequest) -> Result<Self, AgentRunError> {

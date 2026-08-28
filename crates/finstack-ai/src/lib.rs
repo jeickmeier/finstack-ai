@@ -180,7 +180,8 @@ pub mod runtime {
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use finstack_ai_runtime::session::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, LaneInspect,
-    MemoryExternalIdentityMap, SessionError,
+    MemoryExternalIdentityMap, SessionError, SessionInspectPhase, SessionInspectSnapshot,
+    inspect_session,
 };
 pub(crate) use registry::ReadyComponent;
 pub use registry::{

@@ -87,15 +87,6 @@ export function buildMetadata() {
  */
 export function journalKnownAnswer(kind, value) {
     assertInitialized();
-    switch (kind) {
-        case "record_body":
-        case "record_envelope":
-            break;
-        default: {
-            const _exhaustive = kind;
-            throw new TypeError(`unsupported known-answer kind: ${String(_exhaustive)}`);
-        }
-    }
     return JSON.parse(wasmJournalKnownAnswer(kind, JSON.stringify(value)));
 }
 /**
@@ -115,16 +106,6 @@ export function journalKnownAnswer(kind, value) {
  */
 export function normalizePrebetaShape(kind, value) {
     assertInitialized();
-    switch (kind) {
-        case "child_run_prepared":
-        case "interaction_resolution":
-        case "external_effect_completion":
-            break;
-        default: {
-            const _exhaustive = kind;
-            throw new TypeError(`unsupported pre-beta shape: ${String(_exhaustive)}`);
-        }
-    }
     const encoded = wasmNormalizePrebetaShape(kind, JSON.stringify(value));
     return JSON.parse(encoded);
 }

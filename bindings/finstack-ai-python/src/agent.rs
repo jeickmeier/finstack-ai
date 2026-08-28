@@ -790,6 +790,41 @@ impl PyAgent {
         })
     }
 
+    /// Replay one stored session into a provisional Rust-owned inspect snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration error for an invalid identity and a runtime
+    /// error when the journal cannot be recovered.
+    fn inspect_session<'py>(
+        &self,
+        py: Python<'py>,
+        session_id: String,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let agent = Arc::clone(&self.inner);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let session_id = SessionId::parse(&session_id)
+                .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+            let snapshot = agent
+                .inspect_session(session_id)
+                .await
+                .map_err(|error| Python::attach(|py| session_py_error(py, &error)))?;
+            Python::attach(|py| {
+                let value = PyDict::new(py);
+                value.set_item("session_id", snapshot.session_id.to_string())?;
+                value.set_item("head_sequence", snapshot.head_sequence)?;
+                value.set_item("phase", snapshot.phase.as_str())?;
+                if let Some(result_text) = snapshot.result_text {
+                    value.set_item("result_text", result_text)?;
+                }
+                if let Some(last_record_kind) = snapshot.last_record_kind {
+                    value.set_item("last_record_kind", last_record_kind)?;
+                }
+                Ok(value.unbind())
+            })
+        })
+    }
+
     /// Start a run and return its shared control handle immediately.
     #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
     #[pyo3(

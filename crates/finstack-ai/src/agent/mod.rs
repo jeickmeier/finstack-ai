@@ -11,7 +11,6 @@ pub(super) const PREVIEW_ENGINE_VERSION: Version = Version {
 
 mod activation;
 mod builder;
-#[cfg(feature = "native-tokio")]
 mod child;
 mod child_route;
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -46,7 +45,7 @@ pub use deferred::{
 };
 pub use handle::Agent;
 pub use history::HistoryCachePolicy;
-#[cfg(feature = "native-tokio")]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use lane::{LaneLive, live_run};
 pub use linked::{
     AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,

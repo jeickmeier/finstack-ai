@@ -2,19 +2,14 @@
 
 use finstack_ai_kernel::{KernelState, RunPhase, Timestamp};
 
-#[cfg(any(test, feature = "native-tokio"))]
 use std::collections::BTreeMap;
 
-#[cfg(any(test, feature = "native-tokio"))]
 use finstack_ai_kernel::{RawJson, ValidationOutcome};
-#[cfg(any(test, feature = "native-tokio"))]
 use thiserror::Error;
 
-#[cfg(any(test, feature = "native-tokio"))]
 use crate::ports::tool::{JsonSchemaToolValidatorCompiler, ToolValidatorCompiler};
 
 /// Fail-closed interaction-response validation failure.
-#[cfg(any(test, feature = "native-tokio"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub(crate) enum InteractionResponseError {
     /// The parked request's response schema cannot be compiled.
@@ -36,7 +31,6 @@ pub(crate) enum InteractionResponseError {
 /// Returns [`InteractionResponseError::InvalidSchema`] when the parked schema
 /// cannot be compiled, and [`InteractionResponseError::InvalidResponse`] when
 /// `response` fails the compiled schema.
-#[cfg(any(test, feature = "native-tokio"))]
 pub(crate) fn validate_interaction_response(
     schema: &RawJson,
     response: &RawJson,

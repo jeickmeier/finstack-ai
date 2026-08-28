@@ -341,7 +341,8 @@ function requiredResult(value) {
             retryable: false,
         });
     }
-    return { ...session, text };
+    const output = "output" in value ? value.output : null;
+    return { ...session, text, output };
 }
 function requiredInspect(value) {
     if (value === null || typeof value !== "object") {

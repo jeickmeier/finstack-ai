@@ -12,6 +12,10 @@ def test_session_create_lane_inspect_and_identity_bind() -> None:
     async def exercise(server: object) -> None:
         agent = await _agent(server)  # type: ignore[arg-type]
         session = await agent.create_session("tenant-a")
+        session_snapshot = await agent.inspect_session(session.session_id)
+        assert session_snapshot["session_id"] == session.session_id
+        assert session_snapshot["head_sequence"] > 0
+        assert session_snapshot["phase"] == "in_progress"
         main = await session.lane("main")
         research = await session.create_lane("research")
         lanes = await session.list_lanes()
@@ -62,6 +66,9 @@ def test_idle_lane_run_returns_a_live_run() -> None:
         assert run.locator.lane_id == main.lane_id
         result = await run.result()
         assert result.text == "hello"
+        session_snapshot = await agent.inspect_session(session.session_id)
+        assert session_snapshot["phase"] == "completed"
+        assert session_snapshot["result_text"] == "hello"
 
     with _server(_ollama_ndjson(["hello"])) as server:
         asyncio.run(exercise(server))

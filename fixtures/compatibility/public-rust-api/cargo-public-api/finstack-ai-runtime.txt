@@ -3284,6 +3284,23 @@ pub fn finstack_ai_runtime::session::SessionError::fmt(&self, &mut core::fmt::Fo
 impl core::fmt::Display for finstack_ai_runtime::session::SessionError
 pub fn finstack_ai_runtime::session::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::session::SessionError
+pub enum finstack_ai_runtime::session::SessionInspectPhase
+pub finstack_ai_runtime::session::SessionInspectPhase::Cancelled
+pub finstack_ai_runtime::session::SessionInspectPhase::Completed
+pub finstack_ai_runtime::session::SessionInspectPhase::Empty
+pub finstack_ai_runtime::session::SessionInspectPhase::Failed
+pub finstack_ai_runtime::session::SessionInspectPhase::InProgress
+impl finstack_ai_runtime::session::SessionInspectPhase
+pub const fn finstack_ai_runtime::session::SessionInspectPhase::as_str(self) -> &'static str
+impl core::clone::Clone for finstack_ai_runtime::session::SessionInspectPhase
+pub fn finstack_ai_runtime::session::SessionInspectPhase::clone(&self) -> finstack_ai_runtime::session::SessionInspectPhase
+impl core::cmp::Eq for finstack_ai_runtime::session::SessionInspectPhase
+impl core::cmp::PartialEq for finstack_ai_runtime::session::SessionInspectPhase
+pub fn finstack_ai_runtime::session::SessionInspectPhase::eq(&self, &finstack_ai_runtime::session::SessionInspectPhase) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::session::SessionInspectPhase
+pub fn finstack_ai_runtime::session::SessionInspectPhase::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_runtime::session::SessionInspectPhase
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::session::SessionInspectPhase
 pub struct finstack_ai_runtime::session::ExternalIdentityKey
 pub finstack_ai_runtime::session::ExternalIdentityKey::account: alloc::sync::Arc<str>
 pub finstack_ai_runtime::session::ExternalIdentityKey::channel: alloc::sync::Arc<str>
@@ -3391,6 +3408,20 @@ pub fn finstack_ai_runtime::session::SessionHeadUpdate::eq(&self, &finstack_ai_r
 impl core::fmt::Debug for finstack_ai_runtime::session::SessionHeadUpdate
 pub fn finstack_ai_runtime::session::SessionHeadUpdate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_runtime::session::SessionHeadUpdate
+pub struct finstack_ai_runtime::session::SessionInspectSnapshot
+pub finstack_ai_runtime::session::SessionInspectSnapshot::head_sequence: u64
+pub finstack_ai_runtime::session::SessionInspectSnapshot::last_record_kind: core::option::Option<alloc::string::String>
+pub finstack_ai_runtime::session::SessionInspectSnapshot::phase: finstack_ai_runtime::session::SessionInspectPhase
+pub finstack_ai_runtime::session::SessionInspectSnapshot::result_text: core::option::Option<alloc::string::String>
+pub finstack_ai_runtime::session::SessionInspectSnapshot::session_id: finstack_ai_kernel::primitives::ids::SessionId
+impl core::clone::Clone for finstack_ai_runtime::session::SessionInspectSnapshot
+pub fn finstack_ai_runtime::session::SessionInspectSnapshot::clone(&self) -> finstack_ai_runtime::session::SessionInspectSnapshot
+impl core::cmp::Eq for finstack_ai_runtime::session::SessionInspectSnapshot
+impl core::cmp::PartialEq for finstack_ai_runtime::session::SessionInspectSnapshot
+pub fn finstack_ai_runtime::session::SessionInspectSnapshot::eq(&self, &finstack_ai_runtime::session::SessionInspectSnapshot) -> bool
+impl core::fmt::Debug for finstack_ai_runtime::session::SessionInspectSnapshot
+pub fn finstack_ai_runtime::session::SessionInspectSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_runtime::session::SessionInspectSnapshot
 pub struct finstack_ai_runtime::session::SessionRuntime
 impl finstack_ai_runtime::session::SessionRuntime
 pub async fn finstack_ai_runtime::session::SessionRuntime::accept_run(&self, finstack_ai_kernel::primitives::ids::LaneId, finstack_ai_kernel::records::run::accepted::RunAccepted, finstack_ai_kernel::state::env::TransitionEnv) -> core::result::Result<finstack_ai_runtime::commit::CommitCoordinator, finstack_ai_runtime::session::SessionError>
@@ -3422,6 +3453,7 @@ pub fn finstack_ai_runtime::session::ExternalIdentityMap::resolve(&self, &finsta
 impl finstack_ai_runtime::session::ExternalIdentityMap for finstack_ai_runtime::session::MemoryExternalIdentityMap
 pub fn finstack_ai_runtime::session::MemoryExternalIdentityMap::bind(&self, finstack_ai_runtime::session::ExternalIdentityKey, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::ids::LaneId) -> core::result::Result<(), finstack_ai_runtime::session::IdentityMapError>
 pub fn finstack_ai_runtime::session::MemoryExternalIdentityMap::resolve(&self, &finstack_ai_runtime::session::ExternalIdentityKey) -> core::option::Option<(finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::ids::LaneId)>
+pub async fn finstack_ai_runtime::session::inspect_session(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<finstack_ai_runtime::session::SessionInspectSnapshot, finstack_ai_runtime::session::SessionError>
 pub mod finstack_ai_runtime::spec
 pub enum finstack_ai_runtime::spec::AgentSpecError
 pub finstack_ai_runtime::spec::AgentSpecError::DuplicateCapability

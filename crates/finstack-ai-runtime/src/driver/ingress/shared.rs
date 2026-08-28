@@ -8,8 +8,9 @@ use serde::Serialize;
 
 use crate::audit::{SecurityAuditCategory, SecurityAuditEvent};
 use crate::commit::{CommitCoordinator, CommitCoordinatorError};
-use crate::ids::{IdGenerationError, OsRandomSource, SystemClock, UuidV7Generator};
+use crate::ids::IdGenerationError;
 
+use super::IngressIds;
 use super::types::ExternalRouteError;
 
 pub(super) const EXTERNAL_COMMAND_DIGEST_DOMAIN: &str = "external-command";
@@ -168,7 +169,7 @@ impl IdBags {
     fn push(
         &mut self,
         kind: &'static str,
-        generator: UuidV7Generator<SystemClock, OsRandomSource>,
+        generator: IngressIds,
     ) -> Result<(), ExternalRouteError> {
         match kind {
             "record_ids" => self
@@ -207,7 +208,7 @@ pub(super) fn allocate_transition_env(
     coordinator: &CommitCoordinator,
     input: &KernelInput,
     now: Timestamp,
-    generator: UuidV7Generator<SystemClock, OsRandomSource>,
+    generator: IngressIds,
 ) -> Result<TransitionEnv, ExternalRouteError> {
     let mut bags = IdBags::default();
     bags.append_batch_ids

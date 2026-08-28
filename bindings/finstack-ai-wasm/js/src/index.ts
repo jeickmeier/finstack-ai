@@ -38,6 +38,7 @@ export type {
   CapabilityActivation,
   CapabilityCatalogItem,
   ChildRunOptions,
+  ChildRunPolicyOptions,
   EventOptions,
   ExternalIdentitySnapshot,
   LaneInspectSnapshot,
@@ -204,15 +205,6 @@ export function journalKnownAnswer(
   value: unknown,
 ): { payload_digest: string; checksum?: string; cbor_hex: string } {
   assertInitialized();
-  switch (kind) {
-    case "record_body":
-    case "record_envelope":
-      break;
-    default: {
-      const _exhaustive: never = kind;
-      throw new TypeError(`unsupported known-answer kind: ${String(_exhaustive)}`);
-    }
-  }
   return JSON.parse(wasmJournalKnownAnswer(kind, JSON.stringify(value))) as {
     payload_digest: string;
     checksum?: string;
@@ -237,16 +229,6 @@ export function journalKnownAnswer(
  */
 export function normalizePrebetaShape(kind: PrebetaKind, value: unknown): unknown {
   assertInitialized();
-  switch (kind) {
-    case "child_run_prepared":
-    case "interaction_resolution":
-    case "external_effect_completion":
-      break;
-    default: {
-      const _exhaustive: never = kind;
-      throw new TypeError(`unsupported pre-beta shape: ${String(_exhaustive)}`);
-    }
-  }
   const encoded = wasmNormalizePrebetaShape(kind, JSON.stringify(value));
   return JSON.parse(encoded) as unknown;
 }

@@ -61,6 +61,11 @@ export interface JsModelOptions {
   contextWindowTokens?: number;
   /** Maximum output tokens. */
   maxOutputTokens?: number;
+  /**
+   * Whether recovery may safely re-dispatch the same request identity.
+   * Defaults to false.
+   */
+  idempotentRequests?: boolean;
 }
 
 /**

@@ -1,5 +1,7 @@
 """Typed Python facade for the Rust-owned finstack-ai engine."""
 
+from typing import Literal as _Literal
+from typing import NotRequired as _NotRequired
 from typing import TypedDict, cast
 
 from . import _finstack_ai as _native
@@ -129,6 +131,25 @@ def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, ob
     return _native.normalize_prebeta_shape(kind, value)
 
 
+SessionInspectPhase = _Literal[
+    "empty",
+    "in_progress",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+
+class SessionInspectSnapshot(TypedDict):
+    """Replay-derived provisional session inspection snapshot."""
+
+    session_id: str
+    head_sequence: int
+    phase: SessionInspectPhase
+    result_text: _NotRequired[str]
+    last_record_kind: _NotRequired[str]
+
+
 class ParsedDocument(TypedDict):
     """Detailed result of a debug document parse."""
 
@@ -227,6 +248,8 @@ __all__ = [
     "RunResult",
     "RuntimeError",
     "Session",
+    "SessionInspectPhase",
+    "SessionInspectSnapshot",
     "SqliteDurability",
     "TimeoutError",
     "__version__",

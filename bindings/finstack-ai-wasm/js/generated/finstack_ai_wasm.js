@@ -83,9 +83,11 @@ export class Agent {
      * @param {JsMiddleware[] | null} [middleware]
      * @param {JsObserver[] | null} [observers]
      * @param {string | null} [approval_grant]
+     * @param {string | null} [output_schema_json]
+     * @param {string | null} [child_runs_json]
      * @returns {Promise<any>}
      */
-    static create(model, toolsets, instruction, store, capabilities_json, active_capabilities_json, context_providers, middleware, observers, approval_grant) {
+    static create(model, toolsets, instruction, store, capabilities_json, active_capabilities_json, context_providers, middleware, observers, approval_grant, output_schema_json, child_runs_json) {
         _assertClass(model, JsModel);
         const ptr0 = passArrayJsValueToWasm0(toolsets, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
@@ -108,7 +110,11 @@ export class Agent {
         var len7 = WASM_VECTOR_LEN;
         var ptr8 = isLikeNone(approval_grant) ? 0 : passStringToWasm0(approval_grant, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         var len8 = WASM_VECTOR_LEN;
-        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8);
+        var ptr9 = isLikeNone(output_schema_json) ? 0 : passStringToWasm0(output_schema_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len9 = WASM_VECTOR_LEN;
+        var ptr10 = isLikeNone(child_runs_json) ? 0 : passStringToWasm0(child_runs_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len10 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, ptr9, len9, ptr10, len10);
         return takeObject(ret);
     }
     /**
@@ -174,6 +180,21 @@ export class Agent {
      */
     reResolve() {
         const ret = wasm.agent_reResolve(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
+     * Read bytes behind one artifact reference from this agent's store.
+     *
+     * # Errors
+     *
+     * Returns a structured host error for an invalid reference or failed store read.
+     * @param {string} artifact_json
+     * @returns {Promise<any>}
+     */
+    readArtifact(artifact_json) {
+        const ptr0 = passStringToWasm0(artifact_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_readArtifact(this.__wbg_ptr, ptr0, len0);
         return takeObject(ret);
     }
     /**
@@ -1070,6 +1091,16 @@ export class Lane {
         return takeObject(ret);
     }
     /**
+     * Recover the parked run and respawn the Rust-owned run task.
+     * @param {Agent} agent
+     * @returns {Promise<any>}
+     */
+    resume(agent) {
+        _assertClass(agent, Agent);
+        const ret = wasm.lane_resume(this.__wbg_ptr, agent.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
      * Start a new root run on this idle lane.
      *
      * # Errors
@@ -1112,6 +1143,14 @@ export class Lane {
     get session() {
         const ret = wasm.lane_session(this.__wbg_ptr);
         return Session.__wrap(ret);
+    }
+    /**
+     * Park the in-process driver without dropping the journal.
+     * @returns {Promise<any>}
+     */
+    suspend() {
+        const ret = wasm.lane_suspend(this.__wbg_ptr);
+        return takeObject(ret);
     }
 }
 if (Symbol.dispose) Lane.prototype[Symbol.dispose] = Lane.prototype.free;
@@ -1302,9 +1341,6 @@ if (Symbol.dispose) MemoryExternalIdentityMap.prototype[Symbol.dispose] = Memory
 
 /**
  * Detached run control handle. Drop detaches observation and does not cancel.
- *
- * `list_interactions` / `resolve_interaction` remain native-only
- * (`native-tokio`). Browser WASM uses the host session/inbox path.
  */
 export class Run {
     static __wrap(ptr) {
@@ -1341,6 +1377,25 @@ export class Run {
      */
     closeEvents() {
         const ret = wasm.run_closeEvents(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
+     * Route one authenticated external completion through Rust ingress.
+     * @param {string} command_json
+     * @returns {Promise<any>}
+     */
+    completeExternal(command_json) {
+        const ptr0 = passStringToWasm0(command_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.run_completeExternal(this.__wbg_ptr, ptr0, len0);
+        return takeObject(ret);
+    }
+    /**
+     * List the outstanding typed interaction for this run (zero or one).
+     * @returns {Promise<any>}
+     */
+    listInteractions() {
+        const ret = wasm.run_listInteractions(this.__wbg_ptr);
         return takeObject(ret);
     }
     /**
@@ -1385,6 +1440,17 @@ export class Run {
         return takeObject(ret);
     }
     /**
+     * Resolve the outstanding interaction through the live Rust-owned run.
+     * @param {string} resolution_json
+     * @returns {Promise<any>}
+     */
+    resolveInteraction(resolution_json) {
+        const ptr0 = passStringToWasm0(resolution_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.run_resolveInteraction(this.__wbg_ptr, ptr0, len0);
+        return takeObject(ret);
+    }
+    /**
      * Wait for the retained terminal result.
      *
      * # Errors
@@ -1407,7 +1473,7 @@ export class Run {
     /**
      * Prepare and accept one child through the Rust router.
      *
-     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     * Local isolated and compatible placements execute through the Rust router.
      * @param {Agent} child
      * @param {string} input
      * @param {string} placement
@@ -1502,6 +1568,29 @@ export class RunResult {
     get locator() {
         const ret = wasm.runresult_locator(this.__wbg_ptr);
         return Locator.__wrap(ret);
+    }
+    /**
+     * Structured JSON output, or `null` when the run returned text only.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception only if the canonical JSON cannot be materialized.
+     * @returns {any}
+     */
+    get output() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.runresult_output(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Durable retry attempts consumed by this run.
@@ -2267,7 +2356,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_5229(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_5870(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -2357,13 +2446,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1169, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_5215);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1250, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_5856);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_476);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_744);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -2395,14 +2484,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_476(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_476(arg0, arg1);
+function __wasm_bindgen_func_elem_744(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_744(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_5215(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_5856(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_5215(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_5856(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -2413,8 +2502,8 @@ function __wasm_bindgen_func_elem_5215(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_5229(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_5229(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_5870(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_5870(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')

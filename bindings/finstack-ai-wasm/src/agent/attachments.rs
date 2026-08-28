@@ -28,7 +28,7 @@ struct RawAttachment {
 /// Canonical tenant-bound pre-run upload scope. The session/run identity is
 /// unknown until acceptance, so the all-zero session plus `run_id: None` is
 /// the exact scope the document-ingest middleware later resolves.
-fn attachment_scope() -> ArtifactScope {
+pub(super) fn attachment_scope() -> ArtifactScope {
     ArtifactScope {
         tenant_scope: Arc::from("js-local"),
         session_id: SessionId::from_bytes([0_u8; 16]),

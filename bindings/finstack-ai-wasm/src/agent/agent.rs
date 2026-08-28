@@ -3,13 +3,13 @@ use std::sync::Arc;
 use finstack_ai::runtime::artifact::ArtifactStore;
 use finstack_ai::runtime::ports::model::ModelName;
 use finstack_ai::{Agent as FacadeAgent, HistoryCachePolicy as FacadeHistoryCachePolicy};
-use finstack_ai_kernel::SessionId;
+use finstack_ai_kernel::{ArtifactRef, SessionId};
 use wasm_bindgen::prelude::*;
 
 use crate::executor;
 use crate::{JsJournalStore, JsModel, JsToolset};
 
-use super::attachments::stage_attachments;
+use super::attachments::{attachment_scope, stage_attachments};
 use super::build::{build_agent, inspect_session_inner, parse_approval_grant};
 use super::capabilities::{catalog_array, parse_active_capabilities, parse_capabilities};
 use super::errors::{agent_error, session_error};
@@ -84,6 +84,41 @@ impl Agent {
         }
     }
 
+    /// Read bytes behind one artifact reference from this agent's store.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error for an invalid reference or failed store read.
+    #[wasm_bindgen(js_name = readArtifact)]
+    pub fn read_artifact(&self, artifact_json: String) -> js_sys::Promise {
+        let artifact = match serde_json::from_str::<ArtifactRef>(&artifact_json) {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                return js_sys::Promise::reject(&agent_error(
+                    &super::errors::configuration_error(format!(
+                        "invalid artifact reference: {error}"
+                    )),
+                    None,
+                ));
+            }
+        };
+        let store = Arc::clone(&self.artifact_store);
+        executor::drive(async move {
+            store
+                .get(attachment_scope(), artifact)
+                .await
+                .map(|bytes| js_sys::Uint8Array::from(bytes.as_ref()).into())
+                .map_err(|error| {
+                    agent_error(
+                        &super::errors::configuration_error(format!(
+                            "artifact read failed: {error}"
+                        )),
+                        None,
+                    )
+                })
+        })
+    }
+
     /// Construct an Agent over a trusted JS model and optional toolsets.
     ///
     /// Linked provider constructors (`openai`, `anthropic`, and peers) are
@@ -109,6 +144,8 @@ impl Agent {
         middleware: Option<Vec<crate::JsMiddleware>>,
         observers: Option<Vec<crate::JsObserver>>,
         approval_grant: Option<String>,
+        output_schema_json: Option<String>,
+        child_runs_json: Option<String>,
     ) -> js_sys::Promise {
         let model_port = model.port();
         let model_component = model.component();
@@ -163,6 +200,8 @@ impl Agent {
                 capabilities,
                 active_capabilities,
                 approval_grant,
+                output_schema_json,
+                child_runs_json,
             )
             .await
             .map(JsValue::from)
@@ -285,6 +324,7 @@ impl Agent {
         let attachments = stage_attachments(self.artifact_store.as_ref(), &attachments)?;
         let request = run_request(
             &self.model,
+            "js-local",
             input,
             timeout_seconds,
             max_cycles,
@@ -323,6 +363,7 @@ impl Agent {
             let attachments = stage_attachments(artifact_store.as_ref(), &attachments)?;
             let request = run_request(
                 &model,
+                "js-local",
                 input,
                 timeout_seconds,
                 max_cycles,

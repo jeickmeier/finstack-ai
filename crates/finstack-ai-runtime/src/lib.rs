@@ -227,6 +227,9 @@ pub mod session {
         LaneAppendIds, LaneCreateIds, LaneInspect, LaneRunContext, SessionCreateIds, SessionError,
         SessionHeadUpdate, SessionRuntime,
     };
+    pub use crate::services::session_inspect::{
+        SessionInspectPhase, SessionInspectSnapshot, inspect_session,
+    };
 }
 
 /// Security-audit sink and the gate that fails closed without it.
@@ -265,7 +268,7 @@ pub mod budget {
 
 /// Durable ingress: external completion and interaction routing.
 pub mod ingress {
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub use crate::driver::ingress::{
         ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, InteractionRouter,
     };
@@ -274,14 +277,11 @@ pub mod ingress {
 
 /// Workflow sessions, checkpoints and retry decisions.
 pub mod workflow {
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub use crate::driver::workflow::{
-        EFFECT_NOT_OUTSTANDING, RETRY_LIMIT_REACHED, RETRY_NOT_SAFE,
-    };
-    #[cfg(feature = "native-tokio")]
-    pub use crate::driver::workflow::{
-        WorkflowCheckpoint, WorkflowDriverError, WorkflowRetryDecision, WorkflowSession,
-        WorkflowWait, classify_wait, resolve_checkpoint_sequence, retry_decision,
+        EFFECT_NOT_OUTSTANDING, RETRY_LIMIT_REACHED, RETRY_NOT_SAFE, WorkflowCheckpoint,
+        WorkflowDriverError, WorkflowRetryDecision, WorkflowSession, WorkflowWait, classify_wait,
+        resolve_checkpoint_sequence, retry_decision,
     };
 }
 

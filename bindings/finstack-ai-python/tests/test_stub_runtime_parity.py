@@ -21,6 +21,8 @@ _TYPED_ONLY_NAMES = {
     "ObserverDiagnostics",
     "ParsedDocument",
     "RunStateSnapshot",
+    "SessionInspectPhase",
+    "SessionInspectSnapshot",
 }
 _REQUIRED = "<required>"
 

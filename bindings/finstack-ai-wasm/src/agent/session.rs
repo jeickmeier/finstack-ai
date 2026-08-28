@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use finstack_ai::OperationLocator;
 use wasm_bindgen::prelude::*;
 
@@ -224,28 +226,41 @@ impl Lane {
     pub fn inspect(&self) -> js_sys::Promise {
         let lane = self.inner.clone();
         executor::drive(async move {
-            lane.inspect()
+            let inspect = lane
+                .inspect()
                 .await
-                .map(|inspect| {
-                    let object = js_sys::Object::new();
-                    let _ = js_sys::Reflect::set(
-                        &object,
-                        &JsValue::from_str("laneId"),
-                        &JsValue::from_str(&inspect.lane_id.to_string()),
-                    );
-                    let _ = js_sys::Reflect::set(
-                        &object,
-                        &JsValue::from_str("name"),
-                        &JsValue::from_str(&inspect.name),
-                    );
-                    let _ = js_sys::Reflect::set(
-                        &object,
-                        &JsValue::from_str("historyLen"),
-                        &JsValue::from_f64(inspect.history.len() as f64),
-                    );
-                    JsValue::from(object)
-                })
-                .map_err(|error| session_error(&error))
+                .map_err(|error| session_error(&error))?;
+            let object = js_sys::Object::new();
+            js_sys::Reflect::set(
+                &object,
+                &JsValue::from_str("laneId"),
+                &JsValue::from_str(&inspect.lane_id.to_string()),
+            )?;
+            js_sys::Reflect::set(
+                &object,
+                &JsValue::from_str("name"),
+                &JsValue::from_str(&inspect.name),
+            )?;
+            js_sys::Reflect::set(
+                &object,
+                &JsValue::from_str("historyLen"),
+                &JsValue::from_f64(inspect.history.len() as f64),
+            )?;
+            if let Some(leaf_id) = inspect.leaf_id {
+                js_sys::Reflect::set(
+                    &object,
+                    &JsValue::from_str("leafId"),
+                    &JsValue::from_str(&leaf_id.to_string()),
+                )?;
+            }
+            if let Some(run_id) = inspect.active_run_id {
+                js_sys::Reflect::set(
+                    &object,
+                    &JsValue::from_str("activeRunId"),
+                    &JsValue::from_str(&run_id.to_string()),
+                )?;
+            }
+            Ok(object.into())
         })
     }
 
@@ -288,6 +303,7 @@ impl Lane {
         let attachments = stage_attachments(agent.artifact_store.as_ref(), &attachments)?;
         let request = run_request(
             &agent.model,
+            self.inner.session().tenant_scope(),
             input,
             timeout_seconds,
             max_cycles,
@@ -299,6 +315,31 @@ impl Lane {
             .run(agent.inner.as_ref(), request)
             .map(|inner| Run { inner })
             .map_err(|error| agent_error(&error, None))
+    }
+
+    /// Park the in-process driver without dropping the journal.
+    #[wasm_bindgen(js_name = suspend)]
+    pub fn suspend(&self) -> js_sys::Promise {
+        let lane = self.inner.clone();
+        executor::drive(async move {
+            lane.suspend()
+                .await
+                .map(|()| JsValue::UNDEFINED)
+                .map_err(|error| session_error(&error))
+        })
+    }
+
+    /// Recover the parked run and respawn the Rust-owned run task.
+    #[wasm_bindgen(js_name = resume)]
+    pub fn resume(&self, agent: &Agent) -> js_sys::Promise {
+        let lane = self.inner.clone();
+        let agent = Arc::clone(&agent.inner);
+        executor::drive(async move {
+            lane.resume(agent.as_ref())
+                .await
+                .map(|()| JsValue::UNDEFINED)
+                .map_err(|error| agent_error(&error, None))
+        })
     }
 }
 

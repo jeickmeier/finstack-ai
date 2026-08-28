@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "scenarios": [
+    {
+      "id": "structured_output",
+      "portable_contract": "A configured JSON Schema is compiled and enforced by Rust; successful results expose the canonical JSON value.",
+      "rust": ["Agent::try_with_output_schema", "AgentRunOutput::structured_json"],
+      "python": ["Agent(output_type=...)", "RunResult.output", "RunResult.to_dict"],
+      "js": ["AgentOptions.outputSchema", "RunResult.output", "RunResult.toDict"]
+    },
+    {
+      "id": "session_inspection",
+      "portable_contract": "Journal replay yields the same provisional phase, head sequence, terminal text, and last record kind.",
+      "rust": ["Agent::inspect_session", "SessionInspectSnapshot"],
+      "python": ["Agent.inspect_session", "SessionInspectSnapshot"],
+      "js": ["Agent.inspectSession", "SessionInspectSnapshot"]
+    },
+    {
+      "id": "local_child_execution",
+      "portable_contract": "Isolated-session and compatible-lane child placements use the canonical prepare/accept router; remote placement is native-only.",
+      "rust": ["AgentRun::start_child"],
+      "python": ["Run.start_child"],
+      "js": ["Run.startChild"]
+    },
+    {
+      "id": "interaction_resolution",
+      "portable_contract": "Outstanding interactions are listed from live state and resolutions are schema-validated and committed by Rust.",
+      "fixture": "fixtures/compatibility/public-rust-api/v1/interaction-resolution-command/roundtrip--valid.json",
+      "rust": ["AgentRun::list_interactions", "AgentRun::resolve_interaction"],
+      "python": ["Run.list_interactions", "Run.resolve_interaction"],
+      "js": ["Run.listInteractions", "Run.resolveInteraction"]
+    },
+    {
+      "id": "external_completion",
+      "portable_contract": "Authenticated external completions route through Rust ingress and report committed, idempotent, or rejected.",
+      "fixture": "fixtures/compatibility/public-rust-api/v1/external-effect-completion-command/roundtrip--failed.json",
+      "rust": ["AgentRun::complete_external"],
+      "python": ["Run.complete_external"],
+      "js": ["Run.completeExternal"]
+    },
+    {
+      "id": "lane_lifecycle",
+      "portable_contract": "Suspend parks the live owner and resume recovers the journal and respawns the Rust-owned run task.",
+      "rust": ["Lane::suspend", "Lane::resume"],
+      "python": ["Lane.suspend", "Lane.resume"],
+      "js": ["Lane.suspend", "Lane.resume"]
+    },
+    {
+      "id": "artifact_read",
+      "portable_contract": "Artifact references returned by tools resolve to exact bytes through the agent-owned artifact store.",
+      "rust": ["ArtifactStore::get"],
+      "python": ["Agent.read_artifact"],
+      "js": ["Agent.readArtifact"]
+    },
+    {
+      "id": "document_extension_parsing",
+      "portable_contract": "The Rust document extension produces the same detailed parse projection and Markdown helper through Python and JavaScript.",
+      "fixture": "fixtures/documents/sample.csv",
+      "rust": ["finstack_ai_tools_document::parser::parse_document"],
+      "python": ["parse_document", "parse_document_markdown"],
+      "js": ["parseDocument", "parseDocumentMarkdown"]
+    },
+    {
+      "id": "document_extension_ingest",
+      "portable_contract": "The document toolset and ingest middleware share one artifact store so attachment references resolve to identical parsed content.",
+      "fixture": "fixtures/documents/sample.docx",
+      "rust": ["DocumentToolset", "DocumentIngestMiddleware"],
+      "python": ["Agent document attachment composition"],
+      "js": ["Agent document attachment composition"]
+    },
+    {
+      "id": "memory_journal_extension",
+      "portable_contract": "The in-memory journal extension is the bounded binding-owned default store and preserves canonical journal semantics.",
+      "rust": ["MemoryJournalStore"],
+      "python": ["Agent.callback default journal store"],
+      "js": ["Agent.create default journal store"]
+    }
+  ]
+}

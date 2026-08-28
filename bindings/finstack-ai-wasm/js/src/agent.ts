@@ -221,6 +221,11 @@ function approvalGrantWire(
   return value;
 }
 
+/** Child-run admission policy frozen into agent composition. */
+export type ChildRunPolicyOptions =
+  | { mode: "deny" }
+  | { mode: "allow"; maxDepth: number };
+
 /**
  * Options for {@link Agent.create}.
  *
@@ -259,6 +264,10 @@ export interface AgentOptions {
    * {@link ApprovalGrantMode.perCall}.
    */
   approvalGrant?: ApprovalGrantMode | "per_call" | "informed_batch";
+  /** Optional JSON Schema for canonical Rust-owned structured output validation. */
+  outputSchema?: unknown;
+  /** Child-run admission policy. Defaults to deny. */
+  childRuns?: ChildRunPolicyOptions;
 }
 
 /**
@@ -309,6 +318,22 @@ export class Agent {
   withHistoryCache(policy: HistoryCachePolicy): Agent {
     requireWasm();
     return new Agent(this.#handle.withHistoryCache(policy.handle()));
+  }
+
+  /**
+   * Read bytes behind an artifact reference returned by a tool.
+   *
+   * @param artifact - Serialized Rust artifact reference.
+   * @returns Exact staged bytes.
+   * @throws {FinstackError} When the reference is invalid or unavailable.
+   */
+  async readArtifact(artifact: unknown): Promise<Uint8Array> {
+    requireWasm();
+    try {
+      return await this.#handle.readArtifact(JSON.stringify(artifact));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
   }
 
   /**
@@ -365,6 +390,16 @@ export class Agent {
         ),
         (options.observers ?? []).map((observer) => wasmObserverHandle(observer)),
         approvalGrantWire(options.approvalGrant),
+        options.outputSchema === undefined
+          ? undefined
+          : JSON.stringify(options.outputSchema),
+        options.childRuns === undefined
+          ? undefined
+          : JSON.stringify(
+              options.childRuns.mode === "allow"
+                ? { mode: "allow", max_depth: options.childRuns.maxDepth }
+                : { mode: "deny" },
+            ),
       );
       return new Agent(handle);
     } catch (error) {
@@ -722,6 +757,52 @@ export class Run {
     }
   }
 
+  /** List the outstanding typed interaction for this run (zero or one). */
+  async listInteractions(): Promise<Readonly<Record<string, unknown>>[]> {
+    try {
+      return (await this.#handle.listInteractions()) as Readonly<
+        Record<string, unknown>
+      >[];
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Resolve the outstanding interaction through the live Rust-owned run.
+   *
+   * @param resolution - Canonical interaction resolution object.
+   */
+  async resolveInteraction(
+    resolution: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    try {
+      await this.#handle.resolveInteraction(JSON.stringify(resolution));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Route one authenticated external completion through Rust ingress.
+   *
+   * @param command - Canonical external completion command.
+   * @returns Rust-owned ingress status.
+   */
+  async completeExternal(
+    command: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<{ status: "committed" | "idempotent" | "rejected" }>> {
+    try {
+      return (await this.#handle.completeExternal(
+        JSON.stringify(command),
+      )) as Readonly<{
+        status: "committed" | "idempotent" | "rejected";
+      }>;
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
   /**
    * Prepare and accept one child through the Rust router.
    *
@@ -835,6 +916,10 @@ export interface LaneInspectSnapshot {
   name: string;
   /** History length ending at the current leaf. */
   historyLen: number;
+  /** Current conversation leaf, when one exists. */
+  leafId?: string;
+  /** Active run identity, when the lane is not idle. */
+  activeRunId?: string;
 }
 
 /**
@@ -980,10 +1065,8 @@ export class Session {
 /**
  * Live handle for one lane in a session.
  *
- * Durable lane park/respawn (`suspend`/`resume`) and direct interaction
- * management (`listInteractions`/`resolveInteraction`) are native-only.
- * Browser WASM has no truthful respawn path; use the host session/inbox
- * path instead.
+ * Suspend and resume retain journal-authoritative state and respawn the
+ * Rust-owned run task in the same browser process.
  */
 export class Lane {
   readonly #handle: WasmLane;
@@ -1084,6 +1167,24 @@ export class Lane {
     }
   }
 
+  /** Park the in-process driver without dropping the journal. */
+  async suspend(): Promise<void> {
+    try {
+      await this.#handle.suspend();
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /** Recover the parked run and respawn its Rust-owned task. */
+  async resume(agent: Agent): Promise<void> {
+    try {
+      await this.#handle.resume(agent.handle());
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
 }
 
 const identityMapHandles = new WeakMap<
@@ -1143,6 +1244,11 @@ export class RunResult {
     return this.#handle.text;
   }
 
+  /** Structured JSON output, or `null` when the run returned text only. */
+  get output(): unknown | null {
+    return this.#handle.output;
+  }
+
   /** Durable retry attempts consumed by this run. */
   get retryAttempts(): number {
     return this.#handle.retryAttempts;
@@ -1175,7 +1281,7 @@ export class RunResult {
   /**
    * Serialize the terminal result explicitly.
    *
-   * @returns Locator fields plus `text`.
+   * @returns Locator fields plus `text` and `output`.
    * @example
    * ```ts
    * const snapshot = result.toDict();

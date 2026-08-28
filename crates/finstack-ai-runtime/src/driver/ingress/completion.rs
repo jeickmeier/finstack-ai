@@ -6,9 +6,10 @@ use finstack_ai_kernel::{
     KernelInput, OperationLocator, PrincipalRef, RecordExternalCommandRejected, Timestamp,
 };
 
-use crate::audit::{SecurityAuditCategory, SecurityAuditGate};
+use crate::audit::SecurityAuditCategory;
+#[cfg(feature = "native-tokio")]
+use crate::audit::SecurityAuditGate;
 use crate::commit::{CommitCoordinator, CommitCoordinatorError};
-use crate::ids::{OsRandomSource, SystemClock, UuidV7Generator};
 use crate::ports::journal::JournalStore;
 
 use super::shared::{
@@ -16,23 +17,26 @@ use super::shared::{
     audit_event, authorization_matches, known_effect, known_tool_effect, normalized_digest,
 };
 use super::types::{ExternalRouteError, ExternalRouteOutcome};
+use super::{IngressIds, ingress_ids};
 
 /// Direct-locator router for authenticated deferred effect completions.
 pub struct ExternalCompletionRouter {
     store: Arc<dyn JournalStore>,
+    #[cfg(feature = "native-tokio")]
     audit: Arc<SecurityAuditGate>,
-    ids: UuidV7Generator<SystemClock, OsRandomSource>,
+    ids: IngressIds,
     horizon: Option<crate::ports::journal::IdempotencyHorizon>,
 }
 
 impl ExternalCompletionRouter {
     /// Construct a router over a direct store and already-enabled healthy audit gate.
     #[must_use]
+    #[cfg(feature = "native-tokio")]
     pub fn new(store: Arc<dyn JournalStore>, audit: Arc<SecurityAuditGate>) -> Self {
         Self {
             store,
             audit,
-            ids: UuidV7Generator::new(SystemClock, OsRandomSource),
+            ids: ingress_ids(),
             horizon: None,
         }
     }
@@ -50,11 +54,29 @@ impl ExternalCompletionRouter {
     ///
     /// Returns [`ExternalRouteError::IngressRejected`] when the trusted gate
     /// cannot be enabled.
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        expect(
+            clippy::unused_async,
+            reason = "the target-neutral constructor enables the audit gate asynchronously on native"
+        )
+    )]
     pub async fn trusted(store: Arc<dyn JournalStore>) -> Result<Self, ExternalRouteError> {
-        let audit = SecurityAuditGate::enable_noop()
-            .await
-            .map_err(|_| ExternalRouteError::IngressRejected)?;
-        Ok(Self::new(store, audit))
+        #[cfg(feature = "native-tokio")]
+        {
+            let audit = SecurityAuditGate::enable_noop()
+                .await
+                .map_err(|_| ExternalRouteError::IngressRejected)?;
+            Ok(Self::new(store, audit))
+        }
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        {
+            Ok(Self {
+                store,
+                ids: ingress_ids(),
+                horizon: None,
+            })
+        }
     }
 
     /// Route one fully authenticated command without accepting raw callback tokens.
@@ -240,6 +262,13 @@ impl ExternalCompletionRouter {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        expect(
+            clippy::unused_async,
+            reason = "the target-neutral rejection path records the audit event asynchronously on native"
+        )
+    )]
     async fn reject_unknown(
         &self,
         locator: &OperationLocator,
@@ -259,10 +288,13 @@ impl ExternalCompletionRouter {
             submission_digest,
             submitted_at,
         )?;
+        #[cfg(feature = "native-tokio")]
         self.audit
             .record(event)
             .await
             .map_err(|_| ExternalRouteError::IngressRejected)?;
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        let _ = event;
         Err(ExternalRouteError::IngressRejected)
     }
 

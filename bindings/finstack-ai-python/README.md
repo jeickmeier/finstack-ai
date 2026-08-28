@@ -80,10 +80,12 @@ Python.
 
 `normalize_prebeta_shape()` exposes data-only Rust validation for child-lineage,
 interaction-resolution, and authenticated external-completion shapes. It does
-not route those commands. `Agent.open_session` inspects a journal and does not
-respawn parked runs. `Lane.resume(agent)` respawns the parked owner.
+not route those commands. `Agent.inspect_session(session_id)` returns the same
+Rust-owned provisional replay projection exposed by the browser binding.
+`Agent.open_session` inspects a journal and does not respawn parked runs;
+`Lane.resume(agent)` respawns the parked owner.
 `Agent.from_python(..., sqlite_path=..., sqlite_durability=...)` opens
-`finstack-ai-store-sqlite`. Interaction resolve-after-open and live
+`finstack-ai-store-sqlite`. Interaction resolution and live
 external-completion routing stay Rust-owned. IndexedDB remains experimental
 and non-durable.
 

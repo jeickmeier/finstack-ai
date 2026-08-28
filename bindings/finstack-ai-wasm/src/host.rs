@@ -154,6 +154,9 @@ pub struct HostModelOptions {
     /// Maximum output tokens.
     #[serde(default = "default_max_output_tokens", alias = "maxOutputTokens")]
     pub max_output_tokens: u64,
+    /// Whether replay may safely re-dispatch the same model request identity.
+    #[serde(default, alias = "idempotentRequests")]
+    pub idempotent_requests: bool,
 }
 
 const fn default_hard_input_bytes() -> u64 {

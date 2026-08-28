@@ -23,6 +23,7 @@ export interface WorkerHostRun {
 /** Structural terminal result used inside the worker. */
 export interface WorkerHostRunResult {
     readonly text: string;
+    readonly output: unknown | null;
     toDict(): RunResultSnapshot;
     readonly session: {
         toDict(): SessionSnapshot;

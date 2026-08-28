@@ -6,9 +6,10 @@ use finstack_ai_kernel::{
     OperationLocator, PrincipalRef, RecordExternalCommandRejected, Timestamp,
 };
 
-use crate::audit::{SecurityAuditCategory, SecurityAuditGate};
+use crate::audit::SecurityAuditCategory;
+#[cfg(feature = "native-tokio")]
+use crate::audit::SecurityAuditGate;
 use crate::commit::{CommitCoordinator, CommitCoordinatorError};
-use crate::ids::{OsRandomSource, SystemClock, UuidV7Generator};
 use crate::ports::journal::JournalStore;
 
 use crate::interaction::validate_interaction_response;
@@ -19,22 +20,25 @@ use super::shared::{
     normalized_digest,
 };
 use super::types::{ExternalRouteError, ExternalRouteOutcome};
+use super::{IngressIds, ingress_ids};
 
 /// Direct-locator router for authenticated interaction resolutions.
 pub struct InteractionRouter {
     store: Arc<dyn JournalStore>,
+    #[cfg(feature = "native-tokio")]
     audit: Arc<SecurityAuditGate>,
-    ids: UuidV7Generator<SystemClock, OsRandomSource>,
+    ids: IngressIds,
 }
 
 impl InteractionRouter {
     /// Construct a router over a direct store and enabled healthy audit gate.
     #[must_use]
+    #[cfg(feature = "native-tokio")]
     pub fn new(store: Arc<dyn JournalStore>, audit: Arc<SecurityAuditGate>) -> Self {
         Self {
             store,
             audit,
-            ids: UuidV7Generator::new(SystemClock, OsRandomSource),
+            ids: ingress_ids(),
         }
     }
 
@@ -44,11 +48,28 @@ impl InteractionRouter {
     ///
     /// Returns [`ExternalRouteError::IngressRejected`] when the trusted gate
     /// cannot be enabled.
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        expect(
+            clippy::unused_async,
+            reason = "the target-neutral constructor enables the audit gate asynchronously on native"
+        )
+    )]
     pub async fn trusted(store: Arc<dyn JournalStore>) -> Result<Self, ExternalRouteError> {
-        let audit = SecurityAuditGate::enable_noop()
-            .await
-            .map_err(|_| ExternalRouteError::IngressRejected)?;
-        Ok(Self::new(store, audit))
+        #[cfg(feature = "native-tokio")]
+        {
+            let audit = SecurityAuditGate::enable_noop()
+                .await
+                .map_err(|_| ExternalRouteError::IngressRejected)?;
+            Ok(Self::new(store, audit))
+        }
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        {
+            Ok(Self {
+                store,
+                ids: ingress_ids(),
+            })
+        }
     }
 
     /// Route one fully authenticated interaction resolution.
@@ -289,6 +310,13 @@ impl InteractionRouter {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        expect(
+            clippy::unused_async,
+            reason = "the target-neutral rejection path records the audit event asynchronously on native"
+        )
+    )]
     async fn reject_unknown(
         &self,
         locator: &OperationLocator,
@@ -308,10 +336,13 @@ impl InteractionRouter {
             submission_digest,
             submitted_at,
         )?;
+        #[cfg(feature = "native-tokio")]
         self.audit
             .record(event)
             .await
             .map_err(|_| ExternalRouteError::IngressRejected)?;
+        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+        let _ = event;
         Err(ExternalRouteError::IngressRejected)
     }
 

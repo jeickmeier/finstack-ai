@@ -71,6 +71,7 @@ test("runs a model-only scripted Agent to a text result", async ({ page }) => {
 
   expect(result.text).toBe("hello from Agent");
   expect(result.snapshot.text).toBe("hello from Agent");
+  expect(result.snapshot.output).toBeNull();
   expect(result.snapshot.tenantScope).toBe("js-local");
   expect(result.session).toEqual({
     tenantScope: result.snapshot.tenantScope,
@@ -78,6 +79,38 @@ test("runs a model-only scripted Agent to a text result", async ({ page }) => {
     laneId: result.snapshot.laneId,
     runId: result.snapshot.runId,
   });
+});
+
+
+test("validates and exposes Rust-owned structured output", async ({ page }) => {
+  const result = await page.evaluate(async ({ modelOptions }) => {
+    const model = new window.finstackTest.JsModel(
+      {
+        request: async () => ({
+          json: { ok: true, value: 7 },
+          completion_id: "js-structured-output-1",
+        }),
+      },
+      modelOptions,
+    );
+    const agent = await window.finstackTest.Agent.create({
+      model,
+      outputSchema: {
+        additionalProperties: false,
+        properties: {
+          ok: { type: "boolean" },
+          value: { type: "integer" },
+        },
+        required: ["ok", "value"],
+        type: "object",
+      },
+    });
+    const runResult = await agent.run("structured");
+    return { output: runResult.output, snapshot: runResult.toDict() };
+  }, { modelOptions: MODEL_OPTIONS });
+
+  expect(result.output).toEqual({ ok: true, value: 7 });
+  expect(result.snapshot.output).toEqual(result.output);
 });
 
 test("uses canonical run bounds without a binding-only one-day timeout cap", async ({
@@ -117,16 +150,38 @@ test("uses canonical run bounds without a binding-only one-day timeout cap", asy
 
 test("mirrors native session and child-run control surfaces", async ({ page }) => {
   const result = await page.evaluate(async ({ modelOptions }) => {
-    const model = new window.finstackTest.JsModel(
+    const parentGate = Promise.withResolvers<{
+      text: string;
+      completion_id: string;
+    }>();
+    const releaseParent = (): void => {
+      parentGate.resolve({
+        text: "parent complete",
+        completion_id: "js-surface-parent-1",
+      });
+    };
+    const parentModel = new window.finstackTest.JsModel(
+      { request: async () => parentGate.promise },
+      modelOptions,
+    );
+    const childModel = new window.finstackTest.JsModel(
       {
         request: async () => ({
           text: "surface parity",
-          completion_id: "js-surface-parity-1",
+          completion_id: "js-surface-child-1",
         }),
       },
-      modelOptions,
+      {
+        ...modelOptions,
+        component: "js.model.fixture.child",
+        model: "js-fixture-child-model",
+      },
     );
-    const agent = await window.finstackTest.Agent.create({ model });
+    const agent = await window.finstackTest.Agent.create({
+      model: parentModel,
+      childRuns: { mode: "allow", maxDepth: 2 },
+    });
+    const childAgent = await window.finstackTest.Agent.create({ model: childModel });
     const session = await agent.createSession("tenant-parity");
     const main = await session.lane("main");
     const entryId = await main.appendText("seed");
@@ -134,25 +189,13 @@ test("mirrors native session and child-run control surfaces", async ({ page }) =
     const inspect = await byId.inspect();
 
     const parent = agent.start("parent");
-    let supportedCode = "";
-    try {
-      await parent.startChild(agent, "child", {
-        timeoutSeconds: 100_000,
-        maxCycles: 16,
-      });
-    } catch (error) {
-      if (
-        error !== null &&
-        typeof error === "object" &&
-        "code" in error &&
-        typeof error.code === "string"
-      ) {
-        supportedCode = error.code;
-      }
-    }
+    const child = await parent.startChild(childAgent, "child", {
+      maxCycles: 16,
+    });
+    const childText = (await child.result()).text;
     let limitCode = "";
     try {
-      await parent.startChild(agent, "child", { maxCycles: 1_025 });
+      await parent.startChild(childAgent, "child", { maxCycles: 1_025 });
     } catch (error) {
       if (
         error !== null &&
@@ -163,13 +206,14 @@ test("mirrors native session and child-run control surfaces", async ({ page }) =
         limitCode = error.code;
       }
     }
+    releaseParent();
     await parent.result();
     return {
       entryId,
       laneId: main.laneId,
       restoredLaneId: byId.laneId,
       historyLen: inspect.historyLen,
-      supportedCode,
+      childText,
       limitCode,
     };
   }, { modelOptions: MODEL_OPTIONS });
@@ -177,8 +221,50 @@ test("mirrors native session and child-run control surfaces", async ({ page }) =
   expect(result.entryId).not.toBe("");
   expect(result.restoredLaneId).toBe(result.laneId);
   expect(result.historyLen).toBe(1);
-  expect(result.supportedCode).toBe("agent_run_unsupported_plan");
+  expect(result.childText).toBe("surface parity");
   expect(result.limitCode).toBe("agent_run_invalid_configuration");
+});
+
+test("suspends and resumes a lane in the browser process", async ({ page }) => {
+  const result = await page.evaluate(async ({ modelOptions }) => {
+    const gate = Promise.withResolvers<{
+      text: string;
+      completion_id: string;
+    }>();
+    let requests = 0;
+    const release = (): void => {
+      gate.resolve({
+        text: "resumed",
+        completion_id: "js-lane-resume-1",
+      });
+    };
+    const model = new window.finstackTest.JsModel(
+      {
+        request: async () => {
+          requests += 1;
+          return gate.promise;
+        },
+      },
+      { ...modelOptions, idempotentRequests: true },
+    );
+    const agent = await window.finstackTest.Agent.create({ model });
+    const session = await agent.createSession("tenant-resume");
+    const lane = await session.lane("main");
+    const run = lane.run(agent, "park");
+    while (requests === 0) {
+      await Promise.resolve();
+    }
+    const runId = run.locator.runId;
+    await lane.suspend();
+    const suspendedRunId = (await lane.inspect()).activeRunId;
+    await lane.resume(agent);
+    const resumedRunId = (await lane.inspect()).activeRunId;
+    release();
+    return { resumedRunId, runId, suspendedRunId };
+  }, { modelOptions: MODEL_OPTIONS });
+
+  expect(result.suspendedRunId).toBe(result.runId);
+  expect(result.resumedRunId).toBe(result.runId);
 });
 
 test("reports bounded redacted observer diagnostics without affecting results", async ({

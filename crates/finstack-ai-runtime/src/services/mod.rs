@@ -14,5 +14,6 @@ pub(crate) mod interaction;
 #[cfg(all(feature = "confinement", not(target_arch = "wasm32")))]
 pub(crate) mod process_confinement;
 pub(crate) mod session;
+pub(crate) mod session_inspect;
 mod session_intern;
 mod session_sync;

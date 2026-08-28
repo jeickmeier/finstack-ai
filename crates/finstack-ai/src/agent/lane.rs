@@ -4,7 +4,7 @@ use super::handle::Agent;
 use super::run::AgentRun;
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunRequest};
 
-#[cfg(feature = "native-tokio")]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 mod native {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -308,10 +308,10 @@ mod native {
     }
 }
 
-#[cfg(feature = "native-tokio")]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use native::LaneLive;
 
-#[cfg(feature = "native-tokio")]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) fn live_run(
     lane: &crate::Lane,
 ) -> Result<Option<AgentRun>, finstack_ai_runtime::session::SessionError> {
@@ -335,7 +335,7 @@ impl crate::Lane {
                 "run security tenant does not match the session tenant",
             ));
         }
-        #[cfg(feature = "native-tokio")]
+        #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
         {
             let generation = native::reserve_run(self)?;
             match agent.start_on_lane(self, request) {
@@ -353,7 +353,7 @@ impl crate::Lane {
                 }
             }
         }
-        #[cfg(not(feature = "native-tokio"))]
+        #[cfg(not(any(feature = "native-tokio", feature = "wasm-host")))]
         agent.start_on_lane(self, request)
     }
 
@@ -365,7 +365,7 @@ impl crate::Lane {
     /// # Errors
     ///
     /// Returns a recover or lock failure.
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub async fn suspend(&self) -> Result<(), finstack_ai_runtime::session::SessionError> {
         let Some((generation, run)) = native::begin_suspend(self)? else {
             return Ok(());
@@ -389,12 +389,12 @@ impl crate::Lane {
     /// # Errors
     ///
     /// Returns an unknown-run, recover, port, or spawn failure.
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub async fn resume(&self, agent: &Agent) -> Result<(), AgentRunError> {
         Box::pin(self.resume_inner(agent)).await
     }
 
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     async fn resume_inner(&self, agent: &Agent) -> Result<(), AgentRunError> {
         use finstack_ai_kernel::OperationLocator;
 

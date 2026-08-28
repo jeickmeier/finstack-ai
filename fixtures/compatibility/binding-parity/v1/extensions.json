@@ -1,0 +1,242 @@
+{
+  "format_version": 1,
+  "extensions": [
+    {
+      "crate": "finstack-ai-store-artifact",
+      "python": {"status": "unavailable", "reason": "Application-injected artifact store; no binding-owned constructor."},
+      "js": {"status": "unavailable", "reason": "Application-injected artifact store; no binding-owned constructor."}
+    },
+    {
+      "crate": "finstack-ai-context-repository",
+      "python": {"status": "unavailable", "reason": "Application-injected context extension; bindings expose generic host adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected context extension; bindings expose generic host adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-memory",
+      "python": {"status": "direct", "surfaces": ["MemoryExtension", "MemoryContextProvider", "MemoryToolset", "MemoryObserver"]},
+      "js": {"status": "composed", "reason": "Provides the portable in-process memory-store implementation used behind WASM host composition."}
+    },
+    {
+      "crate": "finstack-ai-codex-child",
+      "python": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."},
+      "js": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."}
+    },
+    {
+      "crate": "finstack-ai-completion-ingress",
+      "python": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."},
+      "js": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."}
+    },
+    {
+      "crate": "finstack-ai-remote-child",
+      "python": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."},
+      "js": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."}
+    },
+    {
+      "crate": "finstack-ai-middleware-compaction",
+      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-middleware-document-ingest",
+      "python": {"status": "composed", "reason": "Registered internally with the document toolset and shared artifact store."},
+      "js": {"status": "composed", "reason": "Registered internally with the document toolset and shared artifact store."}
+    },
+    {
+      "crate": "finstack-ai-middleware-instructions",
+      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-middleware-redaction",
+      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-middleware-tool-policy",
+      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-middleware-verify",
+      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-net-guard",
+      "python": {"status": "unavailable", "reason": "Internal network-security machinery, not a user-facing binding extension."},
+      "js": {"status": "unavailable", "reason": "Internal network-security machinery, not a user-facing binding extension."}
+    },
+    {
+      "crate": "finstack-ai-observer-billing",
+      "python": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-observer-log",
+      "python": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-observer-metrics",
+      "python": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-observer-notify",
+      "python": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-observer-otel",
+      "python": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected observer; bindings expose generic host observer adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-provider-anthropic",
+      "python": {"status": "direct", "surfaces": ["Agent.anthropic"]},
+      "js": {"status": "unavailable", "reason": "Native provider implementation; browser hosts use credential-free host model adapters."}
+    },
+    {
+      "crate": "finstack-ai-provider-gemini",
+      "python": {"status": "direct", "surfaces": ["Agent.gemini"]},
+      "js": {"status": "unavailable", "reason": "Native provider implementation; browser hosts use credential-free host model adapters."}
+    },
+    {
+      "crate": "finstack-ai-provider-ollama",
+      "python": {"status": "direct", "surfaces": ["Agent.ollama"]},
+      "js": {"status": "unavailable", "reason": "Native provider implementation; browser hosts use credential-free host model adapters."}
+    },
+    {
+      "crate": "finstack-ai-provider-openai",
+      "python": {"status": "direct", "surfaces": ["Agent.openai"]},
+      "js": {
+        "status": "host_adapter",
+        "source": "bindings/finstack-ai-wasm/js/src/adapters/openai.ts",
+        "surfaces": ["createOpenAIModel"],
+        "reason": "Browser-safe same-origin adapter; provider credentials remain off-browser."
+      }
+    },
+    {
+      "crate": "finstack-ai-provider-openrouter",
+      "python": {"status": "direct", "surfaces": ["Agent.openrouter"]},
+      "js": {"status": "unavailable", "reason": "Native provider implementation; browser hosts use credential-free host model adapters."}
+    },
+    {
+      "crate": "finstack-ai-provider-wire",
+      "python": {
+        "status": "facade",
+        "surfaces": ["Agent.gateway"],
+        "reason": "The native facade composes provider-wire behind the gateway factory."
+      },
+      "js": {"status": "unavailable", "reason": "Native provider implementation; browser hosts use credential-free host model adapters."}
+    },
+    {
+      "crate": "finstack-ai-store-common",
+      "python": {"status": "unavailable", "reason": "Shared store machinery, not a user-facing binding extension."},
+      "js": {"status": "unavailable", "reason": "Shared store machinery, not a user-facing binding extension."}
+    },
+    {
+      "crate": "finstack-ai-store-memory",
+      "python": {"status": "composed", "reason": "Used as the binding-owned default journal store."},
+      "js": {"status": "composed", "reason": "Used as the binding-owned default journal store."}
+    },
+    {
+      "crate": "finstack-ai-store-postgres",
+      "python": {"status": "unavailable", "reason": "Application-injected native persistence extension; not a binding-owned store."},
+      "js": {"status": "unavailable", "reason": "Native-only persistence extension; browser hosts provide their own journal store."}
+    },
+    {
+      "crate": "finstack-ai-store-sqlite",
+      "python": {"status": "direct", "surfaces": ["SqliteDurability"]},
+      "js": {"status": "unavailable", "reason": "Native-only persistence extension; browser hosts use IndexedDB or another host journal store."}
+    },
+    {
+      "crate": "finstack-ai-sandbox-e2b",
+      "python": {"status": "direct", "surfaces": ["E2bSandboxToolset"]},
+      "js": {"status": "unavailable", "reason": "Remote sandbox credentials and transport remain outside browser bundles."}
+    },
+    {
+      "crate": "finstack-ai-tools-calculator",
+      "python": {"status": "unavailable", "reason": "Application-injected toolset; bindings expose generic host toolset adapters instead."},
+      "js": {"status": "unavailable", "reason": "Application-injected toolset; bindings expose generic host toolset adapters instead."}
+    },
+    {
+      "crate": "finstack-ai-tools-document",
+      "python": {"status": "direct", "surfaces": ["parse_document", "parse_document_markdown"]},
+      "js": {"status": "direct", "surfaces": ["parseDocument", "parseDocumentMarkdown"]}
+    },
+    {
+      "crate": "finstack-ai-tools-elicitation",
+      "python": {"status": "direct", "surfaces": ["ElicitationToolset"]},
+      "js": {"status": "unavailable", "reason": "Browser interaction routing is exposed directly on Run instead of as a toolset constructor."}
+    },
+    {
+      "crate": "finstack-ai-tools-fetch",
+      "python": {"status": "direct", "surfaces": ["HttpFetchToolset"]},
+      "js": {"status": "unavailable", "reason": "Browser fetch authority is host-owned and supplied through generic toolset adapters."}
+    },
+    {
+      "crate": "finstack-ai-tools-filesystem",
+      "python": {"status": "unavailable", "reason": "Application-injected filesystem toolset; not a binding-owned constructor."},
+      "js": {"status": "unavailable", "reason": "Browser hosts have no ambient filesystem authority."}
+    },
+    {
+      "crate": "finstack-ai-tools-mcp",
+      "python": {"status": "unavailable", "reason": "Application-injected native MCP toolset; not a binding-owned constructor."},
+      "js": {"status": "unavailable", "reason": "Browser hosts provide remote tools through generic host adapters."}
+    },
+    {
+      "crate": "finstack-ai-tools-openai-media",
+      "python": {
+        "status": "facade",
+        "surfaces": ["Agent.openai"],
+        "reason": "The native facade composes the media toolset through the OpenAI factory's media_tools option."
+      },
+      "js": {"status": "unavailable", "reason": "Media credentials and outbound provider transport remain off-browser."}
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
+      "python": {
+        "status": "facade",
+        "surfaces": ["Agent.openrouter"],
+        "reason": "The native facade composes the media toolset through linked provider factory options."
+      },
+      "js": {"status": "unavailable", "reason": "Media credentials and outbound provider transport remain off-browser."}
+    },
+    {
+      "crate": "finstack-ai-tools-shell",
+      "python": {"status": "unavailable", "reason": "Application-injected native shell toolset; not a binding-owned constructor."},
+      "js": {"status": "unavailable", "reason": "Browser hosts have no ambient process authority."}
+    },
+    {
+      "crate": "finstack-ai-tools-skill-import",
+      "python": {"status": "unavailable", "reason": "Application-injected native skill importer; not a binding-owned constructor."},
+      "js": {"status": "unavailable", "reason": "Browser hosts have no ambient repository authority."}
+    },
+    {
+      "crate": "finstack-ai-tools-skills",
+      "python": {"status": "unavailable", "reason": "Application-injected native skill toolset; not a binding-owned constructor."},
+      "js": {"status": "unavailable", "reason": "Browser hosts have no ambient repository authority."}
+    },
+    {
+      "crate": "finstack-ai-tools-subagent",
+      "python": {"status": "unavailable", "reason": "Application-injected native subagent toolset; child runs are exposed directly on Run."},
+      "js": {"status": "unavailable", "reason": "Child runs are exposed directly on Run rather than through this native toolset."}
+    },
+    {
+      "crate": "finstack-ai-workflow-hitl",
+      "python": {"status": "unavailable", "reason": "Native workflow deployment extension; not an in-process binding surface."},
+      "js": {"status": "unavailable", "reason": "Native workflow deployment extension; not an in-process binding surface."}
+    },
+    {
+      "crate": "finstack-ai-workflow-local",
+      "python": {"status": "unavailable", "reason": "Native workflow deployment extension; not an in-process binding surface."},
+      "js": {"status": "unavailable", "reason": "Native workflow deployment extension; not an in-process binding surface."}
+    },
+    {
+      "crate": "finstack-ai-workflow-worker",
+      "python": {"status": "unavailable", "reason": "Native workflow deployment extension; not an in-process binding surface."},
+      "js": {"status": "unavailable", "reason": "Native workflow deployment extension; not an in-process binding surface."}
+    }
+  ]
+}

@@ -36,10 +36,12 @@ let provider = OpenRouterProvider::try_new(config, vec![model]).expect("provider
 `with_authentication` returns `Result`. It fails when the reserved
 `default` credential name is rejected.
 
-`Agent::openrouter` and the Python/WASM linked factories construct this
-provider without a `MediaResolver`. Vision, file, and audio **input**
-require a host-built provider with `with_media_resolver`; linked factories do
-not accept host callback resolvers across FFI.
+`Agent::openrouter` and the Python linked factory construct this provider
+without a `MediaResolver`. Vision, file, and audio **input** require a
+host-built provider with `with_media_resolver`; the linked factory does not
+accept host callback resolvers across FFI. Browser WASM deliberately has no
+provider-specific linked factory: compose a credential-free host `JsModel`
+adapter and terminate provider credentials off-browser.
 
 ## Provider routing
 

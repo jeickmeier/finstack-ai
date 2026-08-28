@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
-use finstack_ai::{AgentRun, RemoteChildRouteSpec};
-use finstack_ai_kernel::ChildPlacement;
+use finstack_ai::{AgentRun, InteractionResolution, RemoteChildRouteSpec};
+use finstack_ai_kernel::{ChildPlacement, ExternalEffectCompletionCommand};
 use wasm_bindgen::prelude::*;
 
 use crate::executor;
@@ -14,9 +14,6 @@ use super::results::RunResult;
 use super::session::{Locator, Session};
 
 /// Detached run control handle. Drop detaches observation and does not cancel.
-///
-/// `list_interactions` / `resolve_interaction` remain native-only
-/// (`native-tokio`). Browser WASM uses the host session/inbox path.
 #[wasm_bindgen(js_name = Run)]
 pub struct Run {
     pub(super) inner: AgentRun,
@@ -119,6 +116,80 @@ impl Run {
         })
     }
 
+    /// List the outstanding typed interaction for this run (zero or one).
+    #[wasm_bindgen(js_name = listInteractions)]
+    pub fn list_interactions(&self) -> js_sys::Promise {
+        let run = self.inner.clone();
+        executor::drive(async move {
+            let locator = run.locator().clone();
+            let requests = run
+                .list_interactions()
+                .await
+                .map_err(|error| agent_error(&error, Some(&locator)))?;
+            let encoded = serde_json::to_string(&requests)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            js_sys::JSON::parse(&encoded)
+        })
+    }
+
+    /// Resolve the outstanding interaction through the live Rust-owned run.
+    #[wasm_bindgen(js_name = resolveInteraction)]
+    pub fn resolve_interaction(&self, resolution_json: String) -> js_sys::Promise {
+        let resolution = match serde_json::from_str::<InteractionResolution>(&resolution_json) {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                return js_sys::Promise::reject(&agent_error(
+                    &configuration_error(error.to_string()),
+                    Some(self.inner.locator()),
+                ));
+            }
+        };
+        let run = self.inner.clone();
+        executor::drive(async move {
+            let locator = run.locator().clone();
+            run.resolve_interaction(resolution)
+                .await
+                .map(|()| JsValue::UNDEFINED)
+                .map_err(|error| agent_error(&error, Some(&locator)))
+        })
+    }
+
+    /// Route one authenticated external completion through Rust ingress.
+    #[wasm_bindgen(js_name = completeExternal)]
+    pub fn complete_external(&self, command_json: String) -> js_sys::Promise {
+        let command = match serde_json::from_str::<ExternalEffectCompletionCommand>(&command_json) {
+            Ok(command) => command,
+            Err(error) => {
+                return js_sys::Promise::reject(&agent_error(
+                    &configuration_error(error.to_string()),
+                    Some(self.inner.locator()),
+                ));
+            }
+        };
+        let run = self.inner.clone();
+        executor::drive(async move {
+            let locator = run.locator().clone();
+            let outcome = run
+                .complete_external(command)
+                .await
+                .map_err(|error| agent_error(&error, Some(&locator)))?;
+            let status = match outcome {
+                finstack_ai::runtime::ingress::ExternalRouteOutcome::Committed(_) => "committed",
+                finstack_ai::runtime::ingress::ExternalRouteOutcome::Idempotent { .. } => {
+                    "idempotent"
+                }
+                finstack_ai::runtime::ingress::ExternalRouteOutcome::Rejected { .. } => "rejected",
+            };
+            let object = js_sys::Object::new();
+            js_sys::Reflect::set(
+                &object,
+                &JsValue::from_str("status"),
+                &JsValue::from_str(status),
+            )?;
+            Ok(object.into())
+        })
+    }
+
     /// Receive the next transport batch, or `undefined` after close/terminal.
     ///
     /// # Errors
@@ -141,7 +212,7 @@ impl Run {
 
     /// Prepare and accept one child through the Rust router.
     ///
-    /// wasm-host fails closed with `agent_run_unsupported_plan`.
+    /// Local isolated and compatible placements execute through the Rust router.
     #[wasm_bindgen(js_name = startChild)]
     #[expect(
         clippy::too_many_arguments,
@@ -169,6 +240,7 @@ impl Run {
             let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
             let request = run_request(
                 &model,
+                parent.locator().tenant_scope.as_ref(),
                 input,
                 timeout_seconds,
                 max_cycles,

@@ -113,10 +113,12 @@ Default `Agent.create` stays memory-backed. Opt into a host journal with
 `Agent.create({ store })`. IndexedDB batteries live on
 `@finstack/ai/adapters/indexeddb` and report `health().detail =
 js_indexeddb_experimental`. Persistence remains experimental;
-it does not meet NFR-REL-001. `durable` stays false. Reload restore is
-`Agent.inspectSession` / `WorkerClient.inspectSession`, not continue-the-run.
-Call `deleteIndexedDbStores()` to drop origin-local data. This package does
-not ship SQLite and does not claim crash durability.
+it does not meet NFR-REL-001. `durable` stays false. Reload inspection uses
+`Agent.inspectSession` / `WorkerClient.inspectSession`; it does not continue
+work across a page or worker reload. In the same browser process,
+`Lane.suspend()` parks a live owner and `Lane.resume(agent)` recovers the
+journal and respawns it. Call `deleteIndexedDbStores()` to drop origin-local
+data. This package does not ship SQLite and does not claim crash durability.
 
 ## Same-origin OpenAI Responses battery
 
@@ -139,11 +141,15 @@ Terminate secrets at a trusted same-origin proxy. Optional application
 - `init(): Promise<void>`
 - `health(): string`
 - `buildMetadata(): { version, engineVersion, implementation: "wasm", target: "wasm32-unknown-unknown" }`
-- `Agent.create`, `Agent.start`, `Agent.run`, `Agent.inspectSession`
+- `Agent.create`, `Agent.start`, `Agent.run`, `Agent.inspectSession`,
+  `Agent.readArtifact`
 - `Agent.capabilityCatalog`, `Agent.compactCapabilityCatalog`
-- `Run` (`session`, `events`, `result`, `cancel`, `closeEvents`)
-- `RunResult.trace`, `RunResult.activeCapabilities`
-- `Session`, `RunResult`, `Event`, `EventBatch`, `FinstackError`
+- `Run` (`session`, `events`, `result`, `listInteractions`,
+  `resolveInteraction`, `startChild`, `completeExternal`, `cancel`,
+  `closeEvents`)
+- `RunResult.output`, `RunResult.trace`, `RunResult.activeCapabilities`
+- `Session`, `Lane` (`suspend`, `resume`), `RunResult`, `Event`, `EventBatch`,
+  `FinstackError`
 - `Capability`, `CapabilityActivation`, `CapabilityCatalogItem`, `ActiveCapability`,
   `ApprovalGrantMode` (`Agent.create({ approvalGrant: ApprovalGrantMode.perCall() })`,
   default `perCall`)

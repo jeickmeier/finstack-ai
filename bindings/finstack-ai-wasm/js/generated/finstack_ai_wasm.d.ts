@@ -31,7 +31,7 @@ export class Agent {
      *
      * Returns a structured host error when configuration is invalid.
      */
-    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null, context_providers?: JsContextProvider[] | null, middleware?: JsMiddleware[] | null, observers?: JsObserver[] | null, approval_grant?: string | null): Promise<any>;
+    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null, context_providers?: JsContextProvider[] | null, middleware?: JsMiddleware[] | null, observers?: JsObserver[] | null, approval_grant?: string | null, output_schema_json?: string | null, child_runs_json?: string | null): Promise<any>;
     /**
      * Create a live session on this agent's journal store.
      *
@@ -67,6 +67,14 @@ export class Agent {
      * closed from Rust.
      */
     reResolve(): Promise<any>;
+    /**
+     * Read bytes behind one artifact reference from this agent's store.
+     *
+     * # Errors
+     *
+     * Returns a structured host error for an invalid reference or failed store read.
+     */
+    readArtifact(artifact_json: string): Promise<any>;
     /**
      * Execute one run and await its committed result.
      *
@@ -372,6 +380,10 @@ export class Lane {
      */
     navigate(entry_id: string): Promise<any>;
     /**
+     * Recover the parked run and respawn the Rust-owned run task.
+     */
+    resume(agent: Agent): Promise<any>;
+    /**
      * Start a new root run on this idle lane.
      *
      * # Errors
@@ -380,6 +392,10 @@ export class Lane {
      * cannot start.
      */
     run(agent: Agent, input: string, timeout_seconds: number | null | undefined, max_cycles: number | null | undefined, max_output_retries: number | null | undefined, capability: string | null | undefined, attachments: any): Run;
+    /**
+     * Park the in-process driver without dropping the journal.
+     */
+    suspend(): Promise<any>;
     /**
      * Durable lane identity.
      */
@@ -445,9 +461,6 @@ export class MemoryExternalIdentityMap {
 
 /**
  * Detached run control handle. Drop detaches observation and does not cancel.
- *
- * `list_interactions` / `resolve_interaction` remain native-only
- * (`native-tokio`). Browser WASM uses the host session/inbox path.
  */
 export class Run {
     private constructor();
@@ -465,6 +478,14 @@ export class Run {
      * Close event delivery without cancelling the run.
      */
     closeEvents(): Promise<any>;
+    /**
+     * Route one authenticated external completion through Rust ingress.
+     */
+    completeExternal(command_json: string): Promise<any>;
+    /**
+     * List the outstanding typed interaction for this run (zero or one).
+     */
+    listInteractions(): Promise<any>;
     /**
      * Read the latest confirmed semantic and lifecycle snapshot.
      */
@@ -487,6 +508,10 @@ export class Run {
      */
     observerDiagnostics(): Promise<any>;
     /**
+     * Resolve the outstanding interaction through the live Rust-owned run.
+     */
+    resolveInteraction(resolution_json: string): Promise<any>;
+    /**
      * Wait for the retained terminal result.
      *
      * # Errors
@@ -497,7 +522,7 @@ export class Run {
     /**
      * Prepare and accept one child through the Rust router.
      *
-     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     * Local isolated and compatible placements execute through the Rust router.
      */
     startChild(child: Agent, input: string, placement: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null, capability?: string | null, route_endpoint?: string | null, route_service?: string | null, route_id?: string | null, route_token?: string | null): Promise<any>;
     /**
@@ -541,6 +566,14 @@ export class RunResult {
      * Operation locator for the completed run.
      */
     readonly locator: Locator;
+    /**
+     * Structured JSON output, or `null` when the run returned text only.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception only if the canonical JSON cannot be materialized.
+     */
+    readonly output: any;
     /**
      * Durable retry attempts consumed by this run.
      */
@@ -765,11 +798,12 @@ export interface InitOutput {
     readonly __wbg_session_free: (a: number, b: number) => void;
     readonly agent_capabilityCatalog: (a: number, b: number) => void;
     readonly agent_compactCapabilityCatalog: (a: number, b: number) => void;
-    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => number;
+    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => number;
     readonly agent_createSession: (a: number, b: number, c: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
     readonly agent_openSession: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly agent_reResolve: (a: number) => number;
+    readonly agent_readArtifact: (a: number, b: number, c: number) => number;
     readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;
     readonly agent_withHistoryCache: (a: number, b: number) => number;
@@ -809,8 +843,10 @@ export interface InitOutput {
     readonly lane_inspect: (a: number) => number;
     readonly lane_laneId: (a: number, b: number) => void;
     readonly lane_navigate: (a: number, b: number, c: number) => number;
+    readonly lane_resume: (a: number, b: number) => number;
     readonly lane_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
     readonly lane_session: (a: number) => number;
+    readonly lane_suspend: (a: number) => number;
     readonly locator_laneId: (a: number, b: number) => void;
     readonly locator_runId: (a: number, b: number) => void;
     readonly locator_sessionId: (a: number, b: number) => void;
@@ -824,16 +860,20 @@ export interface InitOutput {
     readonly runNoopTrace: (a: number) => void;
     readonly run_cancel: (a: number) => number;
     readonly run_closeEvents: (a: number) => number;
+    readonly run_completeExternal: (a: number, b: number, c: number) => number;
+    readonly run_listInteractions: (a: number) => number;
     readonly run_liveState: (a: number) => number;
     readonly run_locator: (a: number) => number;
     readonly run_nextEventBatch: (a: number) => number;
     readonly run_observerDiagnostics: (a: number) => number;
+    readonly run_resolveInteraction: (a: number, b: number, c: number) => number;
     readonly run_result: (a: number) => number;
     readonly run_session: (a: number) => number;
     readonly run_startChild: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => number;
     readonly run_waitForLiveState: (a: number, b: bigint) => number;
     readonly runresult_activeCapabilities: (a: number, b: number) => void;
     readonly runresult_locator: (a: number) => number;
+    readonly runresult_output: (a: number, b: number) => void;
     readonly runresult_retryAttempts: (a: number) => number;
     readonly runresult_text: (a: number, b: number) => void;
     readonly runresult_toDict: (a: number, b: number) => void;
@@ -851,9 +891,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_5215: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_5229: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_476: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_5856: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_5870: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_744: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

@@ -480,7 +480,8 @@ function requiredResult(value: unknown): RunResultSnapshot {
       retryable: false,
     });
   }
-  return { ...session, text };
+  const output = "output" in value ? value.output : null;
+  return { ...session, text, output };
 }
 
 function requiredInspect(value: unknown): SessionInspectSnapshot {

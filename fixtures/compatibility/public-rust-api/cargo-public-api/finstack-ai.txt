@@ -35,7 +35,10 @@ pub use finstack_ai::RunPolicy
 pub use finstack_ai::RunSecurityContext
 pub use finstack_ai::SessionError
 pub use finstack_ai::SessionId
+pub use finstack_ai::SessionInspectPhase
+pub use finstack_ai::SessionInspectSnapshot
 pub use finstack_ai::Version
+pub use finstack_ai::inspect_session
 pub mod finstack_ai::registry
 pub enum finstack_ai::registry::AgentBuildError
 pub finstack_ai::registry::AgentBuildError::Cancelled
@@ -999,6 +1002,7 @@ impl finstack_ai::Agent
 pub fn finstack_ai::Agent::builder(finstack_ai_kernel::primitives::ids::AgentId, finstack_ai_kernel::primitives::ids::BundleId, (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::port::Model>), (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)) -> finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::Agent::capability_catalog(&self) -> alloc::vec::Vec<finstack_ai::CapabilityCatalogEntry>
 pub fn finstack_ai::Agent::compact_capability_catalog(&self) -> alloc::string::String
+pub async fn finstack_ai::Agent::inspect_session(&self, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<finstack_ai_runtime::services::session_inspect::SessionInspectSnapshot, finstack_ai_runtime::services::session::SessionError>
 pub fn finstack_ai::Agent::journal_store(&self) -> alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>
 pub async fn finstack_ai::Agent::re_resolve(&self) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::resolved(&self) -> &alloc::sync::Arc<finstack_ai::ResolvedAgent>

@@ -1,23 +1,28 @@
 //! `AgentRun` child-run prepare/accept and external-completion routing.
 
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
+#[cfg(feature = "native-tokio")]
+use std::sync::{Mutex, OnceLock};
 
 use crate::ChildRunPolicy;
 use finstack_ai_kernel::ExternalEffectCompletionCommand;
+#[cfg(feature = "native-tokio")]
+use finstack_ai_kernel::{AppendBatchTag, EffectTag, RecordTag, RunTag};
 use finstack_ai_kernel::{
-    AppendBatchTag, BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement,
-    ChildRunLocator, ChildRunPrepared, ContentBlock, DeadlinePropagation, Digest, EffectId,
-    EffectTag, Metadata, OperationLocator, PrincipalPropagation, RecordTag, RunAccepted,
-    RunPropagationPolicy, RunRelation, RunRelationKind, RunTag, TextBlock, Timestamp,
+    BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement, ChildRunLocator,
+    ChildRunPrepared, ContentBlock, DeadlinePropagation, Digest, EffectId, Metadata,
+    OperationLocator, PrincipalPropagation, RunAccepted, RunPropagationPolicy, RunRelation,
+    RunRelationKind, TextBlock, Timestamp,
 };
 use finstack_ai_runtime::child::{
-    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
-    ChildCoordinationIds, ChildRunContext, ChildRunCoordinator, ChildRunHandle, ChildRunRequest,
-    child_relation_digest,
+    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext,
+    ChildRunHandle, ChildRunRequest, child_relation_digest,
 };
-use finstack_ai_runtime::commit::CommitCoordinator;
 #[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::child::{ChildCoordinationIds, ChildRunCoordinator};
+use finstack_ai_runtime::commit::CommitCoordinator;
 use finstack_ai_runtime::ingress::{ExternalCompletionRouter, ExternalRouteOutcome};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::AuthorizationContext;
@@ -27,13 +32,16 @@ use finstack_ai_runtime::host_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::native_driver as driver;
 
+#[cfg(feature = "native-tokio")]
 use super::child_route::RemoteChildRouteSpec;
 use super::handle::Agent;
 use super::prepare::NativeIds;
-use super::run::{AgentRun, AgentRunInner, CancellationState, EventStreamState};
+use super::run::AgentRun;
+#[cfg(feature = "native-tokio")]
+use super::run::{AgentRunInner, CancellationState, EventStreamState};
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunRequest};
 
-struct RecordingChildInvoker;
+pub(super) struct RecordingChildInvoker;
 
 impl AgentInvoker for RecordingChildInvoker {
     fn start_or_attach(
@@ -346,7 +354,6 @@ impl AgentRun {
     ///
     /// Returns a runtime failure when the locator does not match or ingress
     /// rejects the command.
-    #[cfg(feature = "native-tokio")]
     pub async fn complete_external(
         &self,
         command: ExternalEffectCompletionCommand,
@@ -354,7 +361,6 @@ impl AgentRun {
         Box::pin(self.complete_external_at(command, NativeIds::now()?)).await
     }
 
-    #[cfg(feature = "native-tokio")]
     pub(crate) async fn complete_external_at(
         &self,
         command: ExternalEffectCompletionCommand,
@@ -411,7 +417,7 @@ impl AgentRun {
     /// Rebuild isolated children from journaled mappings when live handles
     /// are gone. Compatible mappings stay on the recovered parent journal
     /// and are not accepted again. Remote stays a no-op.
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) async fn recover_children(&self) -> Result<(), AgentRunError> {
         let live = self.live_child_run_ids()?;
         for prepared in self.journaled_child_mappings().await? {
@@ -435,7 +441,7 @@ impl AgentRun {
         Ok(())
     }
 
-    fn parent_turn_is_open(&self) -> Result<bool, AgentRunError> {
+    pub(super) fn parent_turn_is_open(&self) -> Result<bool, AgentRunError> {
         let result = self
             .inner
             .result
@@ -444,6 +450,7 @@ impl AgentRun {
         Ok(result.is_none())
     }
 
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     fn live_child_run_ids(&self) -> Result<BTreeSet<finstack_ai_kernel::RunId>, AgentRunError> {
         let children = self
             .inner
@@ -456,7 +463,7 @@ impl AgentRun {
             .collect())
     }
 
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     async fn journaled_child_mappings(&self) -> Result<Vec<ChildRunPrepared>, AgentRunError> {
         let parent_run = self.inner.locator.run_id;
         let Ok(commit) = CommitCoordinator::recover_run(
@@ -555,6 +562,7 @@ impl AgentRun {
             .await
     }
 
+    #[cfg(feature = "native-tokio")]
     async fn cancel_remote_child(&self, locator: &ChildRunLocator) -> Result<(), AgentRunError> {
         let invoker = self
             .inner
@@ -603,7 +611,7 @@ impl AgentRun {
             .map_err(|error| AgentRunError::session(&error))
     }
 
-    async fn wait_accepted(&self) -> Result<RunAccepted, AgentRunError> {
+    pub(super) async fn wait_accepted(&self) -> Result<RunAccepted, AgentRunError> {
         self.runtime_handle().await?;
         loop {
             if let Ok(commit) = CommitCoordinator::recover_run(
@@ -621,6 +629,7 @@ impl AgentRun {
         }
     }
 
+    #[cfg(feature = "native-tokio")]
     async fn allocate_child_locator(
         &self,
         placement: ChildPlacement,
@@ -722,6 +731,7 @@ impl AgentRun {
     }
 }
 
+#[cfg(feature = "native-tokio")]
 fn build_remote_invoker(
     spec: RemoteChildRouteSpec,
 ) -> Result<finstack_ai_remote_child::RemoteChildInvoker, AgentRunError> {
@@ -738,6 +748,7 @@ fn build_remote_invoker(
     })
 }
 
+#[cfg(feature = "native-tokio")]
 fn accept_remote_child(
     parent: &AgentRun,
     prepared: &ChildRunPrepared,
@@ -775,13 +786,16 @@ fn accept_remote_child(
     })
 }
 
-fn child_depth(parent_depth: u16) -> Result<u16, AgentRunError> {
+pub(super) fn child_depth(parent_depth: u16) -> Result<u16, AgentRunError> {
     parent_depth
         .checked_add(1)
         .ok_or_else(|| AgentRunError::runtime_message("child relation depth overflow"))
 }
 
-fn enforce_child_run_policy(policy: ChildRunPolicy, child_depth: u16) -> Result<(), AgentRunError> {
+pub(super) fn enforce_child_run_policy(
+    policy: ChildRunPolicy,
+    child_depth: u16,
+) -> Result<(), AgentRunError> {
     match policy {
         ChildRunPolicy::Deny => Err(AgentRunError::configuration(
             AGENT_INVOKE_INVALID_ACCEPTANCE,
@@ -797,7 +811,7 @@ fn enforce_child_run_policy(policy: ChildRunPolicy, child_depth: u16) -> Result<
     }
 }
 
-fn child_run_request(
+pub(super) fn child_run_request(
     child: &Agent,
     request: &AgentRunRequest,
     placement: ChildPlacement,
@@ -847,7 +861,7 @@ fn child_run_request(
     Ok(child_request)
 }
 
-fn child_run_context(
+pub(super) fn child_run_context(
     parent: &OperationLocator,
     parent_effect_id: EffectId,
     request: &AgentRunRequest,
@@ -869,7 +883,7 @@ fn child_run_context(
     }
 }
 
-fn child_acceptance(
+pub(super) fn child_acceptance(
     child: &Agent,
     request: &AgentRunRequest,
     prepared: &ChildRunPrepared,
@@ -927,7 +941,7 @@ fn child_acceptance(
     })
 }
 
-async fn child_session(
+pub(super) async fn child_session(
     parent: &AgentRun,
     prepared: &ChildRunPrepared,
 ) -> Result<crate::Session, AgentRunError> {

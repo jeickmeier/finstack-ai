@@ -9,7 +9,6 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::ids::IdGenerationError;
 use finstack_ai_runtime::ports::model::{ModelError, ModelName, ModelSettings};
 use finstack_ai_runtime::run::RunHandleError;
-#[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::session::SessionError;
 use thiserror::Error;
 
@@ -282,7 +281,6 @@ impl AgentRunError {
         }
     }
 
-    #[cfg(feature = "native-tokio")]
     pub(crate) fn owned_code(&self) -> ErrorCode {
         match self {
             Self::Failed { descriptor } => descriptor.code.clone(),
@@ -337,7 +335,6 @@ impl AgentRunError {
         )
     }
 
-    #[cfg(feature = "native-tokio")]
     pub(super) fn session(error: &SessionError) -> Self {
         let code = ErrorCode::new(error.code())
             .unwrap_or_else(|_| finstack_ai_kernel::static_error_code!(AGENT_RUN_RUNTIME_FAILURE));

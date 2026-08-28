@@ -23,6 +23,7 @@ const PREVIEW_VERSION: Version = Version {
 )]
 pub(super) fn run_request(
     model: &ModelName,
+    tenant_scope: &str,
     input: String,
     timeout_seconds: Option<f64>,
     max_cycles: Option<f64>,
@@ -63,8 +64,8 @@ pub(super) fn run_request(
         )
     })?;
     let security = RunSecurityContext::try_new(
-        "js-local",
-        PrincipalRef::try_new("finstack-ai-wasm", "local-user", Some("js-local"))
+        tenant_scope,
+        PrincipalRef::try_new("finstack-ai-wasm", "local-user", Some(tenant_scope))
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
         "local",
         "js-embedded",
