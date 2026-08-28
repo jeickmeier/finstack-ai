@@ -88,7 +88,31 @@ fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
                 Ok(ExitCode::SUCCESS)
             })
         }
-        Command::Ingest(_) | Command::Repl { .. } => Err(KnowledgeError::Config {
+        Command::Ingest(args) => {
+            let config = config_from(cli)?;
+            let path = args.path.clone();
+            let session = args.session.clone();
+            runtime()?.block_on(async move {
+                use finstack_ai_knowledge::cli::ingest;
+                if cli.json {
+                    let mut sink = JsonRenderer::new();
+                    let outcome =
+                        ingest::run_ingest(&config, &path, session.as_deref(), &os_user(), &mut sink)
+                            .await?;
+                    print!("{}", sink.into_markup());
+                    report_session(&outcome);
+                } else {
+                    let mut sink = TextRenderer::new();
+                    let outcome =
+                        ingest::run_ingest(&config, &path, session.as_deref(), &os_user(), &mut sink)
+                            .await?;
+                    print_markup(&sink.into_markup());
+                    report_session(&outcome);
+                }
+                Ok(ExitCode::SUCCESS)
+            })
+        }
+        Command::Repl { .. } => Err(KnowledgeError::Config {
             reason: "command_not_implemented_yet",
         }),
     }

@@ -1367,6 +1367,7 @@ dependencies = [
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-provider-openrouter",
+ "finstack-ai-store-artifact",
  "finstack-ai-store-sqlite",
  "finstack-ai-tools-document",
  "finstack-ai-tools-fetch",

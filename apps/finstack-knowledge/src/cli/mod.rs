@@ -8,6 +8,7 @@
 
 pub mod args;
 pub mod ask;
+pub mod ingest;
 pub mod render;
 pub mod sessions;
 

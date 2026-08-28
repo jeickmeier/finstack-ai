@@ -14,6 +14,7 @@ publish = false
 finstack-ai = { workspace = true, features = ["native-tokio"] }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
+finstack-ai-store-artifact = { workspace = true, features = ["local"] }
 finstack-ai-context-repository = { workspace = true }
 finstack-ai-memory = { workspace = true, features = ["sqlite"] }
 finstack-ai-middleware-instructions = { workspace = true }

@@ -1,5 +1,6 @@
 use clap::Parser as _;
 use finstack_ai_kernel::RunEvent;
+use finstack_ai_memory::store::{MemoryPage, MemoryStore as _};
 
 use super::args::{Cli, Command, SessionsCommand};
 use super::render::{EventSink as _, JsonRenderer, TextRenderer, render_markup_plain};
@@ -150,6 +151,101 @@ async fn ask_unknown_session_id_is_a_config_error() {
         error,
         crate::KnowledgeError::Config { .. } | crate::KnowledgeError::Compose { .. }
     ));
+}
+
+/// Ollama NDJSON body carrying one `remember` tool call, then a final turn.
+fn remember_tool_response() -> String {
+    concat!(
+        "{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"remember\",\"arguments\":{\"keywords\":[\"acme\",\"revenue\"],\"body\":\"Acme Corp revenue rose 12 percent in Q1 per ingested report.\"}}}]},\"done\":false}\n",
+        "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}\n",
+    )
+    .to_owned()
+}
+
+#[tokio::test]
+async fn ingest_attaches_summarizes_and_captures_memory() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let doc_path = dir.path().join("report.csv");
+    std::fs::write(
+        &doc_path,
+        "company,metric,change\nAcme Corp,revenue,rose 12 percent in Q1\n",
+    )
+    .expect("fixture doc");
+
+    let (base_url, server) = loopback::serve_ndjson(vec![
+        remember_tool_response(),
+        loopback::text_response("Summary: Acme revenue rose 12 percent."),
+        loopback::text_response("It rose 12 percent (see report.md)."),
+    ])
+    .await
+    .expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+
+    // Ingest: attaches the doc, model remembers a fact and summarizes.
+    let mut sink = TextRenderer::new();
+    let outcome = super::ingest::run_ingest(&config, &doc_path, None, "ingest-test", &mut sink)
+        .await
+        .expect("ingest");
+    let plain = render_markup_plain(&sink.into_markup());
+    assert!(plain.contains("Summary"), "summary rendered: {plain}");
+
+    // Follow-up ask in the same session answers from context.
+    let mut sink = TextRenderer::new();
+    super::ask::run_ask(
+        &config,
+        "How much did Acme revenue rise?",
+        Some(&outcome.session_id),
+        "ingest-test",
+        &mut sink,
+    )
+    .await
+    .expect("follow-up ask");
+    let plain = render_markup_plain(&sink.into_markup());
+    assert!(plain.contains("12 percent"), "follow-up answered: {plain}");
+    server.await.expect("join").expect("served");
+
+    // The memory store holds at least one captured record for the tenant.
+    let memory = finstack_ai_memory::store::SqliteMemoryStore::try_open(
+        &dir.path().join("memory.sqlite3"),
+    )
+    .expect("memory store opens");
+    let scope = finstack_ai_memory::record::MemoryScope::try_new("local").expect("scope");
+    let records = memory
+        .list(scope, MemoryPage { offset: 0, limit: 16 })
+        .await
+        .expect("list");
+    assert!(!records.records.is_empty(), "captured memory records");
+}
+
+#[tokio::test]
+async fn ingest_missing_file_is_a_config_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
+    let config = crate::KnowledgeConfig::new(
+        dir.path().to_path_buf(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "preview-model".to_owned(),
+        },
+    );
+    let mut sink = TextRenderer::new();
+    let error = super::ingest::run_ingest(
+        &config,
+        std::path::Path::new("/definitely/missing.md"),
+        None,
+        "ingest-test",
+        &mut sink,
+    )
+    .await
+    .expect_err("missing file");
+    drop(server);
+    assert!(matches!(error, crate::KnowledgeError::Config { .. }));
 }
 
 #[tokio::test]

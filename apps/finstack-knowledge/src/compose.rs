@@ -143,15 +143,55 @@ pub async fn build_agent_with_journal(
     config: &KnowledgeConfig,
     journal: Arc<dyn JournalStore>,
 ) -> Result<Agent, KnowledgeError> {
+    let artifact_store = open_artifact_store(config)?;
+    build_agent_with_stores(config, journal, artifact_store).await
+}
+
+/// Open the durable artifact store at `<data_dir>/artifacts/`.
+///
+/// Attachments must outlive the staging process: the document-ingest
+/// middleware re-resolves a session's attachment bytes on every later turn
+/// (the journal keeps `File` blocks canonical and only the model-visible
+/// request is rewritten), so an in-process store would strand any session
+/// with attachments after the CLI exits. The filesystem-backed
+/// `LocalArtifactStore` shares the data directory with the journal, which
+/// also makes attachments resolvable from the Python notebooks.
+///
+/// # Errors
+///
+/// Returns [`KnowledgeError`] when the directory cannot be created or the
+/// store rejects it.
+pub fn open_artifact_store(
+    config: &KnowledgeConfig,
+) -> Result<Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>, KnowledgeError> {
+    std::fs::create_dir_all(&config.data_dir).map_err(|_| KnowledgeError::Config {
+        reason: "data_dir_unwritable",
+    })?;
+    Ok(Arc::new(
+        finstack_ai_store_artifact::LocalArtifactStore::try_new(
+            config.data_dir.join("artifacts"),
+        )
+        .map_err(compose_error)?,
+    ))
+}
+
+/// Build the composed knowledge agent over explicit journal and artifact
+/// stores.
+///
+/// # Errors
+///
+/// Returns [`KnowledgeError`] as for [`build_agent`].
+pub async fn build_agent_with_stores(
+    config: &KnowledgeConfig,
+    journal: Arc<dyn JournalStore>,
+    artifact_store: Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
+) -> Result<Agent, KnowledgeError> {
     std::fs::create_dir_all(&config.data_dir).map_err(|_| KnowledgeError::Config {
         reason: "data_dir_unwritable",
     })?;
     let self_docs_root = materialize_self_docs(&config.data_dir)?;
 
     let provider = provider(config)?;
-
-    let artifact_store: Arc<dyn finstack_ai::runtime::artifact::ArtifactStore> =
-        Arc::new(finstack_ai::runtime::artifact::InProcessArtifactStore::default());
 
     let (memory_provider, memory_toolset, memory_observer) =
         memory_components(config, &artifact_store)?;
