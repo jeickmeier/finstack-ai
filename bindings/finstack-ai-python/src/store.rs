@@ -6,6 +6,7 @@ use std::sync::Arc;
 use finstack_ai::AgentRunError;
 use finstack_ai::runtime::ports::journal::JournalStore;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
 };
@@ -68,10 +69,36 @@ pub(crate) fn default_store_limits() -> MemoryStoreLimits {
     }
 }
 
-pub(crate) fn open_journal_store(
+/// Open the configured journal: postgres when `postgres_dsn` is set,
+/// sqlite when `sqlite_path` is set, in-memory otherwise. The DSN arrives
+/// as an explicit Python value; the binding never reads environment
+/// variables.
+pub(crate) async fn open_journal_store(
     sqlite_path: Option<String>,
     sqlite_durability: Option<PySqliteDurability>,
+    postgres_dsn: Option<String>,
 ) -> Result<Arc<dyn JournalStore>, AgentRunError> {
+    if let Some(dsn) = postgres_dsn {
+        if sqlite_path.is_some() || sqlite_durability.is_some() {
+            return Err(configuration_error(
+                "postgres_dsn is mutually exclusive with sqlite_path/sqlite_durability",
+            ));
+        }
+        let limits = default_store_limits();
+        let config = PostgresStoreConfig::new(
+            dsn,
+            finstack_ai::runtime::ports::journal::StoreLimits {
+                sessions: limits.sessions,
+                batches_per_session: limits.batches_per_session,
+                records_per_session: limits.records_per_session,
+                snapshot_bytes: limits.snapshot_bytes,
+            },
+        );
+        return PostgresJournalStore::try_open(config)
+            .await
+            .map(|store| Arc::new(store) as Arc<dyn JournalStore>)
+            .map_err(|error| configuration_error(format!("{}: {error}", error.code())));
+    }
     match sqlite_path {
         None => {
             if sqlite_durability.is_some() {

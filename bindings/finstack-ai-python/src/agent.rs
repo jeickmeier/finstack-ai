@@ -744,7 +744,7 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None, capability_toolsets = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None, capability_toolsets = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python callback factory forwards all primary port components distinctly"
@@ -766,6 +766,7 @@ impl PyAgent {
         sqlite_durability: Option<PySqliteDurability>,
         artifact_path: Option<String>,
         capability_toolsets: Option<Vec<PyToolsetArg>>,
+        postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = model.borrow();
         let model_name = model.model_name();
@@ -798,7 +799,7 @@ impl PyAgent {
                 active_capabilities,
                 child_runs,
                 approval_grant,
-                (sqlite_path, sqlite_durability),
+                (sqlite_path, sqlite_durability, postgres_dsn),
                 artifact_store,
                 skills,
                 capability_toolsets,
@@ -1344,17 +1345,19 @@ async fn build_python_agent(
     active_capabilities: Vec<CapabilityId>,
     child_runs: ChildRunPolicy,
     approval_grant: ApprovalGrantMode,
-    sqlite: (Option<String>, Option<PySqliteDurability>),
+    sqlite: (Option<String>, Option<PySqliteDurability>, Option<String>),
     artifact_store: Arc<dyn ArtifactStore>,
     skills: Option<ComponentRef>,
     capability_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
 ) -> Result<PyAgent, AgentRunError> {
-    let store_component = if sqlite.0.is_some() {
+    let store_component = if sqlite.2.is_some() {
+        "python.store.postgres"
+    } else if sqlite.0.is_some() {
         "python.store.sqlite"
     } else {
         "python.store.memory"
     };
-    let store = open_journal_store(sqlite.0, sqlite.1)?;
+    let store = open_journal_store(sqlite.0, sqlite.1, sqlite.2).await?;
     let output = ports.output;
     let mut builder = Agent::builder(
         AgentId::parse("python.agent.callbacks")

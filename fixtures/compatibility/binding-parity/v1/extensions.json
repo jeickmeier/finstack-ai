@@ -142,7 +142,7 @@
     },
     {
       "crate": "finstack-ai-store-postgres",
-      "python": {"status": "unavailable", "reason": "Application-injected native persistence extension; not a binding-owned store."},
+      "python": {"status": "composed", "reason": "Composed as the journal behind Agent.from_python's postgres_dsn= keyword (explicit DSN, crate-default schema management and TLS)."},
       "js": {"status": "unavailable", "reason": "Native-only persistence extension; browser hosts provide their own journal store."}
     },
     {

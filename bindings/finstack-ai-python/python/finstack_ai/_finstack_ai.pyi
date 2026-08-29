@@ -2330,6 +2330,7 @@ class Agent:
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
         artifact_path: str | None = None,
+        postgres_dsn: str | None = None,
         capability_toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -2370,6 +2371,12 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            postgres_dsn: Optional ``postgres://`` connection string for a
+                durable multi-writer PostgreSQL journal (crate defaults:
+                managed schema, synchronous commit, TLS required).
+                Mutually exclusive with ``sqlite_path``. The DSN is an
+                explicit value; the binding never reads environment
+                variables.
             capability_toolsets: Toolsets registered as capability-gated:
                 their tools appear only while a capability whose
                 ``toolsets=[...]`` references their component name is

@@ -1745,6 +1745,7 @@ dependencies = [
  "finstack-ai-sandbox-e2b",
  "finstack-ai-store-artifact",
  "finstack-ai-store-memory",
+ "finstack-ai-store-postgres",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "finstack-ai-tools-calculator",
