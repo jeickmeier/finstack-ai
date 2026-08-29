@@ -16,6 +16,22 @@ unpublished.
 
 ### Added
 
+- Python binding composition parity: every composable extension a Rust host
+  can register now has a native Python surface. New exports —
+  `InstructionsMiddleware`, `CompactionMiddleware` (sliding window, large
+  tool output, and model-assisted summarize with automatic run
+  authorization), `VerifyMiddleware`, `RedactionMiddleware`,
+  `ToolPolicyMiddleware`, `RepositoryContextProvider`, `LogObserver`,
+  `MetricsObserver`, `OtelObserver`, `BillingObserver`, `NotifyObserver`,
+  `SkillsToolset` (model-driven capability activation with
+  capability-gated `capability_toolsets=` and `Capability` component
+  references), `CalculatorToolset`, `FileSystemToolset`, `ShellToolset`,
+  `McpToolset`, `S3ArtifactStore`, and `import_skill_markdown`. Every
+  agent factory gains `artifact_path=` / `artifact_store=` for durable
+  artifact stores (fixing cross-process attachment resolution), and
+  `Agent.from_python` gains `postgres_dsn=`. Deliberate waivers (interop,
+  workflow, net-guard, store-common, subagent pending an SDK in-process
+  `AgentInvoker`) are recorded in the binding parity catalog.
 - Kernel-on-WASM source coverage now runs through `wasm-bindgen-test` and emits
   HTML plus LCOV reports; hosted CI adds macOS and Windows confinement lanes.
 - `finstack-ai-completion-ingress`: new `extensions/interop` leaf that mints signed

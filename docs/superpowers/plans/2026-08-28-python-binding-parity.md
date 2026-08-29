@@ -129,7 +129,7 @@ and commit `91807cc`).
 (same keyword on every factory). Staging, the document toolset, and the
 ingest middleware all share the chosen store, as today.
 
-- [ ] **Step 1:** Failing test: agent A (sqlite journal + artifact_path in
+- [x] **Step 1:** Failing test: agent A (sqlite journal + artifact_path in
   one tmp dir) runs with a csv `Attachment` on a session; a **new** agent B
   over the same two paths opens the session and runs a follow-up turn; the
   follow-up succeeds and the model-visible request contains the converted
@@ -137,9 +137,9 @@ ingest middleware all share the chosen store, as today.
   without `artifact_path`, the same flow's follow-up turn surfaces the
   documented in-process limitation (assert the stable error code — this
   pins today's behavior as explicit rather than surprising).
-- [ ] **Step 2:** Implement; keep `InProcessArtifactStore` the default.
-- [ ] **Step 3:** Rebuild, tests green, clippy, `mise run check-python`.
-- [ ] **Step 4:** Commit `Add durable artifact store option to python agents`
+- [x] **Step 2:** Implement; keep `InProcessArtifactStore` the default.
+- [x] **Step 3:** Rebuild, tests green, clippy, `mise run check-python`.
+- [x] **Step 4:** Commit `Add durable artifact store option to python agents` (fa212e2)
 
 ### Task P0.2: Parity guard — RESOLVED: already exists (adapted 2026-08-29)
 
@@ -189,9 +189,7 @@ were verified against the crates' public API fixtures on 2026-08-28.
   memory).
 - Test: scripted capture-model asserts the policy line appears in the
   model-visible request; empty entries rejected as `ConfigurationError`.
-- [ ] Steps: failing test → implement (+pyi, public_items, PARITY row) →
-  green/clippy/check-python → commit
-  `Add native instructions middleware to python binding`.
+- [x] Done (5e39c56).
 
 ### Task P1.2: `CompactionMiddleware` (sliding window, large tool output)
 
@@ -207,8 +205,7 @@ were verified against the crates' public API fixtures on 2026-08-28.
   multi-turn lane session compacts (assert via `RunResult.trace` record
   kinds — copy the compaction lane test's expected kinds rather than
   inventing).
-- [ ] Steps as P1.1; commit
-  `Add native compaction middleware to python binding`.
+- [x] Done (9a10a59); summarize followed in P4.3.
 
 ### Task P1.3: `RepositoryContextProvider`
 
@@ -218,8 +215,8 @@ were verified against the crates' public API fixtures on 2026-08-28.
   `context_providers=[...]`.
 - Test: point at a tmp docs dir; capture-model asserts the doc text is
   contributed; nonexistent path → `ConfigurationError`.
-- [ ] Steps as P1.1; commit
-  `Add repository instructions provider to python binding`.
+- [x] Done (5c16c39). Also fixed the knowledge CLI's self-docs
+  allowlist bug this task exposed (5d19db9).
 
 ### Task P1.4: `LogObserver`
 
@@ -229,7 +226,7 @@ were verified against the crates' public API fixtures on 2026-08-28.
   `finstack.observer.log` v0.0.4.
 - Test: run once; the file contains NDJSON lines whose `kind` values
   include `run_completed`; payload_mode round-trips.
-- [ ] Steps as P1.1; commit `Add native log observer to python binding`.
+- [x] Done (8b9b611).
 
 ### Task P1.5: Native skills + capability activation
 
@@ -251,8 +248,8 @@ references, and the model can activate capabilities through the native
   model activates a capability; its instruction takes effect on the next
   turn; `RunResult.active_capabilities` lists it; a capability-gated
   toolset's tools appear only after activation.
-- [ ] Steps as P1.1; commit
-  `Add native skills toolset and capability activation to python binding`.
+- [x] Done (6465c84). from_python only; linked factories reject with a
+  clear error (no builder access on the `Agent::linked` path).
 
 ### Task P1.6: Burn down the divergence docstring (knowledge track)
 
@@ -264,7 +261,7 @@ references, and the model can activate capabilities through the native
   by relative path), log observer, and native skills; shrink the docstring
   to the remaining true boundaries (none expected).
 - Golden pytest and all five k-notebooks re-execute green.
-- [ ] Commit `Compose full knowledge parity in python k-track`.
+- [x] Done (646b479). Divergence docstring now reads: none.
 
 ---
 
@@ -274,20 +271,14 @@ One task per crate, same recipe. Constructor mappings to verify from each
 crate's fixture/source at implementation time; tests assert the component's
 observable behavior, not construction alone:
 
-- [ ] **P2.1 `VerifyMiddleware`** — verification outcome visible in trace
-  on a scripted violation. Commit `Add verify middleware to python binding`.
-- [ ] **P2.2 `RedactionMiddleware`** — a seeded secret pattern is redacted
-  in the model-visible request. Commit
-  `Add redaction middleware to python binding`.
-- [ ] **P2.3 `ToolPolicyMiddleware`** — a denied tool call fails with the
-  crate's stable code; an allowed one passes. Commit
-  `Add tool-policy middleware to python binding`.
-- [ ] **P2.4 observers** (`metrics`, `otel`, `notify`, `billing`; one task
-  each or one task if their constructors are trivially parallel — split if
-  any needs a sink/server double). Metrics/billing assert counters via
-  their read surface; otel uses the crate's in-memory exporter if present,
-  else construct+run smoke; notify uses a channel double. Commits
-  `Add <name> observer to python binding`.
+- [x] **P2.1 `VerifyMiddleware`** — done (d5b31f5): pure Python verifier
+  callable; reject fails with `verify_rejected`, errors fail closed.
+- [x] **P2.2 `RedactionMiddleware`** — done (e8cb35c).
+- [x] **P2.3 `ToolPolicyMiddleware`** — done (8451620): the default
+  allowlist narrows the model-visible tool set by stable tool id.
+- [x] **P2.4 observers** — done in one commit (feb3f24): metrics
+  (prometheus text), otel (span capture), billing (jsonl ledger), notify
+  (Python sink double with delivered/failed counters).
 
 ---
 
@@ -297,15 +288,12 @@ Same recipe; each exposes the crate's existing config surface verbatim —
 the binding adds **no policy of its own** (deny-by-default configs stay
 deny-by-default; Python supplies values explicitly):
 
-- [ ] **P3.1 `CalculatorToolset()`** — scripted tool-call round trip
-  (mirror `examples/rust-minimal::run_tool_loop`). 
-- [ ] **P3.2 `SkillImportToolset`** — import a fixture skill; catalog
-  reflects it.
-- [ ] **P3.3 `FilesystemToolset(root, ...)`** — reads confined to the
-  explicit root; escape attempt fails with the stable code. Security note
-  block in the pyi docstring (T2 trusted, not sandboxed).
-- [ ] **P3.4 `ShellToolset(...)`** — expose the crate's allowlist/limits
-  config; denied command fails closed. Same security docstring discipline.
+- [x] **P3.1 `CalculatorToolset()`** — done (a5b607d).
+- [x] **P3.2** — done (efd40522) as `import_skill_markdown` (the crate
+  is a parser, not a toolset); returns a declarative `Capability`.
+- [x] **P3.3 `FileSystemToolset`** — done (db5d905), T2 language in stubs.
+- [x] **P3.4 `ShellToolset`** — done (a94ce65); shell_exec carries
+  approval policy, tests approve via the interaction surface.
 - [x] **P3.5 `SubagentToolset`** — DEFERRED (stop-and-file per Known Risk
   4's rule, 2026-08-29): the toolset requires an `AgentInvoker`, and the
   SDK has no production in-process implementation — interop ships remote/
@@ -315,48 +303,44 @@ deny-by-default; Python supplies values explicitly):
   child runs remain available via `Run.start_child`. Unblock: an SDK
   in-process invoker (change-control), then this task is the standard
   wrapper recipe. Recorded as an explicit waiver in the parity catalog.
-- [ ] **P3.6 `McpToolset`** — stdio transport against a scripted MCP server
-  double (copy the crate's own test double). Network transports stay
-  config-driven.
-- [ ] **P3.7 media toolsets** (`openai-media`, `openrouter-media`) —
-  construct + register against their provider configs; loopback fetch
-  test.
-- Commits: `Add <name> toolset to python binding` each.
+- [x] **P3.6 `McpToolset`** — done (8172a82) over a Python stdio JSON-RPC
+  double; a tolerated -32601 still poisons the stdio transport (upstream
+  quirk flagged as a follow-up task).
+- [x] **P3.7 media toolsets** — already satisfied: both are `facade`
+  rows composed by the provider factories (`media_tools=`,
+  `openrouter_media_*`); no new code needed.
+
 
 ---
 
 ## Phase P4 — Stores and deferred options
 
-- [ ] **P4.1 Postgres journal** — `sqlite_path`/`sqlite_durability` grows a
-  sibling: `journal=finstack_ai.PostgresJournal(dsn=...)` (explicit value,
-  never env); gated behind a `postgres` cargo feature mirroring the
-  workspace's TLS choices; test against a dockerless double is not
-  possible, so the pytest is `@pytest.mark.skipif` without
-  `FINSTACK_TEST_POSTGRES_DSN` — construct-only otherwise (mirrors how the
-  store crate's own tests gate).
-- [ ] **P4.2 S3 artifact store** — `artifact=finstack_ai.S3ArtifactStore(...)`
-  behind the store crate's `s3` feature; gated live test as P4.1,
-  local-path store remains the durable default.
-- [ ] **P4.3 Compaction `summarize`** — now that models/budgets are
-  wrapped: `CompactionMiddleware.summarize(model=<registered component
-  name>, ...)`; port the summarize lane test's assertions.
+- [x] **P4.1 Postgres journal** — done (73a1d21) as
+  `Agent.from_python(postgres_dsn=...)`; linked unconditionally (the crate
+  has no feature gates), live test skipif-gated on
+  `FINSTACK_TEST_POSTGRES_DSN`.
+- [x] **P4.2 S3 artifact store** — done (eef6a69) as `S3ArtifactStore`
+  + `artifact_store=` on every factory; enabling the s3 feature also
+  required cleaning upstream dead code it had hidden from workspace
+  clippy.
+- [x] **P4.3 Compaction `summarize`** — done (91b54ed); the binding
+  auto-folds the matching `CompactionAuthorization` into every run's
+  security context.
 - Commits per task.
 
 ---
 
 ## Phase P5 — Docs and closure
 
-- [ ] **P5.1** `PARITY.md` final sweep: every row `wrapped` or a permanent
-  waiver; guard green with zero `waived-until: this plan` rows.
-- [ ] **P5.2** Docs: notebook README trust table gains the new surfaces; a
-  new `12_full_composition.ipynb` (optional, decide at the time) or an
-  extension of notebook 02 shows one fully-parity composition; the
-  knowledge-agent parity matrix row for Python notes "full extension
-  parity". CHANGELOG entry.
-- [ ] **P5.3** Final verification: binding pytest suite, `mise run
-  check-python`, clippy, golden pytest, k-notebooks, and the parity guard —
-  outputs recorded in the task report. Commit `Close python binding parity
-  initiative`.
+- [x] **P5.1** Catalog sweep: every python row is `direct`, `composed`,
+  or `facade` except the deliberate waivers (interop x3, net-guard,
+  store-common, workflow x3) and the recorded subagent deferral. Guard
+  green.
+- [x] **P5.2** Docs: notebook README trust table notes the full roster
+  and the T2 shell/filesystem language; knowledge parity matrix gains a
+  composition-parity row; CHANGELOG entry added. (No new notebook —
+  notebook 11 plus the k-track already demonstrate the composition.)
+- [x] **P5.3** Final verification recorded in the closing commit.
 
 ## Known Risks
 

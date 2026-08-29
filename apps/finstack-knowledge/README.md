@@ -29,6 +29,7 @@ Asymmetries are documented boundaries, not bugs.
 | Providers | linked native (ollama default; anthropic/openai/openrouter by config) | linked native | host adapter (scripted default; live optional) |
 | Document ingest | `tools-document` + `middleware-document-ingest` | same | TS retrieval toolset over a bundled corpus (File API upload not in v1) |
 | Memory | full extension | full extension | not wired in v1 (host-adapter seam available) |
+| Composition parity | reference | full extension parity (zero divergences) | host-adapter subset |
 | Cross-surface session | opens notebook sessions | opens CLI sessions | inspect/export only (browser storage is origin-local) |
 | Confinement / net-guard | available | available | n/a (browser sandbox) |
 | Golden questions | yes (CI, offline) | yes (CI, offline) | yes (CI, scripted) |

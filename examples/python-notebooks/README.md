@@ -62,6 +62,17 @@ uv run jupyter notebook examples/python-notebooks
 T1 native providers and T2 Python callbacks run in-process. They are not
 isolated. See trust levels.
 
+The binding also exposes the full native extension roster for
+composition (see the parity catalog in
+`fixtures/compatibility/binding-parity/v1/extensions.json`): instruction,
+compaction (including model-assisted summarize), verify, redaction, and
+tool-policy middleware; repository context; log/metrics/otel/billing/
+notify observers; skills activation, calculator, MCP, and skill-import
+toolsets; sqlite/postgres journals and local/S3 durable artifact stores.
+**`FileSystemToolset` and `ShellToolset` are T2 — trusted, not
+sandboxed**: their tools run with the host process's privileges, confined
+only by capability-safe roots and deny-by-default allowlists.
+
 ## The k-track: the knowledge agent as a product
 
 Five narrative notebooks that tell the knowledge-agent story on this
@@ -69,8 +80,8 @@ binding — the analyst path of the three-surface product defined in
 [`apps/finstack-knowledge/README.md`](../../apps/finstack-knowledge/README.md)
 (which also carries the cross-surface parity matrix). All five run
 offline and deterministically (scripted models); the shared composition
-lives in [`_knowledge.py`](_knowledge.py), whose docstring lists its
-honest divergences from the Rust definition.
+lives in [`_knowledge.py`](_knowledge.py), which now composes the
+identical native components the Rust CLI does (divergences: none).
 
 | Notebook | Story beat |
 | --- | --- |
