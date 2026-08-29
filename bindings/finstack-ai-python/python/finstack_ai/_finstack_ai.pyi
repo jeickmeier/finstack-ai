@@ -2427,6 +2427,17 @@ class Agent:
             ...     return result.text
         """
 
+def import_skill_markdown(source: str) -> Capability:
+    """Parse one ``SKILL.md`` document into a declarative :class:`Capability`.
+
+    Frontmatter (``name``, optional ``description``) plus a Markdown body
+    that becomes the capability's instruction; scripts and references are
+    unsupported. The imported capability activates as ``application``.
+
+    Raises:
+        ValueError: The frontmatter or body is invalid.
+    """
+
 def health() -> str:
     """Return ``\"ok\"`` without initializing runtime or network resources.
 

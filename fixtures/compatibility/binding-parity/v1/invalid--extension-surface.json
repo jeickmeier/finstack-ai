@@ -488,8 +488,10 @@
     {
       "crate": "finstack-ai-tools-skill-import",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected native skill importer; not a binding-owned constructor."
+        "status": "direct",
+        "surfaces": [
+          "import_skill_markdown"
+        ]
       },
       "js": {
         "status": "unavailable",

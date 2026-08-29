@@ -53,6 +53,7 @@ VerifyMiddleware
 __version__
 build_metadata
 health
+import_skill_markdown
 journal_known_answer
 linked_providers
 normalize_prebeta_shape

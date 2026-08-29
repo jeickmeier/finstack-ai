@@ -238,6 +238,28 @@ def parse_document(
     return _native.parse_document(media_type, data, path)
 
 
+def import_skill_markdown(source: str) -> Capability:
+    """Parse one ``SKILL.md`` document into a declarative :class:`Capability`.
+
+    The document is frontmatter (``name``, optional ``description``) plus a
+    Markdown body that becomes the capability's instruction. Scripts and
+    references are unsupported. The imported capability activates as
+    ``application``.
+
+    Args:
+        source: The complete ``SKILL.md`` text.
+
+    Returns:
+        The parsed capability, ready for any agent factory's
+        ``capabilities=[...]``.
+
+    Raises:
+        ValueError: The frontmatter or body is invalid.
+    """
+
+    return _native.import_skill_markdown(source)
+
+
 __all__ = [
     "Agent",
     "HistoryCachePolicy",
@@ -294,6 +316,7 @@ __all__ = [
     "__version__",
     "build_metadata",
     "health",
+    "import_skill_markdown",
     "journal_known_answer",
     "linked_providers",
     "normalize_prebeta_shape",

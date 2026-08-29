@@ -210,7 +210,7 @@
     },
     {
       "crate": "finstack-ai-tools-skill-import",
-      "python": {"status": "unavailable", "reason": "Application-injected native skill importer; not a binding-owned constructor."},
+      "python": {"status": "direct", "surfaces": ["import_skill_markdown"]},
       "js": {"status": "unavailable", "reason": "Browser hosts have no ambient repository authority."}
     },
     {

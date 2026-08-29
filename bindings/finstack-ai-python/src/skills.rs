@@ -118,3 +118,19 @@ fn skills_host(host: &Arc<NativeCapabilityHost>) -> SkillsHost {
         }),
     }
 }
+
+/// Parse one `SKILL.md` document into a declarative [`crate::capability::PyCapability`].
+///
+/// The document is frontmatter (`name`, optional `description`) plus a
+/// Markdown body that becomes the capability's instruction. Scripts and
+/// references are unsupported. The imported capability activates as
+/// `application` (matching the crate's opt-in posture); re-declare via
+/// `Capability` if a different activation is needed.
+#[pyfunction]
+pub(crate) fn import_skill_markdown(source: &str) -> PyResult<crate::capability::PyCapability> {
+    let imported = finstack_ai_tools_skill_import::import_skill_markdown(source)
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    Ok(crate::capability::PyCapability {
+        inner: imported.spec().clone(),
+    })
+}

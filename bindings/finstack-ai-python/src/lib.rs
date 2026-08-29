@@ -178,6 +178,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_normalize_pydantic_schema, module)?)?;
     module.add_function(wrap_pyfunction!(parse_document_markdown, module)?)?;
     module.add_function(wrap_pyfunction!(parse_document, module)?)?;
+    module.add_function(wrap_pyfunction!(skills::import_skill_markdown, module)?)?;
     #[cfg(feature = "benchmark-fixture")]
     benchmark_fixture::register(module)?;
     #[cfg(feature = "callback-fixture")]
