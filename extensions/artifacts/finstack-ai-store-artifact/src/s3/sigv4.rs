@@ -283,7 +283,7 @@ pub fn sign_headers(
 /// Build a complete presigned URL, query-string signed, `host`-only signed
 /// headers, `UNSIGNED-PAYLOAD` body hash.
 ///
-/// Kept for hosts that mint download URLs from the same SigV4 parameters
+/// Kept for hosts that mint download URLs from the same `SigV4` parameters
 /// as this driver. The artifact adapter does not call it.
 #[must_use]
 #[cfg_attr(

@@ -188,11 +188,11 @@ pub(crate) struct PyMcpToolset {
 impl PyMcpToolset {
     /// Connect to one stdio MCP server and freeze its tool catalog.
     #[staticmethod]
-    #[pyo3(signature = (program, args = Vec::new(), *, component = "python.tools.mcp", read_only_tools = None, idempotent_tools = None))]
+    #[pyo3(signature = (program, args = None, *, component = "python.tools.mcp", read_only_tools = None, idempotent_tools = None))]
     fn stdio<'py>(
         py: Python<'py>,
         program: String,
-        args: Vec<String>,
+        args: Option<Vec<String>>,
         component: &str,
         read_only_tools: Option<Vec<String>>,
         idempotent_tools: Option<Vec<String>>,
@@ -207,7 +207,7 @@ impl PyMcpToolset {
                 config = config.with_idempotent_tools(names);
             }
             let config = config
-                .stdio(StdioConfig::new(program, args))
+                .stdio(StdioConfig::new(program, args.unwrap_or_default()))
                 .map_err(|error| PyValueError::new_err(error.to_string()))?;
             let toolset = McpToolsetFactory::new(config)
                 .construct()

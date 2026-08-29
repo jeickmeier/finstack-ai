@@ -80,7 +80,7 @@ use repository::PyRepositoryContextProvider;
 use run::{PyAttachment, PyRun, PyRunResult};
 use session::{PyLane, PyMemoryExternalIdentityMap, PySession};
 use skills::PySkillsToolset;
-use store::PySqliteDurability;
+use store::{PyS3ArtifactStore, PySqliteDurability};
 use toolsets::{PyCalculatorToolset, PyFileSystemToolset, PyMcpToolset, PyShellToolset};
 
 pub(crate) const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -141,6 +141,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyLane>()?;
     module.add_class::<PyMemoryExternalIdentityMap>()?;
     module.add_class::<PySqliteDurability>()?;
+    module.add_class::<PyS3ArtifactStore>()?;
     module.add_class::<PyRunResult>()?;
     module.add_class::<PyEvent>()?;
     module.add_class::<PyEventBatch>()?;

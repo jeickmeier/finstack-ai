@@ -27,7 +27,7 @@ const BLOB_CONTENT_DOMAIN: &str = "blob-content";
 const BLOB_CONTENT_SCHEMA_VERSION: u32 = 1;
 
 /// A fully resolved request target: URL, canonical path, `Host` header
-/// value, and scheme, derived from the configured [`Addressing`] style.
+/// value, derived from the configured [`Addressing`] style.
 pub struct RequestTarget {
     /// Complete request URL.
     pub url: Url,
@@ -36,8 +36,6 @@ pub struct RequestTarget {
     pub path: String,
     /// `Host` header value (and `SigV4` signed host).
     pub host: String,
-    /// URL scheme (`http` or `https`).
-    pub scheme: String,
 }
 
 fn invalid_endpoint() -> ObjectError {
@@ -79,12 +77,7 @@ pub fn object_url(
     };
     let url =
         Url::parse(&format!("{scheme}://{host}{path}")).map_err(|_error| invalid_endpoint())?;
-    Ok(RequestTarget {
-        url,
-        path,
-        host,
-        scheme,
-    })
+    Ok(RequestTarget { url, path, host })
 }
 
 /// A resolved `ListObjectsV2` request target, including the canonical query
@@ -291,6 +284,13 @@ pub fn map_status_error(status: StatusCode) -> ObjectError {
 /// responses are a small, fixed, well-known shape, and this avoids taking on
 /// an XML dependency for five tag names.
 #[must_use]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "ListObjectsV2 scanning is exercised by tests; hosts may reuse it"
+    )
+)]
 pub fn extract_tag_values(body: &str, tag: &str) -> Vec<String> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
@@ -308,6 +308,10 @@ pub fn extract_tag_values(body: &str, tag: &str) -> Vec<String> {
     out
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used by extract_tag_values' test-only callers")
+)]
 fn decode_entities(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut remaining = input;

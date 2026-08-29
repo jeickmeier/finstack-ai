@@ -44,6 +44,7 @@ RepositoryContextProvider
 Run
 RunResult
 RuntimeError
+S3ArtifactStore
 Session
 SessionInspectPhase
 SessionInspectSnapshot

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::approval_grant::PyApprovalGrantMode;
 use crate::child_policy::PyChildRunPolicy;
-use crate::store::{PySqliteDurability, open_journal_store};
+use crate::store::{PyS3ArtifactStore, PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::artifact::{ArtifactStore, InProcessArtifactStore};
 use finstack_ai::runtime::ports::middleware::Middleware;
 use finstack_ai::runtime::ports::model::{Model, ModelName, ModelSettings};
@@ -298,7 +298,7 @@ impl PyAgent {
     /// `https://api.openai.com/v1/responses` and does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, reasoning, media toolsets, and primary port components distinctly"
@@ -324,6 +324,7 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
+        artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -340,6 +341,7 @@ impl PyAgent {
             observers,
             output_type,
             artifact_path,
+            artifact_store,
         )?;
         reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
@@ -379,7 +381,7 @@ impl PyAgent {
     /// `openrouter_media_*` registers the same toolset from an explicit key
     /// and cannot be combined with `media_tools`.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, attribution, reasoning, media toolset, and primary port components distinctly"
@@ -407,6 +409,7 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
+        artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -423,6 +426,7 @@ impl PyAgent {
             observers,
             output_type,
             artifact_path,
+            artifact_store,
         )?;
         reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
@@ -458,7 +462,7 @@ impl PyAgent {
     /// required when `api_key` is set; the binding does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None))]
+    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
@@ -482,6 +486,7 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
+        artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -498,6 +503,7 @@ impl PyAgent {
             observers,
             output_type,
             artifact_path,
+            artifact_store,
         )?;
         reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
@@ -530,7 +536,7 @@ impl PyAgent {
     /// variables. Does not hardcode the Google host: `endpoint` is passed
     /// straight into the provider's `GeminiConfig::try_new`.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None))]
+    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
@@ -554,6 +560,7 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
+        artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -570,6 +577,7 @@ impl PyAgent {
             observers,
             output_type,
             artifact_path,
+            artifact_store,
         )?;
         reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
@@ -600,7 +608,7 @@ impl PyAgent {
     /// Python port lists are keyword-only. This factory does not accept an
     /// API key.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None))]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards media toolset and primary port components distinctly"
@@ -623,6 +631,7 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
+        artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -639,6 +648,7 @@ impl PyAgent {
             observers,
             output_type,
             artifact_path,
+            artifact_store,
         )?;
         reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
@@ -669,7 +679,7 @@ impl PyAgent {
     /// required. `openai_chat` is a configuration error. The binding does
     /// not read environment variables.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None))]
+    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards gateway route, auth, media toolset, and primary port components distinctly"
@@ -697,6 +707,7 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
+        artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -713,6 +724,7 @@ impl PyAgent {
             observers,
             output_type,
             artifact_path,
+            artifact_store,
         )?;
         reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
@@ -744,7 +756,7 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None, capability_toolsets = None, postgres_dsn = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None, artifact_store = None, capability_toolsets = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python callback factory forwards all primary port components distinctly"
@@ -765,6 +777,7 @@ impl PyAgent {
         sqlite_path: Option<String>,
         sqlite_durability: Option<PySqliteDurability>,
         artifact_path: Option<String>,
+        artifact_store: Option<Py<PyS3ArtifactStore>>,
         capability_toolsets: Option<Vec<PyToolsetArg>>,
         postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
@@ -779,6 +792,7 @@ impl PyAgent {
             observers,
             output_type,
             artifact_path,
+            artifact_store,
         )?;
         let capability_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = capability_toolsets
             .unwrap_or_default()
@@ -1243,13 +1257,15 @@ fn document_ingest_component(id: &str) -> Result<ComponentRef, AgentRunError> {
 
 fn document_ingest_ports(
     artifact_path: Option<String>,
+    explicit_store: Option<Arc<dyn ArtifactStore>>,
 ) -> Result<DocumentIngestPorts, AgentRunError> {
-    let dyn_store: Arc<dyn ArtifactStore> = match artifact_path {
-        Some(path) => Arc::new(
+    let dyn_store: Arc<dyn ArtifactStore> = match (explicit_store, artifact_path) {
+        (Some(store), _) => store,
+        (None, Some(path)) => Arc::new(
             LocalArtifactStore::try_new(std::path::PathBuf::from(path))
                 .map_err(|error| configuration_error(error.to_string()))?,
         ),
-        None => Arc::new(InProcessArtifactStore::default()),
+        (None, None) => Arc::new(InProcessArtifactStore::default()),
     };
     let toolset = DocumentToolset::try_new(Arc::clone(&dyn_store))
         .map_err(|error| configuration_error(error.to_string()))?;
@@ -1268,6 +1284,10 @@ fn document_ingest_ports(
     ))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one parameter per factory keyword; grouping would only rename them"
+)]
 fn linked_ports(
     py: Python<'_>,
     toolsets: Option<Vec<PyToolsetArg>>,
@@ -1276,9 +1296,17 @@ fn linked_ports(
     observers: Option<Vec<PyObserverArg>>,
     output_type: Option<Py<PyAny>>,
     artifact_path: Option<String>,
+    artifact_store: Option<Py<PyS3ArtifactStore>>,
 ) -> PyResult<(LinkedPorts, Arc<dyn ArtifactStore>, Option<ComponentRef>)> {
+    if artifact_path.is_some() && artifact_store.is_some() {
+        return Err(PyValueError::new_err(
+            "artifact_path and artifact_store are mutually exclusive",
+        ));
+    }
+    let explicit_store = artifact_store.map(|store| Arc::clone(&store.bind(py).borrow().inner));
     let (artifact_store, document_toolset, document_middleware) =
-        document_ingest_ports(artifact_path).map_err(|error| agent_error(py, &error, None))?;
+        document_ingest_ports(artifact_path, explicit_store)
+            .map_err(|error| agent_error(py, &error, None))?;
     let dyn_artifact_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store);
     // The skills toolset is deferred: its catalog depends on the declared
     // capabilities, so it is built at agent assembly (from_python only).

@@ -123,3 +123,66 @@ pub(crate) async fn open_journal_store(
         }
     }
 }
+
+/// Durable S3-compatible artifact store handle.
+///
+/// Wraps the artifact crate's strict S3 transport (`SigV4` when credentials
+/// are given, keyless otherwise). Pass instances via any agent factory's
+/// `artifact_store=` keyword; attachment staging, the document toolset,
+/// and the ingest middleware then share the bucket. Credentials arrive as
+/// explicit Python values — the binding never reads environment variables.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "S3ArtifactStore",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyS3ArtifactStore {
+    pub(crate) inner: Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
+}
+
+#[pymethods]
+impl PyS3ArtifactStore {
+    /// Open a store over one bucket.
+    #[new]
+    #[pyo3(signature = (endpoint, bucket, region, *, key_prefix = None, access_key_id = None, secret_access_key = None))]
+    fn new(
+        endpoint: &str,
+        bucket: &str,
+        region: &str,
+        key_prefix: Option<&str>,
+        access_key_id: Option<&str>,
+        secret_access_key: Option<&str>,
+    ) -> PyResult<Self> {
+        use pyo3::exceptions::PyValueError;
+        let mut config =
+            finstack_ai_store_artifact::S3ObjectStoreConfig::try_new(endpoint, bucket, region)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        if let Some(prefix) = key_prefix {
+            config = config
+                .try_with_key_prefix(prefix)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        match (access_key_id, secret_access_key) {
+            (Some(id), Some(secret)) => {
+                let secret = finstack_ai::runtime::ports::model::SecretString::try_new(secret)
+                    .map_err(|error| PyValueError::new_err(format!("{error:?}")))?;
+                config = config
+                    .with_credentials(id, secret)
+                    .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            }
+            (None, None) => {}
+            _ => {
+                return Err(PyValueError::new_err(
+                    "access_key_id and secret_access_key must be provided together",
+                ));
+            }
+        }
+        let store = finstack_ai_store_artifact::S3ArtifactStore::try_new(config)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            inner: Arc::new(store),
+        })
+    }
+}

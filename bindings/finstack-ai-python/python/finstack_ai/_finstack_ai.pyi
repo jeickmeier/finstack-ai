@@ -341,7 +341,7 @@ class McpToolset:
     @staticmethod
     async def stdio(
         program: str,
-        args: list[str] = [],
+        args: list[str] | None = None,
         *,
         component: str = "python.tools.mcp",
         read_only_tools: list[str] | None = None,
@@ -819,6 +819,45 @@ class SkillsToolset:
     @property
     def component(self) -> str:
         """Stable component identifier for the skills toolset."""
+
+class S3ArtifactStore:
+    """Durable S3-compatible artifact store handle.
+
+    Wraps the artifact crate's strict S3 transport (``SigV4`` when
+    credentials are given, keyless otherwise). Pass instances via any
+    agent factory's ``artifact_store=`` keyword; attachment staging, the
+    document toolset, and the ingest middleware then share the bucket.
+    Credentials arrive as explicit values — the binding never reads
+    environment variables.
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        bucket: str,
+        region: str,
+        *,
+        key_prefix: str | None = None,
+        access_key_id: str | None = None,
+        secret_access_key: str | None = None,
+    ) -> None:
+        """Open a store over one bucket.
+
+        Args:
+            endpoint: ``http(s)`` endpoint without credentials, query, or
+                fragment.
+            bucket: Bucket name (3-63 bytes, ``[a-z0-9.-]``).
+            region: Signing region.
+            key_prefix: Optional validated physical key prefix.
+            access_key_id: Optional access key (requires
+                ``secret_access_key``).
+            secret_access_key: Optional secret key (requires
+                ``access_key_id``).
+
+        Raises:
+            ValueError: The endpoint, bucket, region, prefix, or
+                credential pairing is invalid.
+        """
 
 class Session:
     """Live handle for one journaled session."""
@@ -1657,6 +1696,7 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
+        artifact_store: S3ArtifactStore | None = None,
     ) -> Agent:
         """Build a Rust-backed official OpenAI Responses agent.
 
@@ -1710,6 +1750,9 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            artifact_store: Optional durable :class:`S3ArtifactStore`
+                used instead of a local or in-process store. Mutually
+                exclusive with ``artifact_path``.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1776,6 +1819,7 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
+        artifact_store: S3ArtifactStore | None = None,
     ) -> Agent:
         """Build a Rust-backed OpenRouter Responses agent.
 
@@ -1836,6 +1880,9 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            artifact_store: Optional durable :class:`S3ArtifactStore`
+                used instead of a local or in-process store. Mutually
+                exclusive with ``artifact_path``.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1900,6 +1947,7 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
+        artifact_store: S3ArtifactStore | None = None,
     ) -> Agent:
         """Build a Rust-backed Anthropic Messages agent.
 
@@ -1946,6 +1994,9 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            artifact_store: Optional durable :class:`S3ArtifactStore`
+                used instead of a local or in-process store. Mutually
+                exclusive with ``artifact_path``.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -2008,6 +2059,7 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
+        artifact_store: S3ArtifactStore | None = None,
     ) -> Agent:
         """Build a Rust-backed Gemini ``generateContent`` agent.
 
@@ -2055,6 +2107,9 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            artifact_store: Optional durable :class:`S3ArtifactStore`
+                used instead of a local or in-process store. Mutually
+                exclusive with ``artifact_path``.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -2116,6 +2171,7 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
+        artifact_store: S3ArtifactStore | None = None,
     ) -> Agent:
         """Build a keyless Rust-backed native Ollama agent.
 
@@ -2155,6 +2211,9 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            artifact_store: Optional durable :class:`S3ArtifactStore`
+                used instead of a local or in-process store. Mutually
+                exclusive with ``artifact_path``.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -2221,6 +2280,7 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
+        artifact_store: S3ArtifactStore | None = None,
     ) -> Agent:
         """Build a Rust-backed agent that dispatches to a dedicated provider.
 
@@ -2269,6 +2329,9 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            artifact_store: Optional durable :class:`S3ArtifactStore`
+                used instead of a local or in-process store. Mutually
+                exclusive with ``artifact_path``.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -2330,7 +2393,7 @@ class Agent:
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
         artifact_path: str | None = None,
-        postgres_dsn: str | None = None,
+        artifact_store: S3ArtifactStore | None = None,
         capability_toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -2343,6 +2406,7 @@ class Agent:
             | McpToolset
         ]
         | None = None,
+        postgres_dsn: str | None = None,
     ) -> Agent:
         """Build an agent from trusted callbacks and optional Pydantic output type.
 
@@ -2371,6 +2435,9 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            artifact_store: Optional durable :class:`S3ArtifactStore`
+                used instead of a local or in-process store. Mutually
+                exclusive with ``artifact_path``.
             postgres_dsn: Optional ``postgres://`` connection string for a
                 durable multi-writer PostgreSQL journal (crate defaults:
                 managed schema, synchronous commit, TLS required).

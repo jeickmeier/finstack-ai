@@ -3,7 +3,7 @@
   "extensions": [
     {
       "crate": "finstack-ai-store-artifact",
-      "python": {"status": "composed", "reason": "Composed internally as the durable artifact store behind every Agent factory's artifact_path= keyword; attachment staging, the document toolset, and the ingest middleware share it."},
+      "python": {"status": "direct", "surfaces": ["S3ArtifactStore"]},
       "js": {"status": "unavailable", "reason": "Application-injected artifact store; no binding-owned constructor."}
     },
     {
