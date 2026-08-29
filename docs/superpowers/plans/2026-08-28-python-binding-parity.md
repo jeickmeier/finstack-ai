@@ -49,8 +49,10 @@ knowledge-agent spec's option-a decision
   existing provider factories.
 - Every task updates, in the same commit: the `.pyi` stubs (full
   docstrings + typed signatures per `.agents/rules/04-python-coding.md`),
-  `scripts/compat/public_items.py`'s Python name list, and the parity
-  guard's status table (Task P0.2).
+  the frozen Python name-list baseline checked by
+  `scripts/compat/public_items.py`, and the crate's row in
+  `fixtures/compatibility/binding-parity/v1/extensions.json` (the existing
+  parity catalog — see Task P0.2's resolution).
 - Rebuild the native module before running tests when Rust changed:
   `PYO3_PYTHON="$(uv python find 3.14)" uv run --no-project --with maturin==1.14.1 maturin develop --locked --manifest-path bindings/finstack-ai-python/Cargo.toml --features extension-module`
 - Verify per task: `cargo clippy -p finstack-ai-python --all-targets --locked -- -D warnings`,
@@ -139,32 +141,36 @@ ingest middleware all share the chosen store, as today.
 - [ ] **Step 3:** Rebuild, tests green, clippy, `mise run check-python`.
 - [ ] **Step 4:** Commit `Add durable artifact store option to python agents`
 
-### Task P0.2: Parity guard
+### Task P0.2: Parity guard — RESOLVED: already exists (adapted 2026-08-29)
 
-**Files:**
-- Create: `scripts/compat/python_parity.py` — walks `extensions/*/*/Cargo.toml`
-  for composable crates (stores/toolsets/middleware/context/observers),
-  reads the binding's `Cargo.toml` links plus a checked-in status table,
-  and fails on any extension that is neither linked-and-exported nor waived
-- Create: `bindings/finstack-ai-python/PARITY.md` — the status table this
-  plan's inventory seeds: `crate | status (wrapped | waived: <reason>) |
-  python surface`
-- Modify: `mise.toml` (`check-python` additionally runs the guard)
-- Test: the guard run itself, plus a unit mode (`--self-test`) that
-  verifies it fails on a fabricated unwrapped crate name
+Execution finding: the repo already ships this guard.
+`scripts/compat/public_items.py` (run by `mise run check-public-api`, part
+of CI) validates `fixtures/compatibility/binding-parity/v1/extensions.json`
+— a catalog with one row per extension crate carrying a python and js
+disposition (`direct` / `composed` / `facade` / `host_adapter` /
+`unavailable` + reason). It already enforces everything this task planned:
+a new extension crate anywhere in the workspace fails the check until its
+row is decided; `direct`/`composed` rows must be Cargo dependencies of the
+binding; `direct` rows must name exported surfaces that actually exist in
+the `.pyi`/`__init__` name lists; `unavailable` rows cannot be
+dependencies (this fired on P0.1's new `finstack-ai-store-artifact`
+dependency, proving the guard live). The `--write` mode maintains mutation
+fixtures (`invalid--extension-surface.json`) that self-test the guard.
 
-**Interfaces:** later tasks flip their crate's row to `wrapped` and name the
-exported classes; a new extension crate anywhere in the workspace breaks
-`check-python` until someone decides its row.
+Therefore no `scripts/compat/python_parity.py` and no `PARITY.md` are
+created — a second ledger would drift. **The catalog is this plan's status
+table**: each P1–P4 task flips its crate's python row from `unavailable`
+to `direct` (with `surfaces` naming the new exported classes) or
+`composed` (with reason) in the same commit as the wrapper. P5.1's closure
+check becomes: every python row that this plan scoped is `direct`,
+`composed`, or `facade`, and remaining `unavailable` rows are exactly the
+deliberate waivers listed under "Out of scope".
 
-- [ ] **Step 1:** Failing check: guard runs and correctly reports today's
-  unwrapped crates (the P1–P4 inventory) — commit the table with those rows
-  marked `planned` (a failing status) only after the guard proves it can
-  see them; then mark rows `waived-until: this plan` so CI stays green
-  while phases land. Waivers for out-of-scope crates use their permanent
-  rationale.
-- [ ] **Step 2:** Wire into `check-python`; `--self-test` covered.
-- [ ] **Step 3:** Commit `Add python binding parity guard`
+- [x] **Step 1:** Reconcile P0.1: `finstack-ai-store-artifact` python row
+  → `composed` (durable store behind `artifact_path=`).
+- [x] **Step 2:** Guard green (`public_items.py --check` exit 0); plan
+  updated to route later tasks through the existing catalog.
+- [x] **Step 3:** Commit `Reconcile binding parity catalog with artifact_path`
 
 ---
 
