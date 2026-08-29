@@ -192,10 +192,11 @@ pub fn security(os_user: &str) -> Result<RunSecurityContext, KnowledgeError> {
             reason: "os_user_empty",
         });
     }
-    let principal = PrincipalRef::try_new(user, "operator", Some("local"))
-        .map_err(|error| KnowledgeError::Identity {
+    let principal = PrincipalRef::try_new(user, "operator", Some("local")).map_err(|error| {
+        KnowledgeError::Identity {
             reason: error.to_string(),
-        })?;
+        }
+    })?;
     RunSecurityContext::try_new(
         "local",
         principal,

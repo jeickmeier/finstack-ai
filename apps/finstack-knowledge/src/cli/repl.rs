@@ -38,7 +38,9 @@ pub fn run_repl<'a>(
     output: &'a mut dyn Write,
     interrupt: Arc<AtomicBool>,
 ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), KnowledgeError>> + 'a>> {
-    Box::pin(run_repl_inner(config, session, os_user, input, output, interrupt))
+    Box::pin(run_repl_inner(
+        config, session, os_user, input, output, interrupt,
+    ))
 }
 
 async fn run_repl_inner(
@@ -160,7 +162,11 @@ async fn run_turn(
     }
     match run.result().await {
         Ok(result) => {
-            let text = if answer.is_empty() { result.text() } else { answer };
+            let text = if answer.is_empty() {
+                result.text()
+            } else {
+                answer
+            };
             write_line(output, &render_markup_plain(&text));
         }
         Err(error) if cancelled => {

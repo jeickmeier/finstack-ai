@@ -27,10 +27,7 @@ const LIST_LIMIT: u32 = 256;
 /// Returns [`KnowledgeError`] when the journal cannot be opened or listed.
 pub async fn run_list(config: &KnowledgeConfig) -> Result<String, KnowledgeError> {
     let store = crate::open_journal_sqlite(config)?;
-    let mut rows = store
-        .list_sessions(LIST_LIMIT)
-        .await
-        .map_err(store_error)?;
+    let mut rows = store.list_sessions(LIST_LIMIT).await.map_err(store_error)?;
     rows.sort_by_key(|row| std::cmp::Reverse(row.head_sequence));
 
     let mut table = Table::new();
@@ -55,10 +52,7 @@ pub async fn run_list(config: &KnowledgeConfig) -> Result<String, KnowledgeError
 /// Returns [`KnowledgeError`] when the journal cannot be opened or listed.
 pub async fn run_list_json(config: &KnowledgeConfig) -> Result<String, KnowledgeError> {
     let store = crate::open_journal_sqlite(config)?;
-    let rows = store
-        .list_sessions(LIST_LIMIT)
-        .await
-        .map_err(store_error)?;
+    let rows = store.list_sessions(LIST_LIMIT).await.map_err(store_error)?;
     let mut lines = String::new();
     for row in rows {
         let value = serde_json::json!({
@@ -174,13 +168,16 @@ fn session_name(metadata: &Metadata) -> Option<String> {
 
 /// Merge the name key into existing metadata without dropping other keys.
 fn with_name(metadata: &Metadata, name: &str) -> Result<Metadata, KnowledgeError> {
-    let mut value: serde_json::Value = serde_json::from_slice(metadata.as_bytes())
-        .unwrap_or_else(|_| serde_json::json!({}));
+    let mut value: serde_json::Value =
+        serde_json::from_slice(metadata.as_bytes()).unwrap_or_else(|_| serde_json::json!({}));
     if !value.is_object() {
         value = serde_json::json!({});
     }
     if let Some(object) = value.as_object_mut() {
-        object.insert(NAME_KEY.to_owned(), serde_json::Value::String(name.to_owned()));
+        object.insert(
+            NAME_KEY.to_owned(),
+            serde_json::Value::String(name.to_owned()),
+        );
     }
     Metadata::parse(value.to_string().as_bytes()).map_err(|_| KnowledgeError::Config {
         reason: "session_name_invalid",

@@ -109,8 +109,11 @@ pub fn docs_command(topic: Option<&str>) -> Result<String, KnowledgeError> {
                 .ok_or(KnowledgeError::Config {
                     reason: "docs_topic_unknown",
                 })?;
-            let markup = format!("[bold underline]{}[/bold underline]\n{}", escape(topic),
-                escape(body));
+            let markup = format!(
+                "[bold underline]{}[/bold underline]\n{}",
+                escape(topic),
+                escape(body)
+            );
             Ok(console.export_text(&markup))
         }
     }

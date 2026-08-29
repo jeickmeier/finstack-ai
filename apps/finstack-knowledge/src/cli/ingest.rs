@@ -8,8 +8,8 @@
 
 use std::path::Path;
 
-use finstack_ai::runtime::artifact::{ArtifactMetadata, stage_required_artifact};
 use finstack_ai::runtime::artifact::ArtifactScope;
+use finstack_ai::runtime::artifact::{ArtifactMetadata, stage_required_artifact};
 use finstack_ai::{AgentRunRequest, AttachmentInput};
 use finstack_ai_kernel::{Metadata, Sensitivity, SessionId};
 use finstack_ai_tools_document::parser::{DocumentFormat, DocumentLimits};
@@ -61,8 +61,7 @@ async fn run_ingest_inner(
 
     let journal = open_journal(config)?;
     let artifact_store = open_artifact_store(config)?;
-    let agent =
-        build_agent_with_stores(config, journal.clone(), artifact_store.clone()).await?;
+    let agent = build_agent_with_stores(config, journal.clone(), artifact_store.clone()).await?;
 
     // Stage into the same tenant-bound pre-run scope the ingest middleware
     // resolves (pattern of the python binding's attachment staging).

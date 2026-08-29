@@ -29,10 +29,7 @@ pub trait EventSink {
 /// Render accumulated rich markup to plain text (no ANSI).
 #[must_use]
 pub fn render_markup_plain(markup: &str) -> String {
-    Console::builder()
-        .markup(true)
-        .build()
-        .export_text(markup)
+    Console::builder().markup(true).build().export_text(markup)
 }
 
 /// Human text renderer: deltas inline, tool lines, a completion line.

@@ -38,11 +38,9 @@ pub use compose::{
     build_agent, build_agent_with_journal, build_agent_with_stores, model_name,
     open_artifact_store, open_journal, open_journal_sqlite,
 };
-pub use golden::{GoldenEntry, golden_entries};
-pub use config::{
-    KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security,
-};
+pub use config::{KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security};
 pub use docs::{SELF_DOCS, materialize_self_docs};
+pub use golden::{GoldenEntry, golden_entries};
 
 #[cfg(test)]
 mod tests;

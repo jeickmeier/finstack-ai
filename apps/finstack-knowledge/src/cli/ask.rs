@@ -1,8 +1,10 @@
 //! The `ask` command: one question on a new or existing session.
 
-use finstack_ai::AgentRunRequest;
 use super::render::EventSink;
-use crate::{KnowledgeConfig, KnowledgeError, build_agent_with_journal, model_name, open_journal, security};
+use crate::{
+    KnowledgeConfig, KnowledgeError, build_agent_with_journal, model_name, open_journal, security,
+};
+use finstack_ai::AgentRunRequest;
 
 /// What `ask` did, for the binary to report.
 #[derive(Debug)]

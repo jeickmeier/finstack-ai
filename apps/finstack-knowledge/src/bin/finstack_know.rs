@@ -32,6 +32,10 @@ fn main() -> ExitCode {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one flat match over the CLI commands; splitting it would only scatter the dispatch"
+)]
 fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
     match &cli.command {
         Command::Docs { topic } => {
@@ -46,17 +50,27 @@ fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
             runtime()?.block_on(async move {
                 if cli.json {
                     let mut sink = JsonRenderer::new();
-                    let outcome =
-                        ask::run_ask(&config, &question, session.as_deref(), &os_user(), &mut sink)
-                            .await?;
+                    let outcome = ask::run_ask(
+                        &config,
+                        &question,
+                        session.as_deref(),
+                        &os_user(),
+                        &mut sink,
+                    )
+                    .await?;
                     print!("{}", sink.into_markup());
                     report_session(&outcome);
                     Ok(ExitCode::SUCCESS)
                 } else {
                     let mut sink = TextRenderer::new();
-                    let outcome =
-                        ask::run_ask(&config, &question, session.as_deref(), &os_user(), &mut sink)
-                            .await?;
+                    let outcome = ask::run_ask(
+                        &config,
+                        &question,
+                        session.as_deref(),
+                        &os_user(),
+                        &mut sink,
+                    )
+                    .await?;
                     print_markup(&sink.into_markup());
                     report_session(&outcome);
                     Ok(ExitCode::SUCCESS)
@@ -96,16 +110,26 @@ fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
                 use finstack_ai_knowledge::cli::ingest;
                 if cli.json {
                     let mut sink = JsonRenderer::new();
-                    let outcome =
-                        ingest::run_ingest(&config, &path, session.as_deref(), &os_user(), &mut sink)
-                            .await?;
+                    let outcome = ingest::run_ingest(
+                        &config,
+                        &path,
+                        session.as_deref(),
+                        &os_user(),
+                        &mut sink,
+                    )
+                    .await?;
                     print!("{}", sink.into_markup());
                     report_session(&outcome);
                 } else {
                     let mut sink = TextRenderer::new();
-                    let outcome =
-                        ingest::run_ingest(&config, &path, session.as_deref(), &os_user(), &mut sink)
-                            .await?;
+                    let outcome = ingest::run_ingest(
+                        &config,
+                        &path,
+                        session.as_deref(),
+                        &os_user(),
+                        &mut sink,
+                    )
+                    .await?;
                     print_markup(&sink.into_markup());
                     report_session(&outcome);
                 }
