@@ -58,7 +58,7 @@
     },
     {
       "crate": "finstack-ai-middleware-verify",
-      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "python": {"status": "direct", "surfaces": ["VerifyMiddleware"]},
       "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
     },
     {

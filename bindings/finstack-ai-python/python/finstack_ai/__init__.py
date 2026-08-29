@@ -45,6 +45,7 @@ from ._finstack_ai import (
     SkillsToolset,
     SqliteDurability,
     TimeoutError,
+    VerifyMiddleware,
 )
 from ._pydantic import PydanticTool, pydantic_toolset, tool
 
@@ -275,6 +276,7 @@ __all__ = [
     "SkillsToolset",
     "SqliteDurability",
     "TimeoutError",
+    "VerifyMiddleware",
     "__version__",
     "build_metadata",
     "health",

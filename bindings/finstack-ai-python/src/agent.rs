@@ -36,7 +36,7 @@ use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
-use crate::middleware::{PyCompactionMiddleware, PyInstructionsMiddleware};
+use crate::middleware::{PyCompactionMiddleware, PyInstructionsMiddleware, PyVerifyMiddleware};
 use crate::observers::PyLogObserver;
 use crate::repository::PyRepositoryContextProvider;
 use crate::run::{
@@ -124,6 +124,8 @@ pub(crate) enum PyMiddlewareArg {
     Instructions(Py<PyInstructionsMiddleware>),
     /// Rust deterministic context-compaction middleware.
     Compaction(Py<PyCompactionMiddleware>),
+    /// Rust deterministic content-verification middleware.
+    Verify(Py<PyVerifyMiddleware>),
 }
 
 impl PyMiddlewareArg {
@@ -132,6 +134,7 @@ impl PyMiddlewareArg {
             Self::Python(middleware) => middleware.bind(py).borrow().registration(),
             Self::Instructions(middleware) => middleware.bind(py).borrow().registration(),
             Self::Compaction(middleware) => middleware.bind(py).borrow().registration(),
+            Self::Verify(middleware) => middleware.bind(py).borrow().registration(),
         }
     }
 }

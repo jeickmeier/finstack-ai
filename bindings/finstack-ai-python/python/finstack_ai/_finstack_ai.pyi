@@ -1073,6 +1073,47 @@ class RepositoryContextProvider:
     def component(self) -> str:
         """Stable component identifier for the repository provider."""
 
+class VerifyMiddleware:
+    """Deterministic content-verification middleware backed by the Rust implementation.
+
+    Wraps a synchronous, pure Python verifier callable: it receives the
+    candidate assistant message as a JSON string and returns ``"accept"``
+    or a mapping ``{"verdict": "accept" | "bounce" | "reject",
+    "findings": [{"kind": "citation" | "test" | "artifact", "note": str},
+    ...]}``. ``bounce`` retries the model with the findings as feedback;
+    ``reject`` fails the run with the stable ``verify_rejected`` code.
+    The verifier must be deterministic — the engine re-runs verification
+    on recovery and never journals it. Callback errors or malformed
+    verdicts fail closed as reject. Pass instances via the
+    ``middleware=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(
+        self,
+        verifier: Callable[[str], Any],
+        *,
+        verifier_id: str,
+        backoff_seconds: float = 0.0,
+        policy_version: str = "verify-policy-v1",
+    ) -> None:
+        """Build the middleware from a pure verifier callable.
+
+        Args:
+            verifier: Synchronous callable judging one assistant message
+                (JSON string in, verdict out as described above).
+            verifier_id: Stable identity folded into the configuration
+                digest.
+            backoff_seconds: Bounce retry backoff.
+            policy_version: Bounce policy version label.
+
+        Raises:
+            ValueError: The identity, backoff, or policy version is
+                invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the verify middleware."""
+
 class Run:
     """Shared control and observation handle for one Rust-owned run."""
 
@@ -1277,7 +1318,10 @@ class Agent:
         ]
         | None = None,
         middleware: list[
-            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+            PythonMiddleware
+            | InstructionsMiddleware
+            | CompactionMiddleware
+            | VerifyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1378,7 +1422,10 @@ class Agent:
         ]
         | None = None,
         middleware: list[
-            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+            PythonMiddleware
+            | InstructionsMiddleware
+            | CompactionMiddleware
+            | VerifyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1484,7 +1531,10 @@ class Agent:
         ]
         | None = None,
         middleware: list[
-            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+            PythonMiddleware
+            | InstructionsMiddleware
+            | CompactionMiddleware
+            | VerifyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1574,7 +1624,10 @@ class Agent:
         ]
         | None = None,
         middleware: list[
-            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+            PythonMiddleware
+            | InstructionsMiddleware
+            | CompactionMiddleware
+            | VerifyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1660,7 +1713,10 @@ class Agent:
         ]
         | None = None,
         middleware: list[
-            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+            PythonMiddleware
+            | InstructionsMiddleware
+            | CompactionMiddleware
+            | VerifyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1747,7 +1803,10 @@ class Agent:
         ]
         | None = None,
         middleware: list[
-            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+            PythonMiddleware
+            | InstructionsMiddleware
+            | CompactionMiddleware
+            | VerifyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1836,7 +1895,10 @@ class Agent:
         ]
         | None = None,
         middleware: list[
-            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+            PythonMiddleware
+            | InstructionsMiddleware
+            | CompactionMiddleware
+            | VerifyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,

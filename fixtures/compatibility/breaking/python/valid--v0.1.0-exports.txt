@@ -42,6 +42,7 @@ SessionInspectSnapshot
 SkillsToolset
 SqliteDurability
 TimeoutError
+VerifyMiddleware
 __version__
 build_metadata
 health

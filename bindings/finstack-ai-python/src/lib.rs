@@ -64,7 +64,7 @@ use document::{parse_document, parse_document_markdown};
 use events::{PyEvent, PyEventBatch, PyEventIterator};
 use locator::PyLocator;
 use memory::{PyMemoryContextProvider, PyMemoryExtension, PyMemoryObserver, PyMemoryToolset};
-use middleware::{PyCompactionMiddleware, PyInstructionsMiddleware};
+use middleware::{PyCompactionMiddleware, PyInstructionsMiddleware, PyVerifyMiddleware};
 use observers::PyLogObserver;
 use protocol::{
     _normalize_pydantic_schema, build_metadata, health, journal_known_answer, linked_providers,
@@ -151,6 +151,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyPythonMiddleware>()?;
     module.add_class::<PyInstructionsMiddleware>()?;
     module.add_class::<PyCompactionMiddleware>()?;
+    module.add_class::<PyVerifyMiddleware>()?;
     module.add_class::<PyRepositoryContextProvider>()?;
     module.add_class::<PyLogObserver>()?;
     module.add_class::<PySkillsToolset>()?;
