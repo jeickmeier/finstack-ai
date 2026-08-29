@@ -17,6 +17,11 @@
       "js": {"status": "composed", "reason": "Provides the portable in-process memory-store implementation used behind WASM host composition."}
     },
     {
+      "crate": "finstack-ai-embeddings",
+      "python": {"status": "unavailable", "reason": "Shared embedding machinery; cross-language embedder exposure is a staged follow-up."},
+      "js": {"status": "unavailable", "reason": "Shared embedding machinery; cross-language embedder exposure is a staged follow-up."}
+    },
+    {
       "crate": "finstack-ai-codex-child",
       "python": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."},
       "js": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."}

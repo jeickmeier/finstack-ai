@@ -1,0 +1,65 @@
+pub mod finstack_ai_embeddings
+pub mod finstack_ai_embeddings::embedder
+pub enum finstack_ai_embeddings::embedder::EmbedError
+pub finstack_ai_embeddings::embedder::EmbedError::InvalidInput
+pub finstack_ai_embeddings::embedder::EmbedError::InvalidInput::reason: &'static str
+pub finstack_ai_embeddings::embedder::EmbedError::Unavailable
+pub finstack_ai_embeddings::embedder::EmbedError::Unavailable::message: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_embeddings::embedder::EmbedError
+pub fn finstack_ai_embeddings::embedder::EmbedError::clone(&self) -> finstack_ai_embeddings::embedder::EmbedError
+impl core::cmp::Eq for finstack_ai_embeddings::embedder::EmbedError
+impl core::cmp::PartialEq for finstack_ai_embeddings::embedder::EmbedError
+pub fn finstack_ai_embeddings::embedder::EmbedError::eq(&self, &finstack_ai_embeddings::embedder::EmbedError) -> bool
+impl core::error::Error for finstack_ai_embeddings::embedder::EmbedError
+impl core::fmt::Debug for finstack_ai_embeddings::embedder::EmbedError
+pub fn finstack_ai_embeddings::embedder::EmbedError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_embeddings::embedder::EmbedError
+pub fn finstack_ai_embeddings::embedder::EmbedError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_embeddings::embedder::EmbedError
+pub struct finstack_ai_embeddings::embedder::HashEmbedder
+impl finstack_ai_embeddings::embedder::HashEmbedder
+pub fn finstack_ai_embeddings::embedder::HashEmbedder::try_new(usize) -> core::result::Result<Self, finstack_ai_embeddings::embedder::EmbedError>
+impl core::clone::Clone for finstack_ai_embeddings::embedder::HashEmbedder
+pub fn finstack_ai_embeddings::embedder::HashEmbedder::clone(&self) -> finstack_ai_embeddings::embedder::HashEmbedder
+impl core::fmt::Debug for finstack_ai_embeddings::embedder::HashEmbedder
+pub fn finstack_ai_embeddings::embedder::HashEmbedder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_embeddings::embedder::TextEmbedder for finstack_ai_embeddings::embedder::HashEmbedder
+pub fn finstack_ai_embeddings::embedder::HashEmbedder::descriptor(&self) -> finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub fn finstack_ai_embeddings::embedder::HashEmbedder::embed(&self, alloc::vec::Vec<alloc::sync::Arc<str>>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_embeddings::vector::EmbeddingVector>, finstack_ai_embeddings::embedder::EmbedError>>
+pub struct finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub finstack_ai_embeddings::embedder::TextEmbedderDescriptor::dimensions: usize
+pub finstack_ai_embeddings::embedder::TextEmbedderDescriptor::embedder_id: alloc::sync::Arc<str>
+pub finstack_ai_embeddings::embedder::TextEmbedderDescriptor::max_input_bytes: usize
+impl core::clone::Clone for finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub fn finstack_ai_embeddings::embedder::TextEmbedderDescriptor::clone(&self) -> finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+impl core::cmp::Eq for finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+impl core::cmp::PartialEq for finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub fn finstack_ai_embeddings::embedder::TextEmbedderDescriptor::eq(&self, &finstack_ai_embeddings::embedder::TextEmbedderDescriptor) -> bool
+impl core::fmt::Debug for finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub fn finstack_ai_embeddings::embedder::TextEmbedderDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub trait finstack_ai_embeddings::embedder::TextEmbedder: finstack_ai_runtime::ports::PortObject
+pub fn finstack_ai_embeddings::embedder::TextEmbedder::descriptor(&self) -> finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub fn finstack_ai_embeddings::embedder::TextEmbedder::embed(&self, alloc::vec::Vec<alloc::sync::Arc<str>>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_embeddings::vector::EmbeddingVector>, finstack_ai_embeddings::embedder::EmbedError>>
+impl finstack_ai_embeddings::embedder::TextEmbedder for finstack_ai_embeddings::embedder::HashEmbedder
+pub fn finstack_ai_embeddings::embedder::HashEmbedder::descriptor(&self) -> finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub fn finstack_ai_embeddings::embedder::HashEmbedder::embed(&self, alloc::vec::Vec<alloc::sync::Arc<str>>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_embeddings::vector::EmbeddingVector>, finstack_ai_embeddings::embedder::EmbedError>>
+pub mod finstack_ai_embeddings::vector
+pub struct finstack_ai_embeddings::vector::EmbeddingVector(_)
+impl finstack_ai_embeddings::vector::EmbeddingVector
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::as_slice(&self) -> &[f32]
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::dimensions(&self) -> usize
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::dot(&self, &Self) -> core::option::Option<f32>
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::try_new(alloc::vec::Vec<f32>) -> core::result::Result<Self, finstack_ai_embeddings::embedder::EmbedError>
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::unit_normalized(&self) -> Self
+impl core::clone::Clone for finstack_ai_embeddings::vector::EmbeddingVector
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::clone(&self) -> finstack_ai_embeddings::vector::EmbeddingVector
+impl core::cmp::Eq for finstack_ai_embeddings::vector::EmbeddingVector
+impl core::cmp::PartialEq for finstack_ai_embeddings::vector::EmbeddingVector
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::eq(&self, &Self) -> bool
+impl core::fmt::Debug for finstack_ai_embeddings::vector::EmbeddingVector
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai_embeddings::vector::EmbeddingVector
+pub fn finstack_ai_embeddings::vector::EmbeddingVector::hash<H: core::hash::Hasher>(&self, &mut H)
+pub const finstack_ai_embeddings::vector::EMBEDDING_MAX_DIMENSIONS: usize
+pub fn finstack_ai_embeddings::vector::truncate_to_bytes(&str, usize) -> &str

@@ -1,6 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 
-use crate::embedder::EmbedError;
+use crate::embedder::{EmbedError, HashEmbedder, TextEmbedder};
 use crate::vector::{EMBEDDING_MAX_DIMENSIONS, EmbeddingVector, truncate_to_bytes};
 
 fn hash_of(vector: &EmbeddingVector) -> u64 {
@@ -133,4 +134,120 @@ fn truncate_to_bytes_never_splits_a_character() {
     // "🦀" is four bytes.
     assert_eq!(truncate_to_bytes("🦀🦀", 5), "🦀");
     assert_eq!(truncate_to_bytes("🦀", 0), "");
+}
+
+async fn embed_one(embedder: &HashEmbedder, text: &str) -> EmbeddingVector {
+    let mut vectors = embedder.embed(vec![Arc::from(text)]).await.unwrap();
+    assert_eq!(vectors.len(), 1);
+    vectors.remove(0)
+}
+
+#[tokio::test]
+async fn hash_embedder_is_deterministic_across_calls() {
+    let embedder = HashEmbedder::try_new(64).unwrap();
+    let first = embed_one(&embedder, "the quick brown fox").await;
+    let second = embed_one(&embedder, "the quick brown fox").await;
+    assert_eq!(first, second);
+
+    // Tokenization lowercases, so case differences do not change the vector.
+    let upper = embed_one(&embedder, "The QUICK brown FOX").await;
+    assert_eq!(first, upper);
+}
+
+#[tokio::test]
+async fn hash_embedder_batch_preserves_input_order() {
+    let embedder = HashEmbedder::try_new(64).unwrap();
+    let alpha = embed_one(&embedder, "alpha alone").await;
+    let omega = embed_one(&embedder, "omega instead").await;
+    assert_ne!(alpha, omega);
+
+    let batch = embedder
+        .embed(vec![Arc::from("omega instead"), Arc::from("alpha alone")])
+        .await
+        .unwrap();
+    assert_eq!(batch, vec![omega, alpha]);
+}
+
+#[tokio::test]
+async fn hash_embedder_distinct_texts_differ() {
+    let embedder = HashEmbedder::try_new(64).unwrap();
+    let one = embed_one(&embedder, "remember the deadline").await;
+    let other = embed_one(&embedder, "cancel the meeting").await;
+    assert_ne!(one, other);
+}
+
+#[tokio::test]
+async fn hash_embedder_honors_declared_dimensions() {
+    for dimensions in [1_usize, 8, 64] {
+        let embedder = HashEmbedder::try_new(dimensions).unwrap();
+        assert_eq!(embedder.descriptor().dimensions, dimensions);
+        let vector = embed_one(&embedder, "some text").await;
+        assert_eq!(vector.dimensions(), dimensions);
+    }
+}
+
+#[tokio::test]
+async fn hash_embedder_rejects_empty_input() {
+    let embedder = HashEmbedder::try_new(64).unwrap();
+    for empty in ["", "   ", "\t\n"] {
+        assert_eq!(
+            embedder.embed(vec![Arc::from(empty)]).await,
+            Err(EmbedError::InvalidInput {
+                reason: "embed_input_empty",
+            })
+        );
+    }
+    // One invalid text fails the whole batch.
+    assert_eq!(
+        embedder.embed(vec![Arc::from("fine"), Arc::from("")]).await,
+        Err(EmbedError::InvalidInput {
+            reason: "embed_input_empty",
+        })
+    );
+    // An empty batch is trivially embedded.
+    assert_eq!(embedder.embed(Vec::new()).await, Ok(Vec::new()));
+}
+
+#[tokio::test]
+async fn hash_embedder_embeds_tokenless_input_via_whole_text_fallback() {
+    let embedder = HashEmbedder::try_new(64).unwrap();
+    let punctuation = embed_one(&embedder, "!!!").await;
+    assert_eq!(punctuation.dimensions(), 64);
+    // The fallback hashes the *trimmed* text, so surrounding whitespace is
+    // irrelevant.
+    let padded = embed_one(&embedder, "  !!! ").await;
+    assert_eq!(punctuation, padded);
+    // Distinct tokenless texts still land on distinct vectors.
+    let other = embed_one(&embedder, "???").await;
+    assert_ne!(punctuation, other);
+}
+
+#[test]
+fn hash_embedder_descriptor_id_is_stable_and_encodes_dimensions() {
+    let embedder = HashEmbedder::try_new(64).unwrap();
+    let descriptor = embedder.descriptor();
+    assert_eq!(descriptor.embedder_id.as_ref(), "embed.hash-v1.64");
+    assert_eq!(descriptor.dimensions, 64);
+    assert!(descriptor.max_input_bytes > 0);
+    assert_eq!(
+        HashEmbedder::try_new(8)
+            .unwrap()
+            .descriptor()
+            .embedder_id
+            .as_ref(),
+        "embed.hash-v1.8"
+    );
+}
+
+#[test]
+fn hash_embedder_rejects_invalid_dimensions() {
+    for dimensions in [0, EMBEDDING_MAX_DIMENSIONS + 1] {
+        assert_eq!(
+            HashEmbedder::try_new(dimensions).err(),
+            Some(EmbedError::InvalidInput {
+                reason: "embedder_dimensions_invalid",
+            })
+        );
+    }
+    assert!(HashEmbedder::try_new(EMBEDDING_MAX_DIMENSIONS).is_ok());
 }

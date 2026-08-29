@@ -1306,6 +1306,7 @@ version = "2.0.0"
 dependencies = [
  "finstack-ai-runtime",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

@@ -21,32 +21,7 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-/// Text embedder contract and the deterministic hash reference
-/// implementation (populated by a later task).
-pub mod embedder {
-    use std::sync::Arc;
-
-    use thiserror::Error;
-
-    /// Errors raised by embedding-vector construction and by
-    /// [`TextEmbedder`](crate) implementations.
-    #[derive(Debug, Clone, PartialEq, Eq, Error)]
-    pub enum EmbedError {
-        /// The input text or vector components failed validation.
-        #[error("embed_input_invalid: {reason}")]
-        InvalidInput {
-            /// Stable non-secret reason.
-            reason: &'static str,
-        },
-        /// The embedder is unavailable (e.g. a backend outage).
-        #[error("embed_unavailable: {message}")]
-        Unavailable {
-            /// Stable non-secret reason.
-            message: Arc<str>,
-        },
-    }
-}
-
+pub mod embedder;
 pub mod vector;
 
 #[cfg(test)]
