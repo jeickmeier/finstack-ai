@@ -1301,6 +1301,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-embeddings"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai-runtime",
+ "thiserror",
+]
+
+[[package]]
 name = "finstack-ai-example-durable-interaction"
 version = "2.0.0"
 dependencies = [
