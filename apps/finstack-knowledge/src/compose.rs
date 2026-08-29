@@ -168,10 +168,8 @@ pub fn open_artifact_store(
         reason: "data_dir_unwritable",
     })?;
     Ok(Arc::new(
-        finstack_ai_store_artifact::LocalArtifactStore::try_new(
-            config.data_dir.join("artifacts"),
-        )
-        .map_err(compose_error)?,
+        finstack_ai_store_artifact::LocalArtifactStore::try_new(config.data_dir.join("artifacts"))
+            .map_err(compose_error)?,
     ))
 }
 
@@ -217,7 +215,7 @@ pub async fn build_agent_with_stores(
     // under their declared identity, not a finstack.know.* alias.
     .context_provider(
         versioned("finstack.context.repository", 0, 0, 4)?,
-        Arc::new(repository_provider(&self_docs_root)?),
+        Arc::new(self_docs_provider(&self_docs_root)?),
     )
     .context_provider(
         versioned("finstack.context.memory", 0, 1, 0)?,
@@ -229,8 +227,10 @@ pub async fn build_agent_with_stores(
     )
     .middleware(
         versioned("finstack.middleware.document-ingest", 1, 0, 0)?,
-        Arc::new(DocumentIngestMiddleware::try_new(Arc::clone(&artifact_store))
-            .map_err(compose_error)?),
+        Arc::new(
+            DocumentIngestMiddleware::try_new(Arc::clone(&artifact_store))
+                .map_err(compose_error)?,
+        ),
     )
     .middleware(
         versioned("finstack.middleware.compaction", 0, 0, 4)?,
@@ -246,7 +246,10 @@ pub async fn build_agent_with_stores(
         component("finstack.know.tools.document")?,
         Arc::new(DocumentToolset::try_new(Arc::clone(&artifact_store)).map_err(compose_error)?),
     )
-    .toolset(component("finstack.know.tools.memory")?, Arc::new(memory_toolset))
+    .toolset(
+        component("finstack.know.tools.memory")?,
+        Arc::new(memory_toolset),
+    )
     .toolset(component("finstack.know.tools.skills")?, Arc::new(skills))
     // The repl resolves ask_user interactions; spec §8 names elicitation as
     // the interaction surface.
@@ -343,10 +346,8 @@ fn provider(config: &KnowledgeConfig) -> Result<Arc<dyn Model>, KnowledgeError> 
                     .with_authentication(api_key_auth(api_key)?)
                     .map_err(compose_error)?,
                 vec![
-                    AnthropicModelConfig::try_new(
-                        model, bytes, context, output, reserve, overhead,
-                    )
-                    .map_err(compose_error)?,
+                    AnthropicModelConfig::try_new(model, bytes, context, output, reserve, overhead)
+                        .map_err(compose_error)?,
                 ],
             )
             .map_err(compose_error)?,
@@ -386,10 +387,11 @@ fn api_key_auth(
     api_key: &str,
 ) -> Result<finstack_ai::runtime::ports::model::Authentication, KnowledgeError> {
     Ok(finstack_ai::runtime::ports::model::Authentication::ApiKey(
-        finstack_ai::runtime::ports::model::SecretString::try_new(api_key)
-            .map_err(|_| KnowledgeError::Config {
+        finstack_ai::runtime::ports::model::SecretString::try_new(api_key).map_err(|_| {
+            KnowledgeError::Config {
                 reason: "api_key_invalid",
-            })?,
+            }
+        })?,
     ))
 }
 
@@ -397,18 +399,33 @@ fn bearer_auth(
     api_key: &str,
 ) -> Result<finstack_ai::runtime::ports::model::Authentication, KnowledgeError> {
     Ok(finstack_ai::runtime::ports::model::Authentication::Bearer(
-        finstack_ai::runtime::ports::model::SecretString::try_new(api_key)
-            .map_err(|_| KnowledgeError::Config {
+        finstack_ai::runtime::ports::model::SecretString::try_new(api_key).map_err(|_| {
+            KnowledgeError::Config {
                 reason: "api_key_invalid",
-            })?,
+            }
+        })?,
     ))
 }
 
 fn repository_provider(
     root: &Path,
 ) -> Result<finstack_ai_context_repository::RepositoryContextProvider, KnowledgeError> {
-    finstack_ai_context_repository::RepositoryContextProvider::try_new(root)
-        .map_err(compose_error)
+    finstack_ai_context_repository::RepositoryContextProvider::try_new(root).map_err(compose_error)
+}
+
+/// The self-docs root holds `<topic>.md` files, not the provider's default
+/// instruction filenames, so it needs an explicit allowlist — without one
+/// the provider silently contributes nothing.
+fn self_docs_provider(
+    root: &Path,
+) -> Result<finstack_ai_context_repository::RepositoryContextProvider, KnowledgeError> {
+    finstack_ai_context_repository::RepositoryContextProvider::try_with_allowlist(
+        root,
+        crate::docs::SELF_DOCS
+            .iter()
+            .map(|(topic, _)| format!("{topic}.md")),
+    )
+    .map_err(compose_error)
 }
 
 fn instructions_middleware() -> Result<InstructionsMiddleware, KnowledgeError> {

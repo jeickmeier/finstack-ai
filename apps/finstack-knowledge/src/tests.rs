@@ -33,8 +33,8 @@ fn data_dir_prefers_explicit_then_know_home_then_home() {
     .expect("know home wins over home");
     assert_eq!(know_home, PathBuf::from("/tmp/know-home"));
 
-    let home = default_data_dir(None, None, Some(PathBuf::from("/tmp/home")))
-        .expect("home fallback");
+    let home =
+        default_data_dir(None, None, Some(PathBuf::from("/tmp/home"))).expect("home fallback");
     assert_eq!(home, PathBuf::from("/tmp/home/.finstack-know"));
 
     assert!(matches!(
@@ -51,10 +51,7 @@ fn fetch_allowlist_defaults_empty() {
 
 #[test]
 fn security_rejects_empty_user() {
-    assert!(matches!(
-        security(""),
-        Err(KnowledgeError::Config { .. })
-    ));
+    assert!(matches!(security(""), Err(KnowledgeError::Config { .. })));
     assert!(matches!(
         security("   "),
         Err(KnowledgeError::Config { .. })
@@ -104,6 +101,32 @@ async fn agent_builds_and_answers_offline() {
 }
 
 #[tokio::test]
+async fn self_docs_reach_the_model_request() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson_capture(vec![loopback::text_response("ok")])
+        .await
+        .expect("loopback");
+    let config = loopback_config(dir.path(), base_url);
+    let agent = build_agent(&config).await.expect("agent builds");
+    let request = finstack_ai::AgentRunRequest::try_new(
+        model_name(&config).expect("model name"),
+        "What is the architecture?",
+        security("tester").expect("security"),
+    )
+    .expect("request");
+    agent.run(request).await.expect("run succeeds");
+    let captured = server.await.expect("server task").expect("server ok");
+    // The self-docs repository provider needs an explicit `<topic>.md`
+    // allowlist; with the default one it silently contributes nothing.
+    assert!(
+        captured
+            .iter()
+            .any(|body| body.contains("deterministic agent microkernel")),
+        "self-docs text missing from the model request"
+    );
+}
+
+#[tokio::test]
 async fn capability_catalog_lists_citation_skill() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
@@ -131,7 +154,9 @@ async fn fetch_allowlist_gates_the_fetch_toolset() {
     // Valid allowlist builds.
     let good = loopback_config(dir.path(), base_url)
         .with_fetch_allowlist(vec!["docs.example.com".to_owned()]);
-    build_agent(&good).await.expect("fetch-enabled agent builds");
+    build_agent(&good)
+        .await
+        .expect("fetch-enabled agent builds");
     drop(server);
 }
 
@@ -267,6 +292,9 @@ fn provider_debug_redacts_api_keys() {
         assert!(!debug.contains("sk-secret"), "redacted: {debug}");
         let config = KnowledgeConfig::new(PathBuf::from("/tmp/data"), choice);
         let debug = format!("{config:?}");
-        assert!(!debug.contains("sk-secret"), "redacted through config: {debug}");
+        assert!(
+            !debug.contains("sk-secret"),
+            "redacted through config: {debug}"
+        );
     }
 }

@@ -22,12 +22,24 @@ pub fn text_response(text: &str) -> String {
 pub async fn serve_ndjson(
     responses: Vec<String>,
 ) -> Result<(String, tokio::task::JoinHandle<Result<(), String>>), BoxError> {
+    let (address, task) = serve_ndjson_capture(responses).await?;
+    Ok((
+        address,
+        tokio::spawn(async move { task.await.map_err(|error| error.to_string())?.map(|_| ()) }),
+    ))
+}
+
+/// As [`serve_ndjson`], additionally returning each request body received.
+pub async fn serve_ndjson_capture(
+    responses: Vec<String>,
+) -> Result<(String, tokio::task::JoinHandle<Result<Vec<String>, String>>), BoxError> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
     let task = tokio::spawn(async move {
+        let mut captured = Vec::new();
         for body in responses {
             let (mut socket, _) = listener.accept().await.map_err(|error| error.to_string())?;
-            read_request(&mut socket).await?;
+            captured.push(read_request(&mut socket).await?);
             let headers = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
@@ -41,12 +53,12 @@ pub async fn serve_ndjson(
                 .await
                 .map_err(|error| error.to_string())?;
         }
-        Ok(())
+        Ok(captured)
     });
     Ok((format!("http://{address}"), task))
 }
 
-async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(), String> {
+async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<String, String> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4_096];
     let header_end = loop {
@@ -81,5 +93,5 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(), String> 
         }
         request.extend_from_slice(&buffer[..count]);
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&request[header_end..]).into_owned())
 }
