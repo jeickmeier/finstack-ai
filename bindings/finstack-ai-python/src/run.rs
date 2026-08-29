@@ -177,6 +177,7 @@ impl PyRun {
         let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
         let borrowed = agent.borrow();
         let child = Arc::clone(&borrowed.inner);
+        let child_compaction_authorization = borrowed.compaction_authorization.clone();
         let model = borrowed.model.clone();
         let settings = borrowed.settings.clone();
         let timeout_seconds = timeout_seconds.unwrap_or(borrowed.default_timeout_seconds);
@@ -198,6 +199,7 @@ impl PyRun {
                 settings,
                 &tenant_scope,
                 Vec::new(),
+                child_compaction_authorization,
             )
             .map_err(|error| Python::attach(|py| agent_error(py, &error, None)))?;
             match Box::pin(parent.start_child(&child, request, placement, remote)).await {
@@ -603,6 +605,7 @@ pub(crate) fn run_request(
     settings: ModelSettings,
     tenant_scope: &str,
     attachments: Vec<AttachmentInput>,
+    compaction_authorization: Option<finstack_ai_kernel::CompactionAuthorization>,
 ) -> Result<AgentRunRequest, AgentRunError> {
     if attachments.len() > MAX_RUN_ATTACHMENTS {
         return Err(configuration_error(
@@ -616,7 +619,7 @@ pub(crate) fn run_request(
     }
     let timeout = Duration::try_from_secs_f64(timeout_seconds)
         .map_err(|_| configuration_error("timeout_seconds is out of range"))?;
-    let security = RunSecurityContext::try_new(
+    let mut security = RunSecurityContext::try_new(
         tenant_scope,
         PrincipalRef::try_new("finstack-ai-python", "local-user", Some(tenant_scope))
             .map_err(|error| configuration_error(error.to_string()))?,
@@ -627,6 +630,9 @@ pub(crate) fn run_request(
         None,
     )
     .map_err(|error| configuration_error(error.to_string()))?;
+    if let Some(authorization) = compaction_authorization {
+        security = security.with_compaction_authorization(authorization);
+    }
     let mut request = AgentRunRequest::try_new(model.clone(), input, security)?;
     request.settings = settings;
     request.timeout = timeout;

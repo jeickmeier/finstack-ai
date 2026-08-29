@@ -16,8 +16,8 @@ use finstack_ai::{
     OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
 };
 use finstack_ai_kernel::{
-    AgentId, ArtifactRef, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Sensitivity,
-    SessionId, Version,
+    AgentId, ArtifactRef, BundleId, CapabilityId, CompactionAuthorization, ComponentId,
+    ComponentRef, RawJson, Sensitivity, SessionId, Version,
 };
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
 use finstack_ai_store_artifact::LocalArtifactStore;
@@ -267,6 +267,9 @@ pub(crate) struct PyAgent {
     /// filesystem-backed `LocalArtifactStore` so persisted sessions can
     /// re-resolve attachments from a fresh process.
     pub(crate) artifact_store: Arc<dyn ArtifactStore>,
+    /// Durable exact-model authorization folded into every run's security
+    /// context when a summarize compaction middleware is registered.
+    pub(crate) compaction_authorization: Option<CompactionAuthorization>,
 }
 
 #[pymethods]
@@ -289,6 +292,7 @@ impl PyAgent {
             settings: self.settings.clone(),
             default_timeout_seconds: self.default_timeout_seconds,
             artifact_store: Arc::clone(&self.artifact_store),
+            compaction_authorization: self.compaction_authorization.clone(),
         }
     }
 
@@ -347,7 +351,7 @@ impl PyAgent {
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter) = split_linked_ports(ports);
+            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
             let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
                 model,
                 api_key,
@@ -365,7 +369,15 @@ impl PyAgent {
                 },
             }))
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
+            Python::attach(|py| {
+                wrap_linked_agent(
+                    py,
+                    built,
+                    output_adapter,
+                    artifact_store,
+                    compaction_authorization,
+                )
+            })
         })
     }
 
@@ -432,7 +444,7 @@ impl PyAgent {
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter) = split_linked_ports(ports);
+            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
             let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
                 model,
                 api_key,
@@ -452,7 +464,15 @@ impl PyAgent {
                 },
             }))
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
+            Python::attach(|py| {
+                wrap_linked_agent(
+                    py,
+                    built,
+                    output_adapter,
+                    artifact_store,
+                    compaction_authorization,
+                )
+            })
         })
     }
 
@@ -509,7 +529,7 @@ impl PyAgent {
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter) = split_linked_ports(ports);
+            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
             let built = Agent::linked(LinkedProviderSpec::Anthropic(AnthropicAgentSpec {
                 base_url,
                 model,
@@ -525,7 +545,15 @@ impl PyAgent {
                 },
             }))
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
+            Python::attach(|py| {
+                wrap_linked_agent(
+                    py,
+                    built,
+                    output_adapter,
+                    artifact_store,
+                    compaction_authorization,
+                )
+            })
         })
     }
 
@@ -583,7 +611,7 @@ impl PyAgent {
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter) = split_linked_ports(ports);
+            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
             let built = Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
                 endpoint,
                 model,
@@ -599,7 +627,15 @@ impl PyAgent {
                 },
             }))
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
+            Python::attach(|py| {
+                wrap_linked_agent(
+                    py,
+                    built,
+                    output_adapter,
+                    artifact_store,
+                    compaction_authorization,
+                )
+            })
         })
     }
 
@@ -654,7 +690,7 @@ impl PyAgent {
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter) = split_linked_ports(ports);
+            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
             let built = Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
                 base_url,
                 model,
@@ -669,7 +705,15 @@ impl PyAgent {
                 },
             }))
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
+            Python::attach(|py| {
+                wrap_linked_agent(
+                    py,
+                    built,
+                    output_adapter,
+                    artifact_store,
+                    compaction_authorization,
+                )
+            })
         })
     }
 
@@ -730,7 +774,7 @@ impl PyAgent {
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter) = split_linked_ports(ports);
+            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
             let built = Agent::linked(LinkedProviderSpec::Gateway(GatewayAgentSpec {
                 endpoint,
                 model,
@@ -750,7 +794,15 @@ impl PyAgent {
                 },
             }))
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter, artifact_store))
+            Python::attach(|py| {
+                wrap_linked_agent(
+                    py,
+                    built,
+                    output_adapter,
+                    artifact_store,
+                    compaction_authorization,
+                )
+            })
         })
     }
 
@@ -858,6 +910,7 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
+        let compaction_authorization = self.compaction_authorization.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             match agent.re_resolve().await {
                 Ok(inner) => Python::attach(|py| {
@@ -870,6 +923,7 @@ impl PyAgent {
                             settings,
                             default_timeout_seconds,
                             artifact_store,
+                            compaction_authorization,
                         },
                     )
                 }),
@@ -976,6 +1030,7 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
+        let compaction_authorization = self.compaction_authorization.clone();
         let attachments = collect_attachments(py, attachments);
         py.detach(move || {
             let runtime = pyo3_async_runtimes::tokio::get_runtime();
@@ -995,6 +1050,7 @@ impl PyAgent {
                 settings,
                 "python-local",
                 staged,
+                compaction_authorization,
             )?;
             agent.start(request).map(|inner| PyRun {
                 inner,
@@ -1070,6 +1126,7 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
+        let compaction_authorization = self.compaction_authorization.clone();
         let attachments = collect_attachments(py, attachments);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let staged =
@@ -1088,6 +1145,7 @@ impl PyAgent {
                 settings,
                 "python-local",
                 staged,
+                compaction_authorization,
             ) {
                 Ok(request) => request,
                 Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
@@ -1134,6 +1192,7 @@ impl PyAgent {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         let artifact_store = Arc::clone(&self.artifact_store);
+        let compaction_authorization = self.compaction_authorization.clone();
         let attachments = collect_attachments(py, attachments);
         let lane = lane.clone();
         let tenant_scope = lane.session().tenant_scope().to_string();
@@ -1155,6 +1214,7 @@ impl PyAgent {
                 settings,
                 &tenant_scope,
                 staged,
+                compaction_authorization,
             )?;
             lane.run(&agent, request).map(|inner| PyRun {
                 inner,
@@ -1165,7 +1225,13 @@ impl PyAgent {
     }
 }
 
-fn split_linked_ports(ports: LinkedPorts) -> (LinkedAgentPorts, Option<Py<PyAny>>) {
+type SplitLinkedPorts = (
+    LinkedAgentPorts,
+    Option<Py<PyAny>>,
+    Option<CompactionAuthorization>,
+);
+
+fn split_linked_ports(ports: LinkedPorts) -> SplitLinkedPorts {
     (
         LinkedAgentPorts {
             toolsets: ports.toolsets,
@@ -1176,6 +1242,7 @@ fn split_linked_ports(ports: LinkedPorts) -> (LinkedAgentPorts, Option<Py<PyAny>
             output_schema: ports.output.as_ref().map(|output| output.schema.clone()),
         },
         ports.output.map(|output| output.adapter),
+        ports.compaction_authorization,
     )
 }
 
@@ -1184,6 +1251,7 @@ fn wrap_linked_agent(
     built: Result<LinkedAgent, AgentRunError>,
     output_adapter: Option<Py<PyAny>>,
     artifact_store: Arc<dyn ArtifactStore>,
+    compaction_authorization: Option<CompactionAuthorization>,
 ) -> PyResult<Py<PyAgent>> {
     match built {
         Ok(value) => Py::new(
@@ -1195,6 +1263,7 @@ fn wrap_linked_agent(
                 settings: value.settings,
                 default_timeout_seconds: value.default_timeout.as_secs_f64(),
                 artifact_store,
+                compaction_authorization,
             },
         ),
         Err(error) => Err(agent_error(py, &error, None)),
@@ -1203,6 +1272,7 @@ fn wrap_linked_agent(
 
 struct LinkedPorts {
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
+    compaction_authorization: Option<CompactionAuthorization>,
     artifact_store: Option<Arc<dyn ArtifactStore>>,
     context_providers: Vec<(
         ComponentRef,
@@ -1330,8 +1400,12 @@ fn linked_ports(
         .map(|toolset| toolset.registration(py, &dyn_artifact_store))
         .collect::<PyResult<Vec<_>>>()?;
     toolsets.push(document_toolset);
-    let mut middleware: Vec<(ComponentRef, Arc<dyn Middleware>)> = middleware
-        .unwrap_or_default()
+    let middleware_args = middleware.unwrap_or_default();
+    let compaction_authorization = middleware_args.iter().find_map(|entry| match entry {
+        PyMiddlewareArg::Compaction(handle) => handle.bind(py).borrow().authorization(),
+        _ => None,
+    });
+    let mut middleware: Vec<(ComponentRef, Arc<dyn Middleware>)> = middleware_args
         .into_iter()
         .map(|middleware| middleware.registration(py))
         .collect();
@@ -1339,6 +1413,7 @@ fn linked_ports(
     Ok((
         LinkedPorts {
             toolsets,
+            compaction_authorization,
             artifact_store: Some(Arc::clone(&dyn_artifact_store)),
             context_providers: context_providers
                 .unwrap_or_default()
@@ -1386,6 +1461,7 @@ async fn build_python_agent(
         "python.store.memory"
     };
     let store = open_journal_store(sqlite.0, sqlite.1, sqlite.2).await?;
+    let compaction_authorization = ports.compaction_authorization.clone();
     let output = ports.output;
     let mut builder = Agent::builder(
         AgentId::parse("python.agent.callbacks")
@@ -1434,6 +1510,7 @@ async fn build_python_agent(
         settings: built.settings,
         default_timeout_seconds: built.default_timeout.as_secs_f64(),
         artifact_store,
+        compaction_authorization,
     })
 }
 

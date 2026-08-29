@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::ports::middleware::Middleware;
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{
+    BudgetScopeId, CompactionAuthorization, ComponentId, ComponentRef, Digest, Sensitivity, Version,
+};
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_instructions::{
     InstructionsMiddleware, PolicyEntry, PolicyInstructionsConfig,
@@ -110,10 +112,14 @@ const COMPACTION_VERSION: Version = Version {
 pub(crate) struct PyCompactionMiddleware {
     component: ComponentRef,
     inner: Arc<CompactionMiddleware>,
+    authorization: Option<CompactionAuthorization>,
 }
 
 impl PyCompactionMiddleware {
-    fn from_config(config: CompactionConfig) -> PyResult<Self> {
+    fn from_config(
+        config: CompactionConfig,
+        authorization: Option<CompactionAuthorization>,
+    ) -> PyResult<Self> {
         let middleware = CompactionMiddleware::try_new(config)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let component = ComponentId::parse(COMPACTION_COMPONENT)
@@ -122,7 +128,14 @@ impl PyCompactionMiddleware {
         Ok(Self {
             component,
             inner: Arc::new(middleware),
+            authorization,
         })
+    }
+
+    /// The durable exact-model authorization every run must carry when the
+    /// summarize strategy is registered.
+    pub(crate) fn authorization(&self) -> Option<CompactionAuthorization> {
+        self.authorization.clone()
     }
 
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
@@ -136,10 +149,10 @@ impl PyCompactionMiddleware {
     #[staticmethod]
     #[pyo3(signature = (threshold_tokens, hysteresis_tokens))]
     fn sliding_window(threshold_tokens: u64, hysteresis_tokens: u64) -> PyResult<Self> {
-        Self::from_config(CompactionConfig::sliding_window(
-            threshold_tokens,
-            hysteresis_tokens,
-        ))
+        Self::from_config(
+            CompactionConfig::sliding_window(threshold_tokens, hysteresis_tokens),
+            None,
+        )
     }
 
     /// Truncate large tool-result bodies while keeping call/result pairs.
@@ -150,11 +163,43 @@ impl PyCompactionMiddleware {
         hysteresis_tokens: u64,
         max_body_bytes: usize,
     ) -> PyResult<Self> {
-        Self::from_config(CompactionConfig::large_tool_output(
-            threshold_tokens,
-            hysteresis_tokens,
-            max_body_bytes,
-        ))
+        Self::from_config(
+            CompactionConfig::large_tool_output(
+                threshold_tokens,
+                hysteresis_tokens,
+                max_body_bytes,
+            ),
+            None,
+        )
+    }
+
+    /// Summarize older context through a runtime-authorized secondary model.
+    ///
+    /// `model_component` names the registered model the summaries run on
+    /// (for `Agent.from_python`, the `PythonModel`'s component); the
+    /// binding folds the matching durable authorization into every run's
+    /// security context automatically.
+    #[staticmethod]
+    #[pyo3(signature = (threshold_tokens, hysteresis_tokens, *, model_component, budget_scope, residency_label = "python-residency"))]
+    fn summarize(
+        threshold_tokens: u64,
+        hysteresis_tokens: u64,
+        model_component: &str,
+        budget_scope: &str,
+        residency_label: &str,
+    ) -> PyResult<Self> {
+        let model = ComponentId::parse(model_component)
+            .map(|id| ComponentRef::new(id, None))
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let budget = BudgetScopeId::parse(budget_scope)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let digest = Digest::raw_json(residency_label.as_bytes());
+        let authorization =
+            CompactionAuthorization::new(model.clone(), Sensitivity::Internal, digest);
+        Self::from_config(
+            CompactionConfig::summarize(threshold_tokens, hysteresis_tokens, model, budget, digest),
+            Some(authorization),
+        )
     }
 
     /// Exact registered component identity.

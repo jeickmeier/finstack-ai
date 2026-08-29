@@ -116,3 +116,64 @@ def test_one_strategy_per_instance() -> None:
             raise AssertionError("expected duplicate-component rejection")
 
     asyncio.run(exercise())
+
+
+def test_summarize_strategy_summarizes_via_authorized_model() -> None:
+    """A tiny summarize threshold routes a compaction model request to the
+    registered model and lands the summary in the model-visible view."""
+    captured: list[dict[str, Any]] = []
+    calls = 0
+
+    async def callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        del context
+        nonlocal calls
+        calls += 1
+        captured.append(request)
+        return {"text": "acknowledged", "completion_id": f"python-summarize-{calls}"}
+
+    model = finstack_ai.PythonModel(
+        callback,
+        component="python.model.summarize",
+        provider="python-fixture",
+        model="python-fixture-model",
+        context_window_tokens=131_072,
+    )
+
+    async def exercise() -> None:
+        # Threshold above one turn but below two: turn one passes, turn two
+        # summarizes the prior turn through the authorized model.
+        agent = await finstack_ai.Agent.from_python(
+            model,
+            middleware=[
+                finstack_ai.CompactionMiddleware.summarize(
+                    1_000,
+                    0,
+                    model_component="python.model.summarize",
+                    budget_scope="01234567-89ab-7cde-89ab-0123456789ab",
+                )
+            ],
+        )
+        session = await agent.create_session("python-local")
+        lane = await session.lane("main")
+        first = lane.run(agent, "SUMMARIZE_ME " * 90)
+        assert (await first.result()).text == "acknowledged"
+        second = lane.run(agent, "FOLLOW_UP " * 90)
+        assert (await second.result()).text == "acknowledged"
+
+    asyncio.run(exercise())
+
+    # The scripted model served at least one extra (summary) request.
+    assert calls >= 3, calls
+
+
+def test_summarize_invalid_budget_scope_rejected() -> None:
+    try:
+        finstack_ai.CompactionMiddleware.summarize(
+            64, 0, model_component="python.model.x", budget_scope="not-a-uuid"
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected a ValueError for an invalid budget scope")

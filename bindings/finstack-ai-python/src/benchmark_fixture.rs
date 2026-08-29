@@ -110,6 +110,7 @@ async fn run_native_workload(deltas: usize, runs: usize) -> Result<u64, AgentRun
             empty_model_settings()?,
             "python-local",
             Vec::new(),
+            None,
         )?;
         let output = agent.inner.start(request)?.result().await?;
         black_box(output);
@@ -172,6 +173,7 @@ async fn build_agent(
             // middleware, so these are unused, dedicated instances rather
             // than the shared ones a real agent factory wires up.
             artifact_store: Arc::new(InProcessArtifactStore::default()),
+            compaction_authorization: None,
         },
         PyBenchmarkControl { model, control },
     ))

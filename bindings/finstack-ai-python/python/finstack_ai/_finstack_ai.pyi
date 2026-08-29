@@ -456,6 +456,37 @@ class CompactionMiddleware:
         Raises:
             ValueError: The thresholds or byte ceiling are invalid.
         """
+    @staticmethod
+    def summarize(
+        threshold_tokens: int,
+        hysteresis_tokens: int,
+        *,
+        model_component: str,
+        budget_scope: str,
+        residency_label: str = "python-residency",
+    ) -> CompactionMiddleware:
+        """Summarize older context through a runtime-authorized model.
+
+        ``model_component`` names the registered model summaries run on
+        (for :meth:`Agent.from_python`, the :class:`PythonModel`'s
+        component id); the binding folds the matching durable
+        authorization into every run's security context automatically.
+
+        Args:
+            threshold_tokens: Token count that triggers compaction. Must
+                be greater than zero.
+            hysteresis_tokens: Extra tokens reclaimed below the threshold
+                before compaction stops.
+            model_component: Registered model component id authorized to
+                produce summaries.
+            budget_scope: UUID budget scope charged for summary requests.
+            residency_label: Label digested into the residency/egress
+                policy authorization.
+
+        Raises:
+            ValueError: The component id, budget scope, or thresholds are
+                invalid.
+        """
     @property
     def component(self) -> str:
         """Stable component identifier for the compaction middleware."""
