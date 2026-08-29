@@ -51,6 +51,7 @@ finstack-ai-provider-openrouter = { workspace = true, features = ["vendored-tls"
 finstack-ai-store-artifact = { workspace = true, features = ["local"] }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
+finstack-ai-tools-calculator = { workspace = true }
 finstack-ai-tools-document = { workspace = true }
 finstack-ai-tools-elicitation = { workspace = true }
 finstack-ai-tools-fetch = { workspace = true, features = ["vendored-tls"] }

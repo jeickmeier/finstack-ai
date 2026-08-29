@@ -47,6 +47,7 @@ mod run;
 mod session;
 mod skills;
 mod store;
+mod toolsets;
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
@@ -80,6 +81,7 @@ use run::{PyAttachment, PyRun, PyRunResult};
 use session::{PyLane, PyMemoryExternalIdentityMap, PySession};
 use skills::PySkillsToolset;
 use store::PySqliteDurability;
+use toolsets::PyCalculatorToolset;
 
 pub(crate) const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -166,6 +168,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyBillingObserver>()?;
     module.add_class::<PyNotifyObserver>()?;
     module.add_class::<PySkillsToolset>()?;
+    module.add_class::<PyCalculatorToolset>()?;
     module.add_class::<PyPythonObserver>()?;
     module.add_function(wrap_pyfunction!(health, module)?)?;
     module.add_function(wrap_pyfunction!(build_metadata, module)?)?;

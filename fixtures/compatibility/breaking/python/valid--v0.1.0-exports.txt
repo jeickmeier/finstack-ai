@@ -3,6 +3,7 @@ ApprovalGrantMode
 Attachment
 BillingObserver
 BuildMetadata
+CalculatorToolset
 CallbackContext
 CancelledError
 Capability

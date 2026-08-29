@@ -43,6 +43,28 @@ class TimeoutError(FinstackError):
     Typical ``code`` is ``agent_run_timeout``.
     """
 
+class CalculatorToolset:
+    """Deterministic arithmetic toolset backed by the Rust implementation.
+
+    Exposes one ``calculator`` tool taking ``{"operation": "add" |
+    "subtract" | "multiply" | "divide", "operands": [number, ...]}``.
+    Pass instances via the ``toolsets=[...]`` parameter of any
+    :class:`Agent` factory.
+    """
+
+    def __init__(self, component: str = "python.tools.calculator") -> None:
+        """Construct the calculator toolset.
+
+        Args:
+            component: Component id to register the toolset under.
+
+        Raises:
+            ValueError: The component id is invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the calculator toolset."""
+
 class CallbackContext:
     """Immutable identity and cancellation view for one callback invocation.
 
@@ -1497,6 +1519,7 @@ class Agent:
             | MemoryToolset
             | HttpFetchToolset
             | E2bSandboxToolset
+            | CalculatorToolset
         ]
         | None = None,
         context_providers: list[
@@ -1612,6 +1635,7 @@ class Agent:
             | MemoryToolset
             | HttpFetchToolset
             | E2bSandboxToolset
+            | CalculatorToolset
         ]
         | None = None,
         context_providers: list[
@@ -1732,6 +1756,7 @@ class Agent:
             | MemoryToolset
             | HttpFetchToolset
             | E2bSandboxToolset
+            | CalculatorToolset
         ]
         | None = None,
         context_providers: list[
@@ -1836,6 +1861,7 @@ class Agent:
             | MemoryToolset
             | HttpFetchToolset
             | E2bSandboxToolset
+            | CalculatorToolset
         ]
         | None = None,
         context_providers: list[
@@ -1935,7 +1961,12 @@ class Agent:
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
         toolsets: list[
-            PythonToolset | ElicitationToolset | MemoryToolset | E2bSandboxToolset
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
+            | CalculatorToolset
         ]
         | None = None,
         context_providers: list[
@@ -2037,6 +2068,7 @@ class Agent:
             | MemoryToolset
             | HttpFetchToolset
             | E2bSandboxToolset
+            | CalculatorToolset
         ]
         | None = None,
         context_providers: list[
@@ -2136,6 +2168,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | SkillsToolset
+            | CalculatorToolset
         ]
         | None = None,
         instruction: str | None = None,
@@ -2177,6 +2210,7 @@ class Agent:
             | MemoryToolset
             | HttpFetchToolset
             | E2bSandboxToolset
+            | CalculatorToolset
         ]
         | None = None,
     ) -> Agent:

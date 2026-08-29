@@ -157,7 +157,7 @@
     },
     {
       "crate": "finstack-ai-tools-calculator",
-      "python": {"status": "unavailable", "reason": "Application-injected toolset; bindings expose generic host toolset adapters instead."},
+      "python": {"status": "direct", "surfaces": ["CalculatorToolset"]},
       "js": {"status": "unavailable", "reason": "Application-injected toolset; bindings expose generic host toolset adapters instead."}
     },
     {
