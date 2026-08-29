@@ -407,6 +407,112 @@ class E2bSandboxToolset:
     def tool_count(self) -> int:
         """Number of E2B sandbox tools exposed to the model."""
 
+class MetricsObserver:
+    """Prometheus text-exposition metrics observer backed by the Rust implementation.
+
+    Metadata-only: aggregates run, effect, and latency counters and
+    renders them in Prometheus text format. Pass instances via the
+    ``observers=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(self) -> None:
+        """Construct the metadata-only metrics observer."""
+    def encode_prometheus(self) -> str:
+        """Render the aggregated counters in Prometheus text format."""
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the metrics observer."""
+
+class OtelObserver:
+    """OpenTelemetry span observer with an in-process capture buffer.
+
+    Spans carry identifier and classification attributes only unless a
+    public body is authorized by ``payload_mode``. Pass instances via the
+    ``observers=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(
+        self, payload_mode: str = "metadata_only", capture_capacity: int = 1024
+    ) -> None:
+        """Construct the observer with a bounded in-memory span capture.
+
+        Args:
+            payload_mode: ``"metadata_only"``, ``"redacted"``, or
+                ``"full"``.
+            capture_capacity: Maximum retained spans (oldest evicted).
+
+        Raises:
+            ValueError: The capture capacity is out of bounds.
+            TypeError: The payload mode is unsupported.
+        """
+    def spans(self) -> list[dict[str, Any]]:
+        """Snapshot captured spans as ``{"name", "attributes"}`` mappings."""
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the otel observer."""
+
+class BillingObserver:
+    """Bounded in-memory billing ledger observer backed by the Rust implementation.
+
+    Aggregates spend and usage attribution rows per run. Pass instances
+    via the ``observers=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(self, max_entries: int = 1024) -> None:
+        """Construct the ledger with a bounded entry count.
+
+        Args:
+            max_entries: Maximum retained ledger entries.
+
+        Raises:
+            ValueError: The bound is zero or above the crate ceiling.
+        """
+    def export_jsonl(self) -> str:
+        """Render the ledger as JSON lines for reconciliation."""
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the billing observer."""
+
+class NotifyObserver:
+    """Announce-only interaction lifecycle observer over a Python sink.
+
+    The sink callable receives one JSON string per interaction lifecycle
+    event (identifiers and whitelisted detail only — never prompt content
+    or resolution payloads). A raising sink counts as a failed delivery
+    once the policy's attempts are exhausted. Pass instances via the
+    ``observers=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(
+        self,
+        sink: Callable[[str], Any],
+        *,
+        request_timeout_ms: int = 1000,
+        max_attempts: int = 1,
+        retry_backoff_ms: int = 0,
+    ) -> None:
+        """Construct the observer over a Python sink callable.
+
+        Args:
+            sink: Synchronous callable receiving one notification JSON
+                string per lifecycle event.
+            request_timeout_ms: Per-delivery timeout (100ms..60s).
+            max_attempts: Delivery attempts (1..5).
+            retry_backoff_ms: Backoff between attempts (at most 10s).
+
+        Raises:
+            ValueError: The delivery policy is out of bounds.
+        """
+    @property
+    def delivered(self) -> int:
+        """Notifications delivered successfully."""
+    @property
+    def failed(self) -> int:
+        """Notifications dropped after exhausting delivery attempts."""
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the notify observer."""
+
 class LogObserver:
     """Structured NDJSON run-event observer backed by the Rust implementation.
 
@@ -1406,7 +1512,16 @@ class Agent:
             | ToolPolicyMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
+        observers: list[
+            PythonObserver
+            | MemoryObserver
+            | LogObserver
+            | MetricsObserver
+            | OtelObserver
+            | BillingObserver
+            | NotifyObserver
+        ]
+        | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1512,7 +1627,16 @@ class Agent:
             | ToolPolicyMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
+        observers: list[
+            PythonObserver
+            | MemoryObserver
+            | LogObserver
+            | MetricsObserver
+            | OtelObserver
+            | BillingObserver
+            | NotifyObserver
+        ]
+        | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1623,7 +1747,16 @@ class Agent:
             | ToolPolicyMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
+        observers: list[
+            PythonObserver
+            | MemoryObserver
+            | LogObserver
+            | MetricsObserver
+            | OtelObserver
+            | BillingObserver
+            | NotifyObserver
+        ]
+        | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1718,7 +1851,16 @@ class Agent:
             | ToolPolicyMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
+        observers: list[
+            PythonObserver
+            | MemoryObserver
+            | LogObserver
+            | MetricsObserver
+            | OtelObserver
+            | BillingObserver
+            | NotifyObserver
+        ]
+        | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1809,7 +1951,16 @@ class Agent:
             | ToolPolicyMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
+        observers: list[
+            PythonObserver
+            | MemoryObserver
+            | LogObserver
+            | MetricsObserver
+            | OtelObserver
+            | BillingObserver
+            | NotifyObserver
+        ]
+        | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1901,7 +2052,16 @@ class Agent:
             | ToolPolicyMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
+        observers: list[
+            PythonObserver
+            | MemoryObserver
+            | LogObserver
+            | MetricsObserver
+            | OtelObserver
+            | BillingObserver
+            | NotifyObserver
+        ]
+        | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1995,7 +2155,16 @@ class Agent:
             | ToolPolicyMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
+        observers: list[
+            PythonObserver
+            | MemoryObserver
+            | LogObserver
+            | MetricsObserver
+            | OtelObserver
+            | BillingObserver
+            | NotifyObserver
+        ]
+        | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,

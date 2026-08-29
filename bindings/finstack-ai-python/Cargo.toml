@@ -37,7 +37,11 @@ finstack-ai-middleware-instructions = { workspace = true }
 finstack-ai-middleware-redaction = { workspace = true }
 finstack-ai-middleware-tool-policy = { workspace = true }
 finstack-ai-middleware-verify = { workspace = true }
+finstack-ai-observer-billing = { workspace = true }
 finstack-ai-observer-log = { workspace = true }
+finstack-ai-observer-metrics = { workspace = true }
+finstack-ai-observer-notify = { workspace = true }
+finstack-ai-observer-otel = { workspace = true }
 finstack-ai-protocol = { workspace = true }
 finstack-ai-provider-anthropic = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-provider-gemini = { workspace = true, features = ["vendored-tls"] }

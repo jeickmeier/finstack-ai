@@ -164,8 +164,10 @@
     {
       "crate": "finstack-ai-observer-billing",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected observer; bindings expose generic host observer adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "BillingObserver"
+        ]
       },
       "js": {
         "status": "unavailable",
@@ -188,8 +190,10 @@
     {
       "crate": "finstack-ai-observer-metrics",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected observer; bindings expose generic host observer adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "MetricsObserver"
+        ]
       },
       "js": {
         "status": "unavailable",
@@ -199,8 +203,10 @@
     {
       "crate": "finstack-ai-observer-notify",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected observer; bindings expose generic host observer adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "NotifyObserver"
+        ]
       },
       "js": {
         "status": "unavailable",
@@ -210,8 +216,10 @@
     {
       "crate": "finstack-ai-observer-otel",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected observer; bindings expose generic host observer adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "OtelObserver"
+        ]
       },
       "js": {
         "status": "unavailable",

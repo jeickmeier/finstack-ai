@@ -68,7 +68,9 @@ use middleware::{
     PyCompactionMiddleware, PyInstructionsMiddleware, PyRedactionMiddleware,
     PyToolPolicyMiddleware, PyVerifyMiddleware,
 };
-use observers::PyLogObserver;
+use observers::{
+    PyBillingObserver, PyLogObserver, PyMetricsObserver, PyNotifyObserver, PyOtelObserver,
+};
 use protocol::{
     _normalize_pydantic_schema, build_metadata, health, journal_known_answer, linked_providers,
     normalize_prebeta_shape,
@@ -159,6 +161,10 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyToolPolicyMiddleware>()?;
     module.add_class::<PyRepositoryContextProvider>()?;
     module.add_class::<PyLogObserver>()?;
+    module.add_class::<PyMetricsObserver>()?;
+    module.add_class::<PyOtelObserver>()?;
+    module.add_class::<PyBillingObserver>()?;
+    module.add_class::<PyNotifyObserver>()?;
     module.add_class::<PySkillsToolset>()?;
     module.add_class::<PyPythonObserver>()?;
     module.add_function(wrap_pyfunction!(health, module)?)?;

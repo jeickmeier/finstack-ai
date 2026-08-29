@@ -40,7 +40,9 @@ use crate::middleware::{
     PyCompactionMiddleware, PyInstructionsMiddleware, PyRedactionMiddleware,
     PyToolPolicyMiddleware, PyVerifyMiddleware,
 };
-use crate::observers::PyLogObserver;
+use crate::observers::{
+    PyBillingObserver, PyLogObserver, PyMetricsObserver, PyNotifyObserver, PyOtelObserver,
+};
 use crate::repository::PyRepositoryContextProvider;
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
@@ -157,6 +159,14 @@ pub(crate) enum PyObserverArg {
     Memory(Py<PyMemoryObserver>),
     /// Rust structured NDJSON log observer.
     Log(Py<PyLogObserver>),
+    /// Rust Prometheus metrics observer.
+    Metrics(Py<PyMetricsObserver>),
+    /// Rust OpenTelemetry span observer.
+    Otel(Py<PyOtelObserver>),
+    /// Rust bounded billing ledger observer.
+    Billing(Py<PyBillingObserver>),
+    /// Rust interaction lifecycle notify observer.
+    Notify(Py<PyNotifyObserver>),
 }
 
 impl PyObserverArg {
@@ -171,6 +181,10 @@ impl PyObserverArg {
             Self::Python(observer) => observer.bind(py).borrow().registration(),
             Self::Memory(observer) => observer.bind(py).borrow().registration(),
             Self::Log(observer) => observer.bind(py).borrow().registration(),
+            Self::Metrics(observer) => observer.bind(py).borrow().registration(),
+            Self::Otel(observer) => observer.bind(py).borrow().registration(),
+            Self::Billing(observer) => observer.bind(py).borrow().registration(),
+            Self::Notify(observer) => observer.bind(py).borrow().registration(),
         }
     }
 }

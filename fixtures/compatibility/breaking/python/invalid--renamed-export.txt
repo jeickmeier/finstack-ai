@@ -1,6 +1,7 @@
 AgentRenamed
 ApprovalGrantMode
 Attachment
+BillingObserver
 BuildMetadata
 CallbackContext
 CancelledError
@@ -25,6 +26,9 @@ MemoryExtension
 MemoryExternalIdentityMap
 MemoryObserver
 MemoryToolset
+MetricsObserver
+NotifyObserver
+OtelObserver
 ParsedDocument
 PydanticTool
 PythonContextProvider
