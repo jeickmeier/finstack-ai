@@ -9,6 +9,7 @@ use finstack_ai_middleware_instructions::{
     InstructionsMiddleware, PolicyEntry, PolicyInstructionsConfig,
 };
 use finstack_ai_middleware_redaction::{OutputPolicy, RedactionConfig, RedactionMiddleware};
+use finstack_ai_middleware_tool_policy::{JailbreakAction, ToolPolicyConfig, ToolPolicyMiddleware};
 use finstack_ai_middleware_verify::{
     EvidenceFinding, EvidenceFindings, EvidenceKind, EvidenceVerifier, Verdict, VerifyMiddleware,
     VerifyPolicy,
@@ -423,6 +424,130 @@ impl PyRedactionMiddleware {
 }
 
 impl PyRedactionMiddleware {
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
+        (self.component.clone(), self.inner.clone())
+    }
+}
+
+const TOOL_POLICY_COMPONENT: &str = "finstack.middleware.tool-policy";
+
+/// `ToolPolicyMiddleware`'s declared invocation version
+/// (`TOOL_POLICY_VERSION` in `finstack-ai-middleware-tool-policy::lib`).
+const TOOL_POLICY_VERSION: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
+
+fn tool_ids(
+    names: Vec<String>,
+) -> PyResult<std::collections::BTreeSet<finstack_ai_kernel::ToolId>> {
+    names
+        .into_iter()
+        .map(|name| {
+            finstack_ai_kernel::ToolId::parse(&name)
+                .map_err(|error| PyValueError::new_err(error.to_string()))
+        })
+        .collect()
+}
+
+/// Policy filter middleware that narrows the model-visible tool set.
+///
+/// Exposes the crate's deny-by-default rule slots verbatim: a per-role
+/// tool allowlist (with a default set for unmapped roles), a per-run
+/// write-call budget, jailbreak trigger patterns, and a child-agent depth
+/// gate. At least one rule is required. Tools are named by their stable
+/// tool ids (the spec ``id`` field), not their model names.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "ToolPolicyMiddleware",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyToolPolicyMiddleware {
+    component: ComponentRef,
+    inner: Arc<ToolPolicyMiddleware>,
+}
+
+#[pymethods]
+impl PyToolPolicyMiddleware {
+    /// Build the middleware from the crate's rule slots.
+    #[new]
+    #[pyo3(signature = (*, role_allowlist = None, default_allowed = None, write_budget = None, jailbreak_patterns = None, jailbreak_action = "fail", jailbreak_restrict_to = None, child_depth_max = None, child_depth_restricted = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one keyword-only slot per crate policy rule"
+    )]
+    fn new(
+        role_allowlist: Option<std::collections::BTreeMap<String, Vec<String>>>,
+        default_allowed: Option<Vec<String>>,
+        write_budget: Option<u32>,
+        jailbreak_patterns: Option<Vec<String>>,
+        jailbreak_action: &str,
+        jailbreak_restrict_to: Option<Vec<String>>,
+        child_depth_max: Option<u16>,
+        child_depth_restricted: Option<Vec<String>>,
+    ) -> PyResult<Self> {
+        let mut config = ToolPolicyConfig::new();
+        if role_allowlist.is_some() || default_allowed.is_some() {
+            let roles = role_allowlist
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(role, tools)| Ok((Arc::from(role), tool_ids(tools)?)))
+                .collect::<PyResult<std::collections::BTreeMap<_, _>>>()?;
+            config = config
+                .with_role_allowlist(roles, tool_ids(default_allowed.unwrap_or_default())?)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        if let Some(budget) = write_budget {
+            config = config
+                .with_write_budget(budget)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        if let Some(patterns) = jailbreak_patterns {
+            let action = match jailbreak_action {
+                "fail" => JailbreakAction::Fail,
+                "restrict_to" => JailbreakAction::RestrictTo(tool_ids(
+                    jailbreak_restrict_to.unwrap_or_default(),
+                )?),
+                _ => {
+                    return Err(PyValueError::new_err(
+                        "jailbreak_action must be \"fail\" or \"restrict_to\"",
+                    ));
+                }
+            };
+            config = config
+                .with_jailbreak_triggers(patterns.into_iter().map(Arc::from).collect(), action)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        if let Some(max_depth) = child_depth_max {
+            config = config
+                .with_child_depth_gate(
+                    max_depth,
+                    tool_ids(child_depth_restricted.unwrap_or_default())?,
+                )
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        let middleware = ToolPolicyMiddleware::try_new(config)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let component = ComponentId::parse(TOOL_POLICY_COMPONENT)
+            .map(|id| ComponentRef::new(id, Some(TOOL_POLICY_VERSION)))
+            .map_err(|_| PyValueError::new_err("tool-policy component id is invalid"))?;
+        Ok(Self {
+            component,
+            inner: Arc::new(middleware),
+        })
+    }
+
+    /// Exact registered component identity.
+    #[getter]
+    fn component(&self) -> String {
+        self.component.id().to_string()
+    }
+}
+
+impl PyToolPolicyMiddleware {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
         (self.component.clone(), self.inner.clone())
     }

@@ -1108,6 +1108,51 @@ class RedactionMiddleware:
     def component(self) -> str:
         """Stable component identifier for the redaction middleware."""
 
+class ToolPolicyMiddleware:
+    """Policy filter middleware that narrows the model-visible tool set.
+
+    Exposes the Rust crate's deny-by-default rule slots verbatim: a
+    per-role tool allowlist (with a default set for unmapped roles), a
+    per-run write-call budget, jailbreak trigger patterns, and a
+    child-agent depth gate. At least one rule is required. Tools are
+    named by their stable tool ids (the spec ``id`` field), not their
+    model names. Pass instances via the ``middleware=[...]`` parameter of
+    any :class:`Agent` factory.
+    """
+
+    def __init__(
+        self,
+        *,
+        role_allowlist: dict[str, list[str]] | None = None,
+        default_allowed: list[str] | None = None,
+        write_budget: int | None = None,
+        jailbreak_patterns: list[str] | None = None,
+        jailbreak_action: str = "fail",
+        jailbreak_restrict_to: list[str] | None = None,
+        child_depth_max: int | None = None,
+        child_depth_restricted: list[str] | None = None,
+    ) -> None:
+        """Build the middleware from the crate's rule slots.
+
+        Args:
+            role_allowlist: Allowed tool ids per principal role.
+            default_allowed: Allowed tool ids for unmapped roles.
+            write_budget: Maximum write-classified tool calls per run.
+            jailbreak_patterns: Case-insensitive trigger substrings.
+            jailbreak_action: ``"fail"`` or ``"restrict_to"``.
+            jailbreak_restrict_to: Tool ids retained when a trigger fires
+                with ``jailbreak_action="restrict_to"``.
+            child_depth_max: Relation depth at which ``child_depth_restricted``
+                tools are hidden.
+            child_depth_restricted: Tool ids hidden at or beyond the depth.
+
+        Raises:
+            ValueError: No rule is configured, or a rule is invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the tool-policy middleware."""
+
 class VerifyMiddleware:
     """Deterministic content-verification middleware backed by the Rust implementation.
 
@@ -1358,6 +1403,7 @@ class Agent:
             | CompactionMiddleware
             | VerifyMiddleware
             | RedactionMiddleware
+            | ToolPolicyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1463,6 +1509,7 @@ class Agent:
             | CompactionMiddleware
             | VerifyMiddleware
             | RedactionMiddleware
+            | ToolPolicyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1573,6 +1620,7 @@ class Agent:
             | CompactionMiddleware
             | VerifyMiddleware
             | RedactionMiddleware
+            | ToolPolicyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1667,6 +1715,7 @@ class Agent:
             | CompactionMiddleware
             | VerifyMiddleware
             | RedactionMiddleware
+            | ToolPolicyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1757,6 +1806,7 @@ class Agent:
             | CompactionMiddleware
             | VerifyMiddleware
             | RedactionMiddleware
+            | ToolPolicyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1848,6 +1898,7 @@ class Agent:
             | CompactionMiddleware
             | VerifyMiddleware
             | RedactionMiddleware
+            | ToolPolicyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1941,6 +1992,7 @@ class Agent:
             | CompactionMiddleware
             | VerifyMiddleware
             | RedactionMiddleware
+            | ToolPolicyMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,

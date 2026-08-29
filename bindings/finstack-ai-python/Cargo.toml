@@ -35,6 +35,7 @@ finstack-ai-middleware-document-ingest = { workspace = true }
 finstack-ai-middleware-compaction = { workspace = true }
 finstack-ai-middleware-instructions = { workspace = true }
 finstack-ai-middleware-redaction = { workspace = true }
+finstack-ai-middleware-tool-policy = { workspace = true }
 finstack-ai-middleware-verify = { workspace = true }
 finstack-ai-observer-log = { workspace = true }
 finstack-ai-protocol = { workspace = true }

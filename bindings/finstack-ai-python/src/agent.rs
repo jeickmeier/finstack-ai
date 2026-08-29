@@ -37,7 +37,8 @@ use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
 use crate::middleware::{
-    PyCompactionMiddleware, PyInstructionsMiddleware, PyRedactionMiddleware, PyVerifyMiddleware,
+    PyCompactionMiddleware, PyInstructionsMiddleware, PyRedactionMiddleware,
+    PyToolPolicyMiddleware, PyVerifyMiddleware,
 };
 use crate::observers::PyLogObserver;
 use crate::repository::PyRepositoryContextProvider;
@@ -130,6 +131,8 @@ pub(crate) enum PyMiddlewareArg {
     Verify(Py<PyVerifyMiddleware>),
     /// Rust fail-soft PII/secret redaction middleware.
     Redaction(Py<PyRedactionMiddleware>),
+    /// Rust tool-policy filter middleware.
+    ToolPolicy(Py<PyToolPolicyMiddleware>),
 }
 
 impl PyMiddlewareArg {
@@ -140,6 +143,7 @@ impl PyMiddlewareArg {
             Self::Compaction(middleware) => middleware.bind(py).borrow().registration(),
             Self::Verify(middleware) => middleware.bind(py).borrow().registration(),
             Self::Redaction(middleware) => middleware.bind(py).borrow().registration(),
+            Self::ToolPolicy(middleware) => middleware.bind(py).borrow().registration(),
         }
     }
 }

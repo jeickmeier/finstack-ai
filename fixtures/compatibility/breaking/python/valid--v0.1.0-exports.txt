@@ -43,6 +43,7 @@ SessionInspectSnapshot
 SkillsToolset
 SqliteDurability
 TimeoutError
+ToolPolicyMiddleware
 VerifyMiddleware
 __version__
 build_metadata

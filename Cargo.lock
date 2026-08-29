@@ -1729,6 +1729,7 @@ dependencies = [
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-middleware-instructions",
  "finstack-ai-middleware-redaction",
+ "finstack-ai-middleware-tool-policy",
  "finstack-ai-middleware-verify",
  "finstack-ai-observer-log",
  "finstack-ai-protocol",

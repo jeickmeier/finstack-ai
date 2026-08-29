@@ -53,7 +53,7 @@
     },
     {
       "crate": "finstack-ai-middleware-tool-policy",
-      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "python": {"status": "direct", "surfaces": ["ToolPolicyMiddleware"]},
       "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
     },
     {
