@@ -306,8 +306,15 @@ deny-by-default; Python supplies values explicitly):
   block in the pyi docstring (T2 trusted, not sandboxed).
 - [ ] **P3.4 `ShellToolset(...)`** — expose the crate's allowlist/limits
   config; denied command fails closed. Same security docstring discipline.
-- [ ] **P3.5 `SubagentToolset`** — child run over `ChildRunPolicy` (the
-  binding already has the child-run surface; wire the toolset to it).
+- [x] **P3.5 `SubagentToolset`** — DEFERRED (stop-and-file per Known Risk
+  4's rule, 2026-08-29): the toolset requires an `AgentInvoker`, and the
+  SDK has no production in-process implementation — interop ships remote/
+  codex invokers, and every in-process consumer (the subagent lane test
+  included) hand-rolls an invoker bound to a live parent `AgentRun`,
+  which the binding's `Agent.run` path never holds. Python-initiated
+  child runs remain available via `Run.start_child`. Unblock: an SDK
+  in-process invoker (change-control), then this task is the standard
+  wrapper recipe. Recorded as an explicit waiver in the parity catalog.
 - [ ] **P3.6 `McpToolset`** — stdio transport against a scripted MCP server
   double (copy the crate's own test double). Network transports stay
   config-driven.

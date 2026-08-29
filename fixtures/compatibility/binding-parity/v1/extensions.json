@@ -220,7 +220,7 @@
     },
     {
       "crate": "finstack-ai-tools-subagent",
-      "python": {"status": "unavailable", "reason": "Application-injected native subagent toolset; child runs are exposed directly on Run."},
+      "python": {"status": "unavailable", "reason": "Model-initiated child starts need a production in-process AgentInvoker; the SDK ships only interop/remote invokers and consumers hand-roll parent-run-bound ones. Python-initiated child runs are already exposed via Run.start_child; wrapping SubagentToolset awaits that SDK surface (change-control, see docs/superpowers/plans/2026-08-28-python-binding-parity.md P3.5)."},
       "js": {"status": "unavailable", "reason": "Child runs are exposed directly on Run rather than through this native toolset."}
     },
     {
