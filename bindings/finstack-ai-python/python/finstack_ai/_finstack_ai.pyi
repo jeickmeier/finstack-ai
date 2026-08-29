@@ -402,6 +402,45 @@ class E2bSandboxToolset:
     def tool_count(self) -> int:
         """Number of E2B sandbox tools exposed to the model."""
 
+class LogObserver:
+    """Structured NDJSON run-event observer backed by the Rust implementation.
+
+    Writes one JSON line per observed run event to a file (append mode) or
+    to the process's stderr. Payload visibility is bounded by
+    ``payload_mode``: ``"metadata_only"`` (default) never includes event
+    bodies, ``"redacted"`` includes only public-sensitivity bodies, and
+    ``"full"`` includes everything except credential-sensitivity bodies.
+    Pass instances via the ``observers=[...]`` parameter of any
+    :class:`Agent` factory.
+    """
+
+    def __init__(self, path: str, payload_mode: str = "metadata_only") -> None:
+        """Append NDJSON event lines to the file at ``path``.
+
+        Args:
+            path: Log file path; created if missing, appended otherwise.
+            payload_mode: ``"metadata_only"``, ``"redacted"``, or
+                ``"full"``.
+
+        Raises:
+            ValueError: The path is unwritable.
+            TypeError: The payload mode is unsupported.
+        """
+    @staticmethod
+    def stderr(payload_mode: str = "metadata_only") -> LogObserver:
+        """Write NDJSON event lines to the process's stderr.
+
+        Args:
+            payload_mode: ``"metadata_only"``, ``"redacted"``, or
+                ``"full"``.
+
+        Raises:
+            TypeError: The payload mode is unsupported.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the log observer."""
+
 class MemoryObserver:
     """Capture observer handle produced by :meth:`MemoryExtension.observer`."""
 
@@ -1211,7 +1250,7 @@ class Agent:
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1312,7 +1351,7 @@ class Agent:
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1418,7 +1457,7 @@ class Agent:
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1508,7 +1547,7 @@ class Agent:
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1594,7 +1633,7 @@ class Agent:
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1681,7 +1720,7 @@ class Agent:
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
@@ -1769,7 +1808,7 @@ class Agent:
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
         | None = None,
-        observers: list[PythonObserver | MemoryObserver] | None = None,
+        observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,

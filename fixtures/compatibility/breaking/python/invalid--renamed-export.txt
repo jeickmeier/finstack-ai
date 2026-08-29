@@ -19,6 +19,7 @@ HttpFetchToolset
 InstructionsMiddleware
 Lane
 Locator
+LogObserver
 MemoryContextProvider
 MemoryExtension
 MemoryExternalIdentityMap

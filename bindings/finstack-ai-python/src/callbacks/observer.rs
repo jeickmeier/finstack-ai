@@ -96,7 +96,7 @@ impl PyPythonObserver {
     }
 }
 
-fn parse_payload_mode(value: &str) -> PyResult<ObserverPayloadMode> {
+pub(crate) fn parse_payload_mode(value: &str) -> PyResult<ObserverPayloadMode> {
     match value {
         "metadata_only" => Ok(ObserverPayloadMode::MetadataOnly),
         "redacted" => Ok(ObserverPayloadMode::Redacted),

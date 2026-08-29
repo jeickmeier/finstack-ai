@@ -1728,6 +1728,7 @@ dependencies = [
  "finstack-ai-middleware-compaction",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-middleware-instructions",
+ "finstack-ai-observer-log",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-gemini",

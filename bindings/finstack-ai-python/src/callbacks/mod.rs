@@ -14,6 +14,6 @@ pub(crate) use context::PyCallbackContext;
 pub(crate) use context_provider::PyPythonContextProvider;
 pub(crate) use middleware::PyPythonMiddleware;
 pub(crate) use model::PyPythonModel;
-pub(crate) use observer::PyPythonObserver;
+pub(crate) use observer::{PyPythonObserver, parse_payload_mode};
 pub(crate) use schema::normalize_pydantic_schema;
 pub(crate) use toolset::PyPythonToolset;

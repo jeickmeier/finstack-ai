@@ -34,6 +34,7 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-middleware-document-ingest = { workspace = true }
 finstack-ai-middleware-compaction = { workspace = true }
 finstack-ai-middleware-instructions = { workspace = true }
+finstack-ai-observer-log = { workspace = true }
 finstack-ai-protocol = { workspace = true }
 finstack-ai-provider-anthropic = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-provider-gemini = { workspace = true, features = ["vendored-tls"] }

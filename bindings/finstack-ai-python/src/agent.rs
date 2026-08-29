@@ -37,6 +37,7 @@ use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
 use crate::middleware::{PyCompactionMiddleware, PyInstructionsMiddleware};
+use crate::observers::PyLogObserver;
 use crate::repository::PyRepositoryContextProvider;
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
@@ -136,6 +137,8 @@ pub(crate) enum PyObserverArg {
     Python(Py<PyPythonObserver>),
     /// Rust memory capture observer from `MemoryExtension.observer()`.
     Memory(Py<PyMemoryObserver>),
+    /// Rust structured NDJSON log observer.
+    Log(Py<PyLogObserver>),
 }
 
 impl PyObserverArg {
@@ -149,6 +152,7 @@ impl PyObserverArg {
         match self {
             Self::Python(observer) => observer.bind(py).borrow().registration(),
             Self::Memory(observer) => observer.bind(py).borrow().registration(),
+            Self::Log(observer) => observer.bind(py).borrow().registration(),
         }
     }
 }

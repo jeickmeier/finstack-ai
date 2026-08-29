@@ -169,8 +169,10 @@
     {
       "crate": "finstack-ai-observer-log",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected observer; bindings expose generic host observer adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "LogObserver"
+        ]
       },
       "js": {
         "status": "unavailable",
