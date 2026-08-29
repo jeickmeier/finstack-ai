@@ -75,8 +75,10 @@
     {
       "crate": "finstack-ai-middleware-compaction",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "CompactionMiddleware"
+        ]
       },
       "js": {
         "status": "unavailable",

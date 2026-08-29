@@ -31,6 +31,7 @@ finstack-ai = { workspace = true, default-features = false, features = ["native-
 finstack-ai-memory = { workspace = true, features = ["sqlite"] }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-middleware-document-ingest = { workspace = true }
+finstack-ai-middleware-compaction = { workspace = true }
 finstack-ai-middleware-instructions = { workspace = true }
 finstack-ai-protocol = { workspace = true }
 finstack-ai-provider-anthropic = { workspace = true, features = ["vendored-tls"] }

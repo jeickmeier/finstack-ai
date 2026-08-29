@@ -313,6 +313,53 @@ class HttpFetchToolset:
     def tool_count(self) -> int:
         """Number of HTTP fetch tools exposed to the model."""
 
+class CompactionMiddleware:
+    """Deterministic context-compaction middleware backed by the Rust implementation.
+
+    One instance owns one strategy; construct via the strategy factories.
+    The model-assisted ``summarize`` strategy is not exposed from Python
+    yet — it needs an authorized model reference and budget scope. Pass
+    instances via the ``middleware=[...]`` parameter of any
+    :class:`Agent` factory. Compaction rewrites only the model-visible
+    context projection; the journal keeps canonical history.
+    """
+
+    @staticmethod
+    def sliding_window(
+        threshold_tokens: int, hysteresis_tokens: int
+    ) -> CompactionMiddleware:
+        """Drop the oldest unprotected context above the token threshold.
+
+        Args:
+            threshold_tokens: Token count that triggers compaction. Must be
+                greater than zero.
+            hysteresis_tokens: Extra tokens reclaimed below the threshold
+                before compaction stops.
+
+        Raises:
+            ValueError: The thresholds are invalid.
+        """
+    @staticmethod
+    def large_tool_output(
+        threshold_tokens: int, hysteresis_tokens: int, max_body_bytes: int
+    ) -> CompactionMiddleware:
+        """Truncate large tool-result bodies while keeping call/result pairs.
+
+        Args:
+            threshold_tokens: Token count that triggers compaction. Must be
+                greater than zero.
+            hysteresis_tokens: Extra tokens reclaimed below the threshold
+                before compaction stops.
+            max_body_bytes: Per-body byte ceiling for retained tool
+                results. Must be greater than zero.
+
+        Raises:
+            ValueError: The thresholds or byte ceiling are invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the compaction middleware."""
+
 class InstructionsMiddleware:
     """Frozen policy-instruction middleware backed by the Rust implementation.
 
@@ -1130,7 +1177,10 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
+        middleware: list[
+            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+        ]
+        | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1226,7 +1276,10 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
+        middleware: list[
+            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+        ]
+        | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1327,7 +1380,10 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
+        middleware: list[
+            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+        ]
+        | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1407,7 +1463,10 @@ class Agent:
         ]
         | None = None,
         context_providers: list[PythonContextProvider] | None = None,
-        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
+        middleware: list[
+            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+        ]
+        | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1488,7 +1547,10 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
+        middleware: list[
+            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+        ]
+        | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1570,7 +1632,10 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
+        middleware: list[
+            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+        ]
+        | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1653,7 +1718,10 @@ class Agent:
         active_capabilities: list[str] | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
+        middleware: list[
+            PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
+        ]
+        | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,

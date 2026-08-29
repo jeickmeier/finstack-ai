@@ -36,7 +36,7 @@ use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
-use crate::middleware::PyInstructionsMiddleware;
+use crate::middleware::{PyCompactionMiddleware, PyInstructionsMiddleware};
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
     result_to_python_with_locator, run_request, stage_attachments,
@@ -111,6 +111,8 @@ pub(crate) enum PyMiddlewareArg {
     Python(Py<PyPythonMiddleware>),
     /// Rust frozen policy-instructions middleware.
     Instructions(Py<PyInstructionsMiddleware>),
+    /// Rust deterministic context-compaction middleware.
+    Compaction(Py<PyCompactionMiddleware>),
 }
 
 impl PyMiddlewareArg {
@@ -118,6 +120,7 @@ impl PyMiddlewareArg {
         match self {
             Self::Python(middleware) => middleware.bind(py).borrow().registration(),
             Self::Instructions(middleware) => middleware.bind(py).borrow().registration(),
+            Self::Compaction(middleware) => middleware.bind(py).borrow().registration(),
         }
     }
 }

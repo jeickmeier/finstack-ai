@@ -6,6 +6,7 @@ CallbackContext
 CancelledError
 Capability
 ChildRunPolicy
+CompactionMiddleware
 ConfigurationError
 E2bSandboxToolset
 ElicitationToolset

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use finstack_ai::runtime::ports::middleware::Middleware;
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_instructions::{
     InstructionsMiddleware, PolicyEntry, PolicyInstructionsConfig,
 };
@@ -73,5 +74,86 @@ impl PyInstructionsMiddleware {
 impl PyInstructionsMiddleware {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
         (self.component.clone(), self.inner.clone())
+    }
+}
+
+const COMPACTION_COMPONENT: &str = "finstack.middleware.compaction";
+
+/// `CompactionMiddleware`'s declared invocation version (see the crate's
+/// checked-in `MiddlewareDescriptor`); the registered `ComponentRef` must
+/// match it exactly.
+const COMPACTION_VERSION: Version = Version {
+    major: 0,
+    minor: 0,
+    patch: 4,
+};
+
+/// Deterministic context-compaction middleware backed by the Rust
+/// implementation.
+///
+/// One instance owns one strategy; construct via the strategy factories.
+/// The `summarize` strategy (model-assisted) is not exposed from Python
+/// yet — it needs an authorized model reference and budget scope.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "CompactionMiddleware",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyCompactionMiddleware {
+    component: ComponentRef,
+    inner: Arc<CompactionMiddleware>,
+}
+
+impl PyCompactionMiddleware {
+    fn from_config(config: CompactionConfig) -> PyResult<Self> {
+        let middleware = CompactionMiddleware::try_new(config)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let component = ComponentId::parse(COMPACTION_COMPONENT)
+            .map(|id| ComponentRef::new(id, Some(COMPACTION_VERSION)))
+            .map_err(|_| PyValueError::new_err("compaction component id is invalid"))?;
+        Ok(Self {
+            component,
+            inner: Arc::new(middleware),
+        })
+    }
+
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
+        (self.component.clone(), self.inner.clone())
+    }
+}
+
+#[pymethods]
+impl PyCompactionMiddleware {
+    /// Drop the oldest unprotected context above the token threshold.
+    #[staticmethod]
+    #[pyo3(signature = (threshold_tokens, hysteresis_tokens))]
+    fn sliding_window(threshold_tokens: u64, hysteresis_tokens: u64) -> PyResult<Self> {
+        Self::from_config(CompactionConfig::sliding_window(
+            threshold_tokens,
+            hysteresis_tokens,
+        ))
+    }
+
+    /// Truncate large tool-result bodies while keeping call/result pairs.
+    #[staticmethod]
+    #[pyo3(signature = (threshold_tokens, hysteresis_tokens, max_body_bytes))]
+    fn large_tool_output(
+        threshold_tokens: u64,
+        hysteresis_tokens: u64,
+        max_body_bytes: usize,
+    ) -> PyResult<Self> {
+        Self::from_config(CompactionConfig::large_tool_output(
+            threshold_tokens,
+            hysteresis_tokens,
+            max_body_bytes,
+        ))
+    }
+
+    /// Exact registered component identity.
+    #[getter]
+    fn component(&self) -> String {
+        self.component.id().to_string()
     }
 }
