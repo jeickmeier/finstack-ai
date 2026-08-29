@@ -1110,6 +1110,7 @@ class Agent:
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
+        artifact_path: str | None = None,
     ) -> Agent:
         """Build a Rust-backed official OpenAI Responses agent.
 
@@ -1157,6 +1158,12 @@ class Agent:
                 :meth:`ChildRunPolicy.deny`.
             approval_grant: Optional paid-tool approval grant mode. Defaults
                 to :meth:`ApprovalGrantMode.per_call`.
+            artifact_path: Optional directory for a durable
+                filesystem-backed artifact store shared by attachment
+                staging, the document toolset, and the ingest
+                middleware. ``None`` keeps the process-local in-memory
+                store, which cannot resolve a persisted session's
+                attachments from a new process.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1199,6 +1206,7 @@ class Agent:
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
+        artifact_path: str | None = None,
     ) -> Agent:
         """Build a Rust-backed OpenRouter Responses agent.
 
@@ -1253,6 +1261,12 @@ class Agent:
                 :meth:`ChildRunPolicy.deny`.
             approval_grant: Optional paid-tool approval grant mode. Defaults
                 to :meth:`ApprovalGrantMode.per_call`.
+            artifact_path: Optional directory for a durable
+                filesystem-backed artifact store shared by attachment
+                staging, the document toolset, and the ingest
+                middleware. ``None`` keeps the process-local in-memory
+                store, which cannot resolve a persisted session's
+                attachments from a new process.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1293,6 +1307,7 @@ class Agent:
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
+        artifact_path: str | None = None,
     ) -> Agent:
         """Build a Rust-backed Anthropic Messages agent.
 
@@ -1333,6 +1348,12 @@ class Agent:
                 :meth:`ChildRunPolicy.deny`.
             approval_grant: Optional paid-tool approval grant mode. Defaults
                 to :meth:`ApprovalGrantMode.per_call`.
+            artifact_path: Optional directory for a durable
+                filesystem-backed artifact store shared by attachment
+                staging, the document toolset, and the ingest
+                middleware. ``None`` keeps the process-local in-memory
+                store, which cannot resolve a persisted session's
+                attachments from a new process.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1366,6 +1387,7 @@ class Agent:
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
+        artifact_path: str | None = None,
     ) -> Agent:
         """Build a Rust-backed Gemini ``generateContent`` agent.
 
@@ -1407,6 +1429,12 @@ class Agent:
                 :meth:`ChildRunPolicy.deny`.
             approval_grant: Optional paid-tool approval grant mode. Defaults
                 to :meth:`ApprovalGrantMode.per_call`.
+            artifact_path: Optional directory for a durable
+                filesystem-backed artifact store shared by attachment
+                staging, the document toolset, and the ingest
+                middleware. ``None`` keeps the process-local in-memory
+                store, which cannot resolve a persisted session's
+                attachments from a new process.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1440,6 +1468,7 @@ class Agent:
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
+        artifact_path: str | None = None,
     ) -> Agent:
         """Build a keyless Rust-backed native Ollama agent.
 
@@ -1473,6 +1502,12 @@ class Agent:
                 :meth:`ChildRunPolicy.deny`.
             approval_grant: Optional paid-tool approval grant mode. Defaults
                 to :meth:`ApprovalGrantMode.per_call`.
+            artifact_path: Optional directory for a durable
+                filesystem-backed artifact store shared by attachment
+                staging, the document toolset, and the ingest
+                middleware. ``None`` keeps the process-local in-memory
+                store, which cannot resolve a persisted session's
+                attachments from a new process.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1515,6 +1550,7 @@ class Agent:
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
+        artifact_path: str | None = None,
     ) -> Agent:
         """Build a Rust-backed agent that dispatches to a dedicated provider.
 
@@ -1557,6 +1593,12 @@ class Agent:
                 :meth:`ChildRunPolicy.deny`.
             approval_grant: Optional paid-tool approval grant mode. Defaults
                 to :meth:`ApprovalGrantMode.per_call`.
+            artifact_path: Optional directory for a durable
+                filesystem-backed artifact store shared by attachment
+                staging, the document toolset, and the ingest
+                middleware. ``None`` keeps the process-local in-memory
+                store, which cannot resolve a persisted session's
+                attachments from a new process.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1593,6 +1635,7 @@ class Agent:
         approval_grant: ApprovalGrantMode | None = None,
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
+        artifact_path: str | None = None,
     ) -> Agent:
         """Build an agent from trusted callbacks and optional Pydantic output type.
 
@@ -1615,6 +1658,12 @@ class Agent:
                 :attr:`SqliteDurability.Relaxed`.
             sqlite_durability: Durability policy when ``sqlite_path`` is
                 set. Defaults to :attr:`SqliteDurability.Durable`.
+            artifact_path: Optional directory for a durable
+                filesystem-backed artifact store shared by attachment
+                staging, the document toolset, and the ingest
+                middleware. ``None`` keeps the process-local in-memory
+                store, which cannot resolve a persisted session's
+                attachments from a new process.
 
         Returns:
             An immutable Rust-owned agent handle.

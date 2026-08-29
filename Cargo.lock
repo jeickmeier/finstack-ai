@@ -1732,6 +1732,7 @@ dependencies = [
  "finstack-ai-provider-openai",
  "finstack-ai-provider-openrouter",
  "finstack-ai-sandbox-e2b",
+ "finstack-ai-store-artifact",
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",

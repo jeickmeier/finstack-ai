@@ -37,6 +37,7 @@ finstack-ai-provider-gemini = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-provider-openai = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-provider-ollama = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-provider-openrouter = { workspace = true, features = ["vendored-tls"] }
+finstack-ai-store-artifact = { workspace = true, features = ["local"] }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-tools-document = { workspace = true }
