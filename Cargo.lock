@@ -1722,6 +1722,7 @@ name = "finstack-ai-python"
 version = "2.0.0"
 dependencies = [
  "finstack-ai",
+ "finstack-ai-context-repository",
  "finstack-ai-kernel",
  "finstack-ai-memory",
  "finstack-ai-middleware-compaction",

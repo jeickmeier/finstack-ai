@@ -15,8 +15,10 @@
     {
       "crate": "finstack-ai-context-repository",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected context extension; bindings expose generic host adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "RepositoryContextProviderRenamed"
+        ]
       },
       "js": {
         "status": "unavailable",
@@ -28,7 +30,7 @@
       "python": {
         "status": "direct",
         "surfaces": [
-          "MemoryExtensionRenamed",
+          "MemoryExtension",
           "MemoryContextProvider",
           "MemoryToolset",
           "MemoryObserver"

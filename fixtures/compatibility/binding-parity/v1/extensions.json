@@ -8,7 +8,7 @@
     },
     {
       "crate": "finstack-ai-context-repository",
-      "python": {"status": "unavailable", "reason": "Application-injected context extension; bindings expose generic host adapters instead."},
+      "python": {"status": "direct", "surfaces": ["RepositoryContextProvider"]},
       "js": {"status": "unavailable", "reason": "Application-injected context extension; bindings expose generic host adapters instead."}
     },
     {

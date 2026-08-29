@@ -37,6 +37,7 @@ use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
 use crate::middleware::{PyCompactionMiddleware, PyInstructionsMiddleware};
+use crate::repository::PyRepositoryContextProvider;
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
     result_to_python_with_locator, run_request, stage_attachments,
@@ -86,6 +87,8 @@ pub(crate) enum PyContextProviderArg {
     Python(Py<PyPythonContextProvider>),
     /// Rust memory recall provider from `MemoryExtension.context_provider()`.
     Memory(Py<PyMemoryContextProvider>),
+    /// Rust repository-instructions provider.
+    Repository(Py<PyRepositoryContextProvider>),
 }
 
 impl PyContextProviderArg {
@@ -100,6 +103,7 @@ impl PyContextProviderArg {
         match self {
             Self::Python(provider) => Ok(provider.bind(py).borrow().registration()),
             Self::Memory(provider) => provider.bind(py).borrow().registration(py, artifact_store),
+            Self::Repository(provider) => Ok(provider.bind(py).borrow().registration()),
         }
     }
 }

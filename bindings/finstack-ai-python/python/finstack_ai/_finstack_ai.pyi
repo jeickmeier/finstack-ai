@@ -976,6 +976,34 @@ class RunStateSnapshot(TypedDict):
     retry_attempts: int
     terminal: dict[str, object] | None
 
+class RepositoryContextProvider:
+    """Repository-instructions context provider backed by the Rust implementation.
+
+    Reads an allowlisted set of instruction files under one explicit root
+    directory and contributes them as protected context items. Reads are
+    confined to the root via capability-safe directory handles; symlinked
+    escapes and traversing names are rejected. Pass instances via the
+    ``context_providers=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(self, root: str, allowlist: list[str] | None = None) -> None:
+        """Open ``root`` with the default or an explicit filename allowlist.
+
+        Args:
+            root: Directory to read instruction files from.
+            allowlist: Relative filenames to read, in order. ``None`` uses
+                the default (``AGENTS.md``, ``README.md``,
+                ``.finstack/instructions.md``). At most 32 names, each at
+                most 256 bytes and 16 path segments; absolute or traversing
+                names are rejected.
+
+        Raises:
+            ValueError: The root is unsafe or the allowlist is invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the repository provider."""
+
 class Run:
     """Shared control and observation handle for one Rust-owned run."""
 
@@ -1175,7 +1203,9 @@ class Agent:
             | E2bSandboxToolset
         ]
         | None = None,
-        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        context_providers: list[
+            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+        ]
         | None = None,
         middleware: list[
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
@@ -1274,7 +1304,9 @@ class Agent:
             | E2bSandboxToolset
         ]
         | None = None,
-        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        context_providers: list[
+            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+        ]
         | None = None,
         middleware: list[
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
@@ -1378,7 +1410,9 @@ class Agent:
             | E2bSandboxToolset
         ]
         | None = None,
-        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        context_providers: list[
+            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+        ]
         | None = None,
         middleware: list[
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
@@ -1459,10 +1493,17 @@ class Agent:
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
         toolsets: list[
-            PythonToolset | ElicitationToolset | HttpFetchToolset | E2bSandboxToolset
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
         ]
         | None = None,
-        context_providers: list[PythonContextProvider] | None = None,
+        context_providers: list[
+            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+        ]
+        | None = None,
         middleware: list[
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
         ]
@@ -1545,7 +1586,9 @@ class Agent:
             PythonToolset | ElicitationToolset | MemoryToolset | E2bSandboxToolset
         ]
         | None = None,
-        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        context_providers: list[
+            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+        ]
         | None = None,
         middleware: list[
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
@@ -1630,7 +1673,9 @@ class Agent:
             | E2bSandboxToolset
         ]
         | None = None,
-        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        context_providers: list[
+            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+        ]
         | None = None,
         middleware: list[
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
@@ -1716,7 +1761,9 @@ class Agent:
         output_type: Any | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
-        context_providers: list[PythonContextProvider | MemoryContextProvider]
+        context_providers: list[
+            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+        ]
         | None = None,
         middleware: list[
             PythonMiddleware | InstructionsMiddleware | CompactionMiddleware
