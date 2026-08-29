@@ -1,10 +1,10 @@
 """Scripted MCP stdio server double for `test_mcp_toolset.py`.
 
 Speaks newline-delimited JSON-RPC: answers `tools/list` with one `echo`
-tool, other list catalogs with empty results (a -32601 error would be
-tolerated by the classify layer but poisons the stdio transport for later
-calls), and `tools/call` by echoing the `text` argument back as a text
-content block.
+tool, `prompts/list` with -32601 (deliberately unimplemented — the classify
+layer tolerates it and the stdio transport must not poison on a clean
+error response), other list catalogs with empty results, and `tools/call`
+by echoing the `text` argument back as a text content block.
 """
 
 from __future__ import annotations
@@ -68,7 +68,13 @@ def main() -> None:
                 }
             )
         elif method == "prompts/list":
-            _reply({"jsonrpc": "2.0", "id": request_id, "result": {"prompts": []}})
+            _reply(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32601, "message": "Method not found"},
+                }
+            )
         else:
             _reply({"jsonrpc": "2.0", "id": request_id, "result": {}})
 
