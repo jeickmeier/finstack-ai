@@ -1725,6 +1725,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-memory",
  "finstack-ai-middleware-document-ingest",
+ "finstack-ai-middleware-instructions",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-gemini",

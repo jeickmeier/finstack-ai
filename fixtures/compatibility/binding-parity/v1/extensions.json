@@ -43,7 +43,7 @@
     },
     {
       "crate": "finstack-ai-middleware-instructions",
-      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "python": {"status": "direct", "surfaces": ["InstructionsMiddleware"]},
       "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
     },
     {

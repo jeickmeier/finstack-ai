@@ -15,6 +15,7 @@ EventBatchIterator
 FinstackError
 HistoryCachePolicy
 HttpFetchToolset
+InstructionsMiddleware
 Lane
 Locator
 MemoryContextProvider

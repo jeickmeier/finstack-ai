@@ -4,8 +4,8 @@
     {
       "crate": "finstack-ai-store-artifact",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected artifact store; no binding-owned constructor."
+        "status": "composed",
+        "reason": "Composed internally as the durable artifact store behind every Agent factory's artifact_path= keyword; attachment staging, the document toolset, and the ingest middleware share it."
       },
       "js": {
         "status": "unavailable",
@@ -97,8 +97,10 @@
     {
       "crate": "finstack-ai-middleware-instructions",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."
+        "status": "direct",
+        "surfaces": [
+          "InstructionsMiddleware"
+        ]
       },
       "js": {
         "status": "unavailable",

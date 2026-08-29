@@ -39,6 +39,7 @@ mod fetch;
 mod json_bridge;
 mod locator;
 mod memory;
+mod middleware;
 mod protocol;
 mod run;
 mod session;
@@ -60,6 +61,7 @@ use document::{parse_document, parse_document_markdown};
 use events::{PyEvent, PyEventBatch, PyEventIterator};
 use locator::PyLocator;
 use memory::{PyMemoryContextProvider, PyMemoryExtension, PyMemoryObserver, PyMemoryToolset};
+use middleware::PyInstructionsMiddleware;
 use protocol::{
     _normalize_pydantic_schema, build_metadata, health, journal_known_answer, linked_providers,
     normalize_prebeta_shape,
@@ -141,6 +143,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<e2b::PyE2bSandboxToolset>()?;
     module.add_class::<PyPythonContextProvider>()?;
     module.add_class::<PyPythonMiddleware>()?;
+    module.add_class::<PyInstructionsMiddleware>()?;
     module.add_class::<PyPythonObserver>()?;
     module.add_function(wrap_pyfunction!(health, module)?)?;
     module.add_function(wrap_pyfunction!(build_metadata, module)?)?;

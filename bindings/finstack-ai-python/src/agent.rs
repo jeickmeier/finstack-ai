@@ -36,6 +36,7 @@ use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
+use crate::middleware::PyInstructionsMiddleware;
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
     result_to_python_with_locator, run_request, stage_attachments,
@@ -99,6 +100,24 @@ impl PyContextProviderArg {
         match self {
             Self::Python(provider) => Ok(provider.bind(py).borrow().registration()),
             Self::Memory(provider) => provider.bind(py).borrow().registration(py, artifact_store),
+        }
+    }
+}
+
+/// Middleware argument accepted by every agent factory.
+#[derive(FromPyObject)]
+pub(crate) enum PyMiddlewareArg {
+    /// Trusted Python callback middleware.
+    Python(Py<PyPythonMiddleware>),
+    /// Rust frozen policy-instructions middleware.
+    Instructions(Py<PyInstructionsMiddleware>),
+}
+
+impl PyMiddlewareArg {
+    fn registration(&self, py: Python<'_>) -> (ComponentRef, Arc<dyn Middleware>) {
+        match self {
+            Self::Python(middleware) => middleware.bind(py).borrow().registration(),
+            Self::Instructions(middleware) => middleware.bind(py).borrow().registration(),
         }
     }
 }
@@ -243,7 +262,7 @@ impl PyAgent {
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        middleware: Option<Vec<PyMiddlewareArg>>,
         observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
@@ -325,7 +344,7 @@ impl PyAgent {
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        middleware: Option<Vec<PyMiddlewareArg>>,
         observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
@@ -399,7 +418,7 @@ impl PyAgent {
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        middleware: Option<Vec<PyMiddlewareArg>>,
         observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
@@ -470,7 +489,7 @@ impl PyAgent {
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        middleware: Option<Vec<PyMiddlewareArg>>,
         observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
@@ -538,7 +557,7 @@ impl PyAgent {
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        middleware: Option<Vec<PyMiddlewareArg>>,
         observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
@@ -611,7 +630,7 @@ impl PyAgent {
         openrouter_media_title: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        middleware: Option<Vec<PyMiddlewareArg>>,
         observers: Option<Vec<PyObserverArg>>,
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
@@ -677,7 +696,7 @@ impl PyAgent {
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
-        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        middleware: Option<Vec<PyMiddlewareArg>>,
         observers: Option<Vec<PyObserverArg>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
@@ -1182,7 +1201,7 @@ fn linked_ports(
     py: Python<'_>,
     toolsets: Option<Vec<PyToolsetArg>>,
     context_providers: Option<Vec<PyContextProviderArg>>,
-    middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+    middleware: Option<Vec<PyMiddlewareArg>>,
     observers: Option<Vec<PyObserverArg>>,
     output_type: Option<Py<PyAny>>,
     artifact_path: Option<String>,
@@ -1199,7 +1218,7 @@ fn linked_ports(
     let mut middleware: Vec<(ComponentRef, Arc<dyn Middleware>)> = middleware
         .unwrap_or_default()
         .into_iter()
-        .map(|middleware| middleware.bind(py).borrow().registration())
+        .map(|middleware| middleware.registration(py))
         .collect();
     middleware.push(document_middleware);
     Ok((

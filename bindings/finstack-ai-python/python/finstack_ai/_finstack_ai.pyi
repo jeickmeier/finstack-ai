@@ -313,6 +313,31 @@ class HttpFetchToolset:
     def tool_count(self) -> int:
         """Number of HTTP fetch tools exposed to the model."""
 
+class InstructionsMiddleware:
+    """Frozen policy-instruction middleware backed by the Rust implementation.
+
+    Each ``(label, text)`` entry becomes one protected System context item
+    injected at ``prepare_context``, with provenance source id
+    ``policy:{label}``. Entries are validated and frozen at construction:
+    at least one entry, at most 16, non-blank labels of at most 249 bytes,
+    non-blank text. Pass instances via the ``middleware=[...]`` parameter
+    of any :class:`Agent` factory.
+    """
+
+    def __init__(self, entries: list[tuple[str, str]]) -> None:
+        """Build the middleware from ordered ``(label, text)`` entries.
+
+        Args:
+            entries: Ordered policy entries injected at ``prepare_context``.
+
+        Raises:
+            ValueError: The entry list is empty, oversized, or contains a
+                blank or oversized label or blank text.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the instructions middleware."""
+
 class E2bSandboxToolset:
     """Composable T4 E2B sandbox toolset for a real model-backed agent."""
 
@@ -1105,7 +1130,7 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware] | None = None,
+        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1201,7 +1226,7 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware] | None = None,
+        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1302,7 +1327,7 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware] | None = None,
+        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1382,7 +1407,7 @@ class Agent:
         ]
         | None = None,
         context_providers: list[PythonContextProvider] | None = None,
-        middleware: list[PythonMiddleware] | None = None,
+        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1463,7 +1488,7 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware] | None = None,
+        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1545,7 +1570,7 @@ class Agent:
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware] | None = None,
+        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
@@ -1628,7 +1653,7 @@ class Agent:
         active_capabilities: list[str] | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
-        middleware: list[PythonMiddleware] | None = None,
+        middleware: list[PythonMiddleware | InstructionsMiddleware] | None = None,
         observers: list[PythonObserver | MemoryObserver] | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,
