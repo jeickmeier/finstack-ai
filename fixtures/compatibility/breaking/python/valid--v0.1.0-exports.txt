@@ -46,6 +46,7 @@ RuntimeError
 Session
 SessionInspectPhase
 SessionInspectSnapshot
+ShellToolset
 SkillsToolset
 SqliteDurability
 TimeoutError

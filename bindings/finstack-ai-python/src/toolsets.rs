@@ -6,6 +6,7 @@ use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
 use finstack_ai_tools_calculator::CalculatorToolset;
 use finstack_ai_tools_filesystem::FileSystemToolset;
+use finstack_ai_tools_shell::{ShellPolicy, ShellToolset};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -111,6 +112,54 @@ impl PyFileSystemToolset {
 }
 
 impl PyFileSystemToolset {
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Toolset>) {
+        (self.component.clone(), self.inner.clone())
+    }
+}
+
+/// Deny-by-default shell execution toolset backed by the Rust implementation.
+///
+/// **Security (T2 — trusted, not sandboxed by default):** `shell_exec`
+/// runs allowlisted programs in-process-spawned children with the host's
+/// privileges. Only the listed basenames or exact paths run; everything
+/// else fails closed with `shell_policy_denied`. Output and runtime are
+/// bounded by the crate's default limits.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "ShellToolset",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyShellToolset {
+    component: ComponentRef,
+    inner: Arc<ShellToolset>,
+}
+
+#[pymethods]
+impl PyShellToolset {
+    /// Build the toolset over an executable allowlist.
+    #[new]
+    #[pyo3(signature = (allowed, *, root = None, component = "python.tools.shell"))]
+    fn new(allowed: Vec<String>, root: Option<&str>, component: &str) -> PyResult<Self> {
+        let policy = ShellPolicy::try_new(allowed)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let toolset = ShellToolset::try_new(policy, root.map(std::path::Path::new))
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            component: caller_component(component)?,
+            inner: Arc::new(toolset),
+        })
+    }
+
+    /// Exact registered component identity.
+    #[getter]
+    fn component(&self) -> String {
+        self.component.id().to_string()
+    }
+}
+
+impl PyShellToolset {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Toolset>) {
         (self.component.clone(), self.inner.clone())
     }

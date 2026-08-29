@@ -479,8 +479,10 @@
     {
       "crate": "finstack-ai-tools-shell",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected native shell toolset; not a binding-owned constructor."
+        "status": "direct",
+        "surfaces": [
+          "ShellToolset"
+        ]
       },
       "js": {
         "status": "unavailable",

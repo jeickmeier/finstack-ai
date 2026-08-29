@@ -725,6 +725,38 @@ class Locator:
             ``tenant_scope``, ``session_id``, ``lane_id``, and ``run_id``.
         """
 
+class ShellToolset:
+    """Deny-by-default shell execution toolset backed by the Rust implementation.
+
+    Security (T2 — trusted, not sandboxed by default): ``shell_exec``
+    runs allowlisted programs as child processes with the host's
+    privileges. Only the listed basenames or exact paths run; everything
+    else fails closed with ``shell_policy_denied``. Output and runtime
+    are bounded by the crate's default limits. Pass instances via the
+    ``toolsets=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(
+        self,
+        allowed: list[str],
+        *,
+        root: str | None = None,
+        component: str = "python.tools.shell",
+    ) -> None:
+        """Build the toolset over an executable allowlist.
+
+        Args:
+            allowed: Program basenames or exact paths permitted to run.
+            root: Optional working-directory confinement root.
+            component: Component id to register the toolset under.
+
+        Raises:
+            ValueError: The allowlist is empty or invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the shell toolset."""
+
 class SkillsToolset:
     """Deferred native skills toolset for model-driven capability activation.
 
@@ -1556,6 +1588,7 @@ class Agent:
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
         context_providers: list[
@@ -1673,6 +1706,7 @@ class Agent:
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
         context_providers: list[
@@ -1795,6 +1829,7 @@ class Agent:
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
         context_providers: list[
@@ -1901,6 +1936,7 @@ class Agent:
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
         context_providers: list[
@@ -2007,6 +2043,7 @@ class Agent:
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
         context_providers: list[
@@ -2110,6 +2147,7 @@ class Agent:
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
         context_providers: list[
@@ -2211,6 +2249,7 @@ class Agent:
             | SkillsToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
         instruction: str | None = None,
@@ -2254,6 +2293,7 @@ class Agent:
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
+            | ShellToolset
         ]
         | None = None,
     ) -> Agent:
