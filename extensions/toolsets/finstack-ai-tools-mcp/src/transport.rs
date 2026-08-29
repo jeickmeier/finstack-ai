@@ -492,7 +492,16 @@ impl StdioTransport {
                 timed.unwrap_or_else(|_elapsed| Err(read_timeout_error()))
             }
         };
-        if result.is_err() {
+        // A JSON-RPC error *response* (tagged with a code by
+        // `interpret_result`) arrived as a complete, correctly framed line,
+        // so the request/response cadence is still aligned and the transport
+        // stays usable — construct-time catalog enumeration relies on this to
+        // tolerate -32601 from servers without prompts/resources. Every other
+        // failure (framing, i/o, timeout) leaves the stream position unknown
+        // and MUST poison.
+        if let Err(error) = &result
+            && error.jsonrpc_code().is_none()
+        {
             self.poisoned.store(true, Ordering::SeqCst);
             terminate_stdio_state(&mut state).await;
         }
@@ -1172,6 +1181,35 @@ mod tests {
             .await
             .expect_err("a timed-out transport must stay poisoned");
         assert!(format!("{poisoned}").contains("poisoned"));
+    }
+
+    /// Regression: a stdio server without `prompts/list` (a clean -32601
+    /// error response) must not poison the transport — construction
+    /// tolerates the error via `optional_catalog_missing`, and later
+    /// `tools/call` round trips must still work.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stdio_jsonrpc_error_response_does_not_poison_the_transport() {
+        let script = concat!(
+            "read -r _request\n",
+            "printf '{\"jsonrpc\":\"2.0\",\"id\":1,",
+            "\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}\\n'\n",
+            "read -r _request\n",
+            "printf '{\"jsonrpc\":\"2.0\",\"id\":2,",
+            "\"result\":{\"resultType\":\"complete\",\"tools\":[]}}\\n'\n",
+        );
+        let config = StdioConfig::new("/bin/sh", vec!["-c".to_owned(), script.to_owned()]);
+        let transport = StdioTransport::try_spawn(&config).expect("spawns");
+        let error = transport
+            .request("prompts/list", serde_json::json!({}))
+            .await
+            .expect_err("the server rejects prompts/list");
+        assert_eq!(error.jsonrpc_code(), Some(-32601));
+        let value = transport
+            .request("tools/list", serde_json::json!({}))
+            .await
+            .expect("a clean jsonrpc error response must not poison the transport");
+        assert_eq!(value["resultType"], "complete");
     }
 
     #[test]
