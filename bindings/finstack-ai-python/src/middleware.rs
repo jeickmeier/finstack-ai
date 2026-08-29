@@ -8,6 +8,7 @@ use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_instructions::{
     InstructionsMiddleware, PolicyEntry, PolicyInstructionsConfig,
 };
+use finstack_ai_middleware_redaction::{OutputPolicy, RedactionConfig, RedactionMiddleware};
 use finstack_ai_middleware_verify::{
     EvidenceFinding, EvidenceFindings, EvidenceKind, EvidenceVerifier, Verdict, VerifyMiddleware,
     VerifyPolicy,
@@ -343,6 +344,85 @@ impl PyVerifyMiddleware {
 }
 
 impl PyVerifyMiddleware {
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
+        (self.component.clone(), self.inner.clone())
+    }
+}
+
+const REDACTION_COMPONENT: &str = "finstack.middleware.redaction";
+
+/// `RedactionMiddleware`'s declared invocation version (`REDACTION_VERSION`
+/// in `finstack-ai-middleware-redaction::lib`).
+const REDACTION_VERSION: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
+
+/// Fail-soft PII/secret redaction middleware backed by the Rust
+/// implementation.
+///
+/// Detects and replaces emails, vendor API keys, JWTs, PEM private keys,
+/// Luhn-valid card numbers, and mod-97-valid IBANs in the model-visible
+/// request with `[REDACTED:<kind>]` markers. `output_policy="fail"`
+/// additionally fails the run when the assistant output itself contains a
+/// detectable secret; the default `"off"` leaves output unobserved.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "RedactionMiddleware",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyRedactionMiddleware {
+    component: ComponentRef,
+    inner: Arc<RedactionMiddleware>,
+}
+
+#[pymethods]
+impl PyRedactionMiddleware {
+    /// Build the middleware with per-detector switches.
+    #[new]
+    #[pyo3(signature = (*, detect_emails = true, detect_api_keys = true, detect_account_numbers = true, output_policy = "off"))]
+    fn new(
+        detect_emails: bool,
+        detect_api_keys: bool,
+        detect_account_numbers: bool,
+        output_policy: &str,
+    ) -> PyResult<Self> {
+        let output_policy = match output_policy {
+            "off" => OutputPolicy::Off,
+            "fail" => OutputPolicy::Fail,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "output_policy must be \"off\" or \"fail\"",
+                ));
+            }
+        };
+        let middleware = RedactionMiddleware::try_with_config(RedactionConfig {
+            detect_emails,
+            detect_api_keys,
+            detect_account_numbers,
+            output_policy,
+        })
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let component = ComponentId::parse(REDACTION_COMPONENT)
+            .map(|id| ComponentRef::new(id, Some(REDACTION_VERSION)))
+            .map_err(|_| PyValueError::new_err("redaction component id is invalid"))?;
+        Ok(Self {
+            component,
+            inner: Arc::new(middleware),
+        })
+    }
+
+    /// Exact registered component identity.
+    #[getter]
+    fn component(&self) -> String {
+        self.component.id().to_string()
+    }
+}
+
+impl PyRedactionMiddleware {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
         (self.component.clone(), self.inner.clone())
     }

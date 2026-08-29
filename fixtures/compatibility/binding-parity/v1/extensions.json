@@ -48,7 +48,7 @@
     },
     {
       "crate": "finstack-ai-middleware-redaction",
-      "python": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."},
+      "python": {"status": "direct", "surfaces": ["RedactionMiddleware"]},
       "js": {"status": "unavailable", "reason": "Application-injected middleware; bindings expose generic host middleware adapters instead."}
     },
     {

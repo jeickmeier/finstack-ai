@@ -1073,6 +1073,41 @@ class RepositoryContextProvider:
     def component(self) -> str:
         """Stable component identifier for the repository provider."""
 
+class RedactionMiddleware:
+    """Fail-soft PII/secret redaction middleware backed by the Rust implementation.
+
+    Detects and replaces emails, vendor API keys, JWTs, PEM private keys,
+    Luhn-valid card numbers, and mod-97-valid IBANs in the model-visible
+    request with ``[REDACTED:<kind>]`` markers; the journal keeps
+    canonical history. ``output_policy="fail"`` additionally fails the
+    run when the assistant output itself contains a detectable secret;
+    the default ``"off"`` leaves output unobserved. Pass instances via
+    the ``middleware=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(
+        self,
+        *,
+        detect_emails: bool = True,
+        detect_api_keys: bool = True,
+        detect_account_numbers: bool = True,
+        output_policy: str = "off",
+    ) -> None:
+        """Build the middleware with per-detector switches.
+
+        Args:
+            detect_emails: Redact email addresses.
+            detect_api_keys: Redact vendor API keys, JWTs, and PEM keys.
+            detect_account_numbers: Redact card numbers and IBANs.
+            output_policy: ``"off"`` or ``"fail"``.
+
+        Raises:
+            ValueError: The output policy is unsupported.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the redaction middleware."""
+
 class VerifyMiddleware:
     """Deterministic content-verification middleware backed by the Rust implementation.
 
@@ -1322,6 +1357,7 @@ class Agent:
             | InstructionsMiddleware
             | CompactionMiddleware
             | VerifyMiddleware
+            | RedactionMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1426,6 +1462,7 @@ class Agent:
             | InstructionsMiddleware
             | CompactionMiddleware
             | VerifyMiddleware
+            | RedactionMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1535,6 +1572,7 @@ class Agent:
             | InstructionsMiddleware
             | CompactionMiddleware
             | VerifyMiddleware
+            | RedactionMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1628,6 +1666,7 @@ class Agent:
             | InstructionsMiddleware
             | CompactionMiddleware
             | VerifyMiddleware
+            | RedactionMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1717,6 +1756,7 @@ class Agent:
             | InstructionsMiddleware
             | CompactionMiddleware
             | VerifyMiddleware
+            | RedactionMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1807,6 +1847,7 @@ class Agent:
             | InstructionsMiddleware
             | CompactionMiddleware
             | VerifyMiddleware
+            | RedactionMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
@@ -1899,6 +1940,7 @@ class Agent:
             | InstructionsMiddleware
             | CompactionMiddleware
             | VerifyMiddleware
+            | RedactionMiddleware
         ]
         | None = None,
         observers: list[PythonObserver | MemoryObserver | LogObserver] | None = None,
