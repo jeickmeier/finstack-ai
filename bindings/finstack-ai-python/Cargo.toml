@@ -55,6 +55,7 @@ finstack-ai-tools-calculator = { workspace = true }
 finstack-ai-tools-document = { workspace = true }
 finstack-ai-tools-elicitation = { workspace = true }
 finstack-ai-tools-fetch = { workspace = true, features = ["vendored-tls"] }
+finstack-ai-tools-filesystem = { workspace = true }
 finstack-ai-tools-skill-import = { workspace = true }
 finstack-ai-tools-skills = { workspace = true }
 finstack-ai-sandbox-e2b = { workspace = true, features = ["vendored-tls"] }

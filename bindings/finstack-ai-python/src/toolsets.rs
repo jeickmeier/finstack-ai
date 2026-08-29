@@ -5,6 +5,7 @@ use std::sync::Arc;
 use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
 use finstack_ai_tools_calculator::CalculatorToolset;
+use finstack_ai_tools_filesystem::FileSystemToolset;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -59,6 +60,57 @@ impl PyCalculatorToolset {
 }
 
 impl PyCalculatorToolset {
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Toolset>) {
+        (self.component.clone(), self.inner.clone())
+    }
+}
+
+/// Capability-confined filesystem toolset backed by the Rust implementation.
+///
+/// **Security (T2 — trusted, not sandboxed):** tools run in-process with
+/// the host's privileges; confinement to `root` relies on capability-safe
+/// directory handles, not an OS sandbox. Reads/writes/listings are bounded
+/// by the crate's default limits; `protected_paths` patterns (default:
+/// the crate's secret-bearing names) are never readable or writable.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "FileSystemToolset",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyFileSystemToolset {
+    component: ComponentRef,
+    inner: Arc<FileSystemToolset>,
+}
+
+#[pymethods]
+impl PyFileSystemToolset {
+    /// Open an explicit root directory with default bounds.
+    #[new]
+    #[pyo3(signature = (root, *, component = "python.tools.filesystem", protected_paths = None))]
+    fn new(root: &str, component: &str, protected_paths: Option<Vec<String>>) -> PyResult<Self> {
+        let mut toolset = FileSystemToolset::try_new(root)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        if let Some(patterns) = protected_paths {
+            toolset = toolset
+                .try_with_protected_paths(patterns)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        }
+        Ok(Self {
+            component: caller_component(component)?,
+            inner: Arc::new(toolset),
+        })
+    }
+
+    /// Exact registered component identity.
+    #[getter]
+    fn component(&self) -> String {
+        self.component.id().to_string()
+    }
+}
+
+impl PyFileSystemToolset {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Toolset>) {
         (self.component.clone(), self.inner.clone())
     }

@@ -427,8 +427,10 @@
     {
       "crate": "finstack-ai-tools-filesystem",
       "python": {
-        "status": "unavailable",
-        "reason": "Application-injected filesystem toolset; not a binding-owned constructor."
+        "status": "direct",
+        "surfaces": [
+          "FileSystemToolset"
+        ]
       },
       "js": {
         "status": "unavailable",

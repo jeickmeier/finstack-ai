@@ -177,7 +177,7 @@
     },
     {
       "crate": "finstack-ai-tools-filesystem",
-      "python": {"status": "unavailable", "reason": "Application-injected filesystem toolset; not a binding-owned constructor."},
+      "python": {"status": "direct", "surfaces": ["FileSystemToolset"]},
       "js": {"status": "unavailable", "reason": "Browser hosts have no ambient filesystem authority."}
     },
     {

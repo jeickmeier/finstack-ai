@@ -15,6 +15,7 @@ ElicitationToolset
 Event
 EventBatch
 EventBatchIterator
+FileSystemToolset
 FinstackError
 HistoryCachePolicy
 HttpFetchToolset

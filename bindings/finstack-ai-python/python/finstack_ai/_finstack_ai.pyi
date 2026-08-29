@@ -6,6 +6,41 @@ from typing import Any, Literal, NotRequired, TypedDict
 __version__: str
 __engine_version__: str
 
+class FileSystemToolset:
+    """Capability-confined filesystem toolset backed by the Rust implementation.
+
+    Security (T2 — trusted, not sandboxed): tools run in-process with the
+    host's privileges; confinement to ``root`` relies on capability-safe
+    directory handles, not an OS sandbox. Reads, writes, and listings are
+    bounded by the crate's default limits, and ``protected_paths``
+    patterns are never readable or writable. Pass instances via the
+    ``toolsets=[...]`` parameter of any :class:`Agent` factory.
+    """
+
+    def __init__(
+        self,
+        root: str,
+        *,
+        component: str = "python.tools.filesystem",
+        protected_paths: list[str] | None = None,
+    ) -> None:
+        """Open an explicit root directory with default bounds.
+
+        Args:
+            root: Directory the tools are confined to.
+            component: Component id to register the toolset under.
+            protected_paths: Replacement protected-path patterns (plain
+                names match at any depth; ``*``, ``**``, ``?`` supported).
+                ``None`` keeps the crate's secret-bearing defaults.
+
+        Raises:
+            ValueError: The root cannot be opened safely or a pattern is
+                invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the filesystem toolset."""
+
 class FinstackError(Exception):
     """Base error raised by the Rust-owned semantic engine.
 
@@ -1520,6 +1555,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
         context_providers: list[
@@ -1636,6 +1672,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
         context_providers: list[
@@ -1757,6 +1794,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
         context_providers: list[
@@ -1862,6 +1900,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
         context_providers: list[
@@ -1967,6 +2006,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
         context_providers: list[
@@ -2069,6 +2109,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
         context_providers: list[
@@ -2169,6 +2210,7 @@ class Agent:
             | E2bSandboxToolset
             | SkillsToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
         instruction: str | None = None,
@@ -2211,6 +2253,7 @@ class Agent:
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
+            | FileSystemToolset
         ]
         | None = None,
     ) -> Agent:

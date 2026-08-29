@@ -50,7 +50,7 @@ use crate::run::{
 };
 use crate::session::PySession;
 use crate::skills::{PySkillsToolset, build_skills_ports};
-use crate::toolsets::PyCalculatorToolset;
+use crate::toolsets::{PyCalculatorToolset, PyFileSystemToolset};
 
 /// Toolset argument accepted by every agent factory.
 #[derive(FromPyObject)]
@@ -69,6 +69,8 @@ pub(crate) enum PyToolsetArg {
     Skills(Py<PySkillsToolset>),
     /// Rust deterministic calculator toolset.
     Calculator(Py<PyCalculatorToolset>),
+    /// Rust capability-confined filesystem toolset (T2, not sandboxed).
+    FileSystem(Py<PyFileSystemToolset>),
 }
 
 impl PyToolsetArg {
@@ -92,6 +94,7 @@ impl PyToolsetArg {
                 "SkillsToolset is only supported in Agent.from_python's toolsets",
             )),
             Self::Calculator(toolset) => Ok(toolset.bind(py).borrow().registration()),
+            Self::FileSystem(toolset) => Ok(toolset.bind(py).borrow().registration()),
         }
     }
 }
