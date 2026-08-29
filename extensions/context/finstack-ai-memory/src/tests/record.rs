@@ -242,3 +242,53 @@ fn hard_expiry_is_inclusive_at_the_deadline() {
     assert!(!record.is_expired_at(Timestamp::from_unix_ms(9).unwrap()));
     assert!(record.is_expired_at(Timestamp::from_unix_ms(10).unwrap()));
 }
+
+#[test]
+fn embedding_source_text_is_byte_exact_for_inline_bodies() {
+    // Canonical form v1: preview, inline body, and space-joined keywords —
+    // exactly the fields full-text search indexes — separated by newlines.
+    let record = sample_record("m1", "t1");
+    assert_eq!(
+        crate::store::embedding_source_text(&record),
+        "body text\nbody text\nalpha"
+    );
+
+    let mut multi = sample_record("m2", "t1");
+    multi.preview = Arc::from("a preview");
+    multi.body = MemoryBody::Inline(Arc::from("the inline body"));
+    multi.keywords = Arc::from([Arc::<str>::from("alpha"), Arc::<str>::from("beta")]);
+    assert_eq!(
+        crate::store::embedding_source_text(&multi),
+        "a preview\nthe inline body\nalpha beta"
+    );
+
+    let mut no_keywords = sample_record("m3", "t1");
+    no_keywords.keywords = Arc::from(Vec::<Arc<str>>::new());
+    assert_eq!(
+        crate::store::embedding_source_text(&no_keywords),
+        "body text\nbody text\n"
+    );
+}
+
+#[tokio::test]
+async fn embedding_source_text_for_blob_bodies_covers_preview_and_keywords_only() {
+    let record = crate::tests::blob_backed_record("m1", "t1").await;
+    assert_eq!(
+        crate::store::embedding_source_text(&record),
+        "body text\n\nalpha"
+    );
+}
+
+#[test]
+fn embedding_source_digest_is_domain_separated_and_stable() {
+    let text = "body text\nbody text\nalpha";
+    let digest = crate::store::embedding_source_digest(text).unwrap();
+    let expected =
+        finstack_ai_kernel::Digest::domain_separated("memory-embed-source", 1, text.as_bytes())
+            .unwrap();
+    assert_eq!(digest, expected);
+    assert_ne!(
+        digest,
+        crate::store::embedding_source_digest("something else").unwrap()
+    );
+}

@@ -1,5 +1,6 @@
 use crate::record::*;
 use crate::store::*;
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -803,4 +804,99 @@ async fn artifact_outbox_pins_then_unpins_memory_blobs() {
         1
     );
     assert!(artifacts.get(artifact_scope, artifact).await.is_err());
+}
+
+fn embedding_query(embedder_id: &str, vector: EmbeddingVector) -> MemoryQuery {
+    MemoryQuery::Embedding {
+        embedder_id: Arc::from(embedder_id),
+        vector,
+    }
+}
+
+#[tokio::test]
+async fn embedding_query_rejects_invalid_embedder_ids() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let vector = EmbeddingVector::try_new(vec![1.0, 0.0]).unwrap();
+    let overlong = "i".repeat(257);
+    for bad_id in ["", overlong.as_str(), "id\0nul"] {
+        assert_eq!(
+            store
+                .search(scope.clone(), embedding_query(bad_id, vector.clone()), 10)
+                .await,
+            Err(MemoryStoreError::InvalidRequest {
+                reason: "memory_embedder_id_invalid",
+            })
+        );
+    }
+}
+
+#[tokio::test]
+async fn embedding_query_rejects_oversized_dimensions() {
+    let narrow = InProcessMemoryStore::new().with_limits(MemoryStoreLimits {
+        max_embedding_dimensions: 1,
+        ..MemoryStoreLimits::default()
+    });
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let vector = EmbeddingVector::try_new(vec![1.0, 0.0]).unwrap();
+    assert_eq!(
+        narrow
+            .search(scope, embedding_query("embed.hash-v1.2", vector), 10)
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_exceeded",
+        })
+    );
+}
+
+#[tokio::test]
+async fn embedding_query_within_bounds_passes_validation() {
+    // The in-process embedding index arrives in a later task; a valid query
+    // must get past validation and hit the honest unsupported stub, not a
+    // validation error.
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let vector = EmbeddingVector::try_new(vec![1.0, 0.0]).unwrap();
+    assert_eq!(
+        store
+            .search(scope, embedding_query("embed.hash-v1.2", vector), 10)
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embeddings_unsupported",
+        })
+    );
+}
+
+#[test]
+fn embedding_limits_default_to_documented_ceilings() {
+    let limits = MemoryStoreLimits::default();
+    assert_eq!(limits.max_embedding_dimensions, 4096);
+    assert_eq!(limits.max_embedding_spaces, 4);
+    assert_eq!(
+        limits.max_embedding_dimensions,
+        MAX_MEMORY_EMBEDDING_DIMENSIONS
+    );
+    assert_eq!(limits.max_embedding_spaces, MAX_MEMORY_EMBEDDING_SPACES);
+}
+
+#[test]
+fn similarity_score_is_clamped_and_monotonic_with_fixed_endpoints() {
+    assert_eq!(similarity_score(-1.0), 0);
+    assert_eq!(similarity_score(0.0), 500_000);
+    assert_eq!(similarity_score(1.0), 1_000_000);
+    // Out-of-range dots clamp instead of wrapping.
+    assert_eq!(similarity_score(-2.5), 0);
+    assert_eq!(similarity_score(2.5), 1_000_000);
+    assert_eq!(similarity_score(f32::NEG_INFINITY), 0);
+    assert_eq!(similarity_score(f32::INFINITY), 1_000_000);
+    // A degenerate NaN dot ranks last instead of poisoning the ordering.
+    assert_eq!(similarity_score(f32::NAN), 0);
+
+    let dots = [-1.0_f32, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0];
+    for pair in dots.windows(2) {
+        assert!(
+            similarity_score(pair[0]) < similarity_score(pair[1]),
+            "similarity_score must be strictly monotonic over {pair:?}"
+        );
+    }
 }

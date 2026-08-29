@@ -16,6 +16,7 @@ default = []
 sqlite = ["dep:rusqlite", "dep:tokio"]
 
 [dependencies]
+finstack-ai-embeddings = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true }
 futures-util = { workspace = true }

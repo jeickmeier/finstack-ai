@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::{ArtifactRef, Digest, Timestamp};
 use finstack_ai_runtime::artifact::{ArtifactOwnerId, ArtifactScope, ArtifactStore};
 use finstack_ai_runtime::ports::{PortFuture, PortObject};
 
-use crate::record::{MemoryId, MemoryRecord, MemoryScope};
+use crate::record::{MemoryBody, MemoryId, MemoryRecord, MemoryScope};
 
 mod in_process;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
@@ -40,6 +41,13 @@ pub const MAX_MEMORY_ARTIFACT_ACTIONS: usize = 16_384;
 pub const MEMORY_IDEMPOTENCY_KEY_MAX_BYTES: usize = 256;
 /// Default maximum retained age of an idempotency receipt (30 days).
 pub const MAX_MEMORY_RECEIPT_AGE_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+/// Default maximum embedding-vector dimensionality accepted by a store.
+pub const MAX_MEMORY_EMBEDDING_DIMENSIONS: usize = 4096;
+/// Default maximum distinct embedding spaces (embedder identities) retained
+/// by a store.
+pub const MAX_MEMORY_EMBEDDING_SPACES: usize = 4;
+/// Maximum byte length of an embedder identity.
+const MEMORY_EMBEDDER_ID_MAX_BYTES: usize = 256;
 
 /// Effective finite limits for a memory store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +69,12 @@ pub struct MemoryStoreLimits {
     /// Older receipts are pruned on write-path sweeps. Re-sending a pruned
     /// key is a new operation, not a replay.
     pub max_receipt_age_ms: u64,
+    /// Maximum embedding-vector dimensionality accepted from writes and
+    /// queries.
+    pub max_embedding_dimensions: usize,
+    /// Maximum distinct embedding spaces (embedder identities) retained by
+    /// the store's index.
+    pub max_embedding_spaces: usize,
 }
 
 impl Default for MemoryStoreLimits {
@@ -73,6 +87,8 @@ impl Default for MemoryStoreLimits {
             max_page_size: MAX_MEMORY_PAGE_SIZE,
             max_artifact_actions: MAX_MEMORY_ARTIFACT_ACTIONS,
             max_receipt_age_ms: MAX_MEMORY_RECEIPT_AGE_MS,
+            max_embedding_dimensions: MAX_MEMORY_EMBEDDING_DIMENSIONS,
+            max_embedding_spaces: MAX_MEMORY_EMBEDDING_SPACES,
         }
     }
 }
@@ -142,9 +158,25 @@ pub enum MemoryQuery {
     /// Match records whose preview or inline body contains any normalized
     /// query token as a case-insensitive token prefix.
     FullText(Arc<str>),
+    /// Rank records by cosine similarity between `vector` and the record
+    /// vectors stored for the embedding space `embedder_id`.
+    ///
+    /// The space must have been populated by the same embedder identity
+    /// ([`store_embedding`](MemoryStore::store_embedding)); querying an
+    /// unknown space returns no hits. Stores without an embedding index
+    /// reject this query with [`MemoryStoreError::InvalidRequest`] (reason
+    /// `memory_embeddings_unsupported`).
+    Embedding {
+        /// Embedding space to search: the producing embedder's stable
+        /// identity.
+        embedder_id: Arc<str>,
+        /// Query vector; its dimensionality must match the space.
+        vector: EmbeddingVector,
+    },
 }
 
 /// Which part of a [`MemoryHit`] matched the query that produced it.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchEvidence {
     /// The record matched by exact identifier.
@@ -153,6 +185,8 @@ pub enum MatchEvidence {
     Keyword(Arc<str>),
     /// The record matched a full-text substring search.
     FullText,
+    /// The record's stored embedding was similar to the query vector.
+    Semantic,
 }
 
 /// One search result: the matched record, a relevance score, and evidence
@@ -464,6 +498,81 @@ pub(crate) fn artifact_transition_actions(
         });
     }
     Ok(actions)
+}
+
+/// Canonical embedding source text of `record`: preview, inline body, and
+/// keywords — exactly the fields full-text search indexes. Blob bodies
+/// contribute preview and keywords only (their segment is empty).
+///
+/// Canonical form, version 1: three newline-separated segments — the
+/// preview, the inline body text (empty for blob bodies), and the keywords
+/// joined by single spaces. This form feeds
+/// [`embedding_source_digest`], whose staleness guard compares digests
+/// byte-for-byte: changing this helper requires bumping the digest domain
+/// version and dropping existing embedding spaces.
+#[must_use]
+pub fn embedding_source_text(record: &MemoryRecord) -> String {
+    let body = match &record.body {
+        MemoryBody::Inline(text) => text.as_ref(),
+        MemoryBody::Blob { .. } => "",
+    };
+    let keywords = record
+        .keywords
+        .iter()
+        .map(std::convert::AsRef::as_ref)
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{}\n{}\n{}", record.preview, body, keywords)
+}
+
+/// Digest of a canonical [`embedding_source_text`] under the
+/// `memory-embed-source` domain, version 1.
+///
+/// [`MemoryStore::store_embedding`] compares this digest against the
+/// record's current source text to detect records rewritten mid-reconcile.
+///
+/// # Errors
+///
+/// Returns [`MemoryStoreError::InvalidRequest`] (reason
+/// `memory_embedding_source_invalid`) when digest computation fails.
+pub fn embedding_source_digest(text: &str) -> Result<Digest, MemoryStoreError> {
+    Digest::domain_separated("memory-embed-source", 1, text.as_bytes()).map_err(|_| {
+        MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_source_invalid",
+        }
+    })
+}
+
+/// Map a dot product over unit-normalized vectors to a search score.
+///
+/// Clamps `dot` to `[-1, 1]`, then maps it linearly onto `0..=1_000_000`
+/// (`-1 → 0`, `0 → 500_000`, `1 → 1_000_000`). The map is monotonic, and a
+/// degenerate NaN input scores `0` so it ranks last deterministically. Both
+/// store implementations score through this one function, keeping their
+/// semantic rankings identical.
+#[must_use]
+pub fn similarity_score(dot: f32) -> u32 {
+    if dot.is_nan() {
+        return 0;
+    }
+    let clamped = f64::from(dot).clamp(-1.0, 1.0);
+    // The clamped value lands in 0.0..=1_000_000.0 after scaling, so the
+    // narrowing conversion cannot truncate or lose sign.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let score = ((clamped + 1.0) * 500_000.0).round() as u32;
+    score
+}
+
+pub(crate) fn validate_embedder_id(embedder_id: &str) -> Result<(), MemoryStoreError> {
+    if embedder_id.is_empty()
+        || embedder_id.len() > MEMORY_EMBEDDER_ID_MAX_BYTES
+        || embedder_id.as_bytes().contains(&0)
+    {
+        return Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedder_id_invalid",
+        });
+    }
+    Ok(())
 }
 
 pub(crate) fn normalize_search_tokens(text: &str) -> Vec<String> {

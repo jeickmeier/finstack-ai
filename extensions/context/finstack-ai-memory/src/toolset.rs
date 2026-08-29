@@ -721,11 +721,12 @@ impl MemoryToolset {
     }
 }
 
-fn matched_str(matched: &MatchEvidence) -> String {
+pub(crate) fn matched_str(matched: &MatchEvidence) -> String {
     match matched {
         MatchEvidence::ExactId => "exact_id".to_owned(),
         MatchEvidence::Keyword(keyword) => keyword.to_string(),
         MatchEvidence::FullText => "full_text".to_owned(),
+        MatchEvidence::Semantic => "semantic".to_owned(),
     }
 }
 

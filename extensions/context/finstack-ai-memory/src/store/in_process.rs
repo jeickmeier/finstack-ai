@@ -18,7 +18,7 @@ use super::{
     MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction, MemoryHit,
     MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError,
     MemoryStoreLimits, PutOutcome, artifact_transition_actions, normalize_search_tokens,
-    validate_new_record_lifecycle,
+    validate_embedder_id, validate_new_record_lifecycle,
 };
 
 /// Whether writing `incoming` at its id conflicts with `existing`.
@@ -199,6 +199,14 @@ impl MemoryStore for InProcessMemoryStore {
         let result = (|| -> Result<Vec<MemoryHit>, MemoryStoreError> {
             validate_scope(&scope)?;
             validate_query(&query, limit, self.limits)?;
+            if matches!(query, MemoryQuery::Embedding { .. }) {
+                // The in-process embedding index arrives with the store
+                // extension task; until then a valid embedding query is
+                // honestly unsupported rather than silently empty.
+                return Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_embeddings_unsupported",
+                });
+            }
             let now = (self.clock)();
             let state = self.state.lock().map_err(|_| lock_error())?;
             let mut hits: Vec<MemoryHit> = state
@@ -488,6 +496,18 @@ fn validate_query(
             }
             Ok(())
         }
+        MemoryQuery::Embedding {
+            embedder_id,
+            vector,
+        } => {
+            validate_embedder_id(embedder_id)?;
+            if vector.dimensions() > limits.max_embedding_dimensions {
+                return Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_embedding_dimensions_exceeded",
+                });
+            }
+            Ok(())
+        }
     }
 }
 
@@ -698,5 +718,9 @@ fn match_record(record: &MemoryRecord, query: &MemoryQuery) -> Option<MemoryHit>
                 None
             }
         }
+        // Semantic search ranks via the embedding index, never via
+        // per-record lexical matching; `search` routes embedding queries
+        // before reaching this function.
+        MemoryQuery::Embedding { .. } => None,
     }
 }

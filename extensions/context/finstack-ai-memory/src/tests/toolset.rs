@@ -797,3 +797,21 @@ async fn search_memory_rejects_an_empty_text_query() {
         .expect("empty text must be rejected");
     assert_eq!(error.code(), "memory_query_invalid");
 }
+
+#[test]
+fn matched_str_maps_semantic_evidence_to_a_stable_label() {
+    use crate::store::MatchEvidence;
+    assert_eq!(
+        crate::toolset::matched_str(&MatchEvidence::Semantic),
+        "semantic"
+    );
+    // The pre-existing labels stay untouched.
+    assert_eq!(
+        crate::toolset::matched_str(&MatchEvidence::FullText),
+        "full_text"
+    );
+    assert_eq!(
+        crate::toolset::matched_str(&MatchEvidence::ExactId),
+        "exact_id"
+    );
+}

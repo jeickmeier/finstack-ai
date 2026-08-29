@@ -237,11 +237,13 @@ fn order_candidates(mut candidates: Vec<MemoryHit>, max_hits: usize) -> Vec<Memo
 }
 
 /// Score-bucket tier: keyword/exact-id matches recall before full-text
-/// matches once the stable prefix has been applied.
-fn tier_of(evidence: &MatchEvidence) -> u8 {
+/// matches, and full-text matches before semantic similarity, once the
+/// stable prefix has been applied.
+pub(crate) fn tier_of(evidence: &MatchEvidence) -> u8 {
     match evidence {
         MatchEvidence::ExactId | MatchEvidence::Keyword(_) => 0,
         MatchEvidence::FullText => 1,
+        MatchEvidence::Semantic => 2,
     }
 }
 

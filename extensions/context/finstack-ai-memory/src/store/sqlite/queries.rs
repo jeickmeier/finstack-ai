@@ -15,7 +15,8 @@ use crate::record::{
 use super::super::{
     MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction, MemoryHit,
     MemoryListing, MemoryPage, MemoryQuery, MemoryStoreError, MemoryStoreLimits, PutOutcome,
-    artifact_transition_actions, normalize_search_tokens, validate_new_record_lifecycle,
+    artifact_transition_actions, normalize_search_tokens, validate_embedder_id,
+    validate_new_record_lifecycle,
 };
 
 pub(super) fn sqlite_put(
@@ -79,6 +80,14 @@ pub(super) fn sqlite_search(
             search_keywords(connection, scope, keywords, limit, now)?
         }
         MemoryQuery::FullText(text) => search_full_text(connection, scope, text, limit, now)?,
+        MemoryQuery::Embedding { .. } => {
+            // The sqlite embedding index lands with the schema-v3 upgrade;
+            // until then a valid embedding query is honestly unsupported
+            // rather than silently empty.
+            return Err(MemoryStoreError::InvalidRequest {
+                reason: "memory_embeddings_unsupported",
+            });
+        }
     };
     hits.sort_by(|left, right| {
         right
@@ -758,6 +767,18 @@ fn validate_query(
             if text.len() > INLINE_BODY_MAX_BYTES || text.as_bytes().contains(&0) {
                 return Err(MemoryStoreError::InvalidRequest {
                     reason: "memory_query_text_invalid",
+                });
+            }
+            Ok(())
+        }
+        MemoryQuery::Embedding {
+            embedder_id,
+            vector,
+        } => {
+            validate_embedder_id(embedder_id)?;
+            if vector.dimensions() > limits.max_embedding_dimensions {
+                return Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_embedding_dimensions_exceeded",
                 });
             }
             Ok(())

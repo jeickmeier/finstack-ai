@@ -314,3 +314,11 @@ async fn recall_skips_tombstoned_records() {
         .expect("collect");
     assert!(contribution.items.is_empty());
 }
+
+#[test]
+fn semantic_evidence_recalls_in_its_own_tier_after_full_text() {
+    assert_eq!(tier_of(&MatchEvidence::ExactId), 0);
+    assert_eq!(tier_of(&MatchEvidence::Keyword(Arc::from("alpha"))), 0);
+    assert_eq!(tier_of(&MatchEvidence::FullText), 1);
+    assert_eq!(tier_of(&MatchEvidence::Semantic), 2);
+}

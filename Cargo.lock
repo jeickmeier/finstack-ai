@@ -1394,6 +1394,7 @@ dependencies = [
 name = "finstack-ai-memory"
 version = "2.0.0"
 dependencies = [
+ "finstack-ai-embeddings",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",

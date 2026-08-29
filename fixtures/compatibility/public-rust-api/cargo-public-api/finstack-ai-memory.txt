@@ -257,10 +257,11 @@ pub fn finstack_ai_memory::record::system_clock() -> finstack_ai_memory::record:
 pub type finstack_ai_memory::record::MemoryClock = alloc::sync::Arc<(dyn core::ops::function::Fn() -> finstack_ai_kernel::primitives::time::Timestamp + core::marker::Send + core::marker::Sync)>
 pub mod finstack_ai_memory::store
 pub use finstack_ai_memory::store::InProcessArtifactStore
-pub enum finstack_ai_memory::store::MatchEvidence
+#[non_exhaustive] pub enum finstack_ai_memory::store::MatchEvidence
 pub finstack_ai_memory::store::MatchEvidence::ExactId
 pub finstack_ai_memory::store::MatchEvidence::FullText
 pub finstack_ai_memory::store::MatchEvidence::Keyword(alloc::sync::Arc<str>)
+pub finstack_ai_memory::store::MatchEvidence::Semantic
 impl core::clone::Clone for finstack_ai_memory::store::MatchEvidence
 pub fn finstack_ai_memory::store::MatchEvidence::clone(&self) -> finstack_ai_memory::store::MatchEvidence
 impl core::cmp::Eq for finstack_ai_memory::store::MatchEvidence
@@ -296,6 +297,9 @@ pub fn finstack_ai_memory::store::MemoryArtifactAction::serialize<__S>(&self, __
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::store::MemoryArtifactAction
 pub fn finstack_ai_memory::store::MemoryArtifactAction::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 #[non_exhaustive] pub enum finstack_ai_memory::store::MemoryQuery
+pub finstack_ai_memory::store::MemoryQuery::Embedding
+pub finstack_ai_memory::store::MemoryQuery::Embedding::embedder_id: alloc::sync::Arc<str>
+pub finstack_ai_memory::store::MemoryQuery::Embedding::vector: finstack_ai_embeddings::vector::EmbeddingVector
 pub finstack_ai_memory::store::MemoryQuery::ExactId(finstack_ai_memory::record::MemoryId)
 pub finstack_ai_memory::store::MemoryQuery::FullText(alloc::sync::Arc<str>)
 pub finstack_ai_memory::store::MemoryQuery::Keywords(alloc::sync::Arc<[alloc::sync::Arc<str>]>)
@@ -413,6 +417,8 @@ pub fn finstack_ai_memory::store::MemoryStoreDescriptor::fmt(&self, &mut core::f
 impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryStoreDescriptor
 pub struct finstack_ai_memory::store::MemoryStoreLimits
 pub finstack_ai_memory::store::MemoryStoreLimits::max_artifact_actions: usize
+pub finstack_ai_memory::store::MemoryStoreLimits::max_embedding_dimensions: usize
+pub finstack_ai_memory::store::MemoryStoreLimits::max_embedding_spaces: usize
 pub finstack_ai_memory::store::MemoryStoreLimits::max_idempotency_keys: usize
 pub finstack_ai_memory::store::MemoryStoreLimits::max_inline_bytes: u64
 pub finstack_ai_memory::store::MemoryStoreLimits::max_page_size: usize
@@ -431,6 +437,8 @@ pub fn finstack_ai_memory::store::MemoryStoreLimits::fmt(&self, &mut core::fmt::
 impl core::marker::Copy for finstack_ai_memory::store::MemoryStoreLimits
 impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryStoreLimits
 pub const finstack_ai_memory::store::MAX_MEMORY_ARTIFACT_ACTIONS: usize
+pub const finstack_ai_memory::store::MAX_MEMORY_EMBEDDING_DIMENSIONS: usize
+pub const finstack_ai_memory::store::MAX_MEMORY_EMBEDDING_SPACES: usize
 pub const finstack_ai_memory::store::MAX_MEMORY_IDEMPOTENCY_KEYS: usize
 pub const finstack_ai_memory::store::MAX_MEMORY_INLINE_BYTES: u64
 pub const finstack_ai_memory::store::MAX_MEMORY_PAGE_SIZE: usize
@@ -458,7 +466,10 @@ pub fn finstack_ai_memory::store::InProcessMemoryStore::list(&self, finstack_ai_
 pub fn finstack_ai_memory::store::InProcessMemoryStore::pending_artifact_actions(&self, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryArtifactAction>, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::embedding_source_digest(&str) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_memory::store::MemoryStoreError>
+pub fn finstack_ai_memory::store::embedding_source_text(&finstack_ai_memory::record::MemoryRecord) -> alloc::string::String
 pub async fn finstack_ai_memory::store::reconcile_memory_artifacts(&dyn finstack_ai_memory::store::MemoryStore, &dyn finstack_ai_runtime::services::artifact::ArtifactStore, usize) -> core::result::Result<usize, finstack_ai_memory::store::MemoryStoreError>
+pub fn finstack_ai_memory::store::similarity_score(f32) -> u32
 pub mod finstack_ai_memory::toolset
 pub struct finstack_ai_memory::toolset::MemoryPolicy
 pub finstack_ai_memory::toolset::MemoryPolicy::manage: bool
