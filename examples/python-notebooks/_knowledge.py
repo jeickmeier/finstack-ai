@@ -4,24 +4,16 @@ Mirrors the Rust definition in ``apps/finstack-knowledge`` (spec §6,
 option a: each surface composes the same agent in its own language; the
 golden-questions fixture holds the surfaces together).
 
-Divergences from the Rust composition (kept honest; every entry is either
-a binding gap worth filing or a deliberate surface boundary):
-
-- ``finstack.middleware.instructions``: folded into the ``instruction``
-  string — the native policy-instructions middleware has no Python wrapper.
-- ``finstack.middleware.compaction`` (sliding window): not composable from
-  Python; ``Agent.from_python`` accepts only ``PythonMiddleware``.
-- Document toolset (model-callable ``document_parse``/``pdf_classify``):
-  not exposed as a Python toolset. The automatic document-ingest
-  middleware covers the attachment path, and
-  ``finstack_ai.parse_document`` covers debug parsing.
-- Skills toolset: Python capabilities are instruction-only, so the
-  citations skill is declared via ``Capability(..., activation="model")``
-  without the native activation tools.
-- Repository-instructions context providers (self-docs and project
-  roots): not exposed to Python. The bundled self-docs corpus is not
-  injected here.
-- Log observer: callers pass a ``PythonObserver`` when they want one.
+Divergences from the Rust composition: none. Every component the CLI
+composes is the same native extension here — instructions middleware,
+sliding-window compaction, the self-docs repository provider, the
+document toolset + ingest middleware (auto-registered), memory
+toolset/recall/capture, the native skills toolset with model-driven
+capability activation, the log observer, and the durable artifact store.
+Two deliberate surface choices remain (configuration, not gaps): the log
+observer writes to ``<data_dir>/events.ndjson`` instead of the CLI's
+stderr, and the self-docs are read from the app crate's ``docs/`` tree
+instead of materialized under the data dir.
 """
 
 from __future__ import annotations
@@ -50,6 +42,30 @@ CITATIONS_CAPABILITY = finstack_ai.Capability(
     ],
     activation="model",
 )
+
+#: Grounding policy entry, verbatim from ``apps/finstack-knowledge/src/compose.rs``.
+GROUNDING_POLICY = (
+    "knowledge-grounding",
+    "Ground answers in retrieved context; never invent citations.",
+)
+
+#: Sliding-window compaction thresholds, verbatim from the Rust composition.
+COMPACTION_TOKENS = (120_000, 24_000)
+
+#: The bundled self-docs tree (the CLI materializes the same five topics).
+_SELF_DOCS_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "apps"
+    / "finstack-knowledge"
+    / "docs"
+)
+_SELF_DOCS_ALLOWLIST = [
+    "architecture.md",
+    "sessions.md",
+    "memory.md",
+    "ingestion.md",
+    "cli.md",
+]
 
 #: Repository-relative path of the shared golden fixture.
 _GOLDEN_PATH = (
@@ -91,22 +107,44 @@ async def build_knowledge_agent(
 ) -> finstack_ai.Agent:
     """Compose the knowledge agent over ``data_dir`` (option a mirror).
 
-    One sqlite journal at ``<data_dir>/journal.sqlite3`` (the same file the
-    CLI uses), the memory extension's toolset/recall-provider/observer, the
-    elicitation toolset, and the citations capability.
+    One sqlite journal at ``<data_dir>/journal.sqlite3`` and one durable
+    artifact store at ``<data_dir>/artifacts`` (the same layout the CLI
+    uses), the self-docs repository provider, the memory extension's
+    toolset/recall-provider/observer, instructions + sliding-window
+    compaction middleware, the native skills toolset (the citations
+    capability is model-activatable through it), the elicitation toolset,
+    and the NDJSON log observer.
     """
 
     data_dir.mkdir(parents=True, exist_ok=True)
     memory = memory or knowledge_memory(data_dir, tenant=tenant)
     return await finstack_ai.Agent.from_python(
         model,
-        [memory.toolset(), finstack_ai.ElicitationToolset(ask_user=True)],
+        [
+            memory.toolset(),
+            finstack_ai.SkillsToolset("finstack.know.tools.skills"),
+            finstack_ai.ElicitationToolset(ask_user=True),
+        ],
         BASE_INSTRUCTION,
         capabilities=[CITATIONS_CAPABILITY],
-        context_providers=[memory.context_provider(max_hits=4)],
-        observers=[memory.observer(), *observers],
+        context_providers=[
+            finstack_ai.RepositoryContextProvider(
+                str(_SELF_DOCS_DIR), allowlist=_SELF_DOCS_ALLOWLIST
+            ),
+            memory.context_provider(max_hits=4),
+        ],
+        middleware=[
+            finstack_ai.InstructionsMiddleware([GROUNDING_POLICY]),
+            finstack_ai.CompactionMiddleware.sliding_window(*COMPACTION_TOKENS),
+        ],
+        observers=[
+            finstack_ai.LogObserver(str(data_dir / "events.ndjson")),
+            memory.observer(),
+            *observers,
+        ],
         sqlite_path=str(data_dir / "journal.sqlite3"),
         sqlite_durability=finstack_ai.SqliteDurability.Durable,
+        artifact_path=str(data_dir / "artifacts"),
     )
 
 
