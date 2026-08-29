@@ -44,6 +44,7 @@ use crate::run::{
     result_to_python_with_locator, run_request, stage_attachments,
 };
 use crate::session::PySession;
+use crate::skills::{PySkillsToolset, build_skills_ports};
 
 /// Toolset argument accepted by every agent factory.
 #[derive(FromPyObject)]
@@ -58,6 +59,8 @@ pub(crate) enum PyToolsetArg {
     HttpFetch(Py<PyHttpFetchToolset>),
     /// Rust E2B sandbox toolset.
     E2b(Py<PyE2bSandboxToolset>),
+    /// Deferred native skills toolset (capability activation).
+    Skills(Py<PySkillsToolset>),
 }
 
 impl PyToolsetArg {
@@ -77,6 +80,9 @@ impl PyToolsetArg {
                 .registration(py, Arc::clone(artifact_store)),
             Self::HttpFetch(toolset) => Ok(toolset.bind(py).borrow().registration()),
             Self::E2b(toolset) => Ok(toolset.bind(py).borrow().registration()),
+            Self::Skills(_) => Err(PyValueError::new_err(
+                "SkillsToolset is only supported in Agent.from_python's toolsets",
+            )),
         }
     }
 }
@@ -287,7 +293,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store) = linked_ports(
+        let (ports, artifact_store, skills) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -296,6 +302,7 @@ impl PyAgent {
             output_type,
             artifact_path,
         )?;
+        reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -369,7 +376,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store) = linked_ports(
+        let (ports, artifact_store, skills) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -378,6 +385,7 @@ impl PyAgent {
             output_type,
             artifact_path,
         )?;
+        reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -443,7 +451,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store) = linked_ports(
+        let (ports, artifact_store, skills) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -452,6 +460,7 @@ impl PyAgent {
             output_type,
             artifact_path,
         )?;
+        reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -514,7 +523,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store) = linked_ports(
+        let (ports, artifact_store, skills) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -523,6 +532,7 @@ impl PyAgent {
             output_type,
             artifact_path,
         )?;
+        reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -582,7 +592,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store) = linked_ports(
+        let (ports, artifact_store, skills) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -591,6 +601,7 @@ impl PyAgent {
             output_type,
             artifact_path,
         )?;
+        reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -655,7 +666,7 @@ impl PyAgent {
             openrouter_media_referer,
             openrouter_media_title,
         )?;
-        let (ports, artifact_store) = linked_ports(
+        let (ports, artifact_store, skills) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -664,6 +675,7 @@ impl PyAgent {
             output_type,
             artifact_path,
         )?;
+        reject_linked_skills(skills.as_ref())?;
         let child_runs = child_runs_or_deny(py, child_runs);
         let approval_grant = approval_grant_or_per_call(py, approval_grant);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -693,7 +705,7 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None, capability_toolsets = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python callback factory forwards all primary port components distinctly"
@@ -714,11 +726,12 @@ impl PyAgent {
         sqlite_path: Option<String>,
         sqlite_durability: Option<PySqliteDurability>,
         artifact_path: Option<String>,
+        capability_toolsets: Option<Vec<PyToolsetArg>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = model.borrow();
         let model_name = model.model_name();
         let model = model.registration();
-        let (ports, artifact_store) = linked_ports(
+        let (ports, artifact_store, skills) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -727,6 +740,11 @@ impl PyAgent {
             output_type,
             artifact_path,
         )?;
+        let capability_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = capability_toolsets
+            .unwrap_or_default()
+            .into_iter()
+            .map(|toolset| toolset.registration(py, &artifact_store))
+            .collect::<PyResult<Vec<_>>>()?;
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
         let child_runs = child_runs_or_deny(py, child_runs);
@@ -743,6 +761,8 @@ impl PyAgent {
                 approval_grant,
                 (sqlite_path, sqlite_durability),
                 artifact_store,
+                skills,
+                capability_toolsets,
             )
             .await;
             Python::attach(|py| match built {
@@ -1216,12 +1236,28 @@ fn linked_ports(
     observers: Option<Vec<PyObserverArg>>,
     output_type: Option<Py<PyAny>>,
     artifact_path: Option<String>,
-) -> PyResult<(LinkedPorts, Arc<dyn ArtifactStore>)> {
+) -> PyResult<(LinkedPorts, Arc<dyn ArtifactStore>, Option<ComponentRef>)> {
     let (artifact_store, document_toolset, document_middleware) =
         document_ingest_ports(artifact_path).map_err(|error| agent_error(py, &error, None))?;
     let dyn_artifact_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store);
-    let mut toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = toolsets
-        .unwrap_or_default()
+    // The skills toolset is deferred: its catalog depends on the declared
+    // capabilities, so it is built at agent assembly (from_python only).
+    let mut skills: Option<ComponentRef> = None;
+    let mut plain: Vec<PyToolsetArg> = Vec::new();
+    for toolset in toolsets.unwrap_or_default() {
+        match toolset {
+            PyToolsetArg::Skills(handle) => {
+                if skills.is_some() {
+                    return Err(PyValueError::new_err(
+                        "at most one SkillsToolset may be registered",
+                    ));
+                }
+                skills = Some(handle.bind(py).borrow().component_ref());
+            }
+            other => plain.push(other),
+        }
+    }
+    let mut toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = plain
         .into_iter()
         .map(|toolset| toolset.registration(py, &dyn_artifact_store))
         .collect::<PyResult<Vec<_>>>()?;
@@ -1252,6 +1288,7 @@ fn linked_ports(
                 .transpose()?,
         },
         artifact_store,
+        skills,
     ))
 }
 
@@ -1270,6 +1307,8 @@ async fn build_python_agent(
     approval_grant: ApprovalGrantMode,
     sqlite: (Option<String>, Option<PySqliteDurability>),
     artifact_store: Arc<dyn ArtifactStore>,
+    skills: Option<ComponentRef>,
+    capability_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
 ) -> Result<PyAgent, AgentRunError> {
     let store_component = if sqlite.0.is_some() {
         "python.store.sqlite"
@@ -1278,36 +1317,46 @@ async fn build_python_agent(
     };
     let store = open_journal_store(sqlite.0, sqlite.1)?;
     let output = ports.output;
-    let built = Agent::builder(
+    let mut builder = Agent::builder(
         AgentId::parse("python.agent.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
         BundleId::parse("python.bundle.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
         model,
         (component(store_component)?, store),
-    )
-    .build_linked(
-        LinkedCommon {
-            instruction,
-            capabilities,
-            active_capabilities,
-            ports: LinkedAgentPorts {
-                toolsets: ports.toolsets,
-                artifact_store: ports.artifact_store,
-                context_providers: ports.context_providers,
-                middleware: ports.middleware,
-                observers: ports.observers,
-                output_schema: output.as_ref().map(|value| value.schema.clone()),
+    );
+    if let Some(skills_component) = skills {
+        let (registration, host) = build_skills_ports(skills_component, &capabilities)?;
+        builder = builder
+            .toolset(registration.0, registration.1)
+            .capability_activation_host(host);
+    }
+    for (component, toolset) in capability_toolsets {
+        builder = builder.capability_toolset(component, toolset);
+    }
+    let built = builder
+        .build_linked(
+            LinkedCommon {
+                instruction,
+                capabilities,
+                active_capabilities,
+                ports: LinkedAgentPorts {
+                    toolsets: ports.toolsets,
+                    artifact_store: ports.artifact_store,
+                    context_providers: ports.context_providers,
+                    middleware: ports.middleware,
+                    observers: ports.observers,
+                    output_schema: output.as_ref().map(|value| value.schema.clone()),
+                },
+                child_runs,
+                approval_grant,
+                openrouter_media: None,
             },
-            child_runs,
-            approval_grant,
-            openrouter_media: None,
-        },
-        model_name,
-        empty_model_settings()?,
-        DEFAULT_RUN_TIMEOUT,
-    )
-    .await?;
+            model_name,
+            empty_model_settings()?,
+            DEFAULT_RUN_TIMEOUT,
+        )
+        .await?;
     Ok(PyAgent {
         inner: Arc::new(built.agent),
         model: built.model,
@@ -1316,6 +1365,18 @@ async fn build_python_agent(
         default_timeout_seconds: built.default_timeout.as_secs_f64(),
         artifact_store,
     })
+}
+
+/// The linked provider factories build through `Agent::linked`, which has
+/// no builder access, so the deferred skills toolset cannot attach its
+/// activation host there yet.
+fn reject_linked_skills(skills: Option<&ComponentRef>) -> PyResult<()> {
+    if skills.is_some() {
+        return Err(PyValueError::new_err(
+            "SkillsToolset is currently supported only by Agent.from_python",
+        ));
+    }
+    Ok(())
 }
 
 fn child_runs_or_deny(py: Python<'_>, child_runs: Option<Py<PyChildRunPolicy>>) -> ChildRunPolicy {

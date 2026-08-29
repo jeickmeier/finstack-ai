@@ -108,12 +108,14 @@ class ActiveCapability(TypedDict):
     source: Literal["always", "application", "model"]
 
 class Capability:
-    """Instruction-only declarative capability composed by the Rust SDK.
+    """Declarative capability composed by the Rust SDK.
 
-    Python stays instruction-only: ``id``, ``description``,
-    ``instructions``, and ``activation``. Native bundle specifications
-    may additionally contribute registered Toolset, ContextProvider, and
-    Middleware references.
+    ``id``, ``description``, ``instructions``, and ``activation``, plus
+    optional component-name references (``toolsets``,
+    ``context_providers``, ``middleware``) that gate registered components
+    behind this capability's activation. Gating matches components by id:
+    the named components must be registered on the same agent — toolsets
+    usually via :meth:`Agent.from_python`'s ``capability_toolsets=``.
 
     Examples:
         >>> capability = Capability(
@@ -131,6 +133,9 @@ class Capability:
         instructions: list[str],
         *,
         activation: CapabilityActivation = "application",
+        toolsets: list[str] | None = None,
+        context_providers: list[str] | None = None,
+        middleware: list[str] | None = None,
     ) -> None: ...
     @property
     def id(self) -> str:
@@ -556,6 +561,31 @@ class Locator:
         Returns:
             ``tenant_scope``, ``session_id``, ``lane_id``, and ``run_id``.
         """
+
+class SkillsToolset:
+    """Deferred native skills toolset for model-driven capability activation.
+
+    Gives the model ``capability_list`` and ``capability_activate`` tools
+    over the agent's declared model-activated capability catalog. Unlike
+    other toolset wrappers this handle is a marker: the real toolset and
+    its activation host are built at agent assembly, when the declared
+    capabilities (and therefore the compact catalog) are known. Only
+    :meth:`Agent.from_python` supports it today — the linked provider
+    factories reject it with a clear error.
+    """
+
+    def __init__(self, component: str = "python.tools.skills") -> None:
+        """Declare the skills toolset under a caller-chosen component name.
+
+        Args:
+            component: Component id to register the toolset under.
+
+        Raises:
+            ValueError: The component id is invalid.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the skills toolset."""
 
 class Session:
     """Live handle for one journaled session."""
@@ -1794,6 +1824,7 @@ class Agent:
             | MemoryToolset
             | HttpFetchToolset
             | E2bSandboxToolset
+            | SkillsToolset
         ]
         | None = None,
         instruction: str | None = None,
@@ -1815,6 +1846,14 @@ class Agent:
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
         artifact_path: str | None = None,
+        capability_toolsets: list[
+            PythonToolset
+            | ElicitationToolset
+            | MemoryToolset
+            | HttpFetchToolset
+            | E2bSandboxToolset
+        ]
+        | None = None,
     ) -> Agent:
         """Build an agent from trusted callbacks and optional Pydantic output type.
 
@@ -1843,6 +1882,10 @@ class Agent:
                 middleware. ``None`` keeps the process-local in-memory
                 store, which cannot resolve a persisted session's
                 attachments from a new process.
+            capability_toolsets: Toolsets registered as capability-gated:
+                their tools appear only while a capability whose
+                ``toolsets=[...]`` references their component name is
+                active.
 
         Returns:
             An immutable Rust-owned agent handle.

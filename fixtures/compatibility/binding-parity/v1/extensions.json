@@ -215,7 +215,7 @@
     },
     {
       "crate": "finstack-ai-tools-skills",
-      "python": {"status": "unavailable", "reason": "Application-injected native skill toolset; not a binding-owned constructor."},
+      "python": {"status": "direct", "surfaces": ["SkillsToolset"]},
       "js": {"status": "unavailable", "reason": "Browser hosts have no ambient repository authority."}
     },
     {

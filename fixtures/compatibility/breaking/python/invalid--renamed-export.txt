@@ -39,6 +39,7 @@ RuntimeError
 Session
 SessionInspectPhase
 SessionInspectSnapshot
+SkillsToolset
 SqliteDurability
 TimeoutError
 __version__

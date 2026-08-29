@@ -1743,6 +1743,7 @@ dependencies = [
  "finstack-ai-tools-document",
  "finstack-ai-tools-elicitation",
  "finstack-ai-tools-fetch",
+ "finstack-ai-tools-skills",
  "futures-util",
  "pyo3",
  "pyo3-async-runtimes",

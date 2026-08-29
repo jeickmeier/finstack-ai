@@ -47,6 +47,7 @@ finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-tools-document = { workspace = true }
 finstack-ai-tools-elicitation = { workspace = true }
 finstack-ai-tools-fetch = { workspace = true, features = ["vendored-tls"] }
+finstack-ai-tools-skills = { workspace = true }
 finstack-ai-sandbox-e2b = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-test = { workspace = true, optional = true }
 futures-util = { workspace = true }

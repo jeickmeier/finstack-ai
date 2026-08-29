@@ -42,6 +42,7 @@ from ._finstack_ai import (
     RunResult,
     RuntimeError,
     Session,
+    SkillsToolset,
     SqliteDurability,
     TimeoutError,
 )
@@ -271,6 +272,7 @@ __all__ = [
     "Session",
     "SessionInspectPhase",
     "SessionInspectSnapshot",
+    "SkillsToolset",
     "SqliteDurability",
     "TimeoutError",
     "__version__",

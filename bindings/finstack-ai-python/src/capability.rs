@@ -1,13 +1,14 @@
-//! Data-only declarative capability accepted by both Python agent factories.
+//! Declarative capability accepted by every Python agent factory.
 
 use std::sync::Arc;
 
 use finstack_ai::{CapabilityActivation, CapabilitySpec, InstructionSpec};
-use finstack_ai_kernel::CapabilityId;
+use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
-/// Instruction-only declarative capability accepted by both Python agent factories.
+/// Declarative capability: bounded instructions plus optional component
+/// references gating registered toolsets/providers/middleware.
 #[pyclass(
     module = "finstack_ai._finstack_ai",
     name = "Capability",
@@ -23,12 +24,15 @@ pub(crate) struct PyCapability {
 impl PyCapability {
     /// Construct one bounded declarative capability.
     #[new]
-    #[pyo3(signature = (id, description, instructions, *, activation = "application"))]
+    #[pyo3(signature = (id, description, instructions, *, activation = "application", toolsets = None, context_providers = None, middleware = None))]
     fn new(
         id: String,
         description: String,
         instructions: Vec<String>,
         activation: &str,
+        toolsets: Option<Vec<String>>,
+        context_providers: Option<Vec<String>>,
+        middleware: Option<Vec<String>>,
     ) -> PyResult<Self> {
         let activation = match activation {
             "always" => CapabilityActivation::Always,
@@ -50,9 +54,9 @@ impl PyCapability {
             id: CapabilityId::parse(id).map_err(|error| PyTypeError::new_err(error.to_string()))?,
             description: Arc::from(description),
             instructions: instructions.into(),
-            toolsets: Arc::from([]),
-            context_providers: Arc::from([]),
-            middleware: Arc::from([]),
+            toolsets: component_refs(toolsets)?,
+            context_providers: component_refs(context_providers)?,
+            middleware: component_refs(middleware)?,
             activation,
         };
         inner
@@ -83,4 +87,22 @@ impl PyCapability {
             CapabilityActivation::Disabled => "disabled",
         }
     }
+}
+
+/// Convert component-name strings into unversioned capability references.
+///
+/// Capability gating matches registered components by id alone, so the
+/// references carry no version; the named components must be registered on
+/// the same agent (for toolsets, usually via ``capability_toolsets=``).
+fn component_refs(names: Option<Vec<String>>) -> PyResult<Arc<[ComponentRef]>> {
+    Ok(names
+        .unwrap_or_default()
+        .into_iter()
+        .map(|name| {
+            ComponentId::parse(&name)
+                .map(|id| ComponentRef::new(id, None))
+                .map_err(|error| PyTypeError::new_err(error.to_string()))
+        })
+        .collect::<PyResult<Vec<_>>>()?
+        .into())
 }
