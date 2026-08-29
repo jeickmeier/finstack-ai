@@ -182,7 +182,7 @@
     },
     {
       "crate": "finstack-ai-tools-mcp",
-      "python": {"status": "unavailable", "reason": "Application-injected native MCP toolset; not a binding-owned constructor."},
+      "python": {"status": "direct", "surfaces": ["McpToolset"]},
       "js": {"status": "unavailable", "reason": "Browser hosts provide remote tools through generic host adapters."}
     },
     {

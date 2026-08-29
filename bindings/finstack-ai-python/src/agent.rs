@@ -50,7 +50,7 @@ use crate::run::{
 };
 use crate::session::PySession;
 use crate::skills::{PySkillsToolset, build_skills_ports};
-use crate::toolsets::{PyCalculatorToolset, PyFileSystemToolset, PyShellToolset};
+use crate::toolsets::{PyCalculatorToolset, PyFileSystemToolset, PyMcpToolset, PyShellToolset};
 
 /// Toolset argument accepted by every agent factory.
 #[derive(FromPyObject)]
@@ -73,6 +73,8 @@ pub(crate) enum PyToolsetArg {
     FileSystem(Py<PyFileSystemToolset>),
     /// Rust deny-by-default shell toolset (T2, not sandboxed by default).
     Shell(Py<PyShellToolset>),
+    /// Rust MCP client toolset over an allowlisted stdio server.
+    Mcp(Py<PyMcpToolset>),
 }
 
 impl PyToolsetArg {
@@ -98,6 +100,7 @@ impl PyToolsetArg {
             Self::Calculator(toolset) => Ok(toolset.bind(py).borrow().registration()),
             Self::FileSystem(toolset) => Ok(toolset.bind(py).borrow().registration()),
             Self::Shell(toolset) => Ok(toolset.bind(py).borrow().registration()),
+            Self::Mcp(toolset) => Ok(toolset.bind(py).borrow().registration()),
         }
     }
 }

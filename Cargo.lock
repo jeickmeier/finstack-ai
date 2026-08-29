@@ -1752,6 +1752,7 @@ dependencies = [
  "finstack-ai-tools-elicitation",
  "finstack-ai-tools-fetch",
  "finstack-ai-tools-filesystem",
+ "finstack-ai-tools-mcp",
  "finstack-ai-tools-shell",
  "finstack-ai-tools-skill-import",
  "finstack-ai-tools-skills",

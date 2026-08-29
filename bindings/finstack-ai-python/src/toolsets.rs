@@ -6,6 +6,7 @@ use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
 use finstack_ai_tools_calculator::CalculatorToolset;
 use finstack_ai_tools_filesystem::FileSystemToolset;
+use finstack_ai_tools_mcp::{McpConfig, McpToolset, McpToolsetFactory, StdioConfig};
 use finstack_ai_tools_shell::{ShellPolicy, ShellToolset};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -160,6 +161,78 @@ impl PyShellToolset {
 }
 
 impl PyShellToolset {
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Toolset>) {
+        (self.component.clone(), self.inner.clone())
+    }
+}
+
+/// Model Context Protocol client toolset backed by the Rust implementation.
+///
+/// Connects to one allowlisted stdio MCP server at construction,
+/// enumerates `tools/list`, and freezes the catalog. Classification is
+/// fail-closed: tools are non-idempotent writes requiring approval unless
+/// the host names them in `read_only_tools` / `idempotent_tools` (server
+/// annotations never grant this).
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "McpToolset",
+    frozen,
+    skip_from_py_object
+)]
+pub(crate) struct PyMcpToolset {
+    component: ComponentRef,
+    inner: Arc<McpToolset>,
+}
+
+#[pymethods]
+impl PyMcpToolset {
+    /// Connect to one stdio MCP server and freeze its tool catalog.
+    #[staticmethod]
+    #[pyo3(signature = (program, args = Vec::new(), *, component = "python.tools.mcp", read_only_tools = None, idempotent_tools = None))]
+    fn stdio<'py>(
+        py: Python<'py>,
+        program: String,
+        args: Vec<String>,
+        component: &str,
+        read_only_tools: Option<Vec<String>>,
+        idempotent_tools: Option<Vec<String>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let component = caller_component(component)?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut config = McpConfig::default().allow_command(&program);
+            if let Some(names) = read_only_tools {
+                config = config.with_read_only_tools(names);
+            }
+            if let Some(names) = idempotent_tools {
+                config = config.with_idempotent_tools(names);
+            }
+            let config = config
+                .stdio(StdioConfig::new(program, args))
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            let toolset = McpToolsetFactory::new(config)
+                .construct()
+                .await
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    Self {
+                        component,
+                        inner: Arc::new(toolset),
+                    },
+                )
+            })
+        })
+    }
+
+    /// Exact registered component identity.
+    #[getter]
+    fn component(&self) -> String {
+        self.component.id().to_string()
+    }
+}
+
+impl PyMcpToolset {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Toolset>) {
         (self.component.clone(), self.inner.clone())
     }

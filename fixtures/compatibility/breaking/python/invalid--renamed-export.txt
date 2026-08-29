@@ -23,6 +23,7 @@ InstructionsMiddleware
 Lane
 Locator
 LogObserver
+McpToolset
 MemoryContextProvider
 MemoryExtension
 MemoryExternalIdentityMap

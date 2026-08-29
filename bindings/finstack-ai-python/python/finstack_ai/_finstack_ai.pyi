@@ -326,6 +326,44 @@ class MemoryExtension:
     def observer(self) -> MemoryObserver:
         """Return the capture observer handle for ``observers``."""
 
+class McpToolset:
+    """Model Context Protocol client toolset backed by the Rust implementation.
+
+    Connects to one allowlisted stdio MCP server at construction,
+    enumerates ``tools/list``, and freezes the catalog. Classification is
+    fail-closed: tools are non-idempotent writes requiring approval
+    unless the host names them in ``read_only_tools`` /
+    ``idempotent_tools`` (server annotations never grant this). Pass
+    instances via the ``toolsets=[...]`` parameter of any :class:`Agent`
+    factory.
+    """
+
+    @staticmethod
+    async def stdio(
+        program: str,
+        args: list[str] = [],
+        *,
+        component: str = "python.tools.mcp",
+        read_only_tools: list[str] | None = None,
+        idempotent_tools: list[str] | None = None,
+    ) -> McpToolset:
+        """Connect to one stdio MCP server and freeze its tool catalog.
+
+        Args:
+            program: Exact program path (implicitly allowlisted).
+            args: Additional argv after the program.
+            component: Component id to register the toolset under.
+            read_only_tools: Host-declared read-only tool names.
+            idempotent_tools: Host-declared retry-safe tool names.
+
+        Raises:
+            ValueError: Transport setup fails or ``tools/list`` violates
+                protocol rules.
+        """
+    @property
+    def component(self) -> str:
+        """Stable component identifier for the MCP toolset."""
+
 class MemoryContextProvider:
     """Recall provider handle produced by :meth:`MemoryExtension.context_provider`."""
 
@@ -1589,6 +1627,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
         context_providers: list[
@@ -1707,6 +1746,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
         context_providers: list[
@@ -1830,6 +1870,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
         context_providers: list[
@@ -1937,6 +1978,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
         context_providers: list[
@@ -2044,6 +2086,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
         context_providers: list[
@@ -2148,6 +2191,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
         context_providers: list[
@@ -2250,6 +2294,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
         instruction: str | None = None,
@@ -2294,6 +2339,7 @@ class Agent:
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
+            | McpToolset
         ]
         | None = None,
     ) -> Agent:
