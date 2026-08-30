@@ -33,6 +33,7 @@ members = [
     "extensions/toolsets/finstack-ai-tools-subagent",
     "extensions/toolsets/finstack-ai-tools-skills",
     "extensions/toolsets/finstack-ai-tools-skill-import",
+    "extensions/toolsets/finstack-ai-tools-video-compose",
     "extensions/context/finstack-ai-context-repository",
     "extensions/context/finstack-ai-memory",
     "extensions/embeddings/finstack-ai-embeddings",
@@ -160,6 +161,7 @@ finstack-ai-tools-shell = { path = "extensions/toolsets/finstack-ai-tools-shell"
 finstack-ai-tools-subagent = { path = "extensions/toolsets/finstack-ai-tools-subagent", version = "2.0.0" }
 finstack-ai-tools-skills = { path = "extensions/toolsets/finstack-ai-tools-skills", version = "2.0.0" }
 finstack-ai-tools-skill-import = { path = "extensions/toolsets/finstack-ai-tools-skill-import", version = "2.0.0" }
+finstack-ai-tools-video-compose = { path = "extensions/toolsets/finstack-ai-tools-video-compose", version = "1.0.0" }
 finstack-ai-memory = { path = "extensions/context/finstack-ai-memory", version = "2.0.0" }
 finstack-ai-embeddings = { path = "extensions/embeddings/finstack-ai-embeddings", version = "2.0.0" }
 finstack-ai-embedder-ollama = { path = "extensions/embeddings/finstack-ai-embedder-ollama", version = "2.0.0" }

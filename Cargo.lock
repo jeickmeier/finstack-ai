@@ -2142,6 +2142,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-tools-video-compose"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-net-guard",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-toolset-port-leaf-fixture"
 version = "2.0.0"
 dependencies = [
