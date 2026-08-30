@@ -2,16 +2,9 @@
 //!
 //! Every field here is data, never a shell fragment: nothing in this module
 //! ever becomes a raw `ffmpeg` flag or filesystem path directly. The
-//! filtergraph builder (`graph.rs`, arriving in a later task) is the only
-//! place that reads a [`CompositionSpec`] to build a command.
-//!
-//! `graph.rs` now consumes these types to build `ffmpeg` argument vectors,
-//! but nothing yet calls `graph::build_ffmpeg_args` outside its own tests:
-//! `Toolset::call` still rejects every request until `exec.rs` lands and
-//! wires the whole pipeline together. Until then the compiler sees this
-//! whole chain (spec types -> `graph.rs` -> unreachable) as dead code, so
-//! `dead_code` stays muted here for that interim stretch.
-#![allow(dead_code)]
+//! filtergraph builder (`graph.rs`) is the only place that reads a
+//! [`CompositionSpec`] to build a command; `lib.rs::call` is the only place
+//! that parses one from a tool call.
 
 use finstack_ai_kernel::ArtifactRef;
 use serde::{Deserialize, Serialize};

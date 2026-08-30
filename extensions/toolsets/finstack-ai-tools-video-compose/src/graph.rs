@@ -1,14 +1,9 @@
 //! Pure `ffmpeg` argument construction from a validated [`CompositionSpec`].
 //!
 //! Nothing in this module touches the filesystem or spawns a process: every
-//! function here is a total computation over its inputs. The caller (a later
-//! task) is responsible for staging clips to disk, probing their durations,
-//! and actually invoking `ffmpeg` with the returned argument vector.
-//!
-//! `build_ffmpeg_args` is exercised only by this module's own tests until
-//! `exec.rs` lands and wires it into `Toolset::call`; `dead_code` stays
-//! muted here for that interim stretch (see `spec.rs` for the same note).
-#![allow(dead_code)]
+//! function here is a total computation over its inputs. The caller
+//! (`lib.rs::call`) stages clips to disk, probes their durations, and
+//! invokes `ffmpeg` with the returned argument vector.
 
 use std::ffi::OsString;
 use std::fmt::Write as _;
