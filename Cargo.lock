@@ -2146,7 +2146,6 @@ name = "finstack-ai-tools-video-compose"
 version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
- "finstack-ai-net-guard",
  "finstack-ai-runtime",
  "futures-util",
  "serde",

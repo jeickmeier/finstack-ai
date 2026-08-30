@@ -53,16 +53,17 @@ const PROBE_TOOL_ID: &str = "finstack.tools.probe_media";
 pub const VIDEO_COMPOSE_CONFIG_INVALID: &str = "video_compose_config_invalid";
 /// Stable argument-validation code.
 pub const VIDEO_COMPOSE_INVALID_ARGUMENTS: &str = "video_compose_invalid_arguments";
-/// Stable code for a spec referencing an artifact the store cannot find.
-pub const VIDEO_COMPOSE_ARTIFACT_NOT_FOUND: &str = "video_compose_artifact_not_found";
+/// Stable code for a `validate_spec` rejection (Task 5 attaches the reason).
+pub const VIDEO_COMPOSE_SPEC_INVALID: &str = "video_compose_spec_invalid";
 /// Stable code for an `ffmpeg`/`ffprobe` process failure.
-pub const VIDEO_COMPOSE_RENDER_FAILED: &str = "video_compose_render_failed";
+pub const VIDEO_COMPOSE_FFMPEG_FAILED: &str = "video_compose_ffmpeg_failed";
 /// Stable code for a render exceeding `render_timeout`.
 pub const VIDEO_COMPOSE_TIMEOUT: &str = "video_compose_timeout";
+/// Stable code for a stored-media failure: missing artifact, or an
+/// artifact-store read/write error.
+pub const VIDEO_COMPOSE_MEDIA_FAILURE: &str = "video_compose_media_failure";
 /// Stable output-limit code.
 pub const VIDEO_COMPOSE_LIMIT_EXCEEDED: &str = "video_compose_limit_exceeded";
-/// Stable code for an artifact-store read or write failure.
-pub const VIDEO_COMPOSE_STORE_FAILED: &str = "video_compose_store_failed";
 
 /// Explicit video-compose route. Never populated from the environment.
 pub struct VideoComposeConfig {
