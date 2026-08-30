@@ -249,8 +249,10 @@ pub struct PlanBudget {
 ///
 /// Returns an error message when the plan is malformed (bad version, empty
 /// scene list, duplicate or malformed scene ids, empty prompts, out-of-range
-/// durations, malformed or overlapping caption cues, or transitions that
-/// name an unknown or final scene) or exceeds the supplied `limits`.
+/// durations, malformed or overlapping caption cues, too many or unpinned
+/// reference images, a caption delivery mode with no cues anywhere, or
+/// transitions that name an unknown or final scene) or exceeds the supplied
+/// `limits`.
 #[allow(
     clippy::cast_precision_loss,
     reason = "scene durations are bounded to 1..=60 seconds above; the cast to f64 for a \
@@ -268,6 +270,7 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
     }
     let mut seen = std::collections::BTreeSet::new();
     let mut total_video_s: u64 = 0;
+    let mut any_cues = false;
     for scene in &plan.scenes {
         let valid_id = !scene.id.is_empty()
             && scene.id.len() <= 64
@@ -288,9 +291,26 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
         if !(1..=60).contains(&duration) {
             return Err("scene duration must be between 1 and 60 seconds");
         }
+        // Mirrors the video tool schema's `reference_images` maxItems, and its
+        // requirement that every reference resolve to a URL or stored artifact:
+        // a prompt has no resolution path here, so rejecting beats dropping it.
+        if let Some(references) = &scene.reference_images {
+            if references.len() > 4 {
+                return Err("scene has more than 4 reference images");
+            }
+            if references
+                .iter()
+                .any(|source| matches!(source, FrameSource::Prompt { .. }))
+            {
+                return Err("reference images must be pinned artifacts or urls");
+            }
+        }
         if let Some(cues) = &scene.captions {
             if cues.len() > 32 {
                 return Err("scene has more than 32 caption cues");
+            }
+            if !cues.is_empty() {
+                any_cues = true;
             }
             let mut previous_end = 0.0_f64;
             for cue in cues {
@@ -312,6 +332,15 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
     }
     if total_video_s > limits.max_total_video_s {
         return Err("movie plan exceeds the total video seconds ceiling");
+    }
+    // A caption delivery mode with nothing to deliver would otherwise stage an
+    // empty transcript, or silently ship a movie with no captions at all.
+    if matches!(
+        plan.output.captions,
+        Some(CaptionsMode::Sidecar | CaptionsMode::BurnIn)
+    ) && !any_cues
+    {
+        return Err("captions delivery requested but no scene has cues");
     }
     let last_id = plan.scenes.last().map(|scene| scene.id.as_str());
     for transition in plan.transitions.iter().flatten() {
@@ -489,5 +518,36 @@ mod tests {
             },
         ]);
         assert!(validate_plan(&plan, &limits()).is_err(), "overlapping cues");
+
+        let mut plan = two_scene_plan();
+        plan.scenes[0].reference_images = Some(
+            (0..5)
+                .map(|index| FrameSource::Url {
+                    url: format!("https://example.test/ref-{index}.png"),
+                })
+                .collect(),
+        );
+        assert_eq!(
+            validate_plan(&plan, &limits()),
+            Err("scene has more than 4 reference images")
+        );
+
+        let mut plan = two_scene_plan();
+        plan.scenes[0].reference_images = Some(vec![FrameSource::Prompt {
+            prompt: "moody teal grade".into(),
+        }]);
+        assert_eq!(
+            validate_plan(&plan, &limits()),
+            Err("reference images must be pinned artifacts or urls"),
+            "an unresolvable reference is reported, not silently dropped"
+        );
+
+        let mut plan = two_scene_plan();
+        plan.scenes[0].captions = None;
+        assert_eq!(
+            validate_plan(&plan, &limits()),
+            Err("captions delivery requested but no scene has cues"),
+            "burn_in output with nothing to caption"
+        );
     }
 }

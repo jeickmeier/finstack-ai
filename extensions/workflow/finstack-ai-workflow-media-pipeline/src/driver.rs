@@ -218,9 +218,13 @@ impl MediaPipelineDriver {
             .to_owned();
         let plan_digest = Digest::raw_json(plan_json);
         let hex = plan_digest.to_hex();
-        let short = hex
-            .get(..24)
-            .ok_or_else(|| stage_error("plan digest is too short to derive a render identity"))?;
+        let short = hex.get(..24).ok_or_else(|| {
+            tool_error(
+                MEDIA_PIPELINE_PLAN_INVALID,
+                ErrorCategory::Validation,
+                "plan digest is too short to derive a render identity",
+            )
+        })?;
         let render_id: Arc<str> = Arc::from(format!("render-{short}"));
         let tenant_scope = Arc::clone(&ctx.run.locator.tenant_scope);
 
@@ -487,6 +491,7 @@ impl MediaPipelineDriver {
         state.status = RenderStatus::Composing;
         // Transcripts are staged and persisted BEFORE composing so a crash
         // between the two resumes without regenerating them.
+        let mut transcripts_staged_now = false;
         if plan_has_cues(plan) && state.transcript_srt_artifact.is_none() {
             let cues = cue_timeline(plan);
             let Some(store) = self.artifact_store.as_ref() else {
@@ -517,6 +522,7 @@ impl MediaPipelineDriver {
                 return Ok(());
             }
             state.revision = state.revision.saturating_add(1);
+            transcripts_staged_now = true;
         }
 
         let spec = compose_spec(plan, state)?;
@@ -532,8 +538,7 @@ impl MediaPipelineDriver {
                 if error.code() == VIDEO_COMPOSE_MEDIA_FAILURE
                     || error.message().contains(VIDEO_COMPOSE_MEDIA_FAILURE)
                 {
-                    self.demote_unverified_clips(ctx, state).await;
-                    state.status = RenderStatus::Running;
+                    self.rerun_or_fail(ctx, state, transcripts_staged_now).await;
                 } else {
                     state.status = RenderStatus::Failed;
                 }
@@ -542,10 +547,50 @@ impl MediaPipelineDriver {
         }
     }
 
-    /// Re-run the at-least-once tail: any clip that no longer verifies is
-    /// demoted to the stage that can produce it again.
-    async fn demote_unverified_clips(&self, ctx: &ToolCallContext, state: &mut RenderState) {
+    /// Decide the at-least-once re-run after a compose media failure.
+    ///
+    /// Composition reads two kinds of input: the per-scene clips and the
+    /// transcript pair. Demoting the clips that no longer verify is the normal
+    /// repair. When *nothing* was demoted the clips are all fine, so the
+    /// suspect input is the transcript pair — which a crash-resume can carry
+    /// over from a previous run's scope. Clearing it makes the next tick
+    /// re-stage it under this run's scope and compose again.
+    ///
+    /// That second chance is only real if the transcripts predate this tick.
+    /// Transcripts staged moments ago in this same tick would be re-staged
+    /// byte-identically under the same scope, so clearing them would buy a
+    /// no-progress loop rather than progress: with nothing left to redo, the
+    /// render fails instead.
+    async fn rerun_or_fail(
+        &self,
+        ctx: &ToolCallContext,
+        state: &mut RenderState,
+        transcripts_staged_now: bool,
+    ) {
+        if self.demote_unverified_clips(ctx, state).await > 0 {
+            state.status = RenderStatus::Running;
+            return;
+        }
+        let carried_over_transcripts = !transcripts_staged_now
+            && (state.transcript_srt_artifact.is_some() || state.transcript_vtt_artifact.is_some());
+        if carried_over_transcripts {
+            state.transcript_srt_artifact = None;
+            state.transcript_vtt_artifact = None;
+            state.status = RenderStatus::Running;
+        } else {
+            state.status = RenderStatus::Failed;
+        }
+    }
+
+    /// Demote every clip that no longer verifies to the stage that can produce
+    /// it again, returning how many scenes were demoted.
+    async fn demote_unverified_clips(
+        &self,
+        ctx: &ToolCallContext,
+        state: &mut RenderState,
+    ) -> usize {
         let scope = artifact_scope(ctx);
+        let mut demoted = 0_usize;
         for index in 0..state.scenes.len() {
             let Some(artifact) = state
                 .scenes
@@ -564,8 +609,10 @@ impl MediaPipelineDriver {
                 } else {
                     SceneStage::PendingSubmit
                 };
+                demoted = demoted.saturating_add(1);
             }
         }
+        demoted
     }
 
     async fn clip_verifies(&self, scope: &ArtifactScope, artifact: &ArtifactRef) -> bool {
@@ -687,8 +734,8 @@ fn submit_arguments(plan: &MoviePlan, spec: &SceneSpec, scene: &SceneState) -> V
         .and_then(|value| value.resolution.clone())
         .or_else(|| plan.defaults.resolution.clone());
     let duration = spec.duration_s.unwrap_or(plan.defaults.scene_duration_s);
-    // Prompt-sourced reference images cannot be resolved here (they would need
-    // their own generation pass), so only pinned artifacts and URLs are sent.
+    // `validate_plan` rejects prompt-sourced reference images, so every entry
+    // here resolves; `filter_map` is the total-function spelling of that.
     let references: Vec<Value> = spec
         .reference_images
         .iter()
@@ -940,8 +987,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use finstack_ai_kernel::{
-        EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId,
-        SessionId, ToolBatchId, ToolCallId, ToolExecutionMode, ToolId, ValidatedToolCall,
+        Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety,
+        RunId, SessionId, ToolBatchId, ToolCallId, ToolExecutionMode, ToolId, ValidatedToolCall,
     };
     use finstack_ai_runtime::artifact::{ArtifactMetadata, InProcessArtifactStore};
     use finstack_ai_runtime::ports::PortFuture;
@@ -957,9 +1004,9 @@ mod tests {
 
     use super::{
         ArtifactRef, ArtifactStore, Bytes, MediaPipelineConfig, MediaPipelineDriver, PlanLimits,
-        RenderStatus, SceneStage, artifact_scope, stage_required_artifact,
+        RenderStatus, SceneStage, SceneState, artifact_scope, stage_required_artifact,
     };
-    use crate::state::MemoryRenderStateStore;
+    use crate::state::{MemoryRenderStateStore, RenderState, RenderStateStore};
 
     // ----- test double ---------------------------------------------------
 
@@ -973,8 +1020,19 @@ mod tests {
     #[derive(Debug)]
     struct QueueToolset {
         tools: Arc<[ToolSpec]>,
-        queues: Mutex<BTreeMap<String, VecDeque<Value>>>,
+        queues: Mutex<BTreeMap<String, VecDeque<Queued>>>,
         calls: Mutex<Vec<(String, Value)>>,
+    }
+
+    /// One queued outcome for a single call.
+    #[derive(Debug, Clone)]
+    enum Queued {
+        /// A normal successful result payload.
+        Ok(Value),
+        /// A terminal result the tool itself flags as an error.
+        ErrorResult(Value),
+        /// An adapter error raised by `call` before any stream exists.
+        CallError(ToolError),
     }
 
     impl QueueToolset {
@@ -988,12 +1046,29 @@ mod tests {
         }
 
         fn push(&self, tool: &str, result: Value) {
+            self.enqueue(tool, Queued::Ok(result));
+        }
+
+        /// Queue a terminal `ToolResult` carrying `is_error: true`.
+        fn push_error_result(&self, tool: &str, payload: Value) {
+            self.enqueue(tool, Queued::ErrorResult(payload));
+        }
+
+        /// Queue an adapter error raised straight out of `Toolset::call`.
+        fn push_call_error(&self, tool: &str, code: &str, message: &str) {
+            let error =
+                ToolError::try_new(code, ErrorCategory::Tool, false, message, Metadata::empty())
+                    .expect("tool error");
+            self.enqueue(tool, Queued::CallError(error));
+        }
+
+        fn enqueue(&self, tool: &str, entry: Queued) {
             self.queues
                 .lock()
                 .unwrap()
                 .entry(tool.to_owned())
                 .or_default()
-                .push_back(result);
+                .push_back(entry);
         }
 
         fn calls(&self) -> Vec<(String, Value)> {
@@ -1053,24 +1128,28 @@ mod tests {
             let arguments: Value =
                 serde_json::from_slice(call.call.arguments().as_bytes()).expect("arguments json");
             self.calls.lock().unwrap().push((name.clone(), arguments));
-            let result = self
+            let entry = self
                 .queues
                 .lock()
                 .unwrap()
                 .get_mut(&name)
                 .and_then(VecDeque::pop_front)
                 .unwrap_or_else(|| panic!("no queued result for {name}"));
-            let output = RawJson::parse(serde_json::to_vec(&result).expect("encode"))
+            let (payload, is_error) = match entry {
+                Queued::Ok(payload) => (payload, false),
+                Queued::ErrorResult(payload) => (payload, true),
+                Queued::CallError(error) => {
+                    return Box::pin(async move { Err(error) });
+                }
+            };
+            let output = RawJson::parse(serde_json::to_vec(&payload).expect("encode"))
                 .expect("canonical json");
-            let item = ToolStreamItem::Completed(ToolResult {
-                output,
-                is_error: false,
-            });
+            let item = ToolStreamItem::Completed(ToolResult { output, is_error });
             Box::pin(async move { Ok(Box::pin(stream::iter(vec![Ok(item)])) as ToolEventStream) })
         }
     }
 
-    use super::ToolError;
+    use super::{ErrorCategory, ToolError};
 
     // ----- fixtures ------------------------------------------------------
 
@@ -1168,11 +1247,32 @@ mod tests {
         .expect("stage")
     }
 
+    async fn stage_subtitle(
+        store: &Arc<dyn ArtifactStore>,
+        ctx: &ToolCallContext,
+        body: &str,
+    ) -> ArtifactRef {
+        stage_required_artifact(
+            store.as_ref(),
+            artifact_scope(ctx),
+            Bytes::from(body.as_bytes().to_vec()),
+            ArtifactMetadata {
+                kind: Arc::from("tool-output"),
+                media_type: Arc::from("application/x-subrip"),
+                name: Some(Arc::from("transcript.srt")),
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("stage")
+    }
+
     struct Harness {
         driver: MediaPipelineDriver,
         media: Arc<QueueToolset>,
         compose: Arc<QueueToolset>,
         store: Option<Arc<dyn ArtifactStore>>,
+        state: Arc<MemoryRenderStateStore>,
     }
 
     fn harness(limits: PlanLimits, with_store: bool) -> Harness {
@@ -1185,10 +1285,11 @@ mod tests {
         let compose = QueueToolset::new(&[super::COMPOSE_TOOL]);
         let store: Option<Arc<dyn ArtifactStore>> = with_store
             .then(|| Arc::new(InProcessArtifactStore::default()) as Arc<dyn ArtifactStore>);
+        let state = Arc::new(MemoryRenderStateStore::new());
         let driver = MediaPipelineDriver::try_new(MediaPipelineConfig {
             media_tools: Arc::clone(&media) as Arc<dyn Toolset>,
             compose_tools: Arc::clone(&compose) as Arc<dyn Toolset>,
-            state: Arc::new(MemoryRenderStateStore::new()),
+            state: Arc::clone(&state) as Arc<dyn RenderStateStore>,
             artifact_store: store.clone(),
             limits,
         })
@@ -1198,6 +1299,7 @@ mod tests {
             media,
             compose,
             store,
+            state,
         }
     }
 
@@ -1242,6 +1344,52 @@ mod tests {
             super::COMPOSE_TOOL,
             json!({ "artifact": final_clip, "duration_s": 13.5, "byte_length": 17 }),
         );
+    }
+
+    /// Seed the state store with a render whose scenes are already `Done`, as
+    /// a crashed-then-resumed process would find it. Returns the render id.
+    fn seed_done_render(
+        harness: &Harness,
+        ctx: &ToolCallContext,
+        plan_json: &[u8],
+        clips: &[ArtifactRef],
+        transcripts: Option<(ArtifactRef, ArtifactRef)>,
+    ) -> String {
+        let plan: crate::plan::MoviePlan = serde_json::from_slice(plan_json).expect("plan");
+        let plan_digest = Digest::raw_json(plan_json);
+        let render_id: Arc<str> = Arc::from(format!("render-{}", &plan_digest.to_hex()[..24]));
+        let scenes = plan
+            .scenes
+            .iter()
+            .zip(clips)
+            .map(|(spec, clip)| SceneState {
+                scene_id: spec.id.clone(),
+                stage: SceneStage::Done,
+                start_frame_artifact: None,
+                start_frame_url: None,
+                end_frame_artifact: None,
+                end_frame_url: None,
+                job_id: Some("job-done".to_owned()),
+                clip_artifact: Some(clip.clone()),
+                failure: None,
+                resubmitted: false,
+            })
+            .collect();
+        let (srt, vtt) = transcripts.unzip();
+        let state = RenderState {
+            tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
+            render_id: Arc::clone(&render_id),
+            plan_json: String::from_utf8(plan_json.to_vec()).expect("utf8"),
+            plan_digest,
+            status: RenderStatus::Running,
+            scenes,
+            final_artifact: None,
+            transcript_srt_artifact: srt,
+            transcript_vtt_artifact: vtt,
+            revision: 0,
+        };
+        harness.state.insert(&state).expect("seed");
+        render_id.to_string()
     }
 
     // ----- tests ---------------------------------------------------------
@@ -1504,5 +1652,254 @@ mod tests {
         );
         assert!(harness.media.calls().is_empty());
         assert!(harness.compose.calls().is_empty());
+    }
+    #[tokio::test]
+    async fn compose_media_failure_reclears_carried_over_transcripts_then_completes() {
+        let ctx = tool_context();
+        let harness = harness(limits(), true);
+        let store = harness.store.clone().expect("store");
+        let clip_one = stage(&store, &ctx, "clip-one-bytes").await;
+        let clip_two = stage(&store, &ctx, "clip-two-bytes").await;
+        let final_clip = stage(&store, &ctx, "final-movie-bytes").await;
+        let stale_srt = stage_subtitle(&store, &ctx, "stale srt").await;
+        let stale_vtt = stage_subtitle(&store, &ctx, "stale vtt").await;
+
+        let plan = fixture_plan();
+        let render_id = seed_done_render(
+            &harness,
+            &ctx,
+            &plan,
+            &[clip_one.clone(), clip_two.clone()],
+            Some((stale_srt.clone(), stale_vtt)),
+        );
+
+        // The clips all verify, so nothing is demotable: the transcript pair
+        // carried over from the crashed run is the only suspect input.
+        harness.compose.push_call_error(
+            super::COMPOSE_TOOL,
+            super::VIDEO_COMPOSE_MEDIA_FAILURE,
+            "composition inputs failed verification",
+        );
+        let state = harness
+            .driver
+            .advance(&ctx, &render_id)
+            .await
+            .expect("media failure tick");
+        assert_eq!(state.status, RenderStatus::Running);
+        assert!(state.transcript_srt_artifact.is_none(), "srt was cleared");
+        assert!(state.transcript_vtt_artifact.is_none(), "vtt was cleared");
+        assert!(
+            state
+                .scenes
+                .iter()
+                .all(|scene| scene.stage == SceneStage::Done && scene.clip_artifact.is_some()),
+            "verified clips are left alone: {state:?}"
+        );
+
+        // The next tick re-stages the transcripts under this run's scope and
+        // composes again.
+        harness.compose.push(
+            super::COMPOSE_TOOL,
+            json!({ "artifact": final_clip, "duration_s": 13.5, "byte_length": 17 }),
+        );
+        let state = harness
+            .driver
+            .advance(&ctx, &render_id)
+            .await
+            .expect("recovery tick");
+        assert_eq!(state.status, RenderStatus::Completed);
+        assert_eq!(state.final_artifact.as_ref(), Some(&final_clip));
+        let srt = state.transcript_srt_artifact.clone().expect("restaged srt");
+        assert_ne!(srt, stale_srt, "the stale transcript was replaced");
+        let bytes = store.get(artifact_scope(&ctx), srt).await.expect("read");
+        assert_eq!(
+            std::str::from_utf8(&bytes).expect("utf8"),
+            "1\n00:00:00,000 --> 00:00:03,500\nHarbors wake up slowly.\n\n2\n00:00:03,500 --> 00:00:07,500\nThen all at once.\n\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn compose_media_failure_with_nothing_to_redo_fails_the_render() {
+        let ctx = tool_context();
+        let harness = harness(limits(), true);
+        let store = harness.store.clone().expect("store");
+        let clip = stage(&store, &ctx, "clip-bytes").await;
+
+        // No captions, so no transcripts exist; every clip verifies, so the
+        // re-run has nothing left to change and must fail rather than spin.
+        let plan = url_only_plan(1);
+        let render_id = seed_done_render(&harness, &ctx, &plan, &[clip], None);
+        harness.compose.push_call_error(
+            super::COMPOSE_TOOL,
+            super::VIDEO_COMPOSE_MEDIA_FAILURE,
+            "composition inputs failed verification",
+        );
+
+        let state = harness
+            .driver
+            .advance(&ctx, &render_id)
+            .await
+            .expect("tick");
+        assert_eq!(state.status, RenderStatus::Failed);
+        assert!(state.final_artifact.is_none());
+
+        // A terminal render is never re-driven, so the loop is closed.
+        let again = harness
+            .driver
+            .advance(&ctx, &render_id)
+            .await
+            .expect("terminal tick");
+        assert_eq!(again.status, RenderStatus::Failed);
+        assert_eq!(
+            harness.compose.calls().len(),
+            1,
+            "the failed render is not re-composed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scene_tool_error_fails_only_that_scene_and_the_tick_continues() {
+        let ctx = tool_context();
+        let harness = harness(limits(), true);
+        harness.media.push_call_error(
+            super::VIDEO_SUBMIT_TOOL,
+            "openrouter_media_transport_failed",
+            "the provider connection dropped",
+        );
+        harness.media.push(
+            super::VIDEO_SUBMIT_TOOL,
+            json!({ "id": "job-b", "status": "queued" }),
+        );
+
+        let plan = url_only_plan(2);
+        let state = harness
+            .driver
+            .submit_plan(&ctx, &plan)
+            .await
+            .expect("submit");
+        let render_id = state.render_id.to_string();
+        let state = harness
+            .driver
+            .advance(&ctx, &render_id)
+            .await
+            .expect("tick");
+
+        assert_eq!(state.scenes[0].stage, SceneStage::Failed);
+        let failure = state.scenes[0].failure.clone().expect("failure");
+        assert!(
+            failure.contains("openrouter_media_transport_failed"),
+            "the scene keeps the inner code: {failure}"
+        );
+        // The pass did not abort: the second scene still made its own call.
+        assert_eq!(state.scenes[1].stage, SceneStage::Polling);
+        assert_eq!(state.scenes[1].job_id.as_deref(), Some("job-b"));
+        assert_eq!(state.status, RenderStatus::Running);
+        assert_eq!(harness.media.calls().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_is_error_result_becomes_a_stage_failure_carrying_the_inner_code() {
+        let ctx = tool_context();
+        let harness = harness(limits(), true);
+        harness.media.push_error_result(
+            super::VIDEO_SUBMIT_TOOL,
+            json!({ "code": "provider_rejected", "message": "unsupported duration" }),
+        );
+
+        let plan = url_only_plan(1);
+        let state = harness
+            .driver
+            .submit_plan(&ctx, &plan)
+            .await
+            .expect("submit");
+        let render_id = state.render_id.to_string();
+        let state = harness
+            .driver
+            .advance(&ctx, &render_id)
+            .await
+            .expect("tick");
+
+        let failure = state.scenes[0].failure.clone().expect("failure");
+        assert!(
+            failure.starts_with(super::MEDIA_PIPELINE_STAGE_FAILED),
+            "mapped to the pipeline code: {failure}"
+        );
+        assert!(
+            failure.contains("provider_rejected"),
+            "the inner code survives: {failure}"
+        );
+        assert_eq!(state.scenes[0].stage, SceneStage::Failed);
+        assert_eq!(state.status, RenderStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn a_caption_mode_with_no_cues_anywhere_is_rejected_at_submit() {
+        let ctx = tool_context();
+        let harness = harness(limits(), true);
+        let plan = serde_json::to_vec(&json!({
+            "version": 1,
+            "defaults": {
+                "image_model": "test/image-model",
+                "video_model": "test/video-model",
+                "scene_duration_s": 6,
+            },
+            "scenes": [{
+                "id": "scene-01",
+                "video_prompt": "a quiet street",
+                "start_frame": { "url": "https://example.test/frame.png" },
+            }],
+            "output": { "container": "mp4", "captions": "burn_in" },
+        }))
+        .expect("plan json");
+
+        let error = harness
+            .driver
+            .submit_plan(&ctx, &plan)
+            .await
+            .expect_err("captions with nothing to caption");
+        assert_eq!(error.code(), super::MEDIA_PIPELINE_PLAN_INVALID);
+        assert!(
+            error
+                .message()
+                .contains("captions delivery requested but no scene has cues")
+        );
+        assert!(harness.media.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_prompt_reference_image_is_rejected_at_submit() {
+        let ctx = tool_context();
+        let harness = harness(limits(), true);
+        let plan = serde_json::to_vec(&json!({
+            "version": 1,
+            "defaults": {
+                "image_model": "test/image-model",
+                "video_model": "test/video-model",
+                "scene_duration_s": 6,
+            },
+            "scenes": [{
+                "id": "scene-01",
+                "video_prompt": "a quiet street",
+                "start_frame": { "url": "https://example.test/frame.png" },
+                "reference_images": [{ "prompt": "moody teal grade" }],
+            }],
+            "output": { "container": "mp4" },
+        }))
+        .expect("plan json");
+
+        let error = harness
+            .driver
+            .submit_plan(&ctx, &plan)
+            .await
+            .expect_err("an unpinned reference image");
+        assert_eq!(error.code(), super::MEDIA_PIPELINE_PLAN_INVALID);
+        assert!(
+            error
+                .message()
+                .contains("reference images must be pinned artifacts or urls"),
+            "the drop is reported, not silent: {}",
+            error.message()
+        );
+        assert!(harness.media.calls().is_empty());
     }
 }
