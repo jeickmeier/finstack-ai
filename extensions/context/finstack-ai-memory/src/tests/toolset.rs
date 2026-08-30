@@ -1,17 +1,24 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use finstack_ai_embeddings::embedder::{
+    EmbedError, HashEmbedder, TextEmbedder, TextEmbedderDescriptor,
+};
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::{
     Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, OperationLocator,
     PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, UNIX_EPOCH,
 };
+use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolStreamItem, Toolset};
 use futures_util::StreamExt;
 
 use crate::record::MemoryScope;
-use crate::store::{InProcessArtifactStore, InProcessMemoryStore, MemoryPage, MemoryStore};
+use crate::store::{
+    InProcessArtifactStore, InProcessMemoryStore, MemoryPage, MemoryStore, MemoryStoreError,
+};
 use crate::toolset::{MemoryPolicy, MemoryToolset};
 
 fn toolset_with_policy(policy: MemoryPolicy) -> (MemoryToolset, Arc<InProcessMemoryStore>) {
@@ -28,6 +35,58 @@ fn toolset_with_policy(policy: MemoryPolicy) -> (MemoryToolset, Arc<InProcessMem
     )
     .expect("toolset");
     (toolset, store)
+}
+
+fn toolset_with_embedder(
+    embedder: Arc<dyn TextEmbedder>,
+) -> (MemoryToolset, Arc<InProcessMemoryStore>) {
+    let store = Arc::new(InProcessMemoryStore::new());
+    let toolset = embedder_toolset_over(store.clone() as Arc<dyn MemoryStore>, embedder);
+    (toolset, store)
+}
+
+fn embedder_toolset_over(
+    store: Arc<dyn MemoryStore>,
+    embedder: Arc<dyn TextEmbedder>,
+) -> MemoryToolset {
+    let artifact_store = Arc::new(InProcessArtifactStore::default());
+    let scope = MemoryScope::try_new("tenant-a").expect("scope");
+    let clock: crate::record::MemoryClock = Arc::new(|| UNIX_EPOCH);
+    MemoryToolset::try_new_with_embedder(
+        store,
+        artifact_store,
+        scope,
+        MemoryPolicy::default(),
+        clock,
+        embedder,
+    )
+    .expect("toolset")
+}
+
+fn hash_embedder(dimensions: usize) -> Arc<dyn TextEmbedder> {
+    Arc::new(HashEmbedder::try_new(dimensions).expect("embedder"))
+}
+
+/// A [`TextEmbedder`] whose every `embed` call fails, standing in for an
+/// unreachable embedding backend.
+struct FailingEmbedder;
+
+impl TextEmbedder for FailingEmbedder {
+    fn descriptor(&self) -> TextEmbedderDescriptor {
+        TextEmbedderDescriptor {
+            embedder_id: Arc::from("embed.test-failing.8"),
+            dimensions: 8,
+            max_input_bytes: 1024,
+        }
+    }
+
+    fn embed(&self, _texts: Vec<Arc<str>>) -> PortFuture<Result<Vec<EmbeddingVector>, EmbedError>> {
+        Box::pin(async {
+            Err(EmbedError::Unavailable {
+                message: Arc::from("test_embedder_down"),
+            })
+        })
+    }
 }
 
 fn context(effect_id: EffectId) -> ToolCallContext {
@@ -814,4 +873,286 @@ fn matched_str_maps_semantic_evidence_to_a_stable_label() {
         crate::toolset::matched_str(&MatchEvidence::ExactId),
         "exact_id"
     );
+}
+
+fn search_spec_of(toolset: &MemoryToolset) -> finstack_ai_runtime::ports::model::ToolSpec {
+    toolset
+        .tools()
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == "search_memory")
+        .cloned()
+        .expect("search spec")
+}
+
+/// `mode` is advertised — in the input schema and the description — only
+/// when the toolset holds an embedder.
+#[test]
+fn search_schema_advertises_mode_only_with_an_embedder() {
+    let (without, _store) = toolset_with_policy(MemoryPolicy::default());
+    let spec = search_spec_of(&without);
+    assert!(!spec.input_schema.as_str().contains("\"mode\""));
+    assert!(!spec.description.contains("semantic"));
+
+    let (with, _store) = toolset_with_embedder(hash_embedder(64));
+    let spec = search_spec_of(&with);
+    assert!(spec.input_schema.as_str().contains("\"mode\""));
+    assert!(spec.description.contains("semantic"));
+}
+
+/// An explicit semantic ask on a toolset with no embedder fails honestly
+/// with the stable `memory_semantic_unavailable` reason.
+#[tokio::test]
+async fn semantic_mode_without_an_embedder_is_a_stable_error() {
+    let (toolset, _store) = toolset_with_policy(MemoryPolicy::default());
+    let args = br#"{"text":"night colors","mode":"semantic"}"#;
+    let Err(error) = toolset
+        .call(
+            context(EffectId::from_bytes([50; 16])),
+            validated_call(&toolset, "search_memory", args),
+        )
+        .await
+    else {
+        panic!("semantic mode without an embedder must fail");
+    };
+    assert_eq!(
+        error.code(),
+        crate::toolset::MEMORY_TOOL_SEMANTIC_UNAVAILABLE
+    );
+    assert!(!error.retryable());
+}
+
+/// A bad `mode` value and `mode` without `text` are query-shape errors,
+/// not semantic availability errors.
+#[tokio::test]
+async fn invalid_mode_arguments_are_query_invalid() {
+    let (toolset, _store) = toolset_with_embedder(hash_embedder(64));
+    for (seed, args) in [
+        (51_u8, br#"{"text":"night colors","mode":"cosine"}"# as &[u8]),
+        (52, br#"{"keywords":["alpha"],"mode":"semantic"}"#),
+        (53, br#"{"keywords":["alpha"],"mode":"lexical"}"#),
+    ] {
+        let Err(error) = toolset
+            .call(
+                context(EffectId::from_bytes([seed; 16])),
+                validated_call(&toolset, "search_memory", args),
+            )
+            .await
+        else {
+            panic!("malformed mode arguments must fail: {args:?}");
+        };
+        assert_eq!(error.code(), "memory_query_invalid");
+    }
+}
+
+/// Remembering through an embedder-configured toolset drains the embedding
+/// index, and an explicit semantic search then ranks the stored record with
+/// `semantic` match evidence.
+#[tokio::test]
+async fn semantic_search_returns_indexed_hits_after_remember() {
+    let (toolset, store) = toolset_with_embedder(hash_embedder(64));
+    let remember_args =
+        br#"{"id":"mem-sem","keywords":["appearance"],"body":"night colors on screens"}"#;
+    let remembered = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([54; 16])),
+        "remember",
+        remember_args,
+    )
+    .await;
+    assert!(!remembered.is_error);
+
+    // The post-mutation drain indexed the record: nothing is pending.
+    let pending = store
+        .pending_embedding_sources(Arc::from("embed.hash-v1.64"), 16)
+        .await
+        .expect("pending");
+    assert!(pending.is_empty(), "drain must have indexed: {pending:?}");
+
+    let search_args = br#"{"text":"the display theme at night","mode":"semantic"}"#;
+    let hits = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([55; 16])),
+        "search_memory",
+        search_args,
+    )
+    .await;
+    assert!(!hits.is_error);
+    let value: serde_json::Value = serde_json::from_str(hits.output.as_str()).expect("json");
+    let hits = value["hits"].as_array().expect("hits array");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0]["id"].as_str(), Some("mem-sem"));
+    assert_eq!(hits[0]["matched"].as_str(), Some("semantic"));
+}
+
+/// A failing embedder surfaces a retryable `memory_semantic_unavailable` on
+/// an explicit semantic search, while `remember` still succeeds because the
+/// post-mutation drain is best-effort and swallowed.
+#[tokio::test]
+async fn failing_embedder_fails_semantic_search_but_not_remember() {
+    let (toolset, store) = toolset_with_embedder(Arc::new(FailingEmbedder));
+    let remember_args = br#"{"id":"mem-kept","keywords":["appearance"],"body":"night colors"}"#;
+    let remembered = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([56; 16])),
+        "remember",
+        remember_args,
+    )
+    .await;
+    assert!(!remembered.is_error, "drain failure must not fail remember");
+
+    // The record could not be indexed, so it is still pending for the space.
+    let pending = store
+        .pending_embedding_sources(Arc::from("embed.test-failing.8"), 16)
+        .await
+        .expect("pending");
+    assert_eq!(pending.len(), 1);
+
+    let Err(error) = toolset
+        .call(
+            context(EffectId::from_bytes([57; 16])),
+            validated_call(
+                &toolset,
+                "search_memory",
+                br#"{"text":"night colors","mode":"semantic"}"#,
+            ),
+        )
+        .await
+    else {
+        panic!("an explicit semantic ask must fail honestly");
+    };
+    assert_eq!(
+        error.code(),
+        crate::toolset::MEMORY_TOOL_SEMANTIC_UNAVAILABLE
+    );
+    assert!(error.retryable());
+}
+
+/// Wraps an [`InProcessMemoryStore`] but rejects every `Embedding` search
+/// as unsupported: the posture of a store without an embedding index.
+struct EmbeddingRejectingStore {
+    inner: Arc<InProcessMemoryStore>,
+}
+
+impl MemoryStore for EmbeddingRejectingStore {
+    fn put(
+        &self,
+        idempotency_key: Arc<str>,
+        record: crate::record::MemoryRecord,
+    ) -> PortFuture<Result<crate::store::PutOutcome, MemoryStoreError>> {
+        self.inner.put(idempotency_key, record)
+    }
+
+    fn get(
+        &self,
+        scope: MemoryScope,
+        id: crate::record::MemoryId,
+    ) -> PortFuture<Result<Option<crate::record::MemoryRecord>, MemoryStoreError>> {
+        self.inner.get(scope, id)
+    }
+
+    fn search(
+        &self,
+        scope: MemoryScope,
+        query: crate::store::MemoryQuery,
+        limit: usize,
+    ) -> PortFuture<Result<Vec<crate::store::MemoryHit>, MemoryStoreError>> {
+        if matches!(query, crate::store::MemoryQuery::Embedding { .. }) {
+            return Box::pin(async {
+                Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_embeddings_unsupported",
+                })
+            });
+        }
+        self.inner.search(scope, query, limit)
+    }
+
+    fn forget(
+        &self,
+        idempotency_key: Arc<str>,
+        scope: MemoryScope,
+        id: crate::record::MemoryId,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        self.inner.forget(idempotency_key, scope, id)
+    }
+
+    fn correct(
+        &self,
+        idempotency_key: Arc<str>,
+        scope: MemoryScope,
+        old: crate::record::MemoryId,
+        replacement: crate::record::MemoryRecord,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        self.inner.correct(idempotency_key, scope, old, replacement)
+    }
+
+    fn list(
+        &self,
+        scope: MemoryScope,
+        page: MemoryPage,
+    ) -> PortFuture<Result<crate::store::MemoryListing, MemoryStoreError>> {
+        self.inner.list(scope, page)
+    }
+}
+
+/// A store that cannot serve `Embedding` queries makes an explicit semantic
+/// ask fail with `memory_semantic_unavailable` — the capability is missing,
+/// the caller's arguments are not invalid.
+#[tokio::test]
+async fn store_without_embedding_index_fails_semantic_search_honestly() {
+    let store = Arc::new(EmbeddingRejectingStore {
+        inner: Arc::new(InProcessMemoryStore::new()),
+    });
+    let toolset = embedder_toolset_over(store, hash_embedder(64));
+    let Err(error) = toolset
+        .call(
+            context(EffectId::from_bytes([58; 16])),
+            validated_call(
+                &toolset,
+                "search_memory",
+                br#"{"text":"night colors","mode":"semantic"}"#,
+            ),
+        )
+        .await
+    else {
+        panic!("a store without an embedding index must fail an explicit ask");
+    };
+    assert_eq!(
+        error.code(),
+        crate::toolset::MEMORY_TOOL_SEMANTIC_UNAVAILABLE
+    );
+}
+
+/// `mode: "lexical"` and an omitted `mode` produce identical results: the
+/// mode never changes what a lexical query matches.
+#[tokio::test]
+async fn lexical_mode_and_omitted_mode_are_identical() {
+    let (toolset, _store) = toolset_with_embedder(hash_embedder(64));
+    let remembered = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([59; 16])),
+        "remember",
+        br#"{"id":"mem-lex","keywords":["widget"],"body":"a widget record"}"#,
+    )
+    .await;
+    assert!(!remembered.is_error);
+
+    let omitted = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([60; 16])),
+        "search_memory",
+        br#"{"text":"widget"}"#,
+    )
+    .await;
+    let explicit = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([61; 16])),
+        "search_memory",
+        br#"{"text":"widget","mode":"lexical"}"#,
+    )
+    .await;
+    assert!(!omitted.is_error);
+    assert_eq!(omitted.output.as_str(), explicit.output.as_str());
+    let value: serde_json::Value = serde_json::from_str(omitted.output.as_str()).expect("json");
+    assert_eq!(value["hits"].as_array().expect("hits").len(), 1);
+    assert_eq!(value["hits"][0]["matched"].as_str(), Some("full_text"));
 }

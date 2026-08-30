@@ -8,6 +8,8 @@
 
 use std::sync::Arc;
 
+use finstack_ai_embeddings::embedder::TextEmbedder;
+use finstack_ai_embeddings::vector::truncate_to_bytes;
 use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
     ValidatedToolCall,
@@ -33,7 +35,7 @@ use crate::record::{
 };
 use crate::store::{
     MatchEvidence, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
-    reconcile_memory_artifacts,
+    reconcile_memory_artifacts, reconcile_memory_embeddings,
 };
 
 /// Inline-vs-blob threshold for a memory record body, in bytes.
@@ -70,11 +72,34 @@ pub const MEMORY_TOOL_ID_CONFLICT: &str = "memory_id_conflict";
 pub const MEMORY_TOOL_SELF_SUPERSESSION: &str = "memory_self_supersession";
 /// Stable policy-denied error code.
 pub const MEMORY_TOOL_POLICY_DENIED: &str = "memory_policy_denied";
+/// Stable semantic-unavailable error code, raised when an explicit
+/// `mode: "semantic"` search cannot be served: the toolset has no embedder,
+/// the embedder fails (retryable), or the store has no embedding index.
+/// Implicit recall degrades silently; an explicit semantic ask fails with
+/// this reason instead.
+pub const MEMORY_TOOL_SEMANTIC_UNAVAILABLE: &str = "memory_semantic_unavailable";
+
+/// Bounded per-mutation embedding-index drain size.
+///
+/// Small on purpose: the drain runs inline after each mutating tool call,
+/// so it must stay cheap; anything it does not reach stays pending for the
+/// next drain (or an application-driven backfill).
+const EMBEDDING_DRAIN_LIMIT: usize = 16;
 
 const REMEMBER_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256},"keywords":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1,"maxLength":128}},"body":{"type":"string","minLength":1,"maxLength":4194304},"sensitivity":{"type":"string"}},"required":["keywords","body"]}"#;
 const REMEMBER_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"outcome":{"type":"string","enum":["inserted","already_applied"]}},"required":["id","outcome"]}"#;
 
 const SEARCH_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256},"keywords":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","minLength":1,"maxLength":128}},"text":{"type":"string","minLength":1,"maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":25}},"required":[]}"#;
+/// [`SEARCH_INPUT_SCHEMA`] plus the `mode` property. Advertised only when
+/// the toolset holds an embedder; `mode` on an embedder-less toolset is not
+/// part of the model-facing contract.
+const SEARCH_INPUT_SCHEMA_WITH_MODE: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256},"keywords":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","minLength":1,"maxLength":128}},"text":{"type":"string","minLength":1,"maxLength":4096},"mode":{"type":"string","enum":["lexical","semantic"]},"limit":{"type":"integer","minimum":1,"maximum":25}},"required":[]}"#;
+
+const SEARCH_DESCRIPTION: &str = "Search memory records by exact id, keywords, or full text.";
+const SEARCH_DESCRIPTION_WITH_MODE: &str =
+    "Search memory records by exact id, keywords, or full text. With text, \
+     set mode to \"semantic\" to rank by embedding similarity instead of \
+     lexical matching; mode defaults to \"lexical\".";
 const SEARCH_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"hits":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"preview":{"type":"string"},"score":{"type":"integer"},"matched":{"type":"string"}},"required":["id","preview","score","matched"]}}},"required":["hits"]}"#;
 
 const INSPECT_INPUT_SCHEMA: &[u8] =
@@ -118,6 +143,7 @@ pub struct MemoryToolset {
     scope: MemoryScope,
     policy: MemoryPolicy,
     clock: MemoryClock,
+    embedder: Option<Arc<dyn TextEmbedder>>,
     descriptor: ToolsetDescriptor,
     specs: Arc<[ToolSpec]>,
 }
@@ -132,7 +158,8 @@ impl std::fmt::Debug for MemoryToolset {
 }
 
 impl MemoryToolset {
-    /// Construct the toolset and its five cached tool specifications.
+    /// Construct the toolset and its five cached tool specifications, with
+    /// lexical search only.
     ///
     /// # Errors
     ///
@@ -145,6 +172,48 @@ impl MemoryToolset {
         policy: MemoryPolicy,
         clock: MemoryClock,
     ) -> Result<Self, MemoryError> {
+        Self::build(store, artifact_store, scope, policy, clock, None)
+    }
+
+    /// Construct a toolset whose `search_memory` additionally accepts
+    /// `mode: "semantic"` served through `embedder`, and whose mutating
+    /// tools drain the store's embedding index best-effort after each
+    /// write.
+    ///
+    /// An explicit semantic search that cannot be served fails with the
+    /// stable [`MEMORY_TOOL_SEMANTIC_UNAVAILABLE`] reason; the
+    /// post-mutation index drain never fails a tool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::Configuration`] when a checked-in tool
+    /// identity or schema constant is invalid.
+    pub fn try_new_with_embedder(
+        store: Arc<dyn MemoryStore>,
+        artifact_store: Arc<dyn ArtifactStore>,
+        scope: MemoryScope,
+        policy: MemoryPolicy,
+        clock: MemoryClock,
+        embedder: Arc<dyn TextEmbedder>,
+    ) -> Result<Self, MemoryError> {
+        Self::build(store, artifact_store, scope, policy, clock, Some(embedder))
+    }
+
+    fn build(
+        store: Arc<dyn MemoryStore>,
+        artifact_store: Arc<dyn ArtifactStore>,
+        scope: MemoryScope,
+        policy: MemoryPolicy,
+        clock: MemoryClock,
+        embedder: Option<Arc<dyn TextEmbedder>>,
+    ) -> Result<Self, MemoryError> {
+        // `mode` joins the model-facing contract only when an embedder can
+        // actually serve it.
+        let (search_description, search_input_schema) = if embedder.is_some() {
+            (SEARCH_DESCRIPTION_WITH_MODE, SEARCH_INPUT_SCHEMA_WITH_MODE)
+        } else {
+            (SEARCH_DESCRIPTION, SEARCH_INPUT_SCHEMA)
+        };
         let specs = Arc::from([
             build_spec(
                 REMEMBER_TOOL_ID,
@@ -162,8 +231,8 @@ impl MemoryToolset {
                 SEARCH_TOOL_ID,
                 SEARCH_NAME,
                 "Search Memory",
-                "Search memory records by exact id, keywords, or full text.",
-                SEARCH_INPUT_SCHEMA,
+                search_description,
+                search_input_schema,
                 Some(SEARCH_OUTPUT_SCHEMA),
                 SideEffectClass::ReadOnly,
             )?,
@@ -203,6 +272,7 @@ impl MemoryToolset {
             scope,
             policy,
             clock,
+            embedder,
             descriptor: ToolsetDescriptor {
                 name: Arc::from("finstack-memory"),
                 metadata: Metadata::empty(),
@@ -379,6 +449,56 @@ impl MemoryToolset {
             .map_err(|error| map_store_error(&error))
     }
 
+    /// Drain a bounded batch of the embedding index after a mutation, when
+    /// an embedder is configured.
+    ///
+    /// Deliberately error-swallowed, in contrast with
+    /// [`reconcile_artifacts`](Self::reconcile_artifacts): artifact
+    /// pin/unpin is ownership-critical and fails the tool, while the
+    /// embedding index is derived data — a failed drain leaves records
+    /// pending for the next drain and must never fail the write that
+    /// triggered it.
+    async fn drain_embeddings(&self) {
+        if let Some(embedder) = &self.embedder {
+            let _ = reconcile_memory_embeddings(
+                self.store.as_ref(),
+                embedder.as_ref(),
+                EMBEDDING_DRAIN_LIMIT,
+            )
+            .await;
+        }
+    }
+
+    /// Embed an explicit `mode: "semantic"` query text into an `Embedding`
+    /// store query.
+    ///
+    /// Unlike the recall provider's implicit leg, this path fails honestly:
+    /// no configured embedder is a non-retryable
+    /// [`MEMORY_TOOL_SEMANTIC_UNAVAILABLE`], and an embedder failure is the
+    /// retryable form of the same reason.
+    async fn semantic_query(&self, text: &str) -> Result<MemoryQuery, ToolError> {
+        let Some(embedder) = &self.embedder else {
+            return Err(invalid_arguments_code(
+                MEMORY_TOOL_SEMANTIC_UNAVAILABLE,
+                "semantic search requires a configured embedder",
+            ));
+        };
+        let descriptor = embedder.descriptor();
+        let truncated = truncate_to_bytes(text, descriptor.max_input_bytes);
+        let vectors = embedder
+            .embed(vec![Arc::from(truncated)])
+            .await
+            .map_err(|_| semantic_unavailable_retryable())?;
+        let vector = vectors
+            .into_iter()
+            .next()
+            .ok_or_else(semantic_unavailable_retryable)?;
+        Ok(MemoryQuery::Embedding {
+            embedder_id: descriptor.embedder_id,
+            vector,
+        })
+    }
+
     async fn remember(
         &self,
         run: &RunCallContext,
@@ -437,6 +557,7 @@ impl MemoryToolset {
             Err(error) => return Err(map_store_error(&error)),
         };
         self.reconcile_artifacts().await?;
+        self.drain_embeddings().await;
         let outcome_str = match outcome {
             PutOutcome::Inserted => "inserted",
             PutOutcome::AlreadyApplied => "already_applied",
@@ -516,6 +637,22 @@ impl MemoryToolset {
         arguments: &[u8],
     ) -> Result<ToolResult, ToolError> {
         let args: SearchArguments = parse_arguments(arguments)?;
+        let semantic = match args.mode.as_deref() {
+            None | Some("lexical") => false,
+            Some("semantic") => true,
+            Some(_) => {
+                return Err(invalid_arguments_code(
+                    "memory_query_invalid",
+                    "mode must be \"lexical\" or \"semantic\"",
+                ));
+            }
+        };
+        if args.mode.is_some() && args.text.is_none() {
+            return Err(invalid_arguments_code(
+                "memory_query_invalid",
+                "mode applies to text queries only",
+            ));
+        }
         let provided = [
             args.id.is_some(),
             args.keywords.is_some(),
@@ -552,7 +689,11 @@ impl MemoryToolset {
                     "text must contain at least one non-whitespace character",
                 ));
             }
-            MemoryQuery::FullText(Arc::from(text.as_str()))
+            if semantic {
+                self.semantic_query(&text).await?
+            } else {
+                MemoryQuery::FullText(Arc::from(text.as_str()))
+            }
         } else {
             return Err(invalid_arguments_code(
                 "memory_query_invalid",
@@ -564,7 +705,7 @@ impl MemoryToolset {
             .store
             .search(self.scope.clone(), query, limit)
             .await
-            .map_err(|error| map_store_error(&error))?;
+            .map_err(|error| map_search_error(&error, semantic))?;
         let hits_json: Vec<serde_json::Value> = hits
             .iter()
             .map(|hit| {
@@ -636,6 +777,7 @@ impl MemoryToolset {
         {
             Ok(()) => {
                 self.reconcile_artifacts().await?;
+                self.drain_embeddings().await;
                 ok_result(&serde_json::json!({ "id": memory_id.as_str(), "tombstoned": true }))
             }
             Err(MemoryStoreError::NotFound | MemoryStoreError::ScopeMismatch) => not_found_result(),
@@ -710,6 +852,7 @@ impl MemoryToolset {
         {
             Ok(()) => {
                 self.reconcile_artifacts().await?;
+                self.drain_embeddings().await;
                 ok_result(&serde_json::json!({
                     "old_id": old_id.as_str(),
                     "new_id": new_id.as_str(),
@@ -854,6 +997,32 @@ fn error_payload(value: &serde_json::Value) -> Result<ToolResult, ToolError> {
     })
 }
 
+fn semantic_unavailable_retryable() -> ToolError {
+    tool_error(
+        MEMORY_TOOL_SEMANTIC_UNAVAILABLE,
+        ErrorCategory::Tool,
+        true,
+        "memory embedder is unavailable",
+    )
+}
+
+/// Map a search-time store error, honoring the explicit-semantic contract:
+/// a store that rejects the `Embedding` query (`InvalidRequest`, e.g. no
+/// embedding index) makes the semantic ask fail as
+/// [`MEMORY_TOOL_SEMANTIC_UNAVAILABLE`] — the capability is missing, the
+/// caller's arguments are not invalid. Everything else maps as usual.
+fn map_search_error(error: &MemoryStoreError, semantic: bool) -> ToolError {
+    if semantic && matches!(error, MemoryStoreError::InvalidRequest { .. }) {
+        return tool_error(
+            MEMORY_TOOL_SEMANTIC_UNAVAILABLE,
+            ErrorCategory::Tool,
+            false,
+            "memory store cannot serve semantic search",
+        );
+    }
+    map_store_error(error)
+}
+
 fn map_store_error(error: &MemoryStoreError) -> ToolError {
     match error {
         MemoryStoreError::Unavailable { .. } => tool_error(
@@ -973,6 +1142,11 @@ struct SearchArguments {
     keywords: Option<Vec<String>>,
     #[serde(default)]
     text: Option<String>,
+    /// `"lexical"` (the default) or `"semantic"`; valid only with `text`.
+    /// Parsed on every toolset but advertised — and servable — only when an
+    /// embedder is configured.
+    #[serde(default)]
+    mode: Option<String>,
     #[serde(default)]
     limit: Option<u32>,
 }

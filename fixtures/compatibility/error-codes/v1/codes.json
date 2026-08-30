@@ -193,6 +193,11 @@
     },
     {
       "crate": "finstack-ai-memory",
+      "name": "MEMORY_TOOL_SEMANTIC_UNAVAILABLE",
+      "value": "memory_semantic_unavailable"
+    },
+    {
+      "crate": "finstack-ai-memory",
       "name": "MEMORY_TOOL_UNAVAILABLE",
       "value": "memory_tool_unavailable"
     },
