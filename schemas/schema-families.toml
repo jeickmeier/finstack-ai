@@ -105,3 +105,13 @@ compatibility_profile = "strict-reject-unknown"
 fixture_root = "fixtures/compatibility/plugin-lock/"
 status = "active"
 notes_root = "schemas/plugin-lock/"
+
+[families."movie-plan"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "schemas/movie-plan/"
+format = "json-schema-2020-12"
+stability = "candidate-v1"
+compatibility_profile = "strict-reject-unknown"
+fixture_root = "fixtures/compatibility/movie-plan/"
+status = "active"

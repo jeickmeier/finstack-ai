@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "title": "Two scene test",
+  "defaults": {
+    "image_model": "test/image-model",
+    "video_model": "test/video-model",
+    "resolution": "720p",
+    "scene_duration_s": 6
+  },
+  "scenes": [
+    {
+      "id": "scene-01",
+      "video_prompt": "camera glides across a harbor at dawn",
+      "start_frame": { "prompt": "wide shot of a harbor at dawn, golden light" },
+      "end_frame": { "prompt": "close-up of a moored fishing boat" },
+      "duration_s": 8,
+      "seed": 42,
+      "captions": [
+        { "text": "Harbors wake up slowly.", "start_s": 0.0, "end_s": 3.5 },
+        { "text": "Then all at once.", "start_s": 3.5, "end_s": 7.5 }
+      ]
+    },
+    {
+      "id": "scene-02",
+      "video_prompt": "gulls lift off the pier",
+      "start_frame": { "url": "https://example.test/pier.png" }
+    }
+  ],
+  "transitions": [
+    { "after": "scene-01", "type": "crossfade", "duration_s": 0.5 }
+  ],
+  "output": { "container": "mp4", "fps": 24, "captions": "burn_in" }
+}

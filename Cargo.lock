@@ -2243,6 +2243,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-workflow-media-pipeline"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "futures-util",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-workflow-worker"
 version = "2.0.0"
 dependencies = [

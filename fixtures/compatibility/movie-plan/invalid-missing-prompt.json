@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "defaults": {
+    "image_model": "test/image-model",
+    "video_model": "test/video-model",
+    "scene_duration_s": 6
+  },
+  "scenes": [
+    {
+      "id": "scene-01",
+      "video_prompt": "camera glides across a harbor at dawn",
+      "start_frame": {}
+    }
+  ],
+  "output": { "container": "mp4" }
+}
