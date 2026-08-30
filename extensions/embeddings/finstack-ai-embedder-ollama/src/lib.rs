@@ -23,3 +23,6 @@
 
 pub mod config;
 pub mod embedder;
+
+#[cfg(test)]
+mod tests;

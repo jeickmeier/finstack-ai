@@ -22,6 +22,11 @@
       "js": {"status": "unavailable", "reason": "Shared embedding machinery; cross-language embedder exposure is a staged follow-up."}
     },
     {
+      "crate": "finstack-ai-embedder-ollama",
+      "python": {"status": "unavailable", "reason": "Native Ollama embedder; cross-language embedder exposure is a staged follow-up."},
+      "js": {"status": "unavailable", "reason": "Native Ollama embedder; cross-language embedder exposure is a staged follow-up."}
+    },
+    {
       "crate": "finstack-ai-codex-child",
       "python": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."},
       "js": {"status": "unavailable", "reason": "Native interoperability extension; not a portable in-process binding surface."}

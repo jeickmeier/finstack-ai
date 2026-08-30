@@ -1,0 +1,18 @@
+pub mod finstack_ai_embedder_ollama
+pub mod finstack_ai_embedder_ollama::config
+pub struct finstack_ai_embedder_ollama::config::OllamaEmbedderConfig
+impl finstack_ai_embedder_ollama::config::OllamaEmbedderConfig
+pub fn finstack_ai_embedder_ollama::config::OllamaEmbedderConfig::try_new(&str, &str, usize) -> core::result::Result<Self, finstack_ai_embeddings::embedder::EmbedError>
+impl core::clone::Clone for finstack_ai_embedder_ollama::config::OllamaEmbedderConfig
+pub fn finstack_ai_embedder_ollama::config::OllamaEmbedderConfig::clone(&self) -> finstack_ai_embedder_ollama::config::OllamaEmbedderConfig
+impl core::fmt::Debug for finstack_ai_embedder_ollama::config::OllamaEmbedderConfig
+pub fn finstack_ai_embedder_ollama::config::OllamaEmbedderConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod finstack_ai_embedder_ollama::embedder
+pub struct finstack_ai_embedder_ollama::embedder::OllamaEmbedder
+impl finstack_ai_embedder_ollama::embedder::OllamaEmbedder
+pub fn finstack_ai_embedder_ollama::embedder::OllamaEmbedder::try_new(finstack_ai_embedder_ollama::config::OllamaEmbedderConfig) -> core::result::Result<Self, finstack_ai_embeddings::embedder::EmbedError>
+impl core::fmt::Debug for finstack_ai_embedder_ollama::embedder::OllamaEmbedder
+pub fn finstack_ai_embedder_ollama::embedder::OllamaEmbedder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_embeddings::embedder::TextEmbedder for finstack_ai_embedder_ollama::embedder::OllamaEmbedder
+pub fn finstack_ai_embedder_ollama::embedder::OllamaEmbedder::descriptor(&self) -> finstack_ai_embeddings::embedder::TextEmbedderDescriptor
+pub fn finstack_ai_embedder_ollama::embedder::OllamaEmbedder::embed(&self, alloc::vec::Vec<alloc::sync::Arc<str>>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_embeddings::vector::EmbeddingVector>, finstack_ai_embeddings::embedder::EmbedError>>
