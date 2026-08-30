@@ -123,9 +123,9 @@ pub use agent::{
     DEFAULT_MAX_CYCLES, DEFAULT_MAX_OUTPUT_RETRIES, DEFAULT_RUN_TIMEOUT, GatewayAgentSpec,
     GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts, LinkedCommon,
     LinkedProviderSpec, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_CONFIGURED_CYCLES,
-    MAX_CONFIGURED_OUTPUT_RETRIES, MAX_RUN_ATTACHMENTS, NativeAgentBuilder, NativeCapabilityHost,
-    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec,
-    RemoteChildRouteSpec,
+    MAX_CONFIGURED_OUTPUT_RETRIES, MAX_RUN_ATTACHMENTS, MediaPipelineSpec, NativeAgentBuilder,
+    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+    OpenRouterMediaToolsSpec, RemoteChildRouteSpec, VideoComposeSpec,
 };
 #[cfg(feature = "native-tokio")]
 pub use agent::{

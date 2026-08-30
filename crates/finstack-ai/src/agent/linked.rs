@@ -3,10 +3,15 @@
 //! Python and WASM only map arguments. `wasm-host` methods exist and return
 //! [`crate::AGENT_RUN_UNSUPPORTED_PLAN`]. Constructors never read ambient env.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(any(feature = "linked-providers", feature = "tool-openrouter-media"))]
+#[cfg(any(
+    feature = "linked-providers",
+    feature = "tool-openrouter-media",
+    feature = "tool-video-compose"
+))]
 use finstack_ai_kernel::ComponentId;
 #[cfg(feature = "linked-providers")]
 use finstack_ai_kernel::{AgentId, BundleId};
@@ -26,7 +31,11 @@ use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy, RunPolicy};
 
 use super::builder::NativeAgentBuilder;
 use super::handle::Agent;
-#[cfg(any(feature = "linked-providers", feature = "tool-openrouter-media"))]
+#[cfg(any(
+    feature = "linked-providers",
+    feature = "tool-openrouter-media",
+    feature = "tool-video-compose"
+))]
 use super::types::AGENT_RUN_INVALID_CONFIGURATION;
 #[cfg(not(feature = "linked-providers"))]
 use super::types::AGENT_RUN_UNSUPPORTED_PLAN;
@@ -104,6 +113,11 @@ pub struct LinkedCommon {
     /// Independent of which provider serves the model, so it lives here
     /// rather than on four of the six provider specs.
     pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
+    /// Optional local ffmpeg composition-toolset registration.
+    pub video_compose: Option<VideoComposeSpec>,
+    /// Optional `MoviePlan` pipeline-toolset registration. Requires both
+    /// [`LinkedCommon::openrouter_media`] and [`LinkedCommon::video_compose`].
+    pub media_pipeline: Option<MediaPipelineSpec>,
 }
 
 /// `OpenRouter` media-toolset registration for any linked constructor.
@@ -117,6 +131,39 @@ pub struct OpenRouterMediaToolsSpec {
     pub referer: Option<String>,
     /// Optional non-secret `X-Title` attribution header.
     pub title: Option<String>,
+}
+
+/// Local ffmpeg composition-toolset registration for any linked constructor.
+///
+/// Every path is host-chosen and explicit: the SDK never searches `PATH` or
+/// invents a scratch location.
+pub struct VideoComposeSpec {
+    /// Absolute path to the `ffmpeg` binary.
+    pub ffmpeg_path: PathBuf,
+    /// Absolute path to the `ffprobe` binary.
+    pub ffprobe_path: PathBuf,
+    /// Directory for per-render scratch files. Created when missing.
+    pub scratch_dir: PathBuf,
+    /// Wall-clock ceiling for one render, in seconds. Must be greater than
+    /// zero and at most one hour.
+    pub render_timeout_s: u64,
+}
+
+/// `MoviePlan` pipeline-toolset registration for any linked constructor.
+///
+/// The driver is composed over the registered `OpenRouter` media toolset,
+/// the registered composition toolset, and the host's artifact store, so all
+/// three must be present on the same [`LinkedCommon`].
+pub struct MediaPipelineSpec {
+    /// Maximum number of scenes in one plan.
+    pub max_scenes: usize,
+    /// Maximum total video duration, in seconds, across all scenes.
+    pub max_total_video_s: u64,
+    /// Maximum number of concurrent render jobs.
+    pub max_concurrent_jobs: usize,
+    /// Optional sqlite file for durable render state. `None` keeps
+    /// process-local state that a restart cannot resume.
+    pub sqlite_state_path: Option<PathBuf>,
 }
 
 /// Provider selection for [`Agent::linked`], the single linked-provider
@@ -250,21 +297,52 @@ impl NativeAgentBuilder {
     /// lock, or output-schema compilation fails.
     pub async fn build_linked(
         mut self,
-        #[cfg_attr(not(feature = "tool-openrouter-media"), allow(unused_mut))]
+        #[cfg_attr(
+            not(any(feature = "tool-openrouter-media", feature = "tool-video-compose")),
+            allow(unused_mut)
+        )]
         mut common: LinkedCommon,
         model_name: ModelName,
         settings: ModelSettings,
         default_timeout: Duration,
     ) -> Result<LinkedAgent, AgentRunError> {
+        // Only the media-pipeline registration reads these handles back,
+        // and it is a narrower feature than either toolset it composes.
         #[cfg(feature = "tool-openrouter-media")]
-        if let Some(media) = common.openrouter_media.take() {
-            register_openrouter_media(&mut common.ports, media)?;
-        }
+        #[cfg_attr(not(feature = "workflow-media-pipeline"), allow(unused_variables))]
+        let media_toolset = match common.openrouter_media.take() {
+            Some(media) => Some(register_openrouter_media(&mut common.ports, media)?),
+            None => None,
+        };
         #[cfg(not(feature = "tool-openrouter-media"))]
         if common.openrouter_media.is_some() {
             return Err(AgentRunError::configuration(
                 crate::AGENT_RUN_UNSUPPORTED_PLAN,
                 "openrouter_media requires the tool-openrouter-media feature",
+            ));
+        }
+        #[cfg(feature = "tool-video-compose")]
+        #[cfg_attr(not(feature = "workflow-media-pipeline"), allow(unused_variables))]
+        let compose_toolset = match common.video_compose.take() {
+            Some(compose) => Some(register_video_compose(&mut common.ports, &compose)?),
+            None => None,
+        };
+        #[cfg(not(feature = "tool-video-compose"))]
+        if common.video_compose.is_some() {
+            return Err(AgentRunError::configuration(
+                crate::AGENT_RUN_UNSUPPORTED_PLAN,
+                "video_compose requires the tool-video-compose feature",
+            ));
+        }
+        #[cfg(feature = "workflow-media-pipeline")]
+        if let Some(pipeline) = common.media_pipeline.take() {
+            register_media_pipeline(&mut common.ports, pipeline, media_toolset, compose_toolset)?;
+        }
+        #[cfg(not(feature = "workflow-media-pipeline"))]
+        if common.media_pipeline.is_some() {
+            return Err(AgentRunError::configuration(
+                crate::AGENT_RUN_UNSUPPORTED_PLAN,
+                "media_pipeline requires the workflow-media-pipeline feature",
             ));
         }
         let LinkedCommon {
@@ -275,6 +353,8 @@ impl NativeAgentBuilder {
             child_runs,
             approval_grant,
             openrouter_media: _,
+            video_compose: _,
+            media_pipeline: _,
         } = common;
         for (component, toolset) in ports.toolsets {
             self = self.toolset(component, toolset);
@@ -868,7 +948,11 @@ fn memory_store() -> Result<(ComponentRef, Arc<dyn JournalStore>), AgentRunError
     Ok((component("python.store.memory")?, store))
 }
 
-#[cfg(any(feature = "linked-providers", feature = "tool-openrouter-media"))]
+#[cfg(any(
+    feature = "linked-providers",
+    feature = "tool-openrouter-media",
+    feature = "tool-video-compose"
+))]
 fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id).map_err(|error| {
@@ -910,7 +994,7 @@ fn register_openai_media(
 fn register_openrouter_media(
     ports: &mut LinkedAgentPorts,
     spec: OpenRouterMediaToolsSpec,
-) -> Result<(), AgentRunError> {
+) -> Result<Arc<dyn Toolset>, AgentRunError> {
     use finstack_ai_tools_openrouter_media::{OpenRouterMediaConfig, OpenRouterMediaToolset};
 
     let toolset = OpenRouterMediaToolset::try_new(OpenRouterMediaConfig {
@@ -927,8 +1011,107 @@ fn register_openrouter_media(
         Some(store) => toolset.with_artifact_store(store),
         None => toolset,
     };
+    let toolset: Arc<dyn Toolset> = Arc::new(toolset);
     ports.toolsets.push((
         component("python.toolset.openrouter_media")?,
+        Arc::clone(&toolset),
+    ));
+    Ok(toolset)
+}
+
+/// Register the local ffmpeg composition toolset.
+///
+/// The toolset stages every render through the host artifact store, so a
+/// linked composition without one is a configuration error rather than a
+/// silently degraded toolset.
+#[cfg(feature = "tool-video-compose")]
+fn register_video_compose(
+    ports: &mut LinkedAgentPorts,
+    spec: &VideoComposeSpec,
+) -> Result<Arc<dyn Toolset>, AgentRunError> {
+    use finstack_ai_tools_video_compose::{VideoComposeConfig, VideoComposeToolset};
+
+    let artifact_store = ports.artifact_store.clone().ok_or_else(|| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "video_compose requires an artifact store",
+        )
+    })?;
+    let toolset = VideoComposeToolset::try_new(VideoComposeConfig {
+        ffmpeg_path: spec.ffmpeg_path.clone(),
+        ffprobe_path: spec.ffprobe_path.clone(),
+        artifact_store,
+        scratch_dir: spec.scratch_dir.clone(),
+        render_timeout: Duration::from_secs(spec.render_timeout_s),
+    })
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    let toolset: Arc<dyn Toolset> = Arc::new(toolset);
+    ports.toolsets.push((
+        component("python.toolset.video_compose")?,
+        Arc::clone(&toolset),
+    ));
+    Ok(toolset)
+}
+
+/// Register the `MoviePlan` pipeline over the already-registered media and
+/// composition toolsets.
+#[cfg(feature = "workflow-media-pipeline")]
+fn register_media_pipeline(
+    ports: &mut LinkedAgentPorts,
+    spec: MediaPipelineSpec,
+    media_tools: Option<Arc<dyn Toolset>>,
+    compose_tools: Option<Arc<dyn Toolset>>,
+) -> Result<(), AgentRunError> {
+    use finstack_ai_workflow_media_pipeline::{
+        MediaPipelineConfig, MediaPipelineDriver, MediaPipelineToolset, MemoryRenderStateStore,
+        PlanLimits, RenderStateStore, SqliteRenderStateStore,
+    };
+
+    let media_tools = media_tools.ok_or_else(|| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "media_pipeline requires openrouter_media",
+        )
+    })?;
+    let compose_tools = compose_tools.ok_or_else(|| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "media_pipeline requires video_compose (ffmpeg_path, ffprobe_path, scratch_dir)",
+        )
+    })?;
+    let artifact_store = ports.artifact_store.clone().ok_or_else(|| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "media_pipeline requires an artifact store",
+        )
+    })?;
+    let state: Arc<dyn RenderStateStore> = match spec.sqlite_state_path {
+        Some(path) => Arc::new(SqliteRenderStateStore::open(path).map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?),
+        None => Arc::new(MemoryRenderStateStore::new()),
+    };
+    let driver = MediaPipelineDriver::try_new(MediaPipelineConfig {
+        media_tools,
+        compose_tools,
+        state,
+        artifact_store: Some(artifact_store),
+        limits: PlanLimits {
+            max_scenes: spec.max_scenes,
+            max_total_video_s: spec.max_total_video_s,
+            max_concurrent_jobs: spec.max_concurrent_jobs,
+        },
+    })
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    let toolset = MediaPipelineToolset::try_new(Arc::new(driver)).map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    ports.toolsets.push((
+        component("python.toolset.media_pipeline")?,
         Arc::new(toolset),
     ));
     Ok(())
@@ -1594,5 +1777,111 @@ mod media_tests {
             .await
             .expect("gateway + openrouter media construct");
         assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[cfg(feature = "tool-video-compose")]
+    fn video_compose(scratch_dir: std::path::PathBuf) -> VideoComposeSpec {
+        VideoComposeSpec {
+            ffmpeg_path: "/usr/bin/ffmpeg".into(),
+            ffprobe_path: "/usr/bin/ffprobe".into(),
+            scratch_dir,
+            render_timeout_s: 300,
+        }
+    }
+
+    #[cfg(feature = "workflow-media-pipeline")]
+    fn media_pipeline() -> MediaPipelineSpec {
+        MediaPipelineSpec {
+            max_scenes: 4,
+            max_total_video_s: 120,
+            max_concurrent_jobs: 2,
+            sqlite_state_path: None,
+        }
+    }
+
+    #[cfg(feature = "tool-video-compose")]
+    fn ports_with_artifact_store() -> LinkedAgentPorts {
+        LinkedAgentPorts {
+            artifact_store: Some(Arc::new(
+                finstack_ai_runtime::artifact::InProcessArtifactStore::default(),
+            )),
+            ..LinkedAgentPorts::default()
+        }
+    }
+
+    #[cfg(feature = "tool-video-compose")]
+    #[tokio::test]
+    async fn video_compose_registers_over_the_host_artifact_store() {
+        let scratch = tempfile::tempdir().expect("scratch dir");
+        let mut spec = gateway_spec();
+        spec.common.ports = ports_with_artifact_store();
+        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
+        let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .expect("gateway + video compose construct");
+        assert!(toolset_ids(&built.agent).contains(&"python.toolset.video_compose".into()));
+    }
+
+    #[cfg(feature = "tool-video-compose")]
+    #[tokio::test]
+    async fn video_compose_without_an_artifact_store_is_a_configuration_error() {
+        let scratch = tempfile::tempdir().expect("scratch dir");
+        let mut spec = gateway_spec();
+        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .err()
+            .expect("missing artifact store");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("artifact store"));
+    }
+
+    #[cfg(feature = "workflow-media-pipeline")]
+    #[tokio::test]
+    async fn media_pipeline_registers_over_media_and_compose_toolsets() {
+        let scratch = tempfile::tempdir().expect("scratch dir");
+        let mut spec = gateway_spec();
+        spec.common.ports = ports_with_artifact_store();
+        spec.common.openrouter_media = Some(openrouter_media());
+        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
+        spec.common.media_pipeline = Some(media_pipeline());
+        let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .expect("gateway + media pipeline construct");
+        let ids = toolset_ids(&built.agent);
+        assert!(ids.contains(&"python.toolset.media_pipeline".into()));
+        assert!(ids.contains(&"python.toolset.video_compose".into()));
+        assert!(ids.contains(&"python.toolset.openrouter_media".into()));
+    }
+
+    #[cfg(feature = "workflow-media-pipeline")]
+    #[tokio::test]
+    async fn media_pipeline_without_video_compose_is_a_configuration_error() {
+        let mut spec = gateway_spec();
+        spec.common.ports = ports_with_artifact_store();
+        spec.common.openrouter_media = Some(openrouter_media());
+        spec.common.media_pipeline = Some(media_pipeline());
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .err()
+            .expect("missing video compose");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("video_compose"));
+    }
+
+    #[cfg(feature = "workflow-media-pipeline")]
+    #[tokio::test]
+    async fn media_pipeline_without_openrouter_media_is_a_configuration_error() {
+        let scratch = tempfile::tempdir().expect("scratch dir");
+        let mut spec = gateway_spec();
+        spec.common.ports = ports_with_artifact_store();
+        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
+        spec.common.media_pipeline = Some(media_pipeline());
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .err()
+            .expect("missing openrouter media");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("openrouter_media"));
     }
 }

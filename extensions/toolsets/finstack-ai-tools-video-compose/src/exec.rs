@@ -17,8 +17,10 @@ use finstack_ai_runtime::ports::model::CancellationSignal;
 use finstack_ai_runtime::ports::tool::ToolError;
 use serde::Deserialize;
 
-use crate::{VIDEO_COMPOSE_CONFIG_INVALID, VIDEO_COMPOSE_FFMPEG_FAILED, VIDEO_COMPOSE_MEDIA_FAILURE};
 use crate::timeout_error;
+use crate::{
+    VIDEO_COMPOSE_CONFIG_INVALID, VIDEO_COMPOSE_FFMPEG_FAILED, VIDEO_COMPOSE_MEDIA_FAILURE,
+};
 
 /// Bound on the trailing `stderr` slice carried by a
 /// [`VIDEO_COMPOSE_FFMPEG_FAILED`] message.
@@ -241,9 +243,14 @@ mod tests {
             "ffmpeg",
             "echo \"boom: filter parse error\" >&2; exit 1",
         );
-        let error = run_bounded(&stub, &[], Duration::from_secs(5), &CancellationSignal::new())
-            .await
-            .expect_err("nonzero exit");
+        let error = run_bounded(
+            &stub,
+            &[],
+            Duration::from_secs(5),
+            &CancellationSignal::new(),
+        )
+        .await
+        .expect_err("nonzero exit");
         assert_eq!(error.code(), crate::VIDEO_COMPOSE_FFMPEG_FAILED);
         assert!(error.message().contains("filter parse error"));
         assert!(error.message().len() <= STDERR_TAIL_BYTES);

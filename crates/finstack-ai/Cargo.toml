@@ -31,6 +31,16 @@ provider-ollama = ["native-tokio", "dep:finstack-ai-provider-ollama"]
 tool-openrouter-media = ["native-tokio", "dep:finstack-ai-tools-openrouter-media"]
 tool-openai-media = ["native-tokio", "dep:finstack-ai-tools-openai-media"]
 tool-e2b = ["native-tokio", "dep:finstack-ai-sandbox-e2b"]
+tool-video-compose = ["native-tokio", "dep:finstack-ai-tools-video-compose"]
+# The pipeline driver composes the OpenRouter media toolset and the compose
+# toolset; neither is substitutable, so the workflow feature turns both on
+# rather than leaving an unusable combination expressible.
+workflow-media-pipeline = [
+    "native-tokio",
+    "tool-openrouter-media",
+    "tool-video-compose",
+    "dep:finstack-ai-workflow-media-pipeline",
+]
 # `linked-providers` is the only production path that constructs a journal
 # store on the caller's behalf (see `agent::linked::memory_store`), so the
 # concrete store dependency belongs here rather than on `native-tokio`. A
@@ -43,7 +53,13 @@ linked-providers = [
     "provider-ollama",
     "dep:finstack-ai-store-memory",
 ]
-linked-tools = ["tool-openrouter-media", "tool-openai-media", "tool-e2b"]
+linked-tools = [
+    "tool-openrouter-media",
+    "tool-openai-media",
+    "tool-e2b",
+    "tool-video-compose",
+    "workflow-media-pipeline",
+]
 linked-all = ["linked-providers", "linked-tools"]
 vendored-tls = [
     "finstack-ai-provider-openai?/vendored-tls",
@@ -72,6 +88,8 @@ finstack-ai-sandbox-e2b = { workspace = true, optional = true }
 finstack-ai-store-memory = { workspace = true, optional = true }
 finstack-ai-tools-openrouter-media = { workspace = true, optional = true }
 finstack-ai-tools-openai-media = { workspace = true, optional = true }
+finstack-ai-tools-video-compose = { workspace = true, optional = true }
+finstack-ai-workflow-media-pipeline = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_json_canonicalizer = { workspace = true }
@@ -84,6 +102,7 @@ finstack-ai-store-memory = { workspace = true }
 finstack-ai-test = { workspace = true }
 finstack-ai-tools-calculator = { workspace = true }
 finstack-ai-tools-skills = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 
 [lints]

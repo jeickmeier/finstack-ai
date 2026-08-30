@@ -69,8 +69,14 @@ impl QueueToolset {
     }
 
     fn push_call_error(&self, tool: &str, code: &str, message: &str) {
-        let error = ToolError::try_new(code, finstack_ai_kernel::ErrorCategory::Tool, false, message, Metadata::empty())
-            .expect("tool error");
+        let error = ToolError::try_new(
+            code,
+            finstack_ai_kernel::ErrorCategory::Tool,
+            false,
+            message,
+            Metadata::empty(),
+        )
+        .expect("tool error");
         self.enqueue(tool, Queued::CallError(error));
     }
 
@@ -146,7 +152,9 @@ impl Toolset for QueueToolset {
                     output,
                     is_error: false,
                 });
-                Box::pin(async move { Ok(Box::pin(stream::iter(vec![Ok(item)])) as ToolEventStream) })
+                Box::pin(
+                    async move { Ok(Box::pin(stream::iter(vec![Ok(item)])) as ToolEventStream) },
+                )
             }
             Queued::CallError(error) => Box::pin(async move { Err(error) }),
         }
@@ -316,8 +324,14 @@ async fn killed_after_scene_one_download_resumes_at_scene_two() {
     assert_eq!(submitted.scenes[1].stage, SceneStage::PendingSubmit);
 
     // Tick 1: both scenes submit their jobs.
-    media.push(VIDEO_SUBMIT_TOOL, json!({ "id": "job-a", "status": "queued" }));
-    media.push(VIDEO_SUBMIT_TOOL, json!({ "id": "job-b", "status": "queued" }));
+    media.push(
+        VIDEO_SUBMIT_TOOL,
+        json!({ "id": "job-a", "status": "queued" }),
+    );
+    media.push(
+        VIDEO_SUBMIT_TOOL,
+        json!({ "id": "job-b", "status": "queued" }),
+    );
     let state = driver.advance(&ctx, &render_id).await.expect("tick 1");
     assert_eq!(state.scenes[0].stage, SceneStage::Polling);
     assert_eq!(state.scenes[1].stage, SceneStage::Polling);
@@ -380,7 +394,11 @@ async fn killed_after_scene_one_download_resumes_at_scene_two() {
         .advance(&ctx, &render_id)
         .await
         .expect("resumed tick 1");
-    assert_eq!(state.scenes[0].stage, SceneStage::Done, "scene-01 untouched");
+    assert_eq!(
+        state.scenes[0].stage,
+        SceneStage::Done,
+        "scene-01 untouched"
+    );
     assert_eq!(state.scenes[1].stage, SceneStage::PendingDownload);
 
     let clip_two = stage(&store, &ctx, "scene-two-clip-bytes").await;
@@ -418,7 +436,9 @@ async fn killed_after_scene_one_download_resumes_at_scene_two() {
     let calls = fresh_media.calls();
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert!(
-        calls.iter().all(|(_, args)| args.get("id").and_then(Value::as_str) != Some("job-a")),
+        calls
+            .iter()
+            .all(|(_, args)| args.get("id").and_then(Value::as_str) != Some("job-a")),
         "no scene-01 call was consumed after resume: {calls:?}"
     );
 }
@@ -446,8 +466,14 @@ async fn corrupted_clip_fails_closed_then_reruns_the_scene() {
     let render_id = submitted.render_id.to_string();
 
     // Drive both scenes to `Done`: submit, poll to completion, download.
-    media.push(VIDEO_SUBMIT_TOOL, json!({ "id": "job-a", "status": "queued" }));
-    media.push(VIDEO_SUBMIT_TOOL, json!({ "id": "job-b", "status": "queued" }));
+    media.push(
+        VIDEO_SUBMIT_TOOL,
+        json!({ "id": "job-a", "status": "queued" }),
+    );
+    media.push(
+        VIDEO_SUBMIT_TOOL,
+        json!({ "id": "job-b", "status": "queued" }),
+    );
     driver.advance(&ctx, &render_id).await.expect("submit tick");
 
     media.push(
@@ -543,8 +569,14 @@ async fn resubmitted_plan_after_crash_returns_the_persisted_render() {
     let render_id = first.render_id.to_string();
     assert_eq!(first.revision, 0);
 
-    media.push(VIDEO_SUBMIT_TOOL, json!({ "id": "job-a", "status": "queued" }));
-    media.push(VIDEO_SUBMIT_TOOL, json!({ "id": "job-b", "status": "queued" }));
+    media.push(
+        VIDEO_SUBMIT_TOOL,
+        json!({ "id": "job-a", "status": "queued" }),
+    );
+    media.push(
+        VIDEO_SUBMIT_TOOL,
+        json!({ "id": "job-b", "status": "queued" }),
+    );
     let ticked = driver.advance(&ctx, &render_id).await.expect("tick");
     assert_eq!(ticked.scenes[0].stage, SceneStage::Polling);
     assert_eq!(ticked.scenes[1].stage, SceneStage::Polling);

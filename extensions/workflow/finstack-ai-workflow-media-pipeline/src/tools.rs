@@ -84,16 +84,14 @@ impl MediaPipelineToolset {
                 reason: "invalid_tool_id",
             })?;
 
-        let result_schema = RawJson::parse(RESULT_SCHEMA).map_err(|_| {
-            PipelineError::ConfigInvalid {
+        let result_schema =
+            RawJson::parse(RESULT_SCHEMA).map_err(|_| PipelineError::ConfigInvalid {
                 reason: "invalid_output_schema",
-            }
-        })?;
-        let render_id_schema = RawJson::parse(RENDER_ID_SCHEMA).map_err(|_| {
-            PipelineError::ConfigInvalid {
+            })?;
+        let render_id_schema =
+            RawJson::parse(RENDER_ID_SCHEMA).map_err(|_| PipelineError::ConfigInvalid {
                 reason: "invalid_input_schema",
-            }
-        })?;
+            })?;
 
         let render_movie_spec = ToolSpec {
             id: render_movie_id.clone(),
@@ -185,7 +183,11 @@ impl MediaPipelineToolset {
                 name: Arc::from("finstack-media-pipeline"),
                 metadata: Metadata::empty(),
             },
-            tools: Arc::from([render_movie_spec, advance_render_spec, get_render_status_spec]),
+            tools: Arc::from([
+                render_movie_spec,
+                advance_render_spec,
+                get_render_status_spec,
+            ]),
             render_movie_id,
             advance_render_id,
             get_render_status_id,
@@ -465,8 +467,7 @@ mod tests {
         );
 
         let toolset = MediaPipelineToolset::try_new(Arc::clone(&harness.driver)).expect("toolset");
-        let plan: serde_json::Value =
-            serde_json::from_slice(&url_only_plan(1)).expect("plan json");
+        let plan: serde_json::Value = serde_json::from_slice(&url_only_plan(1)).expect("plan json");
         let result = call_tool(&toolset, "render_movie", json!({ "plan": plan })).await;
 
         assert_eq!(result["status"], "running");
@@ -486,15 +487,17 @@ mod tests {
         let final_clip = stage(&store, &tool_context(), "final-movie-bytes").await;
         prime_happy_path(&harness, &image, [&clip_one, &clip_two], &final_clip);
 
-        let plan: serde_json::Value =
-            serde_json::from_slice(&fixture_plan()).expect("plan json");
+        let plan: serde_json::Value = serde_json::from_slice(&fixture_plan()).expect("plan json");
         let submitted = call_tool(
             &MediaPipelineToolset::try_new(Arc::clone(&harness.driver)).expect("toolset"),
             "render_movie",
             json!({ "plan": plan }),
         )
         .await;
-        let render_id = submitted["render_id"].as_str().expect("render_id").to_owned();
+        let render_id = submitted["render_id"]
+            .as_str()
+            .expect("render_id")
+            .to_owned();
 
         let toolset = MediaPipelineToolset::try_new(Arc::clone(&harness.driver)).expect("toolset");
         let mut result = submitted;
@@ -526,8 +529,7 @@ mod tests {
         prime_happy_path(&harness, &image, [&clip_one, &clip_two], &final_clip);
 
         let toolset = MediaPipelineToolset::try_new(Arc::clone(&harness.driver)).expect("toolset");
-        let plan: serde_json::Value =
-            serde_json::from_slice(&fixture_plan()).expect("plan json");
+        let plan: serde_json::Value = serde_json::from_slice(&fixture_plan()).expect("plan json");
         let mut result = call_tool(&toolset, "render_movie", json!({ "plan": plan })).await;
         let render_id = result["render_id"].as_str().expect("render_id").to_owned();
         for _ in 0..12 {

@@ -54,6 +54,8 @@ FORBIDDEN_WASM = frozenset(
         "finstack-ai-sandbox-e2b",
         "finstack-ai-tools-openrouter-media",
         "finstack-ai-tools-openai-media",
+        "finstack-ai-tools-video-compose",
+        "finstack-ai-workflow-media-pipeline",
         "finstack-ai-server",
         "finstack-ai-workflow-local",
         "rustls",

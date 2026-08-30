@@ -521,16 +521,21 @@ async fn handle_compose(
     scratch_dir: &Path,
     render_timeout: Duration,
 ) -> Result<ToolEventStream, ToolError> {
-    let spec: CompositionSpec = serde_json::from_slice(call.call.arguments().as_bytes())
-        .map_err(|_| {
+    let spec: CompositionSpec =
+        serde_json::from_slice(call.call.arguments().as_bytes()).map_err(|_| {
             tool_error(
                 VIDEO_COMPOSE_INVALID_ARGUMENTS,
                 ErrorCategory::Validation,
                 "compose_video arguments are invalid",
             )
         })?;
-    validate_spec(&spec)
-        .map_err(|reason| tool_error(VIDEO_COMPOSE_SPEC_INVALID, ErrorCategory::Validation, reason))?;
+    validate_spec(&spec).map_err(|reason| {
+        tool_error(
+            VIDEO_COMPOSE_SPEC_INVALID,
+            ErrorCategory::Validation,
+            reason,
+        )
+    })?;
 
     let scope = artifact_scope(ctx);
     let mut scratch = ScratchGuard::default();
@@ -551,10 +556,18 @@ async fn handle_compose(
     }
 
     let audio_path = match &spec.audio {
-        Some(audio) => Some(scratch.track(
-            fetch_artifact_to_file(artifact_store, &scope, &audio.artifact, scratch_dir, "audio")
+        Some(audio) => Some(
+            scratch.track(
+                fetch_artifact_to_file(
+                    artifact_store,
+                    &scope,
+                    &audio.artifact,
+                    scratch_dir,
+                    "audio",
+                )
                 .await?,
-        )),
+            ),
+        ),
         None => None,
     };
 
@@ -596,9 +609,8 @@ async fn handle_compose(
         Container::Mp4 => "mp4",
         Container::Webm => "webm",
     };
-    let output_path = scratch.track(
-        scratch_dir.join(format!("render-{:x?}.{ext}", ctx.run.effect_id)),
-    );
+    let output_path =
+        scratch.track(scratch_dir.join(format!("render-{:x?}.{ext}", ctx.run.effect_id)));
 
     let args = build_ffmpeg_args(
         &spec,
@@ -607,7 +619,13 @@ async fn handle_compose(
         subtitles_path.as_deref(),
         &output_path,
     )
-    .map_err(|reason| tool_error(VIDEO_COMPOSE_SPEC_INVALID, ErrorCategory::Validation, reason))?;
+    .map_err(|reason| {
+        tool_error(
+            VIDEO_COMPOSE_SPEC_INVALID,
+            ErrorCategory::Validation,
+            reason,
+        )
+    })?;
 
     exec::run_bounded(ffmpeg_path, &args, render_timeout, &ctx.run.cancellation).await?;
 
@@ -695,10 +713,10 @@ mod tests {
         ArtifactMetadata, ArtifactScope, ArtifactStore, InProcessArtifactStore,
         stage_required_artifact,
     };
+    use finstack_ai_runtime::ports::model::ToolSpec;
     use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, RunCallContext,
     };
-    use finstack_ai_runtime::ports::model::ToolSpec;
     use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolStreamItem, Toolset};
     use futures_util::StreamExt;
     use tempfile::tempdir;
@@ -807,7 +825,12 @@ mod tests {
         .expect("artifact")
     }
 
-    fn toolset(ffmpeg: PathBuf, ffprobe: PathBuf, scratch: PathBuf, timeout: Duration) -> VideoComposeToolset {
+    fn toolset(
+        ffmpeg: PathBuf,
+        ffprobe: PathBuf,
+        scratch: PathBuf,
+        timeout: Duration,
+    ) -> VideoComposeToolset {
         toolset_with_store(
             ffmpeg,
             ffprobe,
@@ -1134,5 +1157,19 @@ mod tests {
             panic!("oversized render output must fail closed")
         };
         assert_eq!(error.code(), VIDEO_COMPOSE_LIMIT_EXCEEDED);
+    }
+
+    #[test]
+    fn video_compose_is_not_a_wasm_host_sdk_dependency() {
+        let manifest = include_str!("../../../../crates/finstack-ai/Cargo.toml");
+        let wasm_host = manifest
+            .lines()
+            .find(|line| line.contains("wasm-host ="))
+            .expect("wasm-host feature");
+        assert!(
+            !wasm_host.contains("finstack-ai-tools-video-compose"),
+            "video compose must stay off the wasm-host feature graph"
+        );
+        assert!(manifest.contains("dep:finstack-ai-tools-video-compose"));
     }
 }

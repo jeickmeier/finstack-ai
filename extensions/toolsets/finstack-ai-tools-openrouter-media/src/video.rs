@@ -31,7 +31,11 @@ pub(crate) const MAX_INLINE_IMAGE_BYTES: usize = 8 * 1_048_576;
 
 /// Test-shrunk inline-image ceiling so oversize-rejection tests stay fast.
 fn inline_image_ceiling() -> usize {
-    if cfg!(test) { 1_024 } else { MAX_INLINE_IMAGE_BYTES }
+    if cfg!(test) {
+        1_024
+    } else {
+        MAX_INLINE_IMAGE_BYTES
+    }
 }
 
 /// One frame or reference image: exactly one of a URL or a stored artifact.

@@ -1399,11 +1399,11 @@ pub(crate) mod test_support {
 mod tests {
     use serde_json::json;
 
-    use super::{PlanLimits, RenderStatus, SceneStage, artifact_scope};
     use super::test_support::{
         fixture_plan, harness, limits, prime_happy_path, seed_done_render, stage, stage_subtitle,
         tool_context, url_only_plan,
     };
+    use super::{PlanLimits, RenderStatus, SceneStage, artifact_scope};
 
     // ----- tests ---------------------------------------------------------
 
