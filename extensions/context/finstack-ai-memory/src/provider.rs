@@ -2,8 +2,9 @@
 //! matching [`MemoryRecord`](crate::record::MemoryRecord)s into bounded, cache-stable context items.
 //!
 //! This provider never mutates conversation history, never writes to the
-//! [`MemoryStore`], and never reconciles artifact ownership. Writes and
-//! reconciliation belong to the toolset.
+//! [`MemoryStore`], and never reconciles artifact ownership or the
+//! embedding index (its optional semantic leg only reads). Writes and
+//! reconciliation belong to the toolset and observer.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

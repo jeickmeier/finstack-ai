@@ -10,6 +10,10 @@
 //!
 //! Captured bodies are always inline, so a candidate whose body exceeds
 //! [`INLINE_BODY_MAX_BYTES`] is skipped rather than stored unbounded.
+//!
+//! With an embedder ([`MemoryObserver::try_new_with_embedder`]), each
+//! observed batch ends in a bounded, error-swallowed drain of the store's
+//! embedding index; the same failure isolation applies to it absolutely.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

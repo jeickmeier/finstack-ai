@@ -5,6 +5,12 @@
 //! [`Toolset::tools`] exposes only the subset a [`MemoryPolicy`] permits.
 //! Scope is bound at construction time from the toolset's configuration and
 //! is never accepted from tool arguments.
+//!
+//! With an embedder ([`MemoryToolset::try_new_with_embedder`]),
+//! `search_memory` additionally accepts `mode: "semantic"` — an explicit
+//! ask that fails honestly ([`MEMORY_TOOL_SEMANTIC_UNAVAILABLE`]) when it
+//! cannot be served — and the mutating tools drain the store's embedding
+//! index best-effort after each write.
 
 use std::sync::Arc;
 
