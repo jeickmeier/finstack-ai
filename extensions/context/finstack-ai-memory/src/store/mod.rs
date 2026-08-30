@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use finstack_ai_embeddings::vector::EmbeddingVector;
+use finstack_ai_embeddings::embedder::TextEmbedder;
+use finstack_ai_embeddings::vector::{EmbeddingVector, truncate_to_bytes};
 use finstack_ai_kernel::{ArtifactRef, Digest, Timestamp};
 use finstack_ai_runtime::artifact::{ArtifactOwnerId, ArtifactScope, ArtifactStore};
 use finstack_ai_runtime::ports::{PortFuture, PortObject};
@@ -200,6 +201,26 @@ pub struct MemoryHit {
     pub score: u32,
     /// Why this record matched.
     pub matched: MatchEvidence,
+}
+
+/// One live record awaiting embedding for a space: its identity, canonical
+/// source text, and the digest guarding against mid-reconcile rewrites.
+///
+/// Produced by [`MemoryStore::pending_embedding_sources`]; `text` is the
+/// full [`embedding_source_text`] (callers truncate to the embedder's input
+/// limit before embedding), and `source_digest` is its
+/// [`embedding_source_digest`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddingSource {
+    /// Scope the record is bound to.
+    pub scope: MemoryScope,
+    /// Record identity within `scope`.
+    pub id: MemoryId,
+    /// Canonical embedding source text of the record.
+    pub text: Arc<str>,
+    /// Digest of `text`, passed back to [`MemoryStore::store_embedding`] as
+    /// the staleness guard.
+    pub source_digest: Digest,
 }
 
 /// Outcome of a [`MemoryStore::put`] call.
@@ -413,6 +434,69 @@ pub trait MemoryStore: PortObject {
     ) -> PortFuture<Result<(), MemoryStoreError>> {
         Box::pin(async { Ok(()) })
     }
+
+    /// Return at most `limit` live records that have no embedding row for
+    /// the space `embedder_id`, in stable order.
+    ///
+    /// "Pending" is derived, not queued: the anti-join of live records
+    /// against the space's index rows. A record rewritten after being
+    /// listed simply reappears here on the next call. Stores without an
+    /// embedding index report no pending work.
+    fn pending_embedding_sources(
+        &self,
+        _embedder_id: Arc<str>,
+        _limit: usize,
+    ) -> PortFuture<Result<Vec<EmbeddingSource>, MemoryStoreError>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    /// Store `vector` for `(scope, id)` in the space `embedder_id`, guarded
+    /// by `source_digest`.
+    ///
+    /// The store recomputes the record's current source digest and
+    /// **silently no-ops** when it differs from `source_digest` or the
+    /// record is no longer live — the record was rewritten or removed
+    /// mid-reconcile, and the anti-join re-surfaces it if appropriate.
+    /// Vectors are unit-normalized at write. The first vector stored in a
+    /// space fixes that space's dimensionality.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryStoreError::InvalidRequest`] when the embedder id is
+    /// malformed, the vector exceeds
+    /// [`MemoryStoreLimits::max_embedding_dimensions`], or its
+    /// dimensionality mismatches the space (reason
+    /// `memory_embedding_dimensions_mismatch`);
+    /// [`MemoryStoreError::CapacityExceeded`] (resource `embedding_spaces`)
+    /// when a new space would exceed
+    /// [`MemoryStoreLimits::max_embedding_spaces`]; and, for stores without
+    /// an embedding index, [`MemoryStoreError::InvalidRequest`] with reason
+    /// `memory_embeddings_unsupported`.
+    fn store_embedding(
+        &self,
+        _embedder_id: Arc<str>,
+        _scope: MemoryScope,
+        _id: MemoryId,
+        _source_digest: Digest,
+        _vector: EmbeddingVector,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        Box::pin(async {
+            Err(MemoryStoreError::InvalidRequest {
+                reason: "memory_embeddings_unsupported",
+            })
+        })
+    }
+
+    /// Drop every embedding row of the space `embedder_id` (embedder
+    /// rotation). The index is derived data, so forgetting a space merely
+    /// makes its records pending again; stores without an embedding index
+    /// have nothing to drop.
+    fn forget_embedding_space(
+        &self,
+        _embedder_id: Arc<str>,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// Drain a bounded batch of memory artifact ownership actions.
@@ -455,6 +539,69 @@ pub async fn reconcile_memory_artifacts(
         applied = applied.saturating_add(1);
     }
     Ok(applied)
+}
+
+/// Drain a bounded batch of the embedding index's pending records through
+/// `embedder`.
+///
+/// Pending source texts are truncated to the embedder's declared input
+/// limit (at a character boundary), batch-embedded, and stored under the
+/// digest guard, so records rewritten mid-drain are silently skipped and
+/// re-surface on the next run. The embedding index is derived, best-effort
+/// data — callers on write paths swallow this function's errors rather
+/// than failing the write.
+///
+/// Returns the number of applied embeddings; a partial or failed run
+/// leaves the remainder pending for the next call.
+///
+/// # Errors
+///
+/// Returns [`MemoryStoreError::Unavailable`] with message
+/// `memory_embedder_failed` when the embedder rejects the batch, and
+/// propagates store errors from listing or writing rows.
+pub async fn reconcile_memory_embeddings(
+    store: &dyn MemoryStore,
+    embedder: &dyn TextEmbedder,
+    limit: usize,
+) -> Result<usize, MemoryStoreError> {
+    let descriptor = embedder.descriptor();
+    let pending = store
+        .pending_embedding_sources(Arc::clone(&descriptor.embedder_id), limit)
+        .await?;
+    if pending.is_empty() {
+        return Ok(0);
+    }
+    let texts: Vec<Arc<str>> = pending
+        .iter()
+        .map(|source| Arc::from(truncate_to_bytes(&source.text, descriptor.max_input_bytes)))
+        .collect();
+    let vectors = embedder
+        .embed(texts)
+        .await
+        .map_err(|_| memory_embedder_failed())?;
+    if vectors.len() != pending.len() {
+        return Err(memory_embedder_failed());
+    }
+    let mut applied = 0_usize;
+    for (source, vector) in pending.into_iter().zip(vectors) {
+        store
+            .store_embedding(
+                Arc::clone(&descriptor.embedder_id),
+                source.scope,
+                source.id,
+                source.source_digest,
+                vector,
+            )
+            .await?;
+        applied = applied.saturating_add(1);
+    }
+    Ok(applied)
+}
+
+fn memory_embedder_failed() -> MemoryStoreError {
+    MemoryStoreError::Unavailable {
+        message: Arc::from("memory_embedder_failed"),
+    }
 }
 
 pub(crate) fn artifact_transition_actions(

@@ -348,6 +348,19 @@ impl core::fmt::Debug for finstack_ai_memory::store::PutOutcome
 pub fn finstack_ai_memory::store::PutOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_memory::store::PutOutcome
 impl core::marker::StructuralPartialEq for finstack_ai_memory::store::PutOutcome
+pub struct finstack_ai_memory::store::EmbeddingSource
+pub finstack_ai_memory::store::EmbeddingSource::id: finstack_ai_memory::record::MemoryId
+pub finstack_ai_memory::store::EmbeddingSource::scope: finstack_ai_memory::record::MemoryScope
+pub finstack_ai_memory::store::EmbeddingSource::source_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_memory::store::EmbeddingSource::text: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_memory::store::EmbeddingSource
+pub fn finstack_ai_memory::store::EmbeddingSource::clone(&self) -> finstack_ai_memory::store::EmbeddingSource
+impl core::cmp::Eq for finstack_ai_memory::store::EmbeddingSource
+impl core::cmp::PartialEq for finstack_ai_memory::store::EmbeddingSource
+pub fn finstack_ai_memory::store::EmbeddingSource::eq(&self, &finstack_ai_memory::store::EmbeddingSource) -> bool
+impl core::fmt::Debug for finstack_ai_memory::store::EmbeddingSource
+pub fn finstack_ai_memory::store::EmbeddingSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_memory::store::EmbeddingSource
 pub struct finstack_ai_memory::store::InProcessMemoryStore
 impl finstack_ai_memory::store::InProcessMemoryStore
 pub fn finstack_ai_memory::store::InProcessMemoryStore::new() -> Self
@@ -362,11 +375,14 @@ pub fn finstack_ai_memory::store::InProcessMemoryStore::acknowledge_artifact_act
 pub fn finstack_ai_memory::store::InProcessMemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::descriptor(&self) -> finstack_ai_memory::store::MemoryStoreDescriptor
 pub fn finstack_ai_memory::store::InProcessMemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::InProcessMemoryStore::forget_embedding_space(&self, alloc::sync::Arc<str>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::pending_artifact_actions(&self, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryArtifactAction>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::InProcessMemoryStore::pending_embedding_sources(&self, alloc::sync::Arc<str>, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::EmbeddingSource>, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::InProcessMemoryStore::store_embedding(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_kernel::primitives::digest::Digest, finstack_ai_embeddings::vector::EmbeddingVector) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub struct finstack_ai_memory::store::MemoryHit
 pub finstack_ai_memory::store::MemoryHit::matched: finstack_ai_memory::store::MatchEvidence
 pub finstack_ai_memory::store::MemoryHit::record: finstack_ai_memory::record::MemoryRecord
@@ -451,24 +467,31 @@ pub fn finstack_ai_memory::store::MemoryStore::acknowledge_artifact_action(&self
 pub fn finstack_ai_memory::store::MemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::descriptor(&self) -> finstack_ai_memory::store::MemoryStoreDescriptor
 pub fn finstack_ai_memory::store::MemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::forget_embedding_space(&self, alloc::sync::Arc<str>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::pending_artifact_actions(&self, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryArtifactAction>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::pending_embedding_sources(&self, alloc::sync::Arc<str>, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::EmbeddingSource>, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::MemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::MemoryStore::store_embedding(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_kernel::primitives::digest::Digest, finstack_ai_embeddings::vector::EmbeddingVector) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 impl finstack_ai_memory::store::MemoryStore for finstack_ai_memory::store::InProcessMemoryStore
 pub fn finstack_ai_memory::store::InProcessMemoryStore::acknowledge_artifact_action(&self, finstack_ai_kernel::primitives::digest::Digest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::correct(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::descriptor(&self) -> finstack_ai_memory::store::MemoryStoreDescriptor
 pub fn finstack_ai_memory::store::InProcessMemoryStore::forget(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::InProcessMemoryStore::forget_embedding_space(&self, alloc::sync::Arc<str>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::get(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_memory::record::MemoryRecord>, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::list(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryPage) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::MemoryListing, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::pending_artifact_actions(&self, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryArtifactAction>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::InProcessMemoryStore::pending_embedding_sources(&self, alloc::sync::Arc<str>, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::EmbeddingSource>, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::put(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryRecord) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_memory::store::PutOutcome, finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::InProcessMemoryStore::search(&self, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::store::MemoryQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<alloc::vec::Vec<finstack_ai_memory::store::MemoryHit>, finstack_ai_memory::store::MemoryStoreError>>
+pub fn finstack_ai_memory::store::InProcessMemoryStore::store_embedding(&self, alloc::sync::Arc<str>, finstack_ai_memory::record::MemoryScope, finstack_ai_memory::record::MemoryId, finstack_ai_kernel::primitives::digest::Digest, finstack_ai_embeddings::vector::EmbeddingVector) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_memory::store::MemoryStoreError>>
 pub fn finstack_ai_memory::store::embedding_source_digest(&str) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_memory::store::MemoryStoreError>
 pub fn finstack_ai_memory::store::embedding_source_text(&finstack_ai_memory::record::MemoryRecord) -> alloc::string::String
 pub async fn finstack_ai_memory::store::reconcile_memory_artifacts(&dyn finstack_ai_memory::store::MemoryStore, &dyn finstack_ai_runtime::services::artifact::ArtifactStore, usize) -> core::result::Result<usize, finstack_ai_memory::store::MemoryStoreError>
+pub async fn finstack_ai_memory::store::reconcile_memory_embeddings(&dyn finstack_ai_memory::store::MemoryStore, &dyn finstack_ai_embeddings::embedder::TextEmbedder, usize) -> core::result::Result<usize, finstack_ai_memory::store::MemoryStoreError>
 pub fn finstack_ai_memory::store::similarity_score(f32) -> u32
 pub mod finstack_ai_memory::toolset
 pub struct finstack_ai_memory::toolset::MemoryPolicy

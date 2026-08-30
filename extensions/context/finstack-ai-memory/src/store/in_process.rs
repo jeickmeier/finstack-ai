@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::{Digest, Timestamp};
 use finstack_ai_runtime::ports::PortFuture;
 
@@ -15,9 +16,10 @@ use crate::record::{
 };
 
 use super::{
-    MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction, MemoryHit,
-    MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError,
-    MemoryStoreLimits, PutOutcome, artifact_transition_actions, normalize_search_tokens,
+    EmbeddingSource, MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction,
+    MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor,
+    MemoryStoreError, MemoryStoreLimits, PutOutcome, artifact_transition_actions,
+    embedding_source_digest, embedding_source_text, normalize_search_tokens, similarity_score,
     validate_embedder_id, validate_new_record_lifecycle,
 };
 
@@ -56,6 +58,18 @@ struct MemoryState {
     artifact_actions: VecDeque<MemoryArtifactAction>,
     artifact_action_ids: BTreeSet<Digest>,
     total_inline_bytes: u64,
+    /// Derived per-space embedding index, keyed by record identity and
+    /// embedder identity. Rows are evicted whenever their record dies.
+    embeddings: BTreeMap<(MemoryScope, MemoryId, Arc<str>), StoredEmbedding>,
+}
+
+/// One embedding row: the unit-normalized vector, the space dimensionality
+/// it fixes, and the source digest it was computed from.
+#[derive(Debug, Clone)]
+struct StoredEmbedding {
+    unit_vector: EmbeddingVector,
+    dimensions: usize,
+    source_digest: Digest,
 }
 
 /// Fingerprint plus apply time, so write-path sweeps can age receipts out.
@@ -154,6 +168,9 @@ impl MemoryStore for InProcessMemoryStore {
                 .total_inline_bytes
                 .saturating_sub(replaced.as_ref().map_or(0, inline_bytes))
                 .saturating_add(inline_bytes(&record));
+            // The written content supersedes whatever any space indexed for
+            // this id (e.g. a revived tombstone's stale rows).
+            evict_embeddings(&mut state, &record.scope, &record.id);
             state.receipts.insert(
                 (record.scope.clone(), idempotency_key),
                 Receipt {
@@ -199,16 +216,15 @@ impl MemoryStore for InProcessMemoryStore {
         let result = (|| -> Result<Vec<MemoryHit>, MemoryStoreError> {
             validate_scope(&scope)?;
             validate_query(&query, limit, self.limits)?;
-            if matches!(query, MemoryQuery::Embedding { .. }) {
-                // The in-process embedding index arrives with the store
-                // extension task; until then a valid embedding query is
-                // honestly unsupported rather than silently empty.
-                return Err(MemoryStoreError::InvalidRequest {
-                    reason: "memory_embeddings_unsupported",
-                });
-            }
             let now = (self.clock)();
             let state = self.state.lock().map_err(|_| lock_error())?;
+            if let MemoryQuery::Embedding {
+                embedder_id,
+                vector,
+            } = &query
+            {
+                return search_embeddings(&state, &scope, embedder_id, vector, limit, now);
+            }
             let mut hits: Vec<MemoryHit> = state
                 .records
                 .values()
@@ -268,6 +284,7 @@ impl MemoryStore for InProcessMemoryStore {
                 .get_mut(&record_key)
                 .ok_or(MemoryStoreError::NotFound)?;
             record.tombstoned = true;
+            evict_embeddings(&mut state, &record_key.0, &record_key.1);
             state.receipts.insert(
                 (scope, idempotency_key),
                 Receipt {
@@ -350,6 +367,10 @@ impl MemoryStore for InProcessMemoryStore {
             if let Some(old_record) = state.records.get_mut(&old_key) {
                 old_record.superseded_by = Some(replacement_id);
             }
+            // The superseded record leaves every space, and any stale rows
+            // under the replacement's id go with it.
+            evict_embeddings(&mut state, &old_key.0, &old_key.1);
+            evict_embeddings(&mut state, &replacement.scope, &replacement.id);
             state.receipts.insert(
                 (scope, idempotency_key),
                 Receipt {
@@ -430,6 +451,207 @@ impl MemoryStore for InProcessMemoryStore {
         })();
         Box::pin(async move { result })
     }
+
+    fn pending_embedding_sources(
+        &self,
+        embedder_id: Arc<str>,
+        limit: usize,
+    ) -> PortFuture<Result<Vec<EmbeddingSource>, MemoryStoreError>> {
+        let result = (|| -> Result<Vec<EmbeddingSource>, MemoryStoreError> {
+            validate_embedder_id(&embedder_id)?;
+            // Reads filter expiry; they do not sweep.
+            let now = (self.clock)();
+            let state = self.state.lock().map_err(|_| lock_error())?;
+            let mut sources = Vec::new();
+            for ((scope, id), record) in &state.records {
+                if sources.len() >= limit {
+                    break;
+                }
+                if record.tombstoned || record.superseded_by.is_some() || record.is_expired_at(now)
+                {
+                    continue;
+                }
+                let text = embedding_source_text(record);
+                let source_digest = embedding_source_digest(&text)?;
+                // Anti-join on current content: a record is pending unless
+                // the space holds a row for it whose stored digest still
+                // matches, so a stale row re-surfaces its record.
+                let row_key = (scope.clone(), id.clone(), Arc::clone(&embedder_id));
+                if state
+                    .embeddings
+                    .get(&row_key)
+                    .is_some_and(|stored| stored.source_digest == source_digest)
+                {
+                    continue;
+                }
+                sources.push(EmbeddingSource {
+                    scope: scope.clone(),
+                    id: id.clone(),
+                    text: Arc::from(text),
+                    source_digest,
+                });
+            }
+            Ok(sources)
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn store_embedding(
+        &self,
+        embedder_id: Arc<str>,
+        scope: MemoryScope,
+        id: MemoryId,
+        source_digest: Digest,
+        vector: EmbeddingVector,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        let result = (|| -> Result<(), MemoryStoreError> {
+            validate_embedder_id(&embedder_id)?;
+            validate_scope(&scope)?;
+            if vector.dimensions() > self.limits.max_embedding_dimensions {
+                return Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_embedding_dimensions_exceeded",
+                });
+            }
+            let now = (self.clock)();
+            let mut state = self.state.lock().map_err(|_| lock_error())?;
+            match space_dimensions(&state, &embedder_id) {
+                // The first vector stored in a space fixes its
+                // dimensionality.
+                Some(dimensions) if dimensions != vector.dimensions() => {
+                    return Err(MemoryStoreError::InvalidRequest {
+                        reason: "memory_embedding_dimensions_mismatch",
+                    });
+                }
+                Some(_) => {}
+                None => reserve_embedding_space(&state, self.limits)?,
+            }
+            // Staleness guard: only a live record whose current source
+            // digest still matches takes the write; anything else is a
+            // silent no-op and the anti-join re-surfaces the record.
+            let Some(record) = state.records.get(&(scope.clone(), id.clone())) else {
+                return Ok(());
+            };
+            if record.tombstoned || record.superseded_by.is_some() || record.is_expired_at(now) {
+                return Ok(());
+            }
+            if embedding_source_digest(&embedding_source_text(record))? != source_digest {
+                return Ok(());
+            }
+            let dimensions = vector.dimensions();
+            state.embeddings.insert(
+                (scope, id, embedder_id),
+                StoredEmbedding {
+                    unit_vector: vector.unit_normalized(),
+                    dimensions,
+                    source_digest,
+                },
+            );
+            Ok(())
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn forget_embedding_space(
+        &self,
+        embedder_id: Arc<str>,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        let result = (|| -> Result<(), MemoryStoreError> {
+            validate_embedder_id(&embedder_id)?;
+            let mut state = self.state.lock().map_err(|_| lock_error())?;
+            state
+                .embeddings
+                .retain(|(_, _, space), _| space != &embedder_id);
+            Ok(())
+        })();
+        Box::pin(async move { result })
+    }
+}
+
+/// Dimensionality of the space `embedder_id`, fixed by its first stored
+/// row; `None` when the space holds no rows.
+fn space_dimensions(state: &MemoryState, embedder_id: &Arc<str>) -> Option<usize> {
+    state
+        .embeddings
+        .iter()
+        .find(|((_, _, space), _)| space == embedder_id)
+        .map(|(_, stored)| stored.dimensions)
+}
+
+/// Fail closed when creating one more space would exceed the cap. Spaces
+/// are derived from live rows, so dropping a space frees its slot.
+fn reserve_embedding_space(
+    state: &MemoryState,
+    limits: MemoryStoreLimits,
+) -> Result<(), MemoryStoreError> {
+    let mut spaces = BTreeSet::new();
+    for (_, _, space) in state.embeddings.keys() {
+        spaces.insert(Arc::clone(space));
+    }
+    if spaces.len() >= limits.max_embedding_spaces {
+        return Err(MemoryStoreError::CapacityExceeded {
+            resource: "embedding_spaces",
+            limit: u64::try_from(limits.max_embedding_spaces).unwrap_or(u64::MAX),
+        });
+    }
+    Ok(())
+}
+
+/// Drop every embedding row of `(scope, id)` across all spaces. Called
+/// whenever the record dies or is rewritten so no dead vector can rank.
+fn evict_embeddings(state: &mut MemoryState, scope: &MemoryScope, id: &MemoryId) {
+    state
+        .embeddings
+        .retain(|(row_scope, row_id, _), _| !(row_scope == scope && row_id == id));
+}
+
+/// Brute-force exact ranking over the scope's rows in the space: dot of
+/// unit-normalized vectors through the shared scorer, descending, with an
+/// ascending-id tie-break.
+fn search_embeddings(
+    state: &MemoryState,
+    scope: &MemoryScope,
+    embedder_id: &Arc<str>,
+    vector: &EmbeddingVector,
+    limit: usize,
+    now: Timestamp,
+) -> Result<Vec<MemoryHit>, MemoryStoreError> {
+    let Some(dimensions) = space_dimensions(state, embedder_id) else {
+        // A space no embedder ever populated holds nothing.
+        return Ok(Vec::new());
+    };
+    if dimensions != vector.dimensions() {
+        return Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_mismatch",
+        });
+    }
+    let query = vector.unit_normalized();
+    let mut hits: Vec<MemoryHit> = Vec::new();
+    for ((row_scope, row_id, space), stored) in &state.embeddings {
+        if space != embedder_id || row_scope != scope {
+            continue;
+        }
+        let Some(record) = state.records.get(&(row_scope.clone(), row_id.clone())) else {
+            continue;
+        };
+        if record.tombstoned || record.superseded_by.is_some() || record.is_expired_at(now) {
+            continue;
+        }
+        let Some(dot) = query.dot(&stored.unit_vector) else {
+            continue;
+        };
+        hits.push(MemoryHit {
+            record: record.clone(),
+            score: similarity_score(dot),
+            matched: MatchEvidence::Semantic,
+        });
+    }
+    hits.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.record.id.cmp(&b.record.id))
+    });
+    hits.truncate(limit);
+    Ok(hits)
 }
 
 fn validate_record(record: &MemoryRecord) -> Result<(), MemoryStoreError> {
@@ -620,6 +842,7 @@ fn cleanup_expired(
             state.total_inline_bytes = state
                 .total_inline_bytes
                 .saturating_sub(inline_bytes(&record));
+            evict_embeddings(state, &key.0, &key.1);
         }
     }
     enqueue_artifact_actions(state, actions);

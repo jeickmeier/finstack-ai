@@ -1,5 +1,8 @@
 use crate::record::*;
 use crate::store::*;
+use finstack_ai_embeddings::embedder::{
+    EmbedError, HashEmbedder, TextEmbedder, TextEmbedderDescriptor,
+};
 use finstack_ai_embeddings::vector::EmbeddingVector;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -850,20 +853,21 @@ async fn embedding_query_rejects_oversized_dimensions() {
 }
 
 #[tokio::test]
-async fn embedding_query_within_bounds_passes_validation() {
-    // The in-process embedding index arrives in a later task; a valid query
-    // must get past validation and hit the honest unsupported stub, not a
-    // validation error.
+async fn embedding_query_for_an_unknown_space_returns_empty() {
+    // A valid embedding query passes validation; a space no embedder ever
+    // populated simply holds nothing.
     let store = InProcessMemoryStore::new();
     let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
     let vector = EmbeddingVector::try_new(vec![1.0, 0.0]).unwrap();
     assert_eq!(
         store
             .search(scope, embedding_query("embed.hash-v1.2", vector), 10)
             .await,
-        Err(MemoryStoreError::InvalidRequest {
-            reason: "memory_embeddings_unsupported",
-        })
+        Ok(Vec::new())
     );
 }
 
@@ -899,4 +903,671 @@ fn similarity_score_is_clamped_and_monotonic_with_fixed_endpoints() {
             "similarity_score must be strictly monotonic over {pair:?}"
         );
     }
+}
+
+const SPACE: &str = "embed.test-v1.2";
+
+fn unit(components: Vec<f32>) -> EmbeddingVector {
+    EmbeddingVector::try_new(components)
+        .unwrap()
+        .unit_normalized()
+}
+
+async fn source_digest_of(
+    store: &InProcessMemoryStore,
+    scope: &MemoryScope,
+    id: &str,
+) -> finstack_ai_kernel::Digest {
+    let record = store
+        .get(scope.clone(), MemoryId::parse(id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    embedding_source_digest(&embedding_source_text(&record)).unwrap()
+}
+
+async fn embed_record(
+    store: &InProcessMemoryStore,
+    scope: &MemoryScope,
+    id: &str,
+    space: &str,
+    vector: EmbeddingVector,
+) {
+    let digest = source_digest_of(store, scope, id).await;
+    store
+        .store_embedding(
+            Arc::from(space),
+            scope.clone(),
+            MemoryId::parse(id).unwrap(),
+            digest,
+            vector,
+        )
+        .await
+        .unwrap();
+}
+
+fn pending_ids(sources: &[EmbeddingSource]) -> Vec<&str> {
+    sources.iter().map(|source| source.id.as_str()).collect()
+}
+
+#[tokio::test]
+async fn pending_embedding_sources_lists_only_live_unembedded_records_per_space() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m1", "m2"]);
+    // The source carries the canonical text and its digest.
+    assert_eq!(pending[0].text.as_ref(), "body text\nbody text\nalpha");
+    assert_eq!(
+        pending[0].source_digest,
+        embedding_source_digest("body text\nbody text\nalpha").unwrap()
+    );
+    assert_eq!(pending[0].scope, scope);
+
+    // Pending is derived per space: embedding m1 into one space leaves the
+    // other space's anti-join untouched.
+    embed_record(&store, &scope, "m1", SPACE, unit(vec![1.0, 0.0])).await;
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m2"]);
+    let other_space = store
+        .pending_embedding_sources(Arc::from("embed.other-v1.2"), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&other_space), ["m1", "m2"]);
+
+    // Dead records are never pending; the limit bounds the batch.
+    store
+        .forget(
+            Arc::from("k3"),
+            scope.clone(),
+            MemoryId::parse("m2").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        store
+            .pending_embedding_sources(Arc::from(SPACE), 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let limited = store
+        .pending_embedding_sources(Arc::from("embed.other-v1.2"), 1)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&limited), ["m1"]);
+}
+
+#[tokio::test]
+async fn store_embedding_digest_guard_silently_skips_rewritten_records() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    let stale_digest = source_digest_of(&store, &scope, "m1").await;
+
+    // The record is rewritten mid-reconcile: forgotten, then re-remembered
+    // with different content under the same id.
+    store
+        .forget(
+            Arc::from("k2"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut rewritten = crate::tests::sample_record("m1", "t1");
+    rewritten.body = MemoryBody::Inline(Arc::from("rewritten body"));
+    rewritten.preview = Arc::from("rewritten body");
+    store.put(Arc::from("k3"), rewritten).await.unwrap();
+
+    // The stale write is a silent no-op, so the anti-join re-surfaces the
+    // record instead of freezing the outdated vector.
+    store
+        .store_embedding(
+            Arc::from(SPACE),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+            stale_digest,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m1"]);
+
+    // A tombstoned or missing record is skipped the same way.
+    store
+        .forget(
+            Arc::from("k4"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    store
+        .store_embedding(
+            Arc::from(SPACE),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+            stale_digest,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+    store
+        .store_embedding(
+            Arc::from(SPACE),
+            scope.clone(),
+            MemoryId::parse("missing").unwrap(),
+            stale_digest,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+    let empty = store
+        .search(scope, embedding_query(SPACE, unit(vec![1.0, 0.0])), 10)
+        .await
+        .unwrap();
+    assert!(empty.is_empty());
+}
+
+#[tokio::test]
+async fn first_vector_fixes_a_space_dimensionality() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+    embed_record(&store, &scope, "m1", SPACE, unit(vec![1.0, 0.0])).await;
+
+    let digest = source_digest_of(&store, &scope, "m2").await;
+    assert_eq!(
+        store
+            .store_embedding(
+                Arc::from(SPACE),
+                scope.clone(),
+                MemoryId::parse("m2").unwrap(),
+                digest,
+                unit(vec![1.0, 0.0, 0.0]),
+            )
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_mismatch",
+        })
+    );
+    // Queries against the space enforce the same dimensionality.
+    assert_eq!(
+        store
+            .search(scope, embedding_query(SPACE, unit(vec![1.0, 0.0, 0.0])), 10,)
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_mismatch",
+        })
+    );
+}
+
+#[tokio::test]
+async fn embedding_space_capacity_is_enforced() {
+    let store = InProcessMemoryStore::new().with_limits(MemoryStoreLimits {
+        max_embedding_spaces: 1,
+        ..MemoryStoreLimits::default()
+    });
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    embed_record(&store, &scope, "m1", SPACE, unit(vec![1.0, 0.0])).await;
+
+    let digest = source_digest_of(&store, &scope, "m1").await;
+    assert_eq!(
+        store
+            .store_embedding(
+                Arc::from("embed.other-v1.2"),
+                scope.clone(),
+                MemoryId::parse("m1").unwrap(),
+                digest,
+                unit(vec![1.0, 0.0]),
+            )
+            .await,
+        Err(MemoryStoreError::CapacityExceeded {
+            resource: "embedding_spaces",
+            limit: 1,
+        })
+    );
+
+    // Dropping the space releases its slot: the index is derived data.
+    store
+        .forget_embedding_space(Arc::from(SPACE))
+        .await
+        .unwrap();
+    store
+        .store_embedding(
+            Arc::from("embed.other-v1.2"),
+            scope,
+            MemoryId::parse("m1").unwrap(),
+            digest,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn semantic_search_ranks_by_similarity_with_deterministic_tie_break() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    for id in ["m-close", "m-far", "m-mid", "m-tie"] {
+        store
+            .put(
+                Arc::from(format!("k-{id}")),
+                crate::tests::sample_record(id, "t1"),
+            )
+            .await
+            .unwrap();
+    }
+    embed_record(&store, &scope, "m-close", SPACE, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope, "m-tie", SPACE, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope, "m-mid", SPACE, unit(vec![1.0, 1.0])).await;
+    embed_record(&store, &scope, "m-far", SPACE, unit(vec![-1.0, 0.0])).await;
+
+    let hits = store
+        .search(
+            scope.clone(),
+            embedding_query(SPACE, unit(vec![1.0, 0.0])),
+            10,
+        )
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.record.id.as_str()).collect();
+    // Equal-similarity hits tie-break on ascending id.
+    assert_eq!(ids, ["m-close", "m-tie", "m-mid", "m-far"]);
+    assert!(
+        hits.iter()
+            .all(|hit| hit.matched == MatchEvidence::Semantic)
+    );
+    assert_eq!(hits[0].score, 1_000_000);
+    assert_eq!(hits[0].score, hits[1].score);
+    assert!(hits[1].score > hits[2].score);
+    assert!(hits[2].score > hits[3].score);
+    assert_eq!(hits[3].score, 0);
+
+    // The caller's limit truncates after ranking.
+    let limited = store
+        .search(scope, embedding_query(SPACE, unit(vec![1.0, 0.0])), 2)
+        .await
+        .unwrap();
+    assert_eq!(limited.len(), 2);
+    assert_eq!(limited[0].record.id.as_str(), "m-close");
+}
+
+#[tokio::test]
+async fn semantic_search_honors_scope_isolation_and_liveness() {
+    let now = Arc::new(AtomicI64::new(0));
+    let store = controlled_store(Arc::clone(&now), MemoryStoreLimits::default());
+    let scope_a = MemoryScope::try_new("t1").unwrap();
+    let scope_b = MemoryScope::try_new("t2").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m1", "t2"))
+        .await
+        .unwrap();
+    let mut expiring = crate::tests::sample_record("m-expiring", "t1");
+    expiring.retention = RetentionPolicy::ExpireAfterMs(10);
+    store.put(Arc::from("k3"), expiring).await.unwrap();
+
+    embed_record(&store, &scope_a, "m1", SPACE, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope_b, "m1", SPACE, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope_a, "m-expiring", SPACE, unit(vec![1.0, 0.0])).await;
+
+    // Only tenant 1's records surface for tenant 1's scope.
+    let hits = store
+        .search(
+            scope_a.clone(),
+            embedding_query(SPACE, unit(vec![1.0, 0.0])),
+            10,
+        )
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.record.id.as_str()).collect();
+    assert_eq!(ids, ["m-expiring", "m1"]);
+    assert!(hits.iter().all(|hit| hit.record.scope.tenant() == "t1"));
+
+    // Reads filter expiry without waiting for a write sweep to evict.
+    now.store(10, Ordering::SeqCst);
+    let hits = store
+        .search(scope_a, embedding_query(SPACE, unit(vec![1.0, 0.0])), 10)
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.record.id.as_str()).collect();
+    assert_eq!(ids, ["m1"]);
+}
+
+#[tokio::test]
+async fn embeddings_are_evicted_on_forget_correct_and_expiry() {
+    let now = Arc::new(AtomicI64::new(0));
+    let store = controlled_store(Arc::clone(&now), MemoryStoreLimits::default());
+    let scope = MemoryScope::try_new("t1").unwrap();
+
+    // Forget evicts: re-remembering identical content must surface the id
+    // as pending again instead of reusing the tombstoned row.
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    embed_record(&store, &scope, "m1", SPACE, unit(vec![1.0, 0.0])).await;
+    store
+        .forget(
+            Arc::from("k2"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k3"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m1"]);
+
+    // Correct evicts the superseded record's rows; the replacement is
+    // pending, the old record is neither pending nor searchable.
+    embed_record(&store, &scope, "m1", SPACE, unit(vec![1.0, 0.0])).await;
+    store
+        .correct(
+            Arc::from("k4"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+            crate::tests::sample_record("m2", "t1"),
+        )
+        .await
+        .unwrap();
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m2"]);
+    assert!(
+        store
+            .search(
+                scope.clone(),
+                embedding_query(SPACE, unit(vec![1.0, 0.0])),
+                10,
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // Expiry sweeps evict rows alongside the record.
+    let mut expiring = crate::tests::sample_record("m3", "t1");
+    expiring.retention = RetentionPolicy::ExpireAfterMs(10);
+    store.put(Arc::from("k5"), expiring).await.unwrap();
+    embed_record(&store, &scope, "m3", SPACE, unit(vec![1.0, 0.0])).await;
+    now.store(10, Ordering::SeqCst);
+    // Any write sweeps; re-remembering the id then finds no stale row.
+    store
+        .put(Arc::from("k6"), crate::tests::sample_record("m3", "t1"))
+        .await
+        .unwrap();
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m2", "m3"]);
+}
+
+struct FlakyEmbedder {
+    inner: HashEmbedder,
+    fail_next: std::sync::atomic::AtomicBool,
+}
+
+impl TextEmbedder for FlakyEmbedder {
+    fn descriptor(&self) -> TextEmbedderDescriptor {
+        self.inner.descriptor()
+    }
+
+    fn embed(
+        &self,
+        texts: Vec<Arc<str>>,
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<Vec<EmbeddingVector>, EmbedError>> {
+        if self.fail_next.swap(false, Ordering::SeqCst) {
+            return Box::pin(async {
+                Err(EmbedError::Unavailable {
+                    message: Arc::from("embedder offline"),
+                })
+            });
+        }
+        self.inner.embed(texts)
+    }
+}
+
+#[tokio::test]
+async fn reconcile_memory_embeddings_drains_idempotently_and_resumes() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    for id in ["m1", "m2", "m3"] {
+        store
+            .put(
+                Arc::from(format!("k-{id}")),
+                crate::tests::sample_record(id, "t1"),
+            )
+            .await
+            .unwrap();
+    }
+    let embedder = HashEmbedder::try_new(16).unwrap();
+    let space = embedder.descriptor().embedder_id;
+
+    // A bounded batch drains incrementally and resumes across calls.
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 2).await,
+        Ok(2)
+    );
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 2).await,
+        Ok(1)
+    );
+    // Re-running against a drained index applies nothing.
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 8).await,
+        Ok(0)
+    );
+    assert!(
+        store
+            .pending_embedding_sources(Arc::clone(&space), 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // The drained index answers semantic queries end to end.
+    let query = embedder
+        .embed(vec![Arc::from("alpha body text")])
+        .await
+        .unwrap()
+        .remove(0);
+    let hits = store
+        .search(
+            scope,
+            MemoryQuery::Embedding {
+                embedder_id: Arc::clone(&space),
+                vector: query,
+            },
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 3);
+    assert!(
+        hits.iter()
+            .all(|hit| hit.matched == MatchEvidence::Semantic)
+    );
+    assert!(
+        hits[0].score > 500_000,
+        "shared tokens must score above 0-dot"
+    );
+}
+
+#[tokio::test]
+async fn reconcile_memory_embeddings_surfaces_embedder_failure_and_recovers() {
+    let store = InProcessMemoryStore::new();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    let embedder = FlakyEmbedder {
+        inner: HashEmbedder::try_new(16).unwrap(),
+        fail_next: std::sync::atomic::AtomicBool::new(true),
+    };
+
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 8).await,
+        Err(MemoryStoreError::Unavailable {
+            message: Arc::from("memory_embedder_failed"),
+        })
+    );
+    // Nothing was applied, nothing was lost: the next run drains fully.
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 8).await,
+        Ok(1)
+    );
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 8).await,
+        Ok(0)
+    );
+}
+
+/// A store that opts out of everything optional: the embedding defaults
+/// must report no pending work, reject writes honestly, and accept space
+/// rotation as a no-op.
+struct MinimalStore;
+
+impl MemoryStore for MinimalStore {
+    fn put(
+        &self,
+        _idempotency_key: Arc<str>,
+        _record: MemoryRecord,
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<PutOutcome, MemoryStoreError>> {
+        Box::pin(async { Err(minimal_unavailable()) })
+    }
+
+    fn get(
+        &self,
+        _scope: MemoryScope,
+        _id: MemoryId,
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<Option<MemoryRecord>, MemoryStoreError>>
+    {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn search(
+        &self,
+        _scope: MemoryScope,
+        _query: MemoryQuery,
+        _limit: usize,
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<Vec<MemoryHit>, MemoryStoreError>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn forget(
+        &self,
+        _idempotency_key: Arc<str>,
+        _scope: MemoryScope,
+        _id: MemoryId,
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<(), MemoryStoreError>> {
+        Box::pin(async { Err(minimal_unavailable()) })
+    }
+
+    fn correct(
+        &self,
+        _idempotency_key: Arc<str>,
+        _scope: MemoryScope,
+        _old: MemoryId,
+        _replacement: MemoryRecord,
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<(), MemoryStoreError>> {
+        Box::pin(async { Err(minimal_unavailable()) })
+    }
+
+    fn list(
+        &self,
+        _scope: MemoryScope,
+        _page: MemoryPage,
+    ) -> finstack_ai_runtime::ports::PortFuture<Result<MemoryListing, MemoryStoreError>> {
+        Box::pin(async {
+            Ok(MemoryListing {
+                records: Vec::new(),
+                total: 0,
+            })
+        })
+    }
+}
+
+fn minimal_unavailable() -> MemoryStoreError {
+    MemoryStoreError::Unavailable {
+        message: Arc::from("minimal store is read-only"),
+    }
+}
+
+#[tokio::test]
+async fn embedding_trait_defaults_behave_for_a_minimal_store() {
+    let store = MinimalStore;
+    assert_eq!(
+        store.pending_embedding_sources(Arc::from(SPACE), 8).await,
+        Ok(Vec::new())
+    );
+    assert_eq!(
+        store
+            .store_embedding(
+                Arc::from(SPACE),
+                MemoryScope::try_new("t1").unwrap(),
+                MemoryId::parse("m1").unwrap(),
+                embedding_source_digest("anything").unwrap(),
+                unit(vec![1.0, 0.0]),
+            )
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embeddings_unsupported",
+        })
+    );
+    assert_eq!(store.forget_embedding_space(Arc::from(SPACE)).await, Ok(()));
+
+    // The reconciler sees no pending work and applies nothing.
+    let embedder = HashEmbedder::try_new(16).unwrap();
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 8).await,
+        Ok(0)
+    );
 }
