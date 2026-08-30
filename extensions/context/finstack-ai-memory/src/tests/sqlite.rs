@@ -1676,6 +1676,263 @@ async fn sqlite_forget_embedding_space_empties_only_that_space() {
     assert_eq!(embedding_row_keys(&path), [pair("m1", SPACE_B)]);
 }
 
+fn embedding_query(embedder_id: &str, vector: EmbeddingVector) -> MemoryQuery {
+    MemoryQuery::Embedding {
+        embedder_id: Arc::from(embedder_id),
+        vector,
+    }
+}
+
+#[tokio::test]
+async fn sqlite_semantic_search_ranks_by_similarity_with_deterministic_tie_break() {
+    let store = SqliteMemoryStore::try_open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    for id in ["m-close", "m-far", "m-mid", "m-tie"] {
+        store
+            .put(
+                Arc::from(format!("k-{id}")),
+                crate::tests::sample_record(id, "t1"),
+            )
+            .await
+            .unwrap();
+    }
+    embed_record(&store, &scope, "m-close", SPACE_A, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope, "m-tie", SPACE_A, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope, "m-mid", SPACE_A, unit(vec![1.0, 1.0])).await;
+    embed_record(&store, &scope, "m-far", SPACE_A, unit(vec![-1.0, 0.0])).await;
+
+    let hits = store
+        .search(
+            scope.clone(),
+            embedding_query(SPACE_A, unit(vec![1.0, 0.0])),
+            10,
+        )
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.record.id.as_str()).collect();
+    // Equal-similarity hits tie-break on ascending id.
+    assert_eq!(ids, ["m-close", "m-tie", "m-mid", "m-far"]);
+    assert!(
+        hits.iter()
+            .all(|hit| hit.matched == MatchEvidence::Semantic)
+    );
+    assert_eq!(hits[0].score, 1_000_000);
+    assert_eq!(hits[0].score, hits[1].score);
+    assert!(hits[1].score > hits[2].score);
+    assert!(hits[2].score > hits[3].score);
+    assert_eq!(hits[3].score, 0);
+
+    // The caller's limit truncates after ranking.
+    let limited = store
+        .search(scope, embedding_query(SPACE_A, unit(vec![1.0, 0.0])), 2)
+        .await
+        .unwrap();
+    assert_eq!(limited.len(), 2);
+    assert_eq!(limited[0].record.id.as_str(), "m-close");
+}
+
+#[tokio::test]
+async fn sqlite_semantic_search_honors_scope_isolation_and_expiry() {
+    let now = Arc::new(AtomicI64::new(0));
+    let store = controlled_sqlite(Arc::clone(&now), MemoryStoreLimits::default());
+    let scope_a = MemoryScope::try_new("t1").unwrap();
+    let scope_b = MemoryScope::try_new("t2").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m1", "t2"))
+        .await
+        .unwrap();
+    let mut expiring = crate::tests::sample_record("m-expiring", "t1");
+    expiring.retention = RetentionPolicy::ExpireAfterMs(10);
+    store.put(Arc::from("k3"), expiring).await.unwrap();
+
+    embed_record(&store, &scope_a, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope_b, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    embed_record(
+        &store,
+        &scope_a,
+        "m-expiring",
+        SPACE_A,
+        unit(vec![1.0, 0.0]),
+    )
+    .await;
+
+    // Only tenant 1's records surface for tenant 1's scope.
+    let hits = store
+        .search(
+            scope_a.clone(),
+            embedding_query(SPACE_A, unit(vec![1.0, 0.0])),
+            10,
+        )
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.record.id.as_str()).collect();
+    assert_eq!(ids, ["m-expiring", "m1"]);
+    assert!(hits.iter().all(|hit| hit.record.scope.tenant() == "t1"));
+
+    // Reads filter expiry without waiting for a write sweep to evict.
+    now.store(10, Ordering::SeqCst);
+    let hits = store
+        .search(scope_a, embedding_query(SPACE_A, unit(vec![1.0, 0.0])), 10)
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.record.id.as_str()).collect();
+    assert_eq!(ids, ["m1"]);
+}
+
+#[tokio::test]
+async fn sqlite_semantic_search_excludes_tombstoned_and_superseded_rows() {
+    // Lifecycle eviction already deletes these rows in-transaction; flip the
+    // lifecycle columns directly to prove the search predicates also hold
+    // against any historical or crash-shaped index state.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-liveness.sqlite");
+    let scope = MemoryScope::try_new("t1").unwrap();
+    {
+        let store = SqliteMemoryStore::try_open(&path).unwrap();
+        for id in ["m1", "m2", "m3"] {
+            store
+                .put(
+                    Arc::from(format!("k-{id}")),
+                    crate::tests::sample_record(id, "t1"),
+                )
+                .await
+                .unwrap();
+            embed_record(&store, &scope, id, SPACE_A, unit(vec![1.0, 0.0])).await;
+        }
+    }
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE memory_records SET tombstoned = 1 WHERE id = 'm1'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE memory_records SET superseded_by = 'mx' WHERE id = 'm2'",
+                [],
+            )
+            .unwrap();
+    }
+
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    let hits = store
+        .search(scope, embedding_query(SPACE_A, unit(vec![1.0, 0.0])), 10)
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.record.id.as_str()).collect();
+    assert_eq!(ids, ["m3"]);
+}
+
+#[tokio::test]
+async fn sqlite_semantic_search_unknown_space_is_empty_and_dims_are_enforced() {
+    let store = SqliteMemoryStore::try_open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+
+    // A space no embedder ever populated holds nothing — not an error.
+    assert_eq!(
+        store
+            .search(
+                scope.clone(),
+                embedding_query(SPACE_A, unit(vec![1.0, 0.0])),
+                10,
+            )
+            .await,
+        Ok(Vec::new())
+    );
+
+    // Queries against a populated space enforce its dimensionality.
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    assert_eq!(
+        store
+            .search(
+                scope,
+                embedding_query(SPACE_A, unit(vec![1.0, 0.0, 0.0])),
+                10,
+            )
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_mismatch",
+        })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_and_in_process_semantic_rankings_match() {
+    let sqlite = SqliteMemoryStore::try_open_in_memory().unwrap();
+    let in_process = InProcessMemoryStore::new();
+    let corpus = [
+        ("m-rates", "central bank rate decision moves bond yields"),
+        ("m-equity", "equity portfolio risk concentrated in tech"),
+        ("m-fx", "currency hedging for the european book"),
+        ("m-credit", "credit spreads widened on downgrade risk"),
+        ("m-ops", "settlement workflow fails on holiday calendars"),
+    ];
+    for (id, body) in corpus {
+        let mut record = crate::tests::sample_record(id, "t1");
+        record.body = MemoryBody::Inline(Arc::from(body));
+        record.preview = Arc::from(body);
+        sqlite
+            .put(Arc::from(format!("sq-{id}")), record.clone())
+            .await
+            .unwrap();
+        in_process
+            .put(Arc::from(format!("ip-{id}")), record)
+            .await
+            .unwrap();
+    }
+    let embedder = HashEmbedder::try_new(16).unwrap();
+    let space = embedder.descriptor().embedder_id;
+    assert_eq!(
+        reconcile_memory_embeddings(&sqlite, &embedder, 8).await,
+        Ok(5)
+    );
+    assert_eq!(
+        reconcile_memory_embeddings(&in_process, &embedder, 8).await,
+        Ok(5)
+    );
+
+    let scope = MemoryScope::try_new("t1").unwrap();
+    for query_text in ["portfolio risk", "bond yields downgrade", "holiday"] {
+        let vector = embedder
+            .embed(vec![Arc::from(query_text)])
+            .await
+            .unwrap()
+            .remove(0);
+        let query = MemoryQuery::Embedding {
+            embedder_id: Arc::clone(&space),
+            vector,
+        };
+        let sqlite_hits: Vec<(String, u32)> = sqlite
+            .search(scope.clone(), query.clone(), 8)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|hit| (hit.record.id.as_str().to_owned(), hit.score))
+            .collect();
+        let in_process_hits: Vec<(String, u32)> = in_process
+            .search(scope.clone(), query, 8)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|hit| (hit.record.id.as_str().to_owned(), hit.score))
+            .collect();
+        assert_eq!(sqlite_hits.len(), 5, "query {query_text:?} must rank all");
+        // Byte-identical ranking: same ids in the same order with the same
+        // scores, mirroring the lexical normalization agreement test.
+        assert_eq!(sqlite_hits, in_process_hits, "query {query_text:?}");
+    }
+}
+
 #[tokio::test]
 async fn sqlite_reconcile_memory_embeddings_drains_and_is_idempotent() {
     let store = SqliteMemoryStore::try_open_in_memory().unwrap();

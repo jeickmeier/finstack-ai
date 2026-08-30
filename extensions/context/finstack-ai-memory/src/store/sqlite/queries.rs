@@ -17,7 +17,7 @@ use super::super::{
     EmbeddingSource, MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction,
     MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStoreError, MemoryStoreLimits,
     PutOutcome, artifact_transition_actions, embedding_source_digest, embedding_source_text,
-    normalize_search_tokens, validate_embedder_id, validate_new_record_lifecycle,
+    normalize_search_tokens, similarity_score, validate_embedder_id, validate_new_record_lifecycle,
 };
 
 pub(super) fn sqlite_put(
@@ -81,14 +81,10 @@ pub(super) fn sqlite_search(
             search_keywords(connection, scope, keywords, limit, now)?
         }
         MemoryQuery::FullText(text) => search_full_text(connection, scope, text, limit, now)?,
-        MemoryQuery::Embedding { .. } => {
-            // The sqlite embedding index lands with the schema-v3 upgrade;
-            // until then a valid embedding query is honestly unsupported
-            // rather than silently empty.
-            return Err(MemoryStoreError::InvalidRequest {
-                reason: "memory_embeddings_unsupported",
-            });
-        }
+        MemoryQuery::Embedding {
+            embedder_id,
+            vector,
+        } => search_embedding(connection, scope, embedder_id, vector, now)?,
     };
     hits.sort_by(|left, right| {
         right
@@ -1407,4 +1403,81 @@ fn search_full_text(
             }
         })
         .collect())
+}
+
+/// [`MemoryQuery::Embedding`] search: brute-force exact ranking over the
+/// scope's live rows in the space — the dot product of unit-normalized
+/// vectors mapped through the shared [`similarity_score`], so the ranking is
+/// byte-identical with [`super::super::InProcessMemoryStore`]'s. Ordering
+/// and the caller's limit are applied by [`sqlite_search`]'s shared sort.
+fn search_embedding(
+    connection: &Connection,
+    scope: &MemoryScope,
+    embedder_id: &str,
+    vector: &EmbeddingVector,
+    now: Timestamp,
+) -> Result<Vec<MemoryHit>, MemoryStoreError> {
+    let Some(dimensions) = space_dimensions(connection, embedder_id)? else {
+        // A space no embedder ever populated holds nothing.
+        return Ok(Vec::new());
+    };
+    if dimensions != vector.dimensions() {
+        return Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_mismatch",
+        });
+    }
+    let query = vector.unit_normalized();
+    let mut statement = connection
+        .prepare(
+            "SELECT r.*, e.vector AS embedding_blob
+             FROM memory_embeddings e
+             JOIN memory_records r
+               ON r.scope_digest = e.scope_digest AND r.id = e.id
+             WHERE e.embedder_id = ?1 AND e.scope_digest = ?2
+               AND r.tombstoned = 0 AND r.superseded_by IS NULL
+               AND (r.expires_at IS NULL OR r.expires_at > ?3)",
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    let rows = statement
+        .query_map(
+            params![embedder_id, scope_key(scope)?, now.as_unix_ms()],
+            |row| {
+                let record = record_from_row(row)?;
+                let blob: Vec<u8> = row.get("embedding_blob")?;
+                Ok((record, blob))
+            },
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    let mut hits = Vec::new();
+    for row in rows {
+        let (record, blob) = row.map_err(|_| sqlite_unavailable())?;
+        // Defensively skip a row whose BLOB does not decode to a valid
+        // vector of the query's dimensionality (`dot` is `None` on a
+        // mismatch), rather than failing the whole search on one bad row.
+        let Some(stored) = vector_from_blob(&blob) else {
+            continue;
+        };
+        let Some(dot) = query.dot(&stored) else {
+            continue;
+        };
+        hits.push(MemoryHit {
+            record,
+            score: similarity_score(dot),
+            matched: MatchEvidence::Semantic,
+        });
+    }
+    Ok(hits)
+}
+
+/// Decode a stored little-endian f32 BLOB back into a vector; `None` when
+/// the BLOB is not a valid embedding vector.
+fn vector_from_blob(blob: &[u8]) -> Option<EmbeddingVector> {
+    if blob.is_empty() || !blob.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut components = Vec::with_capacity(blob.len() / 4);
+    for chunk in blob.chunks_exact(4) {
+        components.push(f32::from_le_bytes(chunk.try_into().ok()?));
+    }
+    EmbeddingVector::try_new(components).ok()
 }
