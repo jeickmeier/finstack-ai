@@ -19,6 +19,8 @@ pub const OPENROUTER_MEDIA_TRANSPORT_FAILED: &str = "openrouter_media_transport_
 pub const OPENROUTER_MEDIA_LIMIT_EXCEEDED: &str = "openrouter_media_limit_exceeded";
 /// Stable cancellation/deadline code.
 pub const OPENROUTER_MEDIA_TIMEOUT: &str = "openrouter_media_timeout";
+/// Stable code for an artifact-input call made without a configured store.
+pub const OPENROUTER_MEDIA_STORE_REQUIRED: &str = "openrouter_media_store_required";
 
 /// Explicit `OpenRouter` media route. Never populated from the environment.
 #[derive(Clone)]

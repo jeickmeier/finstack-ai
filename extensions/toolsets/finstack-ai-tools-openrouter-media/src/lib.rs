@@ -81,8 +81,9 @@ use crate::video::{
 
 pub use crate::config::{
     OPENROUTER_MEDIA_CREDENTIAL_REQUIRED, OPENROUTER_MEDIA_ENDPOINT_INVALID,
-    OPENROUTER_MEDIA_INVALID_ARGUMENTS, OPENROUTER_MEDIA_LIMIT_EXCEEDED, OPENROUTER_MEDIA_TIMEOUT,
-    OPENROUTER_MEDIA_TRANSPORT_FAILED, OpenRouterMediaConfig, OpenRouterMediaError,
+    OPENROUTER_MEDIA_INVALID_ARGUMENTS, OPENROUTER_MEDIA_LIMIT_EXCEEDED,
+    OPENROUTER_MEDIA_STORE_REQUIRED, OPENROUTER_MEDIA_TIMEOUT, OPENROUTER_MEDIA_TRANSPORT_FAILED,
+    OpenRouterMediaConfig, OpenRouterMediaError,
 };
 
 /// T1 `OpenRouter` media-generation Toolset.
@@ -226,10 +227,10 @@ impl OpenRouterMediaToolset {
             model_name: Arc::from(VIDEO_TOOL_NAME),
             title: Arc::from("OpenRouter generate video"),
             description: Arc::from(
-                "Submit one asynchronous video-generation job via OpenRouter; it returns a job id immediately, then poll that id with openrouter_get_video. Every call starts a new separately billed job, so call this at most once per requested video: if a job is already pending, poll its id instead of submitting again.",
+                "Submit one asynchronous video-generation job via OpenRouter; it returns a job id immediately, then poll that id with openrouter_get_video. Every call starts a new separately billed job, so call this at most once per requested video: if a job is already pending, poll its id instead of submitting again. Optional first/last frame and reference images accept a URL or a stored artifact reference.",
             ),
             input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 9:16. Null uses the model default.","type":["string","null"]},"duration":{"description":"Clip length in seconds. Each model accepts a fixed set, most commonly 4 to 15; durations under 4 are supported by only a few models. Null uses the model default.","type":["integer","null"]},"model":{"description":"OpenRouter video model id, for example bytedance/seedance-2.0-mini, google/veo-3.1-fast, or openai/sora-2-pro. Video models are a separate catalogue from chat models; a chat model id is rejected.","minLength":1,"type":"string"},"prompt":{"description":"Text description of the video to generate.","minLength":1,"type":"string"},"resolution":{"description":"Resolution such as 480p, 720p, or 1080p. Must be supported by the chosen model. Null uses the model default.","type":["string","null"]}},"required":["aspect_ratio","duration","model","prompt","resolution"],"type":"object"}"#,
+                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 9:16. Null uses the model default.","type":["string","null"]},"duration":{"description":"Clip length in seconds. Each model accepts a fixed set, most commonly 4 to 15; durations under 4 are supported by only a few models. Null uses the model default.","type":["integer","null"]},"first_frame":{"anyOf":[{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image.","type":"object"},"url":{"description":"Publicly fetchable image URL.","minLength":1,"type":"string"}},"type":"object"},{"type":"null"}],"description":"Image to use as the video's first frame. Exactly one of url or artifact."},"generate_audio":{"description":"Generate audio when the model supports it. Null uses the model default.","type":["boolean","null"]},"last_frame":{"anyOf":[{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image.","type":"object"},"url":{"description":"Publicly fetchable image URL.","minLength":1,"type":"string"}},"type":"object"},{"type":"null"}],"description":"Image to use as the video's last frame. Exactly one of url or artifact."},"model":{"description":"OpenRouter video model id, for example bytedance/seedance-2.0-mini, google/veo-3.1-fast, or openai/sora-2-pro. Video models are a separate catalogue from chat models; a chat model id is rejected.","minLength":1,"type":"string"},"prompt":{"description":"Text description of the video to generate.","minLength":1,"type":"string"},"reference_images":{"description":"Style or content reference images.","items":{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image.","type":"object"},"url":{"description":"Publicly fetchable image URL.","minLength":1,"type":"string"}},"type":"object"},"maxItems":4,"type":["array","null"]},"resolution":{"description":"Resolution such as 480p, 720p, or 1080p. Must be supported by the chosen model. Null uses the model default.","type":["string","null"]},"seed":{"description":"Deterministic generation seed. Null lets the provider choose.","type":["integer","null"]},"size":{"description":"Pixel dimensions as WIDTHxHEIGHT. Null uses the model default.","type":["string","null"]}},"required":["aspect_ratio","duration","first_frame","generate_audio","last_frame","model","prompt","reference_images","resolution","seed","size"],"type":"object"}"#,
             )
             .map_err(|_| OpenRouterMediaError::EndpointInvalid {
                 reason: "invalid_input_schema",
@@ -473,6 +474,7 @@ impl Toolset for OpenRouterMediaToolset {
                         referer.as_deref(),
                         title.as_deref(),
                         &endpoint,
+                        artifact_store.as_ref(),
                         &ctx,
                         call.call.arguments().as_bytes(),
                     )
@@ -562,8 +564,8 @@ mod tests {
 
     use finstack_ai_kernel::{
         Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-        OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
-        ToolCallId, ToolCallPlan, ToolFailurePolicy, ValidatedToolCall,
+        OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId, ToolBatchId,
+        ToolCallBlock, ToolCallId, ToolCallPlan, ToolFailurePolicy, ValidatedToolCall,
     };
     use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, RunCallContext,
@@ -583,7 +585,9 @@ mod tests {
         VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME,
     };
 
-    use finstack_ai_runtime::artifact::InProcessArtifactStore;
+    use finstack_ai_runtime::artifact::{
+        ArtifactMetadata, ArtifactScope, InProcessArtifactStore, stage_required_artifact,
+    };
 
     use base64::Engine as _;
 
@@ -1057,6 +1061,292 @@ mod tests {
         );
     }
 
+    /// Scope matching `video::artifact_scope(&tool_context())`, for staging
+    /// fixture artifacts ahead of a video-submit call.
+    fn video_artifact_scope() -> ArtifactScope {
+        let ctx = tool_context();
+        ArtifactScope {
+            tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
+            session_id: ctx.run.locator.session_id,
+            run_id: Some(ctx.run.locator.run_id),
+            sensitivity: Sensitivity::Internal,
+        }
+    }
+
+    #[tokio::test]
+    async fn video_submit_maps_generation_controls_and_frame_images() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(
+                &listener,
+                &seen_tx,
+                202,
+                br#"{"id":"vid-1","status":"pending"}"#,
+                "application/json",
+            )
+            .await;
+        });
+        let store = Arc::new(InProcessArtifactStore::default());
+        let png = vec![0x89, b'P', b'N', b'G', 1, 2, 3, 4];
+        let staged = stage_required_artifact(
+            store.as_ref(),
+            video_artifact_scope(),
+            png.clone().into(),
+            ArtifactMetadata {
+                kind: Arc::from("tool-input"),
+                media_type: Arc::from("image/png"),
+                name: Some(Arc::from("first-frame")),
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("stage fixture");
+        let staged_json = serde_json::to_value(&staged).expect("artifact json");
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+        let spec = find_spec(&tools.tools(), VIDEO_TOOL_NAME);
+        let args = serde_json::json!({
+            "model": "m",
+            "prompt": "a dog running",
+            "aspect_ratio": null,
+            "duration": null,
+            "resolution": null,
+            "seed": 42,
+            "size": "1280x720",
+            "generate_audio": false,
+            "first_frame": { "artifact": staged_json },
+            "last_frame": { "url": "https://example.test/last.png" },
+            "reference_images": null,
+        });
+        let call = call_for(&spec, serde_json::to_vec(&args).expect("args").as_slice());
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(result) = item else {
+            panic!("expected completion");
+        };
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
+        assert_eq!(payload["id"], "vid-1");
+        let seen = seen_rx.recv().await.expect("request");
+        let body_start = seen.find("\r\n\r\n").expect("body separator") + 4;
+        let body: serde_json::Value = serde_json::from_str(&seen[body_start..]).expect("body");
+        assert_eq!(body["seed"], 42);
+        assert_eq!(body["size"], "1280x720");
+        assert_eq!(body["generate_audio"], false);
+        assert_eq!(body["frame_images"][0]["frame_type"], "first_frame");
+        assert!(
+            body["frame_images"][0]["image_url"]["url"]
+                .as_str()
+                .expect("url")
+                .starts_with("data:image/png;base64,"),
+            "artifact frame must become a data URI: {body}"
+        );
+        assert_eq!(body["frame_images"][1]["frame_type"], "last_frame");
+        assert_eq!(
+            body["frame_images"][1]["image_url"]["url"],
+            "https://example.test/last.png"
+        );
+        assert!(
+            body.get("input_references").is_none(),
+            "no reference images were submitted: {body}"
+        );
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn video_submit_without_store_rejects_artifact_frames() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<String>();
+        drop(seen_tx);
+        drop(listener);
+        let store = Arc::new(InProcessArtifactStore::default());
+        let staged = stage_required_artifact(
+            store.as_ref(),
+            video_artifact_scope(),
+            vec![1, 2, 3].into(),
+            ArtifactMetadata {
+                kind: Arc::from("tool-input"),
+                media_type: Arc::from("image/png"),
+                name: None,
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("stage fixture");
+        let staged_json = serde_json::to_value(&staged).expect("artifact json");
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), VIDEO_TOOL_NAME);
+        let args = serde_json::json!({
+            "model": "m",
+            "prompt": "a dog running",
+            "aspect_ratio": null,
+            "duration": null,
+            "resolution": null,
+            "seed": null,
+            "size": null,
+            "generate_audio": null,
+            "first_frame": { "artifact": staged_json },
+            "last_frame": null,
+            "reference_images": null,
+        });
+        let call = call_for(&spec, serde_json::to_vec(&args).expect("args").as_slice());
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected store-required error");
+        };
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_STORE_REQUIRED);
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
+    }
+
+    #[tokio::test]
+    async fn video_submit_rejects_ambiguous_image_input() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<String>();
+        drop(seen_tx);
+        drop(listener);
+        let store = Arc::new(InProcessArtifactStore::default());
+        let staged = stage_required_artifact(
+            store.as_ref(),
+            video_artifact_scope(),
+            vec![1, 2, 3].into(),
+            ArtifactMetadata {
+                kind: Arc::from("tool-input"),
+                media_type: Arc::from("image/png"),
+                name: None,
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("stage fixture");
+        let staged_json = serde_json::to_value(&staged).expect("artifact json");
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+        let spec = find_spec(&tools.tools(), VIDEO_TOOL_NAME);
+        let args = serde_json::json!({
+            "model": "m",
+            "prompt": "a dog running",
+            "aspect_ratio": null,
+            "duration": null,
+            "resolution": null,
+            "seed": null,
+            "size": null,
+            "generate_audio": null,
+            "first_frame": { "url": "https://example.test/a.png", "artifact": staged_json },
+            "last_frame": null,
+            "reference_images": null,
+        });
+        let call = call_for(&spec, serde_json::to_vec(&args).expect("args").as_slice());
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected invalid arguments");
+        };
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_INVALID_ARGUMENTS);
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_frame_artifact_fails_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<String>();
+        drop(seen_tx);
+        drop(listener);
+        let store = Arc::new(InProcessArtifactStore::default());
+        // Larger than the test-shrunk 1 KiB inline ceiling.
+        let big = vec![7_u8; 4 * 1_024];
+        let staged = stage_required_artifact(
+            store.as_ref(),
+            video_artifact_scope(),
+            big.into(),
+            ArtifactMetadata {
+                kind: Arc::from("tool-input"),
+                media_type: Arc::from("image/png"),
+                name: None,
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("stage fixture");
+        let staged_json = serde_json::to_value(&staged).expect("artifact json");
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+        let spec = find_spec(&tools.tools(), VIDEO_TOOL_NAME);
+        let args = serde_json::json!({
+            "model": "m",
+            "prompt": "a dog running",
+            "aspect_ratio": null,
+            "duration": null,
+            "resolution": null,
+            "seed": null,
+            "size": null,
+            "generate_audio": null,
+            "first_frame": { "artifact": staged_json },
+            "last_frame": null,
+            "reference_images": null,
+        });
+        let call = call_for(&spec, serde_json::to_vec(&args).expect("args").as_slice());
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected limit error");
+        };
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_LIMIT_EXCEEDED);
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
+    }
+
+    #[tokio::test]
+    async fn video_submit_rejects_a_fifth_reference_image() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<String>();
+        drop(seen_tx);
+        drop(listener);
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), VIDEO_TOOL_NAME);
+        let references: Vec<serde_json::Value> = (0..5)
+            .map(|index| serde_json::json!({ "url": format!("https://example.test/{index}.png") }))
+            .collect();
+        let args = serde_json::json!({
+            "model": "m",
+            "prompt": "a dog running",
+            "aspect_ratio": null,
+            "duration": null,
+            "resolution": null,
+            "seed": null,
+            "size": null,
+            "generate_audio": null,
+            "first_frame": null,
+            "last_frame": null,
+            "reference_images": references,
+        });
+        let call = call_for(&spec, serde_json::to_vec(&args).expect("args").as_slice());
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected invalid arguments");
+        };
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_INVALID_ARGUMENTS);
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
+    }
+
     #[tokio::test]
     async fn speech_tool_bounds_the_audio_payload() {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -1383,7 +1673,15 @@ mod tests {
             ),
             (
                 VIDEO_TOOL_NAME,
-                &["aspect_ratio", "duration", "resolution"][..],
+                &[
+                    "aspect_ratio",
+                    "duration",
+                    "resolution",
+                    "size",
+                    "seed",
+                    "generate_audio",
+                    "reference_images",
+                ][..],
             ),
             (VIDEO_STATUS_TOOL_NAME, &["wait_seconds"][..]),
             (SPEECH_TOOL_NAME, &["voice"][..]),
