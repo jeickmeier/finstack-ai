@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{ArtifactRef, Digest};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -313,8 +313,16 @@ impl RenderStateStore for SqliteRenderStateStore {
                     json,
                 ],
             )
-            .map_err(|_| StateError::Integrity {
-                code: "render_exists",
+            .map_err(|error| {
+                if is_constraint_violation(&error) {
+                    StateError::Integrity {
+                        code: "render_exists",
+                    }
+                } else {
+                    StateError::Unavailable {
+                        code: "sqlite_state_insert",
+                    }
+                }
             })?;
             Ok(())
         })
@@ -380,6 +388,13 @@ impl RenderStateStore for SqliteRenderStateStore {
     }
 }
 
+fn is_constraint_violation(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(ffi_err, _) if ffi_err.code == ErrorCode::ConstraintViolation
+    )
+}
+
 fn is_memory_path(path: &Path) -> bool {
     let text = path.to_string_lossy();
     text == ":memory:" || text.contains("mode=memory")
@@ -435,7 +450,10 @@ mod tests {
         let store = SqliteRenderStateStore::open(dir.path().join("journal.sqlite")).expect("open");
         let mut state = sample_state();
         store.insert(&state).expect("insert");
-        assert!(store.insert(&state).is_err(), "duplicate render_id");
+        assert_eq!(
+            store.insert(&state).expect_err("duplicate render_id").code(),
+            "render_exists"
+        );
         assert_eq!(
             store
                 .load("tenant-a", state.render_id.as_ref())
@@ -511,5 +529,31 @@ mod tests {
             .expect("row");
         assert_eq!(reloaded.revision, 1);
         assert!(matches!(reloaded.status, RenderStatus::Composing));
+    }
+
+    #[test]
+    fn sqlite_insert_reports_unavailable_not_render_exists_on_genuine_failure() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("journal.sqlite");
+        let store = SqliteRenderStateStore::open(&path).expect("open");
+
+        // Sabotage the table out from under the store via a second raw
+        // connection, so the next insert fails for a reason that is NOT a
+        // constraint violation (table missing, not a duplicate row).
+        let saboteur = Connection::open(&path).expect("saboteur connection");
+        saboteur
+            .execute_batch("DROP TABLE finstack_workflow_media_pipeline;")
+            .expect("drop table");
+        drop(saboteur);
+
+        let mut state = sample_state();
+        state.render_id = Arc::from("render-does-not-exist-yet");
+        let error = store.insert(&state).expect_err("insert must fail");
+        assert_eq!(
+            error.code(),
+            "sqlite_state_insert",
+            "a missing table must report Unavailable, not be mistaken for a duplicate row"
+        );
+        assert!(matches!(error, StateError::Unavailable { .. }));
     }
 }
