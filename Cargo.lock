@@ -1301,6 +1301,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-embedder-ollama"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai-embeddings",
+ "finstack-ai-runtime",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-embeddings"
 version = "2.0.0"
 dependencies = [

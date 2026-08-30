@@ -1,0 +1,29 @@
+[package]
+name = "finstack-ai-embedder-ollama"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Native Ollama /api/embed text embedder for finstack-ai"
+readme = "README.md"
+publish = false
+
+[features]
+default = []
+vendored-tls = ["reqwest/native-tls-vendored"]
+
+[dependencies]
+finstack-ai-embeddings = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

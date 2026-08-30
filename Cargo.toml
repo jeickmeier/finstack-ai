@@ -36,6 +36,7 @@ members = [
     "extensions/context/finstack-ai-context-repository",
     "extensions/context/finstack-ai-memory",
     "extensions/embeddings/finstack-ai-embeddings",
+    "extensions/embeddings/finstack-ai-embedder-ollama",
     "extensions/middleware/finstack-ai-middleware-compaction",
     "extensions/middleware/finstack-ai-middleware-instructions",
     "extensions/middleware/finstack-ai-middleware-verify",
@@ -161,6 +162,7 @@ finstack-ai-tools-skills = { path = "extensions/toolsets/finstack-ai-tools-skill
 finstack-ai-tools-skill-import = { path = "extensions/toolsets/finstack-ai-tools-skill-import", version = "2.0.0" }
 finstack-ai-memory = { path = "extensions/context/finstack-ai-memory", version = "2.0.0" }
 finstack-ai-embeddings = { path = "extensions/embeddings/finstack-ai-embeddings", version = "2.0.0" }
+finstack-ai-embedder-ollama = { path = "extensions/embeddings/finstack-ai-embedder-ollama", version = "2.0.0" }
 # Non-ASCII MCP `Mcp-Name` header sentinel encoding (`=?base64?…?=`).
 finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "2.0.0" }
 finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "2.0.0" }
