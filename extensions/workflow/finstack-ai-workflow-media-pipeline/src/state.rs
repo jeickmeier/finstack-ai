@@ -186,7 +186,10 @@ impl RenderStateStore for MemoryRenderStateStore {
         let mut inner = self.inner.lock().map_err(|_| StateError::Unavailable {
             code: "memory_state_lock_poisoned",
         })?;
-        let key = (Arc::clone(&state.tenant_scope), Arc::clone(&state.render_id));
+        let key = (
+            Arc::clone(&state.tenant_scope),
+            Arc::clone(&state.render_id),
+        );
         if inner.contains_key(&key) {
             return Err(StateError::Integrity {
                 code: "render_exists",
@@ -209,7 +212,10 @@ impl RenderStateStore for MemoryRenderStateStore {
         let mut inner = self.inner.lock().map_err(|_| StateError::Unavailable {
             code: "memory_state_lock_poisoned",
         })?;
-        let key = (Arc::clone(&state.tenant_scope), Arc::clone(&state.render_id));
+        let key = (
+            Arc::clone(&state.tenant_scope),
+            Arc::clone(&state.render_id),
+        );
         let Some(row) = inner.get_mut(&key) else {
             return Ok(false);
         };
@@ -451,7 +457,10 @@ mod tests {
         let mut state = sample_state();
         store.insert(&state).expect("insert");
         assert_eq!(
-            store.insert(&state).expect_err("duplicate render_id").code(),
+            store
+                .insert(&state)
+                .expect_err("duplicate render_id")
+                .code(),
             "render_exists"
         );
         assert_eq!(
@@ -464,7 +473,10 @@ mod tests {
         );
         state.status = RenderStatus::Composing;
         assert!(store.update(&state).expect("update"), "first CAS wins");
-        assert!(!store.update(&state).expect("update"), "stale revision loses");
+        assert!(
+            !store.update(&state).expect("update"),
+            "stale revision loses"
+        );
         let reloaded = store
             .load("tenant-a", state.render_id.as_ref())
             .expect("load")
@@ -495,7 +507,10 @@ mod tests {
         );
         state.status = RenderStatus::Composing;
         assert!(store.update(&state).expect("update"), "first CAS wins");
-        assert!(!store.update(&state).expect("update"), "stale revision loses");
+        assert!(
+            !store.update(&state).expect("update"),
+            "stale revision loses"
+        );
         let reloaded = store
             .load("tenant-a", state.render_id.as_ref())
             .expect("load")

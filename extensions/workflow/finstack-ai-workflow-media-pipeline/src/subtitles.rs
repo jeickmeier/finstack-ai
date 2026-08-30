@@ -10,7 +10,6 @@ use crate::plan::{MoviePlan, TransitionKindName};
 
 /// A single caption cue positioned on the absolute movie timeline.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code, reason = "consumed by Task 9's driver")]
 pub(crate) struct TimedCue {
     /// Caption text.
     pub text: String,
@@ -29,7 +28,6 @@ pub(crate) struct TimedCue {
 /// default) minus the overlap introduced by the transition that follows it:
 /// the transition's `duration_s` (default `0.5`) for `crossfade` and
 /// `fade_to_black`, or `0.0` for `cut` or an absent transition.
-#[allow(dead_code, reason = "consumed by Task 9's driver")]
 pub(crate) fn cue_timeline(plan: &MoviePlan) -> Vec<TimedCue> {
     let mut cues = Vec::new();
     let mut offset = 0.0_f64;
@@ -82,7 +80,6 @@ fn stamp(seconds: f64, millis_sep: char) -> String {
 }
 
 /// Render `cues` as an SRT subtitle file.
-#[allow(dead_code, reason = "consumed by Task 9's driver")]
 pub(crate) fn to_srt(cues: &[TimedCue]) -> String {
     let mut out = String::new();
     for (index, cue) in cues.iter().enumerate() {
@@ -99,7 +96,6 @@ pub(crate) fn to_srt(cues: &[TimedCue]) -> String {
 }
 
 /// Render `cues` as a WebVTT subtitle file.
-#[allow(dead_code, reason = "consumed by Task 9's driver")]
 pub(crate) fn to_vtt(cues: &[TimedCue]) -> String {
     let mut out = String::from("WEBVTT\n\n");
     for cue in cues {
