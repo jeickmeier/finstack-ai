@@ -69,6 +69,17 @@
       "scripted_response": "I do not know: nothing ingested or remembered covers Acme Corp share prices.",
       "must_contain": ["do not know"],
       "event_kinds_expected": ["message_finalized", "run_completed"]
+    },
+    {
+      "id": "memory-semantic-paraphrase",
+      "question": "Where do we keep the archived money totals?",
+      "scripted_response": "A remembered note says the quarterly revenue ledgers rest inside vault nine.",
+      "must_contain": ["vault nine"],
+      "event_kinds_expected": ["message_finalized", "run_completed"],
+      "memory_seed": {
+        "body": "Quarterly revenue ledgers rest inside vault nine.",
+        "keywords": ["quarterly", "revenue", "ledgers", "vault"]
+      }
     }
   ]
 }

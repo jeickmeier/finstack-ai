@@ -337,6 +337,164 @@ async fn golden_entries_hold_offline() {
     }
 }
 
+/// The one golden entry carrying a semantic-recall seed.
+fn semantic_entry() -> crate::GoldenEntry {
+    let entries = crate::golden_entries().expect("fixture loads");
+    let mut seeded = entries
+        .into_iter()
+        .filter(|entry| entry.memory_seed.is_some());
+    let entry = seeded.next().expect("a semantic entry exists");
+    assert!(seeded.next().is_none(), "exactly one semantic entry");
+    entry
+}
+
+/// One scripted NDJSON `remember` tool call storing `seed`.
+fn remember_response(seed: &crate::GoldenMemorySeed) -> String {
+    let call = serde_json::json!({
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "function": {
+                    "name": "remember",
+                    "arguments": { "keywords": &seed.keywords, "body": &seed.body }
+                }
+            }]
+        },
+        "done": false
+    });
+    format!(
+        "{call}\n{{\"message\":{{\"role\":\"assistant\",\"content\":\"\"}},\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}}\n"
+    )
+}
+
+/// Run the semantic entry's scripted flow — a `remember` seeding run, then
+/// the paraphrased ask in a fresh session — and return the entry plus the
+/// ask run's model request, answer text, and observed event kinds.
+async fn run_semantic_entry(
+    with_embedder: bool,
+) -> (crate::GoldenEntry, String, String, Vec<String>) {
+    let entry = semantic_entry();
+    let seed = entry.memory_seed.clone().expect("semantic entry has a seed");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ollama_scripted(
+        vec![
+            remember_response(&seed),
+            loopback::text_response("Noted."),
+            loopback::text_response(&entry.scripted_response),
+        ],
+        EMBED_DIMENSIONS,
+    )
+    .await
+    .expect("loopback");
+    let mut config = loopback_config(dir.path(), base_url.clone());
+    if with_embedder {
+        config = config.with_memory_embedder(ollama_embedder(base_url));
+    }
+    let agent = build_agent(&config).await.expect("agent builds");
+
+    // Seeding run: the scripted `remember` call stores the record.
+    let request = finstack_ai::AgentRunRequest::try_new(
+        model_name(&config).expect("model name"),
+        "Please save this note.",
+        security("golden").expect("security"),
+    )
+    .expect("request");
+    agent.run(request).await.expect("seeding run succeeds");
+
+    // Ask run: the paraphrased question in a fresh session.
+    let request = finstack_ai::AgentRunRequest::try_new(
+        model_name(&config).expect("model name"),
+        entry.question.as_str(),
+        security("golden").expect("security"),
+    )
+    .expect("request");
+    let run = agent.start(request).expect("run starts");
+    let mut observed_kinds: Vec<String> = Vec::new();
+    while let Some(batch) = run.next_event_batch().await.expect("batch") {
+        for event in batch.events() {
+            let kind = serde_json::to_value(event.kind()).expect("kind serializes");
+            if let Some(kind) = kind.as_str() {
+                observed_kinds.push(kind.to_owned());
+            }
+        }
+    }
+    let output = run.result().await.expect("run result");
+    let captured = server.await.expect("server task").expect("server ok");
+    assert_eq!(captured.len(), 3, "three chat requests");
+    let ask_request = captured.into_iter().nth(2).expect("ask request captured");
+    (entry, ask_request, output.text().clone(), observed_kinds)
+}
+
+/// Lowercased alphanumeric tokens, the unit both lexical legs match on.
+fn lexical_tokens(text: &str) -> Vec<String> {
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+#[test]
+fn semantic_golden_question_shares_no_lexical_token_with_its_seed() {
+    let entry = semantic_entry();
+    let seed = entry.memory_seed.expect("semantic entry has a seed");
+    let question_tokens = lexical_tokens(&entry.question);
+    let mut seed_tokens = lexical_tokens(&seed.body);
+    for keyword in &seed.keywords {
+        seed_tokens.extend(lexical_tokens(keyword));
+    }
+    assert!(!question_tokens.is_empty() && !seed_tokens.is_empty());
+    for question_token in &question_tokens {
+        for seed_token in &seed_tokens {
+            // Full-text recall prefix-matches every question token, so a
+            // shared prefix in either direction would let a lexical leg
+            // surface the record and the entry would stop guarding the
+            // semantic leg.
+            assert!(
+                !seed_token.starts_with(question_token.as_str())
+                    && !question_token.starts_with(seed_token.as_str()),
+                "question token {question_token:?} lexically overlaps seed token {seed_token:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn semantic_golden_misses_under_lexical_recall() {
+    let (entry, ask_request, _answer, _kinds) = run_semantic_entry(false).await;
+    let seed = entry.memory_seed.expect("semantic entry has a seed");
+    // The guard: lexical-only recall must not surface the seeded record —
+    // otherwise the fixture would not genuinely require the semantic leg.
+    assert!(
+        !ask_request.contains(seed.body.as_str()),
+        "lexical recall unexpectedly surfaced the seed: {ask_request}"
+    );
+}
+
+#[tokio::test]
+async fn semantic_golden_surfaces_with_embedder() {
+    let (entry, ask_request, answer, observed_kinds) = run_semantic_entry(true).await;
+    let seed = entry.memory_seed.clone().expect("semantic entry has a seed");
+    assert!(
+        ask_request.contains(seed.body.as_str()),
+        "semantic recall did not surface the seed in the model request: {ask_request}"
+    );
+    for needle in &entry.must_contain {
+        assert!(
+            answer.contains(needle),
+            "{}: answer must contain {needle:?}: {answer}",
+            entry.id
+        );
+    }
+    for expected in &entry.event_kinds_expected {
+        assert!(
+            observed_kinds.iter().any(|kind| kind == expected),
+            "{}: expected event kind {expected}; observed {observed_kinds:?}",
+            entry.id
+        );
+    }
+}
+
 #[test]
 fn self_docs_cover_the_promised_topics() {
     let topics: Vec<&str> = SELF_DOCS.iter().map(|(topic, _)| *topic).collect();

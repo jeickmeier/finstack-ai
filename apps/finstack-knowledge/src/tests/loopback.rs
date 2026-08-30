@@ -39,26 +39,110 @@ pub async fn serve_ndjson_capture(
         let mut captured = Vec::new();
         for body in responses {
             let (mut socket, _) = listener.accept().await.map_err(|error| error.to_string())?;
-            captured.push(read_request(&mut socket).await?);
-            let headers = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            socket
-                .write_all(headers.as_bytes())
-                .await
-                .map_err(|error| error.to_string())?;
-            socket
-                .write_all(body.as_bytes())
-                .await
-                .map_err(|error| error.to_string())?;
+            let (_path, request_body) = read_request(&mut socket).await?;
+            captured.push(request_body);
+            write_response(&mut socket, "application/x-ndjson", &body).await?;
         }
         Ok(captured)
     });
     Ok((format!("http://{address}"), task))
 }
 
-async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<String, String> {
+/// As [`serve_ndjson_capture`], additionally answering `POST /api/embed`
+/// deterministically with [`HashEmbedder`]-computed vectors.
+///
+/// Chat requests consume `responses` in order and their bodies are
+/// captured (embed requests are answered, not captured, and may arrive in
+/// any number and order between them). The task ends — and the listener
+/// closes — once the last chat response is served, so post-run best-effort
+/// embed drains simply see a refused connection.
+pub async fn serve_ollama_scripted(
+    responses: Vec<String>,
+    embed_dimensions: usize,
+) -> Result<(String, tokio::task::JoinHandle<Result<Vec<String>, String>>), BoxError> {
+    use finstack_ai_embeddings::embedder::HashEmbedder;
+
+    let embedder = HashEmbedder::try_new(embed_dimensions).map_err(|error| error.to_string())?;
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let task = tokio::spawn(async move {
+        let mut captured = Vec::new();
+        let mut pending = responses.into_iter();
+        let mut next_chat = pending.next();
+        while let Some(chat_body) = next_chat.take() {
+            let (mut socket, _) = listener.accept().await.map_err(|error| error.to_string())?;
+            let (path, request_body) = read_request(&mut socket).await?;
+            if path == "/api/embed" {
+                let body = embed_body(&embedder, &request_body).await?;
+                write_response(&mut socket, "application/json", &body).await?;
+                next_chat = Some(chat_body);
+            } else {
+                captured.push(request_body);
+                write_response(&mut socket, "application/x-ndjson", &chat_body).await?;
+                next_chat = pending.next();
+            }
+        }
+        Ok(captured)
+    });
+    Ok((format!("http://{address}"), task))
+}
+
+/// Compute the `/api/embed` response for `request_body` with `embedder`.
+async fn embed_body(
+    embedder: &finstack_ai_embeddings::embedder::HashEmbedder,
+    request_body: &str,
+) -> Result<String, String> {
+    use finstack_ai_embeddings::embedder::TextEmbedder;
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(request_body).map_err(|error| error.to_string())?;
+    let inputs = parsed
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "embed request lacks an input array".to_owned())?;
+    let texts = inputs
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(std::sync::Arc::<str>::from)
+                .ok_or_else(|| "embed request input is not a string".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let vectors = embedder
+        .embed(texts)
+        .await
+        .map_err(|error| error.to_string())?;
+    let components: Vec<Vec<f32>> = vectors
+        .iter()
+        .map(|vector| vector.as_slice().to_vec())
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "embeddings": components }))
+        .map_err(|error| error.to_string())
+}
+
+/// Write one `200 OK` response with `content_type` and `body`, then close.
+async fn write_response(
+    socket: &mut tokio::net::TcpStream,
+    content_type: &str,
+    body: &str,
+) -> Result<(), String> {
+    let headers = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    socket
+        .write_all(headers.as_bytes())
+        .await
+        .map_err(|error| error.to_string())?;
+    socket
+        .write_all(body.as_bytes())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Read one HTTP request whole; returns its path and body.
+async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(String, String), String> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4_096];
     let header_end = loop {
@@ -75,6 +159,12 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<String, Stri
         }
     };
     let headers = String::from_utf8_lossy(&request[..header_end]);
+    let path = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .ok_or_else(|| "request line lacks a path".to_owned())?
+        .to_owned();
     let content_length = headers
         .lines()
         .find_map(|line| {
@@ -93,5 +183,6 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<String, Stri
         }
         request.extend_from_slice(&buffer[..count]);
     }
-    Ok(String::from_utf8_lossy(&request[header_end..]).into_owned())
+    let body = String::from_utf8_lossy(&request[header_end..]).into_owned();
+    Ok((path, body))
 }

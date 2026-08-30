@@ -25,6 +25,23 @@ pub struct GoldenEntry {
     pub must_contain: Vec<String>,
     /// Event kinds every surface must observe (subset check).
     pub event_kinds_expected: Vec<String>,
+    /// Optional semantic-recall seed: a record first stored through a
+    /// scripted `remember` tool call, phrased so `question` shares no
+    /// keyword or token-prefix substring with it — lexical recall misses
+    /// and only the semantic leg can surface it. Exercised by the Rust
+    /// guard test; the other surfaces script the entry as plain text.
+    #[serde(default)]
+    pub memory_seed: Option<GoldenMemorySeed>,
+}
+
+/// The memory record a semantic golden entry stores before asking.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoldenMemorySeed {
+    /// Inline record body the scripted `remember` call stores.
+    pub body: String,
+    /// Record keywords the scripted `remember` call stores.
+    pub keywords: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +76,15 @@ pub fn golden_entries() -> Result<Vec<GoldenEntry>, KnowledgeError> {
             || entry.scripted_response.trim().is_empty()
             || entry.must_contain.is_empty()
             || entry.event_kinds_expected.is_empty()
+        {
+            return Err(KnowledgeError::Config {
+                reason: "golden_fixture_entry_invalid",
+            });
+        }
+        if let Some(seed) = &entry.memory_seed
+            && (seed.body.trim().is_empty()
+                || seed.keywords.is_empty()
+                || seed.keywords.iter().any(|keyword| keyword.trim().is_empty()))
         {
             return Err(KnowledgeError::Config {
                 reason: "golden_fixture_entry_invalid",

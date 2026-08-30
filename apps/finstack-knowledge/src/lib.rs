@@ -42,7 +42,7 @@ pub use config::{
     EmbedderChoice, KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security,
 };
 pub use docs::{SELF_DOCS, materialize_self_docs};
-pub use golden::{GoldenEntry, golden_entries};
+pub use golden::{GoldenEntry, GoldenMemorySeed, golden_entries};
 
 #[cfg(test)]
 mod tests;
