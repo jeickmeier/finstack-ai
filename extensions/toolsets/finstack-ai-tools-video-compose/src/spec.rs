@@ -5,9 +5,12 @@
 //! filtergraph builder (`graph.rs`, arriving in a later task) is the only
 //! place that reads a [`CompositionSpec`] to build a command.
 //!
-//! These types are exercised only by this module's own tests until `graph.rs`
-//! and `exec.rs` land and wire them into `Toolset::call`; `dead_code` stays
-//! muted here for that interim stretch.
+//! `graph.rs` now consumes these types to build `ffmpeg` argument vectors,
+//! but nothing yet calls `graph::build_ffmpeg_args` outside its own tests:
+//! `Toolset::call` still rejects every request until `exec.rs` lands and
+//! wires the whole pipeline together. Until then the compiler sees this
+//! whole chain (spec types -> `graph.rs` -> unreachable) as dead code, so
+//! `dead_code` stays muted here for that interim stretch.
 #![allow(dead_code)]
 
 use finstack_ai_kernel::ArtifactRef;
@@ -315,10 +318,7 @@ mod tests {
                 duration_s: Some(30.0),
             }]),
         );
-        assert!(
-            validate_spec(&bad_duration).is_err(),
-            "transition <= 5s"
-        );
+        assert!(validate_spec(&bad_duration).is_err(), "transition <= 5s");
         let mut bad_trim = minimal(1, None);
         bad_trim.clips[0].trim = Some(TrimSpec {
             start_s: 5.0,
@@ -341,10 +341,7 @@ mod tests {
                 margin_v: None,
             }),
         });
-        assert!(
-            validate_spec(&bad_style).is_err(),
-            "font_size in [8, 96]"
-        );
+        assert!(validate_spec(&bad_style).is_err(), "font_size in [8, 96]");
         let mut bad_mux = minimal(1, None);
         bad_mux.output.container = Container::Webm;
         bad_mux.subtitles = Some(SubtitlesSpec {

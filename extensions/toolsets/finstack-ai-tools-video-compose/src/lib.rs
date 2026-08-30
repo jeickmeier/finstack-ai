@@ -22,6 +22,7 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+mod graph;
 mod spec;
 
 use std::path::PathBuf;
@@ -126,7 +127,10 @@ impl std::fmt::Debug for VideoComposeToolset {
             .field("probe_tool_id", &self.probe_tool_id)
             .field("ffmpeg_path", &self.ffmpeg_path)
             .field("ffprobe_path", &self.ffprobe_path)
-            .field("artifact_store_refs", &Arc::strong_count(&self.artifact_store))
+            .field(
+                "artifact_store_refs",
+                &Arc::strong_count(&self.artifact_store),
+            )
             .field("scratch_dir", &self.scratch_dir)
             .field("render_timeout", &self.render_timeout)
             .finish_non_exhaustive()
