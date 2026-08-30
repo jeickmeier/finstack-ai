@@ -24,9 +24,14 @@
 #![allow(clippy::doc_markdown)]
 
 mod plan;
+mod state;
 
 pub use plan::{
     CaptionCue, CaptionsMode, FrameSource, MoviePlan, PlanAudio, PlanBudget, PlanDefaults,
     PlanLimits, PlanOutput, PlanTransition, SceneOverrides, SceneSpec, TransitionKindName,
     validate_plan,
+};
+pub use state::{
+    MemoryRenderStateStore, RenderState, RenderStateStore, RenderStatus, SceneStage, SceneState,
+    SqliteRenderStateStore, StateError,
 };
