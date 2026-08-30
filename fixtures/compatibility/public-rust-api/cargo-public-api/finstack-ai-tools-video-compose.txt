@@ -1,0 +1,39 @@
+pub mod finstack_ai_tools_video_compose
+pub enum finstack_ai_tools_video_compose::VideoComposeError
+pub finstack_ai_tools_video_compose::VideoComposeError::ConfigInvalid
+pub finstack_ai_tools_video_compose::VideoComposeError::ConfigInvalid::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_video_compose::VideoComposeError
+pub fn finstack_ai_tools_video_compose::VideoComposeError::clone(&self) -> finstack_ai_tools_video_compose::VideoComposeError
+impl core::cmp::Eq for finstack_ai_tools_video_compose::VideoComposeError
+impl core::cmp::PartialEq for finstack_ai_tools_video_compose::VideoComposeError
+pub fn finstack_ai_tools_video_compose::VideoComposeError::eq(&self, &finstack_ai_tools_video_compose::VideoComposeError) -> bool
+impl core::error::Error for finstack_ai_tools_video_compose::VideoComposeError
+impl core::fmt::Debug for finstack_ai_tools_video_compose::VideoComposeError
+pub fn finstack_ai_tools_video_compose::VideoComposeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_video_compose::VideoComposeError
+pub fn finstack_ai_tools_video_compose::VideoComposeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_video_compose::VideoComposeError
+pub struct finstack_ai_tools_video_compose::VideoComposeConfig
+pub finstack_ai_tools_video_compose::VideoComposeConfig::artifact_store: alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>
+pub finstack_ai_tools_video_compose::VideoComposeConfig::ffmpeg_path: std::path::PathBuf
+pub finstack_ai_tools_video_compose::VideoComposeConfig::ffprobe_path: std::path::PathBuf
+pub finstack_ai_tools_video_compose::VideoComposeConfig::render_timeout: core::time::Duration
+pub finstack_ai_tools_video_compose::VideoComposeConfig::scratch_dir: std::path::PathBuf
+impl core::fmt::Debug for finstack_ai_tools_video_compose::VideoComposeConfig
+pub fn finstack_ai_tools_video_compose::VideoComposeConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_video_compose::VideoComposeToolset
+impl finstack_ai_tools_video_compose::VideoComposeToolset
+pub fn finstack_ai_tools_video_compose::VideoComposeToolset::try_new(finstack_ai_tools_video_compose::VideoComposeConfig) -> core::result::Result<Self, finstack_ai_tools_video_compose::VideoComposeError>
+impl core::fmt::Debug for finstack_ai_tools_video_compose::VideoComposeToolset
+pub fn finstack_ai_tools_video_compose::VideoComposeToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_video_compose::VideoComposeToolset
+pub fn finstack_ai_tools_video_compose::VideoComposeToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_video_compose::VideoComposeToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_video_compose::VideoComposeToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_video_compose::VIDEO_COMPOSE_CONFIG_INVALID: &str
+pub const finstack_ai_tools_video_compose::VIDEO_COMPOSE_FFMPEG_FAILED: &str
+pub const finstack_ai_tools_video_compose::VIDEO_COMPOSE_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_video_compose::VIDEO_COMPOSE_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_video_compose::VIDEO_COMPOSE_MEDIA_FAILURE: &str
+pub const finstack_ai_tools_video_compose::VIDEO_COMPOSE_SPEC_INVALID: &str
+pub const finstack_ai_tools_video_compose::VIDEO_COMPOSE_TIMEOUT: &str

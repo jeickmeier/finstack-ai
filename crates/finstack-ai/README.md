@@ -39,8 +39,10 @@ applications pay only for the HTTP stacks and capabilities they ship.
 
 - `provider-openai`, `provider-openrouter`, `provider-anthropic`,
   `provider-gemini`, `provider-ollama` — trusted native model batteries.
-- `tool-openrouter-media`, `tool-openai-media`, `tool-e2b` — optional trusted
-  tool batteries.
+- `tool-openrouter-media`, `tool-openai-media`, `tool-e2b`,
+  `tool-video-compose` — optional trusted tool batteries.
+- `workflow-media-pipeline` — the MoviePlan render pipeline over the
+  OpenRouter media and video-compose toolsets, which it enables in turn.
 - `linked-providers`, `linked-tools`, `linked-all` — curated convenience sets.
 - `vendored-tls` — vendored native TLS where the selected providers support it.
 - `wasm-host` — browser/WASM host-driven runtime; disable default features.
@@ -71,6 +73,7 @@ Useful references:
 - [Workspace architecture and developer setup](../../README.md)
 - [Rust examples](../../examples/rust-minimal/)
 - [Durable interaction example](../../examples/durable-interaction/)
+- [Media pipeline](../../extensions/workflow/finstack-ai-workflow-media-pipeline/README.md)
 - [Plugin host](../../plugins/finstack-ai-plugin-host/README.md)
 - [Changelog](../../CHANGELOG.md)
 

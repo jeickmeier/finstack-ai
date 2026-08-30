@@ -958,6 +958,11 @@
     },
     {
       "crate": "finstack-ai-tools-openrouter-media",
+      "name": "OPENROUTER_MEDIA_STORE_REQUIRED",
+      "value": "openrouter_media_store_required"
+    },
+    {
+      "crate": "finstack-ai-tools-openrouter-media",
       "name": "OPENROUTER_MEDIA_TIMEOUT",
       "value": "openrouter_media_timeout"
     },
@@ -1057,6 +1062,41 @@
       "value": "subagent_limit_exceeded"
     },
     {
+      "crate": "finstack-ai-tools-video-compose",
+      "name": "VIDEO_COMPOSE_CONFIG_INVALID",
+      "value": "video_compose_config_invalid"
+    },
+    {
+      "crate": "finstack-ai-tools-video-compose",
+      "name": "VIDEO_COMPOSE_FFMPEG_FAILED",
+      "value": "video_compose_ffmpeg_failed"
+    },
+    {
+      "crate": "finstack-ai-tools-video-compose",
+      "name": "VIDEO_COMPOSE_INVALID_ARGUMENTS",
+      "value": "video_compose_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-tools-video-compose",
+      "name": "VIDEO_COMPOSE_LIMIT_EXCEEDED",
+      "value": "video_compose_limit_exceeded"
+    },
+    {
+      "crate": "finstack-ai-tools-video-compose",
+      "name": "VIDEO_COMPOSE_MEDIA_FAILURE",
+      "value": "video_compose_media_failure"
+    },
+    {
+      "crate": "finstack-ai-tools-video-compose",
+      "name": "VIDEO_COMPOSE_SPEC_INVALID",
+      "value": "video_compose_spec_invalid"
+    },
+    {
+      "crate": "finstack-ai-tools-video-compose",
+      "name": "VIDEO_COMPOSE_TIMEOUT",
+      "value": "video_compose_timeout"
+    },
+    {
       "crate": "finstack-ai-wasm",
       "name": "IMPLEMENTATION",
       "value": "wasm"
@@ -1075,6 +1115,41 @@
       "crate": "finstack-ai-wasm",
       "name": "JS_HOST_RESULT_INVALID",
       "value": "js_host_result_invalid"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_BUDGET_EXCEEDED",
+      "value": "media_pipeline_budget_exceeded"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_CONFIG_INVALID",
+      "value": "media_pipeline_config_invalid"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_INVALID_ARGUMENTS",
+      "value": "media_pipeline_invalid_arguments"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_NOT_FOUND",
+      "value": "media_pipeline_not_found"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_PLAN_INVALID",
+      "value": "media_pipeline_plan_invalid"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_STAGE_FAILED",
+      "value": "media_pipeline_stage_failed"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_STORE_FAILURE",
+      "value": "media_pipeline_store_failure"
     }
   ]
 }

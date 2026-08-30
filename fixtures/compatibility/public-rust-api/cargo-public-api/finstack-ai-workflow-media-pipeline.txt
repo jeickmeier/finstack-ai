@@ -1,0 +1,385 @@
+pub mod finstack_ai_workflow_media_pipeline
+pub enum finstack_ai_workflow_media_pipeline::CaptionsMode
+pub finstack_ai_workflow_media_pipeline::CaptionsMode::BurnIn
+pub finstack_ai_workflow_media_pipeline::CaptionsMode::None
+pub finstack_ai_workflow_media_pipeline::CaptionsMode::Sidecar
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::CaptionsMode
+pub fn finstack_ai_workflow_media_pipeline::CaptionsMode::clone(&self) -> finstack_ai_workflow_media_pipeline::CaptionsMode
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::CaptionsMode
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::CaptionsMode
+pub fn finstack_ai_workflow_media_pipeline::CaptionsMode::eq(&self, &finstack_ai_workflow_media_pipeline::CaptionsMode) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::CaptionsMode
+pub fn finstack_ai_workflow_media_pipeline::CaptionsMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_workflow_media_pipeline::CaptionsMode
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::CaptionsMode
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::CaptionsMode
+pub fn finstack_ai_workflow_media_pipeline::CaptionsMode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::CaptionsMode
+pub fn finstack_ai_workflow_media_pipeline::CaptionsMode::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_workflow_media_pipeline::FrameSource
+pub finstack_ai_workflow_media_pipeline::FrameSource::Artifact
+pub finstack_ai_workflow_media_pipeline::FrameSource::Artifact::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
+pub finstack_ai_workflow_media_pipeline::FrameSource::Prompt
+pub finstack_ai_workflow_media_pipeline::FrameSource::Prompt::prompt: alloc::string::String
+pub finstack_ai_workflow_media_pipeline::FrameSource::Url
+pub finstack_ai_workflow_media_pipeline::FrameSource::Url::url: alloc::string::String
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::FrameSource
+pub fn finstack_ai_workflow_media_pipeline::FrameSource::clone(&self) -> finstack_ai_workflow_media_pipeline::FrameSource
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::FrameSource
+pub fn finstack_ai_workflow_media_pipeline::FrameSource::eq(&self, &finstack_ai_workflow_media_pipeline::FrameSource) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::FrameSource
+pub fn finstack_ai_workflow_media_pipeline::FrameSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::FrameSource
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::FrameSource
+pub fn finstack_ai_workflow_media_pipeline::FrameSource::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::FrameSource
+pub fn finstack_ai_workflow_media_pipeline::FrameSource::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_workflow_media_pipeline::PipelineError
+pub finstack_ai_workflow_media_pipeline::PipelineError::ConfigInvalid
+pub finstack_ai_workflow_media_pipeline::PipelineError::ConfigInvalid::reason: &'static str
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::PipelineError
+pub fn finstack_ai_workflow_media_pipeline::PipelineError::clone(&self) -> finstack_ai_workflow_media_pipeline::PipelineError
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::PipelineError
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::PipelineError
+pub fn finstack_ai_workflow_media_pipeline::PipelineError::eq(&self, &finstack_ai_workflow_media_pipeline::PipelineError) -> bool
+impl core::error::Error for finstack_ai_workflow_media_pipeline::PipelineError
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::PipelineError
+pub fn finstack_ai_workflow_media_pipeline::PipelineError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_workflow_media_pipeline::PipelineError
+pub fn finstack_ai_workflow_media_pipeline::PipelineError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PipelineError
+pub enum finstack_ai_workflow_media_pipeline::RenderStatus
+pub finstack_ai_workflow_media_pipeline::RenderStatus::Completed
+pub finstack_ai_workflow_media_pipeline::RenderStatus::Composing
+pub finstack_ai_workflow_media_pipeline::RenderStatus::Failed
+pub finstack_ai_workflow_media_pipeline::RenderStatus::Running
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::RenderStatus
+pub fn finstack_ai_workflow_media_pipeline::RenderStatus::clone(&self) -> finstack_ai_workflow_media_pipeline::RenderStatus
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::RenderStatus
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::RenderStatus
+pub fn finstack_ai_workflow_media_pipeline::RenderStatus::eq(&self, &finstack_ai_workflow_media_pipeline::RenderStatus) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::RenderStatus
+pub fn finstack_ai_workflow_media_pipeline::RenderStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_workflow_media_pipeline::RenderStatus
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::RenderStatus
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::RenderStatus
+pub fn finstack_ai_workflow_media_pipeline::RenderStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::RenderStatus
+pub fn finstack_ai_workflow_media_pipeline::RenderStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_workflow_media_pipeline::SceneStage
+pub finstack_ai_workflow_media_pipeline::SceneStage::Done
+pub finstack_ai_workflow_media_pipeline::SceneStage::Failed
+pub finstack_ai_workflow_media_pipeline::SceneStage::PendingDownload
+pub finstack_ai_workflow_media_pipeline::SceneStage::PendingEndFrame
+pub finstack_ai_workflow_media_pipeline::SceneStage::PendingStartFrame
+pub finstack_ai_workflow_media_pipeline::SceneStage::PendingSubmit
+pub finstack_ai_workflow_media_pipeline::SceneStage::Polling
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::SceneStage
+pub fn finstack_ai_workflow_media_pipeline::SceneStage::clone(&self) -> finstack_ai_workflow_media_pipeline::SceneStage
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::SceneStage
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::SceneStage
+pub fn finstack_ai_workflow_media_pipeline::SceneStage::eq(&self, &finstack_ai_workflow_media_pipeline::SceneStage) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::SceneStage
+pub fn finstack_ai_workflow_media_pipeline::SceneStage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_workflow_media_pipeline::SceneStage
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::SceneStage
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::SceneStage
+pub fn finstack_ai_workflow_media_pipeline::SceneStage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::SceneStage
+pub fn finstack_ai_workflow_media_pipeline::SceneStage::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_workflow_media_pipeline::StateError
+pub finstack_ai_workflow_media_pipeline::StateError::Integrity
+pub finstack_ai_workflow_media_pipeline::StateError::Integrity::code: &'static str
+pub finstack_ai_workflow_media_pipeline::StateError::Unavailable
+pub finstack_ai_workflow_media_pipeline::StateError::Unavailable::code: &'static str
+impl finstack_ai_workflow_media_pipeline::StateError
+pub const fn finstack_ai_workflow_media_pipeline::StateError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::StateError
+pub fn finstack_ai_workflow_media_pipeline::StateError::clone(&self) -> finstack_ai_workflow_media_pipeline::StateError
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::StateError
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::StateError
+pub fn finstack_ai_workflow_media_pipeline::StateError::eq(&self, &finstack_ai_workflow_media_pipeline::StateError) -> bool
+impl core::error::Error for finstack_ai_workflow_media_pipeline::StateError
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::StateError
+pub fn finstack_ai_workflow_media_pipeline::StateError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_workflow_media_pipeline::StateError
+pub fn finstack_ai_workflow_media_pipeline::StateError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::StateError
+pub enum finstack_ai_workflow_media_pipeline::TransitionKindName
+pub finstack_ai_workflow_media_pipeline::TransitionKindName::Crossfade
+pub finstack_ai_workflow_media_pipeline::TransitionKindName::Cut
+pub finstack_ai_workflow_media_pipeline::TransitionKindName::FadeToBlack
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::TransitionKindName
+pub fn finstack_ai_workflow_media_pipeline::TransitionKindName::clone(&self) -> finstack_ai_workflow_media_pipeline::TransitionKindName
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::TransitionKindName
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::TransitionKindName
+pub fn finstack_ai_workflow_media_pipeline::TransitionKindName::eq(&self, &finstack_ai_workflow_media_pipeline::TransitionKindName) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::TransitionKindName
+pub fn finstack_ai_workflow_media_pipeline::TransitionKindName::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_workflow_media_pipeline::TransitionKindName
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::TransitionKindName
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::TransitionKindName
+pub fn finstack_ai_workflow_media_pipeline::TransitionKindName::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::TransitionKindName
+pub fn finstack_ai_workflow_media_pipeline::TransitionKindName::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::CaptionCue
+pub finstack_ai_workflow_media_pipeline::CaptionCue::end_s: f64
+pub finstack_ai_workflow_media_pipeline::CaptionCue::start_s: f64
+pub finstack_ai_workflow_media_pipeline::CaptionCue::text: alloc::string::String
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::CaptionCue
+pub fn finstack_ai_workflow_media_pipeline::CaptionCue::clone(&self) -> finstack_ai_workflow_media_pipeline::CaptionCue
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::CaptionCue
+pub fn finstack_ai_workflow_media_pipeline::CaptionCue::eq(&self, &finstack_ai_workflow_media_pipeline::CaptionCue) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::CaptionCue
+pub fn finstack_ai_workflow_media_pipeline::CaptionCue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::CaptionCue
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::CaptionCue
+pub fn finstack_ai_workflow_media_pipeline::CaptionCue::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::CaptionCue
+pub fn finstack_ai_workflow_media_pipeline::CaptionCue::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::MediaPipelineConfig
+pub finstack_ai_workflow_media_pipeline::MediaPipelineConfig::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
+pub finstack_ai_workflow_media_pipeline::MediaPipelineConfig::compose_tools: alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>
+pub finstack_ai_workflow_media_pipeline::MediaPipelineConfig::limits: finstack_ai_workflow_media_pipeline::PlanLimits
+pub finstack_ai_workflow_media_pipeline::MediaPipelineConfig::media_tools: alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>
+pub finstack_ai_workflow_media_pipeline::MediaPipelineConfig::state: alloc::sync::Arc<dyn finstack_ai_workflow_media_pipeline::RenderStateStore>
+pub struct finstack_ai_workflow_media_pipeline::MediaPipelineDriver
+impl finstack_ai_workflow_media_pipeline::MediaPipelineDriver
+pub async fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::advance(&self, &finstack_ai_runtime::ports::tool::types::ToolCallContext, &str) -> core::result::Result<finstack_ai_workflow_media_pipeline::RenderState, finstack_ai_runtime::ports::tool::error::ToolError>
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::status(&self, &str, &str) -> core::result::Result<finstack_ai_workflow_media_pipeline::RenderState, finstack_ai_runtime::ports::tool::error::ToolError>
+pub async fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::submit_plan(&self, &finstack_ai_runtime::ports::tool::types::ToolCallContext, &[u8]) -> core::result::Result<finstack_ai_workflow_media_pipeline::RenderState, finstack_ai_runtime::ports::tool::error::ToolError>
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::try_new(finstack_ai_workflow_media_pipeline::MediaPipelineConfig) -> core::result::Result<Self, finstack_ai_workflow_media_pipeline::PipelineError>
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::MediaPipelineDriver
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_workflow_media_pipeline::MediaPipelineToolset
+impl finstack_ai_workflow_media_pipeline::MediaPipelineToolset
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineToolset::try_new(alloc::sync::Arc<finstack_ai_workflow_media_pipeline::MediaPipelineDriver>) -> core::result::Result<Self, finstack_ai_workflow_media_pipeline::PipelineError>
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::MediaPipelineToolset
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_workflow_media_pipeline::MediaPipelineToolset
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_workflow_media_pipeline::MediaPipelineToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub struct finstack_ai_workflow_media_pipeline::MemoryRenderStateStore
+impl finstack_ai_workflow_media_pipeline::MemoryRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::new() -> Self
+impl core::default::Default for finstack_ai_workflow_media_pipeline::MemoryRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::default() -> finstack_ai_workflow_media_pipeline::MemoryRenderStateStore
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::MemoryRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_workflow_media_pipeline::RenderStateStore for finstack_ai_workflow_media_pipeline::MemoryRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::insert(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<(), finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::load(&self, &str, &str) -> core::result::Result<core::option::Option<finstack_ai_workflow_media_pipeline::RenderState>, finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::update(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<bool, finstack_ai_workflow_media_pipeline::StateError>
+pub struct finstack_ai_workflow_media_pipeline::MoviePlan
+pub finstack_ai_workflow_media_pipeline::MoviePlan::audio: core::option::Option<finstack_ai_workflow_media_pipeline::PlanAudio>
+pub finstack_ai_workflow_media_pipeline::MoviePlan::defaults: finstack_ai_workflow_media_pipeline::PlanDefaults
+pub finstack_ai_workflow_media_pipeline::MoviePlan::output: finstack_ai_workflow_media_pipeline::PlanOutput
+pub finstack_ai_workflow_media_pipeline::MoviePlan::scenes: alloc::vec::Vec<finstack_ai_workflow_media_pipeline::SceneSpec>
+pub finstack_ai_workflow_media_pipeline::MoviePlan::title: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::MoviePlan::transitions: core::option::Option<alloc::vec::Vec<finstack_ai_workflow_media_pipeline::PlanTransition>>
+pub finstack_ai_workflow_media_pipeline::MoviePlan::version: u32
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::MoviePlan
+pub fn finstack_ai_workflow_media_pipeline::MoviePlan::clone(&self) -> finstack_ai_workflow_media_pipeline::MoviePlan
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::MoviePlan
+pub fn finstack_ai_workflow_media_pipeline::MoviePlan::eq(&self, &finstack_ai_workflow_media_pipeline::MoviePlan) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::MoviePlan
+pub fn finstack_ai_workflow_media_pipeline::MoviePlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::MoviePlan
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::MoviePlan
+pub fn finstack_ai_workflow_media_pipeline::MoviePlan::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::MoviePlan
+pub fn finstack_ai_workflow_media_pipeline::MoviePlan::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::PlanAudio
+pub finstack_ai_workflow_media_pipeline::PlanAudio::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
+pub finstack_ai_workflow_media_pipeline::PlanAudio::mode: alloc::string::String
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::PlanAudio
+pub fn finstack_ai_workflow_media_pipeline::PlanAudio::clone(&self) -> finstack_ai_workflow_media_pipeline::PlanAudio
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::PlanAudio
+pub fn finstack_ai_workflow_media_pipeline::PlanAudio::eq(&self, &finstack_ai_workflow_media_pipeline::PlanAudio) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::PlanAudio
+pub fn finstack_ai_workflow_media_pipeline::PlanAudio::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PlanAudio
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::PlanAudio
+pub fn finstack_ai_workflow_media_pipeline::PlanAudio::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::PlanAudio
+pub fn finstack_ai_workflow_media_pipeline::PlanAudio::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::PlanBudget
+pub finstack_ai_workflow_media_pipeline::PlanBudget::scene_count: usize
+pub finstack_ai_workflow_media_pipeline::PlanBudget::total_video_s: u64
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::PlanBudget
+pub fn finstack_ai_workflow_media_pipeline::PlanBudget::clone(&self) -> finstack_ai_workflow_media_pipeline::PlanBudget
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::PlanBudget
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::PlanBudget
+pub fn finstack_ai_workflow_media_pipeline::PlanBudget::eq(&self, &finstack_ai_workflow_media_pipeline::PlanBudget) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::PlanBudget
+pub fn finstack_ai_workflow_media_pipeline::PlanBudget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_workflow_media_pipeline::PlanBudget
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PlanBudget
+pub struct finstack_ai_workflow_media_pipeline::PlanDefaults
+pub finstack_ai_workflow_media_pipeline::PlanDefaults::aspect_ratio: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::PlanDefaults::image_model: alloc::string::String
+pub finstack_ai_workflow_media_pipeline::PlanDefaults::resolution: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::PlanDefaults::scene_duration_s: u32
+pub finstack_ai_workflow_media_pipeline::PlanDefaults::video_model: alloc::string::String
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::PlanDefaults
+pub fn finstack_ai_workflow_media_pipeline::PlanDefaults::clone(&self) -> finstack_ai_workflow_media_pipeline::PlanDefaults
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::PlanDefaults
+pub fn finstack_ai_workflow_media_pipeline::PlanDefaults::eq(&self, &finstack_ai_workflow_media_pipeline::PlanDefaults) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::PlanDefaults
+pub fn finstack_ai_workflow_media_pipeline::PlanDefaults::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PlanDefaults
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::PlanDefaults
+pub fn finstack_ai_workflow_media_pipeline::PlanDefaults::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::PlanDefaults
+pub fn finstack_ai_workflow_media_pipeline::PlanDefaults::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::PlanLimits
+pub finstack_ai_workflow_media_pipeline::PlanLimits::max_concurrent_jobs: usize
+pub finstack_ai_workflow_media_pipeline::PlanLimits::max_scenes: usize
+pub finstack_ai_workflow_media_pipeline::PlanLimits::max_total_video_s: u64
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::PlanLimits
+pub fn finstack_ai_workflow_media_pipeline::PlanLimits::clone(&self) -> finstack_ai_workflow_media_pipeline::PlanLimits
+impl core::cmp::Eq for finstack_ai_workflow_media_pipeline::PlanLimits
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::PlanLimits
+pub fn finstack_ai_workflow_media_pipeline::PlanLimits::eq(&self, &finstack_ai_workflow_media_pipeline::PlanLimits) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::PlanLimits
+pub fn finstack_ai_workflow_media_pipeline::PlanLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_workflow_media_pipeline::PlanLimits
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PlanLimits
+pub struct finstack_ai_workflow_media_pipeline::PlanOutput
+pub finstack_ai_workflow_media_pipeline::PlanOutput::captions: core::option::Option<finstack_ai_workflow_media_pipeline::CaptionsMode>
+pub finstack_ai_workflow_media_pipeline::PlanOutput::container: alloc::string::String
+pub finstack_ai_workflow_media_pipeline::PlanOutput::fps: core::option::Option<u32>
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::PlanOutput
+pub fn finstack_ai_workflow_media_pipeline::PlanOutput::clone(&self) -> finstack_ai_workflow_media_pipeline::PlanOutput
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::PlanOutput
+pub fn finstack_ai_workflow_media_pipeline::PlanOutput::eq(&self, &finstack_ai_workflow_media_pipeline::PlanOutput) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::PlanOutput
+pub fn finstack_ai_workflow_media_pipeline::PlanOutput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PlanOutput
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::PlanOutput
+pub fn finstack_ai_workflow_media_pipeline::PlanOutput::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::PlanOutput
+pub fn finstack_ai_workflow_media_pipeline::PlanOutput::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::PlanTransition
+pub finstack_ai_workflow_media_pipeline::PlanTransition::after: alloc::string::String
+pub finstack_ai_workflow_media_pipeline::PlanTransition::duration_s: core::option::Option<f64>
+pub finstack_ai_workflow_media_pipeline::PlanTransition::kind: finstack_ai_workflow_media_pipeline::TransitionKindName
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::PlanTransition
+pub fn finstack_ai_workflow_media_pipeline::PlanTransition::clone(&self) -> finstack_ai_workflow_media_pipeline::PlanTransition
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::PlanTransition
+pub fn finstack_ai_workflow_media_pipeline::PlanTransition::eq(&self, &finstack_ai_workflow_media_pipeline::PlanTransition) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::PlanTransition
+pub fn finstack_ai_workflow_media_pipeline::PlanTransition::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PlanTransition
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::PlanTransition
+pub fn finstack_ai_workflow_media_pipeline::PlanTransition::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::PlanTransition
+pub fn finstack_ai_workflow_media_pipeline::PlanTransition::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::RenderState
+pub finstack_ai_workflow_media_pipeline::RenderState::final_artifact: core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_workflow_media_pipeline::RenderState::plan_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_workflow_media_pipeline::RenderState::plan_json: alloc::string::String
+pub finstack_ai_workflow_media_pipeline::RenderState::render_id: alloc::sync::Arc<str>
+pub finstack_ai_workflow_media_pipeline::RenderState::revision: u64
+pub finstack_ai_workflow_media_pipeline::RenderState::scenes: alloc::vec::Vec<finstack_ai_workflow_media_pipeline::SceneState>
+pub finstack_ai_workflow_media_pipeline::RenderState::status: finstack_ai_workflow_media_pipeline::RenderStatus
+pub finstack_ai_workflow_media_pipeline::RenderState::tenant_scope: alloc::sync::Arc<str>
+pub finstack_ai_workflow_media_pipeline::RenderState::transcript_srt_artifact: core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_workflow_media_pipeline::RenderState::transcript_vtt_artifact: core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::RenderState
+pub fn finstack_ai_workflow_media_pipeline::RenderState::clone(&self) -> finstack_ai_workflow_media_pipeline::RenderState
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::RenderState
+pub fn finstack_ai_workflow_media_pipeline::RenderState::eq(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::RenderState
+pub fn finstack_ai_workflow_media_pipeline::RenderState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::RenderState
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::RenderState
+pub fn finstack_ai_workflow_media_pipeline::RenderState::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::RenderState
+pub fn finstack_ai_workflow_media_pipeline::RenderState::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::SceneOverrides
+pub finstack_ai_workflow_media_pipeline::SceneOverrides::image_model: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::SceneOverrides::resolution: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::SceneOverrides::video_model: core::option::Option<alloc::string::String>
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::SceneOverrides
+pub fn finstack_ai_workflow_media_pipeline::SceneOverrides::clone(&self) -> finstack_ai_workflow_media_pipeline::SceneOverrides
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::SceneOverrides
+pub fn finstack_ai_workflow_media_pipeline::SceneOverrides::eq(&self, &finstack_ai_workflow_media_pipeline::SceneOverrides) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::SceneOverrides
+pub fn finstack_ai_workflow_media_pipeline::SceneOverrides::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::SceneOverrides
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::SceneOverrides
+pub fn finstack_ai_workflow_media_pipeline::SceneOverrides::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::SceneOverrides
+pub fn finstack_ai_workflow_media_pipeline::SceneOverrides::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::SceneSpec
+pub finstack_ai_workflow_media_pipeline::SceneSpec::captions: core::option::Option<alloc::vec::Vec<finstack_ai_workflow_media_pipeline::CaptionCue>>
+pub finstack_ai_workflow_media_pipeline::SceneSpec::duration_s: core::option::Option<u32>
+pub finstack_ai_workflow_media_pipeline::SceneSpec::end_frame: core::option::Option<finstack_ai_workflow_media_pipeline::FrameSource>
+pub finstack_ai_workflow_media_pipeline::SceneSpec::id: alloc::string::String
+pub finstack_ai_workflow_media_pipeline::SceneSpec::overrides: core::option::Option<finstack_ai_workflow_media_pipeline::SceneOverrides>
+pub finstack_ai_workflow_media_pipeline::SceneSpec::reference_images: core::option::Option<alloc::vec::Vec<finstack_ai_workflow_media_pipeline::FrameSource>>
+pub finstack_ai_workflow_media_pipeline::SceneSpec::seed: core::option::Option<i64>
+pub finstack_ai_workflow_media_pipeline::SceneSpec::start_frame: finstack_ai_workflow_media_pipeline::FrameSource
+pub finstack_ai_workflow_media_pipeline::SceneSpec::video_prompt: alloc::string::String
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::SceneSpec
+pub fn finstack_ai_workflow_media_pipeline::SceneSpec::clone(&self) -> finstack_ai_workflow_media_pipeline::SceneSpec
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::SceneSpec
+pub fn finstack_ai_workflow_media_pipeline::SceneSpec::eq(&self, &finstack_ai_workflow_media_pipeline::SceneSpec) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::SceneSpec
+pub fn finstack_ai_workflow_media_pipeline::SceneSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::SceneSpec
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::SceneSpec
+pub fn finstack_ai_workflow_media_pipeline::SceneSpec::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::SceneSpec
+pub fn finstack_ai_workflow_media_pipeline::SceneSpec::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::SceneState
+pub finstack_ai_workflow_media_pipeline::SceneState::clip_artifact: core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_workflow_media_pipeline::SceneState::end_frame_artifact: core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_workflow_media_pipeline::SceneState::end_frame_url: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::SceneState::failure: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::SceneState::job_id: core::option::Option<alloc::string::String>
+pub finstack_ai_workflow_media_pipeline::SceneState::resubmitted: bool
+pub finstack_ai_workflow_media_pipeline::SceneState::scene_id: alloc::string::String
+pub finstack_ai_workflow_media_pipeline::SceneState::stage: finstack_ai_workflow_media_pipeline::SceneStage
+pub finstack_ai_workflow_media_pipeline::SceneState::start_frame_artifact: core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_workflow_media_pipeline::SceneState::start_frame_url: core::option::Option<alloc::string::String>
+impl core::clone::Clone for finstack_ai_workflow_media_pipeline::SceneState
+pub fn finstack_ai_workflow_media_pipeline::SceneState::clone(&self) -> finstack_ai_workflow_media_pipeline::SceneState
+impl core::cmp::PartialEq for finstack_ai_workflow_media_pipeline::SceneState
+pub fn finstack_ai_workflow_media_pipeline::SceneState::eq(&self, &finstack_ai_workflow_media_pipeline::SceneState) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_media_pipeline::SceneState
+pub fn finstack_ai_workflow_media_pipeline::SceneState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::SceneState
+impl serde_core::ser::Serialize for finstack_ai_workflow_media_pipeline::SceneState
+pub fn finstack_ai_workflow_media_pipeline::SceneState::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::SceneState
+pub fn finstack_ai_workflow_media_pipeline::SceneState::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_workflow_media_pipeline::SqliteRenderStateStore
+impl finstack_ai_workflow_media_pipeline::SqliteRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_workflow_media_pipeline::StateError>
+impl finstack_ai_workflow_media_pipeline::RenderStateStore for finstack_ai_workflow_media_pipeline::SqliteRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::insert(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<(), finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::load(&self, &str, &str) -> core::result::Result<core::option::Option<finstack_ai_workflow_media_pipeline::RenderState>, finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::update(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<bool, finstack_ai_workflow_media_pipeline::StateError>
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_BUDGET_EXCEEDED: &str
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_CONFIG_INVALID: &str
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_INVALID_ARGUMENTS: &str
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_NOT_FOUND: &str
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_PLAN_INVALID: &str
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_STAGE_FAILED: &str
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_STORE_FAILURE: &str
+pub trait finstack_ai_workflow_media_pipeline::RenderStateStore: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_workflow_media_pipeline::RenderStateStore::insert(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<(), finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::RenderStateStore::load(&self, &str, &str) -> core::result::Result<core::option::Option<finstack_ai_workflow_media_pipeline::RenderState>, finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::RenderStateStore::update(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<bool, finstack_ai_workflow_media_pipeline::StateError>
+impl finstack_ai_workflow_media_pipeline::RenderStateStore for finstack_ai_workflow_media_pipeline::MemoryRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::insert(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<(), finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::load(&self, &str, &str) -> core::result::Result<core::option::Option<finstack_ai_workflow_media_pipeline::RenderState>, finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::MemoryRenderStateStore::update(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<bool, finstack_ai_workflow_media_pipeline::StateError>
+impl finstack_ai_workflow_media_pipeline::RenderStateStore for finstack_ai_workflow_media_pipeline::SqliteRenderStateStore
+pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::insert(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<(), finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::load(&self, &str, &str) -> core::result::Result<core::option::Option<finstack_ai_workflow_media_pipeline::RenderState>, finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::update(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<bool, finstack_ai_workflow_media_pipeline::StateError>
+pub fn finstack_ai_workflow_media_pipeline::validate_plan(&finstack_ai_workflow_media_pipeline::MoviePlan, &finstack_ai_workflow_media_pipeline::PlanLimits) -> core::result::Result<finstack_ai_workflow_media_pipeline::PlanBudget, &'static str>

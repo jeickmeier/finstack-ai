@@ -16,6 +16,32 @@ unpublished.
 
 ### Added
 
+- `finstack-ai-tools-video-compose`: new `extensions/toolsets` leaf. A T1
+  declarative ffmpeg composition toolset (`compose_video`, `probe_media`).
+  Agents submit a bounded JSON spec (clips, `cut` / `crossfade` /
+  `fade_to_black` transitions, audio, burned-in or muxed subtitles, mp4 or
+  webm output); the toolset alone builds the `ffmpeg` invocation, and every
+  input and output moves through an injected `ArtifactStore`. Native-only:
+  it stays off the `wasm-host` feature graph.
+- `finstack-ai-workflow-media-pipeline`: new `extensions/workflow` leaf. A
+  tick-based, resumable MoviePlan driver exposed as `render_movie`,
+  `advance_render`, and `get_render_status`, with adapter-owned render state
+  (`SqliteRenderStateStore`, `MemoryRenderStateStore`), host-set `PlanLimits`,
+  fail-closed plan validation against
+  `schemas/movie-plan/movie-plan.v1.json`, and plan-authored caption cues
+  flattened onto the movie timeline as SRT and VTT sidecars.
+- `finstack-ai-tools-openrouter-media`: video submissions accept generated
+  start and end frame images, and `openrouter_download_video` stages a
+  finished render into the artifact store.
+- `finstack-ai`: new optional features `tool-video-compose` and
+  `workflow-media-pipeline` (both native-only, both in `linked-tools`), plus
+  `VideoComposeSpec` and `MediaPipelineSpec` on `LinkedCommon`. The pipeline
+  registration wires the driver over the constructed OpenRouter media and
+  compose toolsets and the host's artifact store, and fails with
+  `agent_run_invalid_configuration` when any of the three is missing.
+  `finstack-ai-store-artifact` remains host-injected, not an SDK default.
+- Python bindings: every linked agent factory gains `video_compose_*` and
+  `media_pipeline_*` keyword arguments mirroring the new specs.
 - Python binding composition parity: every composable extension a Rust host
   can register now has a native Python surface. New exports —
   `InstructionsMiddleware`, `CompactionMiddleware` (sliding window, large

@@ -1430,7 +1430,7 @@ git commit -m "Prove pipeline resume and fail-closed re-run with golden tests"
 - Modify: `scripts/wasm_package/check.py` — add `finstack-ai-tools-video-compose` and `finstack-ai-workflow-media-pipeline` to `FORBIDDEN_WASM` (line ~19).
 - Modify: `bindings/finstack-ai-python/src/agent.rs` + `bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.pyi` — kwargs mirroring the new spec structs on the same factories that carry the openrouter-media kwargs; a pytest asserting construction succeeds with the pipeline enabled and fails with the mapped configuration error when `ffmpeg_path` is missing.
 - Modify: `bindings/finstack-ai-wasm/src/agent/agent.rs` — new fields rejected with the existing stable native-only error (mirror the E2B handling).
-- Modify: `docs/site/README.md` (add a "Media pipeline" pointer) and create `docs/site/media-pipeline.md` — usage guide: host composition snippet (`LocalArtifactStore::try_new(root).with_max_artifact_bytes(256 * 1024 * 1024)` → media toolset `with_artifact_store` → compose toolset → pipeline driver + tools); the MoviePlan contract with a link to `schemas/movie-plan/movie-plan.v1.json`; scene-prompt authoring guidance (concrete nouns, camera language, consistent style tokens across a scene's two frames, motion described relative to the start frame); caption authoring guidance (short cues of at most ~7 words for short-form, cue timing aligned to scene beats, `output.captions: "burn_in"` recommended for muted autoplay platforms).
+- Modify: `crates/finstack-ai/README.md` (add a "Media pipeline" pointer; the standalone docs site the plan originally named no longer exists, so the SDK crate guide is the live index) and expand `extensions/workflow/finstack-ai-workflow-media-pipeline/README.md` — usage guide: host composition snippet (`LocalArtifactStore::try_new(root).with_max_artifact_bytes(256 * 1024 * 1024)` → media toolset `with_artifact_store` → compose toolset → pipeline driver + tools); the MoviePlan contract with a link to `schemas/movie-plan/movie-plan.v1.json`; scene-prompt authoring guidance (concrete nouns, camera language, consistent style tokens across a scene's two frames, motion described relative to the start frame); caption authoring guidance (short cues of at most ~7 words for short-form, cue timing aligned to scene beats, `output.captions: "burn_in"` recommended for muted autoplay platforms).
 - Modify: `CHANGELOG.md` — one entry per touched/new crate, matching the file's convention.
 
 - [ ] **Step 1: SDK + packaging wiring** (as the file list; keep an E2B-style guard test in the compose crate asserting it stays off the `wasm-host` feature line)
@@ -1449,7 +1449,7 @@ Expected: all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/finstack-ai scripts/wasm_package/check.py bindings docs/site CHANGELOG.md extensions/toolsets/finstack-ai-tools-video-compose
+git add crates/finstack-ai scripts/wasm_package/check.py bindings CHANGELOG.md extensions
 git commit -m "Wire the media pipeline stack through the SDK, bindings, and docs"
 ```
 

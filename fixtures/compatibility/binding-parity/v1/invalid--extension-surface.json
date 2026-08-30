@@ -503,6 +503,34 @@
       }
     },
     {
+      "crate": "finstack-ai-tools-video-compose",
+      "python": {
+        "status": "facade",
+        "surfaces": [
+          "Agent.openrouter"
+        ],
+        "reason": "The native facade composes the compose toolset through the linked factories' video_compose_* options."
+      },
+      "js": {
+        "status": "unavailable",
+        "reason": "Browser hosts have no ambient ffmpeg or filesystem authority."
+      }
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "python": {
+        "status": "facade",
+        "surfaces": [
+          "Agent.openrouter"
+        ],
+        "reason": "The native facade composes the pipeline through the linked factories' media_pipeline_* options."
+      },
+      "js": {
+        "status": "unavailable",
+        "reason": "The pipeline drives native media generation and local ffmpeg renders."
+      }
+    },
+    {
       "crate": "finstack-ai-tools-shell",
       "python": {
         "status": "direct",

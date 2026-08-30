@@ -38,5 +38,6 @@ pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_CREDENTIAL_REQUIR
 pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_ENDPOINT_INVALID: &str
 pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_INVALID_ARGUMENTS: &str
 pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_STORE_REQUIRED: &str
 pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_TIMEOUT: &str
 pub const finstack_ai_tools_openrouter_media::OPENROUTER_MEDIA_TRANSPORT_FAILED: &str
