@@ -25,6 +25,7 @@
 
 mod plan;
 mod state;
+mod subtitles;
 
 pub use plan::{
     CaptionCue, CaptionsMode, FrameSource, MoviePlan, PlanAudio, PlanBudget, PlanDefaults,
