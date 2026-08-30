@@ -10,9 +10,24 @@ use super::super::MemoryStoreError;
 use super::queries::{legacy_record_from_row, sqlite_unavailable, write_record};
 
 /// Applied `PRAGMA user_version` for the current schema.
-const SCHEMA_USER_VERSION: i32 = 2;
+const SCHEMA_USER_VERSION: i32 = 3;
 
-const V2_DDL: &str = "
+/// `PRAGMA user_version` of the last schema without the embedding index.
+const V2_USER_VERSION: i32 = 2;
+
+/// The v3 addition: the per-space embedding index. Shared verbatim between
+/// the fresh-create DDL and the additive v2→v3 migration.
+const EMBEDDINGS_DDL: &str = "
+CREATE TABLE memory_embeddings (
+  scope_digest TEXT NOT NULL, id TEXT NOT NULL, embedder_id TEXT NOT NULL,
+  dimensions INTEGER NOT NULL, source_digest TEXT NOT NULL,
+  vector BLOB NOT NULL, embedded_at INTEGER NOT NULL,
+  PRIMARY KEY (scope_digest, id, embedder_id)
+);
+CREATE INDEX memory_embeddings_space ON memory_embeddings(embedder_id, scope_digest);
+";
+
+const V3_BASE_DDL: &str = "
 CREATE TABLE memory_records (
   scope_digest TEXT NOT NULL,
   id TEXT NOT NULL,
@@ -114,17 +129,20 @@ CREATE TABLE memory_artifact_outbox (
 );
 ";
 
-/// Durable [`MemoryStore`] backed by a single `SQLite` connection with an
-/// FTS5 full-text index.
-///
-/// Available only on native targets with the `sqlite` feature enabled.
+/// Create or migrate the store's schema to [`SCHEMA_USER_VERSION`], keyed by
+/// the file-owned `PRAGMA user_version`. A version newer than this build
+/// understands fails closed (`memory_store_sqlite_schema_unsupported`).
 pub(super) fn apply_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
     let version: i32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| sqlite_unavailable())?;
     match version {
-        0 => create_v2_schema(connection),
-        1 => migrate_v1_schema(connection),
+        0 => create_v3_schema(connection),
+        1 => {
+            migrate_v1_schema(connection)?;
+            migrate_v2_to_v3_schema(connection)
+        }
+        V2_USER_VERSION => migrate_v2_to_v3_schema(connection),
         SCHEMA_USER_VERSION => Ok(()),
         _ => Err(MemoryStoreError::Unavailable {
             message: Arc::from("memory_store_sqlite_schema_unsupported"),
@@ -132,17 +150,39 @@ pub(super) fn apply_schema(connection: &Connection) -> Result<(), MemoryStoreErr
     }
 }
 
-pub(super) fn create_v2_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
+fn create_v3_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
     let transaction = connection
         .unchecked_transaction()
         .map_err(|_| sqlite_unavailable())?;
     transaction
-        .execute_batch(V2_DDL)
+        .execute_batch(V3_BASE_DDL)
         .map_err(|_| sqlite_unavailable())?;
-    finish_schema_transaction(transaction)
+    transaction
+        .execute_batch(EMBEDDINGS_DDL)
+        .map_err(|_| sqlite_unavailable())?;
+    finish_schema_transaction(transaction, SCHEMA_USER_VERSION)
 }
 
-pub(super) fn migrate_v1_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
+/// Additive v2→v3 step: create the embedding index, verify integrity, bump
+/// the version. Pre-existing records gain no rows, so the schema upgrade
+/// itself makes every record pending for every space (backfill by drain).
+fn migrate_v2_to_v3_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|_| sqlite_unavailable())?;
+    transaction
+        .execute_batch(EMBEDDINGS_DDL)
+        .map_err(|_| sqlite_unavailable())?;
+    let quick_check: String = transaction
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .map_err(|_| sqlite_unavailable())?;
+    if quick_check != "ok" {
+        return Err(sqlite_unavailable());
+    }
+    finish_schema_transaction(transaction, SCHEMA_USER_VERSION)
+}
+
+fn migrate_v1_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
     let legacy_blobs: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM memory_records WHERE blob_ref_json IS NOT NULL",
@@ -184,7 +224,9 @@ pub(super) fn migrate_v1_schema(connection: &Connection) -> Result<(), MemorySto
     if quick_check != "ok" {
         return Err(sqlite_unavailable());
     }
-    finish_schema_transaction(transaction)
+    // The v1 migration produces an exact v2 database; the shared v2→v3 step
+    // then finishes the chain.
+    finish_schema_transaction(transaction, V2_USER_VERSION)
 }
 
 fn load_legacy_records(
@@ -200,11 +242,12 @@ fn load_legacy_records(
         .collect()
 }
 
-pub(super) fn finish_schema_transaction(
+fn finish_schema_transaction(
     transaction: Transaction<'_>,
+    version: i32,
 ) -> Result<(), MemoryStoreError> {
     transaction
-        .pragma_update(None, "user_version", SCHEMA_USER_VERSION)
+        .pragma_update(None, "user_version", version)
         .map_err(|_| sqlite_unavailable())?;
     transaction.commit().map_err(|_| sqlite_unavailable())
 }

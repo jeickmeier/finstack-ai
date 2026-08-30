@@ -778,8 +778,33 @@ async fn sqlite_correction_requires_exact_scope_and_clean_links() {
     );
 }
 
+/// `PRAGMA user_version` of the database at `path`, via a raw connection.
+fn schema_version(path: &std::path::Path) -> i32 {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap()
+}
+
+/// Row count of `memory_embeddings`; panics when the table is missing.
+fn embeddings_row_count(path: &std::path::Path) -> i64 {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .query_row("SELECT COUNT(*) FROM memory_embeddings", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+}
+
+fn quick_check(path: &std::path::Path) -> String {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .unwrap()
+}
+
 #[tokio::test]
-async fn sqlite_v1_schema_migrates_to_v2() {
+async fn sqlite_v1_schema_migrates_to_v3() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("memory-v1.sqlite");
     let connection = rusqlite::Connection::open(&path).unwrap();
@@ -813,11 +838,165 @@ async fn sqlite_v1_schema_migrates_to_v2() {
         .await
         .unwrap();
     drop(store);
-    let connection = rusqlite::Connection::open(&path).unwrap();
-    let version: i32 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
+    assert_eq!(schema_version(&path), 3);
+    assert_eq!(embeddings_row_count(&path), 0);
+    assert_eq!(quick_check(&path), "ok");
+}
+
+/// Fabricate the exact v2 layout the previous release wrote, seeded with
+/// `record` in the records table, FTS index, and keyword index.
+fn fabricate_v2_database(path: &std::path::Path, record: &MemoryRecord) {
+    let scope_digest = record.scope.digest().unwrap().to_hex();
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE memory_records (
+                   scope_digest TEXT NOT NULL, id TEXT NOT NULL,
+                   tenant TEXT NOT NULL, user TEXT, agent TEXT, workspace TEXT,
+                   body_inline TEXT, blob_ref_json TEXT, preview TEXT NOT NULL,
+                   sensitivity TEXT NOT NULL, keywords_json TEXT NOT NULL,
+                   provenance_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+                   last_confirmed_at INTEGER NOT NULL, supersedes TEXT,
+                   superseded_by TEXT, retention_json TEXT NOT NULL,
+                   expires_at INTEGER, tombstoned INTEGER NOT NULL DEFAULT 0
+                     CHECK (tombstoned IN (0, 1)),
+                   CHECK ((body_inline IS NULL) != (blob_ref_json IS NULL)),
+                   PRIMARY KEY (scope_digest, id)
+                 );
+                 CREATE INDEX memory_records_scope ON memory_records(scope_digest, id);
+                 CREATE INDEX memory_records_expiry
+                   ON memory_records(expires_at) WHERE expires_at IS NOT NULL;
+                 CREATE VIRTUAL TABLE memory_fts USING fts5(
+                   scope_digest UNINDEXED, id UNINDEXED, preview, body, keywords
+                 );
+                 CREATE TABLE memory_keywords (
+                   scope_digest TEXT NOT NULL, id TEXT NOT NULL,
+                   ordinal INTEGER NOT NULL, keyword TEXT NOT NULL,
+                   keyword_folded TEXT NOT NULL,
+                   PRIMARY KEY (scope_digest, id, ordinal)
+                 );
+                 CREATE INDEX memory_keywords_lookup
+                   ON memory_keywords(scope_digest, keyword_folded, id);
+                 CREATE TABLE memory_idempotency (
+                   scope_digest TEXT NOT NULL, key TEXT NOT NULL,
+                   fingerprint TEXT NOT NULL, applied_at INTEGER NOT NULL,
+                   PRIMARY KEY (scope_digest, key)
+                 );
+                 CREATE TABLE memory_artifact_outbox (
+                   sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                   action_id TEXT NOT NULL UNIQUE,
+                   action_json TEXT NOT NULL,
+                   created_at INTEGER NOT NULL
+                 );
+                 PRAGMA user_version = 2;",
+        )
         .unwrap();
-    assert_eq!(version, 2);
+    connection
+        .execute(
+            "INSERT INTO memory_records
+                 (scope_digest, id, tenant, user, agent, workspace, body_inline, blob_ref_json,
+                  preview, sensitivity, keywords_json, provenance_json, created_at,
+                  last_confirmed_at, supersedes, superseded_by, retention_json, expires_at,
+                  tombstoned)
+                 VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, NULL, ?5, ?6, ?7, ?8, 0, 0,
+                         NULL, NULL, ?9, NULL, 0)",
+            rusqlite::params![
+                scope_digest,
+                record.id.as_str(),
+                record.scope.tenant(),
+                "body text",
+                record.preview.as_ref(),
+                serde_json::to_string(&record.sensitivity).unwrap(),
+                serde_json::to_string(&record.keywords).unwrap(),
+                serde_json::to_string(&record.provenance).unwrap(),
+                serde_json::to_string(&record.retention).unwrap(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO memory_fts (scope_digest, id, preview, body, keywords)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                scope_digest,
+                record.id.as_str(),
+                record.preview.as_ref(),
+                "body text",
+                "alpha"
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO memory_keywords
+                 (scope_digest, id, ordinal, keyword, keyword_folded)
+                 VALUES (?1, ?2, 0, 'alpha', 'alpha')",
+            rusqlite::params![scope_digest, record.id.as_str()],
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn sqlite_v2_schema_migrates_to_v3_preserving_data() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-v2.sqlite");
+    fabricate_v2_database(&path, &crate::tests::sample_record("m1", "t1"));
+
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let survivor = store
+        .get(scope.clone(), MemoryId::parse("m1").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(survivor.preview.as_ref(), "body text");
+    let full_text = store
+        .search(scope.clone(), MemoryQuery::FullText(Arc::from("body")), 8)
+        .await
+        .unwrap();
+    assert_eq!(full_text.len(), 1);
+    let keywords = store
+        .search(
+            scope,
+            MemoryQuery::Keywords(Arc::from([Arc::<str>::from("alpha")])),
+            8,
+        )
+        .await
+        .unwrap();
+    assert_eq!(keywords.len(), 1);
+    drop(store);
+
+    assert_eq!(schema_version(&path), 3);
+    assert_eq!(embeddings_row_count(&path), 0);
+    assert_eq!(quick_check(&path), "ok");
+}
+
+#[test]
+fn sqlite_fresh_open_creates_v3_directly() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-fresh.sqlite");
+    drop(SqliteMemoryStore::try_open(&path).unwrap());
+    assert_eq!(schema_version(&path), 3);
+    assert_eq!(embeddings_row_count(&path), 0);
+    assert_eq!(quick_check(&path), "ok");
+}
+
+#[test]
+fn sqlite_future_schema_version_is_unsupported() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-future.sqlite");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("PRAGMA user_version = 4;")
+        .unwrap();
+    drop(connection);
+    let error = SqliteMemoryStore::try_open(&path).err().unwrap();
+    assert_eq!(
+        error,
+        MemoryStoreError::Unavailable {
+            message: Arc::from("memory_store_sqlite_schema_unsupported"),
+        }
+    );
 }
 
 #[tokio::test]
