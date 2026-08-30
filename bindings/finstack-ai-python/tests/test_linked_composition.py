@@ -343,3 +343,56 @@ def test_ollama_observer_receives_loopback_events() -> None:
 
     assert text == "hello world"
     assert any(event.get("kind") == "run_completed" for event in seen)
+
+
+def test_openrouter_constructs_with_the_media_pipeline(tmp_path: Path) -> None:
+    async def construct() -> None:
+        agent = await finstack_ai.Agent.openrouter(
+            "fixture-model",
+            api_key="sk-openrouter-secret-canary-056",
+            openrouter_media_api_key="sk-openrouter-media-canary-056",
+            video_compose_ffmpeg_path="/usr/bin/ffmpeg",
+            video_compose_ffprobe_path="/usr/bin/ffprobe",
+            video_compose_scratch_dir=str(tmp_path / "scratch"),
+            video_compose_render_timeout_s=300,
+            media_pipeline_max_scenes=4,
+            media_pipeline_max_total_video_s=120,
+            media_pipeline_max_concurrent_jobs=2,
+            media_pipeline_sqlite_state_path=str(tmp_path / "render-state.sqlite3"),
+            artifact_path=str(tmp_path / "artifacts"),
+        )
+        assert agent.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
+def test_media_pipeline_without_ffmpeg_path_is_a_configuration_error(
+    tmp_path: Path,
+) -> None:
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="video_compose"):
+            await finstack_ai.Agent.openrouter(
+                "fixture-model",
+                api_key="sk-openrouter-secret-canary-056",
+                openrouter_media_api_key="sk-openrouter-media-canary-056",
+                media_pipeline_max_scenes=4,
+                media_pipeline_max_total_video_s=120,
+                media_pipeline_max_concurrent_jobs=2,
+                artifact_path=str(tmp_path / "artifacts"),
+            )
+
+    asyncio.run(construct())
+
+
+def test_partial_video_compose_kwargs_are_rejected(tmp_path: Path) -> None:
+    async def construct() -> None:
+        with pytest.raises(ValueError, match="video_compose_ffmpeg_path"):
+            await finstack_ai.Agent.openrouter(
+                "fixture-model",
+                api_key="sk-openrouter-secret-canary-056",
+                video_compose_ffprobe_path="/usr/bin/ffprobe",
+                video_compose_scratch_dir=str(tmp_path / "scratch"),
+                artifact_path=str(tmp_path / "artifacts"),
+            )
+
+    asyncio.run(construct())

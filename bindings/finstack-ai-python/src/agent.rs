@@ -12,8 +12,9 @@ use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
     DEFAULT_MAX_CYCLES, DEFAULT_RUN_TIMEOUT, GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy,
-    LinkedAgent, LinkedAgentPorts, LinkedCommon, LinkedProviderSpec, OllamaAgentSpec,
-    OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
+    LinkedAgent, LinkedAgentPorts, LinkedCommon, LinkedProviderSpec, MediaPipelineSpec,
+    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
+    VideoComposeSpec,
 };
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, CompactionAuthorization, ComponentId,
@@ -302,7 +303,7 @@ impl PyAgent {
     /// `https://api.openai.com/v1/responses` and does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, reasoning, media toolsets, and primary port components distinctly"
@@ -320,6 +321,14 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
+        video_compose_ffmpeg_path: Option<String>,
+        video_compose_ffprobe_path: Option<String>,
+        video_compose_scratch_dir: Option<String>,
+        video_compose_render_timeout_s: Option<u64>,
+        media_pipeline_max_scenes: Option<usize>,
+        media_pipeline_max_total_video_s: Option<u64>,
+        media_pipeline_max_concurrent_jobs: Option<usize>,
+        media_pipeline_sqlite_state_path: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -336,6 +345,18 @@ impl PyAgent {
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
+        )?;
+        let video_compose = video_compose_spec(
+            video_compose_ffmpeg_path,
+            video_compose_ffprobe_path,
+            video_compose_scratch_dir,
+            video_compose_render_timeout_s,
+        )?;
+        let media_pipeline = media_pipeline_spec(
+            media_pipeline_max_scenes,
+            media_pipeline_max_total_video_s,
+            media_pipeline_max_concurrent_jobs,
+            media_pipeline_sqlite_state_path,
         )?;
         let (ports, artifact_store, skills) = linked_ports(
             py,
@@ -360,6 +381,8 @@ impl PyAgent {
                 media_tools,
                 common: LinkedCommon {
                     openrouter_media,
+                    video_compose,
+                    media_pipeline,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -393,7 +416,7 @@ impl PyAgent {
     /// `openrouter_media_*` registers the same toolset from an explicit key
     /// and cannot be combined with `media_tools`.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, attribution, reasoning, media toolset, and primary port components distinctly"
@@ -413,6 +436,14 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
+        video_compose_ffmpeg_path: Option<String>,
+        video_compose_ffprobe_path: Option<String>,
+        video_compose_scratch_dir: Option<String>,
+        video_compose_render_timeout_s: Option<u64>,
+        media_pipeline_max_scenes: Option<usize>,
+        media_pipeline_max_total_video_s: Option<u64>,
+        media_pipeline_max_concurrent_jobs: Option<usize>,
+        media_pipeline_sqlite_state_path: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -429,6 +460,18 @@ impl PyAgent {
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
+        )?;
+        let video_compose = video_compose_spec(
+            video_compose_ffmpeg_path,
+            video_compose_ffprobe_path,
+            video_compose_scratch_dir,
+            video_compose_render_timeout_s,
+        )?;
+        let media_pipeline = media_pipeline_spec(
+            media_pipeline_max_scenes,
+            media_pipeline_max_total_video_s,
+            media_pipeline_max_concurrent_jobs,
+            media_pipeline_sqlite_state_path,
         )?;
         let (ports, artifact_store, skills) = linked_ports(
             py,
@@ -461,6 +504,8 @@ impl PyAgent {
                     child_runs,
                     approval_grant,
                     openrouter_media,
+                    video_compose,
+                    media_pipeline,
                 },
             }))
             .await;
@@ -482,7 +527,7 @@ impl PyAgent {
     /// required when `api_key` is set; the binding does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
@@ -498,6 +543,14 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
+        video_compose_ffmpeg_path: Option<String>,
+        video_compose_ffprobe_path: Option<String>,
+        video_compose_scratch_dir: Option<String>,
+        video_compose_render_timeout_s: Option<u64>,
+        media_pipeline_max_scenes: Option<usize>,
+        media_pipeline_max_total_video_s: Option<u64>,
+        media_pipeline_max_concurrent_jobs: Option<usize>,
+        media_pipeline_sqlite_state_path: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -514,6 +567,18 @@ impl PyAgent {
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
+        )?;
+        let video_compose = video_compose_spec(
+            video_compose_ffmpeg_path,
+            video_compose_ffprobe_path,
+            video_compose_scratch_dir,
+            video_compose_render_timeout_s,
+        )?;
+        let media_pipeline = media_pipeline_spec(
+            media_pipeline_max_scenes,
+            media_pipeline_max_total_video_s,
+            media_pipeline_max_concurrent_jobs,
+            media_pipeline_sqlite_state_path,
         )?;
         let (ports, artifact_store, skills) = linked_ports(
             py,
@@ -536,6 +601,8 @@ impl PyAgent {
                 api_key,
                 common: LinkedCommon {
                     openrouter_media,
+                    video_compose,
+                    media_pipeline,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -564,7 +631,7 @@ impl PyAgent {
     /// variables. Does not hardcode the Google host: `endpoint` is passed
     /// straight into the provider's `GeminiConfig::try_new`.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
@@ -580,6 +647,14 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
+        video_compose_ffmpeg_path: Option<String>,
+        video_compose_ffprobe_path: Option<String>,
+        video_compose_scratch_dir: Option<String>,
+        video_compose_render_timeout_s: Option<u64>,
+        media_pipeline_max_scenes: Option<usize>,
+        media_pipeline_max_total_video_s: Option<u64>,
+        media_pipeline_max_concurrent_jobs: Option<usize>,
+        media_pipeline_sqlite_state_path: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -596,6 +671,18 @@ impl PyAgent {
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
+        )?;
+        let video_compose = video_compose_spec(
+            video_compose_ffmpeg_path,
+            video_compose_ffprobe_path,
+            video_compose_scratch_dir,
+            video_compose_render_timeout_s,
+        )?;
+        let media_pipeline = media_pipeline_spec(
+            media_pipeline_max_scenes,
+            media_pipeline_max_total_video_s,
+            media_pipeline_max_concurrent_jobs,
+            media_pipeline_sqlite_state_path,
         )?;
         let (ports, artifact_store, skills) = linked_ports(
             py,
@@ -618,6 +705,8 @@ impl PyAgent {
                 api_key,
                 common: LinkedCommon {
                     openrouter_media,
+                    video_compose,
+                    media_pipeline,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -644,7 +733,7 @@ impl PyAgent {
     /// Python port lists are keyword-only. This factory does not accept an
     /// API key.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards media toolset and primary port components distinctly"
@@ -659,6 +748,14 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
+        video_compose_ffmpeg_path: Option<String>,
+        video_compose_ffprobe_path: Option<String>,
+        video_compose_scratch_dir: Option<String>,
+        video_compose_render_timeout_s: Option<u64>,
+        media_pipeline_max_scenes: Option<usize>,
+        media_pipeline_max_total_video_s: Option<u64>,
+        media_pipeline_max_concurrent_jobs: Option<usize>,
+        media_pipeline_sqlite_state_path: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -675,6 +772,18 @@ impl PyAgent {
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
+        )?;
+        let video_compose = video_compose_spec(
+            video_compose_ffmpeg_path,
+            video_compose_ffprobe_path,
+            video_compose_scratch_dir,
+            video_compose_render_timeout_s,
+        )?;
+        let media_pipeline = media_pipeline_spec(
+            media_pipeline_max_scenes,
+            media_pipeline_max_total_video_s,
+            media_pipeline_max_concurrent_jobs,
+            media_pipeline_sqlite_state_path,
         )?;
         let (ports, artifact_store, skills) = linked_ports(
             py,
@@ -696,6 +805,8 @@ impl PyAgent {
                 model,
                 common: LinkedCommon {
                     openrouter_media,
+                    video_compose,
+                    media_pipeline,
                     instruction,
                     capabilities,
                     active_capabilities,
@@ -723,7 +834,7 @@ impl PyAgent {
     /// required. `openai_chat` is a configuration error. The binding does
     /// not read environment variables.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards gateway route, auth, media toolset, and primary port components distinctly"
@@ -743,6 +854,14 @@ impl PyAgent {
         openrouter_media_api_key: Option<String>,
         openrouter_media_referer: Option<String>,
         openrouter_media_title: Option<String>,
+        video_compose_ffmpeg_path: Option<String>,
+        video_compose_ffprobe_path: Option<String>,
+        video_compose_scratch_dir: Option<String>,
+        video_compose_render_timeout_s: Option<u64>,
+        media_pipeline_max_scenes: Option<usize>,
+        media_pipeline_max_total_video_s: Option<u64>,
+        media_pipeline_max_concurrent_jobs: Option<usize>,
+        media_pipeline_sqlite_state_path: Option<String>,
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -759,6 +878,18 @@ impl PyAgent {
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
+        )?;
+        let video_compose = video_compose_spec(
+            video_compose_ffmpeg_path,
+            video_compose_ffprobe_path,
+            video_compose_scratch_dir,
+            video_compose_render_timeout_s,
+        )?;
+        let media_pipeline = media_pipeline_spec(
+            media_pipeline_max_scenes,
+            media_pipeline_max_total_video_s,
+            media_pipeline_max_concurrent_jobs,
+            media_pipeline_sqlite_state_path,
         )?;
         let (ports, artifact_store, skills) = linked_ports(
             py,
@@ -791,6 +922,8 @@ impl PyAgent {
                     child_runs,
                     approval_grant,
                     openrouter_media,
+                    video_compose,
+                    media_pipeline,
                 },
             }))
             .await;
@@ -1497,6 +1630,8 @@ async fn build_python_agent(
                 child_runs,
                 approval_grant,
                 openrouter_media: None,
+                video_compose: None,
+                media_pipeline: None,
             },
             model_name,
             empty_model_settings()?,
@@ -1559,6 +1694,63 @@ fn openrouter_media_spec(
             "openrouter_media_referer/openrouter_media_title require openrouter_media_api_key",
         )),
         None => Ok(None),
+    }
+}
+
+/// Map the `video_compose_*` kwargs onto the facade spec.
+///
+/// The four fields are one unit: a partial route would have to invent an
+/// ffprobe path, a scratch directory, or a render ceiling, and this binding
+/// never invents host paths.
+fn video_compose_spec(
+    ffmpeg_path: Option<String>,
+    ffprobe_path: Option<String>,
+    scratch_dir: Option<String>,
+    render_timeout_s: Option<u64>,
+) -> PyResult<Option<VideoComposeSpec>> {
+    match (ffmpeg_path, ffprobe_path, scratch_dir, render_timeout_s) {
+        (None, None, None, None) => Ok(None),
+        (Some(ffmpeg_path), Some(ffprobe_path), Some(scratch_dir), Some(render_timeout_s)) => {
+            Ok(Some(VideoComposeSpec {
+                ffmpeg_path: ffmpeg_path.into(),
+                ffprobe_path: ffprobe_path.into(),
+                scratch_dir: scratch_dir.into(),
+                render_timeout_s,
+            }))
+        }
+        _ => Err(PyValueError::new_err(
+            "video_compose_ffmpeg_path, video_compose_ffprobe_path, \
+             video_compose_scratch_dir, and video_compose_render_timeout_s \
+             must be set together",
+        )),
+    }
+}
+
+/// Map the `media_pipeline_*` kwargs onto the facade spec.
+///
+/// The three limits are one unit; the sqlite path stays optional because
+/// process-local render state is a valid, documented choice.
+fn media_pipeline_spec(
+    max_scenes: Option<usize>,
+    max_total_video_s: Option<u64>,
+    max_concurrent_jobs: Option<usize>,
+    sqlite_state_path: Option<String>,
+) -> PyResult<Option<MediaPipelineSpec>> {
+    match (max_scenes, max_total_video_s, max_concurrent_jobs) {
+        (None, None, None) if sqlite_state_path.is_none() => Ok(None),
+        (Some(max_scenes), Some(max_total_video_s), Some(max_concurrent_jobs)) => {
+            Ok(Some(MediaPipelineSpec {
+                max_scenes,
+                max_total_video_s,
+                max_concurrent_jobs,
+                sqlite_state_path: sqlite_state_path.map(Into::into),
+            }))
+        }
+        _ => Err(PyValueError::new_err(
+            "media_pipeline_max_scenes, media_pipeline_max_total_video_s, and \
+             media_pipeline_max_concurrent_jobs must be set together to enable \
+             the media pipeline",
+        )),
     }
 }
 

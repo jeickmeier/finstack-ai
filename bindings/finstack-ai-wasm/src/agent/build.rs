@@ -168,7 +168,12 @@ pub(super) async fn build_agent(
             },
             child_runs,
             approval_grant,
+            // Native-only toolsets. `Agent.create` exposes no field for
+            // them, and the facade rejects a non-`None` value on
+            // `wasm-host` with `agent_run_unsupported_plan`.
             openrouter_media: None,
+            video_compose: None,
+            media_pipeline: None,
         },
         model_name.clone(),
         settings,

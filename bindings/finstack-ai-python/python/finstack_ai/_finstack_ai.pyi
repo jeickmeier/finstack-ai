@@ -1688,6 +1688,14 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
+        video_compose_ffmpeg_path: str | None = None,
+        video_compose_ffprobe_path: str | None = None,
+        video_compose_scratch_dir: str | None = None,
+        video_compose_render_timeout_s: int | None = None,
+        media_pipeline_max_scenes: int | None = None,
+        media_pipeline_max_total_video_s: int | None = None,
+        media_pipeline_max_concurrent_jobs: int | None = None,
+        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -1765,6 +1773,30 @@ class Agent:
             openrouter_media_title: Optional non-secret ``X-Title``
                 attribution header for the OpenRouter media toolset.
                 Requires ``openrouter_media_api_key``.
+            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
+                Registers the local composition toolset
+                (``compose_video``, ``probe_media``). Set together with
+                ``video_compose_ffprobe_path``,
+                ``video_compose_scratch_dir``, and
+                ``video_compose_render_timeout_s``.
+            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
+            video_compose_scratch_dir: Directory for per-render scratch
+                files. Created when missing.
+            video_compose_render_timeout_s: Wall-clock ceiling for one
+                render, in seconds. At most one hour.
+            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
+                Registers the pipeline toolset (``render_movie``,
+                ``advance_render``, ``get_render_status``). Set together
+                with ``media_pipeline_max_total_video_s`` and
+                ``media_pipeline_max_concurrent_jobs``. Requires the
+                OpenRouter media toolset and the compose kwargs above.
+            media_pipeline_max_total_video_s: Maximum total video
+                duration, in seconds, across all scenes.
+            media_pipeline_max_concurrent_jobs: Maximum concurrent
+                render jobs.
+            media_pipeline_sqlite_state_path: Optional sqlite file for
+                durable render state. ``None`` keeps process-local
+                state that a restart cannot resume.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -1793,7 +1825,9 @@ class Agent:
                 port registration is invalid.
             ValueError: ``openrouter_media_referer`` or
                 ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``.
+                ``openrouter_media_api_key``, or the
+                ``video_compose_*`` or ``media_pipeline_*`` limit
+                kwargs are set only partially.
         """
     @staticmethod
     async def openrouter(
@@ -1811,6 +1845,14 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
+        video_compose_ffmpeg_path: str | None = None,
+        video_compose_ffprobe_path: str | None = None,
+        video_compose_scratch_dir: str | None = None,
+        video_compose_render_timeout_s: int | None = None,
+        media_pipeline_max_scenes: int | None = None,
+        media_pipeline_max_total_video_s: int | None = None,
+        media_pipeline_max_concurrent_jobs: int | None = None,
+        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -1895,6 +1937,30 @@ class Agent:
             openrouter_media_title: Optional non-secret ``X-Title``
                 attribution header for the OpenRouter media toolset.
                 Requires ``openrouter_media_api_key``.
+            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
+                Registers the local composition toolset
+                (``compose_video``, ``probe_media``). Set together with
+                ``video_compose_ffprobe_path``,
+                ``video_compose_scratch_dir``, and
+                ``video_compose_render_timeout_s``.
+            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
+            video_compose_scratch_dir: Directory for per-render scratch
+                files. Created when missing.
+            video_compose_render_timeout_s: Wall-clock ceiling for one
+                render, in seconds. At most one hour.
+            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
+                Registers the pipeline toolset (``render_movie``,
+                ``advance_render``, ``get_render_status``). Set together
+                with ``media_pipeline_max_total_video_s`` and
+                ``media_pipeline_max_concurrent_jobs``. Requires the
+                OpenRouter media toolset and the compose kwargs above.
+            media_pipeline_max_total_video_s: Maximum total video
+                duration, in seconds, across all scenes.
+            media_pipeline_max_concurrent_jobs: Maximum concurrent
+                render jobs.
+            media_pipeline_sqlite_state_path: Optional sqlite file for
+                durable render state. ``None`` keeps process-local
+                state that a restart cannot resume.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -1925,7 +1991,9 @@ class Agent:
                 set.
             ValueError: ``openrouter_media_referer`` or
                 ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``.
+                ``openrouter_media_api_key``, or the
+                ``video_compose_*`` or ``media_pipeline_*`` limit
+                kwargs are set only partially.
         """
     @staticmethod
     async def anthropic(
@@ -1939,6 +2007,14 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
+        video_compose_ffmpeg_path: str | None = None,
+        video_compose_ffprobe_path: str | None = None,
+        video_compose_scratch_dir: str | None = None,
+        video_compose_render_timeout_s: int | None = None,
+        media_pipeline_max_scenes: int | None = None,
+        media_pipeline_max_total_video_s: int | None = None,
+        media_pipeline_max_concurrent_jobs: int | None = None,
+        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -2009,6 +2085,30 @@ class Agent:
             openrouter_media_title: Optional non-secret ``X-Title``
                 attribution header for the OpenRouter media toolset.
                 Requires ``openrouter_media_api_key``.
+            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
+                Registers the local composition toolset
+                (``compose_video``, ``probe_media``). Set together with
+                ``video_compose_ffprobe_path``,
+                ``video_compose_scratch_dir``, and
+                ``video_compose_render_timeout_s``.
+            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
+            video_compose_scratch_dir: Directory for per-render scratch
+                files. Created when missing.
+            video_compose_render_timeout_s: Wall-clock ceiling for one
+                render, in seconds. At most one hour.
+            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
+                Registers the pipeline toolset (``render_movie``,
+                ``advance_render``, ``get_render_status``). Set together
+                with ``media_pipeline_max_total_video_s`` and
+                ``media_pipeline_max_concurrent_jobs``. Requires the
+                OpenRouter media toolset and the compose kwargs above.
+            media_pipeline_max_total_video_s: Maximum total video
+                duration, in seconds, across all scenes.
+            media_pipeline_max_concurrent_jobs: Maximum concurrent
+                render jobs.
+            media_pipeline_sqlite_state_path: Optional sqlite file for
+                durable render state. ``None`` keeps process-local
+                state that a restart cannot resume.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -2037,7 +2137,9 @@ class Agent:
                 set, or port registration is invalid.
             ValueError: ``openrouter_media_referer`` or
                 ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``.
+                ``openrouter_media_api_key``, or the
+                ``video_compose_*`` or ``media_pipeline_*`` limit
+                kwargs are set only partially.
         """
     @staticmethod
     async def gemini(
@@ -2051,6 +2153,14 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
+        video_compose_ffmpeg_path: str | None = None,
+        video_compose_ffprobe_path: str | None = None,
+        video_compose_scratch_dir: str | None = None,
+        video_compose_render_timeout_s: int | None = None,
+        media_pipeline_max_scenes: int | None = None,
+        media_pipeline_max_total_video_s: int | None = None,
+        media_pipeline_max_concurrent_jobs: int | None = None,
+        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -2122,6 +2232,30 @@ class Agent:
             openrouter_media_title: Optional non-secret ``X-Title``
                 attribution header for the OpenRouter media toolset.
                 Requires ``openrouter_media_api_key``.
+            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
+                Registers the local composition toolset
+                (``compose_video``, ``probe_media``). Set together with
+                ``video_compose_ffprobe_path``,
+                ``video_compose_scratch_dir``, and
+                ``video_compose_render_timeout_s``.
+            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
+            video_compose_scratch_dir: Directory for per-render scratch
+                files. Created when missing.
+            video_compose_render_timeout_s: Wall-clock ceiling for one
+                render, in seconds. At most one hour.
+            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
+                Registers the pipeline toolset (``render_movie``,
+                ``advance_render``, ``get_render_status``). Set together
+                with ``media_pipeline_max_total_video_s`` and
+                ``media_pipeline_max_concurrent_jobs``. Requires the
+                OpenRouter media toolset and the compose kwargs above.
+            media_pipeline_max_total_video_s: Maximum total video
+                duration, in seconds, across all scenes.
+            media_pipeline_max_concurrent_jobs: Maximum concurrent
+                render jobs.
+            media_pipeline_sqlite_state_path: Optional sqlite file for
+                durable render state. ``None`` keeps process-local
+                state that a restart cannot resume.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -2150,7 +2284,9 @@ class Agent:
                 set, or port registration is invalid.
             ValueError: ``openrouter_media_referer`` or
                 ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``.
+                ``openrouter_media_api_key``, or the
+                ``video_compose_*`` or ``media_pipeline_*`` limit
+                kwargs are set only partially.
         """
     @staticmethod
     async def ollama(
@@ -2163,6 +2299,14 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
+        video_compose_ffmpeg_path: str | None = None,
+        video_compose_ffprobe_path: str | None = None,
+        video_compose_scratch_dir: str | None = None,
+        video_compose_render_timeout_s: int | None = None,
+        media_pipeline_max_scenes: int | None = None,
+        media_pipeline_max_total_video_s: int | None = None,
+        media_pipeline_max_concurrent_jobs: int | None = None,
+        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -2226,6 +2370,30 @@ class Agent:
             openrouter_media_title: Optional non-secret ``X-Title``
                 attribution header for the OpenRouter media toolset.
                 Requires ``openrouter_media_api_key``.
+            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
+                Registers the local composition toolset
+                (``compose_video``, ``probe_media``). Set together with
+                ``video_compose_ffprobe_path``,
+                ``video_compose_scratch_dir``, and
+                ``video_compose_render_timeout_s``.
+            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
+            video_compose_scratch_dir: Directory for per-render scratch
+                files. Created when missing.
+            video_compose_render_timeout_s: Wall-clock ceiling for one
+                render, in seconds. At most one hour.
+            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
+                Registers the pipeline toolset (``render_movie``,
+                ``advance_render``, ``get_render_status``). Set together
+                with ``media_pipeline_max_total_video_s`` and
+                ``media_pipeline_max_concurrent_jobs``. Requires the
+                OpenRouter media toolset and the compose kwargs above.
+            media_pipeline_max_total_video_s: Maximum total video
+                duration, in seconds, across all scenes.
+            media_pipeline_max_concurrent_jobs: Maximum concurrent
+                render jobs.
+            media_pipeline_sqlite_state_path: Optional sqlite file for
+                durable render state. ``None`` keeps process-local
+                state that a restart cannot resume.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -2254,7 +2422,9 @@ class Agent:
                 registration is invalid.
             ValueError: ``openrouter_media_referer`` or
                 ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``.
+                ``openrouter_media_api_key``, or the
+                ``video_compose_*`` or ``media_pipeline_*`` limit
+                kwargs are set only partially.
         """
     @staticmethod
     async def gateway(
@@ -2272,6 +2442,14 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
+        video_compose_ffmpeg_path: str | None = None,
+        video_compose_ffprobe_path: str | None = None,
+        video_compose_scratch_dir: str | None = None,
+        video_compose_render_timeout_s: int | None = None,
+        media_pipeline_max_scenes: int | None = None,
+        media_pipeline_max_total_video_s: int | None = None,
+        media_pipeline_max_concurrent_jobs: int | None = None,
+        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
@@ -2344,6 +2522,30 @@ class Agent:
             openrouter_media_title: Optional non-secret ``X-Title``
                 attribution header for the OpenRouter media toolset.
                 Requires ``openrouter_media_api_key``.
+            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
+                Registers the local composition toolset
+                (``compose_video``, ``probe_media``). Set together with
+                ``video_compose_ffprobe_path``,
+                ``video_compose_scratch_dir``, and
+                ``video_compose_render_timeout_s``.
+            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
+            video_compose_scratch_dir: Directory for per-render scratch
+                files. Created when missing.
+            video_compose_render_timeout_s: Wall-clock ceiling for one
+                render, in seconds. At most one hour.
+            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
+                Registers the pipeline toolset (``render_movie``,
+                ``advance_render``, ``get_render_status``). Set together
+                with ``media_pipeline_max_total_video_s`` and
+                ``media_pipeline_max_concurrent_jobs``. Requires the
+                OpenRouter media toolset and the compose kwargs above.
+            media_pipeline_max_total_video_s: Maximum total video
+                duration, in seconds, across all scenes.
+            media_pipeline_max_concurrent_jobs: Maximum concurrent
+                render jobs.
+            media_pipeline_sqlite_state_path: Optional sqlite file for
+                durable render state. ``None`` keeps process-local
+                state that a restart cannot resume.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -2373,7 +2575,9 @@ class Agent:
                 invalid.
             ValueError: ``openrouter_media_referer`` or
                 ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``.
+                ``openrouter_media_api_key``, or the
+                ``video_compose_*`` or ``media_pipeline_*`` limit
+                kwargs are set only partially.
         """
     @staticmethod
     async def from_python(
