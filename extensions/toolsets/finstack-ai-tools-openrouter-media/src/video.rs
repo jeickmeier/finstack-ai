@@ -25,19 +25,11 @@ pub(crate) const VIDEO_STATUS_TOOL_ID: &str = "finstack.tools.openrouter_get_vid
 pub(crate) const VIDEO_STATUS_TOOL_NAME: &str = "openrouter_get_video";
 
 /// Ceiling for inline base64 data-URI frame/reference images.
-#[cfg_attr(test, allow(dead_code))]
 pub(crate) const MAX_INLINE_IMAGE_BYTES: usize = 8 * 1_048_576;
 
 /// Test-shrunk inline-image ceiling so oversize-rejection tests stay fast.
 fn inline_image_ceiling() -> usize {
-    #[cfg(test)]
-    {
-        1_024
-    }
-    #[cfg(not(test))]
-    {
-        MAX_INLINE_IMAGE_BYTES
-    }
+    if cfg!(test) { 1_024 } else { MAX_INLINE_IMAGE_BYTES }
 }
 
 /// One frame or reference image: exactly one of a URL or a stored artifact.
@@ -76,7 +68,7 @@ struct VideoArguments {
 }
 
 /// The Global Constraints artifact scope shared by artifact-input tools.
-fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
+pub(crate) fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
     ArtifactScope {
         tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
         session_id: ctx.run.locator.session_id,
