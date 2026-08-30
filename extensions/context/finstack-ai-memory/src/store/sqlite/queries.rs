@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::{ArtifactRef, Digest, Sensitivity, Timestamp};
 use finstack_ai_runtime::artifact::ArtifactScope;
 
@@ -13,10 +14,10 @@ use crate::record::{
 };
 
 use super::super::{
-    MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction, MemoryHit,
-    MemoryListing, MemoryPage, MemoryQuery, MemoryStoreError, MemoryStoreLimits, PutOutcome,
-    artifact_transition_actions, normalize_search_tokens, validate_embedder_id,
-    validate_new_record_lifecycle,
+    EmbeddingSource, MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction,
+    MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStoreError, MemoryStoreLimits,
+    PutOutcome, artifact_transition_actions, embedding_source_digest, embedding_source_text,
+    normalize_search_tokens, validate_embedder_id, validate_new_record_lifecycle,
 };
 
 pub(super) fn sqlite_put(
@@ -988,6 +989,206 @@ pub(super) fn acknowledge_artifact_action(
         )
         .map_err(|_| sqlite_unavailable())?;
     Ok(())
+}
+
+/// [`MemoryStore::pending_embedding_sources`] over the anti-join: live
+/// records in any scope whose `memory_embeddings` row for the space is
+/// absent **or** carries a source digest that no longer matches the record's
+/// current content. Stable order `(scope_digest, id)`; the batch is capped
+/// by [`MemoryStoreLimits::max_search_results`].
+///
+/// [`MemoryStore::pending_embedding_sources`]: super::super::MemoryStore::pending_embedding_sources
+pub(super) fn pending_embedding_sources(
+    connection: &Connection,
+    embedder_id: &str,
+    limit: usize,
+    now: Timestamp,
+    limits: MemoryStoreLimits,
+) -> Result<Vec<EmbeddingSource>, MemoryStoreError> {
+    validate_embedder_id(embedder_id)?;
+    let limit = limit.min(limits.max_search_results);
+    let mut statement = connection
+        .prepare(
+            "SELECT r.*, e.source_digest AS indexed_source_digest
+             FROM memory_records r
+             LEFT JOIN memory_embeddings e
+               ON e.scope_digest = r.scope_digest AND e.id = r.id AND e.embedder_id = ?1
+             WHERE r.tombstoned = 0 AND r.superseded_by IS NULL
+               AND (r.expires_at IS NULL OR r.expires_at > ?2)
+             ORDER BY r.scope_digest, r.id",
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    let rows = statement
+        .query_map(params![embedder_id, now.as_unix_ms()], |row| {
+            let record = record_from_row(row)?;
+            let indexed: Option<String> = row.get("indexed_source_digest")?;
+            Ok((record, indexed))
+        })
+        .map_err(|_| sqlite_unavailable())?;
+    let mut sources = Vec::new();
+    for row in rows {
+        if sources.len() >= limit {
+            break;
+        }
+        let (record, indexed) = row.map_err(|_| sqlite_unavailable())?;
+        let text = embedding_source_text(&record);
+        let source_digest = embedding_source_digest(&text)?;
+        // Anti-join on current content: a record is pending unless the space
+        // holds a row for it whose stored digest still matches, so a stale
+        // row re-surfaces its record.
+        if indexed.is_some_and(|stored| stored == source_digest.to_hex()) {
+            continue;
+        }
+        sources.push(EmbeddingSource {
+            scope: record.scope,
+            id: record.id,
+            text: Arc::from(text),
+            source_digest,
+        });
+    }
+    Ok(sources)
+}
+
+/// One embedding write, exactly as [`MemoryStore::store_embedding`] received
+/// it, carried whole from the worker command into the query.
+///
+/// [`MemoryStore::store_embedding`]: super::super::MemoryStore::store_embedding
+pub(super) struct EmbeddingWrite {
+    pub(super) embedder_id: Arc<str>,
+    pub(super) scope: MemoryScope,
+    pub(super) id: MemoryId,
+    pub(super) source_digest: Digest,
+    pub(super) vector: EmbeddingVector,
+}
+
+/// [`MemoryStore::store_embedding`]: dimension and space-capacity checks,
+/// then the staleness guard, then an `INSERT OR REPLACE` of the
+/// unit-normalized little-endian f32 BLOB — all in one transaction.
+///
+/// [`MemoryStore::store_embedding`]: super::super::MemoryStore::store_embedding
+pub(super) fn store_embedding(
+    connection: &mut Connection,
+    write: &EmbeddingWrite,
+    now: Timestamp,
+    limits: MemoryStoreLimits,
+) -> Result<(), MemoryStoreError> {
+    validate_embedder_id(&write.embedder_id)?;
+    validate_scope(&write.scope)?;
+    if write.vector.dimensions() > limits.max_embedding_dimensions {
+        return Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_exceeded",
+        });
+    }
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| sqlite_unavailable())?;
+    match space_dimensions(&transaction, &write.embedder_id)? {
+        // The first vector stored in a space fixes its dimensionality.
+        Some(dimensions) if dimensions != write.vector.dimensions() => {
+            return Err(MemoryStoreError::InvalidRequest {
+                reason: "memory_embedding_dimensions_mismatch",
+            });
+        }
+        Some(_) => {}
+        None => reserve_embedding_space(&transaction, limits)?,
+    }
+    // Staleness guard: only a live record whose current source digest still
+    // matches takes the write; anything else is a silent no-op and the
+    // anti-join re-surfaces the record.
+    let Some(record) = fetch_record(&transaction, &write.scope, &write.id, now)? else {
+        return transaction.commit().map_err(|_| sqlite_unavailable());
+    };
+    if record.tombstoned || record.superseded_by.is_some() {
+        return transaction.commit().map_err(|_| sqlite_unavailable());
+    }
+    if embedding_source_digest(&embedding_source_text(&record))? != write.source_digest {
+        return transaction.commit().map_err(|_| sqlite_unavailable());
+    }
+    let unit_vector = write.vector.unit_normalized();
+    transaction
+        .execute(
+            "INSERT OR REPLACE INTO memory_embeddings
+             (scope_digest, id, embedder_id, dimensions, source_digest, vector, embedded_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                scope_key(&write.scope)?,
+                write.id.as_str(),
+                write.embedder_id.as_ref(),
+                i64::try_from(unit_vector.dimensions()).unwrap_or(i64::MAX),
+                write.source_digest.to_hex(),
+                vector_to_blob(&unit_vector),
+                now.as_unix_ms(),
+            ],
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    transaction.commit().map_err(|_| sqlite_unavailable())
+}
+
+/// [`MemoryStore::forget_embedding_space`]: drop every row of one space
+/// (embedder rotation); its records become pending again.
+///
+/// [`MemoryStore::forget_embedding_space`]: super::super::MemoryStore::forget_embedding_space
+pub(super) fn forget_embedding_space(
+    connection: &Connection,
+    embedder_id: &str,
+) -> Result<(), MemoryStoreError> {
+    validate_embedder_id(embedder_id)?;
+    connection
+        .execute(
+            "DELETE FROM memory_embeddings WHERE embedder_id = ?1",
+            params![embedder_id],
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    Ok(())
+}
+
+/// Dimensionality of the space `embedder_id`, fixed by its first stored row
+/// (every row in a space carries equal dimensions by construction); `None`
+/// when the space holds no rows.
+fn space_dimensions(
+    connection: &Connection,
+    embedder_id: &str,
+) -> Result<Option<usize>, MemoryStoreError> {
+    let dimensions: Option<i64> = connection
+        .query_row(
+            "SELECT dimensions FROM memory_embeddings WHERE embedder_id = ?1 LIMIT 1",
+            params![embedder_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| sqlite_unavailable())?;
+    Ok(dimensions.map(|value| usize::try_from(value).unwrap_or(usize::MAX)))
+}
+
+/// Fail closed when creating one more space would exceed the cap. Spaces
+/// are derived from live rows, so dropping a space frees its slot.
+fn reserve_embedding_space(
+    transaction: &Transaction<'_>,
+    limits: MemoryStoreLimits,
+) -> Result<(), MemoryStoreError> {
+    let spaces: i64 = transaction
+        .query_row(
+            "SELECT COUNT(DISTINCT embedder_id) FROM memory_embeddings",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    if usize::try_from(spaces).unwrap_or(usize::MAX) >= limits.max_embedding_spaces {
+        return Err(MemoryStoreError::CapacityExceeded {
+            resource: "embedding_spaces",
+            limit: u64::try_from(limits.max_embedding_spaces).unwrap_or(u64::MAX),
+        });
+    }
+    Ok(())
+}
+
+/// Encode a vector as the little-endian f32 BLOB the schema stores.
+fn vector_to_blob(vector: &EmbeddingVector) -> Vec<u8> {
+    let mut blob = Vec::with_capacity(vector.dimensions().saturating_mul(4));
+    for component in vector.as_slice() {
+        blob.extend_from_slice(&component.to_le_bytes());
+    }
+    blob
 }
 
 fn reserve_receipt(

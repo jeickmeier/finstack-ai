@@ -3,6 +3,8 @@ use crate::store::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+use finstack_ai_embeddings::embedder::{HashEmbedder, TextEmbedder};
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::{Metadata, RunId, Sensitivity, SessionId, TIMESTAMP_MAX_MS, Timestamp};
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{ArtifactMetadata, ArtifactScope, stage_required_artifact};
@@ -1248,4 +1250,466 @@ async fn sqlite_artifact_outbox_survives_restart() {
 
     let reopened = SqliteMemoryStore::try_open(&path).unwrap();
     assert_eq!(reopened.pending_artifact_actions(8).await.unwrap(), before);
+}
+
+fn unit(components: Vec<f32>) -> EmbeddingVector {
+    EmbeddingVector::try_new(components)
+        .unwrap()
+        .unit_normalized()
+}
+
+async fn source_digest_of(
+    store: &dyn MemoryStore,
+    scope: &MemoryScope,
+    id: &str,
+) -> finstack_ai_kernel::Digest {
+    let record = store
+        .get(scope.clone(), MemoryId::parse(id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    embedding_source_digest(&embedding_source_text(&record)).unwrap()
+}
+
+async fn embed_record(
+    store: &dyn MemoryStore,
+    scope: &MemoryScope,
+    id: &str,
+    space: &str,
+    vector: EmbeddingVector,
+) {
+    let digest = source_digest_of(store, scope, id).await;
+    store
+        .store_embedding(
+            Arc::from(space),
+            scope.clone(),
+            MemoryId::parse(id).unwrap(),
+            digest,
+            vector,
+        )
+        .await
+        .unwrap();
+}
+
+fn pending_ids(sources: &[EmbeddingSource]) -> Vec<&str> {
+    sources.iter().map(|source| source.id.as_str()).collect()
+}
+
+#[tokio::test]
+async fn sqlite_pending_embedding_sources_anti_join_per_space() {
+    let store = SqliteMemoryStore::try_open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m1", "m2"]);
+    assert_eq!(pending[0].text.as_ref(), "body text\nbody text\nalpha");
+    assert_eq!(
+        pending[0].source_digest,
+        embedding_source_digest("body text\nbody text\nalpha").unwrap()
+    );
+    assert_eq!(pending[0].scope, scope);
+
+    // Pending is derived per space: embedding m1 into one space leaves the
+    // other space's anti-join untouched.
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m2"]);
+    let other_space = store
+        .pending_embedding_sources(Arc::from(SPACE_B), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&other_space), ["m1", "m2"]);
+
+    // Dead records are never pending; the limit bounds the batch.
+    store
+        .forget(
+            Arc::from("k3"),
+            scope.clone(),
+            MemoryId::parse("m2").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        store
+            .pending_embedding_sources(Arc::from(SPACE_A), 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let limited = store
+        .pending_embedding_sources(Arc::from(SPACE_B), 1)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&limited), ["m1"]);
+
+    // A rewritten record re-appears: the forget evicted m1's row, and the
+    // revived id is pending again in every space.
+    store
+        .forget(
+            Arc::from("k4"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k5"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m1"]);
+
+    let invalid = store.pending_embedding_sources(Arc::from(""), 8).await;
+    assert_eq!(
+        invalid,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedder_id_invalid",
+        })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_pending_includes_records_with_stale_index_rows() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-stale.sqlite");
+    {
+        let store = SqliteMemoryStore::try_open(&path).unwrap();
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+            .await
+            .unwrap();
+    }
+    // A row whose stored digest no longer matches the record's content must
+    // re-surface the record even though the space holds a row for it.
+    seed_embedding_row(&path, "t1", "m1", SPACE_A);
+
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m1"]);
+
+    // Re-embedding under the current digest replaces the stale row.
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    assert!(
+        store
+            .pending_embedding_sources(Arc::from(SPACE_A), 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn sqlite_pending_batch_is_capped_by_max_search_results() {
+    let limits = MemoryStoreLimits {
+        max_search_results: 1,
+        ..MemoryStoreLimits::default()
+    };
+    let store = controlled_sqlite(Arc::new(AtomicI64::new(0)), limits);
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m1"]);
+}
+
+#[tokio::test]
+async fn sqlite_store_embedding_digest_guard_skips_rewritten_and_dead_records() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-guard.sqlite");
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    let stale = source_digest_of(&store, &scope, "m1").await;
+
+    // The record is corrected mid-reconcile: the superseded id, a missing
+    // id, and the live replacement under a mismatched digest are all silent
+    // no-ops.
+    store
+        .correct(
+            Arc::from("k2"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+            crate::tests::sample_record("m2", "t1"),
+        )
+        .await
+        .unwrap();
+    store
+        .store_embedding(
+            Arc::from(SPACE_A),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+            stale,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+    store
+        .store_embedding(
+            Arc::from(SPACE_A),
+            scope.clone(),
+            MemoryId::parse("missing").unwrap(),
+            stale,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+    let mismatched = embedding_source_digest("something else entirely").unwrap();
+    store
+        .store_embedding(
+            Arc::from(SPACE_A),
+            scope.clone(),
+            MemoryId::parse("m2").unwrap(),
+            mismatched,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+    // The replacement stays pending until a current-digest write lands.
+    let pending = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending), ["m2"]);
+    embed_record(&store, &scope, "m2", SPACE_A, unit(vec![1.0, 0.0])).await;
+    drop(store);
+
+    assert_eq!(embedding_row_keys(&path), [pair("m2", SPACE_A)]);
+}
+
+#[tokio::test]
+async fn sqlite_first_vector_fixes_space_dimensionality() {
+    let store = SqliteMemoryStore::try_open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+
+    let digest = source_digest_of(&store, &scope, "m2").await;
+    assert_eq!(
+        store
+            .store_embedding(
+                Arc::from(SPACE_A),
+                scope.clone(),
+                MemoryId::parse("m2").unwrap(),
+                digest,
+                unit(vec![1.0, 0.0, 0.0]),
+            )
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_mismatch",
+        })
+    );
+
+    let narrow = controlled_sqlite(
+        Arc::new(AtomicI64::new(0)),
+        MemoryStoreLimits {
+            max_embedding_dimensions: 1,
+            ..MemoryStoreLimits::default()
+        },
+    );
+    assert_eq!(
+        narrow
+            .store_embedding(
+                Arc::from(SPACE_A),
+                scope,
+                MemoryId::parse("m1").unwrap(),
+                digest,
+                unit(vec![1.0, 0.0]),
+            )
+            .await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedding_dimensions_exceeded",
+        })
+    );
+}
+
+#[tokio::test]
+async fn sqlite_embedding_space_capacity_is_enforced() {
+    let store = controlled_sqlite(
+        Arc::new(AtomicI64::new(0)),
+        MemoryStoreLimits {
+            max_embedding_spaces: 1,
+            ..MemoryStoreLimits::default()
+        },
+    );
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+
+    let digest = source_digest_of(&store, &scope, "m1").await;
+    assert_eq!(
+        store
+            .store_embedding(
+                Arc::from(SPACE_B),
+                scope.clone(),
+                MemoryId::parse("m1").unwrap(),
+                digest,
+                unit(vec![1.0, 0.0]),
+            )
+            .await,
+        Err(MemoryStoreError::CapacityExceeded {
+            resource: "embedding_spaces",
+            limit: 1,
+        })
+    );
+
+    // Dropping the space releases its slot: the index is derived data.
+    store
+        .forget_embedding_space(Arc::from(SPACE_A))
+        .await
+        .unwrap();
+    store
+        .store_embedding(
+            Arc::from(SPACE_B),
+            scope,
+            MemoryId::parse("m1").unwrap(),
+            digest,
+            unit(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn sqlite_embedding_rows_persist_across_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-durable.sqlite");
+    let scope = MemoryScope::try_new("t1").unwrap();
+    {
+        let store = SqliteMemoryStore::try_open(&path).unwrap();
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+            .await
+            .unwrap();
+        embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    }
+
+    let reopened = SqliteMemoryStore::try_open(&path).unwrap();
+    assert!(
+        reopened
+            .pending_embedding_sources(Arc::from(SPACE_A), 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    drop(reopened);
+    assert_eq!(embedding_row_keys(&path), [pair("m1", SPACE_A)]);
+}
+
+#[tokio::test]
+async fn sqlite_forget_embedding_space_empties_only_that_space() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-rotate.sqlite");
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope, "m1", SPACE_B, unit(vec![0.0, 1.0])).await;
+
+    store
+        .forget_embedding_space(Arc::from(SPACE_A))
+        .await
+        .unwrap();
+    let pending_a = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 8)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending_a), ["m1"]);
+    assert!(
+        store
+            .pending_embedding_sources(Arc::from(SPACE_B), 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store.forget_embedding_space(Arc::from("")).await,
+        Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_embedder_id_invalid",
+        })
+    );
+    drop(store);
+    assert_eq!(embedding_row_keys(&path), [pair("m1", SPACE_B)]);
+}
+
+#[tokio::test]
+async fn sqlite_reconcile_memory_embeddings_drains_and_is_idempotent() {
+    let store = SqliteMemoryStore::try_open_in_memory().unwrap();
+    for id in ["m1", "m2", "m3"] {
+        store
+            .put(
+                Arc::from(format!("k-{id}")),
+                crate::tests::sample_record(id, "t1"),
+            )
+            .await
+            .unwrap();
+    }
+    let embedder = HashEmbedder::try_new(16).unwrap();
+    let space = embedder.descriptor().embedder_id;
+
+    // A bounded batch drains incrementally and resumes across calls.
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 2).await,
+        Ok(2)
+    );
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 2).await,
+        Ok(1)
+    );
+    // Re-running against a drained index applies nothing.
+    assert_eq!(
+        reconcile_memory_embeddings(&store, &embedder, 8).await,
+        Ok(0)
+    );
+    assert!(
+        store
+            .pending_embedding_sources(Arc::clone(&space), 8)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

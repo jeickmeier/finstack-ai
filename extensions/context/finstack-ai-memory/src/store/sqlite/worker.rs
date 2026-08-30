@@ -7,18 +7,20 @@ use std::time::Duration;
 use rusqlite::Connection;
 use tokio::sync::{mpsc, oneshot};
 
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::Digest;
 
 use crate::record::{MemoryClock, MemoryId, MemoryRecord, MemoryScope, system_clock};
 use finstack_ai_runtime::ports::PortFuture;
 
 use super::super::{
-    MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStore,
-    MemoryStoreDescriptor, MemoryStoreError, MemoryStoreLimits, PutOutcome,
+    EmbeddingSource, MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage, MemoryQuery,
+    MemoryStore, MemoryStoreDescriptor, MemoryStoreError, MemoryStoreLimits, PutOutcome,
 };
 use super::queries::{
-    acknowledge_artifact_action, pending_artifact_actions, sqlite_correct, sqlite_forget,
-    sqlite_get, sqlite_list, sqlite_put, sqlite_search, sqlite_unavailable,
+    EmbeddingWrite, acknowledge_artifact_action, forget_embedding_space, pending_artifact_actions,
+    pending_embedding_sources, sqlite_correct, sqlite_forget, sqlite_get, sqlite_list, sqlite_put,
+    sqlite_search, sqlite_unavailable, store_embedding,
 };
 use super::schema::{apply_schema, ensure_store_identity, ensure_v2_auxiliary_tables};
 
@@ -212,6 +214,70 @@ impl MemoryStore for SqliteMemoryStore {
             receive.await.map_err(|_| sqlite_unavailable())?
         })
     }
+
+    fn pending_embedding_sources(
+        &self,
+        embedder_id: Arc<str>,
+        limit: usize,
+    ) -> PortFuture<Result<Vec<EmbeddingSource>, MemoryStoreError>> {
+        let sender = self.sender.clone();
+        Box::pin(async move {
+            let sender = sender.ok_or_else(sqlite_unavailable)?;
+            let (reply, receive) = oneshot::channel();
+            sender
+                .send(Command::PendingEmbeddingSources {
+                    embedder_id,
+                    limit,
+                    reply,
+                })
+                .await
+                .map_err(|_| sqlite_unavailable())?;
+            receive.await.map_err(|_| sqlite_unavailable())?
+        })
+    }
+
+    fn store_embedding(
+        &self,
+        embedder_id: Arc<str>,
+        scope: MemoryScope,
+        id: MemoryId,
+        source_digest: Digest,
+        vector: EmbeddingVector,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        let sender = self.sender.clone();
+        let write = EmbeddingWrite {
+            embedder_id,
+            scope,
+            id,
+            source_digest,
+            vector,
+        };
+        Box::pin(async move {
+            let sender = sender.ok_or_else(sqlite_unavailable)?;
+            let (reply, receive) = oneshot::channel();
+            sender
+                .send(Command::StoreEmbedding { write, reply })
+                .await
+                .map_err(|_| sqlite_unavailable())?;
+            receive.await.map_err(|_| sqlite_unavailable())?
+        })
+    }
+
+    fn forget_embedding_space(
+        &self,
+        embedder_id: Arc<str>,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        let sender = self.sender.clone();
+        Box::pin(async move {
+            let sender = sender.ok_or_else(sqlite_unavailable)?;
+            let (reply, receive) = oneshot::channel();
+            sender
+                .send(Command::ForgetEmbeddingSpace { embedder_id, reply })
+                .await
+                .map_err(|_| sqlite_unavailable())?;
+            receive.await.map_err(|_| sqlite_unavailable())?
+        })
+    }
 }
 
 enum Command {
@@ -255,6 +321,19 @@ enum Command {
     },
     AcknowledgeArtifactAction {
         action_id: Digest,
+        reply: oneshot::Sender<Result<(), MemoryStoreError>>,
+    },
+    PendingEmbeddingSources {
+        embedder_id: Arc<str>,
+        limit: usize,
+        reply: oneshot::Sender<Result<Vec<EmbeddingSource>, MemoryStoreError>>,
+    },
+    StoreEmbedding {
+        write: EmbeddingWrite,
+        reply: oneshot::Sender<Result<(), MemoryStoreError>>,
+    },
+    ForgetEmbeddingSpace {
+        embedder_id: Arc<str>,
         reply: oneshot::Sender<Result<(), MemoryStoreError>>,
     },
 }
@@ -429,6 +508,25 @@ fn run_worker(
             }
             Command::AcknowledgeArtifactAction { action_id, reply } => {
                 let _ = reply.send(acknowledge_artifact_action(&connection, action_id));
+            }
+            Command::PendingEmbeddingSources {
+                embedder_id,
+                limit,
+                reply,
+            } => {
+                let _ = reply.send(pending_embedding_sources(
+                    &connection,
+                    &embedder_id,
+                    limit,
+                    now,
+                    limits,
+                ));
+            }
+            Command::StoreEmbedding { write, reply } => {
+                let _ = reply.send(store_embedding(&mut connection, &write, now, limits));
+            }
+            Command::ForgetEmbeddingSpace { embedder_id, reply } => {
+                let _ = reply.send(forget_embedding_space(&connection, &embedder_id));
             }
         }
     }
