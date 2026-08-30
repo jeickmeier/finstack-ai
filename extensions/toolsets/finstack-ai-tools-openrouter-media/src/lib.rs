@@ -75,8 +75,9 @@ use crate::image::{IMAGE_TOOL_ID, IMAGE_TOOL_NAME, handle_image};
 use crate::speech::{SPEECH_TOOL_ID, SPEECH_TOOL_NAME, handle_speech};
 use crate::transcribe::{TRANSCRIBE_TOOL_ID, TRANSCRIBE_TOOL_NAME, handle_transcribe};
 use crate::video::{
-    VIDEO_STATUS_TOOL_ID, VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_ID, VIDEO_TOOL_NAME,
-    handle_video_status, handle_video_submit,
+    VIDEO_DOWNLOAD_TOOL_ID, VIDEO_DOWNLOAD_TOOL_NAME, VIDEO_STATUS_TOOL_ID, VIDEO_STATUS_TOOL_NAME,
+    VIDEO_TOOL_ID, VIDEO_TOOL_NAME, handle_video_download, handle_video_status,
+    handle_video_submit,
 };
 
 pub use crate::config::{
@@ -93,6 +94,7 @@ pub struct OpenRouterMediaToolset {
     image_tool_id: ToolId,
     video_tool_id: ToolId,
     video_status_tool_id: ToolId,
+    video_download_tool_id: ToolId,
     speech_tool_id: ToolId,
     transcribe_tool_id: ToolId,
     authorization: HeaderValue,
@@ -167,6 +169,11 @@ impl OpenRouterMediaToolset {
                 reason: "invalid_tool_id",
             })?;
         let video_status_tool_id = ToolId::parse(VIDEO_STATUS_TOOL_ID).map_err(|_| {
+            OpenRouterMediaError::EndpointInvalid {
+                reason: "invalid_tool_id",
+            }
+        })?;
+        let video_download_tool_id = ToolId::parse(VIDEO_DOWNLOAD_TOOL_ID).map_err(|_| {
             OpenRouterMediaError::EndpointInvalid {
                 reason: "invalid_tool_id",
             }
@@ -296,6 +303,41 @@ impl OpenRouterMediaToolset {
                 reason: "invalid_tool_spec",
             })?;
 
+        let video_download_spec = ToolSpec {
+            id: video_download_tool_id.clone(),
+            model_name: Arc::from(VIDEO_DOWNLOAD_TOOL_NAME),
+            title: Arc::from("OpenRouter download video"),
+            description: Arc::from(
+                "Download one completed OpenRouter video job's content into the configured artifact store and return the artifact reference. Requires openrouter_get_video to report status completed first.",
+            ),
+            input_schema: RawJson::parse(
+                br#"{"additionalProperties":false,"properties":{"id":{"description":"Job id returned by openrouter_generate_video.","minLength":1,"type":"string"}},"required":["id"],"type":"object"}"#,
+            )
+            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
+                reason: "invalid_input_schema",
+            })?,
+            output_schema: Some(
+                RawJson::parse(
+                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the video bytes.","type":"object"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["artifact","media_type","byte_length"],"type":"object"}"#,
+                )
+                .map_err(|_| OpenRouterMediaError::EndpointInvalid {
+                    reason: "invalid_output_schema",
+                })?,
+            ),
+            execution: ToolExecutionMode::Sequential,
+            side_effect: SideEffectClass::NonIdempotentWrite,
+            retry_safety: RetrySafety::AtMostOnce,
+            approval: paid_approval.clone(),
+            max_result_bytes: max_result_bytes_u64,
+            metadata: Metadata::empty(),
+            deferral: ToolDeferralSupport::Never,
+        };
+        video_download_spec
+            .validate()
+            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
+                reason: "invalid_tool_spec",
+            })?;
+
         let speech_spec = ToolSpec {
             id: speech_tool_id.clone(),
             model_name: Arc::from(SPEECH_TOOL_NAME),
@@ -392,12 +434,14 @@ impl OpenRouterMediaToolset {
                 image_spec,
                 video_spec,
                 video_status_spec,
+                video_download_spec,
                 speech_spec,
                 transcribe_spec,
             ]),
             image_tool_id,
             video_tool_id,
             video_status_tool_id,
+            video_download_tool_id,
             speech_tool_id,
             transcribe_tool_id,
             authorization,
@@ -448,6 +492,7 @@ impl Toolset for OpenRouterMediaToolset {
         let image_tool_id = self.image_tool_id.clone();
         let video_tool_id = self.video_tool_id.clone();
         let video_status_tool_id = self.video_status_tool_id.clone();
+        let video_download_tool_id = self.video_download_tool_id.clone();
         let speech_tool_id = self.speech_tool_id.clone();
         let transcribe_tool_id = self.transcribe_tool_id.clone();
         Box::pin(async move {
@@ -489,6 +534,23 @@ impl Toolset for OpenRouterMediaToolset {
                         referer.as_deref(),
                         title.as_deref(),
                         &endpoint,
+                        &ctx,
+                        call.call.arguments().as_bytes(),
+                    )
+                    .await?,
+                    artifact: None,
+                }
+            } else if call.tool_id == video_download_tool_id
+                && tool_name == VIDEO_DOWNLOAD_TOOL_NAME
+            {
+                DeliveredMedia {
+                    value: handle_video_download(
+                        &client,
+                        &authorization,
+                        referer.as_deref(),
+                        title.as_deref(),
+                        &endpoint,
+                        artifact_store.as_ref(),
                         &ctx,
                         call.call.arguments().as_bytes(),
                     )
@@ -582,7 +644,7 @@ mod tests {
     use super::{
         IMAGE_TOOL_NAME, OPENROUTER_MEDIA_CREDENTIAL_REQUIRED, OpenRouterMediaConfig,
         OpenRouterMediaError, OpenRouterMediaToolset, SPEECH_TOOL_NAME, TRANSCRIBE_TOOL_NAME,
-        VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME,
+        VIDEO_DOWNLOAD_TOOL_NAME, VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME,
     };
 
     use finstack_ai_runtime::artifact::{
@@ -1347,6 +1409,122 @@ mod tests {
             seen_rx.try_recv().is_err(),
             "no HTTP must reach the fixture"
         );
+    }
+
+    #[tokio::test]
+    async fn download_video_stages_the_content() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let body = vec![7_u8; 1_024];
+        let server = tokio::spawn(async move {
+            respond(&listener, &seen_tx, 200, &body, "video/mp4").await;
+        });
+        let store = Arc::new(InProcessArtifactStore::default());
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+        let spec = find_spec(&tools.tools(), VIDEO_DOWNLOAD_TOOL_NAME);
+        let call = call_for(&spec, br#"{"id":"vid-1"}"#);
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(result) = item else {
+            panic!("expected completion");
+        };
+        let payload: serde_json::Value =
+            serde_json::from_slice(result.output.as_bytes()).expect("json");
+        assert_eq!(payload["media_type"], "video/mp4");
+        assert_eq!(payload["byte_length"], 1_024);
+        let artifact: finstack_ai_kernel::ArtifactRef =
+            serde_json::from_value(payload["artifact"].clone()).expect("artifact reference");
+        let roundtrip = store
+            .get(video_artifact_scope(), artifact)
+            .await
+            .expect("stored bytes");
+        assert_eq!(roundtrip.as_ref(), vec![7_u8; 1_024]);
+        let seen = seen_rx.recv().await.expect("request").to_ascii_lowercase();
+        assert!(seen.contains("get /api/v1/videos/vid-1/content"));
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn download_video_without_store_fails_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<String>();
+        drop(seen_tx);
+        drop(listener);
+        let tools =
+            OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), VIDEO_DOWNLOAD_TOOL_NAME);
+        let call = call_for(&spec, br#"{"id":"vid-1"}"#);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected store-required error");
+        };
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_STORE_REQUIRED);
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
+    }
+
+    #[tokio::test]
+    async fn download_video_bounds_the_body_by_store_limits() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, _seen_rx) = mpsc::unbounded_channel();
+        let big_body = vec![9_u8; 1_024];
+        let server = tokio::spawn(async move {
+            respond(&listener, &seen_tx, 200, &big_body, "video/mp4").await;
+        });
+        let store = Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(512));
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+        let spec = find_spec(&tools.tools(), VIDEO_DOWNLOAD_TOOL_NAME);
+        let call = call_for(&spec, br#"{"id":"vid-1"}"#);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected limit error");
+        };
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_LIMIT_EXCEEDED);
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn download_video_encodes_the_job_id_path() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(&listener, &seen_tx, 200, b"video-bytes", "video/mp4").await;
+        });
+        let store = Arc::new(InProcessArtifactStore::default());
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+        let spec = find_spec(&tools.tools(), VIDEO_DOWNLOAD_TOOL_NAME);
+        let call = call_for(&spec, br#"{"id":"../etc"}"#);
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(_) = item else {
+            panic!("expected completion");
+        };
+        let seen = seen_rx.recv().await.expect("request");
+        assert!(
+            seen.contains("%2F"),
+            "expected percent-encoded segment: {seen}"
+        );
+        assert!(
+            !seen.contains("videos/../etc"),
+            "raw traversal segment must not reach the wire: {seen}"
+        );
+        server.await.expect("server");
     }
 
     #[tokio::test]

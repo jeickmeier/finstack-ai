@@ -15,14 +15,16 @@ use crate::config::{
     OPENROUTER_MEDIA_TRANSPORT_FAILED,
 };
 use crate::http::{
-    BASE64_STANDARD, POLL_INTERVAL, invalid_arguments, parse_arguments, send_json, timeout_error,
-    tool_error, wait_deadline,
+    BASE64_STANDARD, POLL_INTERVAL, deliver_media, invalid_arguments, parse_arguments, send_bytes,
+    send_json, timeout_error, tool_error, wait_deadline,
 };
 
 pub(crate) const VIDEO_TOOL_ID: &str = "finstack.tools.openrouter_generate_video";
 pub(crate) const VIDEO_TOOL_NAME: &str = "openrouter_generate_video";
 pub(crate) const VIDEO_STATUS_TOOL_ID: &str = "finstack.tools.openrouter_get_video";
 pub(crate) const VIDEO_STATUS_TOOL_NAME: &str = "openrouter_get_video";
+pub(crate) const VIDEO_DOWNLOAD_TOOL_ID: &str = "finstack.tools.openrouter_download_video";
+pub(crate) const VIDEO_DOWNLOAD_TOOL_NAME: &str = "openrouter_download_video";
 
 /// Ceiling for inline base64 data-URI frame/reference images.
 pub(crate) const MAX_INLINE_IMAGE_BYTES: usize = 8 * 1_048_576;
@@ -320,6 +322,64 @@ pub(crate) async fn handle_video_status(
             () = tokio::time::sleep(POLL_INTERVAL) => {},
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VideoDownloadArguments {
+    id: String,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_video_download(
+    client: &reqwest::Client,
+    authorization: &HeaderValue,
+    referer: Option<&str>,
+    title: Option<&str>,
+    endpoint: &str,
+    store: Option<&Arc<dyn ArtifactStore>>,
+    ctx: &ToolCallContext,
+    arguments: &[u8],
+) -> Result<serde_json::Value, ToolError> {
+    let arguments: VideoDownloadArguments = parse_arguments(arguments)?;
+    if arguments.id.is_empty() {
+        return Err(invalid_arguments("openrouter media video id is empty"));
+    }
+    let Some(store) = store else {
+        return Err(tool_error(
+            OPENROUTER_MEDIA_STORE_REQUIRED,
+            ErrorCategory::Configuration,
+            "openrouter media video download requires an artifact store",
+        ));
+    };
+    let cap = store.limits().max_artifact_bytes;
+    let url = format!(
+        "{endpoint}/api/v1/videos/{}/content",
+        percent_encode_path_segment(&arguments.id)
+    );
+    let (bytes, content_type) = send_bytes(
+        client,
+        authorization,
+        referer,
+        title,
+        reqwest::Method::GET,
+        &url,
+        None,
+        ctx,
+        cap,
+    )
+    .await?;
+    let media_type = content_type.unwrap_or_else(|| "video/mp4".to_owned());
+    let delivered = deliver_media(
+        bytes,
+        &media_type,
+        "openrouter-video",
+        Some(store),
+        ctx,
+        usize::MAX,
+    )
+    .await?;
+    Ok(delivered.value)
 }
 
 fn percent_encode_path_segment(input: &str) -> String {
