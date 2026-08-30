@@ -2143,7 +2143,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-tools-video-compose"
-version = "2.0.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-net-guard",
