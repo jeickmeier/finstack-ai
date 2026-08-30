@@ -981,8 +981,11 @@ fn store_failure() -> ToolError {
     )
 }
 
+/// Shared test infrastructure reused by both `driver`'s own tests and
+/// `tools`'s tests: a queued-result `Toolset` double, fixture plans, and the
+/// harness that wires a [`MediaPipelineDriver`] to two of those doubles.
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use std::collections::{BTreeMap, VecDeque};
     use std::sync::{Arc, Mutex};
 
@@ -1003,8 +1006,9 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ArtifactRef, ArtifactStore, Bytes, MediaPipelineConfig, MediaPipelineDriver, PlanLimits,
-        RenderStatus, SceneStage, SceneState, artifact_scope, stage_required_artifact,
+        ArtifactRef, ArtifactStore, Bytes, ErrorCategory, MediaPipelineConfig, MediaPipelineDriver,
+        PlanLimits, RenderStatus, SceneStage, SceneState, ToolError, artifact_scope,
+        stage_required_artifact,
     };
     use crate::state::{MemoryRenderStateStore, RenderState, RenderStateStore};
 
@@ -1018,7 +1022,7 @@ mod tests {
     /// plus the recorded arguments to assert the compose spec, so a local
     /// double is the simpler fit.
     #[derive(Debug)]
-    struct QueueToolset {
+    pub(crate) struct QueueToolset {
         tools: Arc<[ToolSpec]>,
         queues: Mutex<BTreeMap<String, VecDeque<Queued>>>,
         calls: Mutex<Vec<(String, Value)>>,
@@ -1036,7 +1040,7 @@ mod tests {
     }
 
     impl QueueToolset {
-        fn new(names: &[&str]) -> Arc<Self> {
+        pub(crate) fn new(names: &[&str]) -> Arc<Self> {
             let tools: Vec<ToolSpec> = names.iter().map(|name| spec_for(name)).collect();
             Arc::new(Self {
                 tools: Arc::from(tools),
@@ -1045,17 +1049,17 @@ mod tests {
             })
         }
 
-        fn push(&self, tool: &str, result: Value) {
+        pub(crate) fn push(&self, tool: &str, result: Value) {
             self.enqueue(tool, Queued::Ok(result));
         }
 
         /// Queue a terminal `ToolResult` carrying `is_error: true`.
-        fn push_error_result(&self, tool: &str, payload: Value) {
+        pub(crate) fn push_error_result(&self, tool: &str, payload: Value) {
             self.enqueue(tool, Queued::ErrorResult(payload));
         }
 
         /// Queue an adapter error raised straight out of `Toolset::call`.
-        fn push_call_error(&self, tool: &str, code: &str, message: &str) {
+        pub(crate) fn push_call_error(&self, tool: &str, code: &str, message: &str) {
             let error =
                 ToolError::try_new(code, ErrorCategory::Tool, false, message, Metadata::empty())
                     .expect("tool error");
@@ -1071,11 +1075,11 @@ mod tests {
                 .push_back(entry);
         }
 
-        fn calls(&self) -> Vec<(String, Value)> {
+        pub(crate) fn calls(&self) -> Vec<(String, Value)> {
             self.calls.lock().unwrap().clone()
         }
 
-        fn queued(&self) -> usize {
+        pub(crate) fn queued(&self) -> usize {
             self.queues
                 .lock()
                 .unwrap()
@@ -1149,11 +1153,9 @@ mod tests {
         }
     }
 
-    use super::{ErrorCategory, ToolError};
-
     // ----- fixtures ------------------------------------------------------
 
-    fn tool_context() -> ToolCallContext {
+    pub(crate) fn tool_context() -> ToolCallContext {
         ToolCallContext {
             run: RunCallContext {
                 locator: OperationLocator::try_new(
@@ -1186,7 +1188,7 @@ mod tests {
         }
     }
 
-    fn limits() -> PlanLimits {
+    pub(crate) fn limits() -> PlanLimits {
         PlanLimits {
             max_scenes: 10,
             max_total_video_s: 240,
@@ -1194,7 +1196,7 @@ mod tests {
         }
     }
 
-    fn fixture_plan() -> Vec<u8> {
+    pub(crate) fn fixture_plan() -> Vec<u8> {
         std::fs::read(
             finstack_ai_test::repo_root()
                 .join("fixtures/compatibility/movie-plan/valid-two-scene.json"),
@@ -1204,7 +1206,7 @@ mod tests {
 
     /// A plan whose scenes all start pinned to a URL, so every scene begins in
     /// `PendingSubmit` and nothing is generated before submission.
-    fn url_only_plan(scene_count: usize) -> Vec<u8> {
+    pub(crate) fn url_only_plan(scene_count: usize) -> Vec<u8> {
         let scenes: Vec<Value> = (1..=scene_count)
             .map(|index| {
                 json!({
@@ -1227,7 +1229,7 @@ mod tests {
         .expect("plan json")
     }
 
-    async fn stage(
+    pub(crate) async fn stage(
         store: &Arc<dyn ArtifactStore>,
         ctx: &ToolCallContext,
         body: &str,
@@ -1247,7 +1249,7 @@ mod tests {
         .expect("stage")
     }
 
-    async fn stage_subtitle(
+    pub(crate) async fn stage_subtitle(
         store: &Arc<dyn ArtifactStore>,
         ctx: &ToolCallContext,
         body: &str,
@@ -1267,15 +1269,15 @@ mod tests {
         .expect("stage")
     }
 
-    struct Harness {
-        driver: MediaPipelineDriver,
-        media: Arc<QueueToolset>,
-        compose: Arc<QueueToolset>,
-        store: Option<Arc<dyn ArtifactStore>>,
-        state: Arc<MemoryRenderStateStore>,
+    pub(crate) struct Harness {
+        pub(crate) driver: Arc<MediaPipelineDriver>,
+        pub(crate) media: Arc<QueueToolset>,
+        pub(crate) compose: Arc<QueueToolset>,
+        pub(crate) store: Option<Arc<dyn ArtifactStore>>,
+        pub(crate) state: Arc<MemoryRenderStateStore>,
     }
 
-    fn harness(limits: PlanLimits, with_store: bool) -> Harness {
+    pub(crate) fn harness(limits: PlanLimits, with_store: bool) -> Harness {
         let media = QueueToolset::new(&[
             super::IMAGE_TOOL,
             super::VIDEO_SUBMIT_TOOL,
@@ -1295,7 +1297,7 @@ mod tests {
         })
         .expect("driver");
         Harness {
-            driver,
+            driver: Arc::new(driver),
             media,
             compose,
             store,
@@ -1306,7 +1308,7 @@ mod tests {
     /// Queue the whole two-scene happy path: two frame images, two job
     /// submissions, one `pending` poll before the two `completed` polls, two
     /// downloads, and the final composition.
-    fn prime_happy_path(
+    pub(crate) fn prime_happy_path(
         harness: &Harness,
         image: &ArtifactRef,
         clips: [&ArtifactRef; 2],
@@ -1348,7 +1350,7 @@ mod tests {
 
     /// Seed the state store with a render whose scenes are already `Done`, as
     /// a crashed-then-resumed process would find it. Returns the render id.
-    fn seed_done_render(
+    pub(crate) fn seed_done_render(
         harness: &Harness,
         ctx: &ToolCallContext,
         plan_json: &[u8],
@@ -1391,6 +1393,17 @@ mod tests {
         harness.state.insert(&state).expect("seed");
         render_id.to_string()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{PlanLimits, RenderStatus, SceneStage, artifact_scope};
+    use super::test_support::{
+        fixture_plan, harness, limits, prime_happy_path, seed_done_render, stage, stage_subtitle,
+        tool_context, url_only_plan,
+    };
 
     // ----- tests ---------------------------------------------------------
 

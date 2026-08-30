@@ -27,6 +27,7 @@ mod driver;
 mod plan;
 mod state;
 mod subtitles;
+mod tools;
 
 pub use driver::{
     MEDIA_PIPELINE_BUDGET_EXCEEDED, MEDIA_PIPELINE_CONFIG_INVALID,
@@ -43,3 +44,4 @@ pub use state::{
     MemoryRenderStateStore, RenderState, RenderStateStore, RenderStatus, SceneStage, SceneState,
     SqliteRenderStateStore, StateError,
 };
+pub use tools::MediaPipelineToolset;
