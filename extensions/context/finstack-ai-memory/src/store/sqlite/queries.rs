@@ -133,6 +133,7 @@ pub(super) fn sqlite_forget(
         )
         .map_err(|_| sqlite_unavailable())?;
     delete_fts_row(&transaction, scope, id)?;
+    delete_embedding_rows(&transaction, scope, id)?;
     enqueue_artifact_actions(&transaction, &actions, now)?;
     insert_receipt(&transaction, scope, key, fingerprint, now)?;
     transaction.commit().map_err(|_| sqlite_unavailable())?;
@@ -194,6 +195,9 @@ pub(super) fn sqlite_correct(
     replacement.supersedes = Some(old.clone());
     write_record(&transaction, &replacement)?;
     delete_fts_row(&transaction, scope, old)?;
+    // The superseded record leaves every space; the replacement's stale rows
+    // were dropped by `write_record`.
+    delete_embedding_rows(&transaction, scope, old)?;
     transaction
         .execute(
             "UPDATE memory_records SET superseded_by = ?1
@@ -502,6 +506,9 @@ pub(super) fn write_record(
             params![scope_key(&record.scope)?, record.id.as_str()],
         )
         .map_err(|_| sqlite_unavailable())?;
+    // The written content supersedes whatever any space indexed for this id
+    // (e.g. a revived tombstone's stale rows).
+    delete_embedding_rows(transaction, &record.scope, &record.id)?;
 
     let keywords_text = record
         .keywords
@@ -557,6 +564,23 @@ fn delete_fts_row(
     transaction
         .execute(
             "DELETE FROM memory_fts WHERE scope_digest = ?1 AND id = ?2",
+            params![scope_key(scope)?, id.as_str()],
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    Ok(())
+}
+
+/// Drop every embedding row of `(scope, id)` across all spaces. Called in
+/// the same transaction as every record death or rewrite so no dead vector
+/// can rank.
+fn delete_embedding_rows(
+    transaction: &Transaction<'_>,
+    scope: &MemoryScope,
+    id: &MemoryId,
+) -> Result<(), MemoryStoreError> {
+    transaction
+        .execute(
+            "DELETE FROM memory_embeddings WHERE scope_digest = ?1 AND id = ?2",
             params![scope_key(scope)?, id.as_str()],
         )
         .map_err(|_| sqlite_unavailable())?;
@@ -845,6 +869,15 @@ fn cleanup_expired(
     transaction
         .execute(
             "DELETE FROM memory_keywords WHERE (scope_digest, id) IN (
+               SELECT scope_digest, id FROM memory_records
+               WHERE expires_at IS NOT NULL AND expires_at <= ?1
+             )",
+            params![now.as_unix_ms()],
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    transaction
+        .execute(
+            "DELETE FROM memory_embeddings WHERE (scope_digest, id) IN (
                SELECT scope_digest, id FROM memory_records
                WHERE expires_at IS NOT NULL AND expires_at <= ?1
              )",

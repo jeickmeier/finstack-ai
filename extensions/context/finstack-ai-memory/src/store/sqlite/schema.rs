@@ -16,15 +16,19 @@ const SCHEMA_USER_VERSION: i32 = 3;
 const V2_USER_VERSION: i32 = 2;
 
 /// The v3 addition: the per-space embedding index. Shared verbatim between
-/// the fresh-create DDL and the additive v2→v3 migration.
+/// the fresh-create DDL, the v1 migration (which needs the table before it
+/// replays records through [`write_record`]), and the additive v2→v3
+/// migration; `IF NOT EXISTS` keeps the shared step idempotent across those
+/// paths and across a crash between the two v1 migration transactions.
 const EMBEDDINGS_DDL: &str = "
-CREATE TABLE memory_embeddings (
+CREATE TABLE IF NOT EXISTS memory_embeddings (
   scope_digest TEXT NOT NULL, id TEXT NOT NULL, embedder_id TEXT NOT NULL,
   dimensions INTEGER NOT NULL, source_digest TEXT NOT NULL,
   vector BLOB NOT NULL, embedded_at INTEGER NOT NULL,
   PRIMARY KEY (scope_digest, id, embedder_id)
 );
-CREATE INDEX memory_embeddings_space ON memory_embeddings(embedder_id, scope_digest);
+CREATE INDEX IF NOT EXISTS memory_embeddings_space
+  ON memory_embeddings(embedder_id, scope_digest);
 ";
 
 const V3_BASE_DDL: &str = "
@@ -211,6 +215,11 @@ fn migrate_v1_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
     let records = load_legacy_records(&transaction)?;
     transaction
         .execute_batch(MIGRATE_V1_DDL)
+        .map_err(|_| sqlite_unavailable())?;
+    // `write_record` resets the record's embedding rows, so the table must
+    // exist before the replay even though this step only reaches v2.
+    transaction
+        .execute_batch(EMBEDDINGS_DDL)
         .map_err(|_| sqlite_unavailable())?;
     for record in &records {
         write_record(&transaction, record)?;

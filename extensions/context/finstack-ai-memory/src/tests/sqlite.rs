@@ -999,6 +999,184 @@ fn sqlite_future_schema_version_is_unsupported() {
     );
 }
 
+const SPACE_A: &str = "embed.a-v1.2";
+const SPACE_B: &str = "embed.b-v1.2";
+
+/// Insert an embedding row directly, bypassing the store: eviction must hold
+/// for arbitrary rows, not only rows `store_embedding` accepted.
+fn seed_embedding_row(path: &std::path::Path, tenant: &str, id: &str, embedder_id: &str) {
+    let scope_digest = MemoryScope::try_new(tenant)
+        .unwrap()
+        .digest()
+        .unwrap()
+        .to_hex();
+    let vector: Vec<u8> = [1.0_f32, 0.0_f32]
+        .iter()
+        .flat_map(|component| component.to_le_bytes())
+        .collect();
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT OR REPLACE INTO memory_embeddings
+             (scope_digest, id, embedder_id, dimensions, source_digest, vector, embedded_at)
+             VALUES (?1, ?2, ?3, 2, 'seeded', ?4, 0)",
+            rusqlite::params![scope_digest, id, embedder_id, vector],
+        )
+        .unwrap();
+}
+
+/// `(id, embedder_id)` pairs currently indexed, in stable order.
+fn embedding_row_keys(path: &std::path::Path) -> Vec<(String, String)> {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT id, embedder_id FROM memory_embeddings ORDER BY id, embedder_id")
+        .unwrap();
+    let rows = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap();
+    rows.map(Result::unwrap).collect()
+}
+
+fn pair(id: &str, embedder_id: &str) -> (String, String) {
+    (String::from(id), String::from(embedder_id))
+}
+
+#[tokio::test]
+async fn sqlite_put_over_tombstone_evicts_stale_embedding_rows() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-revive.sqlite");
+    {
+        let store = SqliteMemoryStore::try_open(&path).unwrap();
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+            .await
+            .unwrap();
+        store
+            .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+            .await
+            .unwrap();
+        store
+            .forget(
+                Arc::from("k3"),
+                MemoryScope::try_new("t1").unwrap(),
+                MemoryId::parse("m1").unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+    seed_embedding_row(&path, "t1", "m1", SPACE_A);
+    seed_embedding_row(&path, "t1", "m1", SPACE_B);
+    seed_embedding_row(&path, "t1", "m2", SPACE_A);
+
+    // Re-remembering the forgotten id must drop the tombstone's stale rows
+    // in every space; the unrelated record's rows survive.
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    store
+        .put(Arc::from("k4"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    drop(store);
+    assert_eq!(embedding_row_keys(&path), [pair("m2", SPACE_A)]);
+}
+
+#[tokio::test]
+async fn sqlite_forget_evicts_embedding_rows_across_all_spaces() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-forget.sqlite");
+    {
+        let store = SqliteMemoryStore::try_open(&path).unwrap();
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+            .await
+            .unwrap();
+        store
+            .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+            .await
+            .unwrap();
+    }
+    seed_embedding_row(&path, "t1", "m1", SPACE_A);
+    seed_embedding_row(&path, "t1", "m1", SPACE_B);
+    seed_embedding_row(&path, "t1", "m2", SPACE_A);
+
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    store
+        .forget(
+            Arc::from("k3"),
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap();
+    drop(store);
+    assert_eq!(embedding_row_keys(&path), [pair("m2", SPACE_A)]);
+}
+
+#[tokio::test]
+async fn sqlite_correct_evicts_superseded_and_replacement_rows() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-correct.sqlite");
+    {
+        let store = SqliteMemoryStore::try_open(&path).unwrap();
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+            .await
+            .unwrap();
+        store
+            .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+            .await
+            .unwrap();
+    }
+    seed_embedding_row(&path, "t1", "m1", SPACE_A);
+    seed_embedding_row(&path, "t1", "m1", SPACE_B);
+    seed_embedding_row(&path, "t1", "m2", SPACE_A);
+    // A stale row under the replacement's id must go with the supersession.
+    seed_embedding_row(&path, "t1", "m3", SPACE_A);
+
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    store
+        .correct(
+            Arc::from("k3"),
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("m1").unwrap(),
+            crate::tests::sample_record("m3", "t1"),
+        )
+        .await
+        .unwrap();
+    drop(store);
+    assert_eq!(embedding_row_keys(&path), [pair("m2", SPACE_A)]);
+}
+
+#[tokio::test]
+async fn sqlite_expiry_sweep_evicts_embedding_rows() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-expiry.sqlite");
+    {
+        let store = SqliteMemoryStore::try_open(&path).unwrap();
+        store
+            .put(Arc::from("k1"), crate::tests::sample_record("m2", "t1"))
+            .await
+            .unwrap();
+        // `sample_record` is created at the epoch, so a 10ms retention is
+        // hard-expired under the system clock; put last so no earlier
+        // write's sweep removes it before rows are seeded.
+        let mut expiring = crate::tests::sample_record("m-old", "t1");
+        expiring.retention = RetentionPolicy::ExpireAfterMs(10);
+        store.put(Arc::from("k2"), expiring).await.unwrap();
+    }
+    seed_embedding_row(&path, "t1", "m-old", SPACE_A);
+    seed_embedding_row(&path, "t1", "m-old", SPACE_B);
+    seed_embedding_row(&path, "t1", "m2", SPACE_A);
+
+    // Any write sweeps hard-expired records; their rows go too.
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    store
+        .put(Arc::from("k3"), crate::tests::sample_record("m3", "t1"))
+        .await
+        .unwrap();
+    drop(store);
+    assert_eq!(embedding_row_keys(&path), [pair("m2", SPACE_A)]);
+}
+
 #[tokio::test]
 async fn sqlite_decode_fails_closed_on_corrupt_timestamps() {
     let directory = tempfile::tempdir().unwrap();
