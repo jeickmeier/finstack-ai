@@ -105,6 +105,27 @@ impl fmt::Debug for ProviderChoice {
     }
 }
 
+/// Which text embedder powers semantic memory recall.
+///
+/// Configuring an embedder is the app's explicit egress decision (spec §8):
+/// with `None` no memory content ever leaves local storage, and the only
+/// offered choice is an Ollama endpoint the operator names.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum EmbedderChoice {
+    /// Ollama `POST /api/embed` endpoint.
+    Ollama {
+        /// Base URL of the Ollama server. Plaintext HTTP is accepted only
+        /// toward a loopback IP; validation happens when the agent builds.
+        base_url: String,
+        /// Embedding model name to request.
+        model: String,
+        /// Exact vector dimensionality the model must produce; part of the
+        /// embedding-space identity.
+        dimensions: usize,
+    },
+}
+
 /// Everything the knowledge agent needs to build.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -119,10 +140,14 @@ pub struct KnowledgeConfig {
     /// entirely. Patterns are validated against the fetch toolset's
     /// grammar when the agent is built.
     pub fetch_allowlist: Vec<String>,
+    /// Optional embedder behind semantic memory recall; `None` (the
+    /// default) keeps recall lexical and fully local.
+    pub memory_embedder: Option<EmbedderChoice>,
 }
 
 impl KnowledgeConfig {
-    /// Construct a config with fetch disabled (empty allowlist).
+    /// Construct a config with fetch disabled (empty allowlist) and no
+    /// memory embedder.
     #[must_use]
     pub fn new(data_dir: PathBuf, provider: ProviderChoice) -> Self {
         Self {
@@ -130,6 +155,7 @@ impl KnowledgeConfig {
             provider,
             project_root: None,
             fetch_allowlist: Vec::new(),
+            memory_embedder: None,
         }
     }
 
@@ -144,6 +170,13 @@ impl KnowledgeConfig {
     #[must_use]
     pub fn with_project_root(mut self, root: PathBuf) -> Self {
         self.project_root = Some(root);
+        self
+    }
+
+    /// Enable semantic memory recall through `embedder`.
+    #[must_use]
+    pub fn with_memory_embedder(mut self, embedder: EmbedderChoice) -> Self {
+        self.memory_embedder = Some(embedder);
         self
     }
 }

@@ -13,12 +13,15 @@ use finstack_ai::runtime::ports::journal::JournalStore;
 use finstack_ai::runtime::ports::model::{Model, ModelName};
 use finstack_ai::runtime::ports::observer::ObserverPayloadMode;
 use finstack_ai::{Agent, NativeCapabilityHost};
+use finstack_ai_embedder_ollama::config::OllamaEmbedderConfig;
+use finstack_ai_embedder_ollama::embedder::OllamaEmbedder;
+use finstack_ai_embeddings::embedder::TextEmbedder;
 use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, Version};
 use finstack_ai_memory::extract::RuleBasedExtractor;
 use finstack_ai_memory::observer::MemoryObserver;
 use finstack_ai_memory::provider::{MemoryContextProvider, RecallConfig};
 use finstack_ai_memory::record::{MemoryScope, system_clock};
-use finstack_ai_memory::store::{MemoryStore, SqliteMemoryStore};
+use finstack_ai_memory::store::{MemoryStore, SqliteMemoryStore, reconcile_memory_embeddings};
 use finstack_ai_memory::toolset::{MemoryPolicy, MemoryToolset};
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
@@ -38,7 +41,7 @@ use finstack_ai_tools_document::DocumentToolset;
 use finstack_ai_tools_fetch::{HostPattern, HttpFetchConfig, HttpFetchToolset};
 use finstack_ai_tools_skills::{SkillsHost, SkillsHostError, SkillsToolset};
 
-use crate::config::{KnowledgeConfig, KnowledgeError, ProviderChoice};
+use crate::config::{EmbedderChoice, KnowledgeConfig, KnowledgeError, ProviderChoice};
 use crate::docs::materialize_self_docs;
 
 /// Exact component version for every `finstack.know.*` registration.
@@ -61,6 +64,9 @@ know. Prefer citing sources by name. Use registered tools when they help.";
 
 /// Provider-neutral model context bounds (bytes, context, output, reserve, overhead).
 const MODEL_BOUNDS: (u64, u64, u64, u64, u64) = (1_048_576, 131_072, 8_192, 8_192, 64);
+
+/// Records drained by the one best-effort embedding backfill at startup.
+const EMBEDDING_BACKFILL_LIMIT: usize = 64;
 
 /// Sliding-window compaction thresholds in tokens (threshold, hysteresis).
 const COMPACTION_TOKENS: (u64, u64) = (120_000, 24_000);
@@ -191,8 +197,14 @@ pub async fn build_agent_with_stores(
 
     let provider = provider(config)?;
 
-    let (memory_provider, memory_toolset, memory_observer) =
-        memory_components(config, &artifact_store)?;
+    let memory = memory_components(config, &artifact_store)?;
+    backfill_memory_embeddings(&memory).await;
+    let MemoryComponents {
+        provider: memory_provider,
+        toolset: memory_toolset,
+        observer: memory_observer,
+        ..
+    } = memory;
 
     // Capability catalog: the citations skill, activatable by the model
     // through the skills toolset.
@@ -218,7 +230,9 @@ pub async fn build_agent_with_stores(
         Arc::new(self_docs_provider(&self_docs_root)?),
     )
     .context_provider(
-        versioned("finstack.context.memory", 0, 1, 0)?,
+        // 0.2.0: the recall contract gained the optional semantic leg
+        // (spec §6.1), whether or not this composition configures one.
+        versioned("finstack.context.memory", 0, 2, 0)?,
         Arc::new(memory_provider),
     )
     .middleware(
@@ -290,26 +304,110 @@ pub async fn build_agent_with_stores(
     builder.build().await.map_err(compose_error)
 }
 
+/// One bounded startup backfill of the embedding index, when an embedder
+/// is configured.
+///
+/// Drains records that predate the embedder configuration. The embedding
+/// index is derived, best-effort data (spec §6.1): a down embedder must
+/// never block startup, so the result — including its error — is ignored
+/// and unindexed records stay pending for the next drain.
+async fn backfill_memory_embeddings(memory: &MemoryComponents) {
+    if let Some(embedder) = &memory.embedder {
+        let _ = reconcile_memory_embeddings(
+            memory.store.as_ref(),
+            embedder.as_ref(),
+            EMBEDDING_BACKFILL_LIMIT,
+        )
+        .await;
+    }
+}
+
+/// The assembled memory surfaces plus the store and embedder they share,
+/// kept for the startup embedding backfill.
+struct MemoryComponents {
+    provider: MemoryContextProvider,
+    toolset: MemoryToolset,
+    observer: MemoryObserver,
+    store: Arc<dyn MemoryStore>,
+    embedder: Option<Arc<dyn TextEmbedder>>,
+}
+
 /// Memory: one sqlite store behind the recall provider, toolset, and
-/// capture observer.
+/// capture observer — each embedder-aware when one is configured.
 fn memory_components(
     config: &KnowledgeConfig,
     artifact_store: &Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
-) -> Result<(MemoryContextProvider, MemoryToolset, MemoryObserver), KnowledgeError> {
+) -> Result<MemoryComponents, KnowledgeError> {
     let memory_store: Arc<dyn MemoryStore> = Arc::new(
         SqliteMemoryStore::try_open(&config.data_dir.join("memory.sqlite3"))
             .map_err(compose_error)?,
     );
     let scope = MemoryScope::try_new("local").map_err(compose_error)?;
+    let embedder = memory_embedder(config)?;
+    let (provider, toolset, observer) = if let Some(embedder) = &embedder {
+        memory_surfaces_with_embedder(&memory_store, artifact_store, scope, embedder)?
+    } else {
+        memory_surfaces_lexical(&memory_store, artifact_store, scope)?
+    };
+    Ok(MemoryComponents {
+        provider,
+        toolset,
+        observer,
+        store: memory_store,
+        embedder,
+    })
+}
+
+/// The three memory surfaces with semantic recall through `embedder`.
+fn memory_surfaces_with_embedder(
+    memory_store: &Arc<dyn MemoryStore>,
+    artifact_store: &Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
+    scope: MemoryScope,
+    embedder: &Arc<dyn TextEmbedder>,
+) -> Result<(MemoryContextProvider, MemoryToolset, MemoryObserver), KnowledgeError> {
+    let provider = MemoryContextProvider::try_new_with_embedder(
+        Arc::clone(memory_store),
+        artifact_store.as_ref(),
+        scope.clone(),
+        RecallConfig::default(),
+        Arc::clone(embedder),
+    )
+    .map_err(compose_error)?;
+    let toolset = MemoryToolset::try_new_with_embedder(
+        Arc::clone(memory_store),
+        Arc::clone(artifact_store),
+        scope.clone(),
+        MemoryPolicy::default(),
+        system_clock(),
+        Arc::clone(embedder),
+    )
+    .map_err(compose_error)?;
+    let observer = MemoryObserver::try_new_with_embedder(
+        Arc::clone(memory_store),
+        scope,
+        Arc::new(RuleBasedExtractor::default()),
+        system_clock(),
+        Arc::clone(embedder),
+    )
+    .map_err(compose_error)?;
+    Ok((provider, toolset, observer))
+}
+
+/// The three memory surfaces with lexical recall only.
+fn memory_surfaces_lexical(
+    memory_store: &Arc<dyn MemoryStore>,
+    artifact_store: &Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
+    scope: MemoryScope,
+) -> Result<(MemoryContextProvider, MemoryToolset, MemoryObserver), KnowledgeError> {
     let provider = MemoryContextProvider::try_new(
-        Arc::clone(&memory_store),
+        Arc::clone(memory_store),
         artifact_store.as_ref(),
         scope.clone(),
         RecallConfig::default(),
     )
     .map_err(compose_error)?;
     let toolset = MemoryToolset::try_new(
-        Arc::clone(&memory_store),
+        Arc::clone(memory_store),
         Arc::clone(artifact_store),
         scope.clone(),
         MemoryPolicy::default(),
@@ -317,13 +415,37 @@ fn memory_components(
     )
     .map_err(compose_error)?;
     let observer = MemoryObserver::try_new(
-        memory_store,
+        Arc::clone(memory_store),
         scope,
         Arc::new(RuleBasedExtractor::default()),
         system_clock(),
     )
     .map_err(compose_error)?;
     Ok((provider, toolset, observer))
+}
+
+/// Build the configured text embedder, if any.
+///
+/// The embedder endpoint is an operator-configured fixed URL: the embedder
+/// crate validates it once at construction (plaintext HTTP only toward a
+/// loopback IP; no credentials, query, or fragment).
+fn memory_embedder(
+    config: &KnowledgeConfig,
+) -> Result<Option<Arc<dyn TextEmbedder>>, KnowledgeError> {
+    match &config.memory_embedder {
+        None => Ok(None),
+        Some(EmbedderChoice::Ollama {
+            base_url,
+            model,
+            dimensions,
+        }) => {
+            let embedder_config = OllamaEmbedderConfig::try_new(base_url, model, *dimensions)
+                .map_err(compose_error)?;
+            Ok(Some(Arc::new(
+                OllamaEmbedder::try_new(embedder_config).map_err(compose_error)?,
+            )))
+        }
+    }
 }
 
 fn provider(config: &KnowledgeConfig) -> Result<Arc<dyn Model>, KnowledgeError> {

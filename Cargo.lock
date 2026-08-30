@@ -1378,6 +1378,8 @@ dependencies = [
  "clap",
  "finstack-ai",
  "finstack-ai-context-repository",
+ "finstack-ai-embedder-ollama",
+ "finstack-ai-embeddings",
  "finstack-ai-kernel",
  "finstack-ai-memory",
  "finstack-ai-middleware-compaction",

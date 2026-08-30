@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::{
-    KnowledgeConfig, KnowledgeError, ProviderChoice, SELF_DOCS, build_agent, default_data_dir,
-    materialize_self_docs, model_name, security,
+    EmbedderChoice, KnowledgeConfig, KnowledgeError, ProviderChoice, SELF_DOCS, build_agent,
+    default_data_dir, materialize_self_docs, model_name, security,
 };
 
 pub(crate) mod loopback;
@@ -157,6 +158,111 @@ async fn fetch_allowlist_gates_the_fetch_toolset() {
     build_agent(&good)
         .await
         .expect("fetch-enabled agent builds");
+    drop(server);
+}
+
+/// Dimensionality shared by the test embedder config and the scripted
+/// loopback `/api/embed` server.
+const EMBED_DIMENSIONS: usize = 32;
+
+fn ollama_embedder(base_url: String) -> EmbedderChoice {
+    EmbedderChoice::Ollama {
+        base_url,
+        model: "hash-embed".to_owned(),
+        dimensions: EMBED_DIMENSIONS,
+    }
+}
+
+/// Does any registered toolset advertise `mode` on `search_memory`?
+fn search_memory_advertises_mode(agent: &finstack_ai::Agent) -> bool {
+    agent.resolved().run_plan().toolsets().iter().any(|toolset| {
+        toolset.handle().tools().iter().any(|spec| {
+            spec.model_name.as_ref() == "search_memory"
+                && spec.input_schema.as_str().contains("\"mode\"")
+        })
+    })
+}
+
+#[test]
+fn default_config_has_no_memory_embedder() {
+    let config = KnowledgeConfig::new(PathBuf::from("/tmp/data"), ollama());
+    assert!(config.memory_embedder.is_none());
+}
+
+#[tokio::test]
+async fn memory_embedder_advertises_search_mode() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
+
+    // Lexical-only composition: `mode` stays out of the model contract.
+    let lexical = loopback_config(dir.path(), base_url.clone());
+    let agent = build_agent(&lexical).await.expect("lexical agent builds");
+    assert!(!search_memory_advertises_mode(&agent));
+    drop(agent);
+
+    // Embedder-configured composition advertises `mode` on `search_memory`.
+    let semantic = loopback_config(dir.path(), base_url.clone())
+        .with_memory_embedder(ollama_embedder(base_url));
+    let agent = build_agent(&semantic).await.expect("semantic agent builds");
+    assert!(search_memory_advertises_mode(&agent));
+    drop(server);
+}
+
+#[tokio::test]
+async fn down_embedder_never_blocks_startup() {
+    use finstack_ai_kernel::{Sensitivity, UNIX_EPOCH};
+    use finstack_ai_memory::record::{
+        ExtractionMethod, MemoryBody, MemoryId, MemoryProvenance, MemoryRecord, MemoryScope,
+        RetentionPolicy,
+    };
+    use finstack_ai_memory::store::{MemoryStore, SqliteMemoryStore};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    // Seed one live record so the startup backfill genuinely attempts the
+    // embedder instead of short-circuiting on an empty pending set.
+    {
+        let store = SqliteMemoryStore::try_open(&dir.path().join("memory.sqlite3"))
+            .expect("memory store opens");
+        let record = MemoryRecord {
+            id: MemoryId::parse("seed-record").expect("id"),
+            scope: MemoryScope::try_new("local").expect("scope"),
+            keywords: Arc::from([Arc::<str>::from("seed")]),
+            body: MemoryBody::Inline(Arc::from("seed body")),
+            preview: Arc::from("seed body"),
+            sensitivity: Sensitivity::Internal,
+            provenance: MemoryProvenance {
+                source_session: None,
+                source_run: None,
+                source_ref: None,
+                extraction: ExtractionMethod::Explicit,
+                confidence: 80,
+            },
+            created_at: UNIX_EPOCH,
+            last_confirmed_at: UNIX_EPOCH,
+            supersedes: None,
+            superseded_by: None,
+            retention: RetentionPolicy::KeepUntilDeleted,
+            tombstoned: false,
+        };
+        store
+            .put(Arc::from("seed-key"), record)
+            .await
+            .expect("seed record stored");
+    }
+
+    // Bind then drop a loopback listener: the embedder endpoint is down.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback listener");
+    let dead_url = format!("http://{}", listener.local_addr().expect("address"));
+    drop(listener);
+
+    let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
+    let config =
+        loopback_config(dir.path(), base_url).with_memory_embedder(ollama_embedder(dead_url));
+    build_agent(&config)
+        .await
+        .expect("a down embedder never blocks startup");
     drop(server);
 }
 
