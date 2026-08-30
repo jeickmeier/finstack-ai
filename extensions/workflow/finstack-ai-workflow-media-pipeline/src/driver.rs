@@ -1610,6 +1610,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn schema_enum_violation_rejects_before_any_tool_call() {
+        let ctx = tool_context();
+        let harness = harness(limits(), true);
+        harness.media.push(
+            super::VIDEO_SUBMIT_TOOL,
+            json!({ "id": "job-a", "status": "queued" }),
+        );
+
+        let mut plan: serde_json::Value =
+            serde_json::from_slice(&url_only_plan(1)).expect("plan parses as json");
+        plan["output"]["container"] = json!("mkv");
+        let bytes = serde_json::to_vec(&plan).expect("plan json");
+
+        let error = harness
+            .driver
+            .submit_plan(&ctx, &bytes)
+            .await
+            .expect_err("mkv is not a schema container");
+        assert_eq!(error.code(), super::MEDIA_PIPELINE_PLAN_INVALID);
+        assert!(harness.media.calls().is_empty());
+        assert!(harness.compose.calls().is_empty());
+        assert_eq!(
+            harness.media.queued(),
+            1,
+            "the queued response was untouched"
+        );
+    }
+
+    #[tokio::test]
     async fn resubmitting_the_same_plan_resumes_instead_of_duplicating() {
         let ctx = tool_context();
         let harness = harness(limits(), true);

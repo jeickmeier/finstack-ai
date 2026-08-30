@@ -19,6 +19,12 @@ pub(crate) struct ClipInput {
     pub path: PathBuf,
     /// Probed duration of the clip, in seconds.
     pub duration_s: f64,
+    /// Whether the probe found an audio stream on this clip. A clip without
+    /// one gets a synthesized silent lane instead of an `[i:a]` reference:
+    /// referencing a stream that does not exist makes `ffmpeg` fail the whole
+    /// render, and the concat/xfade folds downstream require one audio label
+    /// per clip.
+    pub has_audio: bool,
 }
 
 /// Render an `f64` the way `ffmpeg` filtergraph literals expect: `3.0`
@@ -70,8 +76,16 @@ fn video_lane(idx: usize, clip: &ClipSpec, output: &OutputSpec) -> String {
     lane
 }
 
-/// Build the `[i:a]...[ai]` filter clause for one clip.
-fn audio_lane(idx: usize, clip: &ClipSpec) -> String {
+/// Build the `[i:a]...[ai]` filter clause for one clip, or a synthesized
+/// silent lane of the clip's effective duration when the clip has no audio
+/// stream to reference.
+fn audio_lane(idx: usize, clip: &ClipSpec, input: &ClipInput) -> String {
+    if !input.has_audio {
+        let duration = fmt_f64(clip_duration(clip, input));
+        return format!(
+            "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={duration}[a{idx}]"
+        );
+    }
     let mut lane = format!("[{idx}:a]");
     if let Some(trim) = &clip.trim {
         let start = fmt_f64(trim.start_s);
@@ -141,9 +155,9 @@ pub(crate) fn build_ffmpeg_args(
     }
 
     let mut parts: Vec<String> = Vec::new();
-    for (idx, clip_spec) in spec.clips.iter().enumerate() {
+    for (idx, (clip_spec, input)) in spec.clips.iter().zip(clips).enumerate() {
         parts.push(video_lane(idx, clip_spec, &spec.output));
-        parts.push(audio_lane(idx, clip_spec));
+        parts.push(audio_lane(idx, clip_spec, input));
     }
 
     match &spec.transitions {
@@ -352,6 +366,14 @@ mod tests {
         ClipInput {
             path: PathBuf::from(path),
             duration_s,
+            has_audio: true,
+        }
+    }
+
+    fn silent_clip(path: &str, duration_s: f64) -> ClipInput {
+        ClipInput {
+            has_audio: false,
+            ..clip(path, duration_s)
         }
     }
 
@@ -380,6 +402,25 @@ mod tests {
         assert!(text.contains("concat=n=2:v=1:a=1"));
         assert!(text.ends_with("/out/movie.mp4"));
         assert!(!text.contains("xfade"));
+    }
+
+    #[test]
+    fn audio_less_clip_gets_a_synthesized_silent_lane() {
+        let spec = minimal(2, None);
+        let clips = [clip("/in/a.mp4", 4.0), silent_clip("/in/b.mp4", 6.0)];
+        let args = build_ffmpeg_args(&spec, &clips, None, None, Path::new("/out/movie.mp4"))
+            .expect("args");
+        let text = rendered(&args).join(" ");
+        assert!(
+            text.contains("anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=6[a1]"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("[1:a]"),
+            "the missing stream must never be referenced: {text}"
+        );
+        assert!(text.contains("[0:a]"), "clip 0 still uses its real audio");
+        assert!(text.contains("concat=n=2:v=1:a=1"));
     }
 
     #[test]

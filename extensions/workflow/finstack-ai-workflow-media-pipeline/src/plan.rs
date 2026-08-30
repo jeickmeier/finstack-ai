@@ -251,8 +251,9 @@ pub struct PlanBudget {
 /// scene list, duplicate or malformed scene ids, empty prompts, out-of-range
 /// durations, malformed or overlapping caption cues, too many or unpinned
 /// reference images, a caption delivery mode with no cues anywhere, or
-/// transitions that name an unknown or final scene) or exceeds the supplied
-/// `limits`.
+/// transitions that name an unknown or final scene, an out-of-range transition
+/// duration, an unknown output container or audio mode, or an out-of-range
+/// output frame rate) or exceeds the supplied `limits`.
 #[allow(
     clippy::cast_precision_loss,
     reason = "scene durations are bounded to 1..=60 seconds above; the cast to f64 for a \
@@ -350,11 +351,45 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
         if Some(transition.after.as_str()) == last_id {
             return Err("transition cannot follow the final scene");
         }
+        // A `cut` carries no visible duration, so its value is unconstrained
+        // (matching the compose crate's `validate_spec`); every other kind is
+        // fed to `xfade`/`acrossfade` and must be a sane, finite window.
+        if !matches!(transition.kind, TransitionKindName::Cut)
+            && let Some(duration) = transition.duration_s
+            && (!duration.is_finite() || !(0.05..=5.0).contains(&duration))
+        {
+            return Err("transition duration must be between 0.05 and 5 seconds");
+        }
     }
+    validate_schema_bounds(plan)?;
     Ok(PlanBudget {
         scene_count: plan.scenes.len(),
         total_video_s,
     })
+}
+
+/// Enforce the published schema's enum members and numeric ranges.
+///
+/// `movie-plan.v1.json` constrains `output.container`, `audio.mode`, and
+/// `output.fps` as enums and bounded integers, but the Rust types are looser
+/// (`String` / `Option<u32>`), so deserialization alone lets a typo through.
+/// Enforcing the bounds at submit time keeps a bad container from burning the
+/// whole generation budget and then failing terminally at the final render.
+fn validate_schema_bounds(plan: &MoviePlan) -> Result<(), &'static str> {
+    if !matches!(plan.output.container.as_str(), "mp4" | "webm") {
+        return Err("output container must be mp4 or webm");
+    }
+    if let Some(fps) = plan.output.fps
+        && !(1..=120).contains(&fps)
+    {
+        return Err("output fps must be between 1 and 120");
+    }
+    if let Some(audio) = &plan.audio
+        && !matches!(audio.mode.as_str(), "replace" | "mix")
+    {
+        return Err("audio mode must be replace or mix");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -549,5 +584,89 @@ mod tests {
             Err("captions delivery requested but no scene has cues"),
             "burn_in output with nothing to caption"
         );
+    }
+
+    #[test]
+    fn schema_enum_and_range_violations_fail_closed() {
+        let mut plan = two_scene_plan();
+        plan.output.container = "mkv".into();
+        assert_eq!(
+            validate_plan(&plan, &limits()),
+            Err("output container must be mp4 or webm")
+        );
+
+        let mut plan = two_scene_plan();
+        plan.audio = Some(PlanAudio {
+            artifact: audio_artifact(),
+            mode: "duck".into(),
+        });
+        assert_eq!(
+            validate_plan(&plan, &limits()),
+            Err("audio mode must be replace or mix")
+        );
+        // The two schema-legal modes still pass.
+        for mode in ["replace", "mix"] {
+            let mut plan = two_scene_plan();
+            plan.audio = Some(PlanAudio {
+                artifact: audio_artifact(),
+                mode: mode.into(),
+            });
+            assert!(validate_plan(&plan, &limits()).is_ok(), "{mode} is legal");
+        }
+
+        for bad in [0.0_f64, 0.01, 6.0, f64::NAN] {
+            let mut plan = two_scene_plan();
+            plan.transitions = Some(vec![PlanTransition {
+                after: "scene-01".into(),
+                kind: TransitionKindName::Crossfade,
+                duration_s: Some(bad),
+            }]);
+            assert_eq!(
+                validate_plan(&plan, &limits()),
+                Err("transition duration must be between 0.05 and 5 seconds"),
+                "crossfade duration {bad}"
+            );
+        }
+        // A `cut` is unbounded, matching the compose crate's `validate_spec`.
+        let mut plan = two_scene_plan();
+        plan.transitions = Some(vec![PlanTransition {
+            after: "scene-01".into(),
+            kind: TransitionKindName::Cut,
+            duration_s: Some(99.0),
+        }]);
+        assert!(validate_plan(&plan, &limits()).is_ok(), "cut is unbounded");
+
+        for bad in [0, 121] {
+            let mut plan = two_scene_plan();
+            plan.output.fps = Some(bad);
+            assert_eq!(
+                validate_plan(&plan, &limits()),
+                Err("output fps must be between 1 and 120"),
+                "fps {bad}"
+            );
+        }
+    }
+
+    fn audio_artifact() -> ArtifactRef {
+        use finstack_ai_kernel::{ArtifactId, BlobRef, Digest, Metadata};
+        let content = b"score".as_slice();
+        let digest = Digest::blob_content(content);
+        let blob = BlobRef::try_new(
+            "blob-audio",
+            "audio/mpeg",
+            u64::try_from(content.len()).expect("length"),
+            Some(digest),
+            None::<&str>,
+        )
+        .expect("blob");
+        ArtifactRef::try_new(
+            ArtifactId::from_bytes([9; 16]),
+            "audio",
+            blob,
+            digest,
+            Digest::raw_json(b"scope"),
+            Metadata::empty(),
+        )
+        .expect("artifact")
     }
 }

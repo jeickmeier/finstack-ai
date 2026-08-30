@@ -12,6 +12,11 @@ artifact, and the store's own ceilings bound how large a render can get.
 v1 transitions: `cut`, `crossfade`, `fade_to_black`. Subtitles are either
 burned in from an SRT track or muxed as an mp4 `mov_text` stream.
 
+A clip with no audio stream is handled automatically: the toolset gives it a
+silent lane of the clip's effective duration instead of referencing an audio
+stream that does not exist, so mixing silent and voiced clips renders
+normally.
+
 ```rust
 use std::path::PathBuf;
 use std::sync::Arc;

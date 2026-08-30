@@ -88,8 +88,13 @@ are native-only and stay off the `wasm-host` feature graph.
 
 ## The MoviePlan contract
 
-`render_movie` takes one `plan` object validated against
+`render_movie` takes one `plan` object whose shape is published as
 [`schemas/movie-plan/movie-plan.v1.json`](../../../schemas/movie-plan/movie-plan.v1.json).
+The runtime does not evaluate that JSON Schema literally: the plan is
+deserialized into the Rust `MoviePlan` types (which reject unknown fields and
+ambiguous frame sources) and then checked by `validate_plan`, which enforces
+the schema's semantic bounds — enum members, ranges, and the host's own
+ceilings — as well.
 A plan is a bounded, declarative description of a whole movie:
 
 - `defaults` — `image_model`, `video_model`, and `scene_duration_s`, plus
@@ -107,8 +112,10 @@ A plan is a bounded, declarative description of a whole movie:
 
 Validation is fail-closed and happens before any paid call: an over-limit
 scene count or total duration, a duplicate scene id, an ambiguous frame
-source, an overlapping caption cue, or a caption mode with no cues anywhere
-is rejected at submit time.
+source, an overlapping caption cue, a caption mode with no cues anywhere, an
+unknown `output.container` or `audio.mode`, an `output.fps` outside 1–120, or
+a non-`cut` transition `duration_s` outside 0.05–5 seconds is rejected at
+submit time.
 
 Each `render_movie` call submits the plan and runs one tick. `advance_render`
 runs the next tick for a `render_id`; `get_render_status` reads progress

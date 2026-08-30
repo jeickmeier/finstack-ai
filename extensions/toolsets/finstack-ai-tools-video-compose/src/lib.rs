@@ -26,14 +26,15 @@ mod exec;
 mod graph;
 mod spec;
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use finstack_ai_kernel::{
-    ArtifactRef, ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode,
-    ToolId, ValidatedToolCall,
+    ArtifactRef, EffectId, ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity,
+    ToolExecutionMode, ToolId, ValidatedToolCall,
 };
 use finstack_ai_runtime::artifact::{
     ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
@@ -602,6 +603,7 @@ async fn handle_compose(
         clip_inputs.push(ClipInput {
             path: path.clone(),
             duration_s: probed.duration_s,
+            has_audio: probed.has_audio,
         });
     }
 
@@ -610,7 +612,7 @@ async fn handle_compose(
         Container::Webm => "webm",
     };
     let output_path =
-        scratch.track(scratch_dir.join(format!("render-{:x?}.{ext}", ctx.run.effect_id)));
+        scratch.track(scratch_dir.join(format!("{}.{ext}", render_file_stem(ctx.run.effect_id))));
 
     let args = build_ffmpeg_args(
         &spec,
@@ -657,6 +659,21 @@ async fn handle_compose(
         "duration_s": probed.duration_s,
         "byte_length": byte_length,
     }))
+}
+
+/// Derive the scratch render's file stem from the effect id.
+///
+/// The stem must be a plain shell- and ffmpeg-safe token: it lands on the
+/// `ffmpeg` argument vector and in the staged artifact's name. Formatting the
+/// id with `{:?}`/`{:x?}` would embed the `EffectId(...)` wrapper — brackets,
+/// quotes and spaces — so the 16 UUID bytes are hex-encoded explicitly here.
+fn render_file_stem(effect_id: EffectId) -> String {
+    let mut stem = String::with_capacity(39);
+    stem.push_str("render-");
+    for byte in effect_id.as_bytes() {
+        let _ = write!(stem, "{byte:02x}");
+    }
+    stem
 }
 
 fn completed_stream(value: &serde_json::Value) -> Result<ToolEventStream, ToolError> {
@@ -936,6 +953,27 @@ mod tests {
         assert!(args_text.contains("xfade=transition=fade"));
         assert!(args_text.contains("clip-0-"));
         assert!(args_text.contains("clip-1-"));
+        // The output name is derived from the effect id as plain hex: no
+        // `EffectId(..)` Debug wrapper leaking brackets or spaces into a path
+        // that ends up on an argv and in the staged artifact name.
+        let expected_stem = format!("render-{}.mp4", "04".repeat(16));
+        assert!(args_text.contains(&expected_stem), "{args_text}");
+        assert!(
+            !args_text.contains('(') && !args_text.contains(')'),
+            "{args_text}"
+        );
+    }
+
+    #[test]
+    fn render_file_stem_is_plain_lowercase_hex() {
+        let stem = super::render_file_stem(EffectId::from_bytes([
+            0, 1, 0xab, 0xff, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        ]));
+        assert_eq!(stem, "render-0001abff0405060708090a0b0c0d0e0f");
+        assert!(
+            stem.chars()
+                .all(|c| c == '-' || c.is_ascii_lowercase() || c.is_ascii_digit())
+        );
     }
 
     #[tokio::test]
