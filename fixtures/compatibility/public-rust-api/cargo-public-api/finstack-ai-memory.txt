@@ -35,6 +35,7 @@ pub struct finstack_ai_memory::observer::MemoryObserver
 impl finstack_ai_memory::observer::MemoryObserver
 pub fn finstack_ai_memory::observer::MemoryObserver::diagnostics(&self) -> finstack_ai_memory::observer::MemoryObserverDiagnostics
 pub fn finstack_ai_memory::observer::MemoryObserver::try_new(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, finstack_ai_memory::record::MemoryScope, alloc::sync::Arc<dyn finstack_ai_memory::extract::MemoryExtractor>, finstack_ai_memory::record::MemoryClock) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
+pub fn finstack_ai_memory::observer::MemoryObserver::try_new_with_embedder(alloc::sync::Arc<dyn finstack_ai_memory::store::MemoryStore>, finstack_ai_memory::record::MemoryScope, alloc::sync::Arc<dyn finstack_ai_memory::extract::MemoryExtractor>, finstack_ai_memory::record::MemoryClock, alloc::sync::Arc<dyn finstack_ai_embeddings::embedder::TextEmbedder>) -> core::result::Result<Self, finstack_ai_memory::record::MemoryError>
 impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_memory::observer::MemoryObserver
 pub fn finstack_ai_memory::observer::MemoryObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
 pub fn finstack_ai_memory::observer::MemoryObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>

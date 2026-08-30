@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+use finstack_ai_embeddings::embedder::{
+    EmbedError, HashEmbedder, TextEmbedder, TextEmbedderDescriptor,
+};
+use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::{
     Digest, EffectTag, EventTag, Id, IdTag, LaneTag, ModelRequestTag, ModelTextDelta,
     RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RunEvent, RunEventBody, RunTag, Sensitivity,
@@ -356,6 +360,137 @@ async fn observer_handles_candidates_without_event_correlation() {
         .await
         .expect("list");
     assert_eq!(listing.total, 1);
+}
+
+/// A [`TextEmbedder`] whose every `embed` call fails, standing in for an
+/// unreachable embedding backend.
+struct FailingEmbedder;
+
+impl TextEmbedder for FailingEmbedder {
+    fn descriptor(&self) -> TextEmbedderDescriptor {
+        TextEmbedderDescriptor {
+            embedder_id: Arc::from("embed.test-failing.8"),
+            dimensions: 8,
+            max_input_bytes: 1024,
+        }
+    }
+
+    fn embed(&self, _texts: Vec<Arc<str>>) -> PortFuture<Result<Vec<EmbeddingVector>, EmbedError>> {
+        Box::pin(async {
+            Err(EmbedError::Unavailable {
+                message: Arc::from("test_embedder_down"),
+            })
+        })
+    }
+}
+
+/// A clock pinned to the Unix epoch, so records written through different
+/// observers compare equal field-for-field.
+fn fixed_clock() -> crate::record::MemoryClock {
+    Arc::new(|| finstack_ai_kernel::UNIX_EPOCH)
+}
+
+fn embedder_observer(
+    store: Arc<InProcessMemoryStore>,
+    embedder: Arc<dyn TextEmbedder>,
+) -> MemoryObserver {
+    MemoryObserver::try_new_with_embedder(
+        store as Arc<dyn MemoryStore>,
+        MemoryScope::try_new("t1").expect("scope"),
+        Arc::new(RuleBasedExtractor::default()),
+        fixed_clock(),
+        embedder,
+    )
+    .expect("observer")
+}
+
+/// The post-batch drain indexes captured candidates: after `observe`,
+/// nothing is pending for the embedder's space.
+#[tokio::test]
+async fn observer_drains_captured_candidates_into_the_embedding_index() {
+    let store = Arc::new(InProcessMemoryStore::new());
+    let embedder: Arc<dyn TextEmbedder> =
+        Arc::new(HashEmbedder::try_new(64).expect("embedder"));
+    let observer = embedder_observer(store.clone(), embedder);
+
+    let batch: Arc<[RunEvent]> =
+        Arc::from([text_event("[[remember]] the user prefers dark mode\n")]);
+    observer.observe(batch).await.expect("observe");
+
+    let listing = store
+        .list(
+            MemoryScope::try_new("t1").expect("scope"),
+            MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    assert_eq!(listing.total, 1);
+
+    let pending = store
+        .pending_embedding_sources(Arc::from("embed.hash-v1.64"), 16)
+        .await
+        .expect("pending");
+    assert!(pending.is_empty(), "drain must have indexed: {pending:?}");
+}
+
+/// Observer failure isolation is absolute: a failing embedder changes
+/// neither the capture results nor the diagnostics relative to a run with
+/// no embedder at all — the record merely stays pending for the space.
+#[tokio::test]
+async fn failing_embedder_leaves_capture_results_and_stats_untouched() {
+    let batch: Arc<[RunEvent]> =
+        Arc::from([text_event("[[remember]] the user prefers dark mode\n")]);
+    let scope = MemoryScope::try_new("t1").expect("scope");
+
+    let plain_store = Arc::new(InProcessMemoryStore::new());
+    let plain_observer = MemoryObserver::try_new(
+        plain_store.clone() as Arc<dyn MemoryStore>,
+        scope.clone(),
+        Arc::new(RuleBasedExtractor::default()),
+        fixed_clock(),
+    )
+    .expect("observer");
+    plain_observer
+        .observe(batch.clone())
+        .await
+        .expect("plain observe");
+
+    let failing_store = Arc::new(InProcessMemoryStore::new());
+    let failing_observer = embedder_observer(failing_store.clone(), Arc::new(FailingEmbedder));
+    failing_observer
+        .observe(batch)
+        .await
+        .expect("drain failure must not surface");
+
+    let listing_of = |store: Arc<InProcessMemoryStore>| {
+        let scope = scope.clone();
+        async move {
+            store
+                .list(
+                    scope,
+                    MemoryPage {
+                        offset: 0,
+                        limit: 10,
+                    },
+                )
+                .await
+                .expect("list")
+        }
+    };
+    assert_eq!(
+        listing_of(plain_store).await,
+        listing_of(failing_store.clone()).await
+    );
+    assert_eq!(plain_observer.diagnostics(), failing_observer.diagnostics());
+
+    let pending = failing_store
+        .pending_embedding_sources(Arc::from("embed.test-failing.8"), 16)
+        .await
+        .expect("pending");
+    assert_eq!(pending.len(), 1, "the record stays pending for the space");
 }
 
 #[test]

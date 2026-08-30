@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use finstack_ai_embeddings::embedder::TextEmbedder;
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Sensitivity, Version};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::observer::{
@@ -26,7 +27,14 @@ use crate::record::{
     ExtractionMethod, INLINE_BODY_MAX_BYTES, MemoryBody, MemoryClock, MemoryError,
     MemoryProvenance, MemoryRecord, MemoryScope, RetentionPolicy, preview_of,
 };
-use crate::store::MemoryStore;
+use crate::store::{MemoryStore, reconcile_memory_embeddings};
+
+/// Bounded per-batch embedding-index drain size.
+///
+/// Small on purpose: the drain runs inline after every observed batch, so
+/// it must stay cheap; anything it does not reach stays pending for the
+/// next batch (or an application-driven backfill).
+const EMBEDDING_DRAIN_LIMIT: usize = 16;
 
 /// Captures candidate memories extracted from observed run events.
 pub struct MemoryObserver {
@@ -35,6 +43,7 @@ pub struct MemoryObserver {
     scope: MemoryScope,
     extractor: Arc<dyn MemoryExtractor>,
     clock: MemoryClock,
+    embedder: Option<Arc<dyn TextEmbedder>>,
     diagnostics: Arc<ObserverDiagnostics>,
 }
 
@@ -76,6 +85,38 @@ impl MemoryObserver {
         extractor: Arc<dyn MemoryExtractor>,
         clock: MemoryClock,
     ) -> Result<Self, MemoryError> {
+        Self::build(store, scope, extractor, clock, None)
+    }
+
+    /// Construct a memory-capture observer that additionally drains the
+    /// store's embedding index through `embedder` after each observed
+    /// batch's captures.
+    ///
+    /// The drain is bounded and best-effort: a failing embedder (or store)
+    /// changes no capture result, no diagnostics, and no run outcome —
+    /// unindexed records simply stay pending for a later drain.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::Configuration`] exactly as
+    /// [`MemoryObserver::try_new`] does.
+    pub fn try_new_with_embedder(
+        store: Arc<dyn MemoryStore>,
+        scope: MemoryScope,
+        extractor: Arc<dyn MemoryExtractor>,
+        clock: MemoryClock,
+        embedder: Arc<dyn TextEmbedder>,
+    ) -> Result<Self, MemoryError> {
+        Self::build(store, scope, extractor, clock, Some(embedder))
+    }
+
+    fn build(
+        store: Arc<dyn MemoryStore>,
+        scope: MemoryScope,
+        extractor: Arc<dyn MemoryExtractor>,
+        clock: MemoryClock,
+        embedder: Option<Arc<dyn TextEmbedder>>,
+    ) -> Result<Self, MemoryError> {
         scope.validate()?;
         let component = ComponentId::parse("finstack.observer.memory").map_err(|_| {
             MemoryError::Configuration {
@@ -104,6 +145,7 @@ impl MemoryObserver {
             scope,
             extractor,
             clock,
+            embedder,
             diagnostics: Arc::new(ObserverDiagnostics::default()),
         })
     }
@@ -136,6 +178,7 @@ impl Observer for MemoryObserver {
         let scope = self.scope.clone();
         let extractor = Arc::clone(&self.extractor);
         let clock = self.clock.clone();
+        let embedder = self.embedder.clone();
         let diagnostics = Arc::clone(&self.diagnostics);
         Box::pin(async move {
             let filtered: Vec<RunEvent> = batch
@@ -233,6 +276,20 @@ impl Observer for MemoryObserver {
                         *last = Some("memory_capture_store_failed");
                     }
                 }
+            }
+
+            // Post-batch, best-effort embedding-index drain. The index is
+            // derived data, so failure isolation here is absolute: a
+            // failing embedder or store changes no capture result, no
+            // diagnostics, and no run outcome — unindexed records stay
+            // pending and re-surface on the next drain.
+            if let Some(embedder) = &embedder {
+                let _ = reconcile_memory_embeddings(
+                    store.as_ref(),
+                    embedder.as_ref(),
+                    EMBEDDING_DRAIN_LIMIT,
+                )
+                .await;
             }
 
             Ok(())
