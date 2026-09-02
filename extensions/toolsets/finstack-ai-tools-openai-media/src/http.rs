@@ -1,10 +1,12 @@
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{ErrorCategory, Timestamp};
 use finstack_ai_net_guard::{
-    BodyReadInterrupt, NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client,
-    read_body_bounded_interruptible, reject_literal_destination, resolve_and_pin,
+    BodyReadInterrupt, NetGuardError, SystemResolver, UrlPolicy, VettedUrl, parse_and_vet_url,
+    pinned_client, read_body_bounded_interruptible, reject_literal_destination, resolve_and_pin,
 };
+use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use serde::Deserialize;
 
@@ -15,29 +17,45 @@ use crate::{
 
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
+/// Validated `OpenAI` route plus the delivery settings every handler reads.
+#[derive(Clone)]
+pub(crate) struct Route {
+    pub(crate) client: reqwest::Client,
+    pub(crate) api_key: String,
+    pub(crate) endpoint: String,
+    pub(crate) max_result_bytes: usize,
+    pub(crate) store: Option<Arc<dyn ArtifactStore>>,
+}
+
 pub(crate) async fn send_json<T: for<'de> Deserialize<'de>>(
-    client: &reqwest::Client,
-    api_key: &str,
-    method: reqwest::Method,
+    route: &Route,
     url: &str,
-    body: Option<&serde_json::Value>,
+    body: &serde_json::Value,
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<T, ToolError> {
-    let response = send(client, api_key, method, url, body, ctx).await?;
+    let request = route
+        .client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(body);
+    let response = send(route, request, ctx).await?;
     read_bounded_json(response, cap, ctx).await
 }
 
 pub(crate) async fn send_bytes(
-    client: &reqwest::Client,
-    api_key: &str,
-    method: reqwest::Method,
+    route: &Route,
     url: &str,
-    body: Option<&serde_json::Value>,
+    body: &serde_json::Value,
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<(Vec<u8>, Option<String>), ToolError> {
-    let response = send(client, api_key, method, url, body, ctx).await?;
+    let request = route
+        .client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(body);
+    let response = send(route, request, ctx).await?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -47,23 +65,15 @@ pub(crate) async fn send_bytes(
     Ok((bytes, content_type))
 }
 
-async fn send(
-    client: &reqwest::Client,
-    api_key: &str,
-    method: reqwest::Method,
-    url: &str,
-    body: Option<&serde_json::Value>,
+/// Authorize and send one request to the configured endpoint, racing it
+/// against cancellation and the run deadline.
+pub(crate) async fn send(
+    route: &Route,
+    request: reqwest::RequestBuilder,
     ctx: &ToolCallContext,
 ) -> Result<reqwest::Response, ToolError> {
     check_interrupted(ctx)?;
-    let mut request = client
-        .request(method, url)
-        .header("Authorization", format!("Bearer {api_key}"));
-    if let Some(body) = body {
-        request = request
-            .header("Content-Type", "application/json")
-            .json(body);
-    }
+    let request = request.header("Authorization", format!("Bearer {}", route.api_key));
     let response = tokio::select! {
         () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
         () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
@@ -82,10 +92,8 @@ pub(crate) async fn download_bytes(
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<Vec<u8>, ToolError> {
+    let vetted = validate_download_url(url)?;
     check_interrupted(ctx)?;
-    let policy = download_url_policy();
-    let vetted = parse_and_vet_url(url, &policy).map_err(map_net_guard_error)?;
-    reject_literal_destination(&vetted, &policy).map_err(map_net_guard_error)?;
     let addr = tokio::select! {
         () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
         () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
@@ -109,26 +117,16 @@ pub(crate) async fn download_bytes(
         .map_err(map_net_guard_error)
 }
 
-pub(crate) fn validate_download_url(value: &str) -> Result<(), ToolError> {
-    let policy = download_url_policy();
+/// Vet a caller-supplied download URL before any network activity.
+pub(crate) fn validate_download_url(value: &str) -> Result<VettedUrl, ToolError> {
+    let policy = UrlPolicy {
+        // Scripted fixtures serve audio from a loopback listener.
+        allow_loopback_http: cfg!(test),
+        allow_nonstandard_https_port: true,
+    };
     let vetted = parse_and_vet_url(value, &policy).map_err(|_| invalid_download_url())?;
-    reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())
-}
-
-#[cfg(test)]
-fn download_url_policy() -> UrlPolicy {
-    UrlPolicy {
-        allow_loopback_http: true,
-        allow_nonstandard_https_port: true,
-    }
-}
-
-#[cfg(not(test))]
-fn download_url_policy() -> UrlPolicy {
-    UrlPolicy {
-        allow_loopback_http: false,
-        allow_nonstandard_https_port: true,
-    }
+    reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())?;
+    Ok(vetted)
 }
 
 fn invalid_download_url() -> ToolError {
@@ -208,7 +206,7 @@ fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
     deadline.is_some_and(|deadline| now_unix_ms() >= deadline.as_unix_ms())
 }
 
-pub(crate) async fn wait_deadline(deadline: Option<Timestamp>) {
+async fn wait_deadline(deadline: Option<Timestamp>) {
     let Some(deadline) = deadline else {
         std::future::pending::<()>().await;
         return;
@@ -229,7 +227,7 @@ fn now_unix_ms() -> i64 {
     .unwrap_or(i64::MAX)
 }
 
-pub(crate) fn timeout_error() -> ToolError {
+fn timeout_error() -> ToolError {
     tool_error(
         OPENAI_MEDIA_TIMEOUT,
         ErrorCategory::Deadline,

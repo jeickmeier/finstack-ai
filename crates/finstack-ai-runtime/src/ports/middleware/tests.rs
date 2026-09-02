@@ -2,13 +2,10 @@ use std::sync::Arc;
 
 use super::*;
 use finstack_ai_kernel::{
-    ComponentId, ComponentInvocation, ComponentRef, ContentBlock, Digest, EffectId, EffectInput,
-    EffectKind, EffectOutputContract, EffectOutputKind, EffectPurpose, EffectRelation,
-    EffectRequested, EffectTag, EntryTag, EventTag, Id, IdTag, InteractionKind, InteractionRequest,
-    InteractionTag, InvocationRecovery, LaneTag, Message, MessageRole, Metadata, OutputSpec,
-    PipelinePosition, ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, RecordBody,
-    RecordEnvelope, RecordTag, RetrySafety, RunTag, Sensitivity, SessionTag, Stage, StageCursor,
-    TextBlock, Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
+    ComponentId, ComponentInvocation, ComponentRef, ContentBlock, Digest, EffectTag, EntryTag, Id,
+    IdTag, InteractionKind, InteractionRequest, InteractionTag, InvocationRecovery, Message,
+    MessageRole, Metadata, OutputSpec, ProviderIds, RawJson, Sensitivity, Stage, TextBlock,
+    Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
 };
 
 use crate::ports::PortFuture;
@@ -489,158 +486,6 @@ fn compaction_preserves_protected_bytes_tool_pair_atomicity_and_canonical_histor
             .code(),
         COMPACTION_RESULT_INVALID
     );
-}
-
-fn envelope(sequence: u64, body: RecordBody) -> RecordEnvelope {
-    let events = (0..body
-        .derived_event_count(RECORD_KIND_VERSION)
-        .expect("events"))
-        .map(|offset| id::<EventTag>(100 + sequence + u64::try_from(offset).expect("offset")))
-        .collect();
-    RecordEnvelope::try_new(
-        RECORD_FORMAT_VERSION,
-        RECORD_KIND_VERSION,
-        id::<RecordTag>(10 + sequence),
-        id::<SessionTag>(1),
-        id::<LaneTag>(2),
-        Some(id::<RunTag>(3)),
-        sequence,
-        Timestamp::from_unix_ms(1_000).expect("timestamp"),
-        None,
-        Digest::raw_json(b"{}"),
-        None,
-        Digest::raw_json(b"{}"),
-        events,
-        body,
-    )
-    .expect("envelope")
-}
-
-fn middleware_effect(
-    effect_id: EffectId,
-    descriptor: &MiddlewareDescriptor,
-    input: &StageInput,
-) -> EffectRequested {
-    EffectRequested::try_new(
-        effect_id,
-        EffectKind::Middleware,
-        None,
-        Some(descriptor.invocation.clone()),
-        Some(
-            PipelinePosition::try_new(
-                Digest::raw_json(b"middleware-chain"),
-                stage_name(input.stage()),
-                0,
-            )
-            .expect("pipeline"),
-        ),
-        EffectOutputContract {
-            kind: EffectOutputKind::MiddlewareOutcome,
-            schema_version: 1,
-            schema_digest: Digest::raw_json(b"middleware-outcome-v1"),
-        },
-        EffectInput::Middleware {
-            cursor: StageCursor {
-                cycle: 0,
-                stage: input.stage(),
-            },
-            stage: Arc::from(stage_name(input.stage())),
-            input: input.to_raw_json().expect("input"),
-            resume: None,
-        },
-        RetrySafety::SafeToRetry,
-        None,
-    )
-    .expect("effect")
-}
-
-#[test]
-fn compaction_child_model_requires_exact_committed_relation_and_input() {
-    let descriptor = compactor_descriptor("fixture.compactor");
-    let input = StageInput::BeforeModel(Box::new(compaction_input()));
-    let parent_id = id::<EffectTag>(80);
-    let parent = middleware_effect(parent_id, &descriptor, &input);
-    let model_component = ComponentRef::new(
-        ComponentId::parse("fixture.summary-model").expect("model component"),
-        Some(Version {
-            major: 1,
-            minor: 0,
-            patch: 0,
-        }),
-    );
-    let request = CompactionModelRequest {
-        model: model_component.clone(),
-        request: model_draft(Arc::from([])),
-        budget_scope_id: id(81),
-        source_sensitivity: Sensitivity::Internal,
-        residency_policy_digest: Digest::raw_json(b"residency"),
-        resume_state: RawJson::parse(b"{}").expect("resume"),
-    };
-    let child = EffectRequested::try_new(
-        id::<EffectTag>(82),
-        EffectKind::Model,
-        Some(EffectRelation {
-            parent_effect_id: parent_id,
-            purpose: EffectPurpose::CompactionSummary {
-                middleware_component_id: descriptor.invocation.component.clone(),
-            },
-        }),
-        Some(ComponentInvocation {
-            component: model_component.id().clone(),
-            version: model_component.version().expect("version"),
-            configuration_digest: Digest::raw_json(b"model-config"),
-            recovery: InvocationRecovery::Reconcile,
-        }),
-        None,
-        EffectOutputContract {
-            kind: EffectOutputKind::ModelResponse,
-            schema_version: 1,
-            schema_digest: Digest::raw_json(b"model-response-v1"),
-        },
-        EffectInput::Model {
-            request: RawJson::parse(request.request.canonical_bytes().expect("request"))
-                .expect("raw"),
-        },
-        RetrySafety::IdempotentWithKey,
-        None,
-    )
-    .expect("child");
-    let child_envelope = envelope(2, RecordBody::EffectRequested(child.clone()));
-    validate_compaction_model_effect(&parent, &child_envelope, &request).expect("related child");
-
-    let wrong_relation = EffectRequested::try_new(
-        id::<EffectTag>(83),
-        child.kind(),
-        Some(EffectRelation {
-            parent_effect_id: id::<EffectTag>(84),
-            purpose: EffectPurpose::CompactionSummary {
-                middleware_component_id: descriptor.invocation.component.clone(),
-            },
-        }),
-        child.component().cloned(),
-        child.pipeline().cloned(),
-        child.output_contract().clone(),
-        child.input().clone(),
-        child.retry_safety(),
-        child.deadline(),
-    )
-    .expect("wrong relation fixture");
-    assert_eq!(
-        validate_compaction_model_effect(
-            &parent,
-            &envelope(3, RecordBody::EffectRequested(wrong_relation)),
-            &request,
-        )
-        .expect_err("wrong parent relation")
-        .code(),
-        COMPACTION_MODEL_NOT_AUTHORIZED
-    );
-
-    let mut wrong = request;
-    wrong.resume_state = RawJson::parse(b"{\"different\":true}").expect("state");
-    // Resume state belongs to the parent cursor and does not change child provider input.
-    validate_compaction_model_effect(&parent, &child_envelope, &wrong)
-        .expect("opaque parent resume state");
 }
 
 #[test]

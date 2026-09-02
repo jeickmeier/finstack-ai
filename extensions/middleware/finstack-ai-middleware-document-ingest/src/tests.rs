@@ -563,7 +563,7 @@ fn ingest_limit_follows_the_store_ceiling() {
     let store: Arc<dyn ArtifactStore> =
         Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(64 * 1024 * 1024));
     let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
-    assert_eq!(middleware.limits().max_input_bytes, 64 * 1024 * 1024);
+    assert_eq!(middleware.limits.max_input_bytes, 64 * 1024 * 1024);
 }
 
 #[test]

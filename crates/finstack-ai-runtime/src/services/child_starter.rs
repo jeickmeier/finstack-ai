@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    AppendBatchTag, BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, LaneTag,
-    Metadata, OperationLocator, RecordTag, RemoteRouteRef, RunTag, SessionTag,
+    AppendBatchTag, BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, Id, IdTag,
+    LaneTag, Metadata, OperationLocator, RecordTag, RemoteRouteRef, RunTag, SessionTag, Timestamp,
 };
 
 use crate::child::{
@@ -29,7 +29,7 @@ pub struct ChildRunStartRequest {
     /// Exact remote route for remote placement.
     pub remote: Option<RemoteRouteRef>,
     /// Optional deadline no later than the parent deadline.
-    pub requested_deadline: Option<finstack_ai_kernel::Timestamp>,
+    pub requested_deadline: Option<Timestamp>,
     /// Optional shared-budget request.
     pub requested_budget: BudgetRequest,
     /// Optional non-secret delegation reference.
@@ -76,13 +76,7 @@ impl ChildRunStarter {
     ) -> Result<ChildRunHandle, AgentInvokeError> {
         validate_start_request(self.policy, ctx, &request)?;
 
-        let mut commit = CommitCoordinator::recover_run(
-            Arc::clone(&self.store),
-            ctx.run.locator.session_id,
-            Some(ctx.run.locator.run_id),
-        )
-        .await
-        .map_err(|error| unavailable(error.to_string()))?;
+        let mut commit = self.recover_parent(ctx).await?;
         let locator = if let Some(existing) = commit
             .session()
             .child_mapping(ctx.run.locator.run_id, ctx.run.effect_id)
@@ -97,13 +91,7 @@ impl ChildRunStarter {
             .await?;
             // Compatible-lane allocation advances the parent journal's
             // structural head, so refresh before preparing the child.
-            commit = CommitCoordinator::recover_run(
-                Arc::clone(&self.store),
-                ctx.run.locator.session_id,
-                Some(ctx.run.locator.run_id),
-            )
-            .await
-            .map_err(|error| unavailable(error.to_string()))?;
+            commit = self.recover_parent(ctx).await?;
             commit
                 .session()
                 .child_mapping(ctx.run.locator.run_id, ctx.run.effect_id)
@@ -125,28 +113,14 @@ impl ChildRunStarter {
             parent_effect_id: ctx.run.effect_id,
             authorization: ctx.run.authorization.clone(),
         };
-        let generator = UuidV7Generator::new(SystemClock, OsRandomSource);
         let ids = ChildCoordinationIds {
-            preparation_batch_id: generator
-                .generate::<AppendBatchTag>()
-                .map_err(|error| unavailable(error.to_string()))?,
-            preparation_record_id: generator
-                .generate::<RecordTag>()
-                .map_err(|error| unavailable(error.to_string()))?,
+            preparation_batch_id: generate::<AppendBatchTag>()?,
+            preparation_record_id: generate::<RecordTag>()?,
             reservation_request_record_id: None,
             reservation_settlement: None,
         };
         ChildRunCoordinator::new(Arc::clone(&self.invoker))
-            .start_or_attach(
-                &mut commit,
-                context,
-                prepared,
-                None,
-                ids,
-                SystemClock
-                    .now()
-                    .map_err(|error| unavailable(error.to_string()))?,
-            )
+            .start_or_attach(&mut commit, context, prepared, None, ids, now()?)
             .await
             .map_err(|error| match error {
                 crate::child::CompositionError::Agent(error) => error,
@@ -175,19 +149,27 @@ impl ChildRunStarter {
         self.invoker.cancel(locator).await
     }
 
+    async fn recover_parent(
+        &self,
+        ctx: &ToolCallContext,
+    ) -> Result<CommitCoordinator, AgentInvokeError> {
+        CommitCoordinator::recover_run(
+            Arc::clone(&self.store),
+            ctx.run.locator.session_id,
+            Some(ctx.run.locator.run_id),
+        )
+        .await
+        .map_err(|error| unavailable(error.to_string()))
+    }
+
     async fn allocate_locator(
         &self,
         parent: &OperationLocator,
         placement: ChildPlacement,
         remote: Option<RemoteRouteRef>,
     ) -> Result<ChildRunLocator, AgentInvokeError> {
-        let generator = UuidV7Generator::new(SystemClock, OsRandomSource);
-        let run_id = generator
-            .generate::<RunTag>()
-            .map_err(|error| unavailable(error.to_string()))?;
-        let lane_id = generator
-            .generate::<LaneTag>()
-            .map_err(|error| unavailable(error.to_string()))?;
+        let run_id = generate::<RunTag>()?;
+        let lane_id = generate::<LaneTag>()?;
         let session_id = match placement {
             ChildPlacement::CompatibleLaneInParentSession => {
                 let session = SessionRuntime::open(
@@ -203,16 +185,10 @@ impl ChildRunStarter {
                         None,
                         LaneCreateIds {
                             lane_id,
-                            lane_created_record_id: generator
-                                .generate::<RecordTag>()
-                                .map_err(|error| unavailable(error.to_string()))?,
+                            lane_created_record_id: generate::<RecordTag>()?,
                             lane_moved_record_id: None,
-                            batch_id: generator
-                                .generate::<AppendBatchTag>()
-                                .map_err(|error| unavailable(error.to_string()))?,
-                            now: SystemClock
-                                .now()
-                                .map_err(|error| unavailable(error.to_string()))?,
+                            batch_id: generate::<AppendBatchTag>()?,
+                            now: now()?,
                         },
                     )
                     .await
@@ -220,42 +196,42 @@ impl ChildRunStarter {
                 parent.session_id
             }
             ChildPlacement::IsolatedChildSession => {
-                let session_id = generator
-                    .generate::<SessionTag>()
-                    .map_err(|error| unavailable(error.to_string()))?;
+                let session_id = generate::<SessionTag>()?;
                 SessionRuntime::create(
                     Arc::clone(&self.store),
                     Arc::clone(&parent.tenant_scope),
                     SessionCreateIds {
                         session_id,
                         main_lane_id: lane_id,
-                        session_created_record_id: generator
-                            .generate::<RecordTag>()
-                            .map_err(|error| unavailable(error.to_string()))?,
-                        lane_created_record_id: generator
-                            .generate::<RecordTag>()
-                            .map_err(|error| unavailable(error.to_string()))?,
-                        batch_id: generator
-                            .generate::<AppendBatchTag>()
-                            .map_err(|error| unavailable(error.to_string()))?,
-                        now: SystemClock
-                            .now()
-                            .map_err(|error| unavailable(error.to_string()))?,
+                        session_created_record_id: generate::<RecordTag>()?,
+                        lane_created_record_id: generate::<RecordTag>()?,
+                        batch_id: generate::<AppendBatchTag>()?,
+                        now: now()?,
                     },
                 )
                 .await
                 .map_err(|error| unavailable(error.to_string()))?;
                 session_id
             }
-            ChildPlacement::RemoteChildSession => generator
-                .generate::<SessionTag>()
-                .map_err(|error| unavailable(error.to_string()))?,
+            ChildPlacement::RemoteChildSession => generate::<SessionTag>()?,
         };
         let operation =
             OperationLocator::try_new(parent.tenant_scope.as_ref(), session_id, lane_id, run_id)
                 .map_err(|error| invalid_request(error.to_string()))?;
         Ok(ChildRunLocator { operation, remote })
     }
+}
+
+fn generate<T: IdTag>() -> Result<Id<T>, AgentInvokeError> {
+    UuidV7Generator::new(SystemClock, OsRandomSource)
+        .generate()
+        .map_err(|error| unavailable(error.to_string()))
+}
+
+fn now() -> Result<Timestamp, AgentInvokeError> {
+    SystemClock
+        .now()
+        .map_err(|error| unavailable(error.to_string()))
 }
 
 fn validate_start_request(
@@ -282,7 +258,11 @@ fn validate_start_request(
             "child run starter requires a configured shared-budget ledger",
         ));
     }
-    validate_route_shape(request.placement, request.remote.as_ref())?;
+    if matches!(request.placement, ChildPlacement::RemoteChildSession) != request.remote.is_some() {
+        return Err(invalid_request(
+            "remote route must be present exactly for remote child placement",
+        ));
+    }
     if ctx.run.deadline.is_some_and(|parent| {
         request
             .requested_deadline
@@ -290,18 +270,6 @@ fn validate_start_request(
     }) {
         return Err(invalid_request(
             "child deadline must not outlive the parent deadline",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_route_shape(
-    placement: ChildPlacement,
-    remote: Option<&RemoteRouteRef>,
-) -> Result<(), AgentInvokeError> {
-    if matches!(placement, ChildPlacement::RemoteChildSession) != remote.is_some() {
-        return Err(invalid_request(
-            "remote route must be present exactly for remote child placement",
         ));
     }
     Ok(())

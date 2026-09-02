@@ -44,7 +44,11 @@ pub struct PortConformanceFailure {
 }
 
 impl PortConformanceFailure {
-    fn new(port: &'static str, contract: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn new(
+        port: &'static str,
+        contract: &'static str,
+        detail: impl Into<String>,
+    ) -> Self {
         Self {
             port,
             contract,

@@ -233,16 +233,6 @@ impl SqliteCronStore {
 
     fn with_conn<T>(
         &self,
-        body: impl FnOnce(&Connection) -> Result<T, CronError>,
-    ) -> Result<T, CronError> {
-        let conn = self.conn.lock().map_err(|_| CronError::StoreUnavailable {
-            code: "sqlite_cron_lock_poisoned",
-        })?;
-        body(&conn)
-    }
-
-    fn with_conn_mut<T>(
-        &self,
         body: impl FnOnce(&mut Connection) -> Result<T, CronError>,
     ) -> Result<T, CronError> {
         let mut conn = self.conn.lock().map_err(|_| CronError::StoreUnavailable {
@@ -301,50 +291,15 @@ impl CronScheduleStore for SqliteCronStore {
                 .map_err(|_| CronError::StoreUnavailable {
                     code: "sqlite_cron_prepare",
                 })?;
+            let tenant_scope: Arc<str> = Arc::from(tenant_scope);
             let rows = stmt
-                .query_map(params![tenant_scope], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, Option<i64>>(4)?,
-                        row.get::<_, i64>(5)?,
-                    ))
+                .query_map(params![tenant_scope.as_ref()], |row| {
+                    Ok((Arc::clone(&tenant_scope), RawSchedule::read(row, 0)?))
                 })
                 .map_err(|_| CronError::StoreUnavailable {
                     code: "sqlite_cron_query",
                 })?;
-            let mut schedules = Vec::new();
-            for row in rows {
-                let (schedule_id, expression, origin, next_fire, last_fired, fire_count) = row
-                    .map_err(|_| CronError::StoreIntegrity {
-                        code: "sqlite_cron_row",
-                    })?;
-                schedules.push(CronSchedule {
-                    tenant_scope: Arc::from(tenant_scope),
-                    schedule_id: Arc::from(schedule_id),
-                    expression: IntervalSchedule::parse(&expression)?,
-                    origin: Timestamp::from_unix_ms(origin).map_err(|_| {
-                        CronError::StoreIntegrity {
-                            code: "sqlite_cron_origin",
-                        }
-                    })?,
-                    next_fire_at: Timestamp::from_unix_ms(next_fire).map_err(|_| {
-                        CronError::StoreIntegrity {
-                            code: "sqlite_cron_next_fire",
-                        }
-                    })?,
-                    last_fired_at: last_fired
-                        .map(Timestamp::from_unix_ms)
-                        .transpose()
-                        .map_err(|_| CronError::StoreIntegrity {
-                            code: "sqlite_cron_last_fired",
-                        })?,
-                    fire_count: u64_from_i64(fire_count)?,
-                });
-            }
-            Ok(schedules)
+            rows.map(decode_schedule).collect()
         })
     }
 
@@ -356,7 +311,7 @@ impl CronScheduleStore for SqliteCronStore {
         now: Timestamp,
         claimed: &CronSchedule,
     ) -> Result<bool, CronError> {
-        self.with_conn_mut(|conn| {
+        self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| CronError::StoreUnavailable {
@@ -406,59 +361,70 @@ impl CronScheduleStore for SqliteCronStore {
                 .query_map(
                     params![now.as_unix_ms(), i64::try_from(limit).unwrap_or(i64::MAX)],
                     |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, i64>(4)?,
-                            row.get::<_, Option<i64>>(5)?,
-                            row.get::<_, i64>(6)?,
-                        ))
+                        let tenant_scope: String = row.get(0)?;
+                        Ok((Arc::from(tenant_scope), RawSchedule::read(row, 1)?))
                     },
                 )
                 .map_err(|_| CronError::StoreUnavailable {
                     code: "sqlite_cron_query",
                 })?;
-            let mut schedules = Vec::new();
-            for row in rows {
-                let (
-                    tenant_scope,
-                    schedule_id,
-                    expression,
-                    origin,
-                    next_fire,
-                    last_fired,
-                    fire_count,
-                ) = row.map_err(|_| CronError::StoreIntegrity {
-                    code: "sqlite_cron_row",
-                })?;
-                schedules.push(CronSchedule {
-                    tenant_scope: Arc::from(tenant_scope),
-                    schedule_id: Arc::from(schedule_id),
-                    expression: IntervalSchedule::parse(&expression)?,
-                    origin: Timestamp::from_unix_ms(origin).map_err(|_| {
-                        CronError::StoreIntegrity {
-                            code: "sqlite_cron_origin",
-                        }
-                    })?,
-                    next_fire_at: Timestamp::from_unix_ms(next_fire).map_err(|_| {
-                        CronError::StoreIntegrity {
-                            code: "sqlite_cron_next_fire",
-                        }
-                    })?,
-                    last_fired_at: last_fired
-                        .map(Timestamp::from_unix_ms)
-                        .transpose()
-                        .map_err(|_| CronError::StoreIntegrity {
-                            code: "sqlite_cron_last_fired",
-                        })?,
-                    fire_count: u64_from_i64(fire_count)?,
-                });
-            }
-            Ok(schedules)
+            rows.map(decode_schedule).collect()
         })
     }
+}
+
+/// The schedule columns shared by [`CronScheduleStore::load_tenant`] and
+/// [`CronScheduleStore::load_due`], as read from sqlite before decoding.
+struct RawSchedule {
+    schedule_id: String,
+    expression: String,
+    origin: i64,
+    next_fire: i64,
+    last_fired: Option<i64>,
+    fire_count: i64,
+}
+
+impl RawSchedule {
+    /// Read the six schedule columns starting at column `first`.
+    fn read(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Self> {
+        Ok(Self {
+            schedule_id: row.get(first)?,
+            expression: row.get(first + 1)?,
+            origin: row.get(first + 2)?,
+            next_fire: row.get(first + 3)?,
+            last_fired: row.get(first + 4)?,
+            fire_count: row.get(first + 5)?,
+        })
+    }
+}
+
+fn decode_schedule(
+    row: rusqlite::Result<(Arc<str>, RawSchedule)>,
+) -> Result<CronSchedule, CronError> {
+    let (tenant_scope, raw) = row.map_err(|_| CronError::StoreIntegrity {
+        code: "sqlite_cron_row",
+    })?;
+    Ok(CronSchedule {
+        tenant_scope,
+        schedule_id: Arc::from(raw.schedule_id),
+        expression: IntervalSchedule::parse(&raw.expression)?,
+        origin: Timestamp::from_unix_ms(raw.origin).map_err(|_| CronError::StoreIntegrity {
+            code: "sqlite_cron_origin",
+        })?,
+        next_fire_at: Timestamp::from_unix_ms(raw.next_fire).map_err(|_| {
+            CronError::StoreIntegrity {
+                code: "sqlite_cron_next_fire",
+            }
+        })?,
+        last_fired_at: raw
+            .last_fired
+            .map(Timestamp::from_unix_ms)
+            .transpose()
+            .map_err(|_| CronError::StoreIntegrity {
+                code: "sqlite_cron_last_fired",
+            })?,
+        fire_count: u64_from_i64(raw.fire_count)?,
+    })
 }
 
 fn is_memory_path(path: &Path) -> bool {

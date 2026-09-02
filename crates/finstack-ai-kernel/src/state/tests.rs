@@ -1,7 +1,3 @@
-use super::hash_entries::{
-    completion_hash_entries, model_hash_entries, resolution_hash_entries, stage_hash_entries,
-    tool_call_hash_entries, tool_settlement_hash_entries,
-};
 use super::hash_projection;
 use super::*;
 use crate::content::{ContentBlock, ToolCallBlock};
@@ -760,12 +756,7 @@ mod kernel_state_eq_tests {
         assert_eq!(left_wire, right_wire);
         assert_eq!(left, right);
 
-        let hash_projection = hash_projection::KernelStateHashV1::from_state(
-            &left,
-            stage_hash_entries(&left.stage_settlements),
-            model_hash_entries(&left.model_settlements),
-            completion_hash_entries(&left.completion_identities),
-        );
+        let hash_projection = hash_projection::KernelStateHashV1::from_state(&left);
         let hash_json =
             serde_json_canonicalizer::to_vec(&hash_projection).expect("hash projection");
         assert_ne!(
@@ -811,40 +802,18 @@ mod hash_projection_explicit_null_tests {
     }
 
     fn v4_json(state: &KernelState) -> serde_json::Value {
-        serde_json::to_value(hash_projection::KernelStateHashV4::from_state(
-            state,
-            stage_hash_entries(&state.stage_settlements),
-            model_hash_entries(&state.model_settlements),
-            completion_hash_entries(&state.completion_identities),
-            tool_call_hash_entries(&state.tool_calls),
-            tool_settlement_hash_entries(&state.tool_settlements),
-        ))
-        .expect("v4 json")
+        serde_json::to_value(hash_projection::KernelStateHashV4::from_state(state))
+            .expect("v4 json")
     }
 
     fn v5_json(state: &KernelState) -> serde_json::Value {
-        serde_json::to_value(hash_projection::KernelStateHashV5::from_state(
-            state,
-            stage_hash_entries(&state.stage_settlements),
-            model_hash_entries(&state.model_settlements),
-            completion_hash_entries(&state.completion_identities),
-            tool_call_hash_entries(&state.tool_calls),
-            tool_settlement_hash_entries(&state.tool_settlements),
-        ))
-        .expect("v5 json")
+        serde_json::to_value(hash_projection::KernelStateHashV5::from_state(state))
+            .expect("v5 json")
     }
 
     fn v6_json(state: &KernelState) -> serde_json::Value {
-        serde_json::to_value(hash_projection::KernelStateHashV6::from_state(
-            state,
-            stage_hash_entries(&state.stage_settlements),
-            model_hash_entries(&state.model_settlements),
-            completion_hash_entries(&state.completion_identities),
-            tool_call_hash_entries(&state.tool_calls),
-            tool_settlement_hash_entries(&state.tool_settlements),
-            resolution_hash_entries(&state.resolution_identities),
-        ))
-        .expect("v6 json")
+        serde_json::to_value(hash_projection::KernelStateHashV6::from_state(state))
+            .expect("v6 json")
     }
 
     fn dummy_schema() -> SchemaRef {
@@ -882,15 +851,8 @@ mod hash_projection_explicit_null_tests {
             last_limit: Some(last_limit_without_cost()),
             ..KernelState::default()
         };
-        let json = serde_json::to_value(hash_projection::KernelStateHashV3::from_state(
-            &state,
-            stage_hash_entries(&state.stage_settlements),
-            model_hash_entries(&state.model_settlements),
-            completion_hash_entries(&state.completion_identities),
-            tool_call_hash_entries(&state.tool_calls),
-            tool_settlement_hash_entries(&state.tool_settlements),
-        ))
-        .expect("v3 json");
+        let json = serde_json::to_value(hash_projection::KernelStateHashV3::from_state(&state))
+            .expect("v3 json");
         let usage = json["last_limit"]["usage"]
             .as_object()
             .expect("raw last_limit usage");

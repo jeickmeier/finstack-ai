@@ -280,7 +280,7 @@ pub fn spawn(future: PortFuture<()>) -> Result<HostTaskHandle, DriverUnavailable
 
 /// Cooperatively yield one turn to the host driver.
 pub async fn yield_now() {
-    pump_local();
+    drive_local();
     #[cfg(target_arch = "wasm32")]
     {
         // Yield through the installed sleeper so wait loops cannot starve
@@ -358,10 +358,6 @@ pub(crate) async fn sleep(duration: Duration) {
 /// Drive queued local tasks once. Native `wasm-host` tests use this as a
 /// cooperative executor step.
 pub fn drive_local() {
-    pump_local();
-}
-
-fn pump_local() {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let now = Instant::now();
@@ -385,8 +381,7 @@ fn pump_local() {
         let mut ready = LOCAL_TASKS.with(|tasks| std::mem::take(&mut *tasks.borrow_mut()));
         let mut pending = Vec::with_capacity(ready.len());
         for mut task in ready.drain(..) {
-            let waker = noop_waker();
-            let mut cx = Context::from_waker(&waker);
+            let mut cx = Context::from_waker(Waker::noop());
             if task.as_mut().poll(&mut cx).is_pending() {
                 pending.push(task);
             }
@@ -399,11 +394,6 @@ fn pump_local() {
             tasks.extend(pending);
         });
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn noop_waker() -> Waker {
-    Waker::noop().clone()
 }
 
 fn oneshot() -> (OneshotSignal, OneshotWait) {

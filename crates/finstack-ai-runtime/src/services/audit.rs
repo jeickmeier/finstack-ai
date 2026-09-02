@@ -209,35 +209,7 @@ impl SecurityAuditGate {
             failure_count: AtomicU64::new(0),
         }))
     }
-}
 
-/// In-process audit sink for trusted same-run list/resolve wrappers.
-#[cfg(feature = "native-tokio")]
-pub(crate) struct NoopSecurityAuditSink;
-
-#[cfg(feature = "native-tokio")]
-impl SecurityAuditSink for NoopSecurityAuditSink {
-    fn record(
-        &self,
-        event: SecurityAuditEvent,
-    ) -> PortFuture<Result<SecurityAuditReceipt, SecurityAuditError>> {
-        let event_id = Arc::<str>::from(event.event_id());
-        let recorded_at = event.timestamp();
-        Box::pin(async move {
-            Ok(SecurityAuditReceipt {
-                event_id,
-                recorded_at,
-            })
-        })
-    }
-
-    fn health(&self) -> PortFuture<Result<SecurityAuditHealth, SecurityAuditError>> {
-        Box::pin(async { Ok(SecurityAuditHealth { ready: true }) })
-    }
-}
-
-#[cfg(feature = "native-tokio")]
-impl SecurityAuditGate {
     /// Enable a healthy gate that records required events without an external sink.
     ///
     /// # Errors
@@ -306,6 +278,31 @@ impl SecurityAuditGate {
             ready: self.ready.load(Ordering::Acquire),
             failure_count: self.failure_count.load(Ordering::Acquire),
         }
+    }
+}
+
+/// In-process audit sink for trusted same-run list/resolve wrappers.
+#[cfg(feature = "native-tokio")]
+struct NoopSecurityAuditSink;
+
+#[cfg(feature = "native-tokio")]
+impl SecurityAuditSink for NoopSecurityAuditSink {
+    fn record(
+        &self,
+        event: SecurityAuditEvent,
+    ) -> PortFuture<Result<SecurityAuditReceipt, SecurityAuditError>> {
+        let event_id = Arc::<str>::from(event.event_id());
+        let recorded_at = event.timestamp();
+        Box::pin(async move {
+            Ok(SecurityAuditReceipt {
+                event_id,
+                recorded_at,
+            })
+        })
+    }
+
+    fn health(&self) -> PortFuture<Result<SecurityAuditHealth, SecurityAuditError>> {
+        Box::pin(async { Ok(SecurityAuditHealth { ready: true }) })
     }
 }
 

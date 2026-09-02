@@ -131,14 +131,12 @@ pub(super) fn folded_allocation_error(error: RunHandleError) -> RunHandleError {
 pub(super) fn limit_crossing_allocation<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
 ) -> Result<AllocatedIds, RunHandleError> {
-    let mut records = Vec::with_capacity(LIMIT_CROSSING_RECORDS);
-    for _ in 0..LIMIT_CROSSING_RECORDS {
-        records.push(sources.generate::<RecordTag>()?);
-    }
-    let mut events = Vec::with_capacity(LIMIT_CROSSING_EVENTS);
-    for _ in 0..LIMIT_CROSSING_EVENTS {
-        events.push(sources.generate::<EventTag>()?);
-    }
+    let records = (0..LIMIT_CROSSING_RECORDS)
+        .map(|_| sources.generate::<RecordTag>())
+        .collect::<Result<Vec<_>, _>>()?;
+    let events = (0..LIMIT_CROSSING_EVENTS)
+        .map(|_| sources.generate::<EventTag>())
+        .collect::<Result<Vec<_>, _>>()?;
     AllocatedIds::try_new(
         records,
         events,

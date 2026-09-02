@@ -77,10 +77,6 @@ impl AuthContext {
         self.protocol_version = protocol_version;
         self
     }
-
-    pub(crate) fn is_valid(&self) -> bool {
-        label_is_valid(&self.tenant_scope) && label_is_valid(&self.principal)
-    }
 }
 
 /// Application verifier invoked after the pre-auth hello.

@@ -3,7 +3,7 @@
 use super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::canonical_digest;
 use super::capacity::{self, StateGrowth};
-use super::decide::{draft_for_state, expected_stage_cursor, next_sequence};
+use super::decide::{decision_for, expected_stage_cursor};
 use super::decision::{Decision, KernelError};
 use super::input::{InteractionSettled, RequestInteraction};
 use crate::Digest;
@@ -72,19 +72,15 @@ pub(super) fn decide_request(
         request.expires_at(),
     )
     .map_err(|_| KernelError::InvariantViolation)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(
-            state,
-            env,
-            vec![
-                RecordBody::EffectRequested(requested),
-                RecordBody::InteractionRequested(request.clone()),
-            ],
-        )?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(
+        state,
+        env,
+        vec![
+            RecordBody::EffectRequested(requested),
+            RecordBody::InteractionRequested(request.clone()),
+        ],
+        Vec::new(),
+    )
 }
 
 pub(super) fn decide_settled(
@@ -132,19 +128,15 @@ pub(super) fn decide_settled(
                 Some(expired.interaction_id.to_canonical_string()),
             )
             .map_err(|_| KernelError::InvariantViolation)?;
-            Ok(Decision {
-                expected_sequence: next_sequence(state)?,
-                records: draft_for_state(
-                    state,
-                    env,
-                    vec![
-                        RecordBody::InteractionExpired(expired.clone()),
-                        RecordBody::EffectFailed(failed),
-                    ],
-                )?,
-                actions: Vec::new(),
-                diagnostics: Vec::new(),
-            })
+            decision_for(
+                state,
+                env,
+                vec![
+                    RecordBody::InteractionExpired(expired.clone()),
+                    RecordBody::EffectFailed(failed),
+                ],
+                Vec::new(),
+            )
         }
         InteractionSettled::Cancelled(cancelled) => {
             if cancelled.interaction_id() != pending.request.interaction_id() {
@@ -161,19 +153,15 @@ pub(super) fn decide_settled(
                 Some(cancelled.interaction_id().to_canonical_string()),
             )
             .map_err(|_| KernelError::InvariantViolation)?;
-            Ok(Decision {
-                expected_sequence: next_sequence(state)?,
-                records: draft_for_state(
-                    state,
-                    env,
-                    vec![
-                        RecordBody::InteractionCancelled(cancelled.clone()),
-                        RecordBody::EffectCancelled(effect),
-                    ],
-                )?,
-                actions: Vec::new(),
-                diagnostics: Vec::new(),
-            })
+            decision_for(
+                state,
+                env,
+                vec![
+                    RecordBody::InteractionCancelled(cancelled.clone()),
+                    RecordBody::EffectCancelled(effect),
+                ],
+                Vec::new(),
+            )
         }
     }
 }
@@ -236,19 +224,15 @@ fn decide_resolved(
         None,
     )
     .map_err(|_| KernelError::InvariantViolation)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(
-            state,
-            env,
-            vec![
-                RecordBody::InteractionResolved(resolution.clone()),
-                RecordBody::EffectCompleted(completed),
-            ],
-        )?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(
+        state,
+        env,
+        vec![
+            RecordBody::InteractionResolved(resolution.clone()),
+            RecordBody::EffectCompleted(completed),
+        ],
+        Vec::new(),
+    )
 }
 
 pub(super) fn approval_outcome(

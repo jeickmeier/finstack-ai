@@ -224,10 +224,8 @@ impl<G: GuestToolset + Send + Sync + 'static> Toolset for WitToolsetAdapter<G> {
 /// Extension that registers the adapters named by one experimental manifest.
 pub struct WitPluginExtension {
     manifest: PluginManifest,
-    context: Option<Arc<dyn ContextProvider>>,
-    context_lifecycle: Option<Arc<PluginLifecycle>>,
-    toolset: Option<Arc<dyn Toolset>>,
-    toolset_lifecycle: Option<Arc<PluginLifecycle>>,
+    context: Option<(Arc<dyn ContextProvider>, Arc<PluginLifecycle>)>,
+    toolset: Option<(Arc<dyn Toolset>, Arc<PluginLifecycle>)>,
 }
 
 impl WitPluginExtension {
@@ -245,11 +243,10 @@ impl WitPluginExtension {
             &construction,
             Arc::new(NoopPluginHooks),
         )?;
+        let lifecycle = adapter.lifecycle();
         Ok(Self {
-            context_lifecycle: Some(adapter.lifecycle()),
-            context: Some(Arc::new(adapter)),
+            context: Some((Arc::new(adapter), lifecycle)),
             toolset: None,
-            toolset_lifecycle: None,
             manifest,
         })
     }
@@ -268,11 +265,10 @@ impl WitPluginExtension {
             &construction,
             Arc::new(NoopPluginHooks),
         )?;
+        let lifecycle = adapter.lifecycle();
         Ok(Self {
-            toolset_lifecycle: Some(adapter.lifecycle()),
-            toolset: Some(Arc::new(adapter)),
+            toolset: Some((Arc::new(adapter), lifecycle)),
             context: None,
-            context_lifecycle: None,
             manifest,
         })
     }
@@ -291,44 +287,21 @@ impl Extension for WitPluginExtension {
             self.manifest.identity.clone(),
             adapter_version(&self.manifest),
         );
-        match (&self.context, &self.context_lifecycle) {
-            (Some(provider), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
-                registrar.context_provider(
-                    metadata.clone(),
-                    ReadyComponent::new(Arc::clone(provider))
-                        .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
-                )?;
-            }
-            (None, None) => {}
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(RegistrationError::InvalidDescriptor {
-                    message: Arc::from("context adapter is missing lifecycle hooks"),
-                });
-            }
+        if let Some((provider, lifecycle)) = &self.context {
+            let hooks = Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
+            registrar.context_provider(
+                metadata.clone(),
+                ReadyComponent::new(Arc::clone(provider))
+                    .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
+            )?;
         }
-        match (&self.toolset, &self.toolset_lifecycle) {
-            (Some(toolset), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
-                registrar.toolset(
-                    metadata,
-                    ReadyComponent::new(Arc::clone(toolset))
-                        .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
-                )?;
-            }
-            (None, None) => {}
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(RegistrationError::InvalidDescriptor {
-                    message: Arc::from("toolset adapter is missing lifecycle hooks"),
-                });
-            }
-        }
-        if self.context.is_none() && self.toolset.is_none() {
-            return Err(RegistrationError::InvalidDescriptor {
-                message: Arc::from("plugin extension registered no port"),
-            });
+        if let Some((toolset, lifecycle)) = &self.toolset {
+            let hooks = Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
+            registrar.toolset(
+                metadata,
+                ReadyComponent::new(Arc::clone(toolset))
+                    .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
+            )?;
         }
         Ok(())
     }
@@ -353,6 +326,7 @@ fn construction_context(manifest: &PluginManifest) -> ComponentConstructionConte
         metadata: Metadata::empty(),
     }
 }
+
 fn map_lifecycle_registration(error: &WitMapError) -> PluginLifecycleError {
     PluginLifecycleError::InitializeFailed(match error {
         WitMapError::ManifestInvalid(reason)

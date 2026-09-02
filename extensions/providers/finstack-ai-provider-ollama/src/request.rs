@@ -87,18 +87,18 @@ struct WireFunction {
     parameters: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ContinuationEnvelope {
+#[derive(Deserialize)]
+struct ContinuationEnvelope {
     provider: String,
     version: u32,
     assistant_replay: Vec<ReplayEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct ReplayEntry {
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub(crate) thinking: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub(crate) digest: Option<String>,
 }
 
@@ -406,43 +406,6 @@ fn content_digest(text: &str, tool_calls: &[Value]) -> Result<String, ModelError
     let raw = RawJson::parse(&bytes)
         .map_err(|_| request_error("assistant content digest is not canonical JSON"))?;
     Ok(raw.digest().to_hex())
-}
-
-#[allow(
-    dead_code,
-    reason = "request-side continuation helpers stay with the vendor crate"
-)]
-pub(crate) fn response_content_digest(
-    text: &str,
-    tool_calls: &[(String, String)],
-) -> Result<String, ModelError> {
-    let values = tool_calls
-        .iter()
-        .map(|(name, arguments)| json!({ "name": name, "arguments": arguments }))
-        .collect::<Vec<_>>();
-    content_digest(text, &values)
-}
-
-#[allow(
-    dead_code,
-    reason = "request-side continuation helpers stay with the vendor crate"
-)]
-pub(crate) fn encode_continuation(
-    entries: Vec<ReplayEntry>,
-) -> Result<Option<RawJson>, ModelError> {
-    if entries.iter().all(|entry| entry.thinking.is_empty()) {
-        return Ok(None);
-    }
-    let envelope = ContinuationEnvelope {
-        provider: CONTINUATION_PROVIDER.to_owned(),
-        version: CONTINUATION_VERSION,
-        assistant_replay: entries,
-    };
-    let bytes = serde_json::to_vec(&envelope)
-        .map_err(|_| request_error("provider continuation could not be encoded"))?;
-    RawJson::parse(&bytes)
-        .map(Some)
-        .map_err(|_| request_error("provider continuation is not canonical JSON"))
 }
 
 pub(crate) fn serialize_request(request: &ChatRequest) -> Result<Vec<u8>, ModelError> {

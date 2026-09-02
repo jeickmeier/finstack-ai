@@ -10,7 +10,7 @@
 //!
 //! - `paths` — repository, schema, and compatibility fixture paths
 //! - `crash_prefix` — legal restore classification
-//! - `fakes` — deterministic clocks, random sources, IDs, and `ManualGate`
+//! - `fakes` — deterministic clocks, random sources, and `ManualGate`
 //! - `scripted` — scripted model, toolset, and extension doubles
 //! - `fixtures` — golden traces, public-API subjects, and journal corpus
 //! - `conformance` — target-neutral runner, port checks, compaction, reducer
@@ -63,10 +63,7 @@ pub use conformance::runner::{
     DeferredBindingAdapter, NoOpRustAdapter, TargetKind,
 };
 pub use crash_prefix::{LegalRestore, classify_phase};
-pub use fakes::{
-    DeterministicIdSource, FixedClock, ManualClock, ManualGate, PatternRandomSource,
-    SequenceRandomSource,
-};
+pub use fakes::{FixedClock, ManualClock, ManualGate, PatternRandomSource};
 pub use fixtures::golden_scenarios::{
     GoldenScenario, GoldenScenarioId, GoldenScenarioSuite, load_golden_scenarios,
 };

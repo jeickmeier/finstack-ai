@@ -276,7 +276,10 @@ pub(super) fn apply_effect_completed(
         completed.output_contract().kind,
         EffectOutputKind::ContextContribution | EffectOutputKind::MiddlewareOutcome
     ) {
-        return apply_extension_completed(state, completed);
+        return apply_extension_settled(
+            state,
+            crate::ExtensionSettlement::Completed(completed.clone()),
+        );
     }
     if completed.output_contract().kind == EffectOutputKind::InteractionResolution {
         return apply_interaction_effect_terminal(
@@ -299,7 +302,18 @@ pub(super) fn apply_effect_completed(
     let RecordBody::EntryAppended(entry) = next.ok_or(KernelError::InvalidRecordOrder)? else {
         return Err(KernelError::InvalidRecordOrder);
     };
-    index_completed_settlement(state, completed, entry)?;
+    let pending = state
+        .pending_model_effect
+        .as_ref()
+        .ok_or(KernelError::ModelSettlementMismatch)?;
+    let digest = completed_record_digest(pending, completed, &entry.message)?;
+    insert_model_identity(
+        state,
+        completed.effect_id(),
+        ModelSettlementKind::Completed,
+        digest,
+        completed.completion_id(),
+    )?;
     state.terminal_candidate = Some(TerminalCandidate::Completed {
         cycle: entry.cycle,
         turn_id: entry.turn_id,
@@ -368,7 +382,7 @@ pub(super) fn apply_effect_failed(
         failed.output_contract().kind,
         EffectOutputKind::ContextContribution | EffectOutputKind::MiddlewareOutcome
     ) {
-        return apply_extension_failed(state, failed);
+        return apply_extension_settled(state, crate::ExtensionSettlement::Failed(failed.clone()));
     }
     if failed.output_contract().kind == EffectOutputKind::InteractionResolution {
         return apply_interaction_effect_terminal(
@@ -381,7 +395,18 @@ pub(super) fn apply_effect_failed(
     if failed.output_contract().kind == EffectOutputKind::ToolResult {
         return apply_tool_effect_failed(state, failed);
     }
-    index_failed_settlement(state, failed)?;
+    let pending = state
+        .pending_model_effect
+        .as_ref()
+        .ok_or(KernelError::ModelSettlementMismatch)?;
+    let digest = failed_record_digest(pending, failed)?;
+    insert_model_identity(
+        state,
+        failed.effect_id(),
+        ModelSettlementKind::Failed,
+        digest,
+        failed.completion_id(),
+    )?;
     let pending = state
         .pending_model_effect
         .take()
@@ -397,68 +422,35 @@ pub(super) fn apply_effect_failed(
     Ok(())
 }
 
-fn apply_extension_completed(
+fn apply_extension_settled(
     state: &mut KernelState,
-    completed: &crate::EffectCompleted,
+    outcome: crate::ExtensionSettlement,
 ) -> Result<(), KernelError> {
     let pending = state
         .pending_extension_effect
         .as_ref()
         .ok_or(KernelError::InvalidRecordOrder)?;
-    completed
+    outcome
         .validate_against(&pending.requested)
         .map_err(|_| KernelError::InvalidRecordOrder)?;
     let input = crate::ExtensionEffectSettled {
         cursor: pending.cursor,
-        outcome: crate::ExtensionSettlement::Completed(completed.clone()),
+        outcome,
     };
     let fingerprint = super::super::extension::fingerprint(&input)?;
+    let effect_id = input.outcome.effect_id();
     if state
         .extension_settlements
-        .insert(completed.effect_id(), fingerprint.clone())
+        .insert(effect_id, fingerprint.clone())
         .is_some()
     {
         return Err(KernelError::InvalidRecordOrder);
     }
     super::insert_completion_identity(
         state,
-        completed.effect_id(),
+        effect_id,
         fingerprint.digest,
-        completed.completion_id(),
-    )?;
-    state.pending_extension_effect = None;
-    state.state_version = state.state_version.max(7);
-    Ok(())
-}
-
-fn apply_extension_failed(
-    state: &mut KernelState,
-    failed: &crate::EffectFailed,
-) -> Result<(), KernelError> {
-    let pending = state
-        .pending_extension_effect
-        .as_ref()
-        .ok_or(KernelError::InvalidRecordOrder)?;
-    failed
-        .validate_against(&pending.requested)
-        .map_err(|_| KernelError::InvalidRecordOrder)?;
-    let input = crate::ExtensionEffectSettled {
-        cursor: pending.cursor,
-        outcome: crate::ExtensionSettlement::Failed(failed.clone()),
-    };
-    let fingerprint = super::super::extension::fingerprint(&input)?;
-    if state
-        .extension_settlements
-        .insert(failed.effect_id(), fingerprint.clone())
-        .is_some()
-    {
-        return Err(KernelError::InvalidRecordOrder);
-    }
-    super::insert_completion_identity(
-        state,
-        failed.effect_id(),
-        fingerprint.digest,
-        failed.completion_id(),
+        input.outcome.completion_id(),
     )?;
     state.pending_extension_effect = None;
     state.state_version = state.state_version.max(7);
@@ -499,44 +491,7 @@ fn apply_compaction_completed(
     Ok(())
 }
 
-pub(super) fn index_completed_settlement(
-    state: &mut KernelState,
-    completed: &crate::EffectCompleted,
-    entry: &EntryAppended,
-) -> Result<(), KernelError> {
-    let pending = state
-        .pending_model_effect
-        .as_ref()
-        .ok_or(KernelError::ModelSettlementMismatch)?;
-    let digest = completed_record_digest(pending, completed, &entry.message)?;
-    insert_model_identity(
-        state,
-        completed.effect_id(),
-        ModelSettlementKind::Completed,
-        digest,
-        completed.completion_id(),
-    )
-}
-
-pub(super) fn index_failed_settlement(
-    state: &mut KernelState,
-    failed: &crate::EffectFailed,
-) -> Result<(), KernelError> {
-    let pending = state
-        .pending_model_effect
-        .as_ref()
-        .ok_or(KernelError::ModelSettlementMismatch)?;
-    let digest = failed_record_digest(pending, failed)?;
-    insert_model_identity(
-        state,
-        failed.effect_id(),
-        ModelSettlementKind::Failed,
-        digest,
-        failed.completion_id(),
-    )
-}
-
-pub(super) fn insert_model_identity(
+fn insert_model_identity(
     state: &mut KernelState,
     effect_id: crate::EffectId,
     kind: ModelSettlementKind,

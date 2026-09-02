@@ -145,13 +145,12 @@ impl Toolset for DocumentToolset {
         let toolset = self.clone();
         Box::pin(async move {
             let name = call.call.tool_name();
-            let expected_id = toolset
+            let spec = toolset
                 .tools
                 .iter()
                 .find(|spec| spec.model_name.as_ref() == name)
-                .map(|spec| spec.id.clone())
                 .ok_or_else(|| invalid_arguments("unknown document tool name"))?;
-            validate_call_context(&ctx, &call, &expected_id)?;
+            validate_call_context(&ctx, &call, &spec.id)?;
             let args = parse_call_arguments(name, call.call.arguments().as_bytes())?;
             if let Some((start, end)) = args.page_range
                 && (start == 0 || end < start)
@@ -161,17 +160,13 @@ impl Toolset for DocumentToolset {
             let resolved = crate::source::resolve(
                 &args.artifact,
                 &ctx,
-                &toolset.artifact_store,
+                toolset.artifact_store.as_ref(),
                 &toolset.limits,
             )
             .await
             .map_err(|error| source_error(&error))?;
-            let crate::source::ResolvedSource::Bytes {
-                bytes,
-                media_type_hint,
-                ..
-            } = resolved;
-            let media_type_hint = args.media_type_hint.or(media_type_hint);
+            let bytes = resolved.bytes;
+            let media_type_hint = args.media_type_hint.unwrap_or(resolved.media_type_hint);
 
             let output = match name {
                 PARSE_NAME => {
@@ -179,9 +174,10 @@ impl Toolset for DocumentToolset {
                         &toolset,
                         &ctx,
                         &bytes,
-                        media_type_hint.as_deref(),
+                        &media_type_hint,
                         args.page_range,
                         args.max_output_bytes,
+                        spec.max_result_bytes,
                     )
                     .await?
                 }
@@ -245,35 +241,21 @@ fn validate_call_context(
     Ok(())
 }
 
-/// Arguments common to both tools after per-tool JSON deserialization.
-struct CallArguments {
-    artifact: serde_json::Value,
-    media_type_hint: Option<String>,
-    page_range: Option<(u32, u32)>,
-    max_output_bytes: Option<u64>,
-}
-
 struct DocumentOutput {
     value: serde_json::Value,
     artifact: Option<finstack_ai_kernel::ArtifactRef>,
 }
 
-fn parse_call_arguments(name: &str, arguments: &[u8]) -> Result<CallArguments, ToolError> {
+/// Deserialize the per-tool argument shape; `pdf_classify` takes only the
+/// artifact, so its parse-only fields come back unset.
+fn parse_call_arguments(name: &str, arguments: &[u8]) -> Result<ParseArguments, ToolError> {
     match name {
-        PARSE_NAME => {
-            let arguments: ParseArguments = serde_json::from_slice(arguments)
-                .map_err(|_| invalid_arguments("document_parse arguments are invalid"))?;
-            Ok(CallArguments {
-                artifact: arguments.artifact,
-                media_type_hint: arguments.media_type_hint,
-                page_range: arguments.page_range,
-                max_output_bytes: arguments.max_output_bytes,
-            })
-        }
+        PARSE_NAME => serde_json::from_slice(arguments)
+            .map_err(|_| invalid_arguments("document_parse arguments are invalid")),
         CLASSIFY_NAME => {
             let arguments: ClassifyArguments = serde_json::from_slice(arguments)
                 .map_err(|_| invalid_arguments("pdf_classify arguments are invalid"))?;
-            Ok(CallArguments {
+            Ok(ParseArguments {
                 artifact: arguments.artifact,
                 media_type_hint: None,
                 page_range: None,
@@ -290,9 +272,10 @@ async fn build_parse_result(
     toolset: &DocumentToolset,
     ctx: &ToolCallContext,
     bytes: &[u8],
-    media_type_hint: Option<&str>,
+    media_type_hint: &str,
     page_range: Option<(u32, u32)>,
     max_output_bytes: Option<u64>,
+    max_result_bytes: u64,
 ) -> Result<DocumentOutput, ToolError> {
     let mut limits = toolset.limits.clone();
     if let Some(requested) = max_output_bytes {
@@ -304,11 +287,6 @@ async fn build_parse_result(
         ));
     }
     let parsed = parse_document(bytes, media_type_hint, page_range, limits).await?;
-    let max_result_bytes = toolset
-        .tools
-        .iter()
-        .find(|spec| spec.model_name.as_ref() == PARSE_NAME)
-        .map_or(1_048_576, |spec| spec.max_result_bytes);
     build_parse_output(parsed, ctx, &toolset.artifact_store, max_result_bytes).await
 }
 
@@ -350,7 +328,7 @@ fn source_error(error: &crate::source::SourceError) -> ToolError {
             ErrorCategory::Tool,
             message,
         ),
-        SourceError::TooLarge(_) => tool_error(
+        SourceError::TooLarge => tool_error(
             crate::DOCUMENT_TOO_LARGE,
             ErrorCategory::Validation,
             "document input exceeds the byte ceiling",
@@ -360,17 +338,17 @@ fn source_error(error: &crate::source::SourceError) -> ToolError {
 
 async fn parse_document(
     bytes: &[u8],
-    media_type_hint: Option<&str>,
+    media_type_hint: &str,
     page_range: Option<(u32, u32)>,
     limits: DocumentLimits,
 ) -> Result<crate::parser::ParsedDocument, ToolError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let bytes = Bytes::copy_from_slice(bytes);
-        let media_type_hint = media_type_hint.map(str::to_owned);
+        let media_type_hint = media_type_hint.to_owned();
         tokio::task::spawn_blocking(move || match page_range {
             Some(range) => crate::parser::parse_pages(&bytes, range, &limits),
-            None => crate::parser::parse(&bytes, media_type_hint.as_deref(), &limits),
+            None => crate::parser::parse(&bytes, Some(&media_type_hint), &limits),
         })
         .await
         .map_err(|_| parse_worker_error())?
@@ -379,7 +357,7 @@ async fn parse_document(
     #[cfg(target_arch = "wasm32")]
     match page_range {
         Some(range) => crate::parser::parse_pages(bytes, range, &limits),
-        None => crate::parser::parse(bytes, media_type_hint, &limits),
+        None => crate::parser::parse(bytes, Some(media_type_hint), &limits),
     }
     .map_err(|error| parse_error(&error))
 }

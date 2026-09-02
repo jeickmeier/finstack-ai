@@ -10,12 +10,12 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::ports::model::LockedModelContextProfile;
 use finstack_ai_runtime::run::RunHandle;
+use finstack_ai_runtime::session::LaneRunContext;
 
 use super::handle::Agent;
 use super::prepare::{
-    NativeIds, RunContextSeed, StageIds, ensure_nonterminal_failure, model_draft,
-    model_output_contract, structured_candidate, submit, submit_stage, wait_for_cycle,
-    wait_for_phase,
+    NativeIds, StageIds, ensure_nonterminal_failure, model_draft, model_output_contract,
+    structured_candidate, submit, submit_stage, wait_for_cycle, wait_for_phase,
 };
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
@@ -36,7 +36,7 @@ impl Agent {
         request: AgentRunRequest,
         profile: LockedModelContextProfile,
         locator: OperationLocator,
-        context_seed: RunContextSeed,
+        context_seed: LaneRunContext,
     ) -> Result<AgentRunOutput, AgentRunError> {
         submit(
             handle,
@@ -79,7 +79,7 @@ impl Agent {
         let lock_digest = lock.fingerprint().map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?;
-        if let Some(host) = self.activation_host() {
+        if let Some(host) = &self.activation_host {
             host.set_lock_digest(lock_digest);
             host.seed_active(locator.run_id, active.clone().into());
         }
@@ -120,7 +120,7 @@ impl Agent {
         loop {
             let state = handle.live_state();
             self.validate_restored_mask(&state.active_capabilities)?;
-            if let Some(host) = self.activation_host() {
+            if let Some(host) = &self.activation_host {
                 host.seed_active(locator.run_id, Arc::clone(&state.active_capabilities));
             }
             if state.cycle >= request.max_cycles {
@@ -330,7 +330,7 @@ impl Agent {
             .filter(|capability| capability.active)
             .map(|capability| capability.id.clone())
             .collect::<BTreeSet<_>>();
-        self.capability_specs()
+        self.capability_specs
             .iter()
             .filter(|spec| {
                 active.iter().any(|item| item.capability_id == spec.id)
@@ -345,7 +345,7 @@ impl Agent {
         handle: &RunHandle,
         run_id: RunId,
     ) -> Result<(), AgentRunError> {
-        let Some(host) = self.activation_host() else {
+        let Some(host) = &self.activation_host else {
             return Ok(());
         };
         let Some(complete) = host.take_pending(run_id) else {

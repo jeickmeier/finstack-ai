@@ -15,7 +15,7 @@ use finstack_ai_runtime::ports::context::{
 };
 use finstack_ai_runtime::ports::model::ReconcileContext;
 
-use crate::classify::{MAX_LIST_PAGES, optional_catalog_missing};
+use crate::classify::list_all;
 use crate::protocol::{
     ListResourceTemplatesResult, ListResourcesResult, ReadResourceResult, Resource,
     ResourceContents, ResourceTemplate, ResultType,
@@ -55,7 +55,6 @@ pub struct McpContextProvider {
     descriptor: ContextProviderDescriptor,
     snapshot: Arc<[FrozenResource]>,
     transport: Arc<dyn McpTransport>,
-    inline_result_bytes: u64,
     config: McpConfig,
     list_changed: Option<Arc<dyn crate::McpListChangedObserver>>,
     subscribed: Mutex<BTreeSet<Arc<str>>>,
@@ -137,7 +136,6 @@ impl McpContextProvider {
             },
             snapshot,
             transport,
-            inline_result_bytes: config.inline_result_bytes(),
             config: config.clone(),
             list_changed,
             subscribed: Mutex::new(BTreeSet::new()),
@@ -219,11 +217,11 @@ impl ContextProvider for McpContextProvider {
             .lock()
             .map(|names| names.clone())
             .unwrap_or_default();
-        let max_bytes = self.inline_result_bytes;
+        let max_bytes = self.config.inline_result_bytes();
         let control = RequestControl::new(ctx.run.cancellation.clone(), ctx.run.deadline);
         Box::pin(async move {
             collect_frozen(
-                &transport,
+                transport.as_ref(),
                 &snapshot,
                 &subscribed,
                 &request,
@@ -258,131 +256,61 @@ impl ContextProvider for McpContextProvider {
 pub(crate) async fn enumerate_resources(
     transport: &dyn McpTransport,
 ) -> Result<Vec<Resource>, McpError> {
-    let mut resources = Vec::new();
     let mut seen_names = BTreeSet::new();
     let mut seen_uris = BTreeSet::new();
-    let mut cursor: Option<String> = None;
-    for _ in 0..MAX_LIST_PAGES {
-        let mut params = serde_json::json!({});
-        if let Some(cursor) = cursor.as_ref()
-            && let Some(object) = params.as_object_mut()
-        {
-            object.insert(
-                "cursor".to_owned(),
-                serde_json::Value::String(cursor.clone()),
-            );
-        }
-        let value = transport.request("resources/list", params).await?;
-        let page: ListResourcesResult = serde_json::from_value(value).map_err(|error| {
-            McpError::stable(
-                MCP_PROTOCOL_VIOLATION,
-                format!("resources/list result is invalid: {error}"),
-            )
-        })?;
-        if page.result_type != ResultType::Complete {
+    list_all::<ListResourcesResult>(transport, "resources/list", false, |resource| {
+        if resource.name.is_empty() {
             return Err(McpError::stable(
-                MCP_RESULT_UNSUPPORTED,
-                "resources/list resultType is not complete",
+                MCP_PROTOCOL_VIOLATION,
+                "resources/list returned an empty resource name",
             ));
         }
-        for resource in page.resources {
-            if resource.name.is_empty() {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "resources/list returned an empty resource name",
-                ));
-            }
-            if resource.uri.is_empty() {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "resources/list returned an empty resource uri",
-                ));
-            }
-            if !seen_names.insert(resource.name.clone()) {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "resources/list returned a duplicate resource name",
-                ));
-            }
-            if !seen_uris.insert(resource.uri.clone()) {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "resources/list returned a duplicate resource uri",
-                ));
-            }
-            resources.push(resource);
+        if resource.uri.is_empty() {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "resources/list returned an empty resource uri",
+            ));
         }
-        match page.next_cursor {
-            Some(next) => cursor = Some(next),
-            None => return Ok(resources),
+        if !seen_names.insert(resource.name.clone()) {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "resources/list returned a duplicate resource name",
+            ));
         }
-    }
-    Err(McpError::stable(
-        MCP_PROTOCOL_VIOLATION,
-        "resources/list exceeded the page cap",
-    ))
+        if !seen_uris.insert(resource.uri.clone()) {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "resources/list returned a duplicate resource uri",
+            ));
+        }
+        Ok(())
+    })
+    .await
 }
 
-pub(crate) async fn enumerate_templates(
+async fn enumerate_templates(
     transport: &dyn McpTransport,
 ) -> Result<Vec<ResourceTemplate>, McpError> {
-    let mut templates = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut cursor: Option<String> = None;
-    for _ in 0..MAX_LIST_PAGES {
-        let mut params = serde_json::json!({});
-        if let Some(cursor) = cursor.as_ref()
-            && let Some(object) = params.as_object_mut()
-        {
-            object.insert(
-                "cursor".to_owned(),
-                serde_json::Value::String(cursor.clone()),
-            );
-        }
-        let value = match transport.request("resources/templates", params).await {
-            Ok(value) => value,
-            Err(error) if optional_catalog_missing(&error) => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let page: ListResourceTemplatesResult = serde_json::from_value(value).map_err(|error| {
-            McpError::stable(
-                MCP_PROTOCOL_VIOLATION,
-                format!("resources/templates result is invalid: {error}"),
-            )
-        })?;
-        if page.result_type != ResultType::Complete {
+    list_all::<ListResourceTemplatesResult>(transport, "resources/templates", true, |template| {
+        if template.name.is_empty() || template.uri_template.is_empty() {
             return Err(McpError::stable(
-                MCP_RESULT_UNSUPPORTED,
-                "resources/templates resultType is not complete",
+                MCP_PROTOCOL_VIOLATION,
+                "resources/templates returned an empty name or uriTemplate",
             ));
         }
-        for template in page.resource_templates {
-            if template.name.is_empty() || template.uri_template.is_empty() {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "resources/templates returned an empty name or uriTemplate",
-                ));
-            }
-            if !seen.insert(template.name.clone()) {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "resources/templates returned a duplicate template name",
-                ));
-            }
-            templates.push(template);
+        if !seen.insert(template.name.clone()) {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "resources/templates returned a duplicate template name",
+            ));
         }
-        match page.next_cursor {
-            Some(next) => cursor = Some(next),
-            None => return Ok(templates),
-        }
-    }
-    Err(McpError::stable(
-        MCP_PROTOCOL_VIOLATION,
-        "resources/templates exceeded the page cap",
-    ))
+        Ok(())
+    })
+    .await
 }
 
-pub(crate) fn resource_snapshot_digest(
+fn resource_snapshot_digest(
     server_identity: &str,
     resources: &[Resource],
     templates: &[ResourceTemplate],
@@ -405,7 +333,7 @@ pub(crate) fn resource_snapshot_digest(
 }
 
 async fn collect_frozen(
-    transport: &Arc<dyn McpTransport>,
+    transport: &dyn McpTransport,
     snapshot: &[FrozenResource],
     subscribed: &BTreeSet<Arc<str>>,
     request: &ContextRequest,
@@ -500,11 +428,16 @@ fn item_from_read(
     max_bytes: u64,
 ) -> Result<ContextItem, ContextError> {
     let text = render_contents(contents, resource, max_bytes);
+    let block = TextBlock::try_new(&text).map_err(|_| {
+        context_error(
+            finstack_ai_runtime::ports::context::CONTEXT_CONTRIBUTION_INVALID,
+            ErrorCategory::Validation,
+            "MCP resource text is invalid",
+        )
+    })?;
     ContextItem::try_new(
         ContextItemKind::QuotedSource,
-        vec![ContentBlock::Text(TextBlock::try_new(&text).map_err(
-            |_| contribution_invalid("MCP resource text is invalid"),
-        )?)],
+        vec![ContentBlock::Text(block)],
         ContextProvenance {
             source_id: Arc::from(RESOURCE_SOURCE_ID),
             source_ref: Some(Arc::clone(&resource.uri)),
@@ -562,14 +495,6 @@ fn truncate(text: &str, max_bytes: u64) -> String {
 
 fn estimate_tokens(text: &str) -> u64 {
     u64::try_from(text.len().div_ceil(4)).unwrap_or(1).max(1)
-}
-
-fn contribution_invalid(message: &'static str) -> ContextError {
-    context_error(
-        finstack_ai_runtime::ports::context::CONTEXT_CONTRIBUTION_INVALID,
-        ErrorCategory::Validation,
-        message,
-    )
 }
 
 fn context_error(

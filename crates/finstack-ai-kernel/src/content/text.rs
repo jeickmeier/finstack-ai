@@ -113,7 +113,8 @@ impl<'de> Deserialize<'de> for TextBlock {
 }
 
 /// Structured JSON content block.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JsonBlock {
     value: RawJson,
 }
@@ -129,21 +130,5 @@ impl JsonBlock {
     #[must_use]
     pub const fn value(&self) -> &RawJson {
         &self.value
-    }
-}
-
-impl<'de> Deserialize<'de> for JsonBlock {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct BinaryWire {
-            value: RawJson,
-        }
-
-        let wire = BinaryWire::deserialize(deserializer)?;
-        Ok(Self::new(wire.value))
     }
 }

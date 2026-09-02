@@ -232,12 +232,18 @@ pub const NOTIFY_DELIVERY_FAILED: ObserverDiagnostic = ObserverDiagnostic {
 /// Announce-only interaction lifecycle observer.
 pub struct NotifyObserver {
     descriptor: ObserverDescriptor,
+    delivery: Arc<Delivery>,
+}
+
+/// Sink, policy, counters, and the ordering gate shared with in-flight
+/// delivery futures.
+struct Delivery {
     sink: Arc<dyn NotificationSink>,
     policy: DeliveryPolicy,
-    delivered: Arc<AtomicU64>,
-    failed: Arc<AtomicU64>,
-    diagnostic: Arc<Mutex<Option<ObserverDiagnostic>>>,
-    delivery_gate: Arc<tokio::sync::Mutex<()>>,
+    delivered: AtomicU64,
+    failed: AtomicU64,
+    diagnostic: Mutex<Option<ObserverDiagnostic>>,
+    gate: tokio::sync::Mutex<()>,
 }
 
 impl NotifyObserver {
@@ -267,31 +273,33 @@ impl NotifyObserver {
                 payload_mode: ObserverPayloadMode::Full,
                 metadata: Metadata::empty(),
             },
-            sink,
-            policy,
-            delivered: Arc::new(AtomicU64::new(0)),
-            failed: Arc::new(AtomicU64::new(0)),
-            diagnostic: Arc::new(Mutex::new(None)),
-            delivery_gate: Arc::new(tokio::sync::Mutex::new(())),
+            delivery: Arc::new(Delivery {
+                sink,
+                policy,
+                delivered: AtomicU64::new(0),
+                failed: AtomicU64::new(0),
+                diagnostic: Mutex::new(None),
+                gate: tokio::sync::Mutex::new(()),
+            }),
         })
     }
 
     /// Notifications delivered successfully.
     #[must_use]
     pub fn delivered(&self) -> u64 {
-        self.delivered.load(Ordering::Relaxed)
+        self.delivery.delivered.load(Ordering::Relaxed)
     }
 
     /// Notifications dropped after exhausting delivery attempts.
     #[must_use]
     pub fn failed(&self) -> u64 {
-        self.failed.load(Ordering::Relaxed)
+        self.delivery.failed.load(Ordering::Relaxed)
     }
 
     /// Last stored diagnostic.
     #[must_use]
     pub fn last_diagnostic(&self) -> Option<ObserverDiagnostic> {
-        self.diagnostic.lock().ok().and_then(|slot| *slot)
+        self.delivery.diagnostic.lock().ok().and_then(|slot| *slot)
     }
 }
 
@@ -302,54 +310,45 @@ impl Observer for NotifyObserver {
 
     fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
         let pending = batch.iter().filter_map(project).collect::<Vec<_>>();
-        let sink = Arc::clone(&self.sink);
-        let policy = self.policy.clone();
-        let delivered = Arc::clone(&self.delivered);
-        let failed = Arc::clone(&self.failed);
-        let diagnostic = Arc::clone(&self.diagnostic);
-        let gate = Arc::clone(&self.delivery_gate);
+        let delivery = Arc::clone(&self.delivery);
         Box::pin(async move {
             if !pending.is_empty() {
-                deliver_pending(sink, policy, pending, delivered, failed, diagnostic, gate).await;
+                delivery.deliver_all(pending).await;
             }
             Ok(())
         })
     }
 }
 
-async fn deliver_pending(
-    sink: Arc<dyn NotificationSink>,
-    policy: DeliveryPolicy,
-    pending: Vec<InteractionNotification>,
-    delivered: Arc<AtomicU64>,
-    failed: Arc<AtomicU64>,
-    diagnostic: Arc<Mutex<Option<ObserverDiagnostic>>>,
-    gate: Arc<tokio::sync::Mutex<()>>,
-) {
-    let _ordered = gate.lock().await;
-    for notification in pending {
-        let mut attempt = 0_u32;
-        loop {
-            attempt += 1;
-            let outcome =
-                tokio::time::timeout(policy.request_timeout, sink.deliver(notification.clone()))
-                    .await;
-            match outcome {
-                Ok(Ok(())) => {
-                    delivered.fetch_add(1, Ordering::Relaxed);
-                    break;
-                }
-                // A timed-out request may still have been received by the
-                // endpoint; retrying it would duplicate the notification.
-                Ok(Err(_)) if attempt < policy.max_attempts => {
-                    tokio::time::sleep(policy.retry_backoff).await;
-                }
-                Ok(Err(_)) | Err(_) => {
-                    failed.fetch_add(1, Ordering::Relaxed);
-                    if let Ok(mut slot) = diagnostic.lock() {
-                        *slot = Some(NOTIFY_DELIVERY_FAILED);
+impl Delivery {
+    async fn deliver_all(&self, pending: Vec<InteractionNotification>) {
+        let _ordered = self.gate.lock().await;
+        for notification in pending {
+            let mut attempt = 0_u32;
+            loop {
+                attempt += 1;
+                let outcome = tokio::time::timeout(
+                    self.policy.request_timeout,
+                    self.sink.deliver(notification.clone()),
+                )
+                .await;
+                match outcome {
+                    Ok(Ok(())) => {
+                        self.delivered.fetch_add(1, Ordering::Relaxed);
+                        break;
                     }
-                    break;
+                    // A timed-out request may still have been received by the
+                    // endpoint; retrying it would duplicate the notification.
+                    Ok(Err(_)) if attempt < self.policy.max_attempts => {
+                        tokio::time::sleep(self.policy.retry_backoff).await;
+                    }
+                    Ok(Err(_)) | Err(_) => {
+                        self.failed.fetch_add(1, Ordering::Relaxed);
+                        if let Ok(mut slot) = self.diagnostic.lock() {
+                            *slot = Some(NOTIFY_DELIVERY_FAILED);
+                        }
+                        break;
+                    }
                 }
             }
         }

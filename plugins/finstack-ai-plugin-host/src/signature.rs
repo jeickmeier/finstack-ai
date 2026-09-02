@@ -103,8 +103,7 @@ mod tests {
     use super::{SignaturePolicy, verify_manifest};
     use ed25519_dalek::{Signer, SigningKey};
     use finstack_ai_wit::{
-        PluginManifest, PluginSignature, manifest_digest_hex, manifest_signing_payload,
-        parse_manifest,
+        PluginManifest, manifest_digest_hex, manifest_signing_payload, parse_manifest,
     };
     use std::collections::BTreeMap;
     use std::fmt::Write;
@@ -194,11 +193,6 @@ mod tests {
                 .code(),
             "plugin_signature_untrusted"
         );
-        let _unused = PluginSignature {
-            algorithm: "ed25519".into(),
-            key_id: "x".into(),
-            signature: "00".into(),
-        };
     }
 
     #[test]

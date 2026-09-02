@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::effects::EffectOutputKind;
+use crate::effects::{EffectKind, EffectOutputKind};
 use crate::primitives::Sensitivity;
 use crate::primitives::{EffectId, ModelRequestId, RunId, ToolBatchId, ToolCallId, TurnId};
 use crate::records::{RECORD_KIND_VERSION, RecordBody};
@@ -60,23 +60,11 @@ pub(super) fn validate_event_policy(
         }
         _ => {}
     }
-    let model_event = match body {
-        RunEventBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Model,
-        RunEventBody::EffectDeferred(deferred) => {
-            deferred.output_contract.kind == EffectOutputKind::ModelResponse
-        }
-        RunEventBody::EffectCompleted(completed) => {
-            completed.output_contract().kind == EffectOutputKind::ModelResponse
-        }
-        RunEventBody::EffectFailed(failed) => {
-            failed.output_contract().kind == EffectOutputKind::ModelResponse
-        }
-        RunEventBody::EffectCancelled(cancelled) => {
-            cancelled.output_contract().kind == EffectOutputKind::ModelResponse
-        }
-        RunEventBody::ModelTextDelta(_) | RunEventBody::ReasoningDelta(_) => true,
-        _ => false,
-    };
+    let model_event = effect_event_is(body, EffectKind::Model, &EffectOutputKind::ModelResponse)
+        || matches!(
+            body,
+            RunEventBody::ModelTextDelta(_) | RunEventBody::ReasoningDelta(_)
+        );
     if model_event
         && (turn_id.is_none()
             || model_request_id.is_none()
@@ -87,23 +75,8 @@ pub(super) fn validate_event_policy(
             reason: "model event requires turn_id, model_request_id, effect_id, and confidential sensitivity",
         });
     }
-    let tool_event = match body {
-        RunEventBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Tool,
-        RunEventBody::EffectDeferred(deferred) => {
-            deferred.output_contract.kind == EffectOutputKind::ToolResult
-        }
-        RunEventBody::EffectCompleted(completed) => {
-            completed.output_contract().kind == EffectOutputKind::ToolResult
-        }
-        RunEventBody::EffectFailed(failed) => {
-            failed.output_contract().kind == EffectOutputKind::ToolResult
-        }
-        RunEventBody::EffectCancelled(cancelled) => {
-            cancelled.output_contract().kind == EffectOutputKind::ToolResult
-        }
-        RunEventBody::ToolProgress(_) => true,
-        _ => false,
-    };
+    let tool_event = effect_event_is(body, EffectKind::Tool, &EffectOutputKind::ToolResult)
+        || matches!(body, RunEventBody::ToolProgress(_));
     if tool_event
         && (turn_id.is_none()
             || tool_batch_id.is_none()
@@ -116,6 +89,33 @@ pub(super) fn validate_event_policy(
         });
     }
     Ok(())
+}
+
+/// Whether an effect-lifecycle event belongs to the `kind`/`output` family.
+///
+/// Requests are classified by effect kind; deferrals and settlements carry
+/// only the output contract.
+fn effect_event_is(body: &RunEventBody, kind: EffectKind, output: &EffectOutputKind) -> bool {
+    match body {
+        RunEventBody::EffectRequested(value) => value.kind() == kind,
+        RunEventBody::EffectDeferred(value) => value.output_contract.kind == *output,
+        RunEventBody::EffectCompleted(value) => value.output_contract().kind == *output,
+        RunEventBody::EffectFailed(value) => value.output_contract().kind == *output,
+        RunEventBody::EffectCancelled(value) => value.output_contract().kind == *output,
+        _ => false,
+    }
+}
+
+/// Record-body counterpart of [`effect_event_is`].
+fn effect_record_is(body: &RecordBody, kind: EffectKind, output: &EffectOutputKind) -> bool {
+    match body {
+        RecordBody::EffectRequested(value) => value.kind() == kind,
+        RecordBody::EffectDeferred(value) => value.output_contract.kind == *output,
+        RecordBody::EffectCompleted(value) => value.output_contract().kind == *output,
+        RecordBody::EffectFailed(value) => value.output_contract().kind == *output,
+        RecordBody::EffectCancelled(value) => value.output_contract().kind == *output,
+        _ => false,
+    }
 }
 
 pub(super) fn validate_event_versions(
@@ -199,71 +199,50 @@ pub(super) fn run_event_body_from_record(
     body: &RecordBody,
     ordinal: usize,
 ) -> Result<RunEventBody, EventError> {
-    let event = match body {
-        RecordBody::RunAccepted(value) => RunEventBody::RunAccepted(value.clone()),
-        RecordBody::EffectRequested(value) => RunEventBody::EffectRequested(value.clone()),
-        RecordBody::EffectDeferred(value) => RunEventBody::EffectDeferred(value.clone()),
-        RecordBody::EffectCompleted(value) => RunEventBody::EffectCompleted(value.clone()),
-        RecordBody::EffectFailed(value) => RunEventBody::EffectFailed(value.clone()),
-        RecordBody::EffectCancelled(value) => RunEventBody::EffectCancelled(value.clone()),
-        RecordBody::InteractionRequested(value) => {
+    let event = match (body, ordinal) {
+        (RecordBody::RunAccepted(value), 0) => RunEventBody::RunAccepted(value.clone()),
+        (RecordBody::EffectRequested(value), 0) => RunEventBody::EffectRequested(value.clone()),
+        (RecordBody::EffectDeferred(value), 0) => RunEventBody::EffectDeferred(value.clone()),
+        (RecordBody::EffectCompleted(value), 0) => RunEventBody::EffectCompleted(value.clone()),
+        (RecordBody::EffectFailed(value), 0) => RunEventBody::EffectFailed(value.clone()),
+        (RecordBody::EffectCancelled(value), 0) => RunEventBody::EffectCancelled(value.clone()),
+        (RecordBody::InteractionRequested(value), 0) => {
             RunEventBody::InteractionRequested(value.clone())
         }
-        RecordBody::InteractionResolved(value) => RunEventBody::InteractionResolved(value.clone()),
-        RecordBody::InteractionExpired(value) => RunEventBody::InteractionExpired(value.clone()),
-        RecordBody::InteractionCancelled(value) => {
+        (RecordBody::InteractionResolved(value), 0) => {
+            RunEventBody::InteractionResolved(value.clone())
+        }
+        (RecordBody::InteractionExpired(value), 0) => {
+            RunEventBody::InteractionExpired(value.clone())
+        }
+        (RecordBody::InteractionCancelled(value), 0) => {
             RunEventBody::InteractionCancelled(value.clone())
         }
-        RecordBody::EntryAppended(value) => RunEventBody::MessageFinalized {
+        (RecordBody::EntryAppended(value), 0) => RunEventBody::MessageFinalized {
             message_id: *value.message.id(),
         },
-        RecordBody::ToolCallSettled(value) if ordinal == 0 => RunEventBody::MessageFinalized {
+        (RecordBody::ToolCallSettled(value), 0) => RunEventBody::MessageFinalized {
             message_id: *value.message.id(),
         },
-        RecordBody::ToolCallSettled(value) if ordinal == 1 => RunEventBody::ToolSettled {
+        (RecordBody::ToolCallSettled(value), 1) => RunEventBody::ToolSettled {
             tool_call_id: value.tool_call_id,
         },
-        RecordBody::RunCompleted(value) => RunEventBody::RunCompleted {
+        (RecordBody::RunCompleted(value), 0) => RunEventBody::RunCompleted {
             result_digest: value.result_digest,
         },
-        RecordBody::RunFailed(value) => RunEventBody::RunFailed {
+        (RecordBody::RunFailed(value), 0) => RunEventBody::RunFailed {
             error: value.error.clone(),
         },
-        RecordBody::LimitReached(value) => RunEventBody::LimitReached {
+        (RecordBody::LimitReached(value), 0) => RunEventBody::LimitReached {
             dimension: value.dimension.clone(),
         },
-        RecordBody::RunSuspended(value) => RunEventBody::RunSuspended {
+        (RecordBody::RunSuspended(value), 0) => RunEventBody::RunSuspended {
             reason_code: Some(Arc::from(value.reason_code.as_str())),
         },
-        RecordBody::RunCancelled(value) => RunEventBody::RunCancelled {
+        (RecordBody::RunCancelled(value), 0) => RunEventBody::RunCancelled {
             request_id: Some(value.request_id),
         },
-        RecordBody::StageOutcomeRecorded(_)
-        | RecordBody::ContextPrepared(_)
-        | RecordBody::ToolBatchOpened(_)
-        | RecordBody::ToolBatchClosed(_)
-        | RecordBody::CancellationRequested(_)
-        | RecordBody::CancellationReconciled(_)
-        | RecordBody::RetryScheduled(_)
-        | RecordBody::TimerFired(_)
-        | RecordBody::OutputConfigured(_)
-        | RecordBody::CapabilitiesActivated(_)
-        | RecordBody::FinalResultRecorded(_)
-        | RecordBody::OutputValidationFailed(_)
-        | RecordBody::ExternalCommandRejected(_)
-        | RecordBody::ChildRunPrepared(_)
-        | RecordBody::BudgetReservationRequested(_)
-        | RecordBody::BudgetReservationSettled(_)
-        | RecordBody::BudgetChargeRecorded(_)
-        | RecordBody::BudgetReservationReleased(_)
-        | RecordBody::SessionCreated(_)
-        | RecordBody::LaneCreated(_)
-        | RecordBody::LaneMoved(_)
-        | RecordBody::SnapshotWritten(_)
-        | RecordBody::ConversationEntry(_)
-        | RecordBody::ToolCallSettled(_) => {
-            return Err(EventError::UnsupportedOrdinal { ordinal });
-        }
+        _ => return Err(EventError::UnsupportedOrdinal { ordinal }),
     };
     Ok(event)
 }
@@ -356,42 +335,13 @@ pub(super) fn derived_event_sensitivity(body: &RecordBody) -> Sensitivity {
 }
 
 pub(super) fn is_tool_effect_record(body: &RecordBody) -> bool {
-    match body {
-        RecordBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Tool,
-        RecordBody::EffectDeferred(deferred) => {
-            deferred.output_contract.kind == EffectOutputKind::ToolResult
-        }
-        RecordBody::EffectCompleted(completed) => {
-            completed.output_contract().kind == EffectOutputKind::ToolResult
-        }
-        RecordBody::EffectFailed(failed) => {
-            failed.output_contract().kind == EffectOutputKind::ToolResult
-        }
-        RecordBody::EffectCancelled(cancelled) => {
-            cancelled.output_contract().kind == EffectOutputKind::ToolResult
-        }
-        _ => false,
-    }
+    effect_record_is(body, EffectKind::Tool, &EffectOutputKind::ToolResult)
 }
 
 pub(super) fn is_model_effect_record(body: &RecordBody) -> bool {
-    match body {
-        RecordBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Model,
-        RecordBody::EffectDeferred(deferred) => {
-            deferred.output_contract.kind == EffectOutputKind::ModelResponse
-        }
-        RecordBody::EffectCompleted(completed) => {
-            completed.output_contract().kind == EffectOutputKind::ModelResponse
-        }
-        RecordBody::EffectFailed(failed) => {
-            failed.output_contract().kind == EffectOutputKind::ModelResponse
-        }
-        RecordBody::EffectCancelled(cancelled) => {
-            cancelled.output_contract().kind == EffectOutputKind::ModelResponse
-        }
-        _ => false,
-    }
+    effect_record_is(body, EffectKind::Model, &EffectOutputKind::ModelResponse)
 }
+
 /// Map a record body to derived event kinds by ordinal (`kind_version` = 1).
 ///
 /// # Arguments
@@ -403,7 +353,7 @@ pub(super) fn is_model_effect_record(body: &RecordBody) -> bool {
 /// # Errors
 ///
 /// Returns [`EventError::UnsupportedOrdinal`] when the ordinal is out of range.
-pub(crate) fn derived_event_kind(
+pub(super) fn derived_event_kind(
     body: &RecordBody,
     kind_version: u16,
     ordinal: usize,
@@ -411,56 +361,27 @@ pub(crate) fn derived_event_kind(
     if kind_version != RECORD_KIND_VERSION {
         return Err(EventError::UnsupportedKindVersion { kind_version });
     }
-    if ordinal != 0 && !matches!(body, RecordBody::ToolCallSettled(_)) {
-        return Err(EventError::UnsupportedOrdinal { ordinal });
-    }
-    let kind = match body {
-        RecordBody::RunAccepted(_) => RunEventKind::RunAccepted,
-        RecordBody::EffectRequested(_) => RunEventKind::EffectRequested,
-        RecordBody::EffectDeferred(_) => RunEventKind::EffectDeferred,
-        RecordBody::EffectCompleted(_) => RunEventKind::EffectCompleted,
-        RecordBody::EffectFailed(_) => RunEventKind::EffectFailed,
-        RecordBody::EffectCancelled(_) => RunEventKind::EffectCancelled,
-        RecordBody::InteractionRequested(_) => RunEventKind::InteractionRequested,
-        RecordBody::InteractionResolved(_) => RunEventKind::InteractionResolved,
-        RecordBody::InteractionExpired(_) => RunEventKind::InteractionExpired,
-        RecordBody::InteractionCancelled(_) => RunEventKind::InteractionCancelled,
-        RecordBody::EntryAppended(_) => RunEventKind::MessageFinalized,
-        RecordBody::ToolCallSettled(_) => match ordinal {
-            0 => RunEventKind::MessageFinalized,
-            1 => RunEventKind::ToolSettled,
-            _ => return Err(EventError::UnsupportedOrdinal { ordinal }),
-        },
-        RecordBody::RunCompleted(_) => RunEventKind::RunCompleted,
-        RecordBody::RunFailed(_) => RunEventKind::RunFailed,
-        RecordBody::LimitReached(_) => RunEventKind::LimitReached,
-        RecordBody::RunSuspended(_) => RunEventKind::RunSuspended,
-        RecordBody::RunCancelled(_) => RunEventKind::RunCancelled,
-        RecordBody::StageOutcomeRecorded(_)
-        | RecordBody::ContextPrepared(_)
-        | RecordBody::ToolBatchOpened(_)
-        | RecordBody::ToolBatchClosed(_)
-        | RecordBody::CancellationRequested(_)
-        | RecordBody::CancellationReconciled(_)
-        | RecordBody::RetryScheduled(_)
-        | RecordBody::TimerFired(_)
-        | RecordBody::OutputConfigured(_)
-        | RecordBody::CapabilitiesActivated(_)
-        | RecordBody::FinalResultRecorded(_)
-        | RecordBody::OutputValidationFailed(_)
-        | RecordBody::ExternalCommandRejected(_)
-        | RecordBody::ChildRunPrepared(_)
-        | RecordBody::BudgetReservationRequested(_)
-        | RecordBody::BudgetReservationSettled(_)
-        | RecordBody::BudgetChargeRecorded(_)
-        | RecordBody::BudgetReservationReleased(_)
-        | RecordBody::SessionCreated(_)
-        | RecordBody::LaneCreated(_)
-        | RecordBody::LaneMoved(_)
-        | RecordBody::SnapshotWritten(_)
-        | RecordBody::ConversationEntry(_) => {
-            return Err(EventError::UnsupportedOrdinal { ordinal });
+    let kind = match (body, ordinal) {
+        (RecordBody::RunAccepted(_), 0) => RunEventKind::RunAccepted,
+        (RecordBody::EffectRequested(_), 0) => RunEventKind::EffectRequested,
+        (RecordBody::EffectDeferred(_), 0) => RunEventKind::EffectDeferred,
+        (RecordBody::EffectCompleted(_), 0) => RunEventKind::EffectCompleted,
+        (RecordBody::EffectFailed(_), 0) => RunEventKind::EffectFailed,
+        (RecordBody::EffectCancelled(_), 0) => RunEventKind::EffectCancelled,
+        (RecordBody::InteractionRequested(_), 0) => RunEventKind::InteractionRequested,
+        (RecordBody::InteractionResolved(_), 0) => RunEventKind::InteractionResolved,
+        (RecordBody::InteractionExpired(_), 0) => RunEventKind::InteractionExpired,
+        (RecordBody::InteractionCancelled(_), 0) => RunEventKind::InteractionCancelled,
+        (RecordBody::EntryAppended(_) | RecordBody::ToolCallSettled(_), 0) => {
+            RunEventKind::MessageFinalized
         }
+        (RecordBody::ToolCallSettled(_), 1) => RunEventKind::ToolSettled,
+        (RecordBody::RunCompleted(_), 0) => RunEventKind::RunCompleted,
+        (RecordBody::RunFailed(_), 0) => RunEventKind::RunFailed,
+        (RecordBody::LimitReached(_), 0) => RunEventKind::LimitReached,
+        (RecordBody::RunSuspended(_), 0) => RunEventKind::RunSuspended,
+        (RecordBody::RunCancelled(_), 0) => RunEventKind::RunCancelled,
+        _ => return Err(EventError::UnsupportedOrdinal { ordinal }),
     };
     Ok(kind)
 }

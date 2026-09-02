@@ -151,26 +151,28 @@ fn review_index(existing: Option<Digest>, digest: Digest) -> Result<SettlementRe
     match existing {
         Some(existing) if existing == digest => Ok(SettlementReview::Duplicate),
         Some(_) => Err(KernelError::ConflictingSettlement),
-        None => Ok(fresh(digest)),
+        None => Ok(SettlementReview::Fresh(digest)),
     }
 }
 
+/// A redelivered `Deferred` settlement is compared against the retained
+/// deferral; anything else is fresh.
 fn review_model_deferred(
     state: &KernelState,
     input: &ModelSettled,
     digest: Digest,
 ) -> Result<SettlementReview, KernelError> {
-    let ModelSettlement::Deferred(deferred) = &input.outcome else {
-        return Ok(fresh(digest));
+    let (ModelSettlement::Deferred(deferred), Some(pending)) =
+        (&input.outcome, state.pending_model_effect.as_ref())
+    else {
+        return Ok(SettlementReview::Fresh(digest));
     };
-    let Some(pending) = state.pending_model_effect.as_ref() else {
-        return Ok(fresh(digest));
-    };
-    if pending.requested.effect_id() != deferred.effect_id {
-        return Ok(fresh(digest));
-    }
-    let Some(existing) = pending.deferred.as_ref() else {
-        return Ok(fresh(digest));
+    let Some(existing) = pending
+        .deferred
+        .as_ref()
+        .filter(|_| pending.requested.effect_id() == deferred.effect_id)
+    else {
+        return Ok(SettlementReview::Fresh(digest));
     };
     let existing_digest = direct_digest(&ModelSettled {
         turn_id: pending.turn_id,
@@ -185,33 +187,24 @@ fn review_tool_deferred(
     input: &ToolBatchSettled,
     digest: Digest,
 ) -> Result<SettlementReview, KernelError> {
-    let ToolSettlement::Deferred(_) = &input.outcome else {
-        return Ok(fresh(digest));
+    let (ToolSettlement::Deferred(_), Some(batch)) =
+        (&input.outcome, state.active_tool_batch.as_ref())
+    else {
+        return Ok(SettlementReview::Fresh(digest));
     };
-    let Some(batch) = state.active_tool_batch.as_ref() else {
-        return Ok(fresh(digest));
-    };
-    if batch.opened.tool_batch_id != input.tool_batch_id {
-        return Ok(fresh(digest));
-    }
-    let effect_id = input.outcome.effect_id();
-    let Some(active) = batch.call(effect_id) else {
-        return Ok(fresh(digest));
-    };
-    let crate::records::tools::ActiveToolCallStatus::Requested {
+    let Some(crate::records::tools::ActiveToolCallStatus::Requested {
         deferred: Some(existing),
         ..
-    } = &active.status
+    }) = batch
+        .call(input.outcome.effect_id())
+        .filter(|_| batch.opened.tool_batch_id == input.tool_batch_id)
+        .map(|active| &active.status)
     else {
-        return Ok(fresh(digest));
+        return Ok(SettlementReview::Fresh(digest));
     };
     let existing_digest = direct_tool_digest(
         input.tool_batch_id,
         &ToolSettlement::Deferred(existing.clone()),
     )?;
     review_index(Some(existing_digest), digest)
-}
-
-fn fresh(digest: Digest) -> SettlementReview {
-    SettlementReview::Fresh(digest)
 }

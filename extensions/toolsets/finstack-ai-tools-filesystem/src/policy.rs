@@ -69,26 +69,29 @@ pub(crate) struct ValidatedPath {
 }
 
 impl ValidatedPath {
-    pub(crate) fn from_validated_parts(components: Arc<[Arc<str>]>, normalized: Arc<str>) -> Self {
+    /// Rebuild a path from components that were already validated as part of
+    /// a longer `ValidatedPath` (the parent directory of a leaf).
+    pub(crate) fn from_components(components: &[Arc<str>]) -> Self {
+        let normalized = components
+            .iter()
+            .map(AsRef::as_ref)
+            .collect::<Vec<&str>>()
+            .join("/");
         Self {
-            components,
-            normalized,
+            components: Arc::from(components),
+            normalized: Arc::from(normalized),
         }
     }
 
     pub(crate) fn try_file(path: &str, protected: &ProtectedPaths) -> Result<Self, ToolError> {
-        let value = Self::parse(path, false)?;
-        value.enforce(protected)?;
-        Ok(value)
+        Self::parse(path, false, protected)
     }
 
     pub(crate) fn try_directory(path: &str, protected: &ProtectedPaths) -> Result<Self, ToolError> {
-        let value = Self::parse(path, true)?;
-        value.enforce(protected)?;
-        Ok(value)
+        Self::parse(path, true, protected)
     }
 
-    fn parse(path: &str, allow_empty: bool) -> Result<Self, ToolError> {
+    fn parse(path: &str, allow_empty: bool, protected: &ProtectedPaths) -> Result<Self, ToolError> {
         if path.len() > MAX_PATH_BYTES
             || path.starts_with('/')
             || path.ends_with('/')
@@ -98,17 +101,14 @@ impl ValidatedPath {
         {
             return Err(invalid_error("filesystem path is invalid"));
         }
-        if path.is_empty() {
-            return if allow_empty {
-                Ok(Self {
-                    components: Arc::from([]),
-                    normalized: Arc::from(""),
-                })
-            } else {
-                Err(invalid_error("filesystem file path is empty"))
-            };
+        if path.is_empty() && !allow_empty {
+            return Err(invalid_error("filesystem file path is empty"));
         }
-        let raw = path.split('/').collect::<Vec<_>>();
+        let raw = if path.is_empty() {
+            Vec::new()
+        } else {
+            path.split('/').collect::<Vec<_>>()
+        };
         if raw.len() > MAX_COMPONENTS
             || raw.iter().any(|component| {
                 component.is_empty()
@@ -119,19 +119,13 @@ impl ValidatedPath {
         {
             return Err(invalid_error("filesystem path components are invalid"));
         }
-        let components = raw.into_iter().map(Arc::<str>::from).collect::<Vec<_>>();
-        Ok(Self {
-            normalized: Arc::from(path),
-            components: Arc::from(components),
-        })
-    }
-
-    fn enforce(&self, protected: &ProtectedPaths) -> Result<(), ToolError> {
-        if protected.denies(&self.normalized) {
-            Err(policy_error("filesystem path is protected by host policy"))
-        } else {
-            Ok(())
+        if protected.denies(path) {
+            return Err(policy_error("filesystem path is protected by host policy"));
         }
+        Ok(Self {
+            components: raw.into_iter().map(Arc::<str>::from).collect(),
+            normalized: Arc::from(path),
+        })
     }
 
     pub(crate) fn components(&self) -> &[Arc<str>] {

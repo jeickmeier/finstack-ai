@@ -69,27 +69,17 @@ pub fn assemble_context(
         }
     }
 
-    let mut indexed = recorded
-        .into_iter()
-        .flat_map(|provider| {
-            provider
-                .contribution
-                .items
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .enumerate()
-                .map(move |(source_index, item)| {
-                    (
-                        provider.provider_index,
-                        source_index,
-                        provider.component.clone(),
-                        item,
-                    )
-                })
-        })
-        .collect::<Vec<_>>();
+    let mut indexed = Vec::new();
+    for provider in recorded {
+        for (source_index, item) in provider.contribution.items.iter().enumerate() {
+            indexed.push((
+                provider.provider_index,
+                source_index,
+                provider.component.clone(),
+                item.clone(),
+            ));
+        }
+    }
     indexed.sort_by_key(|(provider_index, source_index, _, item)| {
         let authority_group = u8::from(
             !(item.kind == ContextItemKind::Instruction

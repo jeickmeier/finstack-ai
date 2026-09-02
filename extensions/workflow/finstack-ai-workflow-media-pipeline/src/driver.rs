@@ -667,40 +667,37 @@ fn plan_requires_store(plan: &MoviePlan) -> bool {
 }
 
 fn initial_scene_state(scene: &SceneSpec) -> SceneState {
-    let mut state = SceneState {
-        scene_id: scene.id.clone(),
-        stage: SceneStage::PendingSubmit,
-        start_frame_artifact: None,
-        start_frame_url: None,
-        end_frame_artifact: None,
-        end_frame_url: None,
-        job_id: None,
-        clip_artifact: None,
-        failure: None,
-        resubmitted: false,
-    };
-    match &scene.start_frame {
-        FrameSource::Prompt { .. } => {}
-        FrameSource::Artifact { artifact } => {
-            state.start_frame_artifact = Some(artifact.clone());
-        }
-        FrameSource::Url { url } => state.start_frame_url = Some(url.clone()),
-    }
-    match &scene.end_frame {
-        Some(FrameSource::Artifact { artifact }) => {
-            state.end_frame_artifact = Some(artifact.clone());
-        }
-        Some(FrameSource::Url { url }) => state.end_frame_url = Some(url.clone()),
-        Some(FrameSource::Prompt { .. }) | None => {}
-    }
-    state.stage = if matches!(scene.start_frame, FrameSource::Prompt { .. }) {
+    let stage = if matches!(scene.start_frame, FrameSource::Prompt { .. }) {
         SceneStage::PendingStartFrame
     } else if matches!(scene.end_frame, Some(FrameSource::Prompt { .. })) {
         SceneStage::PendingEndFrame
     } else {
         SceneStage::PendingSubmit
     };
-    state
+    let (start_frame_artifact, start_frame_url) = pinned_frame(Some(&scene.start_frame));
+    let (end_frame_artifact, end_frame_url) = pinned_frame(scene.end_frame.as_ref());
+    SceneState {
+        scene_id: scene.id.clone(),
+        stage,
+        start_frame_artifact,
+        start_frame_url,
+        end_frame_artifact,
+        end_frame_url,
+        job_id: None,
+        clip_artifact: None,
+        failure: None,
+        resubmitted: false,
+    }
+}
+
+/// The already-resolved `(artifact, url)` of a frame source; a prompt (or
+/// no frame) resolves nothing until it is generated.
+fn pinned_frame(source: Option<&FrameSource>) -> (Option<ArtifactRef>, Option<String>) {
+    match source {
+        Some(FrameSource::Artifact { artifact }) => (Some(artifact.clone()), None),
+        Some(FrameSource::Url { url }) => (None, Some(url.clone())),
+        Some(FrameSource::Prompt { .. }) | None => (None, None),
+    }
 }
 
 /// Arguments for `openrouter_generate_image` (required-with-null schema).
@@ -818,19 +815,12 @@ fn compose_spec(plan: &MoviePlan, state: &RenderState) -> Result<Value, ToolErro
                         .find(|transition| transition.after == scene.id)
                 })
                 .map_or_else(
-                    || json!({ "type": "cut" }),
-                    |transition| {
-                        let kind = match transition.kind {
-                            TransitionKindName::Cut => "cut",
-                            TransitionKindName::Crossfade => "crossfade",
-                            TransitionKindName::FadeToBlack => "fade_to_black",
-                        };
-                        match transition.duration_s {
-                            Some(duration) if transition.kind != TransitionKindName::Cut => {
-                                json!({ "type": kind, "duration_s": duration })
-                            }
-                            _ => json!({ "type": kind }),
+                    || json!({ "type": TransitionKindName::Cut }),
+                    |transition| match transition.duration_s {
+                        Some(duration) if transition.kind != TransitionKindName::Cut => {
+                            json!({ "type": transition.kind, "duration_s": duration })
                         }
+                        _ => json!({ "type": transition.kind }),
                     },
                 );
             transitions.push(named);
@@ -951,7 +941,7 @@ async fn invoke_tool(
             .get("code")
             .and_then(Value::as_str)
             .unwrap_or("unspecified");
-        return Err(dyn_tool_error(
+        return Err(tool_error(
             MEDIA_PIPELINE_STAGE_FAILED,
             ErrorCategory::Tool,
             &format!("pipeline tool returned an error result: {code}"),
@@ -960,12 +950,7 @@ async fn invoke_tool(
     Ok(value)
 }
 
-fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
-    ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
-}
-
-/// [`tool_error`] for a message assembled at runtime.
-fn dyn_tool_error(code: &'static str, category: ErrorCategory, message: &str) -> ToolError {
+fn tool_error(code: &'static str, category: ErrorCategory, message: &str) -> ToolError {
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
@@ -1229,30 +1214,30 @@ pub(crate) mod test_support {
         .expect("plan json")
     }
 
+    /// Stage `body` as an `mp4` clip under the run's artifact scope.
     pub(crate) async fn stage(
         store: &Arc<dyn ArtifactStore>,
         ctx: &ToolCallContext,
         body: &str,
     ) -> ArtifactRef {
-        stage_required_artifact(
-            store.as_ref(),
-            artifact_scope(ctx),
-            Bytes::from(body.as_bytes().to_vec()),
-            ArtifactMetadata {
-                kind: Arc::from("tool-output"),
-                media_type: Arc::from("video/mp4"),
-                name: Some(Arc::from("clip.mp4")),
-                attributes: Metadata::empty(),
-            },
-        )
-        .await
-        .expect("stage")
+        stage_as(store, ctx, body, "video/mp4", "clip.mp4").await
     }
 
+    /// Stage `body` as an SRT transcript under the run's artifact scope.
     pub(crate) async fn stage_subtitle(
         store: &Arc<dyn ArtifactStore>,
         ctx: &ToolCallContext,
         body: &str,
+    ) -> ArtifactRef {
+        stage_as(store, ctx, body, "application/x-subrip", "transcript.srt").await
+    }
+
+    async fn stage_as(
+        store: &Arc<dyn ArtifactStore>,
+        ctx: &ToolCallContext,
+        body: &str,
+        media_type: &str,
+        name: &str,
     ) -> ArtifactRef {
         stage_required_artifact(
             store.as_ref(),
@@ -1260,8 +1245,8 @@ pub(crate) mod test_support {
             Bytes::from(body.as_bytes().to_vec()),
             ArtifactMetadata {
                 kind: Arc::from("tool-output"),
-                media_type: Arc::from("application/x-subrip"),
-                name: Some(Arc::from("transcript.srt")),
+                media_type: Arc::from(media_type),
+                name: Some(Arc::from(name)),
                 attributes: Metadata::empty(),
             },
         )

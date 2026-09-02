@@ -3,23 +3,24 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{Digest, Timestamp};
-use finstack_ai_protocol::{RemoteAuthMethod, RemotePreAuth, require_features, select_version};
+use finstack_ai_protocol::{
+    RemoteAuthMethod, RemotePreAuth, VersionOffer, require_features, select_version,
+};
 use finstack_ai_runtime::audit::{SecurityAuditCategory, SecurityAuditEvent, SecurityAuditGate};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
 use crate::ServerError;
 use crate::auth::{AuthContext, AuthVerifier, TransportKind};
-use crate::connection::ConnectionLimits;
+use crate::connection::{AUTH_ATTEMPTS, MANDATORY_FEATURES};
 use crate::frame::{read_pre_auth, write_pre_auth};
 
-#[allow(clippy::too_many_lines)]
 pub(crate) async fn handshake<S>(
     stream: &mut S,
     transport: TransportKind,
     auth: &dyn AuthVerifier,
     audit: &SecurityAuditGate,
-    limits: &ConnectionLimits,
+    server_offer: &VersionOffer,
 ) -> Result<AuthContext, ServerError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -30,25 +31,17 @@ where
             audit,
             SecurityAuditCategory::AuthenticationFailure,
             "expected_hello",
-            None,
         )
         .await?;
         return Err(ServerError::AuthenticationFailure);
     };
-    require_features(
-        &offer,
-        &limits
-            .mandatory_features
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-    )?;
-    let selected = select_version(&offer, &limits.offer)?;
+    require_features(&offer, MANDATORY_FEATURES)?;
+    let selected = select_version(&offer, server_offer)?;
     write_pre_auth(
         stream,
         &RemotePreAuth::ServerHello {
             selected_version: selected,
-            offer: limits.offer.clone(),
+            offer: server_offer.clone(),
         },
     )
     .await?;
@@ -56,81 +49,38 @@ where
     let mut attempts = 0_u8;
     loop {
         attempts = attempts.saturating_add(1);
-        if attempts > limits.auth_attempts {
+        if attempts > AUTH_ATTEMPTS {
             audit_only(
                 audit,
                 SecurityAuditCategory::AuthenticationFailure,
                 "auth_attempt_cap",
-                None,
             )
             .await?;
             return Err(ServerError::AuthenticationFailure);
         }
         match read_pre_auth(stream).await? {
             RemotePreAuth::Authenticate { method } => {
-                if matches!(method, RemoteAuthMethod::Bearer { .. }) && !transport.allows_bearer() {
-                    audit_only(
-                        audit,
-                        SecurityAuditCategory::AuthenticationFailure,
-                        "bearer_over_plaintext",
-                        None,
-                    )
-                    .await?;
-                    write_pre_auth(
-                        stream,
-                        &RemotePreAuth::AuthResult {
-                            accepted: false,
-                            reason_code: Some("authentication_failure".into()),
-                        },
-                    )
-                    .await?;
-                    return Err(ServerError::AuthenticationFailure);
-                }
-                if matches!(method, RemoteAuthMethod::Loopback)
-                    && transport != TransportKind::LoopbackPlaintext
-                {
-                    audit_only(
-                        audit,
-                        SecurityAuditCategory::AuthenticationFailure,
-                        "loopback_over_non_loopback_transport",
-                        None,
-                    )
-                    .await?;
-                    write_pre_auth(
-                        stream,
-                        &RemotePreAuth::AuthResult {
-                            accepted: false,
-                            reason_code: Some("authentication_failure".into()),
-                        },
-                    )
-                    .await?;
-                    return Err(ServerError::AuthenticationFailure);
-                }
-                if matches!(&method, RemoteAuthMethod::Bearer { token } if token.is_empty()) {
-                    audit_only(
-                        audit,
-                        SecurityAuditCategory::AuthenticationFailure,
-                        "empty_bearer",
-                        None,
-                    )
-                    .await?;
-                    write_pre_auth(
-                        stream,
-                        &RemotePreAuth::AuthResult {
-                            accepted: false,
-                            reason_code: Some("authentication_failure".into()),
-                        },
-                    )
-                    .await?;
-                    return Err(ServerError::AuthenticationFailure);
-                }
-                if let Ok(ctx) = auth.verify(&method, transport).and_then(|ctx| {
-                    if ctx.is_valid() {
-                        Ok(ctx)
-                    } else {
-                        Err(ServerError::AuthenticationFailure)
+                let transport_rejection = match &method {
+                    RemoteAuthMethod::Bearer { .. } if !transport.allows_bearer() => {
+                        Some("bearer_over_plaintext")
                     }
-                }) {
+                    RemoteAuthMethod::Loopback if transport != TransportKind::LoopbackPlaintext => {
+                        Some("loopback_over_non_loopback_transport")
+                    }
+                    RemoteAuthMethod::Bearer { token } if token.is_empty() => Some("empty_bearer"),
+                    _ => None,
+                };
+                if let Some(reason_code) = transport_rejection {
+                    audit_only(
+                        audit,
+                        SecurityAuditCategory::AuthenticationFailure,
+                        reason_code,
+                    )
+                    .await?;
+                    write_auth_rejected(stream).await?;
+                    return Err(ServerError::AuthenticationFailure);
+                }
+                if let Ok(ctx) = auth.verify(&method, transport) {
                     write_pre_auth(
                         stream,
                         &RemotePreAuth::AuthResult {
@@ -145,17 +95,9 @@ where
                     audit,
                     SecurityAuditCategory::AuthenticationFailure,
                     "authentication_failure",
-                    None,
                 )
                 .await?;
-                write_pre_auth(
-                    stream,
-                    &RemotePreAuth::AuthResult {
-                        accepted: false,
-                        reason_code: Some("authentication_failure".into()),
-                    },
-                )
-                .await?;
+                write_auth_rejected(stream).await?;
             }
             RemotePreAuth::Close { .. } => return Err(ServerError::AuthenticationFailure),
             _ => {
@@ -163,7 +105,6 @@ where
                     audit,
                     SecurityAuditCategory::AuthenticationFailure,
                     "unexpected_pre_auth",
-                    None,
                 )
                 .await?;
                 return Err(ServerError::AuthenticationFailure);
@@ -172,15 +113,25 @@ where
     }
 }
 
+async fn write_auth_rejected<S: AsyncWrite + Unpin>(stream: &mut S) -> Result<(), ServerError> {
+    write_pre_auth(
+        stream,
+        &RemotePreAuth::AuthResult {
+            accepted: false,
+            reason_code: Some("authentication_failure".into()),
+        },
+    )
+    .await
+}
+
 /// Record an audit event without a locator digest so authentication
 /// failures cannot leak a session id.
 pub(crate) async fn audit_only(
     gate: &SecurityAuditGate,
     category: SecurityAuditCategory,
     reason_code: &str,
-    submission: Option<Digest>,
 ) -> Result<(), ServerError> {
-    audit_digest(gate, category, reason_code, None, submission).await
+    audit_digest(gate, category, reason_code, None, None).await
 }
 
 pub(crate) async fn audit_digest(

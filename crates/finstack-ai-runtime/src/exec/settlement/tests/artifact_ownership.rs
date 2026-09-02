@@ -1,9 +1,11 @@
 use super::*;
 
+#[cfg(feature = "native-tokio")]
 use finstack_ai_kernel::{
-    AppendBatchTag, ArtifactRef, EffectOutputContract, EffectOutputKind, LaneTag,
-    RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft, RunTag, Sensitivity,
+    AppendBatchTag, EffectOutputContract, EffectOutputKind, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, RecordBody, RecordDraft,
 };
+use finstack_ai_kernel::{ArtifactRef, LaneTag, RunTag, Sensitivity};
 
 use crate::Bytes;
 use crate::artifact::{

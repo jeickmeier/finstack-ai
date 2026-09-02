@@ -7,11 +7,7 @@
 //!
 //! [`ensure_schema`] and [`SCHEMA_VERSION`] are `pub(crate)` per spec
 //! D3/D8: the only production caller is
-//! [`crate::store::PostgresJournalStore::try_open`]. Task 2 temporarily
-//! widened this module to `pub` so its tests (then a separate `tests/`
-//! crate) could reach `ensure_schema` before `try_open` existed; now that it
-//! does, those tests live in this module's own `#[cfg(test)]` block below,
-//! which can see `pub(crate)` items directly.
+//! [`crate::store::PostgresJournalStore::try_open`].
 
 use crate::config::SchemaPolicy;
 use crate::error::map_postgres_error;
@@ -229,11 +225,9 @@ async fn ensure_schema_in_transaction(
     Ok(())
 }
 
-/// Server-gated unit tests for `ensure_schema` (spec D3/D8), moved from the
-/// `tests/schema.rs` integration crate once `ensure_schema` became
-/// `pub(crate)` (see the module doc comment). Skips with a notice (rather
-/// than failing) when `FINSTACK_PG_TEST_URL` is unset, matching the crate's
-/// other env-gated suites in `tests/`.
+/// Server-gated unit tests for `ensure_schema` (spec D3/D8). Skips with a
+/// notice (rather than failing) when `FINSTACK_PG_TEST_URL` is unset,
+/// matching the crate's other env-gated suites in `tests/`.
 #[cfg(test)]
 mod tests {
     use std::env;

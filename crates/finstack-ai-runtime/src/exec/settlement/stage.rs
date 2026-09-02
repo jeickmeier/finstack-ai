@@ -16,12 +16,12 @@ use crate::ports::tool::{ApprovalState, ResolvedToolCatalog, ToolCatalogPlan, To
 use crate::run_types::RunHandleError;
 use crate::stage_settlement::{ToolBatchPolicy, run_tool_batch_chain, submit_folded};
 
-use super::SettlementSources;
 use super::interaction::{
     ApprovalSubject, allocate_tool_opening, approval_cursor, journaled_approval_outcomes,
     request_approval_interaction,
 };
 use super::tool::{generate_tool_id, generate_tool_ids};
+use super::{SettlementSources, committed};
 
 /// Settle `Stage::BeforeToolBatch` when the run is parked at that cursor.
 ///
@@ -108,7 +108,7 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     let cursor = approval_cursor(state);
     let terminal = state.last_interaction_terminal();
     sources.prepare_approval_cursor(cursor);
-    let remaining_paid = paid_unpaid_ids(catalog, &calls, None);
+    let remaining_paid = paid_unpaid_ids(catalog, &calls);
     let journaled =
         if sources.needs_journaled_approval_absorb(remaining_paid.len(), terminal, cursor) {
             journaled_approval_outcomes(coordinator).await
@@ -191,17 +191,14 @@ fn plan_source_calls<C: Clock, R: RandomSource>(
     Ok(PlannedBatch::Ready(plans))
 }
 
-fn paid_unpaid_ids(
-    catalog: &ResolvedToolCatalog,
-    calls: &[ToolCallBlock],
-    retained: Option<&BTreeSet<ToolId>>,
-) -> Vec<ToolCallId> {
+/// The calls the catalog would park for approval before any grant or
+/// middleware narrowing is applied.
+fn paid_unpaid_ids(catalog: &ResolvedToolCatalog, calls: &[ToolCallBlock]) -> Vec<ToolCallId> {
     calls
         .iter()
         .filter(|call| {
-            let policy = middleware_tool_policy(catalog, call, retained);
             matches!(
-                catalog.decide_plan((*call).clone(), None, policy, ApprovalState::Unpaid),
+                catalog.decide_plan((*call).clone(), None, None, ApprovalState::Unpaid),
                 ToolCatalogPlan::RequireApproval
             )
         })
@@ -234,13 +231,7 @@ async fn submit_tool_batch_opening<C: Clock, R: RandomSource>(
                 code: "tool_opening_allocation_mismatch",
             })?;
     debug_assert_eq!(decision.records.len(), env.ids.record_ids().len());
-    let outcome = coordinator
-        .submit(env, input)
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
+    committed(coordinator.submit(env, input).await)?;
     Ok(true)
 }
 
@@ -368,14 +359,9 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     now: finstack_ai_kernel::Timestamp,
 ) -> Result<(), RunHandleError> {
-    let cursor = StageCursor {
-        cycle: coordinator.state().cycle(),
-        stage: Stage::BeforeToolBatch,
-    };
-    let stage_outcome = run_deadline_outcome()?;
     let input = KernelInput::StageSettled(StageSettled {
-        cursor,
-        outcome: stage_outcome,
+        cursor: approval_cursor(coordinator.state()),
+        outcome: run_deadline_outcome()?,
     });
     // Deliberately NOT `stage_allocation`: this function's only caller
     // (`prepare_tool_batch_if_ready`) invokes it exactly when
@@ -399,14 +385,7 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
         .map_err(|_| RunHandleError::ToolSettlement {
             code: "deadline_allocation_mismatch",
         })?;
-    let outcome = coordinator
-        .submit(env, input)
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
-    Ok(())
+    committed(coordinator.submit(env, input).await)
 }
 
 /// Allocate the exact [`AllocatedIds`] the kernel requires for `outcome` at

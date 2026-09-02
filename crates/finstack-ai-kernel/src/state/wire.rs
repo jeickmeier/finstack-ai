@@ -293,11 +293,28 @@ struct KernelStateWireOwned {
     snapshot_limit_usage: Option<LimitUsage>,
 }
 
+/// Field that must be present (non-null) once its state version introduced it.
 #[derive(Default)]
 enum RequiredField<T> {
     #[default]
     Missing,
     Present(T),
+}
+
+impl<T> RequiredField<T> {
+    const fn is_present(&self) -> bool {
+        matches!(self, Self::Present(_))
+    }
+
+    fn unwrap_or_default(self) -> T
+    where
+        T: Default,
+    {
+        match self {
+            Self::Missing => T::default(),
+            Self::Present(value) => value,
+        }
+    }
 }
 
 impl<'de, T> Deserialize<'de> for RequiredField<T>
@@ -312,11 +329,25 @@ where
     }
 }
 
+/// Field that must be present (possibly `null`) once its state version introduced it.
 #[derive(Default)]
 enum NullableField<T> {
     #[default]
     Missing,
     Present(Option<T>),
+}
+
+impl<T> NullableField<T> {
+    const fn is_present(&self) -> bool {
+        matches!(self, Self::Present(_))
+    }
+
+    fn into_option(self) -> Option<T> {
+        match self {
+            Self::Missing => None,
+            Self::Present(value) => value,
+        }
+    }
 }
 
 impl<'de, T> Deserialize<'de> for NullableField<T>
@@ -329,6 +360,36 @@ where
     {
         Option::<T>::deserialize(deserializer).map(Self::Present)
     }
+}
+
+/// Fields introduced together at `introduced_in` must be absent before that
+/// version and all present from it on.
+fn check_field_group<E: de::Error>(
+    state_version: u16,
+    introduced_in: u16,
+    present: &[bool],
+    unexpected: &'static str,
+    missing: &'static str,
+) -> Result<(), E> {
+    if state_version < introduced_in && present.iter().any(|flag| *flag) {
+        return Err(E::custom(unexpected));
+    }
+    if state_version >= introduced_in && !present.iter().all(|flag| *flag) {
+        return Err(E::custom(missing));
+    }
+    Ok(())
+}
+
+/// Index wire entries by key; `None` when a key repeats.
+fn indexed<K: Ord, T, V>(entries: Vec<T>, entry: impl Fn(T) -> (K, V)) -> Option<BTreeMap<K, V>> {
+    let mut map = BTreeMap::new();
+    for item in entries {
+        let (key, value) = entry(item);
+        if map.insert(key, value).is_some() {
+            return None;
+        }
+    }
+    Some(map)
 }
 
 impl Serialize for KernelState {
@@ -521,298 +582,194 @@ impl<'de> Deserialize<'de> for KernelState {
         D: Deserializer<'de>,
     {
         let wire = KernelStateWireOwned::deserialize(deserializer)?;
-        if !matches!(wire.state_version, 1..=7) {
+        let version = wire.state_version;
+        if !matches!(version, 1..=7) {
             return Err(de::Error::custom("unsupported kernel state_version"));
         }
-        let tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
-            || matches!(&wire.tool_calls, RequiredField::Present(_))
-            || matches!(&wire.tool_settlements, RequiredField::Present(_))
-            || matches!(&wire.last_tool_batch, NullableField::Present(_));
-        let control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
-            || matches!(&wire.limit_usage, RequiredField::Present(_))
-            || matches!(&wire.cancellation, NullableField::Present(_))
-            || matches!(&wire.retry, RequiredField::Present(_))
-            || matches!(&wire.last_limit, NullableField::Present(_))
-            || matches!(&wire.suspension, NullableField::Present(_));
-        if wire.state_version == 1 && tool_fields_present {
-            return Err(de::Error::custom("v1 kernel state contains tool fields"));
-        }
-        let all_tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
-            && matches!(&wire.tool_calls, RequiredField::Present(_))
-            && matches!(&wire.tool_settlements, RequiredField::Present(_))
-            && matches!(&wire.last_tool_batch, NullableField::Present(_));
-        if matches!(wire.state_version, 2..=7) && !all_tool_fields_present {
-            return Err(de::Error::custom("v2 kernel state is missing tool indexes"));
-        }
-        let all_control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
-            && matches!(&wire.limit_usage, RequiredField::Present(_))
-            && matches!(&wire.cancellation, NullableField::Present(_))
-            && matches!(&wire.retry, RequiredField::Present(_))
-            && matches!(&wire.last_limit, NullableField::Present(_))
-            && matches!(&wire.suspension, NullableField::Present(_));
-        if wire.state_version < 3 && control_fields_present {
-            return Err(de::Error::custom(
-                "v1/v2 kernel state contains control fields",
-            ));
-        }
-        if wire.state_version >= 3 && !all_control_fields_present {
-            return Err(de::Error::custom(
-                "v3/v4 kernel state is missing control fields",
-            ));
-        }
-        let structured_fields_present =
-            matches!(&wire.output_configuration, NullableField::Present(_))
-                || matches!(&wire.active_capabilities, RequiredField::Present(_))
-                || matches!(&wire.resolved_plan_digest, NullableField::Present(_))
-                || matches!(&wire.final_result, NullableField::Present(_))
-                || matches!(&wire.validation_failure, NullableField::Present(_));
-        let all_structured_fields_present =
-            matches!(&wire.output_configuration, NullableField::Present(_))
-                && matches!(&wire.active_capabilities, RequiredField::Present(_))
-                && matches!(&wire.resolved_plan_digest, NullableField::Present(_))
-                && matches!(&wire.final_result, NullableField::Present(_))
-                && matches!(&wire.validation_failure, NullableField::Present(_));
-        if wire.state_version < 4 && structured_fields_present {
-            return Err(de::Error::custom(
-                "v1/v2/v3 kernel state contains structured-output fields",
-            ));
-        }
-        if wire.state_version >= 4 && !all_structured_fields_present {
-            return Err(de::Error::custom(
-                "v4+ kernel state is missing structured-output fields",
-            ));
-        }
-        let composition_fields_present =
-            matches!(&wire.child_preparations, RequiredField::Present(_))
-                || matches!(&wire.budget_reservations, RequiredField::Present(_))
-                || matches!(&wire.budget_charges, RequiredField::Present(_));
-        let all_composition_fields_present =
-            matches!(&wire.child_preparations, RequiredField::Present(_))
-                && matches!(&wire.budget_reservations, RequiredField::Present(_))
-                && matches!(&wire.budget_charges, RequiredField::Present(_));
-        if wire.state_version < 5 && composition_fields_present {
-            return Err(de::Error::custom(
-                "v1/v2/v3/v4 kernel state contains composition fields",
-            ));
-        }
-        if wire.state_version >= 5 && !all_composition_fields_present {
-            return Err(de::Error::custom(
-                "v5+ kernel state is missing composition fields",
-            ));
-        }
-        let interaction_fields_present =
-            matches!(&wire.pending_interaction, NullableField::Present(_))
-                || matches!(&wire.resolution_identities, RequiredField::Present(_))
-                || matches!(&wire.last_interaction_terminal, NullableField::Present(_));
-        let all_interaction_fields_present =
-            matches!(&wire.pending_interaction, NullableField::Present(_))
-                && matches!(&wire.resolution_identities, RequiredField::Present(_))
-                && matches!(&wire.last_interaction_terminal, NullableField::Present(_));
-        if wire.state_version < 6 && interaction_fields_present {
-            return Err(de::Error::custom(
-                "v1-v5 kernel state contains interaction fields",
-            ));
-        }
-        if wire.state_version >= 6 && !all_interaction_fields_present {
-            return Err(de::Error::custom(
-                "v6 kernel state is missing interaction fields",
-            ));
-        }
-        let extension_fields_present =
-            matches!(&wire.pending_extension_effect, NullableField::Present(_))
-                || matches!(&wire.extension_settlements, RequiredField::Present(_));
-        let all_extension_fields_present =
-            matches!(&wire.pending_extension_effect, NullableField::Present(_))
-                && matches!(&wire.extension_settlements, RequiredField::Present(_));
-        if wire.state_version < 7 && extension_fields_present {
-            return Err(de::Error::custom(
-                "v1-v6 kernel state contains extension fields",
-            ));
-        }
-        if wire.state_version == 7 && !all_extension_fields_present {
-            return Err(de::Error::custom(
-                "v7 kernel state is missing extension fields",
-            ));
-        }
-        let mut stage_settlements = BTreeMap::new();
-        for entry in wire.stage_settlements.into_inner() {
-            if stage_settlements
-                .insert(
-                    StageCursor {
-                        cycle: entry.cycle,
-                        stage: entry.stage,
-                    },
-                    entry.settlement_digest,
-                )
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate stage settlement key"));
-            }
-        }
-        let mut model_settlements = BTreeMap::new();
-        for entry in wire.model_settlements.into_inner() {
-            if model_settlements
-                .insert(
-                    entry.effect_id,
-                    ModelSettlementFingerprint {
-                        kind: entry.kind,
-                        digest: entry.settlement_digest,
-                    },
-                )
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate model settlement key"));
-            }
-        }
-        let mut completion_identities = BTreeMap::new();
-        for entry in wire.completion_identities.into_inner() {
-            if completion_identities
-                .insert(
-                    entry.completion_id,
-                    CompletionIdentity {
-                        effect_id: entry.effect_id,
-                        settlement_digest: entry.settlement_digest,
-                    },
-                )
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate completion identity"));
-            }
-        }
-        let mut tool_calls = BTreeMap::new();
-        let tool_call_entries = match wire.tool_calls {
-            RequiredField::Missing => Vec::new(),
-            RequiredField::Present(entries) => entries.into_inner(),
-        };
-        for entry in tool_call_entries {
-            if tool_calls
-                .insert(
-                    entry.tool_call_id,
-                    ToolCallIdentity {
-                        cycle: entry.cycle,
-                        turn_id: entry.turn_id,
-                        source_message_id: entry.source_message_id,
-                        tool_batch_id: entry.tool_batch_id,
-                        effect_id: entry.effect_id,
-                        call: entry.call,
-                    },
-                )
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate tool call identity"));
-            }
-        }
-        let mut tool_settlements = BTreeMap::new();
-        let tool_settlement_entries = match wire.tool_settlements {
-            RequiredField::Missing => Vec::new(),
-            RequiredField::Present(entries) => entries.into_inner(),
-        };
-        for entry in tool_settlement_entries {
-            if tool_settlements
-                .insert(
+        check_field_group(
+            version,
+            2,
+            &[
+                wire.active_tool_batch.is_present(),
+                wire.tool_calls.is_present(),
+                wire.tool_settlements.is_present(),
+                wire.last_tool_batch.is_present(),
+            ],
+            "v1 kernel state contains tool fields",
+            "v2 kernel state is missing tool indexes",
+        )?;
+        check_field_group(
+            version,
+            3,
+            &[
+                wire.accepted_at.is_present(),
+                wire.limit_usage.is_present(),
+                wire.cancellation.is_present(),
+                wire.retry.is_present(),
+                wire.last_limit.is_present(),
+                wire.suspension.is_present(),
+            ],
+            "v1/v2 kernel state contains control fields",
+            "v3/v4 kernel state is missing control fields",
+        )?;
+        check_field_group(
+            version,
+            4,
+            &[
+                wire.output_configuration.is_present(),
+                wire.active_capabilities.is_present(),
+                wire.resolved_plan_digest.is_present(),
+                wire.final_result.is_present(),
+                wire.validation_failure.is_present(),
+            ],
+            "v1/v2/v3 kernel state contains structured-output fields",
+            "v4+ kernel state is missing structured-output fields",
+        )?;
+        check_field_group(
+            version,
+            5,
+            &[
+                wire.child_preparations.is_present(),
+                wire.budget_reservations.is_present(),
+                wire.budget_charges.is_present(),
+            ],
+            "v1/v2/v3/v4 kernel state contains composition fields",
+            "v5+ kernel state is missing composition fields",
+        )?;
+        check_field_group(
+            version,
+            6,
+            &[
+                wire.pending_interaction.is_present(),
+                wire.resolution_identities.is_present(),
+                wire.last_interaction_terminal.is_present(),
+            ],
+            "v1-v5 kernel state contains interaction fields",
+            "v6 kernel state is missing interaction fields",
+        )?;
+        check_field_group(
+            version,
+            7,
+            &[
+                wire.pending_extension_effect.is_present(),
+                wire.extension_settlements.is_present(),
+            ],
+            "v1-v6 kernel state contains extension fields",
+            "v7 kernel state is missing extension fields",
+        )?;
+
+        let stage_settlements = indexed(wire.stage_settlements.into_inner(), |entry| {
+            (
+                StageCursor {
+                    cycle: entry.cycle,
+                    stage: entry.stage,
+                },
+                entry.settlement_digest,
+            )
+        })
+        .ok_or_else(|| de::Error::custom("duplicate stage settlement key"))?;
+        let model_settlements = indexed(wire.model_settlements.into_inner(), |entry| {
+            (
+                entry.effect_id,
+                ModelSettlementFingerprint {
+                    kind: entry.kind,
+                    digest: entry.settlement_digest,
+                },
+            )
+        })
+        .ok_or_else(|| de::Error::custom("duplicate model settlement key"))?;
+        let completion_identities = indexed(wire.completion_identities.into_inner(), |entry| {
+            (
+                entry.completion_id,
+                CompletionIdentity {
+                    effect_id: entry.effect_id,
+                    settlement_digest: entry.settlement_digest,
+                },
+            )
+        })
+        .ok_or_else(|| de::Error::custom("duplicate completion identity"))?;
+        let tool_calls = indexed(wire.tool_calls.unwrap_or_default().into_inner(), |entry| {
+            (
+                entry.tool_call_id,
+                ToolCallIdentity {
+                    cycle: entry.cycle,
+                    turn_id: entry.turn_id,
+                    source_message_id: entry.source_message_id,
+                    tool_batch_id: entry.tool_batch_id,
+                    effect_id: entry.effect_id,
+                    call: entry.call,
+                },
+            )
+        })
+        .ok_or_else(|| de::Error::custom("duplicate tool call identity"))?;
+        let tool_settlements = indexed(
+            wire.tool_settlements.unwrap_or_default().into_inner(),
+            |entry| {
+                (
                     entry.effect_id,
                     ToolSettlementFingerprint {
                         kind: entry.kind,
                         digest: entry.settlement_digest,
                     },
                 )
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate tool settlement identity"));
-            }
-        }
-        let mut child_preparations = BTreeMap::new();
-        let child_entries = match wire.child_preparations {
-            RequiredField::Missing => Vec::new(),
-            RequiredField::Present(entries) => entries.into_inner(),
-        };
-        for entry in child_entries {
-            if child_preparations
-                .insert(entry.parent_effect_id, entry)
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate child preparation identity"));
-            }
-        }
-        let mut budget_reservations = BTreeMap::new();
-        let reservation_entries = match wire.budget_reservations {
-            RequiredField::Missing => Vec::new(),
-            RequiredField::Present(entries) => entries.into_inner(),
-        };
-        for entry in reservation_entries {
-            if budget_reservations
-                .insert(entry.request.reservation_id, entry)
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate budget reservation identity"));
-            }
-        }
-        let mut budget_charges = BTreeMap::new();
-        let charge_entries = match wire.budget_charges {
-            RequiredField::Missing => Vec::new(),
-            RequiredField::Present(entries) => entries.into_inner(),
-        };
-        for entry in charge_entries {
-            if budget_charges.insert(entry.effect_id, entry).is_some() {
-                return Err(de::Error::custom("duplicate budget charge identity"));
-            }
-        }
-        let mut resolution_identities = BTreeMap::new();
-        let resolution_entries = match wire.resolution_identities {
-            RequiredField::Missing => Vec::new(),
-            RequiredField::Present(entries) => entries.into_inner(),
-        };
-        for entry in resolution_entries {
-            if resolution_identities
-                .insert(
+            },
+        )
+        .ok_or_else(|| de::Error::custom("duplicate tool settlement identity"))?;
+        let child_preparations = indexed(
+            wire.child_preparations.unwrap_or_default().into_inner(),
+            |entry| (entry.parent_effect_id, entry),
+        )
+        .ok_or_else(|| de::Error::custom("duplicate child preparation identity"))?;
+        let budget_reservations = indexed(
+            wire.budget_reservations.unwrap_or_default().into_inner(),
+            |entry| (entry.request.reservation_id, entry),
+        )
+        .ok_or_else(|| de::Error::custom("duplicate budget reservation identity"))?;
+        let budget_charges = indexed(
+            wire.budget_charges.unwrap_or_default().into_inner(),
+            |entry| (entry.effect_id, entry),
+        )
+        .ok_or_else(|| de::Error::custom("duplicate budget charge identity"))?;
+        let resolution_identities = indexed(
+            wire.resolution_identities.unwrap_or_default().into_inner(),
+            |entry| {
+                (
                     entry.resolution_id,
                     ResolutionIdentity {
                         interaction_id: entry.interaction_id,
                         settlement_digest: entry.settlement_digest,
                     },
                 )
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate resolution identity"));
-            }
-        }
-        let mut extension_settlements = BTreeMap::new();
-        let extension_entries = match wire.extension_settlements {
-            RequiredField::Missing => Vec::new(),
-            RequiredField::Present(entries) => entries.into_inner(),
-        };
-        for entry in extension_entries {
-            if extension_settlements
-                .insert(
+            },
+        )
+        .ok_or_else(|| de::Error::custom("duplicate resolution identity"))?;
+        let extension_settlements = indexed(
+            wire.extension_settlements.unwrap_or_default().into_inner(),
+            |entry| {
+                (
                     entry.effect_id,
                     ExtensionSettlementFingerprint {
                         kind: entry.kind,
                         digest: entry.settlement_digest,
                     },
                 )
-                .is_some()
-            {
-                return Err(de::Error::custom("duplicate extension settlement identity"));
-            }
-        }
-        let accepted_at = if wire.state_version >= 3 {
-            match wire.accepted_at {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            }
+            },
+        )
+        .ok_or_else(|| de::Error::custom("duplicate extension settlement identity"))?;
+
+        let (accepted_at, limit_usage) = if version >= 3 {
+            (
+                wire.accepted_at.into_option(),
+                wire.limit_usage.unwrap_or_default(),
+            )
         } else {
-            wire.snapshot_accepted_at
-        };
-        let limit_usage = if wire.state_version >= 3 {
-            match wire.limit_usage {
-                RequiredField::Missing => LimitUsage::default(),
-                RequiredField::Present(value) => value,
-            }
-        } else {
-            wire.snapshot_limit_usage.unwrap_or_default()
+            (
+                wire.snapshot_accepted_at,
+                wire.snapshot_limit_usage.unwrap_or_default(),
+            )
         };
         let state = Self {
-            state_version: wire.state_version,
+            state_version: version,
             last_applied_sequence: wire.last_applied_sequence,
             session_id: wire.session_id,
             lane_id: wire.lane_id,
@@ -823,71 +780,31 @@ impl<'de> Deserialize<'de> for KernelState {
             current_turn: wire.current_turn,
             messages: wire.messages.into_inner().into(),
             pending_model_effect: wire.pending_model_effect,
-            pending_extension_effect: match wire.pending_extension_effect {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
+            pending_extension_effect: wire.pending_extension_effect.into_option(),
             terminal_candidate: wire.terminal_candidate,
             stage_settlements,
             model_settlements,
             extension_settlements,
             completion_identities,
-            pending_interaction: match wire.pending_interaction {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
+            pending_interaction: wire.pending_interaction.into_option(),
             resolution_identities,
-            last_interaction_terminal: match wire.last_interaction_terminal {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
-            active_tool_batch: match wire.active_tool_batch {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
+            last_interaction_terminal: wire.last_interaction_terminal.into_option(),
+            active_tool_batch: wire.active_tool_batch.into_option(),
             tool_calls,
             tool_settlements,
-            last_tool_batch: match wire.last_tool_batch {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
+            last_tool_batch: wire.last_tool_batch.into_option(),
             limit_usage,
-            cancellation: match wire.cancellation {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
-            retry: match wire.retry {
-                RequiredField::Missing => RetryState::default(),
-                RequiredField::Present(value) => value,
-            },
-            last_limit: match wire.last_limit {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
-            suspension: match wire.suspension {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
-            output_configuration: match wire.output_configuration {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
-            active_capabilities: match wire.active_capabilities {
-                RequiredField::Missing => Arc::from([]),
-                RequiredField::Present(value) => Arc::from(value.into_inner()),
-            },
-            resolved_plan_digest: match wire.resolved_plan_digest {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
-            final_result: match wire.final_result {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
-            validation_failure: match wire.validation_failure {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
+            cancellation: wire.cancellation.into_option(),
+            retry: wire.retry.unwrap_or_default(),
+            last_limit: wire.last_limit.into_option(),
+            suspension: wire.suspension.into_option(),
+            output_configuration: wire.output_configuration.into_option(),
+            active_capabilities: Arc::from(
+                wire.active_capabilities.unwrap_or_default().into_inner(),
+            ),
+            resolved_plan_digest: wire.resolved_plan_digest.into_option(),
+            final_result: wire.final_result.into_option(),
+            validation_failure: wire.validation_failure.into_option(),
             child_preparations,
             budget_reservations,
             budget_charges,

@@ -12,11 +12,10 @@ use crate::records::RecordEnvelope;
 
 use super::body::RunEventBody;
 use super::derive::{
-    derived_event_sensitivity, effect_id_for_body, is_model_effect_record, is_tool_effect_record,
-    record_correlations, run_event_body_from_record, validate_event_correlations,
-    validate_event_policy, validate_event_versions,
+    derived_event_kind, derived_event_sensitivity, effect_id_for_body, is_model_effect_record,
+    is_tool_effect_record, record_correlations, run_event_body_from_record,
+    validate_event_correlations, validate_event_policy, validate_event_versions,
 };
-use super::derived_event_kind;
 use super::{EventError, RUN_EVENT_SCHEMA_VERSION, RunEventClass, RunEventKind};
 
 /// Public runtime event envelope.
@@ -94,29 +93,11 @@ impl RunEvent {
         sensitivity: Sensitivity,
         body: RunEventBody,
     ) -> Result<Self, EventError> {
-        validate_event_versions(schema_version, kind_version)?;
-        let kind = body.kind();
-        if kind.class() != RunEventClass::DurableDerived {
-            return Err(EventError::ClassMismatch {
-                expected: RunEventClass::DurableDerived,
-                actual: kind.class(),
-            });
-        }
-        validate_event_correlations(run_id, model_request_id, effect_id, tool_call_id, &body)?;
-        validate_event_policy(
-            turn_id,
-            model_request_id,
-            tool_batch_id,
-            effect_id,
-            tool_call_id,
-            sensitivity,
-            &body,
-        )?;
-        Ok(Self {
+        Self::try_new(
+            RunEventClass::DurableDerived,
             schema_version,
             kind_version,
             event_id,
-            kind,
             session_id,
             lane_id,
             run_id,
@@ -125,12 +106,12 @@ impl RunEvent {
             tool_batch_id,
             effect_id,
             tool_call_id,
-            durable_sequence: Some(durable_sequence),
+            Some(durable_sequence),
             transient_sequence,
             timestamp,
             sensitivity,
             body,
-        })
+        )
     }
 
     /// Construct a transient event.
@@ -160,11 +141,52 @@ impl RunEvent {
         sensitivity: Sensitivity,
         body: RunEventBody,
     ) -> Result<Self, EventError> {
+        Self::try_new(
+            RunEventClass::Transient,
+            schema_version,
+            kind_version,
+            event_id,
+            session_id,
+            lane_id,
+            run_id,
+            turn_id,
+            model_request_id,
+            tool_batch_id,
+            effect_id,
+            tool_call_id,
+            None,
+            transient_sequence,
+            timestamp,
+            sensitivity,
+            body,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_new(
+        expected: RunEventClass,
+        schema_version: u16,
+        kind_version: u16,
+        event_id: EventId,
+        session_id: SessionId,
+        lane_id: LaneId,
+        run_id: RunId,
+        turn_id: Option<TurnId>,
+        model_request_id: Option<ModelRequestId>,
+        tool_batch_id: Option<ToolBatchId>,
+        effect_id: Option<EffectId>,
+        tool_call_id: Option<ToolCallId>,
+        durable_sequence: Option<u64>,
+        transient_sequence: u64,
+        timestamp: Timestamp,
+        sensitivity: Sensitivity,
+        body: RunEventBody,
+    ) -> Result<Self, EventError> {
         validate_event_versions(schema_version, kind_version)?;
         let kind = body.kind();
-        if kind.class() != RunEventClass::Transient {
+        if kind.class() != expected {
             return Err(EventError::ClassMismatch {
-                expected: RunEventClass::Transient,
+                expected,
                 actual: kind.class(),
             });
         }
@@ -191,7 +213,7 @@ impl RunEvent {
             tool_batch_id,
             effect_id,
             tool_call_id,
-            durable_sequence: None,
+            durable_sequence,
             transient_sequence,
             timestamp,
             sensitivity,
@@ -434,58 +456,39 @@ impl<'de> Deserialize<'de> for RunEvent {
         if wire.body.kind() != wire.kind {
             return Err(de::Error::custom("run event kind/body mismatch"));
         }
-        match wire.kind.class() {
-            RunEventClass::DurableDerived => {
-                let Some(sequence) = wire.durable_sequence else {
-                    return Err(de::Error::custom(
-                        "durable-derived events require durable_sequence",
-                    ));
-                };
-                Self::try_durable(
-                    wire.schema_version,
-                    wire.kind_version,
-                    wire.event_id,
-                    wire.session_id,
-                    wire.lane_id,
-                    wire.run_id,
-                    wire.turn_id,
-                    wire.model_request_id,
-                    wire.tool_batch_id,
-                    wire.effect_id,
-                    wire.tool_call_id,
-                    sequence,
-                    wire.transient_sequence,
-                    wire.timestamp,
-                    wire.sensitivity,
-                    wire.body,
-                )
-                .map_err(de::Error::custom)
+        let class = wire.kind.class();
+        match (class, wire.durable_sequence) {
+            (RunEventClass::DurableDerived, None) => {
+                return Err(de::Error::custom(
+                    "durable-derived events require durable_sequence",
+                ));
             }
-            RunEventClass::Transient => {
-                if wire.durable_sequence.is_some() {
-                    return Err(de::Error::custom(
-                        "transient events must omit durable_sequence",
-                    ));
-                }
-                Self::try_transient(
-                    wire.schema_version,
-                    wire.kind_version,
-                    wire.event_id,
-                    wire.session_id,
-                    wire.lane_id,
-                    wire.run_id,
-                    wire.turn_id,
-                    wire.model_request_id,
-                    wire.tool_batch_id,
-                    wire.effect_id,
-                    wire.tool_call_id,
-                    wire.transient_sequence,
-                    wire.timestamp,
-                    wire.sensitivity,
-                    wire.body,
-                )
-                .map_err(de::Error::custom)
+            (RunEventClass::Transient, Some(_)) => {
+                return Err(de::Error::custom(
+                    "transient events must omit durable_sequence",
+                ));
             }
+            _ => {}
         }
+        Self::try_new(
+            class,
+            wire.schema_version,
+            wire.kind_version,
+            wire.event_id,
+            wire.session_id,
+            wire.lane_id,
+            wire.run_id,
+            wire.turn_id,
+            wire.model_request_id,
+            wire.tool_batch_id,
+            wire.effect_id,
+            wire.tool_call_id,
+            wire.durable_sequence,
+            wire.transient_sequence,
+            wire.timestamp,
+            wire.sensitivity,
+            wire.body,
+        )
+        .map_err(de::Error::custom)
     }
 }

@@ -21,7 +21,7 @@ use crate::run_types::RunHandleError;
 
 use super::cancel::reconcile_cancelled_effect;
 use super::ids::submit_resume_input;
-use super::{ModelDriverResult, SettlementSources, model_handle_error};
+use super::{ModelDriverResult, SettlementSources, committed, model_handle_error};
 
 pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
@@ -37,14 +37,8 @@ pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
         return Ok(ModelResumeAction::NoOutstanding);
     }
     let first_pass = model_resume_action(coordinator.state());
-    match first_pass {
-        ModelResumeAction::NoOutstanding
-        | ModelResumeAction::UseRecorded
-        | ModelResumeAction::WaitExternal => return Ok(first_pass),
-        ModelResumeAction::Retry | ModelResumeAction::SuspendUncertain => {
-            return Ok(first_pass);
-        }
-        ModelResumeAction::Reconcile => {}
+    if first_pass != ModelResumeAction::Reconcile {
+        return Ok(first_pass);
     }
     let Some(seed) = coordinator.pending_model_seed() else {
         return Err(RunHandleError::ModelSettlement {
@@ -90,7 +84,6 @@ async fn apply_model_reconcile_result<C: Clock, R: RandomSource>(
     retry_allowed: bool,
     sources: &SettlementSources<C, R>,
 ) -> Result<ModelResumeAction, RunHandleError> {
-    let action = map_model_reconcile_result(coordinator.state(), &result, retry_allowed);
     match result {
         ModelReconcileResult::Completed(response) => {
             settle_reconciled_completion(coordinator, model, seed, draft, response, sources).await
@@ -101,7 +94,11 @@ async fn apply_model_reconcile_result<C: Clock, R: RandomSource>(
         ModelReconcileResult::NotStarted
         | ModelReconcileResult::RetrySafe
         | ModelReconcileResult::Unknown
-        | ModelReconcileResult::NonRepeatable => Ok(action),
+        | ModelReconcileResult::NonRepeatable => Ok(map_model_reconcile_result(
+            coordinator.state(),
+            &result,
+            retry_allowed,
+        )),
     }
 }
 
@@ -353,23 +350,18 @@ pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(
         ModelSettlement::Completed { completion, .. } => completion.artifacts().to_vec(),
         ModelSettlement::Failed(_) | ModelSettlement::Deferred(_) => Vec::new(),
     };
-    let outcome = coordinator
-        .submit(
-            TransitionEnv {
-                now,
-                ids: allocation.ids,
-            },
-            KernelInput::ModelSettled(settled),
-        )
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
-    sources
-        .pin_committed_artifacts(&locator, &artifacts)
-        .await?;
-    Ok(())
+    committed(
+        coordinator
+            .submit(
+                TransitionEnv {
+                    now,
+                    ids: allocation.ids,
+                },
+                KernelInput::ModelSettled(settled),
+            )
+            .await,
+    )?;
+    sources.pin_committed_artifacts(&locator, &artifacts).await
 }
 
 pub(crate) async fn process_model_progress<C: Clock, R: RandomSource>(
@@ -413,18 +405,14 @@ fn allocate_settlement<C: Clock, R: RandomSource>(
 ) -> Result<SettlementAllocation, RunHandleError> {
     let completed = matches!(result.result, Ok(ModelTerminal::Completed(_)));
     let tool_count = match &result.result {
-        Ok(value) => match value {
-            ModelTerminal::Completed(response) => response.tool_calls.len(),
-            ModelTerminal::Deferred(_) => 0,
-        },
-        Err(_) => 0,
+        Ok(ModelTerminal::Completed(response)) => response.tool_calls.len(),
+        Ok(ModelTerminal::Deferred(_)) | Err(_) => 0,
     };
-    let record_count = if completed { 2 } else { 1 };
-    let event_count = if completed { 2 } else { 1 };
-    let records = (0..record_count)
+    let count = if completed { 2 } else { 1 };
+    let records = (0..count)
         .map(|_| sources.generate::<RecordTag>())
         .collect::<Result<Vec<RecordId>, _>>()?;
-    let events = (0..event_count)
+    let events = (0..count)
         .map(|_| sources.generate::<EventTag>())
         .collect::<Result<Vec<EventId>, _>>()?;
     let message_id = completed

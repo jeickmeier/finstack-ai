@@ -10,10 +10,7 @@ use reqwest::header::{HeaderName, HeaderValue};
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{
-    FETCH_DESTINATION_BLOCKED, FETCH_HOST_NOT_ALLOWLISTED, FETCH_INVALID_ARGUMENTS,
-    FETCH_LIMIT_EXCEEDED, FETCH_REDIRECT_DENIED, FETCH_TIMEOUT, FETCH_TRANSPORT_FAILED,
-};
+use crate::FETCH_INVALID_ARGUMENTS;
 
 /// Hard ceiling on `HttpFetchConfig::max_response_bytes` (8 MiB).
 pub(crate) const MAX_RESPONSE_BYTES_CEILING: usize = 8 * 1_048_576;
@@ -35,7 +32,7 @@ const REDACTED: &str = "<redacted>";
 #[derive(Clone, PartialEq, Eq)]
 pub struct HostPattern(PatternKind);
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PatternKind {
     /// Matches exactly this lowercase host.
     Exact(String),
@@ -218,19 +215,6 @@ pub enum HttpFetchError {
     },
 }
 
-// Referenced so the frozen error-code constants stay linked to the crate's
-// stable vocabulary even though this task does not yet map every code to a
-// runtime failure path (Task 6 wires request-flow error mapping).
-#[allow(dead_code)]
-const _: [&str; 6] = [
-    FETCH_HOST_NOT_ALLOWLISTED,
-    FETCH_DESTINATION_BLOCKED,
-    FETCH_REDIRECT_DENIED,
-    FETCH_TRANSPORT_FAILED,
-    FETCH_LIMIT_EXCEEDED,
-    FETCH_TIMEOUT,
-];
-
 /// Validate `config` in isolation (allowlist parses, limits within their
 /// ceilings, per-host header keys are exact hosts with valid HTTP
 /// name/value pairs) and return the normalized config (per-host-header keys
@@ -358,48 +342,38 @@ impl HttpFetchConfigSnapshot {
                 reason: "invalid_config_json",
             })?;
         let defaults = HttpFetchConfig::default();
-
-        let max_response_bytes = match snapshot.max_response_bytes {
-            Some(value) => usize::try_from(value).map_err(|_| HttpFetchError::Configuration {
+        let max_response_bytes = snapshot
+            .max_response_bytes
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| HttpFetchError::Configuration {
                 reason: "max_response_bytes_out_of_range",
-            })?,
-            None => defaults.max_response_bytes,
-        };
-        let request_timeout = match snapshot.request_timeout_ms {
-            Some(value) => Duration::from_millis(value),
-            None => defaults.request_timeout,
-        };
-        let max_redirects = match snapshot.max_redirects {
-            Some(value) => usize::try_from(value).map_err(|_| HttpFetchError::Configuration {
+            })?
+            .unwrap_or(defaults.max_response_bytes);
+        let max_redirects = snapshot
+            .max_redirects
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| HttpFetchError::Configuration {
                 reason: "max_redirects_out_of_range",
-            })?,
-            None => defaults.max_redirects,
-        };
-        let per_host_headers = snapshot
-            .per_host_headers
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(host, headers)| (host, headers.into_iter().collect()))
-            .collect();
-
+            })?
+            .unwrap_or(defaults.max_redirects);
         Ok(HttpFetchConfig {
             allowlist: snapshot.allowlist,
             max_response_bytes,
-            request_timeout,
+            request_timeout: snapshot
+                .request_timeout_ms
+                .map_or(defaults.request_timeout, Duration::from_millis),
             max_redirects,
-            per_host_headers,
-            allow_loopback_http: defaults.allow_loopback_http,
+            per_host_headers: snapshot
+                .per_host_headers
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(host, headers)| (host, headers.into_iter().collect()))
+                .collect(),
             user_agent: snapshot.user_agent,
+            ..defaults
         })
-    }
-}
-
-impl fmt::Debug for PatternKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Exact(host) => f.debug_tuple("Exact").field(host).finish(),
-            Self::SubdomainOf(suffix) => f.debug_tuple("SubdomainOf").field(suffix).finish(),
-        }
     }
 }
 

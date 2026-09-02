@@ -75,13 +75,7 @@ impl ListenAddr {
         match self {
             Self::Unix { .. } => Ok(()),
             Self::Tcp { addr, tls } => {
-                if addr.ip().is_loopback() {
-                    if tls.is_some() {
-                        return Err(ServerError::ListenInvalid);
-                    }
-                    return Ok(());
-                }
-                if tls.is_none() {
+                if addr.ip().is_loopback() == tls.is_some() {
                     return Err(ServerError::ListenInvalid);
                 }
                 Ok(())

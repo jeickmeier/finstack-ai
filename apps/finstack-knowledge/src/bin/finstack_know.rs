@@ -32,10 +32,6 @@ fn main() -> ExitCode {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "one flat match over the CLI commands; splitting it would only scatter the dispatch"
-)]
 fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
     match &cli.command {
         Command::Docs { topic } => {
@@ -45,37 +41,17 @@ fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
         }
         Command::Ask(args) => {
             let config = config_from(cli)?;
-            let question = args.question.clone();
-            let session = args.session.clone();
-            runtime()?.block_on(async move {
-                if cli.json {
-                    let mut sink = JsonRenderer::new();
-                    let outcome = ask::run_ask(
-                        &config,
-                        &question,
-                        session.as_deref(),
-                        &os_user(),
-                        &mut sink,
-                    )
-                    .await?;
-                    print!("{}", sink.into_markup());
-                    report_session(&outcome);
-                    Ok(ExitCode::SUCCESS)
-                } else {
-                    let mut sink = TextRenderer::new();
-                    let outcome = ask::run_ask(
-                        &config,
-                        &question,
-                        session.as_deref(),
-                        &os_user(),
-                        &mut sink,
-                    )
-                    .await?;
-                    print_markup(&sink.into_markup());
-                    report_session(&outcome);
-                    Ok(ExitCode::SUCCESS)
-                }
-            })
+            let user = os_user();
+            runtime()?.block_on(run_rendered(cli.json, async |sink| {
+                ask::run_ask(
+                    &config,
+                    &args.question,
+                    args.session.as_deref(),
+                    &user,
+                    sink,
+                )
+                .await
+            }))
         }
         Command::Sessions { command } => {
             let config = config_from(cli)?;
@@ -104,40 +80,41 @@ fn dispatch(cli: &Cli) -> Result<ExitCode, KnowledgeError> {
         }
         Command::Ingest(args) => {
             let config = config_from(cli)?;
-            let path = args.path.clone();
-            let session = args.session.clone();
-            runtime()?.block_on(async move {
-                use finstack_ai_knowledge::cli::ingest;
-                if cli.json {
-                    let mut sink = JsonRenderer::new();
-                    let outcome = ingest::run_ingest(
-                        &config,
-                        &path,
-                        session.as_deref(),
-                        &os_user(),
-                        &mut sink,
-                    )
-                    .await?;
-                    print!("{}", sink.into_markup());
-                    report_session(&outcome);
-                } else {
-                    let mut sink = TextRenderer::new();
-                    let outcome = ingest::run_ingest(
-                        &config,
-                        &path,
-                        session.as_deref(),
-                        &os_user(),
-                        &mut sink,
-                    )
-                    .await?;
-                    print_markup(&sink.into_markup());
-                    report_session(&outcome);
-                }
-                Ok(ExitCode::SUCCESS)
-            })
+            let user = os_user();
+            runtime()?.block_on(run_rendered(cli.json, async |sink| {
+                finstack_ai_knowledge::cli::ingest::run_ingest(
+                    &config,
+                    &args.path,
+                    args.session.as_deref(),
+                    &user,
+                    sink,
+                )
+                .await
+            }))
         }
         Command::Repl { session } => run_repl_command(cli, session.clone()),
     }
+}
+
+/// Drive one run-producing command through the renderer `json` selects,
+/// then print what it accumulated and report a newly created session.
+async fn run_rendered(
+    json: bool,
+    run: impl AsyncFnOnce(&mut dyn EventSink) -> Result<ask::AskOutcome, KnowledgeError>,
+) -> Result<ExitCode, KnowledgeError> {
+    let outcome = if json {
+        let mut sink = JsonRenderer::new();
+        let outcome = run(&mut sink).await?;
+        print!("{}", sink.into_markup());
+        outcome
+    } else {
+        let mut sink = TextRenderer::new();
+        let outcome = run(&mut sink).await?;
+        print_markup(&sink.into_markup());
+        outcome
+    };
+    report_session(&outcome);
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_repl_command(cli: &Cli, session: Option<String>) -> Result<ExitCode, KnowledgeError> {

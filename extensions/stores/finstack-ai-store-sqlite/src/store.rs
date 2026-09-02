@@ -8,18 +8,15 @@ use finstack_ai_runtime::ports::journal::{
     StoreError, WriteMetadataRequest,
 };
 use finstack_ai_store_common::{
-    admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size,
+    VerifiedHead, accelerated_from, admit_prune_snapshot, admit_snapshot_sequence,
+    check_snapshot_size, encode_state_request, outstanding_count, tombstone_count,
 };
 use rusqlite::{Transaction, TransactionBehavior, params};
 
 use crate::append::append_in_transaction;
 use crate::config::{SqliteStoreConfig, health_label, is_memory_path};
 use crate::error::{i64_from_u64, map_sqlite_error};
-use crate::load::{
-    VerifiedHead, VerifiedRead, accelerated_from, encode_state_request, load_session,
-    load_session_row, load_session_window, load_snapshot, outstanding_count, scan_session,
-    tombstone_count,
-};
+use crate::load::{load_session_row, load_session_window, load_snapshot, scan_session};
 use crate::worker::{WorkerCtx, WorkerHandle};
 
 /// One row from [`SqliteJournalStore::list_sessions`].
@@ -120,10 +117,7 @@ impl SqliteJournalStore {
     ///
     /// Returns [`StoreError::InvalidRequest`] for a zero limit and storage
     /// errors from the underlying connection.
-    pub fn list_sessions(
-        &self,
-        limit: u32,
-    ) -> PortFuture<Result<Vec<SessionListRow>, StoreError>> {
+    pub fn list_sessions(&self, limit: u32) -> PortFuture<Result<Vec<SessionListRow>, StoreError>> {
         self.worker.submit(move |ctx| {
             if limit == 0 {
                 return Err(StoreError::InvalidRequest {
@@ -132,9 +126,7 @@ impl SqliteJournalStore {
             }
             let mut statement = ctx
                 .connection
-                .prepare(
-                    "SELECT session_id, current_sequence, metadata FROM sessions LIMIT ?1",
-                )
+                .prepare("SELECT session_id, current_sequence, metadata FROM sessions LIMIT ?1")
                 .map_err(map_sqlite_error)?;
             let rows = statement
                 .query_map([i64::from(limit)], |row| {
@@ -147,8 +139,7 @@ impl SqliteJournalStore {
                 .map_err(map_sqlite_error)?;
             let mut sessions = Vec::new();
             for row in rows {
-                let (session_id, current_sequence, metadata) =
-                    row.map_err(map_sqlite_error)?;
+                let (session_id, current_sequence, metadata) = row.map_err(map_sqlite_error)?;
                 let session_id: [u8; 16] =
                     session_id
                         .as_slice()
@@ -285,30 +276,13 @@ impl WorkerCtx {
         Ok(value)
     }
 
-    /// Record `head` as this process's proof for `session_id`, presenting the
-    /// generation `read` was taken at (see `VerifiedHeadCache`).
-    pub(crate) fn remember(&self, session_id: SessionId, read: VerifiedRead, head: VerifiedHead) {
-        self.verified.remember(session_id, read, head);
-    }
-
-    /// Drop any cached proof for `session_id` (spec D9(b)).
-    pub(crate) fn invalidate(&self, session_id: SessionId) {
-        self.verified.invalidate(session_id);
-    }
-
-    /// Read the cached proof for `session_id`, with the generation it was
-    /// read at.
-    pub(crate) fn cached(&self, session_id: SessionId) -> VerifiedRead {
-        self.verified.read(session_id)
-    }
-
     pub(crate) fn append(&mut self, request: &AppendRequest) -> Result<CommittedBatch, StoreError> {
         let session_id = request.session_id();
-        let previous = self.cached(session_id).head;
+        let previous = self.verified.read(session_id).head;
         let limits = self.limits;
         let committed = self
             .with_immediate(|transaction| append_in_transaction(transaction, request, &limits))?;
-        self.invalidate(session_id);
+        self.verified.invalidate(session_id);
         let genesis = committed.first_sequence == 1;
         let prior_verified = previous.is_some_and(|head| {
             head.sequence.saturating_add(1) == committed.first_sequence
@@ -322,8 +296,8 @@ impl WorkerCtx {
         {
             // Re-read after the invalidation above so the write presents the
             // bumped generation.
-            let read = self.cached(session_id);
-            self.remember(
+            let read = self.verified.read(session_id);
+            self.verified.remember(
                 session_id,
                 read,
                 VerifiedHead {
@@ -336,11 +310,29 @@ impl WorkerCtx {
     }
 
     pub(crate) fn load(&mut self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
-        let read = self.cached(request.session_id);
-        let loaded = match load_session(
+        self.load_window(request.session_id, LoadWindow::Full)
+    }
+
+    pub(crate) fn load_from(
+        &mut self,
+        request: LoadFromRequest,
+    ) -> Result<LoadedSession, StoreError> {
+        self.load_window(request.session_id, request.window)
+    }
+
+    /// Run one load under the session's cached verified head and maintain
+    /// that cache from the outcome (spec D9).
+    fn load_window(
+        &mut self,
+        session_id: SessionId,
+        window: LoadWindow,
+    ) -> Result<LoadedSession, StoreError> {
+        let read = self.verified.read(session_id);
+        let loaded = match load_session_window(
             &self.connection,
-            request.session_id,
+            session_id,
             self.limits.snapshot_bytes,
+            window,
             read.head,
         ) {
             Ok(loaded) => loaded,
@@ -348,40 +340,7 @@ impl WorkerCtx {
                 // Spec D9(b): an integrity failure invalidates whatever this
                 // process believed it had verified for this session.
                 if matches!(error, StoreError::Integrity { .. }) {
-                    self.invalidate(request.session_id);
-                }
-                return Err(error);
-            }
-        };
-        self.remember(
-            request.session_id,
-            read,
-            VerifiedHead {
-                sequence: loaded.head_sequence,
-                checksum: loaded.head_checksum,
-            },
-        );
-        Ok(loaded)
-    }
-
-    pub(crate) fn load_from(
-        &mut self,
-        request: LoadFromRequest,
-    ) -> Result<LoadedSession, StoreError> {
-        let window = request.window;
-        let read = self.cached(request.session_id);
-        let loaded = match load_session_window(
-            &self.connection,
-            request.session_id,
-            self.limits.snapshot_bytes,
-            window,
-            read.head,
-        ) {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                // Spec D9(b), as in `load`.
-                if matches!(error, StoreError::Integrity { .. }) {
-                    self.invalidate(request.session_id);
+                    self.verified.invalidate(session_id);
                 }
                 return Err(error);
             }
@@ -391,8 +350,8 @@ impl WorkerCtx {
         // nothing about the prefix it omitted, so caching its head would let
         // a later full load skip records this process never verified.
         if matches!(window, LoadWindow::Full) {
-            self.remember(
-                request.session_id,
+            self.verified.remember(
+                session_id,
                 read,
                 VerifiedHead {
                     sequence: loaded.head_sequence,
@@ -455,12 +414,7 @@ impl WorkerCtx {
                 session.current_sequence,
                 session.snapshot_sequence,
             )?;
-            let receipt = SnapshotReceipt {
-                session_id: request.session_id,
-                sequence: request.snapshot.sequence(),
-                digest: request.snapshot.digest(),
-                bytes: request.snapshot.bytes().len(),
-            };
+            let sequence = i64_from_u64(request.snapshot.sequence(), "snapshot_sequence")?;
             transaction
                 .execute(
                     "INSERT OR REPLACE INTO snapshots
@@ -468,7 +422,7 @@ impl WorkerCtx {
                      VALUES (?1, ?2, ?3, ?4, 0)",
                     params![
                         request.session_id.as_bytes().as_slice(),
-                        i64_from_u64(request.snapshot.sequence(), "snapshot_sequence")?,
+                        sequence,
                         request.snapshot.bytes(),
                         request.snapshot.digest().as_bytes().as_slice(),
                     ],
@@ -477,13 +431,15 @@ impl WorkerCtx {
             transaction
                 .execute(
                     "UPDATE sessions SET snapshot_sequence = ?1 WHERE session_id = ?2",
-                    params![
-                        i64_from_u64(request.snapshot.sequence(), "snapshot_sequence")?,
-                        request.session_id.as_bytes().as_slice(),
-                    ],
+                    params![sequence, request.session_id.as_bytes().as_slice()],
                 )
                 .map_err(map_sqlite_error)?;
-            Ok(receipt)
+            Ok(SnapshotReceipt {
+                session_id: request.session_id,
+                sequence: request.snapshot.sequence(),
+                digest: request.snapshot.digest(),
+                bytes: request.snapshot.bytes().len(),
+            })
         })
     }
 
@@ -499,7 +455,7 @@ impl WorkerCtx {
     }
 
     pub(crate) fn prune(&mut self, request: PruneRequest) -> Result<PruneReceipt, StoreError> {
-        self.invalidate(request.session_id);
+        self.verified.invalidate(request.session_id);
         let snapshot_bytes = self.limits.snapshot_bytes;
         self.with_immediate(|transaction| {
             let session = load_session_row(transaction, request.session_id)?.ok_or(
@@ -570,7 +526,6 @@ impl WorkerCtx {
                     params![request.session_id.as_bytes().as_slice(), pruned_through],
                 )
                 .map_err(map_sqlite_error)?;
-            let _ = request.horizon;
             Ok(PruneReceipt {
                 pruned_through_sequence: snapshot.sequence(),
                 retained_outstanding,

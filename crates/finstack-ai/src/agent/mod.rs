@@ -13,8 +13,6 @@ mod activation;
 mod builder;
 mod child;
 mod child_route;
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-mod child_wasm;
 #[cfg(feature = "native-tokio")]
 pub mod deferred;
 mod drive;
@@ -45,7 +43,6 @@ pub use deferred::{
 };
 pub use handle::Agent;
 pub use history::HistoryCachePolicy;
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use lane::{LaneLive, live_run};
 pub use linked::{
     AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,

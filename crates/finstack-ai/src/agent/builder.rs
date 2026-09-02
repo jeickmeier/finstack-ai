@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::registry::ReadyComponent;
 use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
     BundleResolver, BundleSpec, CapabilityActivation, CapabilityRef, CapabilitySpec,
-    CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
-    Registrar, RegistrationError, RegistrationMetadata, Registry, RunPolicy, RuntimeServices,
+    CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, Registrar,
+    RegistrationError, RegistrationMetadata, Registry, RunPolicy, RuntimeServices,
 };
 use finstack_ai_kernel::{
     AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, MiddlewareRef, RunLimits,
@@ -132,10 +133,6 @@ impl NativeAgentBuilder {
     pub fn history_cache_policy(mut self, policy: HistoryCachePolicy) -> Self {
         self.history_cache_policy = policy;
         self
-    }
-
-    pub(super) fn set_history_cache_policy(&mut self, policy: HistoryCachePolicy) {
-        self.history_cache_policy = policy;
     }
 
     /// Bind the artifact store used for staging and committed-reference ownership.
@@ -390,7 +387,7 @@ impl NativeAgentBuilder {
         let bundle_resolver = BundleResolver::new(
             &catalog,
             PREVIEW_ENGINE_VERSION,
-            std::collections::BTreeSet::new(),
+            BTreeSet::new(),
             RuntimeServices::default(),
         );
         let resolved_agent = bundle_resolver

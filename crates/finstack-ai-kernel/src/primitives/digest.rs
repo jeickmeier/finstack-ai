@@ -148,13 +148,7 @@ impl Digest {
 
     /// Hash under a domain that has already been checked (or is a fixed registry name).
     fn hash_domain(domain: &str, schema_version: u32, canonical_bytes: &[u8]) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(b"finstack-ai");
-        hasher.update([0]);
-        hasher.update(domain.as_bytes());
-        hasher.update([0]);
-        hasher.update(schema_version.to_be_bytes());
-        hasher.update([0]);
+        let mut hasher = domain_hasher(domain, schema_version);
         hasher.update(canonical_bytes);
         Self(hasher.finalize().into())
     }
@@ -312,15 +306,8 @@ impl DigestWriter {
     /// Returns [`DigestError::InvalidDomain`] when `domain` is empty or NUL-bearing.
     pub(crate) fn new(domain: &str, schema_version: u32) -> Result<Self, DigestError> {
         validate_domain(domain)?;
-        let mut hasher = Sha256::new();
-        hasher.update(b"finstack-ai");
-        hasher.update([0]);
-        hasher.update(domain.as_bytes());
-        hasher.update([0]);
-        hasher.update(schema_version.to_be_bytes());
-        hasher.update([0]);
         Ok(Self {
-            hasher,
+            hasher: domain_hasher(domain, schema_version),
             chunk: Vec::with_capacity(DIGEST_CHUNK_BYTES),
             written: 0,
         })
@@ -429,6 +416,18 @@ const _: () = {
     assert!(domain_is_valid(DOMAIN_MIDDLEWARE_CHAIN));
     assert!(domain_is_valid(DOMAIN_AGENT_SPEC));
 };
+
+/// SHA-256 primed with the `"finstack-ai" NUL domain NUL version NUL` prefix.
+fn domain_hasher(domain: &str, schema_version: u32) -> Sha256 {
+    let mut hasher = Sha256::new();
+    hasher.update(b"finstack-ai");
+    hasher.update([0]);
+    hasher.update(domain.as_bytes());
+    hasher.update([0]);
+    hasher.update(schema_version.to_be_bytes());
+    hasher.update([0]);
+    hasher
+}
 
 fn validate_domain(domain: &str) -> Result<(), DigestError> {
     if !domain_is_valid(domain) {

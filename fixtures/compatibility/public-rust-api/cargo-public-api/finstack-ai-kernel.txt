@@ -403,7 +403,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::EffectInput
 impl serde_core::ser::Serialize for finstack_ai_kernel::EffectInput
 pub fn finstack_ai_kernel::EffectInput::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::EffectInput
-pub fn finstack_ai_kernel::EffectInput::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::EffectInput::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::EffectKind
 pub finstack_ai_kernel::EffectKind::Context
 pub finstack_ai_kernel::EffectKind::Interaction
@@ -723,7 +723,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::InteractionKind
 impl serde_core::ser::Serialize for finstack_ai_kernel::InteractionKind
 pub fn finstack_ai_kernel::InteractionKind::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::InteractionKind
-pub fn finstack_ai_kernel::InteractionKind::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::InteractionKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::InteractionSettled
 pub finstack_ai_kernel::InteractionSettled::Cancelled(finstack_ai_kernel::InteractionCancelled)
 pub finstack_ai_kernel::InteractionSettled::Expired(finstack_ai_kernel::InteractionExpired)
@@ -1515,7 +1515,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::RunEventBody
 impl serde_core::ser::Serialize for finstack_ai_kernel::RunEventBody
 pub fn finstack_ai_kernel::RunEventBody::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::RunEventBody
-pub fn finstack_ai_kernel::RunEventBody::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::RunEventBody::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub enum finstack_ai_kernel::RunEventClass
 pub finstack_ai_kernel::RunEventClass::DurableDerived
 pub finstack_ai_kernel::RunEventClass::Transient
@@ -2362,7 +2362,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::BudgetRequest
 impl serde_core::ser::Serialize for finstack_ai_kernel::BudgetRequest
 pub fn finstack_ai_kernel::BudgetRequest::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::BudgetRequest
-pub fn finstack_ai_kernel::BudgetRequest::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::BudgetRequest::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::BudgetReservationReceipt
 pub finstack_ai_kernel::BudgetReservationReceipt::receipt_digest: finstack_ai_kernel::Digest
 pub finstack_ai_kernel::BudgetReservationReceipt::remaining: finstack_ai_kernel::BudgetRequest
@@ -3507,7 +3507,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::JsonBlock
 impl serde_core::ser::Serialize for finstack_ai_kernel::JsonBlock
 pub fn finstack_ai_kernel::JsonBlock::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::JsonBlock
-pub fn finstack_ai_kernel::JsonBlock::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::JsonBlock::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::Kernel
 impl finstack_ai_kernel::Kernel
 pub fn finstack_ai_kernel::Kernel::adopt_session_head(&mut self, u64) -> core::result::Result<(), finstack_ai_kernel::KernelError>
@@ -3650,7 +3650,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::LaneMoved
 impl serde_core::ser::Serialize for finstack_ai_kernel::LaneMoved
 pub fn finstack_ai_kernel::LaneMoved::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::LaneMoved
-pub fn finstack_ai_kernel::LaneMoved::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::LaneMoved::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::LaneProjection
 pub finstack_ai_kernel::LaneProjection::leaf_id: core::option::Option<finstack_ai_kernel::EntryId>
 pub finstack_ai_kernel::LaneProjection::name: alloc::sync::Arc<str>
@@ -4626,7 +4626,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::SessionCreated
 impl serde_core::ser::Serialize for finstack_ai_kernel::SessionCreated
 pub fn finstack_ai_kernel::SessionCreated::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::SessionCreated
-pub fn finstack_ai_kernel::SessionCreated::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::SessionCreated::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::SessionProjection
 impl finstack_ai_kernel::SessionProjection
 pub fn finstack_ai_kernel::SessionProjection::active_on_lane(&self, finstack_ai_kernel::LaneId) -> core::option::Option<finstack_ai_kernel::RunId>
@@ -4673,7 +4673,7 @@ impl core::marker::StructuralPartialEq for finstack_ai_kernel::SnapshotWritten
 impl serde_core::ser::Serialize for finstack_ai_kernel::SnapshotWritten
 pub fn finstack_ai_kernel::SnapshotWritten::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::SnapshotWritten
-pub fn finstack_ai_kernel::SnapshotWritten::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_kernel::SnapshotWritten::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::StageCursor
 pub finstack_ai_kernel::StageCursor::cycle: u64
 pub finstack_ai_kernel::StageCursor::stage: finstack_ai_kernel::Stage

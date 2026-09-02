@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::content::{ContentBlock, LABEL_MAX_BYTES, ToolCallBlock};
+use crate::content::{ContentBlock, ToolCallBlock};
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
 use crate::primitives::{MessageId, ToolCallId};
 use crate::primitives::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
@@ -51,21 +51,21 @@ impl KernelState {
                 });
             }
         }
-        if self.completion_identities.keys().any(|completion_id| {
-            completion_id.is_empty()
-                || completion_id.len() > LABEL_MAX_BYTES
-                || completion_id.as_bytes().contains(&0)
-        }) {
+        if self
+            .completion_identities
+            .keys()
+            .any(|id| !crate::label_is_valid(id))
+        {
             return Err(KernelError::InvalidInputPayload {
                 field: "completion_identities",
                 reason_code: "invalid_label",
             });
         }
-        if self.resolution_identities.keys().any(|resolution_id| {
-            resolution_id.is_empty()
-                || resolution_id.len() > LABEL_MAX_BYTES
-                || resolution_id.as_bytes().contains(&0)
-        }) {
+        if self
+            .resolution_identities
+            .keys()
+            .any(|id| !crate::label_is_valid(id))
+        {
             return Err(KernelError::InvalidInputPayload {
                 field: "resolution_identities",
                 reason_code: "invalid_label",

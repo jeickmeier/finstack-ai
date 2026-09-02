@@ -1,63 +1,47 @@
 //! Host artifact store over `Uint8Array` payloads.
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Mutex;
 
 use finstack_ai::runtime::Bytes;
 use finstack_ai::runtime::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
     ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
-    artifact_storage_key, build_artifact_ref, validate_artifact_scope, validate_retrieved_artifact,
+};
+#[cfg(target_arch = "wasm32")]
+use finstack_ai::runtime::artifact::{
+    artifact_storage_key, build_artifact_ref, validate_retrieved_artifact,
 };
 use finstack_ai::runtime::ports::PortFuture;
-#[cfg(not(target_arch = "wasm32"))]
-use finstack_ai_kernel::Digest;
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Timestamp};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::document_store::MemoryArtifactStore;
+#[cfg(target_arch = "wasm32")]
 use crate::host::HostFailure;
 
-#[cfg(not(target_arch = "wasm32"))]
-type NativeMap = Arc<Mutex<NativeState>>;
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Default)]
-struct NativeState {
-    entries: BTreeMap<Digest, StoredArtifact>,
-    total_bytes: u64,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct StoredArtifact {
-    scope: ArtifactScope,
-    artifact: ArtifactRef,
-    content: Bytes,
-    owners: BTreeSet<ArtifactOwnerId>,
-    unreferenced_since: Option<Timestamp>,
-}
+const STORE_ID: &str = "wasm.host-artifacts";
 
 /// In-memory / scripted artifact store. Rust owns `ArtifactRef` construction.
 pub struct HostArtifactStore {
     #[cfg(not(target_arch = "wasm32"))]
-    entries: NativeMap,
+    inner: MemoryArtifactStore,
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    stage_put: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    stage_put: js_sys::Function,
     #[cfg(target_arch = "wasm32")]
-    get: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    get: js_sys::Function,
     #[cfg(target_arch = "wasm32")]
-    get_by_blob: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    get_by_blob: js_sys::Function,
     #[cfg(target_arch = "wasm32")]
-    pin: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    pin: js_sys::Function,
     #[cfg(target_arch = "wasm32")]
-    unpin: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    unpin: js_sys::Function,
     #[cfg(target_arch = "wasm32")]
-    collect_orphans: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    collect_orphans: js_sys::Function,
 }
 
+#[cfg(target_arch = "wasm32")]
 fn artifact_unavailable(failure: HostFailure) -> ArtifactError {
     ArtifactError::Unavailable {
         message: Arc::from(failure.message()),
@@ -70,7 +54,7 @@ impl HostArtifactStore {
     #[must_use]
     pub fn memory() -> Self {
         Self {
-            entries: Arc::new(Mutex::new(NativeState::default())),
+            inner: MemoryArtifactStore::new(STORE_ID, ArtifactStoreLimits::default()),
         }
     }
 
@@ -81,20 +65,15 @@ impl HostArtifactStore {
     /// Returns [`HostFailure`] when a required artifact-store method is missing.
     #[cfg(target_arch = "wasm32")]
     pub fn from_js(adapter: wasm_bindgen::JsValue) -> Result<Self, HostFailure> {
-        let stage_put = crate::host::extract_method(&adapter, "stagePut")?;
-        let get = crate::host::extract_method(&adapter, "get")?;
-        let get_by_blob = crate::host::extract_method(&adapter, "getByBlob")?;
-        let pin = crate::host::extract_method(&adapter, "pin")?;
-        let unpin = crate::host::extract_method(&adapter, "unpin")?;
-        let collect_orphans = crate::host::extract_method(&adapter, "collectOrphans")?;
+        let method = |name| crate::host::extract_method(&adapter, name);
         Ok(Self {
+            stage_put: method("stagePut")?,
+            get: method("get")?,
+            get_by_blob: method("getByBlob")?,
+            pin: method("pin")?,
+            unpin: method("unpin")?,
+            collect_orphans: method("collectOrphans")?,
             adapter,
-            stage_put: std::rc::Rc::new(std::cell::RefCell::new(stage_put)),
-            get: std::rc::Rc::new(std::cell::RefCell::new(get)),
-            get_by_blob: std::rc::Rc::new(std::cell::RefCell::new(get_by_blob)),
-            pin: std::rc::Rc::new(std::cell::RefCell::new(pin)),
-            unpin: std::rc::Rc::new(std::cell::RefCell::new(unpin)),
-            collect_orphans: std::rc::Rc::new(std::cell::RefCell::new(collect_orphans)),
         })
     }
 }
@@ -106,75 +85,27 @@ impl ArtifactStore for HostArtifactStore {
         content: Bytes,
         metadata: ArtifactMetadata,
     ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
-        let artifact = match build_artifact_ref(
-            &scope,
-            &content,
-            &metadata,
-            &ArtifactStoreLimits::default(),
-        ) {
-            Ok(artifact) => artifact,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
-        let storage_key = match artifact_storage_key(&scope, &artifact) {
-            Ok(key) => key,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let entries = Arc::clone(&self.entries);
-            Box::pin(async move {
-                let mut entries = entries
-                    .lock()
-                    .map_err(|_| artifact_unavailable(HostFailure::Failed))?;
-                if let Some(stored) = entries.entries.get(&storage_key) {
-                    if stored.scope == scope
-                        && stored.artifact == artifact
-                        && stored.content == content
-                    {
-                        return Ok(artifact);
-                    }
-                    return Err(ArtifactError::Integrity {
-                        message: Arc::from("artifact_identity_collision"),
-                    });
-                }
-                let limits = ArtifactStoreLimits::default();
-                if entries.entries.len() >= limits.max_artifacts {
-                    return Err(ArtifactError::CapacityExceeded {
-                        resource: "artifacts",
-                        limit: u64::try_from(limits.max_artifacts).unwrap_or(u64::MAX),
-                    });
-                }
-                let content_len = u64::try_from(content.len()).unwrap_or(u64::MAX);
-                let total_bytes = entries.total_bytes.checked_add(content_len).ok_or(
-                    ArtifactError::CapacityExceeded {
-                        resource: "total_bytes",
-                        limit: limits.max_total_bytes,
-                    },
-                )?;
-                if total_bytes > limits.max_total_bytes {
-                    return Err(ArtifactError::CapacityExceeded {
-                        resource: "total_bytes",
-                        limit: limits.max_total_bytes,
-                    });
-                }
-                entries.entries.insert(
-                    storage_key,
-                    StoredArtifact {
-                        scope,
-                        artifact: artifact.clone(),
-                        content,
-                        owners: BTreeSet::new(),
-                        unreferenced_since: None,
-                    },
-                );
-                entries.total_bytes = total_bytes;
-                Ok(artifact)
-            })
+            self.inner.stage_put(scope, content, metadata)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let artifact = match build_artifact_ref(
+                &scope,
+                &content,
+                &metadata,
+                &ArtifactStoreLimits::default(),
+            ) {
+                Ok(artifact) => artifact,
+                Err(error) => return Box::pin(async move { Err(error) }),
+            };
+            let storage_key = match artifact_storage_key(&scope, &artifact) {
+                Ok(key) => key,
+                Err(error) => return Box::pin(async move { Err(error) }),
+            };
             let adapter = self.adapter.clone();
-            let method = self.stage_put.borrow().clone();
+            let method = self.stage_put.clone();
             Box::pin(async move {
                 let scope_json = serde_json::to_string(&scope)
                     .map_err(|_| artifact_unavailable(HostFailure::InvalidResult))?;
@@ -186,11 +117,11 @@ impl ArtifactStore for HostArtifactStore {
                     &adapter,
                     &method,
                     &[
-                        crate::host::json_string_value(&scope_json),
+                        wasm_bindgen::JsValue::from_str(&scope_json),
                         crate::host::uint8_array_from_bytes(&content).into(),
-                        crate::host::json_string_value(&metadata_json),
-                        crate::host::json_string_value(&artifact_json),
-                        crate::host::json_string_value(&storage_key.to_hex()),
+                        wasm_bindgen::JsValue::from_str(&metadata_json),
+                        wasm_bindgen::JsValue::from_str(&artifact_json),
+                        wasm_bindgen::JsValue::from_str(&storage_key.to_hex()),
                     ],
                     None,
                 )
@@ -206,37 +137,18 @@ impl ArtifactStore for HostArtifactStore {
         scope: ArtifactScope,
         artifact: ArtifactRef,
     ) -> PortFuture<Result<Bytes, ArtifactError>> {
-        if let Err(error) = validate_artifact_scope(&scope, &artifact) {
-            return Box::pin(async move { Err(error) });
-        }
-        let storage_key = match artifact_storage_key(&scope, &artifact) {
-            Ok(key) => key,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let entries = Arc::clone(&self.entries);
-            Box::pin(async move {
-                let entries = entries
-                    .lock()
-                    .map_err(|_| artifact_unavailable(HostFailure::Failed))?;
-                let stored = entries
-                    .entries
-                    .get(&storage_key)
-                    .ok_or(ArtifactError::NotFound)?;
-                if stored.scope != scope || stored.artifact != artifact {
-                    return Err(ArtifactError::Integrity {
-                        message: Arc::from("stored_reference_mismatch"),
-                    });
-                }
-                validate_retrieved_artifact(&scope, &artifact, &stored.content)?;
-                Ok(stored.content.clone())
-            })
+            self.inner.get(scope, artifact)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let storage_key = match artifact_storage_key(&scope, &artifact) {
+                Ok(key) => key,
+                Err(error) => return Box::pin(async move { Err(error) }),
+            };
             let adapter = self.adapter.clone();
-            let method = self.get.borrow().clone();
+            let method = self.get.clone();
             Box::pin(async move {
                 let scope_json = serde_json::to_string(&scope)
                     .map_err(|_| artifact_unavailable(HostFailure::InvalidResult))?;
@@ -246,9 +158,9 @@ impl ArtifactStore for HostArtifactStore {
                     &adapter,
                     &method,
                     &[
-                        crate::host::json_string_value(&scope_json),
-                        crate::host::json_string_value(&artifact_json),
-                        crate::host::json_string_value(&storage_key.to_hex()),
+                        wasm_bindgen::JsValue::from_str(&scope_json),
+                        wasm_bindgen::JsValue::from_str(&artifact_json),
+                        wasm_bindgen::JsValue::from_str(&storage_key.to_hex()),
                     ],
                     None,
                 )
@@ -271,37 +183,21 @@ impl ArtifactStore for HostArtifactStore {
         scope: ArtifactScope,
         blob: BlobRef,
     ) -> PortFuture<Result<ArtifactRead, ArtifactError>> {
-        if blob.digest().is_none() {
-            return Box::pin(async {
-                Err(ArtifactError::InvalidMetadata {
-                    message: Arc::from("blob_digest_required"),
-                })
-            });
-        }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let entries = Arc::clone(&self.entries);
-            Box::pin(async move {
-                scope.digest()?;
-                let entries = entries
-                    .lock()
-                    .map_err(|_| artifact_unavailable(HostFailure::Failed))?;
-                let stored = entries
-                    .entries
-                    .values()
-                    .find(|stored| stored.scope == scope && stored.artifact.blob() == &blob)
-                    .ok_or(ArtifactError::NotFound)?;
-                validate_retrieved_artifact(&scope, &stored.artifact, &stored.content)?;
-                Ok(ArtifactRead {
-                    reference: stored.artifact.clone(),
-                    content: stored.content.clone(),
-                })
-            })
+            self.inner.get_by_blob(scope, blob)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            if blob.digest().is_none() {
+                return Box::pin(async {
+                    Err(ArtifactError::InvalidMetadata {
+                        message: Arc::from("blob_digest_required"),
+                    })
+                });
+            }
             let adapter = self.adapter.clone();
-            let method = self.get_by_blob.borrow().clone();
+            let method = self.get_by_blob.clone();
             Box::pin(async move {
                 let scope_json = serde_json::to_string(&scope)
                     .map_err(|_| artifact_unavailable(HostFailure::InvalidResult))?;
@@ -311,8 +207,8 @@ impl ArtifactStore for HostArtifactStore {
                     &adapter,
                     &method,
                     &[
-                        crate::host::json_string_value(&scope_json),
-                        crate::host::json_string_value(&blob_json),
+                        wasm_bindgen::JsValue::from_str(&scope_json),
+                        wasm_bindgen::JsValue::from_str(&blob_json),
                     ],
                     None,
                 )
@@ -351,7 +247,7 @@ impl ArtifactStore for HostArtifactStore {
 
     fn descriptor(&self) -> ArtifactStoreDescriptor {
         ArtifactStoreDescriptor {
-            store_id: Arc::from("wasm.host-artifacts"),
+            store_id: Arc::from(STORE_ID),
             persistence: ArtifactPersistence::Ephemeral,
             limits: ArtifactStoreLimits::default(),
         }
@@ -363,44 +259,18 @@ impl ArtifactStore for HostArtifactStore {
         artifact: ArtifactRef,
         owner: ArtifactOwnerId,
     ) -> PortFuture<Result<(), ArtifactError>> {
-        let storage_key = match artifact_storage_key(&scope, &artifact) {
-            Ok(key) => key,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let entries = Arc::clone(&self.entries);
-            Box::pin(async move {
-                let mut state = entries
-                    .lock()
-                    .map_err(|_| artifact_unavailable(HostFailure::Failed))?;
-                let stored = state
-                    .entries
-                    .get_mut(&storage_key)
-                    .ok_or(ArtifactError::NotFound)?;
-                if stored.scope != scope || stored.artifact != artifact {
-                    return Err(ArtifactError::Integrity {
-                        message: Arc::from("stored_reference_mismatch"),
-                    });
-                }
-                let limits = ArtifactStoreLimits::default();
-                if !stored.owners.contains(&owner)
-                    && stored.owners.len() >= limits.max_owners_per_artifact
-                {
-                    return Err(ArtifactError::CapacityExceeded {
-                        resource: "owners",
-                        limit: u64::try_from(limits.max_owners_per_artifact).unwrap_or(u64::MAX),
-                    });
-                }
-                stored.owners.insert(owner);
-                stored.unreferenced_since = None;
-                Ok(())
-            })
+            self.inner.pin(scope, artifact, owner)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let storage_key = match artifact_storage_key(&scope, &artifact) {
+                Ok(key) => key,
+                Err(error) => return Box::pin(async move { Err(error) }),
+            };
             let adapter = self.adapter.clone();
-            let method = self.pin.borrow().clone();
+            let method = self.pin.clone();
             Box::pin(async move {
                 let scope_json = serde_json::to_string(&scope)
                     .map_err(|_| artifact_unavailable(HostFailure::InvalidResult))?;
@@ -410,10 +280,10 @@ impl ArtifactStore for HostArtifactStore {
                     &adapter,
                     &method,
                     &[
-                        crate::host::json_string_value(&scope_json),
-                        crate::host::json_string_value(&artifact_json),
-                        crate::host::json_string_value(&storage_key.to_hex()),
-                        crate::host::json_string_value(owner.as_str()),
+                        wasm_bindgen::JsValue::from_str(&scope_json),
+                        wasm_bindgen::JsValue::from_str(&artifact_json),
+                        wasm_bindgen::JsValue::from_str(&storage_key.to_hex()),
+                        wasm_bindgen::JsValue::from_str(owner.as_str()),
                     ],
                     None,
                 )
@@ -431,36 +301,18 @@ impl ArtifactStore for HostArtifactStore {
         owner: ArtifactOwnerId,
         now: Timestamp,
     ) -> PortFuture<Result<(), ArtifactError>> {
-        let storage_key = match artifact_storage_key(&scope, &artifact) {
-            Ok(key) => key,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let entries = Arc::clone(&self.entries);
-            Box::pin(async move {
-                let mut state = entries
-                    .lock()
-                    .map_err(|_| artifact_unavailable(HostFailure::Failed))?;
-                let stored = state
-                    .entries
-                    .get_mut(&storage_key)
-                    .ok_or(ArtifactError::NotFound)?;
-                if stored.scope != scope || stored.artifact != artifact {
-                    return Err(ArtifactError::Integrity {
-                        message: Arc::from("stored_reference_mismatch"),
-                    });
-                }
-                if stored.owners.remove(&owner) && stored.owners.is_empty() {
-                    stored.unreferenced_since = Some(now);
-                }
-                Ok(())
-            })
+            self.inner.unpin(scope, artifact, owner, now)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let storage_key = match artifact_storage_key(&scope, &artifact) {
+                Ok(key) => key,
+                Err(error) => return Box::pin(async move { Err(error) }),
+            };
             let adapter = self.adapter.clone();
-            let method = self.unpin.borrow().clone();
+            let method = self.unpin.clone();
             Box::pin(async move {
                 let scope_json = serde_json::to_string(&scope)
                     .map_err(|_| artifact_unavailable(HostFailure::InvalidResult))?;
@@ -470,10 +322,10 @@ impl ArtifactStore for HostArtifactStore {
                     &adapter,
                     &method,
                     &[
-                        crate::host::json_string_value(&scope_json),
-                        crate::host::json_string_value(&artifact_json),
-                        crate::host::json_string_value(&storage_key.to_hex()),
-                        crate::host::json_string_value(owner.as_str()),
+                        wasm_bindgen::JsValue::from_str(&scope_json),
+                        wasm_bindgen::JsValue::from_str(&artifact_json),
+                        wasm_bindgen::JsValue::from_str(&storage_key.to_hex()),
+                        wasm_bindgen::JsValue::from_str(owner.as_str()),
                         wasm_bindgen::JsValue::from_f64(now.as_unix_ms() as f64),
                     ],
                     None,
@@ -493,53 +345,12 @@ impl ArtifactStore for HostArtifactStore {
     ) -> PortFuture<Result<ArtifactGcReport, ArtifactError>> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let entries = Arc::clone(&self.entries);
-            Box::pin(async move {
-                scope.digest()?;
-                let limits = ArtifactStoreLimits::default();
-                let mut state = entries
-                    .lock()
-                    .map_err(|_| artifact_unavailable(HostFailure::Failed))?;
-                let mut examined = 0_usize;
-                let mut delete = Vec::new();
-                for (key, stored) in &mut state.entries {
-                    if examined >= limit.min(limits.max_gc_batch) || stored.scope != scope {
-                        continue;
-                    }
-                    examined += 1;
-                    if !stored.owners.is_empty() {
-                        continue;
-                    }
-                    let Some(since) = stored.unreferenced_since else {
-                        stored.unreferenced_since = Some(now);
-                        continue;
-                    };
-                    let elapsed = now.as_unix_ms().checked_sub(since.as_unix_ms());
-                    if elapsed.and_then(|value| u64::try_from(value).ok())
-                        >= Some(limits.orphan_grace_ms)
-                    {
-                        delete.push(*key);
-                    }
-                }
-                let mut report = ArtifactGcReport {
-                    examined,
-                    ..ArtifactGcReport::default()
-                };
-                for key in delete {
-                    if let Some(stored) = state.entries.remove(&key) {
-                        let bytes = u64::try_from(stored.content.len()).unwrap_or(u64::MAX);
-                        state.total_bytes = state.total_bytes.saturating_sub(bytes);
-                        report.deleted += 1;
-                        report.bytes_deleted = report.bytes_deleted.saturating_add(bytes);
-                    }
-                }
-                Ok(report)
-            })
+            self.inner.collect_orphans(scope, now, limit)
         }
         #[cfg(target_arch = "wasm32")]
         {
             let adapter = self.adapter.clone();
-            let method = self.collect_orphans.borrow().clone();
+            let method = self.collect_orphans.clone();
             Box::pin(async move {
                 let scope_json = serde_json::to_string(&scope)
                     .map_err(|_| artifact_unavailable(HostFailure::InvalidResult))?;
@@ -547,7 +358,7 @@ impl ArtifactStore for HostArtifactStore {
                     &adapter,
                     &method,
                     &[
-                        crate::host::json_string_value(&scope_json),
+                        wasm_bindgen::JsValue::from_str(&scope_json),
                         wasm_bindgen::JsValue::from_f64(now.as_unix_ms() as f64),
                         wasm_bindgen::JsValue::from_f64(limit as f64),
                     ],

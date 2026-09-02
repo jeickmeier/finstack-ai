@@ -8,13 +8,13 @@ use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
 
-use crate::protocol::{ListPromptsResult, ListToolsResult, Prompt, ResultType, Tool};
+use crate::protocol::{ListPage, ListPromptsResult, ListToolsResult, Prompt, ResultType, Tool};
 use crate::transport::McpTransport;
 use crate::{
     MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED, McpConfig, McpError,
 };
 
-pub(crate) const MAX_LIST_PAGES: usize = 64;
+const MAX_LIST_PAGES: usize = 64;
 /// Serialized-size cap for one server-provided tool schema. Like the
 /// stdio `MAX_LINE_BYTES` cap, this is a fixed fail-closed bound with no
 /// runtime override: an untrusted server must not be able to inflate the
@@ -26,126 +26,103 @@ const MAX_SCHEMA_BYTES: usize = 64 * 1024;
 const MAX_SCHEMA_DEPTH: usize = 32;
 const TOOL_ID_PREFIX: &str = "mcp.";
 
-pub(crate) async fn enumerate_catalog(transport: &dyn McpTransport) -> Result<Vec<Tool>, McpError> {
-    let mut tools = Vec::new();
-    let mut seen = BTreeSet::new();
+/// Walk every page of a cursor-paginated `method`, validating each item
+/// with `accept` before it is kept. An `optional` catalog answers `-32601`
+/// (method not found) with an empty list instead of an error.
+pub(crate) async fn list_all<P: ListPage>(
+    transport: &dyn McpTransport,
+    method: &str,
+    optional: bool,
+    mut accept: impl FnMut(&P::Item) -> Result<(), McpError>,
+) -> Result<Vec<P::Item>, McpError> {
+    let mut items = Vec::new();
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_LIST_PAGES {
-        let mut params = serde_json::json!({});
-        if let Some(cursor) = cursor.as_ref()
-            && let Some(object) = params.as_object_mut()
-        {
-            object.insert(
-                "cursor".to_owned(),
-                serde_json::Value::String(cursor.clone()),
-            );
-        }
-        let value = transport.request("tools/list", params).await?;
-        let page: ListToolsResult = serde_json::from_value(value).map_err(|error| {
+        let params = match &cursor {
+            Some(cursor) => serde_json::json!({ "cursor": cursor }),
+            None => serde_json::json!({}),
+        };
+        let value = match transport.request(method, params).await {
+            Ok(value) => value,
+            Err(error) if optional && error.jsonrpc_code() == Some(-32601) => {
+                return Ok(Vec::new());
+            }
+            Err(error) => return Err(error),
+        };
+        let page: P = serde_json::from_value(value).map_err(|error| {
             McpError::stable(
                 MCP_PROTOCOL_VIOLATION,
-                format!("tools/list result is invalid: {error}"),
+                format!("{method} result is invalid: {error}"),
             )
         })?;
-        if page.result_type != ResultType::Complete {
+        let (result_type, page_items, next_cursor) = page.into_parts();
+        if result_type != ResultType::Complete {
             return Err(McpError::stable(
                 MCP_RESULT_UNSUPPORTED,
-                "tools/list resultType is not complete",
+                format!("{method} resultType is not complete"),
             ));
         }
-        for tool in page.tools {
-            enforce_schema_limits(&tool.input_schema)?;
-            reject_network_refs(&tool.input_schema)?;
-            if let Some(output) = &tool.output_schema {
-                enforce_schema_limits(output)?;
-                reject_network_refs(output)?;
-            }
-            if tool.name.is_empty() {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "tools/list returned an empty tool name",
-                ));
-            }
-            if !seen.insert(tool.name.clone()) {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "tools/list returned a duplicate tool name",
-                ));
-            }
-            tools.push(tool);
+        for item in page_items {
+            accept(&item)?;
+            items.push(item);
         }
-        match page.next_cursor {
+        match next_cursor {
             Some(next) => cursor = Some(next),
-            None => return Ok(tools),
+            None => return Ok(items),
         }
     }
     Err(McpError::stable(
         MCP_PROTOCOL_VIOLATION,
-        "tools/list exceeded the page cap",
+        format!("{method} exceeded the page cap"),
     ))
+}
+
+pub(crate) async fn enumerate_catalog(transport: &dyn McpTransport) -> Result<Vec<Tool>, McpError> {
+    let mut seen = BTreeSet::new();
+    list_all::<ListToolsResult>(transport, "tools/list", false, |tool| {
+        enforce_schema_limits(&tool.input_schema)?;
+        reject_network_refs(&tool.input_schema)?;
+        if let Some(output) = &tool.output_schema {
+            enforce_schema_limits(output)?;
+            reject_network_refs(output)?;
+        }
+        if tool.name.is_empty() {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "tools/list returned an empty tool name",
+            ));
+        }
+        if !seen.insert(tool.name.clone()) {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "tools/list returned a duplicate tool name",
+            ));
+        }
+        Ok(())
+    })
+    .await
 }
 
 pub(crate) async fn enumerate_prompts(
     transport: &dyn McpTransport,
 ) -> Result<Vec<Prompt>, McpError> {
-    let mut prompts = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut cursor: Option<String> = None;
-    for _ in 0..MAX_LIST_PAGES {
-        let mut params = serde_json::json!({});
-        if let Some(cursor) = cursor.as_ref()
-            && let Some(object) = params.as_object_mut()
-        {
-            object.insert(
-                "cursor".to_owned(),
-                serde_json::Value::String(cursor.clone()),
-            );
-        }
-        let value = match transport.request("prompts/list", params).await {
-            Ok(value) => value,
-            Err(error) if optional_catalog_missing(&error) => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let page: ListPromptsResult = serde_json::from_value(value).map_err(|error| {
-            McpError::stable(
-                MCP_PROTOCOL_VIOLATION,
-                format!("prompts/list result is invalid: {error}"),
-            )
-        })?;
-        if page.result_type != ResultType::Complete {
+    list_all::<ListPromptsResult>(transport, "prompts/list", true, |prompt| {
+        if prompt.name.is_empty() {
             return Err(McpError::stable(
-                MCP_RESULT_UNSUPPORTED,
-                "prompts/list resultType is not complete",
+                MCP_PROTOCOL_VIOLATION,
+                "prompts/list returned an empty prompt name",
             ));
         }
-        for prompt in page.prompts {
-            if prompt.name.is_empty() {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "prompts/list returned an empty prompt name",
-                ));
-            }
-            if !seen.insert(prompt.name.clone()) {
-                return Err(McpError::stable(
-                    MCP_PROTOCOL_VIOLATION,
-                    "prompts/list returned a duplicate prompt name",
-                ));
-            }
-            prompts.push(prompt);
+        if !seen.insert(prompt.name.clone()) {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "prompts/list returned a duplicate prompt name",
+            ));
         }
-        match page.next_cursor {
-            Some(next) => cursor = Some(next),
-            None => return Ok(prompts),
-        }
-    }
-    Err(McpError::stable(
-        MCP_PROTOCOL_VIOLATION,
-        "prompts/list exceeded the page cap",
-    ))
-}
-
-pub(crate) fn optional_catalog_missing(error: &McpError) -> bool {
-    error.jsonrpc_code() == Some(-32601)
+        Ok(())
+    })
+    .await
 }
 
 pub(crate) fn catalog_digest(tools: &[Tool]) -> Digest {
@@ -239,9 +216,9 @@ pub(crate) fn to_tool_spec(tool: &Tool, config: &McpConfig) -> Result<ToolSpec, 
     let metadata = annotation_metadata(tool.annotations.as_ref());
     let spec = ToolSpec {
         id,
-        model_name: std::sync::Arc::from(tool.name.as_str()),
-        title: std::sync::Arc::from(tool.title.as_deref().unwrap_or(tool.name.as_str())),
-        description: std::sync::Arc::from(description),
+        model_name: Arc::from(tool.name.as_str()),
+        title: Arc::from(tool.title.as_deref().unwrap_or(tool.name.as_str())),
+        description: Arc::from(description),
         input_schema,
         output_schema,
         execution: ToolExecutionMode::Sequential,
@@ -363,7 +340,7 @@ fn reject_network_refs(value: &serde_json::Value) -> Result<(), McpError> {
     match value {
         serde_json::Value::Object(map) => {
             if let Some(serde_json::Value::String(reference)) = map.get("$ref")
-                && is_network_ref(reference)
+                && (reference.starts_with("http://") || reference.starts_with("https://"))
             {
                 return Err(McpError::stable(
                     MCP_PROTOCOL_VIOLATION,
@@ -382,8 +359,4 @@ fn reject_network_refs(value: &serde_json::Value) -> Result<(), McpError> {
         _ => {}
     }
     Ok(())
-}
-
-fn is_network_ref(value: &str) -> bool {
-    value.starts_with("http://") || value.starts_with("https://")
 }

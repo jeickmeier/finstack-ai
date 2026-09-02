@@ -9,6 +9,10 @@ use crate::records::policy::ActiveCapability;
 use crate::records::policy::LimitReached;
 use crate::state::projection::MessageSeq;
 
+use super::super::hash_entries::{
+    completion_hash_entries, extension_hash_entries, model_hash_entries, resolution_hash_entries,
+    stage_hash_entries, tool_call_hash_entries, tool_settlement_hash_entries,
+};
 use super::super::types::{
     CompletionIdentityHashEntryV1, ExtensionSettlementHashEntryV7, ModelSettlementHashEntryV1,
     ResolutionIdentityHashEntryV6, StageSettlementHashEntryV1, ToolCallIdentityHashRef,
@@ -46,12 +50,7 @@ pub struct KernelStateHashV1<'a> {
 }
 
 impl<'a> KernelStateHashV1<'a> {
-    pub(crate) fn from_state(
-        state: &'a KernelState,
-        stage_settlements: Vec<StageSettlementHashEntryV1>,
-        model_settlements: Vec<ModelSettlementHashEntryV1>,
-        completion_identities: Vec<CompletionIdentityHashEntryV1>,
-    ) -> Self {
+    pub(crate) fn from_state(state: &'a KernelState) -> Self {
         Self {
             state_version: state.state_version,
             last_applied_sequence: state.last_applied_sequence,
@@ -70,9 +69,9 @@ impl<'a> KernelStateHashV1<'a> {
                 .terminal_candidate
                 .as_ref()
                 .map(TerminalCandidateProjection::from),
-            stage_settlements,
-            model_settlements,
-            completion_identities,
+            stage_settlements: stage_hash_entries(&state.stage_settlements),
+            model_settlements: model_hash_entries(&state.model_settlements),
+            completion_identities: completion_hash_entries(&state.completion_identities),
             terminal: state.terminal.as_ref().map(TerminalStateProjection::from),
         }
     }
@@ -102,14 +101,7 @@ pub struct KernelStateHashV2<'a> {
 }
 
 impl<'a> KernelStateHashV2<'a> {
-    pub(crate) fn from_state(
-        state: &'a KernelState,
-        stage_settlements: Vec<StageSettlementHashEntryV1>,
-        model_settlements: Vec<ModelSettlementHashEntryV1>,
-        completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
-        tool_settlements: Vec<ToolSettlementHashEntryV2>,
-    ) -> Self {
+    pub(crate) fn from_state(state: &'a KernelState) -> Self {
         Self {
             state_version: state.state_version,
             last_applied_sequence: state.last_applied_sequence,
@@ -128,15 +120,15 @@ impl<'a> KernelStateHashV2<'a> {
                 .terminal_candidate
                 .as_ref()
                 .map(TerminalCandidateProjection::from),
-            stage_settlements,
-            model_settlements,
-            completion_identities,
+            stage_settlements: stage_hash_entries(&state.stage_settlements),
+            model_settlements: model_hash_entries(&state.model_settlements),
+            completion_identities: completion_hash_entries(&state.completion_identities),
             active_tool_batch: state
                 .active_tool_batch
                 .as_ref()
                 .map(ActiveToolBatchProjection::from),
-            tool_calls,
-            tool_settlements,
+            tool_calls: tool_call_hash_entries(&state.tool_calls),
+            tool_settlements: tool_settlement_hash_entries(&state.tool_settlements),
             last_tool_batch: state
                 .last_tool_batch
                 .as_ref()
@@ -176,14 +168,7 @@ pub struct KernelStateHashV3<'a> {
 }
 
 impl<'a> KernelStateHashV3<'a> {
-    pub(crate) fn from_state(
-        state: &'a KernelState,
-        stage_settlements: Vec<StageSettlementHashEntryV1>,
-        model_settlements: Vec<ModelSettlementHashEntryV1>,
-        completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
-        tool_settlements: Vec<ToolSettlementHashEntryV2>,
-    ) -> Self {
+    pub(crate) fn from_state(state: &'a KernelState) -> Self {
         Self {
             state_version: state.state_version,
             last_applied_sequence: state.last_applied_sequence,
@@ -202,15 +187,15 @@ impl<'a> KernelStateHashV3<'a> {
                 .terminal_candidate
                 .as_ref()
                 .map(TerminalCandidateProjection::from),
-            stage_settlements,
-            model_settlements,
-            completion_identities,
+            stage_settlements: stage_hash_entries(&state.stage_settlements),
+            model_settlements: model_hash_entries(&state.model_settlements),
+            completion_identities: completion_hash_entries(&state.completion_identities),
             active_tool_batch: state
                 .active_tool_batch
                 .as_ref()
                 .map(ActiveToolBatchProjection::from),
-            tool_calls,
-            tool_settlements,
+            tool_calls: tool_call_hash_entries(&state.tool_calls),
+            tool_settlements: tool_settlement_hash_entries(&state.tool_settlements),
             last_tool_batch: state
                 .last_tool_batch
                 .as_ref()
@@ -264,14 +249,7 @@ pub struct KernelStateHashV4<'a> {
 }
 
 impl<'a> KernelStateHashV4<'a> {
-    pub(crate) fn from_state(
-        state: &'a KernelState,
-        stage_settlements: Vec<StageSettlementHashEntryV1>,
-        model_settlements: Vec<ModelSettlementHashEntryV1>,
-        completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
-        tool_settlements: Vec<ToolSettlementHashEntryV2>,
-    ) -> Self {
+    pub(crate) fn from_state(state: &'a KernelState) -> Self {
         Self {
             state_version: state.state_version,
             last_applied_sequence: state.last_applied_sequence,
@@ -290,15 +268,15 @@ impl<'a> KernelStateHashV4<'a> {
                 .terminal_candidate
                 .as_ref()
                 .map(TerminalCandidateProjection::from),
-            stage_settlements,
-            model_settlements,
-            completion_identities,
+            stage_settlements: stage_hash_entries(&state.stage_settlements),
+            model_settlements: model_hash_entries(&state.model_settlements),
+            completion_identities: completion_hash_entries(&state.completion_identities),
             active_tool_batch: state
                 .active_tool_batch
                 .as_ref()
                 .map(ActiveToolBatchProjection::from),
-            tool_calls,
-            tool_settlements,
+            tool_calls: tool_call_hash_entries(&state.tool_calls),
+            tool_settlements: tool_settlement_hash_entries(&state.tool_settlements),
             last_tool_batch: state
                 .last_tool_batch
                 .as_ref()
@@ -341,23 +319,9 @@ pub struct KernelStateHashV5<'a> {
 }
 
 impl<'a> KernelStateHashV5<'a> {
-    pub(crate) fn from_state(
-        state: &'a KernelState,
-        stage_settlements: Vec<StageSettlementHashEntryV1>,
-        model_settlements: Vec<ModelSettlementHashEntryV1>,
-        completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
-        tool_settlements: Vec<ToolSettlementHashEntryV2>,
-    ) -> Self {
+    pub(crate) fn from_state(state: &'a KernelState) -> Self {
         Self {
-            base: KernelStateHashV4::from_state(
-                state,
-                stage_settlements,
-                model_settlements,
-                completion_identities,
-                tool_calls,
-                tool_settlements,
-            ),
+            base: KernelStateHashV4::from_state(state),
             child_preparations: state
                 .child_preparations
                 .values()
@@ -387,29 +351,14 @@ pub struct KernelStateHashV6<'a> {
 }
 
 impl<'a> KernelStateHashV6<'a> {
-    pub(crate) fn from_state(
-        state: &'a KernelState,
-        stage_settlements: Vec<StageSettlementHashEntryV1>,
-        model_settlements: Vec<ModelSettlementHashEntryV1>,
-        completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
-        tool_settlements: Vec<ToolSettlementHashEntryV2>,
-        resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
-    ) -> Self {
+    pub(crate) fn from_state(state: &'a KernelState) -> Self {
         Self {
-            base: KernelStateHashV5::from_state(
-                state,
-                stage_settlements,
-                model_settlements,
-                completion_identities,
-                tool_calls,
-                tool_settlements,
-            ),
+            base: KernelStateHashV5::from_state(state),
             pending_interaction: state
                 .pending_interaction
                 .as_ref()
                 .map(PendingInteractionProjection::from),
-            resolution_identities,
+            resolution_identities: resolution_hash_entries(&state.resolution_identities),
             last_interaction_terminal: state
                 .last_interaction_terminal
                 .as_ref()
@@ -427,32 +376,14 @@ pub struct KernelStateHashV7<'a> {
 }
 
 impl<'a> KernelStateHashV7<'a> {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_state(
-        state: &'a KernelState,
-        stage_settlements: Vec<StageSettlementHashEntryV1>,
-        model_settlements: Vec<ModelSettlementHashEntryV1>,
-        completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
-        tool_settlements: Vec<ToolSettlementHashEntryV2>,
-        resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
-        extension_settlements: Vec<ExtensionSettlementHashEntryV7>,
-    ) -> Self {
+    pub(crate) fn from_state(state: &'a KernelState) -> Self {
         Self {
-            base: KernelStateHashV6::from_state(
-                state,
-                stage_settlements,
-                model_settlements,
-                completion_identities,
-                tool_calls,
-                tool_settlements,
-                resolution_identities,
-            ),
+            base: KernelStateHashV6::from_state(state),
             pending_extension_effect: state
                 .pending_extension_effect
                 .as_ref()
                 .map(PendingExtensionEffectProjection::from),
-            extension_settlements,
+            extension_settlements: extension_hash_entries(&state.extension_settlements),
         }
     }
 }

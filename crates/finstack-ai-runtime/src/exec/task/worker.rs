@@ -17,7 +17,7 @@ use crate::native::timer::{TimerDriverMessage, TimerDriverResult};
 use crate::native::tool::ToolDriverMessage;
 use crate::ports::model::LockedModelContextProfile;
 use crate::ports::tool::ResolvedToolCatalog;
-use crate::run::{DeadlineDiagnostic, RunStatus};
+use crate::run::DeadlineDiagnostic;
 use crate::run_types::{RunHandleError, result_fault_code};
 use crate::settlement::{
     SettlementSources, ToolResultDisposition, continue_after_interaction, drain_idle_cancellation,
@@ -47,12 +47,7 @@ pub(super) async fn run_worker(
         let fault_code = result_fault_code(&result);
         let _ = command.reply.send(result);
         if let Some(code) = fault_code {
-            shared.shutting_down.store(true, Ordering::Release);
-            if let Ok(mut sender) = shared.sender.lock() {
-                sender.take();
-            }
-            receiver.close();
-            shared.publish_lifecycle(RunStatus::Faulted { code });
+            fault_worker(&shared, &mut receiver, code);
         }
     }
     finish_worker(&shared).await;

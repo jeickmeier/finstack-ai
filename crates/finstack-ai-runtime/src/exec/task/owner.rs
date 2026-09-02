@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -25,11 +24,9 @@ use crate::ports::observer::{Observer, ObserverDiagnostic};
 use crate::ports::tool::{
     ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED, ToolStreamAssembler,
 };
-use crate::run::LiveRunState;
 use crate::run::MonotonicDeadline;
 use crate::run_types::{
-    ModelTaskConfig, RunHandleError, RunLifecycle, RunStatus, RunTaskConfig, ShutdownOutcome,
-    ShutdownReport,
+    ModelTaskConfig, RunHandleError, RunLifecycle, RunTaskConfig, ShutdownOutcome, ShutdownReport,
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
@@ -131,51 +128,35 @@ async fn run_due_poll_waits<C: Clock + Send + Sync + 'static>(
 ) {
     let mut wait: Option<MonotonicDeadline> = None;
     loop {
-        if let Some(active) = wait.as_ref() {
-            tokio::select! {
-                () = cancellation.cancelled() => break,
-                schedule = schedules.changed() => {
-                    if schedule.is_err() {
-                        break;
-                    }
-                    let schedule = *schedules.borrow_and_update();
-                    match schedule.map(|deadline| due_poll_wait(clock.as_ref(), deadline)) {
-                        Some(Ok(DuePollWait::Waiting(next))) => wait = Some(next),
-                        Some(Ok(DuePollWait::Due)) => {
-                            fired.send_replace(DuePollWake::Due);
-                            wait = None;
-                        }
-                        Some(Err(())) => {
-                            fired.send_replace(DuePollWake::ConstructionFailed);
-                            wait = None;
-                        }
-                        None => wait = None,
-                    }
-                }
-                () = active.wait() => {
-                    fired.send_replace(DuePollWake::Due);
-                    wait = None;
-                }
+        let due = async {
+            match wait.as_ref() {
+                Some(active) => active.wait().await,
+                None => std::future::pending().await,
             }
-        } else {
-            tokio::select! {
-                () = cancellation.cancelled() => break,
-                schedule = schedules.changed() => {
-                    if schedule.is_err() {
-                        break;
-                    }
-                    let schedule = *schedules.borrow_and_update();
-                    match schedule.map(|deadline| due_poll_wait(clock.as_ref(), deadline)) {
-                        Some(Ok(DuePollWait::Waiting(next))) => wait = Some(next),
-                        Some(Ok(DuePollWait::Due)) => {
-                            fired.send_replace(DuePollWake::Due);
-                        }
-                        Some(Err(())) => {
-                            fired.send_replace(DuePollWake::ConstructionFailed);
-                        }
-                        None => {}
-                    }
+        };
+        tokio::select! {
+            () = cancellation.cancelled() => break,
+            schedule = schedules.changed() => {
+                if schedule.is_err() {
+                    break;
                 }
+                let schedule = *schedules.borrow_and_update();
+                wait = match schedule.map(|deadline| due_poll_wait(clock.as_ref(), deadline)) {
+                    Some(Ok(DuePollWait::Waiting(next))) => Some(next),
+                    Some(Ok(DuePollWait::Due)) => {
+                        fired.send_replace(DuePollWake::Due);
+                        None
+                    }
+                    Some(Err(())) => {
+                        fired.send_replace(DuePollWake::ConstructionFailed);
+                        None
+                    }
+                    None => None,
+                };
+            }
+            () = due => {
+                fired.send_replace(DuePollWake::Due);
+                wait = None;
             }
         }
     }
@@ -217,29 +198,7 @@ impl RunTaskOwner {
             event_hub(config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
         coordinator.install_event_publisher(Arc::new(event_handle.clone()));
         let (sender, receiver) = mpsc::channel(config.command_capacity);
-        let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
-        let (live_state_sender, live_state_receiver) =
-            watch::channel(LiveRunState::initial(coordinator.state()));
-        let shared = Arc::new(Shared {
-            sender: Mutex::new(Some(sender)),
-            shutting_down: AtomicBool::new(false),
-            status: status_sender,
-            live_state: live_state_sender,
-            kernel_state: Mutex::new(coordinator.state().clone()),
-            record_kinds: Mutex::new(Arc::from([])),
-            session_head: Mutex::new(None),
-            compaction_checkpoint: Mutex::new(None),
-            events: event_handle,
-            shutdown_report: Mutex::new(None),
-            timer_already_due: AtomicU64::new(0),
-            timer_backward_clock_clamped: AtomicU64::new(0),
-            observer_diagnostics: Mutex::new(crate::observer::ObserverDiagnosticBuffer::default()),
-        });
-        let handle = RunHandle {
-            shared: Arc::clone(&shared),
-            status: status_receiver,
-            live_state: live_state_receiver,
-        };
+        let (shared, handle) = Shared::spawn(sender, event_handle, coordinator.state());
         coordinator.install_live_state_publisher(shared.clone());
         let mut tasks = JoinSet::new();
         tasks.spawn(run_worker(coordinator, receiver, shared));
@@ -422,29 +381,7 @@ impl RunTaskOwner {
             apply_interaction_resume(&mut coordinator, &sources).await?;
         }
 
-        let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
-        let (live_state_sender, live_state_receiver) =
-            watch::channel(LiveRunState::initial(coordinator.state()));
-        let shared = Arc::new(Shared {
-            sender: Mutex::new(Some(sender)),
-            shutting_down: AtomicBool::new(false),
-            status: status_sender,
-            live_state: live_state_sender,
-            kernel_state: Mutex::new(coordinator.state().clone()),
-            record_kinds: Mutex::new(Arc::from([])),
-            session_head: Mutex::new(None),
-            compaction_checkpoint: Mutex::new(None),
-            events: event_handle,
-            shutdown_report: Mutex::new(None),
-            timer_already_due: AtomicU64::new(0),
-            timer_backward_clock_clamped: AtomicU64::new(0),
-            observer_diagnostics: Mutex::new(crate::observer::ObserverDiagnosticBuffer::default()),
-        });
-        let handle = RunHandle {
-            shared: Arc::clone(&shared),
-            status: status_receiver,
-            live_state: live_state_receiver,
-        };
+        let (shared, handle) = Shared::spawn(sender, event_handle, coordinator.state());
         coordinator.install_live_state_publisher(shared.clone());
         let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         tasks.spawn(run_worker_with_model(
@@ -718,29 +655,7 @@ impl RunTaskOwner {
             );
         }
 
-        let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
-        let (live_state_sender, live_state_receiver) =
-            watch::channel(LiveRunState::initial(coordinator.state()));
-        let shared = Arc::new(Shared {
-            sender: Mutex::new(Some(sender)),
-            shutting_down: AtomicBool::new(false),
-            status: status_sender,
-            live_state: live_state_sender,
-            kernel_state: Mutex::new(coordinator.state().clone()),
-            record_kinds: Mutex::new(Arc::from([])),
-            session_head: Mutex::new(None),
-            compaction_checkpoint: Mutex::new(None),
-            events: event_handle,
-            shutdown_report: Mutex::new(None),
-            timer_already_due: AtomicU64::new(0),
-            timer_backward_clock_clamped: AtomicU64::new(0),
-            observer_diagnostics: Mutex::new(crate::observer::ObserverDiagnosticBuffer::default()),
-        });
-        let handle = RunHandle {
-            shared: Arc::clone(&shared),
-            status: status_receiver,
-            live_state: live_state_receiver,
-        };
+        let (shared, handle) = Shared::spawn(sender, event_handle, coordinator.state());
         coordinator.install_live_state_publisher(shared.clone());
         let due_poll_clock = sources.clock();
         tasks.spawn(run_worker_with_model_and_tools(

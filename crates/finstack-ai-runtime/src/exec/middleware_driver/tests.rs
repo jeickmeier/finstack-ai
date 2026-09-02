@@ -189,7 +189,10 @@ const ALL_STAGES: [Stage; 7] = [
 fn stage_names_round_trip() {
     for stage in ALL_STAGES {
         let name = crate::middleware::stage_name(stage);
-        assert_eq!(crate::middleware::parse_stage(name), Some(stage));
+        let parsed = ALL_STAGES
+            .into_iter()
+            .find(|candidate| crate::middleware::stage_name(*candidate) == name);
+        assert_eq!(parsed, Some(stage));
     }
 }
 

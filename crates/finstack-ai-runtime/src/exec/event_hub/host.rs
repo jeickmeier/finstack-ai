@@ -119,16 +119,7 @@ impl EventSubscription {
     }
 
     fn close_with(&self, reason: EventSubscriptionCloseReason) {
-        if let Ok(mut inner) = self.subscriber.inner.lock() {
-            flush_pending(&mut inner);
-            if inner.status.public.close_reason.is_none() {
-                inner.status.public.close_reason = Some(reason);
-            }
-            inner.closed = true;
-        }
-        self.subscriber.closed.store(true, Ordering::Release);
-        self.subscriber.ready.notify_waiters();
-        self.subscriber.space.notify_waiters();
+        close_subscriber(&self.subscriber, reason);
     }
 }
 
@@ -213,17 +204,7 @@ impl EventHubHandle {
             .map(|mut subscribers| std::mem::take(&mut *subscribers))
             .unwrap_or_default();
         for subscriber in subscribers {
-            if let Ok(mut inner) = subscriber.inner.lock() {
-                flush_pending(&mut inner);
-                if inner.status.public.close_reason.is_none() {
-                    inner.status.public.close_reason =
-                        Some(EventSubscriptionCloseReason::HubClosed);
-                }
-                inner.closed = true;
-            }
-            subscriber.closed.store(true, Ordering::Release);
-            subscriber.ready.notify_waiters();
-            subscriber.space.notify_waiters();
+            close_subscriber(&subscriber, EventSubscriptionCloseReason::HubClosed);
         }
     }
 }

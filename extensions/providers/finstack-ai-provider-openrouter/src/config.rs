@@ -16,7 +16,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::error::config_error;
 
-const DEFAULT_RESPONSES_PATH: &str = "/api/v1/responses";
+const RESPONSES_PATH: &str = "/api/v1/responses";
 const MODELS_PATH: &str = "/api/v1/models";
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
@@ -74,7 +74,6 @@ impl fmt::Debug for SecretHeader {
 #[derive(Clone)]
 pub struct OpenRouterConfig {
     base_url: Arc<str>,
-    responses_path: Arc<str>,
     credentials: CredentialStore,
     credential: Option<CredentialReference>,
     referer: Option<Arc<str>>,
@@ -91,7 +90,6 @@ impl fmt::Debug for OpenRouterConfig {
         formatter
             .debug_struct("OpenRouterConfig")
             .field("base_url", &self.base_url)
-            .field("responses_path", &self.responses_path)
             .field("credentials", &self.credentials)
             .field("credential", &self.credential)
             .field("referer", &self.referer)
@@ -134,7 +132,6 @@ impl OpenRouterConfig {
         validate_base_url(base_url)?;
         Ok(Self {
             base_url: Arc::from(base_url),
-            responses_path: Arc::from(DEFAULT_RESPONSES_PATH),
             credentials: CredentialStore::empty(),
             credential: None,
             referer: None,
@@ -264,7 +261,7 @@ impl OpenRouterConfig {
     pub(crate) fn endpoint_url(&self) -> Result<Url, ModelError> {
         let mut base =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
-        base.set_path(&self.responses_path);
+        base.set_path(RESPONSES_PATH);
         Ok(base)
     }
 

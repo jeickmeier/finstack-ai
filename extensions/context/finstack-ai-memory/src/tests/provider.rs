@@ -562,16 +562,11 @@ fn configuration_digest_covers_the_embedder_identity() {
     let artifacts = InProcessArtifactStore::default();
     let scope = || MemoryScope::try_new("tenant-a").expect("scope");
     let digest_without = || {
-        MemoryContextProvider::try_new(
-            store.clone(),
-            &artifacts,
-            scope(),
-            RecallConfig::default(),
-        )
-        .expect("provider")
-        .descriptor()
-        .invocation
-        .configuration_digest
+        MemoryContextProvider::try_new(store.clone(), &artifacts, scope(), RecallConfig::default())
+            .expect("provider")
+            .descriptor()
+            .invocation
+            .configuration_digest
     };
     let digest_with = |dimensions: usize| {
         MemoryContextProvider::try_new_with_embedder(

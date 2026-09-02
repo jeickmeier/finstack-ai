@@ -2,12 +2,11 @@
 
 use base64::Engine as _;
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
-use reqwest::header::HeaderValue;
 use serde::Deserialize;
 
 use crate::config::MAX_RESULT_BYTES_CEILING;
-use crate::http::{BASE64_STANDARD, invalid_arguments, parse_arguments, send_json};
-use crate::url::{MAX_AUDIO_DOWNLOAD_BYTES, download_bytes, validate_download_url};
+use crate::http::{BASE64_STANDARD, Route, invalid_arguments, parse_arguments, send_json};
+use crate::url::{MAX_AUDIO_DOWNLOAD_BYTES, download_bytes};
 
 pub(crate) const TRANSCRIBE_TOOL_ID: &str = "finstack.tools.openrouter_transcribe_audio";
 pub(crate) const TRANSCRIBE_TOOL_NAME: &str = "openrouter_transcribe_audio";
@@ -26,14 +25,8 @@ struct TranscribeResponse {
     text: String,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_transcribe(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
-    endpoint: &str,
-    endpoint_is_loopback: bool,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<serde_json::Value, ToolError> {
@@ -43,10 +36,9 @@ pub(crate) async fn handle_transcribe(
             "openrouter media model or audio_url is empty",
         ));
     }
-    validate_download_url(&arguments.audio_url, endpoint_is_loopback)?;
     let downloaded = download_bytes(
         &arguments.audio_url,
-        endpoint_is_loopback,
+        route.endpoint_is_loopback,
         ctx,
         MAX_AUDIO_DOWNLOAD_BYTES,
     )
@@ -74,12 +66,9 @@ pub(crate) async fn handle_transcribe(
         "input_audio": {"data": b64_audio, "format": format},
     });
     let response: TranscribeResponse = send_json(
-        client,
-        authorization,
-        referer,
-        title,
+        route,
         reqwest::Method::POST,
-        &format!("{endpoint}/api/v1/audio/transcriptions"),
+        &format!("{}/api/v1/audio/transcriptions", route.endpoint),
         Some(&body),
         ctx,
         MAX_RESULT_BYTES_CEILING,

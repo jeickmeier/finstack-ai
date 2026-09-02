@@ -3,7 +3,7 @@ use crate::state::{KernelState, TransitionEnv};
 
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::super::decision::{Decision, KernelError};
-use super::{draft_for_state, next_sequence};
+use super::decision_for;
 
 pub(super) fn decide_external_command_rejected(
     state: &KernelState,
@@ -47,16 +47,12 @@ pub(super) fn decide_external_command_rejected(
         _ => {}
     }
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(
-            state,
-            env,
-            vec![RecordBody::ExternalCommandRejected(input.rejection.clone())],
-        )?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(
+        state,
+        env,
+        vec![RecordBody::ExternalCommandRejected(input.rejection.clone())],
+        Vec::new(),
+    )
 }
 
 fn known_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {

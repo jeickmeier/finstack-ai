@@ -9,38 +9,32 @@ use finstack_ai_runtime::artifact::{ArtifactScope, ArtifactStore};
 use finstack_ai_runtime::ports::tool::ToolCallContext;
 
 /// Document bytes resolved from a staged artifact.
-pub(crate) enum ResolvedSource {
-    Bytes {
-        /// Zero-copy handle: sliced straight off the artifact store's
-        /// `Bytes` returned by the artifact store.
-        bytes: Bytes,
-        media_type_hint: Option<String>,
-        #[allow(dead_code, reason = "carried for future diagnostics/spill naming")]
-        name: Option<String>,
-    },
+pub(crate) struct ResolvedSource {
+    /// Zero-copy handle straight off the artifact store's `Bytes`.
+    pub(crate) bytes: Bytes,
+    /// The staged blob's declared media type.
+    pub(crate) media_type_hint: String,
 }
 
 /// Resolve a staged artifact to bytes, enforcing the size ceiling.
 pub(crate) async fn resolve(
     artifact_json: &serde_json::Value,
     ctx: &ToolCallContext,
-    store: &Arc<dyn ArtifactStore>,
+    store: &dyn ArtifactStore,
     limits: &DocumentLimits,
 ) -> Result<ResolvedSource, SourceError> {
     let artifact: ArtifactRef = serde_json::from_value(artifact_json.clone())
         .map_err(|_| SourceError::InvalidArguments("artifact_reference_invalid"))?;
-    let scope = call_scope(ctx);
     let bytes = store
-        .get(scope, artifact.clone())
+        .get(call_scope(ctx), artifact.clone())
         .await
         .map_err(|_| SourceError::Unavailable("artifact_get_failed"))?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limits.max_input_bytes {
-        return Err(SourceError::TooLarge(bytes.len()));
+        return Err(SourceError::TooLarge);
     }
-    Ok(ResolvedSource::Bytes {
+    Ok(ResolvedSource {
         bytes,
-        media_type_hint: Some(artifact.blob().media_type().to_owned()),
-        name: artifact.blob().name().map(str::to_owned),
+        media_type_hint: artifact.blob().media_type().to_owned(),
     })
 }
 
@@ -48,11 +42,7 @@ pub(crate) async fn resolve(
 pub(crate) enum SourceError {
     InvalidArguments(&'static str),
     Unavailable(&'static str),
-    #[allow(
-        dead_code,
-        reason = "the oversized length is diagnostic-only; the mapped tool_error message is a fixed string"
-    )]
-    TooLarge(usize),
+    TooLarge,
 }
 
 /// Build the exact scope used for artifact `get`/`stage_put` calls: the

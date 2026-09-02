@@ -69,11 +69,14 @@ pub use request::{
     ModelRequestLimits, ModelResponse, ModelSettings, ModelTokenEstimate, ModelToolCall,
     SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use stream::CountingWriter;
 pub use stream::{
     AssembledModelStream, ModelEventStream, ModelProgress, ModelStreamAssembler, ModelStreamItem,
     ModelStreamLimits, ModelTerminal, OpaqueProviderEvent, ReasoningDelta, TextDelta,
     ToolCallDelta, UsageDelta,
 };
+pub(crate) use stream::{usage_regressed, usage_total_consistent};
 pub use support::{
     Authentication, CredentialReference, CredentialRejected, CredentialStore, MediaResolveError,
     MediaResolveKind, MediaResolver, ResolveDraftMediaError, ResolvedMedia, SECRET_MAX_BYTES,

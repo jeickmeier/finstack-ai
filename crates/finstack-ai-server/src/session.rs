@@ -284,33 +284,26 @@ impl SessionReplica {
             RemoteCommandPayload::Start(_) => match self.phase {
                 ReplicaPhase::Idle => {
                     self.phase = ReplicaPhase::Running;
-                    self.append_command_event("run_accepted");
+                    self.append_empty_step();
                     (true, None)
                 }
                 ReplicaPhase::Running => (false, Some("already_started")),
                 ReplicaPhase::Terminal => (false, Some("run_terminal")),
             },
-            RemoteCommandPayload::Cancel(_) => match self.phase {
-                ReplicaPhase::Running => {
-                    self.phase = ReplicaPhase::Terminal;
-                    self.append_command_event("run_cancelled");
-                    (true, None)
+            RemoteCommandPayload::Cancel(_) | RemoteCommandPayload::Complete(_) => {
+                match self.phase {
+                    ReplicaPhase::Running => {
+                        self.phase = ReplicaPhase::Terminal;
+                        self.append_empty_step();
+                        (true, None)
+                    }
+                    ReplicaPhase::Idle => (false, Some("not_running")),
+                    ReplicaPhase::Terminal => (false, Some("run_terminal")),
                 }
-                ReplicaPhase::Idle => (false, Some("not_running")),
-                ReplicaPhase::Terminal => (false, Some("run_terminal")),
-            },
+            }
             RemoteCommandPayload::Resolve(_) => match self.phase {
                 ReplicaPhase::Running => {
-                    self.append_command_event("interaction_resolved");
-                    (true, None)
-                }
-                ReplicaPhase::Idle => (false, Some("not_running")),
-                ReplicaPhase::Terminal => (false, Some("run_terminal")),
-            },
-            RemoteCommandPayload::Complete(_) => match self.phase {
-                ReplicaPhase::Running => {
-                    self.phase = ReplicaPhase::Terminal;
-                    self.append_command_event("run_completed");
+                    self.append_empty_step();
                     (true, None)
                 }
                 ReplicaPhase::Idle => (false, Some("not_running")),
@@ -319,9 +312,8 @@ impl SessionReplica {
         }
     }
 
-    fn append_command_event(&mut self, kind: &str) {
+    fn append_empty_step(&mut self) {
         let sequence = self.head_sequence().saturating_add(1);
-        let _ = kind;
         if let Ok(step) = RemoteDurableStep::try_new(sequence, Vec::new()) {
             self.durable.push(step);
         }
@@ -336,7 +328,6 @@ pub struct SessionHub {
 
 impl SessionHub {
     /// Insert or replace a replica.
-    ///
     pub fn insert(&self, replica: SessionReplica) {
         self.inner
             .lock()
@@ -350,7 +341,6 @@ impl SessionHub {
     ///
     /// Returns [`ServerError::UnknownLocator`] when the session is missing, or
     /// the error returned by `f`.
-    ///
     pub fn with<R>(
         &self,
         session_id: &str,

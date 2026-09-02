@@ -79,10 +79,9 @@ impl BlobRef {
     ) -> Result<Self, ContentError> {
         let id = validated_label(id.as_ref(), "id")?;
         let media_type = validated_label(media_type.as_ref(), "media_type")?;
-        let name = match name {
-            Some(value) => Some(validated_label(value.as_ref(), "name")?),
-            None => None,
-        };
+        let name = name
+            .map(|value| validated_label(value.as_ref(), "name"))
+            .transpose()?;
         Ok(Self {
             id,
             media_type,

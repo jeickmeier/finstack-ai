@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_protocol::{
-    POST_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteCommand, RemoteDurableStep,
-    RemotePostAuth, VersionOffer, encode,
+    POST_AUTH_FRAME_MAX_BYTES, RemoteCommand, RemoteDurableStep, RemotePostAuth, VersionOffer,
+    encode,
 };
 use finstack_ai_runtime::audit::{SecurityAuditCategory, SecurityAuditGate};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -18,41 +18,12 @@ use crate::frame::{read_post_auth, write_post_auth};
 use crate::handshake::{audit_digest, audit_only, handshake};
 use crate::session::{ReconnectView, SessionHub};
 
-/// Connection-level limits.
-#[derive(Debug, Clone)]
-pub(crate) struct ConnectionLimits {
-    /// Hello/auth deadline.
-    pub handshake_deadline: Duration,
-    /// Maximum authenticate attempts.
-    pub auth_attempts: u8,
-    /// Mandatory hello features.
-    pub mandatory_features: Vec<String>,
-    /// Server version offer.
-    pub offer: VersionOffer,
-    /// Post-auth frame ceiling.
-    pub post_auth_ceiling: usize,
-}
-
-impl ConnectionLimits {
-    /// Construct default v1 limits.
-    ///
-    /// # Errors
-    ///
-    /// Returns a protocol error when the default offer is invalid.
-    pub fn v1() -> Result<Self, ServerError> {
-        Ok(Self {
-            handshake_deadline: Duration::from_secs(5),
-            auth_attempts: 3,
-            mandatory_features: vec!["auth".into()],
-            offer: VersionOffer::try_new(
-                vec![PROTOCOL_VERSION_V1],
-                PROTOCOL_VERSION_V1,
-                vec!["auth".into()],
-            )?,
-            post_auth_ceiling: POST_AUTH_FRAME_MAX_BYTES,
-        })
-    }
-}
+/// Hello/auth deadline.
+const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(5);
+/// Maximum authenticate attempts per connection.
+pub(crate) const AUTH_ATTEMPTS: u8 = 3;
+/// Features every client hello must advertise.
+pub(crate) const MANDATORY_FEATURES: &[&str] = &["auth"];
 
 /// Serve one accepted stream through hello, auth, reconnect, and commands.
 ///
@@ -66,23 +37,17 @@ pub(crate) async fn serve_connection<S>(
     auth: Arc<dyn AuthVerifier>,
     audit: Arc<SecurityAuditGate>,
     hub: Arc<SessionHub>,
-    limits: ConnectionLimits,
+    offer: &VersionOffer,
     credit: CreditWindow,
     connection_id: u64,
 ) -> Result<(), ServerError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let ctx = timeout(limits.handshake_deadline, async {
-        handshake(
-            &mut stream,
-            transport,
-            auth.as_ref(),
-            audit.as_ref(),
-            &limits,
-        )
-        .await
-    })
+    let ctx = timeout(
+        HANDSHAKE_DEADLINE,
+        handshake(&mut stream, transport, auth.as_ref(), audit.as_ref(), offer),
+    )
     .await
     .map_err(|_| ServerError::HandshakeTimeout)??;
 
@@ -91,7 +56,6 @@ where
         &ctx,
         audit.as_ref(),
         hub.as_ref(),
-        &limits,
         credit,
         connection_id,
     ))
@@ -103,14 +67,13 @@ async fn post_auth<S>(
     auth: &AuthContext,
     audit: &SecurityAuditGate,
     hub: &SessionHub,
-    limits: &ConnectionLimits,
     credit: CreditWindow,
     connection_id: u64,
 ) -> Result<(), ServerError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let open = read_post_auth(stream, limits.post_auth_ceiling, auth.protocol_version()).await?;
+    let open = read_post_auth(stream, POST_AUTH_FRAME_MAX_BYTES, auth.protocol_version()).await?;
     let RemotePostAuth::OpenSession {
         last_known_durable_sequence,
         locator,
@@ -121,7 +84,6 @@ where
             audit,
             SecurityAuditCategory::UnknownLocator,
             "expected_open",
-            None,
         )
         .await?;
         return Err(ServerError::UnknownLocator);
@@ -159,30 +121,18 @@ where
     Box::pin(emit_reconnect_plan(
         stream,
         hub,
-        limits,
         &credit,
         auth.protocol_version(),
         &session_id,
         plan,
     ))
     .await?;
-    serve_post_barrier(
-        stream,
-        auth,
-        audit,
-        hub,
-        limits,
-        credit,
-        connection_id,
-        &session_id,
-    )
-    .await
+    serve_post_barrier(stream, auth, audit, hub, credit, connection_id, &session_id).await
 }
 
 async fn emit_reconnect_plan<S>(
     stream: &mut S,
     hub: &SessionHub,
-    limits: &ConnectionLimits,
     credit: &CreditWindow,
     protocol_version: u16,
     session_id: &str,
@@ -194,7 +144,7 @@ where
     if let Some(snapshot) = plan.snapshot {
         write_post_auth(
             stream,
-            limits.post_auth_ceiling,
+            POST_AUTH_FRAME_MAX_BYTES,
             protocol_version,
             &RemotePostAuth::Snapshot {
                 sequence: snapshot.sequence(),
@@ -205,7 +155,7 @@ where
     } else {
         write_post_auth(
             stream,
-            limits.post_auth_ceiling,
+            POST_AUTH_FRAME_MAX_BYTES,
             protocol_version,
             &RemotePostAuth::NoSnapshot {
                 sequence: plan.snapshot_sequence,
@@ -220,7 +170,7 @@ where
             .map_or(plan.snapshot_sequence + 1, RemoteDurableStep::sequence);
         write_post_auth(
             stream,
-            limits.post_auth_ceiling,
+            POST_AUTH_FRAME_MAX_BYTES,
             protocol_version,
             &RemotePostAuth::DurableTail {
                 from_sequence,
@@ -232,7 +182,7 @@ where
     }
     write_post_auth(
         stream,
-        limits.post_auth_ceiling,
+        POST_AUTH_FRAME_MAX_BYTES,
         protocol_version,
         &RemotePostAuth::SyncBarrier {
             sequence: plan.barrier,
@@ -245,7 +195,7 @@ where
     });
     write_post_auth(
         stream,
-        limits.post_auth_ceiling,
+        POST_AUTH_FRAME_MAX_BYTES,
         protocol_version,
         &RemotePostAuth::Grant {
             items: credit.items(),
@@ -255,13 +205,11 @@ where
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn serve_post_barrier<S>(
     stream: &mut S,
     auth: &AuthContext,
     audit: &SecurityAuditGate,
     hub: &SessionHub,
-    limits: &ConnectionLimits,
     mut credit: CreditWindow,
     connection_id: u64,
     session_id: &str,
@@ -273,7 +221,7 @@ where
         if credit.items() == 0 {
             match tokio::time::timeout(
                 credit.limits().ack_deadline,
-                read_post_auth(stream, limits.post_auth_ceiling, auth.protocol_version()),
+                read_post_auth(stream, POST_AUTH_FRAME_MAX_BYTES, auth.protocol_version()),
             )
             .await
             {
@@ -304,25 +252,30 @@ where
             }
             write_post_auth(
                 stream,
-                limits.post_auth_ceiling,
+                POST_AUTH_FRAME_MAX_BYTES,
                 auth.protocol_version(),
                 &message,
             )
             .await?;
         }
 
-        let incoming =
-            match read_post_auth(stream, limits.post_auth_ceiling, auth.protocol_version()).await {
-                Ok(message) => message,
-                Err(ServerError::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    release_writer(hub, session_id, connection_id);
-                    return Ok(());
-                }
-                Err(err) => {
-                    release_writer(hub, session_id, connection_id);
-                    return Err(err);
-                }
-            };
+        let incoming = match read_post_auth(
+            stream,
+            POST_AUTH_FRAME_MAX_BYTES,
+            auth.protocol_version(),
+        )
+        .await
+        {
+            Ok(message) => message,
+            Err(ServerError::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                release_writer(hub, session_id, connection_id);
+                return Ok(());
+            }
+            Err(err) => {
+                release_writer(hub, session_id, connection_id);
+                return Err(err);
+            }
+        };
         match incoming {
             RemotePostAuth::Ack { items, bytes, .. } => credit.ack(items, bytes),
             RemotePostAuth::Command { command } => {
@@ -330,7 +283,7 @@ where
                     Ok(result) => {
                         write_post_auth(
                             stream,
-                            limits.post_auth_ceiling,
+                            POST_AUTH_FRAME_MAX_BYTES,
                             auth.protocol_version(),
                             &RemotePostAuth::CommandResult { result },
                         )

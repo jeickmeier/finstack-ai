@@ -5,8 +5,6 @@ pub mod export;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
 use std::collections::VecDeque;
 use std::sync::Arc;
-#[cfg(all(test, feature = "native-tokio"))]
-use std::sync::Mutex;
 
 use finstack_ai_kernel::{
     ComponentRef, EffectId, EventId, LaneId, Metadata, ModelRequestId, RunEvent, RunEventBody,
@@ -254,73 +252,6 @@ impl Observer for NoopObserver {
     }
 }
 
-/// Bounded in-memory reference observer for deterministic tests and examples.
-#[cfg(all(test, feature = "native-tokio"))]
-pub(crate) struct ReferenceObserver {
-    descriptor: ObserverDescriptor,
-    max_events: usize,
-    events: Arc<Mutex<Vec<ObserverEventView>>>,
-}
-
-#[cfg(all(test, feature = "native-tokio"))]
-impl ReferenceObserver {
-    /// Construct a bounded capture observer.
-    ///
-    /// # Errors
-    ///
-    /// Returns `observer_configuration_invalid` for a zero or excessive event bound.
-    pub fn try_new(
-        descriptor: ObserverDescriptor,
-        max_events: usize,
-    ) -> Result<Self, ObserverError> {
-        if max_events == 0 || max_events > 1_000_000 {
-            return Err(ObserverError::ConfigurationInvalid);
-        }
-        Ok(Self {
-            descriptor,
-            max_events,
-            events: Arc::new(Mutex::new(Vec::new())),
-        })
-    }
-
-    /// Snapshot captured immutable views in delivery order.
-    ///
-    /// # Errors
-    ///
-    /// Returns `observer_unavailable` when the capture lock is poisoned.
-    pub fn snapshot(&self) -> Result<Arc<[ObserverEventView]>, ObserverError> {
-        self.events
-            .lock()
-            .map(|events| Arc::from(events.clone()))
-            .map_err(|_| ObserverError::Unavailable)
-    }
-}
-
-#[cfg(all(test, feature = "native-tokio"))]
-impl Observer for ReferenceObserver {
-    fn descriptor(&self) -> ObserverDescriptor {
-        self.descriptor.clone()
-    }
-
-    fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
-        let events = Arc::clone(&self.events);
-        let max_events = self.max_events;
-        let mode = self.descriptor.payload_mode;
-        Box::pin(async move {
-            let mut captured = events.lock().map_err(|_| ObserverError::Unavailable)?;
-            if captured.len().saturating_add(batch.len()) > max_events {
-                return Err(ObserverError::CapacityExceeded);
-            }
-            captured.extend(
-                batch
-                    .iter()
-                    .map(|event| ObserverEventView::from_event(event, mode)),
-            );
-            Ok(())
-        })
-    }
-}
-
 /// Bounded observer adapter failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum ObserverError {
@@ -347,12 +278,12 @@ impl ObserverError {
     }
 }
 
-#[cfg(all(test, feature = "native-tokio"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use finstack_ai_kernel::{
-        ComponentId, EventTag, Id, IdTag, LaneTag, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
-        RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag, Version,
+        EventTag, Id, IdTag, LaneTag, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
+        RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag,
     };
 
     fn id<T: IdTag>(value: u64) -> Id<T> {
@@ -384,43 +315,18 @@ mod tests {
         .expect("event")
     }
 
-    fn descriptor(mode: ObserverPayloadMode) -> ObserverDescriptor {
-        ObserverDescriptor {
-            component: ComponentRef::new(
-                ComponentId::parse("fixture.observer").expect("component"),
-                Some(Version {
-                    major: 1,
-                    minor: 0,
-                    patch: 0,
-                }),
-            ),
-            payload_mode: mode,
-            metadata: Metadata::empty(),
-        }
-    }
+    #[test]
+    fn observer_projection_keeps_credential_payloads_hidden() {
+        let public =
+            ObserverEventView::from_event(&event(Sensitivity::Public), ObserverPayloadMode::Full);
+        assert!(public.body.is_some());
+        assert_eq!(public.run_id, id::<RunTag>(3));
 
-    #[cfg(feature = "native-tokio")]
-    #[tokio::test]
-    async fn observer_projection_is_read_only_bounded_and_credential_payloads_stay_hidden() {
-        let observer =
-            ReferenceObserver::try_new(descriptor(ObserverPayloadMode::Full), 2).expect("observer");
-        observer
-            .observe(Arc::from([
-                event(Sensitivity::Public),
-                event(Sensitivity::Credential),
-            ]))
-            .await
-            .expect("observe");
-        let views = observer.snapshot().expect("snapshot");
-        assert!(views[0].body.is_some());
-        assert!(views[1].body.is_none());
-        assert_eq!(views[0].run_id, id::<RunTag>(3));
-
-        let error = observer
-            .observe(Arc::from([event(Sensitivity::Public)]))
-            .await
-            .expect_err("capacity");
-        assert_eq!(error.code(), OBSERVER_CAPACITY_EXCEEDED);
+        let credential = ObserverEventView::from_event(
+            &event(Sensitivity::Credential),
+            ObserverPayloadMode::Full,
+        );
+        assert!(credential.body.is_none());
 
         let metadata_only = ObserverEventView::from_event(
             &event(Sensitivity::Public),

@@ -2,8 +2,6 @@ use finstack_ai_kernel::{
     ComponentId, EffectInput, EffectKind, EffectOutputKind, EffectRequested, RecordBody,
     RecordEnvelope, RetrySafety,
 };
-#[cfg(all(test, feature = "native-tokio"))]
-use finstack_ai_kernel::{EffectCompleted, InvocationRecovery};
 
 use crate::ports::model::ReconcileContext;
 
@@ -263,23 +261,6 @@ pub enum InvocationResumeAction {
     Reconcile,
     /// Suspend because repeating the invocation could duplicate a non-repeatable effect.
     SuspendUncertain,
-}
-
-/// Determine recovery behavior from committed request/output state.
-#[must_use]
-#[cfg(all(test, feature = "native-tokio"))]
-pub(crate) fn context_resume_action(
-    requested: &EffectRequested,
-    completed: Option<&EffectCompleted>,
-) -> InvocationResumeAction {
-    if completed.is_some_and(|value| value.validate_against(requested).is_ok()) {
-        return InvocationResumeAction::UseRecorded;
-    }
-    match requested.component().map(|value| value.recovery) {
-        Some(InvocationRecovery::RecomputeSafe) => InvocationResumeAction::Recompute,
-        Some(InvocationRecovery::Reconcile) => InvocationResumeAction::Reconcile,
-        Some(InvocationRecovery::NonRepeatable) | None => InvocationResumeAction::SuspendUncertain,
-    }
 }
 
 /// Map one provider reconcile result onto the existing context resume taxonomy.

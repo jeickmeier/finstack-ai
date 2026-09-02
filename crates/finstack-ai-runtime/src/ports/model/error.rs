@@ -86,9 +86,7 @@ impl ModelError {
     }
 
     pub(crate) fn limit(code: &'static str, message: &'static str) -> Self {
-        Self {
-            data: PortErrorData::frozen(code, ErrorCategory::Limit, false, message),
-        }
+        Self::frozen(code, ErrorCategory::Limit, false, message)
     }
 
     /// Stable adapter code.

@@ -38,7 +38,9 @@ impl InstructionSpec {
     /// or oversized text.
     pub fn try_new(text: impl Into<Arc<str>>) -> Result<Self, AgentSpecError> {
         let text = text.into();
-        validate_instruction(&text)?;
+        validate_bounded_text(&text, |reason| AgentSpecError::InvalidInstruction {
+            reason,
+        })?;
         Ok(Self { text })
     }
 
@@ -116,7 +118,9 @@ impl CapabilitySpec {
     ///
     /// Returns a stable specification error when the definition is malformed.
     pub fn validate(&self) -> Result<(), AgentSpecError> {
-        validate_description(&self.description)?;
+        validate_bounded_text(&self.description, |reason| {
+            AgentSpecError::InvalidDescription { reason }
+        })?;
         validate_slice_len("capability.instructions", self.instructions.len())?;
         validate_slice_len("capability.toolsets", self.toolsets.len())?;
         validate_slice_len("capability.context_providers", self.context_providers.len())?;
@@ -559,14 +563,6 @@ pub enum AgentSpecError {
         /// Encoder message.
         message: String,
     },
-}
-
-fn validate_instruction(text: &str) -> Result<(), AgentSpecError> {
-    validate_bounded_text(text, |reason| AgentSpecError::InvalidInstruction { reason })
-}
-
-fn validate_description(text: &str) -> Result<(), AgentSpecError> {
-    validate_bounded_text(text, |reason| AgentSpecError::InvalidDescription { reason })
 }
 
 fn validate_bounded_text(

@@ -55,7 +55,6 @@ mod tests {
         let hello = ProcessPreAuth::ProcessClientHello { offer };
         let body = encode(&hello).expect("body");
         assert!(decode::<RemotePostAuth>(&body).is_err());
-        assert!(decode::<RemotePostAuth>(&body).is_err());
         let env = encode_envelope(PayloadFamily::Process, 1, &hello).expect("env");
         assert!(decode_envelope::<RemotePostAuth>(&env, PayloadFamily::Remote, 1).is_err());
         let decoded =

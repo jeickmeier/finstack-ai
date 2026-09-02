@@ -12,7 +12,7 @@ use finstack_ai_kernel::{ComponentId, ComponentRef, ErrorCategory, Metadata, Val
 use futures_util::stream;
 use serde::Deserialize;
 
-use crate::host::{HostFailure, host_component_version, parse_host_json, tool_output_bytes};
+use crate::host::{HOST_VERSION, HostFailure, parse_host_json, tool_output_bytes};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::host::NativeHostResult;
@@ -30,7 +30,6 @@ pub struct HostToolsetOptions {
 
 /// Host-backed Toolset port.
 pub struct HostToolset {
-    #[allow(dead_code)]
     component: ComponentRef,
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
@@ -39,7 +38,7 @@ pub struct HostToolset {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    call: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    call: js_sys::Function,
 }
 
 fn tool_failure(failure: HostFailure) -> ToolError {
@@ -70,7 +69,7 @@ impl HostToolset {
         let component = ComponentRef::new(
             ComponentId::parse(&options.component)
                 .map_err(|_| tool_failure(HostFailure::InvalidResult))?,
-            Some(host_component_version()),
+            Some(HOST_VERSION),
         );
         Ok(Self {
             component,
@@ -84,7 +83,7 @@ impl HostToolset {
             #[cfg(target_arch = "wasm32")]
             adapter,
             #[cfg(target_arch = "wasm32")]
-            call: std::rc::Rc::new(std::cell::RefCell::new(call)),
+            call,
         })
     }
 
@@ -117,7 +116,6 @@ impl HostToolset {
 
     /// Exact registered component identity.
     #[must_use]
-    #[allow(dead_code)]
     pub fn component(&self) -> &ComponentRef {
         &self.component
     }
@@ -131,7 +129,7 @@ impl HostToolset {
         signal: Option<wasm_bindgen::JsValue>,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let adapter = self.adapter.clone();
-        let method = self.call.borrow().clone();
+        let method = self.call.clone();
         let cancellation = ctx.run.cancellation.clone();
         Box::pin(async move {
             let owned = if signal.is_none() {
@@ -151,8 +149,8 @@ impl HostToolset {
             let call_json = serde_json::to_string(&call)
                 .map_err(|_| tool_failure(HostFailure::InvalidResult))?;
             let positional = [
-                crate::host::json_string_value(&context_json),
-                crate::host::json_string_value(&call_json),
+                wasm_bindgen::JsValue::from_str(&context_json),
+                wasm_bindgen::JsValue::from_str(&call_json),
             ];
             let invoke =
                 crate::host::invoke_host(&adapter, &method, &positional, effective.as_ref());

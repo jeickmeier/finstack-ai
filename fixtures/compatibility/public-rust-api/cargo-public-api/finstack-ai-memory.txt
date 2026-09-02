@@ -524,7 +524,6 @@ pub fn finstack_ai_memory::toolset::MemoryToolset::call(&self, finstack_ai_runti
 pub fn finstack_ai_memory::toolset::MemoryToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
 pub fn finstack_ai_memory::toolset::MemoryToolset::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::tool::types::PendingToolEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolReconcileResult, finstack_ai_runtime::ports::tool::error::ToolError>>
 pub fn finstack_ai_memory::toolset::MemoryToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
-pub const finstack_ai_memory::toolset::INLINE_BODY_MAX_BYTES: usize
 pub const finstack_ai_memory::toolset::MEMORY_TOOL_ID_CONFLICT: &str
 pub const finstack_ai_memory::toolset::MEMORY_TOOL_INVALID_ARGUMENTS: &str
 pub const finstack_ai_memory::toolset::MEMORY_TOOL_NOT_FOUND: &str

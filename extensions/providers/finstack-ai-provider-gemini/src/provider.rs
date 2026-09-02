@@ -10,22 +10,22 @@ use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect
 use finstack_ai_provider_wire::{GeminiGenerateContentAssembly, StreamNormError, StreamNormKind};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
-    CancellationSignal, InputCapabilities, MediaResolveError, MediaResolveKind, Model,
-    ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate,
-    ReconcileContext, ResolveDraftMediaError, StructuredOutputCapability, resolve_draft_media,
+    CancellationSignal, InputCapabilities, MediaResolveKind, Model, ModelCapabilities,
+    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
+    ResolveDraftMediaError, StructuredOutputCapability, resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
 use tokio::sync::mpsc;
 
-use crate::config::config_error;
 use crate::error::{
-    GEMINI_HTTP_ERROR, GEMINI_RESPONSE_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED, GEMINI_TIMEOUT,
-    GEMINI_TRANSPORT_ERROR, error,
+    GEMINI_CANCELLED, GEMINI_HTTP_ERROR, GEMINI_RESPONSE_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED,
+    GEMINI_TIMEOUT, GEMINI_TRANSPORT_ERROR, config_error, error, request_error, response_error,
+    stream_error, stream_limit_error,
 };
-use crate::request::{GenerateContentRequest, request_error};
-use crate::sse::{GeminiSse, stream_error, stream_limit_error};
+use crate::request::GenerateContentRequest;
+use crate::sse::GeminiSse;
 use crate::{GeminiConfig, GeminiModelConfig};
 
 const PROVIDER: &str = "gemini";
@@ -155,26 +155,22 @@ fn catalog_from_models(
     Ok(by_name)
 }
 
-fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
-    match error {
+fn map_draft_media(failure: ResolveDraftMediaError) -> ModelError {
+    match failure {
         ResolveDraftMediaError::MissingResolver => {
             request_error("media content requires a configured media resolver")
         }
-        ResolveDraftMediaError::Resolve(inner) => map_resolve(inner),
+        ResolveDraftMediaError::Resolve(inner) => match inner.kind {
+            MediaResolveKind::NotFound => request_error(inner.message),
+            MediaResolveKind::Unavailable => error(
+                GEMINI_TRANSPORT_ERROR,
+                ErrorCategory::Model,
+                true,
+                "Gemini media resolution is unavailable",
+            ),
+            MediaResolveKind::Limit => stream_limit_error(),
+        },
         ResolveDraftMediaError::Limit => stream_limit_error(),
-    }
-}
-
-fn map_resolve(error: MediaResolveError) -> ModelError {
-    match error.kind {
-        MediaResolveKind::NotFound => request_error(error.message),
-        MediaResolveKind::Unavailable => crate::error::error(
-            GEMINI_TRANSPORT_ERROR,
-            ErrorCategory::Model,
-            true,
-            "Gemini media resolution is unavailable",
-        ),
-        MediaResolveKind::Limit => stream_limit_error(),
     }
 }
 
@@ -357,7 +353,6 @@ async fn drive_response(
 ) {
     let mut body = response.bytes_stream();
     let mut parser = GeminiSse::new(max_event_bytes, max_stream_bytes);
-    let mut received: usize = 0;
     let mut assembly = GeminiGenerateContentAssembly::new(request_id, structured);
     loop {
         let chunk = tokio::select! {
@@ -376,7 +371,7 @@ async fn drive_response(
             let error = match parser.finish() {
                 Ok(()) => match assembly.finish() {
                     Ok(()) => stream_error("Gemini SSE stream ended before a terminal chunk"),
-                    Err(error) => map_norm(error),
+                    Err(error) => map_norm(&error),
                 },
                 Err(error) => error,
             };
@@ -387,15 +382,6 @@ async fn drive_response(
             Ok(chunk) => chunk,
             Err(source) => {
                 let _ = sender.send(Err(transport_error(&source))).await;
-                return;
-            }
-        };
-        // Belt-and-braces: the parser bounds the cumulative *framed* bytes, while
-        // this counter bounds the raw *pre-framing* bytes read off the socket.
-        received = match received.checked_add(chunk.len()) {
-            Some(total) if total <= max_stream_bytes => total,
-            _ => {
-                let _ = sender.send(Err(stream_limit_error())).await;
                 return;
             }
         };
@@ -421,7 +407,7 @@ async fn drive_response(
                     }
                 }
                 Err(error) => {
-                    let _ = sender.send(Err(map_norm(error))).await;
+                    let _ = sender.send(Err(map_norm(&error))).await;
                     return;
                 }
             }
@@ -429,11 +415,7 @@ async fn drive_response(
     }
 }
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "map_err passes the normalization error by value"
-)]
-fn map_norm(error: StreamNormError) -> ModelError {
+fn map_norm(error: &StreamNormError) -> ModelError {
     match error.kind {
         StreamNormKind::Limit => stream_limit_error(),
         StreamNormKind::Stream => stream_error(error.message),
@@ -441,18 +423,9 @@ fn map_norm(error: StreamNormError) -> ModelError {
     }
 }
 
-fn response_error(message: &'static str) -> ModelError {
-    error(
-        GEMINI_RESPONSE_INVALID,
-        ErrorCategory::Model,
-        false,
-        message,
-    )
-}
-
 fn cancelled_error() -> ModelError {
     error(
-        crate::error::GEMINI_CANCELLED,
+        GEMINI_CANCELLED,
         ErrorCategory::Cancellation,
         false,
         "Gemini request was cancelled",

@@ -1526,7 +1526,6 @@ dependencies = [
  "finstack-ai-middleware-compaction",
  "finstack-ai-middleware-verify",
  "finstack-ai-provider-ollama",
- "finstack-ai-provider-openai",
  "finstack-ai-store-memory",
  "finstack-ai-tools-calculator",
  "finstack-ai-tools-filesystem",
@@ -1605,7 +1604,6 @@ dependencies = [
  "finstack-ai-test",
  "opentelemetry",
  "opentelemetry_sdk",
- "serde",
  "serde_json",
  "thiserror",
  "tokio",
@@ -1800,7 +1798,6 @@ dependencies = [
  "finstack-ai-protocol",
  "finstack-ai-runtime",
  "serde_json_canonicalizer",
- "thiserror",
  "tokio",
  "uuid",
 ]
@@ -1923,7 +1920,6 @@ dependencies = [
  "finstack-ai-store-common",
  "finstack-ai-test",
  "rusqlite",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -2020,7 +2016,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "url",
 ]
 
 [[package]]

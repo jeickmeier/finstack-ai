@@ -167,20 +167,15 @@ impl Usage {
         cost: Option<CostAmount>,
         extension_counters: BTreeMap<LimitKey, u64>,
     ) -> Result<Self, RefsError> {
-        if extension_counters.len() > Self::MAX_EXTENSION_COUNTERS {
-            return Err(RefsError::TooManyEntries {
-                field: "usage.extension_counters",
-                len: extension_counters.len(),
-                max: Self::MAX_EXTENSION_COUNTERS,
-            });
-        }
-        Ok(Self {
+        let usage = Self {
             input_tokens,
             output_tokens,
             total_tokens,
             cost,
             extension_counters,
-        })
+        };
+        usage.validate()?;
+        Ok(usage)
     }
 
     /// Validate collection ceilings.

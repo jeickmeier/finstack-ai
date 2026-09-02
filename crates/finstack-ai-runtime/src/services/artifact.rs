@@ -465,23 +465,8 @@ pub fn validate_staged_artifact(
     limits: &ArtifactStoreLimits,
 ) -> Result<(), ArtifactError> {
     validate_artifact_input(scope, content, metadata, limits)?;
-    let expected_scope = scope.digest()?;
-    if artifact.scope_digest() != expected_scope {
-        return Err(ArtifactError::ScopeMismatch {
-            expected: expected_scope,
-            actual: artifact.scope_digest(),
-        });
-    }
-    let expected_content = Digest::blob_content(content);
+    validate_retrieved_artifact(scope, artifact, content)?;
     let blob = artifact.blob();
-    if artifact.content_digest() != expected_content
-        || blob.digest().copied() != Some(expected_content)
-        || blob.length() != u64::try_from(content.len()).unwrap_or(u64::MAX)
-    {
-        return Err(ArtifactError::Integrity {
-            message: Arc::from("content_reference_mismatch"),
-        });
-    }
     if artifact.kind() != metadata.kind.as_ref()
         || blob.media_type() != metadata.media_type.as_ref()
         || blob.name() != metadata.name.as_deref()

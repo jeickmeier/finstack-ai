@@ -54,7 +54,11 @@ impl ErrorCode {
     /// ```
     pub fn new(code: impl AsRef<str>) -> Result<Self, ErrorCodeError> {
         let code = code.as_ref();
-        validate_error_code(code)?;
+        if !error_code_is_valid(code) {
+            return Err(ErrorCodeError {
+                code: code.to_owned(),
+            });
+        }
         Ok(Self(Arc::<str>::from(code)))
     }
 
@@ -182,34 +186,6 @@ impl<'de> Deserialize<'de> for ErrorCode {
 pub struct ErrorCodeError {
     /// Rejected code text.
     pub code: String,
-}
-
-fn validate_error_code(code: &str) -> Result<(), ErrorCodeError> {
-    let invalid = || ErrorCodeError {
-        code: code.to_owned(),
-    };
-    if code.len() > LABEL_MAX_BYTES {
-        return Err(invalid());
-    }
-    let mut chars = code.chars();
-    let Some(first) = chars.next() else {
-        return Err(invalid());
-    };
-    if !first.is_ascii_lowercase() {
-        return Err(invalid());
-    }
-    let mut prev_underscore = false;
-    for ch in chars {
-        match ch {
-            'a'..='z' | '0'..='9' => prev_underscore = false,
-            '_' if !prev_underscore => prev_underscore = true,
-            _ => return Err(invalid()),
-        }
-    }
-    if prev_underscore {
-        return Err(invalid());
-    }
-    Ok(())
 }
 
 const fn error_code_is_valid(code: &str) -> bool {

@@ -271,29 +271,22 @@ fn map_input(
     }
     let instructions = concatenate_instructions(&messages[..prefix_len])?;
     let call_ids = provider_call_ids(messages);
-    let conversation = if let Some(state) = continuation_state {
-        let envelope = parse_continuation(state)?;
-        let suffix_start = messages
-            .iter()
-            .rposition(|message| message.role() == MessageRole::Assistant)
-            .map_or(prefix_len, |index| index.saturating_add(1));
-        let mut input = envelope.replay_items;
-        for message in &messages[suffix_start..] {
-            input.extend(map_conversation_message(
-                message, &call_ids, resolved, model,
-            )?);
-        }
-        input
-    } else {
-        let mut input = Vec::with_capacity(messages.len().saturating_sub(prefix_len));
-        for message in &messages[prefix_len..] {
-            input.extend(map_conversation_message(
-                message, &call_ids, resolved, model,
-            )?);
-        }
-        input
+    let (mut input, suffix_start) = match continuation_state {
+        Some(state) => (
+            parse_continuation(state)?.replay_items,
+            messages
+                .iter()
+                .rposition(|message| message.role() == MessageRole::Assistant)
+                .map_or(prefix_len, |index| index.saturating_add(1)),
+        ),
+        None => (Vec::new(), prefix_len),
     };
-    Ok((instructions, conversation))
+    for message in &messages[suffix_start..] {
+        input.extend(map_conversation_message(
+            message, &call_ids, resolved, model,
+        )?);
+    }
+    Ok((instructions, input))
 }
 
 fn parse_continuation(state: &RawJson) -> Result<ContinuationEnvelope, ModelError> {

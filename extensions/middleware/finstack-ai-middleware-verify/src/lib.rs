@@ -302,10 +302,12 @@ impl Middleware for VerifyMiddleware {
                             Ok(StageOutcome::Retry(directive))
                         }
                         Verdict::Reject(findings) => {
-                            let message_text = reject_message(&findings);
                             let error = ErrorDescriptor::new(
                                 "verify_rejected",
-                                message_text,
+                                verdict_message(
+                                    "evidence verification rejected the candidate",
+                                    &findings,
+                                ),
                                 ErrorCategory::Validation,
                                 false,
                             )
@@ -409,11 +411,6 @@ fn feedback_item(findings: &EvidenceFindings) -> Result<ContextItem, MiddlewareE
             "verify feedback item is invalid",
         )
     })
-}
-
-/// Bounded failure message for a `Reject` verdict.
-fn reject_message(findings: &EvidenceFindings) -> String {
-    verdict_message("evidence verification rejected the candidate", findings)
 }
 
 /// Shared verdict renderer: `intro` alone when there are no findings,

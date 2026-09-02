@@ -274,8 +274,33 @@ pub fn run_all_public_api_fixtures() -> Result<usize, PublicApiFixtureError> {
     Ok(paths.len())
 }
 
-fn fail(message: impl Into<String>) -> PublicApiFixtureError {
+pub(crate) fn fail(message: impl Into<String>) -> PublicApiFixtureError {
     PublicApiFixtureError::Failed(message.into())
+}
+
+pub(crate) fn require_input(fixture: &PublicApiFixture) -> Result<Value, PublicApiFixtureError> {
+    fixture
+        .input
+        .clone()
+        .ok_or_else(|| fail("fixture input required"))
+}
+
+pub(crate) fn from_json_field<T: DeserializeOwned>(
+    input: &Value,
+    field: &str,
+) -> Result<T, PublicApiFixtureError> {
+    let value = input
+        .get(field)
+        .ok_or_else(|| fail(format!("missing {field}")))?;
+    from_json_value(value)
+}
+
+/// Round-trip through text so `RawJson` human-readable deserialization works.
+pub(crate) fn from_json_value<T: DeserializeOwned>(
+    value: &Value,
+) -> Result<T, PublicApiFixtureError> {
+    let text = serde_json::to_string(value).map_err(|error| fail(error.to_string()))?;
+    serde_json::from_str(&text).map_err(|error| fail(error.to_string()))
 }
 
 fn materialize(recipe: &Recipe) -> Result<String, PublicApiFixtureError> {
@@ -391,7 +416,10 @@ fn time_error_code(error: &TimeError) -> &'static str {
     }
 }
 
-fn assert_error_code(expect: &Expect, actual: &str) -> Result<(), PublicApiFixtureError> {
+pub(crate) fn assert_error_code(
+    expect: &Expect,
+    actual: &str,
+) -> Result<(), PublicApiFixtureError> {
     if expect.ok {
         return Err(fail(format!("expected success, got error {actual}")));
     }

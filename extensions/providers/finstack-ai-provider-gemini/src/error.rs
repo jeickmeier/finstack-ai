@@ -20,3 +20,43 @@ pub(crate) fn error(
     ModelError::try_new(code, category, retryable, message, Metadata::empty())
         .unwrap_or_else(ModelError::from)
 }
+
+pub(crate) fn config_error(message: &'static str) -> ModelError {
+    error(
+        GEMINI_CONFIG_INVALID,
+        ErrorCategory::Configuration,
+        false,
+        message,
+    )
+}
+
+pub(crate) fn request_error(message: &'static str) -> ModelError {
+    error(
+        GEMINI_REQUEST_INVALID,
+        ErrorCategory::Validation,
+        false,
+        message,
+    )
+}
+
+pub(crate) fn response_error(message: &'static str) -> ModelError {
+    error(
+        GEMINI_RESPONSE_INVALID,
+        ErrorCategory::Model,
+        false,
+        message,
+    )
+}
+
+pub(crate) fn stream_error(message: &'static str) -> ModelError {
+    error(GEMINI_STREAM_INVALID, ErrorCategory::Model, false, message)
+}
+
+pub(crate) fn stream_limit_error() -> ModelError {
+    error(
+        GEMINI_STREAM_LIMIT_EXCEEDED,
+        ErrorCategory::Limit,
+        false,
+        "Gemini response exceeded a configured stream limit",
+    )
+}

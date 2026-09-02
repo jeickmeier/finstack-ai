@@ -90,7 +90,47 @@ impl Timestamp {
     /// assert_eq!(ts.as_unix_ms(), 0);
     /// ```
     pub fn parse_rfc3339(input: &str) -> Result<Self, TimeError> {
-        parse_rfc3339_ms(input)
+        // Exact shape: YYYY-MM-DDTHH:MM:SS.sssZ
+        let invalid = || TimeError::InvalidRfc3339 {
+            input: input.to_owned(),
+        };
+        let bytes = input.as_bytes();
+        if bytes.len() != 24
+            || bytes[4] != b'-'
+            || bytes[7] != b'-'
+            || bytes[10] != b'T'
+            || bytes[13] != b':'
+            || bytes[16] != b':'
+            || bytes[19] != b'.'
+            || bytes[23] != b'Z'
+        {
+            return Err(invalid());
+        }
+        let year = parse_u32(&bytes[0..4]).ok_or_else(invalid)?;
+        let month = parse_u32(&bytes[5..7]).ok_or_else(invalid)?;
+        let day = parse_u32(&bytes[8..10]).ok_or_else(invalid)?;
+        let hour = parse_u32(&bytes[11..13]).ok_or_else(invalid)?;
+        let minute = parse_u32(&bytes[14..16]).ok_or_else(invalid)?;
+        let second = parse_u32(&bytes[17..19]).ok_or_else(invalid)?;
+        let millis = parse_u32(&bytes[20..23]).ok_or_else(invalid)?;
+        if !(1..=9999).contains(&year)
+            || !(1..=12).contains(&month)
+            || !(1..=days_in_month(year, month)).contains(&day)
+            || hour > 23
+            || minute > 59
+            || second > 59
+            || millis > 999
+        {
+            // Leap seconds (second == 60) are intentionally rejected.
+            return Err(invalid());
+        }
+        let days = days_from_civil(year, month, day);
+        let day_ms = i64::from(hour) * 3_600_000
+            + i64::from(minute) * 60_000
+            + i64::from(second) * 1_000
+            + i64::from(millis);
+        let unix_ms = i64::from(days) * 86_400_000 + day_ms;
+        Self::from_unix_ms(unix_ms).map_err(|_| invalid())
     }
 
     /// Checked addition of a duration.
@@ -351,73 +391,15 @@ pub enum TimeError {
     },
 }
 
-fn parse_rfc3339_ms(input: &str) -> Result<Timestamp, TimeError> {
-    // Exact shape: YYYY-MM-DDTHH:MM:SS.sssZ
-    let bytes = input.as_bytes();
-    if bytes.len() != 24
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes[10] != b'T'
-        || bytes[13] != b':'
-        || bytes[16] != b':'
-        || bytes[19] != b'.'
-        || bytes[23] != b'Z'
-    {
-        return Err(TimeError::InvalidRfc3339 {
-            input: input.to_owned(),
-        });
-    }
-    let year = parse_u32(&bytes[0..4], input)?;
-    let month = parse_u32(&bytes[5..7], input)?;
-    let day = parse_u32(&bytes[8..10], input)?;
-    let hour = parse_u32(&bytes[11..13], input)?;
-    let minute = parse_u32(&bytes[14..16], input)?;
-    let second = parse_u32(&bytes[17..19], input)?;
-    let millis = parse_u32(&bytes[20..23], input)?;
-    if !(1..=9999).contains(&year)
-        || !(1..=12).contains(&month)
-        || !(1..=days_in_month(year, month)).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 59
-        || millis > 999
-    {
-        // Leap seconds (second == 60) are intentionally rejected.
-        return Err(TimeError::InvalidRfc3339 {
-            input: input.to_owned(),
-        });
-    }
-    let year = i32::try_from(year).map_err(|_| TimeError::InvalidRfc3339 {
-        input: input.to_owned(),
-    })?;
-    let month = u8::try_from(month).map_err(|_| TimeError::InvalidRfc3339 {
-        input: input.to_owned(),
-    })?;
-    let day = u8::try_from(day).map_err(|_| TimeError::InvalidRfc3339 {
-        input: input.to_owned(),
-    })?;
-    let days = days_from_civil(year, month, day);
-    let day_ms = i64::from(hour) * 3_600_000
-        + i64::from(minute) * 60_000
-        + i64::from(second) * 1_000
-        + i64::from(millis);
-    let unix_ms = i64::from(days) * 86_400_000 + day_ms;
-    Timestamp::from_unix_ms(unix_ms).map_err(|_| TimeError::InvalidRfc3339 {
-        input: input.to_owned(),
-    })
-}
-
-fn parse_u32(slice: &[u8], input: &str) -> Result<u32, TimeError> {
+fn parse_u32(slice: &[u8]) -> Option<u32> {
     let mut value = 0_u32;
     for &b in slice {
         if !b.is_ascii_digit() {
-            return Err(TimeError::InvalidRfc3339 {
-                input: input.to_owned(),
-            });
+            return None;
         }
         value = value * 10 + u32::from(b - b'0');
     }
-    Ok(value)
+    Some(value)
 }
 
 fn is_leap(year: u32) -> bool {
@@ -436,22 +418,20 @@ fn days_in_month(year: u32, month: u32) -> u32 {
 
 /// Howard Hinnant `civil_from_days` / `days_from_civil` adapted to Unix epoch days.
 ///
-/// Casts are bounded by the year-0001–9999 constructor range.
+/// Casts are bounded by the civil range `parse_rfc3339` already checked
+/// (years 0001–9999, months 1–12, days within the month).
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss
 )]
-fn days_from_civil(year: i32, month: u8, day: u8) -> i32 {
+fn days_from_civil(year: u32, month: u32, day: u32) -> i32 {
+    let year = year as i32;
     let y = if month <= 2 { year - 1 } else { year };
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = (y - era * 400) as u32;
-    let mp = if month > 2 {
-        u32::from(month) - 3
-    } else {
-        u32::from(month) + 9
-    };
-    let doy = (153 * mp + 2) / 5 + u32::from(day) - 1;
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe as i32 - 719_468
 }

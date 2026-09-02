@@ -10,18 +10,22 @@ use finstack_ai_embeddings::vector::EmbeddingVector;
 use finstack_ai_kernel::{Digest, Timestamp};
 use finstack_ai_runtime::ports::PortFuture;
 
-use crate::record::{
-    INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryClock,
-    MemoryId, MemoryRecord, MemoryScope,
-};
+use crate::record::{MemoryBody, MemoryClock, MemoryId, MemoryRecord, MemoryScope};
 
 use super::{
-    EmbeddingSource, MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction,
-    MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor,
-    MemoryStoreError, MemoryStoreLimits, PutOutcome, artifact_transition_actions,
-    embedding_source_digest, embedding_source_text, normalize_search_tokens, similarity_score,
-    validate_embedder_id, validate_new_record_lifecycle,
+    EmbeddingSource, MatchEvidence, MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage,
+    MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError, MemoryStoreLimits,
+    PutOutcome, artifact_transition_actions, embedding_source_digest, embedding_source_text,
+    normalize_search_tokens, operation_fingerprint, similarity_score, validate_embedder_id,
+    validate_idempotency_key, validate_new_record_lifecycle, validate_query, validate_record,
+    validate_scope,
 };
+
+/// Whether `record` is visible to reads at `now`: not tombstoned, not
+/// superseded, and not hard-expired.
+fn is_live(record: &MemoryRecord, now: Timestamp) -> bool {
+    !record.tombstoned && record.superseded_by.is_none() && !record.is_expired_at(now)
+}
 
 /// Whether writing `incoming` at its id conflicts with `existing`.
 ///
@@ -197,11 +201,7 @@ impl MemoryStore for InProcessMemoryStore {
             Ok(state
                 .records
                 .get(&(scope, id))
-                .filter(|record| {
-                    !record.tombstoned
-                        && record.superseded_by.is_none()
-                        && !record.is_expired_at(now)
-                })
+                .filter(|record| is_live(record, now))
                 .cloned())
         })();
         Box::pin(async move { result })
@@ -218,24 +218,18 @@ impl MemoryStore for InProcessMemoryStore {
             validate_query(&query, limit, self.limits)?;
             let now = (self.clock)();
             let state = self.state.lock().map_err(|_| lock_error())?;
-            if let MemoryQuery::Embedding {
-                embedder_id,
-                vector,
-            } = &query
-            {
-                return search_embeddings(&state, &scope, embedder_id, vector, limit, now);
-            }
-            let mut hits: Vec<MemoryHit> = state
-                .records
-                .values()
-                .filter(|record| {
-                    scope == record.scope
-                        && !record.tombstoned
-                        && record.superseded_by.is_none()
-                        && !record.is_expired_at(now)
-                })
-                .filter_map(|record| match_record(record, &query))
-                .collect();
+            let mut hits = match &query {
+                MemoryQuery::Embedding {
+                    embedder_id,
+                    vector,
+                } => search_embeddings(&state, &scope, embedder_id, vector, now)?,
+                _ => state
+                    .records
+                    .values()
+                    .filter(|record| scope == record.scope && is_live(record, now))
+                    .filter_map(|record| match_record(record, &query))
+                    .collect(),
+            };
             hits.sort_by(|a, b| {
                 b.score
                     .cmp(&a.score)
@@ -401,12 +395,7 @@ impl MemoryStore for InProcessMemoryStore {
             let matching: Vec<MemoryRecord> = state
                 .records
                 .values()
-                .filter(|record| {
-                    scope == record.scope
-                        && !record.tombstoned
-                        && record.superseded_by.is_none()
-                        && !record.is_expired_at(now)
-                })
+                .filter(|record| scope == record.scope && is_live(record, now))
                 .cloned()
                 .collect();
             let total = matching.len();
@@ -467,8 +456,7 @@ impl MemoryStore for InProcessMemoryStore {
                 if sources.len() >= limit {
                     break;
                 }
-                if record.tombstoned || record.superseded_by.is_some() || record.is_expired_at(now)
-                {
+                if !is_live(record, now) {
                     continue;
                 }
                 let text = embedding_source_text(record);
@@ -531,10 +519,9 @@ impl MemoryStore for InProcessMemoryStore {
             let Some(record) = state.records.get(&(scope.clone(), id.clone())) else {
                 return Ok(());
             };
-            if record.tombstoned || record.superseded_by.is_some() || record.is_expired_at(now) {
-                return Ok(());
-            }
-            if embedding_source_digest(&embedding_source_text(record))? != source_digest {
+            if !is_live(record, now)
+                || embedding_source_digest(&embedding_source_text(record))? != source_digest
+            {
                 return Ok(());
             }
             let dimensions = vector.dimensions();
@@ -583,10 +570,7 @@ fn reserve_embedding_space(
     state: &MemoryState,
     limits: MemoryStoreLimits,
 ) -> Result<(), MemoryStoreError> {
-    let mut spaces = BTreeSet::new();
-    for (_, _, space) in state.embeddings.keys() {
-        spaces.insert(Arc::clone(space));
-    }
+    let spaces: BTreeSet<&Arc<str>> = state.embeddings.keys().map(|(_, _, space)| space).collect();
     if spaces.len() >= limits.max_embedding_spaces {
         return Err(MemoryStoreError::CapacityExceeded {
             resource: "embedding_spaces",
@@ -604,15 +588,14 @@ fn evict_embeddings(state: &mut MemoryState, scope: &MemoryScope, id: &MemoryId)
         .retain(|(row_scope, row_id, _), _| !(row_scope == scope && row_id == id));
 }
 
-/// Brute-force exact ranking over the scope's rows in the space: dot of
-/// unit-normalized vectors through the shared scorer, descending, with an
-/// ascending-id tie-break.
+/// Brute-force exact scoring over the scope's rows in the space: dot of
+/// unit-normalized vectors through the shared scorer. Ordering and the
+/// caller's limit are applied by `search`'s shared sort.
 fn search_embeddings(
     state: &MemoryState,
     scope: &MemoryScope,
     embedder_id: &Arc<str>,
     vector: &EmbeddingVector,
-    limit: usize,
     now: Timestamp,
 ) -> Result<Vec<MemoryHit>, MemoryStoreError> {
     let Some(dimensions) = space_dimensions(state, embedder_id) else {
@@ -633,7 +616,7 @@ fn search_embeddings(
         let Some(record) = state.records.get(&(row_scope.clone(), row_id.clone())) else {
             continue;
         };
-        if record.tombstoned || record.superseded_by.is_some() || record.is_expired_at(now) {
+        if !is_live(record, now) {
             continue;
         }
         let Some(dot) = query.dot(&stored.unit_vector) else {
@@ -645,108 +628,7 @@ fn search_embeddings(
             matched: MatchEvidence::Semantic,
         });
     }
-    hits.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| a.record.id.cmp(&b.record.id))
-    });
-    hits.truncate(limit);
     Ok(hits)
-}
-
-fn validate_record(record: &MemoryRecord) -> Result<(), MemoryStoreError> {
-    record
-        .validate()
-        .map_err(|error| MemoryStoreError::InvalidRecord {
-            reason: match error {
-                crate::record::MemoryError::InvalidRecord { reason }
-                | crate::record::MemoryError::Configuration { reason } => reason,
-            },
-        })
-}
-
-fn validate_scope(scope: &MemoryScope) -> Result<(), MemoryStoreError> {
-    scope
-        .validate()
-        .map_err(|_| MemoryStoreError::InvalidRequest {
-            reason: "memory_scope_invalid",
-        })
-}
-
-fn validate_idempotency_key(key: &str) -> Result<(), MemoryStoreError> {
-    if key.is_empty() || key.len() > MEMORY_IDEMPOTENCY_KEY_MAX_BYTES || key.as_bytes().contains(&0)
-    {
-        return Err(MemoryStoreError::InvalidRequest {
-            reason: "memory_idempotency_key_invalid",
-        });
-    }
-    Ok(())
-}
-
-fn validate_query(
-    query: &MemoryQuery,
-    limit: usize,
-    limits: MemoryStoreLimits,
-) -> Result<(), MemoryStoreError> {
-    if limit > limits.max_search_results {
-        return Err(MemoryStoreError::InvalidRequest {
-            reason: "memory_search_limit_exceeded",
-        });
-    }
-    match query {
-        MemoryQuery::ExactId(_) => Ok(()),
-        MemoryQuery::Keywords(keywords) => {
-            if keywords.is_empty()
-                || keywords.len() > KEYWORDS_MAX_COUNT
-                || keywords.iter().any(|keyword| {
-                    keyword.is_empty()
-                        || keyword.len() > KEYWORD_MAX_BYTES
-                        || keyword.as_bytes().contains(&0)
-                })
-            {
-                return Err(MemoryStoreError::InvalidRequest {
-                    reason: "memory_query_keywords_invalid",
-                });
-            }
-            Ok(())
-        }
-        MemoryQuery::FullText(text) => {
-            if text.len() > INLINE_BODY_MAX_BYTES || text.as_bytes().contains(&0) {
-                return Err(MemoryStoreError::InvalidRequest {
-                    reason: "memory_query_text_invalid",
-                });
-            }
-            Ok(())
-        }
-        MemoryQuery::Embedding {
-            embedder_id,
-            vector,
-        } => {
-            validate_embedder_id(embedder_id)?;
-            if vector.dimensions() > limits.max_embedding_dimensions {
-                return Err(MemoryStoreError::InvalidRequest {
-                    reason: "memory_embedding_dimensions_exceeded",
-                });
-            }
-            Ok(())
-        }
-    }
-}
-
-fn operation_fingerprint<T: serde::Serialize>(
-    operation: &'static str,
-    payload: &T,
-) -> Result<Digest, MemoryStoreError> {
-    let encoded = serde_json_canonicalizer::to_vec(&(operation, payload)).map_err(|_| {
-        MemoryStoreError::InvalidRequest {
-            reason: "memory_idempotency_payload_invalid",
-        }
-    })?;
-    Digest::domain_separated("memory-idempotency", 1, &encoded).map_err(|_| {
-        MemoryStoreError::InvalidRequest {
-            reason: "memory_idempotency_payload_invalid",
-        }
-    })
 }
 
 fn receipt_replay(
@@ -917,14 +799,11 @@ fn match_record(record: &MemoryRecord, query: &MemoryQuery) -> Option<MemoryHit>
             })
         }
         MemoryQuery::FullText(text) => {
-            let haystack = {
-                let mut haystack = record.preview.to_string();
-                if let crate::record::MemoryBody::Inline(body) = &record.body {
-                    haystack.push(' ');
-                    haystack.push_str(body);
-                }
-                haystack
-            };
+            let mut haystack = record.preview.to_string();
+            if let MemoryBody::Inline(body) = &record.body {
+                haystack.push(' ');
+                haystack.push_str(body);
+            }
             let haystack_tokens = normalize_search_tokens(&haystack);
             let matched_any = normalize_search_tokens(text).iter().any(|query| {
                 haystack_tokens

@@ -40,9 +40,7 @@ pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
         CONTEXT_STAGE,
         invocation.provider_index,
     )
-    .map_err(|_| RunHandleError::Middleware {
-        code: std::sync::Arc::from(crate::ports::context::CONTEXT_CONFIGURATION_INVALID),
-    })?;
+    .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_CONFIGURATION_INVALID))?;
     let raw = invocation
         .request
         .to_raw_json()
@@ -187,31 +185,12 @@ fn request_environment<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     requested: &EffectRequested,
 ) -> Result<TransitionEnv, RunHandleError> {
-    let body = RecordBody::EffectRequested(requested.clone());
-    let event_count =
-        body.derived_event_count(RECORD_KIND_VERSION)
-            .map_err(|_| RunHandleError::Middleware {
-                code: std::sync::Arc::from(crate::ports::context::CONTEXT_COMMIT_REQUIRED),
-            })?;
-    Ok(TransitionEnv {
-        now: sources.now()?,
-        ids: AllocatedIds::try_new(
-            vec![sources.generate::<RecordTag>()?],
-            (0..event_count)
-                .map(|_| sources.generate::<EventTag>())
-                .collect::<Result<Vec<_>, _>>()?,
-            vec![requested.effect_id()],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            vec![sources.generate::<AppendBatchTag>()?],
-            Vec::new(),
-        )
-        .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?,
-    })
+    transition_env(
+        sources,
+        &RecordBody::EffectRequested(requested.clone()),
+        vec![requested.effect_id()],
+        crate::ports::context::CONTEXT_COMMIT_REQUIRED,
+    )
 }
 
 fn settlement_environment<C: Clock, R: RandomSource>(
@@ -222,9 +201,24 @@ fn settlement_environment<C: Clock, R: RandomSource>(
         ExtensionSettlement::Completed(value) => RecordBody::EffectCompleted(value.clone()),
         ExtensionSettlement::Failed(value) => RecordBody::EffectFailed(value.clone()),
     };
+    transition_env(
+        sources,
+        &body,
+        Vec::new(),
+        crate::ports::context::CONTEXT_CONTRIBUTION_INVALID,
+    )
+}
+
+/// Allocate one record, its derived events, and one batch id for `body`.
+fn transition_env<C: Clock, R: RandomSource>(
+    sources: &SettlementSources<C, R>,
+    body: &RecordBody,
+    effect_ids: Vec<finstack_ai_kernel::EffectId>,
+    error_code: &'static str,
+) -> Result<TransitionEnv, RunHandleError> {
     let event_count = body
         .derived_event_count(RECORD_KIND_VERSION)
-        .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID))?;
+        .map_err(|_| context_stage_error(error_code))?;
     Ok(TransitionEnv {
         now: sources.now()?,
         ids: AllocatedIds::try_new(
@@ -232,7 +226,7 @@ fn settlement_environment<C: Clock, R: RandomSource>(
             (0..event_count)
                 .map(|_| sources.generate::<EventTag>())
                 .collect::<Result<Vec<_>, _>>()?,
-            Vec::new(),
+            effect_ids,
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -242,7 +236,7 @@ fn settlement_environment<C: Clock, R: RandomSource>(
             vec![sources.generate::<AppendBatchTag>()?],
             Vec::new(),
         )
-        .map_err(|_| context_stage_error(crate::ports::context::CONTEXT_CONTRIBUTION_INVALID))?,
+        .map_err(|_| context_stage_error(error_code))?,
     })
 }
 

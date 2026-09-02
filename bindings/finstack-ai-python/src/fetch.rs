@@ -3,10 +3,12 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::ports::tool::Toolset;
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{ComponentRef, Version};
 use finstack_ai_tools_fetch::{HttpFetchConfigSnapshot, HttpFetchToolset};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+
+use crate::component_ref;
 
 const FETCH_COMPONENT: &str = "finstack.tools.fetch";
 
@@ -58,20 +60,15 @@ impl PyHttpFetchToolset {
         config.allow_loopback_http = insecure_allow_loopback_http;
         let toolset = HttpFetchToolset::try_new(config)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(FETCH_COMPONENT)
-            .map(|id| {
-                ComponentRef::new(
-                    id,
-                    Some(Version {
-                        major: 1,
-                        minor: 0,
-                        patch: 0,
-                    }),
-                )
-            })
-            .map_err(|_| PyValueError::new_err("fetch component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(
+                FETCH_COMPONENT,
+                Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+            )?,
             inner: Arc::new(toolset),
         })
     }

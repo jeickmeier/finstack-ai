@@ -21,8 +21,8 @@ use super::{
 };
 
 /// Event body variants.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum RunEventBody {
     /// Run accepted.
     RunAccepted(RunAccepted),
@@ -62,7 +62,11 @@ pub enum RunEventBody {
     /// Reserved run suspended.
     RunSuspended {
         /// Optional reason code.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_reason_code"
+        )]
         reason_code: Option<Arc<str>>,
     },
     /// Run completed.
@@ -93,81 +97,12 @@ pub enum RunEventBody {
     ProviderHeartbeat(ProviderHeartbeat),
 }
 
-impl<'de> Deserialize<'de> for RunEventBody {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields, rename_all = "snake_case")]
-        enum Wire {
-            RunAccepted(RunAccepted),
-            EffectRequested(EffectRequested),
-            EffectDeferred(EffectDeferred),
-            EffectCompleted(EffectCompleted),
-            EffectFailed(EffectFailed),
-            EffectCancelled(EffectCancelled),
-            InteractionRequested(InteractionRequest),
-            InteractionResolved(InteractionResolution),
-            InteractionExpired(InteractionExpired),
-            InteractionCancelled(InteractionCancelled),
-            MessageFinalized {
-                message_id: MessageId,
-            },
-            ToolSettled {
-                tool_call_id: ToolCallId,
-            },
-            LimitReached {
-                dimension: LimitDimension,
-            },
-            RunSuspended {
-                #[serde(default)]
-                reason_code: Option<BoundedString<LABEL_MAX_BYTES>>,
-            },
-            RunCompleted {
-                result_digest: Digest,
-            },
-            RunFailed {
-                error: ErrorDescriptor,
-            },
-            RunCancelled {
-                #[serde(default)]
-                request_id: Option<CancellationRequestId>,
-            },
-            ModelTextDelta(ModelTextDelta),
-            ReasoningDelta(ReasoningDelta),
-            ToolProgress(ToolProgress),
-            QueueDepthWarning(QueueDepthWarning),
-            ProviderHeartbeat(ProviderHeartbeat),
-        }
-
-        Ok(match Wire::deserialize(deserializer)? {
-            Wire::RunAccepted(value) => Self::RunAccepted(value),
-            Wire::EffectRequested(value) => Self::EffectRequested(value),
-            Wire::EffectDeferred(value) => Self::EffectDeferred(value),
-            Wire::EffectCompleted(value) => Self::EffectCompleted(value),
-            Wire::EffectFailed(value) => Self::EffectFailed(value),
-            Wire::EffectCancelled(value) => Self::EffectCancelled(value),
-            Wire::InteractionRequested(value) => Self::InteractionRequested(value),
-            Wire::InteractionResolved(value) => Self::InteractionResolved(value),
-            Wire::InteractionExpired(value) => Self::InteractionExpired(value),
-            Wire::InteractionCancelled(value) => Self::InteractionCancelled(value),
-            Wire::MessageFinalized { message_id } => Self::MessageFinalized { message_id },
-            Wire::ToolSettled { tool_call_id } => Self::ToolSettled { tool_call_id },
-            Wire::LimitReached { dimension } => Self::LimitReached { dimension },
-            Wire::RunSuspended { reason_code } => Self::RunSuspended {
-                reason_code: reason_code.map(|value| Arc::from(value.into_inner())),
-            },
-            Wire::RunCompleted { result_digest } => Self::RunCompleted { result_digest },
-            Wire::RunFailed { error } => Self::RunFailed { error },
-            Wire::RunCancelled { request_id } => Self::RunCancelled { request_id },
-            Wire::ModelTextDelta(value) => Self::ModelTextDelta(value),
-            Wire::ReasoningDelta(value) => Self::ReasoningDelta(value),
-            Wire::ToolProgress(value) => Self::ToolProgress(value),
-            Wire::QueueDepthWarning(value) => Self::QueueDepthWarning(value),
-            Wire::ProviderHeartbeat(value) => Self::ProviderHeartbeat(value),
-        })
-    }
+fn deserialize_reason_code<'de, D>(deserializer: D) -> Result<Option<Arc<str>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<BoundedString<LABEL_MAX_BYTES>>::deserialize(deserializer)
+        .map(|code| code.map(|value| Arc::from(value.into_inner())))
 }
 
 impl RunEventBody {

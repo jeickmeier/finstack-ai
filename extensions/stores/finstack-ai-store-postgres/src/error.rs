@@ -1,4 +1,5 @@
 use finstack_ai_runtime::ports::journal::StoreError;
+use tokio_postgres::{Client, IsolationLevel, Transaction};
 
 use crate::pool::PooledClient;
 
@@ -75,17 +76,12 @@ impl Failure {
 /// the checkout when the failure demands it (spec D2/D5), then surface the
 /// caller-facing [`StoreError`].
 ///
-/// Every op module ends the same way — the op body returns
-/// `Result<T, Failure>` on a checkout the caller still owns, and the
-/// disposition of that checkout is decided from the failure's poison flag.
-/// Lifting it here keeps the six call sites from drifting.
-///
-/// Generic over the pooled connection type for the same reason
-/// [`PooledClient`] is: production only ever settles a
-/// `PooledClient<tokio_postgres::Client>`.
-pub(crate) fn settle<T, C>(
+/// Every op ends the same way — [`write_op`] and [`read_op`] run the op body
+/// on a checkout the caller still owns, and the disposition of that checkout
+/// is decided from the failure's poison flag.
+fn settle<T>(
     outcome: Result<T, Failure>,
-    client: &mut PooledClient<C>,
+    client: &mut PooledClient<Client>,
 ) -> Result<T, StoreError> {
     match outcome {
         Ok(value) => Ok(value),
@@ -106,13 +102,10 @@ pub(crate) fn settle<T, C>(
 /// connection. A `COMMIT` that fails *with* a SQLSTATE was decided by the
 /// server and is classified normally by [`Failure::from_driver`].
 ///
-/// Only the write paths (append, prune, `write_snapshot`, `write_metadata`)
-/// use this. The read paths commit their read-only transactions with the
-/// plain [`Failure::from_driver`] mapping: nothing was written, so there is
-/// no durability outcome to be ambiguous about.
-pub(crate) async fn commit_or_ambiguous(
-    transaction: tokio_postgres::Transaction<'_>,
-) -> Result<(), Failure> {
+/// Only [`write_op`] uses this. [`read_op`] commits its read-only
+/// transaction with the plain [`Failure::from_driver`] mapping: nothing was
+/// written, so there is no durability outcome to be ambiguous about.
+async fn commit_or_ambiguous(transaction: Transaction<'_>) -> Result<(), Failure> {
     match transaction.commit().await {
         Ok(()) => Ok(()),
         Err(error) if error.code().is_none() => Err(Failure {
@@ -121,6 +114,80 @@ pub(crate) async fn commit_or_ambiguous(
         }),
         Err(error) => Err(Failure::from_driver(&error)),
     }
+}
+
+/// Prepare the statements one write needs, run `op` over them inside one
+/// transaction on `client`, drive it to `COMMIT` (via
+/// [`commit_or_ambiguous`]) or `ROLLBACK`, and settle the checkout's
+/// disposition.
+///
+/// Statements are prepared *before* the transaction opens: `Client::transaction`
+/// borrows the client mutably, and the statement cache lives on the checkout
+/// (see [`PooledClient::prepared`]).
+pub(crate) async fn write_op<S, T>(
+    client: &mut PooledClient<Client>,
+    prepare: impl AsyncFnOnce(&mut PooledClient<Client>) -> Result<S, Failure>,
+    op: impl AsyncFnOnce(&Transaction<'_>, &S) -> Result<T, Failure>,
+) -> Result<T, StoreError> {
+    let outcome = match prepare(client).await {
+        Ok(statements) => match client.transaction().await {
+            Ok(transaction) => match op(&transaction, &statements).await {
+                Ok(value) => commit_or_ambiguous(transaction).await.map(|()| value),
+                Err(failure) => Err(rolled_back(transaction, failure).await),
+            },
+            Err(error) => Err(Failure::from_driver(&error)),
+        },
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
+}
+
+/// [`write_op`]'s read-only twin: `op` runs inside one `READ ONLY REPEATABLE
+/// READ` transaction, so every statement observes one instant of the journal.
+///
+/// Nothing is written, so the closing `COMMIT` is classified by the plain
+/// [`Failure::from_driver`] mapping: there is no durability outcome to be
+/// ambiguous about, but the transaction still has to be ended before the
+/// connection is reusable.
+pub(crate) async fn read_op<S, T>(
+    client: &mut PooledClient<Client>,
+    prepare: impl AsyncFnOnce(&mut PooledClient<Client>) -> Result<S, Failure>,
+    op: impl AsyncFnOnce(&Transaction<'_>, &S) -> Result<T, Failure>,
+) -> Result<T, StoreError> {
+    let outcome = match prepare(client).await {
+        Ok(statements) => {
+            let started = client
+                .build_transaction()
+                .isolation_level(IsolationLevel::RepeatableRead)
+                .read_only(true)
+                .start()
+                .await;
+            match started {
+                Ok(transaction) => match op(&transaction, &statements).await {
+                    Ok(value) => transaction
+                        .commit()
+                        .await
+                        .map(|()| value)
+                        .map_err(|error| Failure::from_driver(&error)),
+                    Err(failure) => Err(rolled_back(transaction, failure).await),
+                },
+                Err(error) => Err(Failure::from_driver(&error)),
+            }
+        }
+        Err(failure) => Err(failure),
+    };
+    settle(outcome, client)
+}
+
+/// Roll `transaction` back after `failure`. A rollback that could not be
+/// delivered leaves the connection possibly still inside the transaction (or
+/// dead), so it poisons the failure even when the original error was purely
+/// logical; it never shadows that original error.
+async fn rolled_back(transaction: Transaction<'_>, mut failure: Failure) -> Failure {
+    if transaction.rollback().await.is_err() {
+        failure.poison = true;
+    }
+    failure
 }
 
 /// Convert an unsigned 64-bit value to the signed 64-bit representation used
@@ -132,6 +199,11 @@ pub(crate) fn i64_from_u64(value: u64, reason_code: &'static str) -> Result<i64,
 /// Convert a stored `BIGINT` back to its unsigned representation.
 pub(crate) fn u64_from_i64(value: i64, reason_code: &'static str) -> Result<u64, StoreError> {
     u64::try_from(value).map_err(|_| StoreError::Integrity { reason_code })
+}
+
+/// Convert a stored `BIGINT` count to `usize`.
+pub(crate) fn usize_from_i64(value: i64, reason_code: &'static str) -> Result<usize, StoreError> {
+    usize::try_from(value).map_err(|_| StoreError::Integrity { reason_code })
 }
 
 /// Classify a SQLSTATE code (and whether the connection was already closed)

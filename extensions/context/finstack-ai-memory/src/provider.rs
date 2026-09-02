@@ -1,5 +1,5 @@
 //! [`MemoryContextProvider`]: a store-backed `ContextProvider` that recalls
-//! matching [`MemoryRecord`](crate::record::MemoryRecord)s into bounded, cache-stable context items.
+//! matching [`MemoryRecord`]s into bounded, cache-stable context items.
 //!
 //! This provider never mutates conversation history, never writes to the
 //! [`MemoryStore`], and never reconciles artifact ownership or the
@@ -23,7 +23,7 @@ use finstack_ai_runtime::ports::context::{
     ContextProviderDescriptor, ContextRequest,
 };
 
-use crate::record::{MemoryError, MemoryId, MemoryScope};
+use crate::record::{MemoryBody, MemoryError, MemoryId, MemoryRecord, MemoryScope};
 use crate::store::{MatchEvidence, MemoryHit, MemoryQuery, MemoryStore};
 
 /// Stable component identity for [`MemoryContextProvider`].
@@ -135,12 +135,11 @@ impl MemoryContextProvider {
                 "dimensions": embedder_descriptor.dimensions,
             });
         }
-        let identity =
-            serde_json_canonicalizer::to_vec(&identity_value).map_err(|_| {
-                MemoryError::Configuration {
-                    reason: "invalid_provider_identity",
-                }
-            })?;
+        let identity = serde_json_canonicalizer::to_vec(&identity_value).map_err(|_| {
+            MemoryError::Configuration {
+                reason: "invalid_provider_identity",
+            }
+        })?;
         let configuration_digest = Digest::domain_separated("memory-provider", 1, &identity)
             .map_err(|_| MemoryError::Configuration {
                 reason: "invalid_provider_identity",
@@ -241,9 +240,8 @@ async fn search_candidates(
     embedder: Option<&dyn TextEmbedder>,
     scope: &MemoryScope,
     query: &str,
-    max_hits: usize,
+    limit: usize,
 ) -> Result<Vec<MemoryHit>, ContextError> {
-    let limit = max_hits;
     let tokens: Arc<[Arc<str>]> = query
         .split_whitespace()
         .map(Arc::<str>::from)
@@ -361,8 +359,7 @@ pub(crate) fn tier_of(evidence: &MatchEvidence) -> u8 {
 
 fn build_item(hit: &MemoryHit) -> Result<ContextItem, ContextError> {
     let record = &hit.record;
-    let artifact_label = artifact_label(record);
-    let rendered = format!("{} [{}]", record.preview, artifact_label);
+    let rendered = format!("{} [{}]", record.preview, artifact_label(record));
     let estimated_tokens = estimate_tokens(&rendered);
     ContextItem::try_new(
         ContextItemKind::Reference,
@@ -382,13 +379,10 @@ fn build_item(hit: &MemoryHit) -> Result<ContextItem, ContextError> {
     )
 }
 
-fn artifact_label(record: &crate::record::MemoryRecord) -> Arc<str> {
+fn artifact_label(record: &MemoryRecord) -> &str {
     match &record.body {
-        crate::record::MemoryBody::Inline(_) => Arc::from("memory"),
-        crate::record::MemoryBody::Blob { artifact, .. } => artifact
-            .blob()
-            .name()
-            .map_or_else(|| Arc::from("memory"), Arc::from),
+        MemoryBody::Inline(_) => "memory",
+        MemoryBody::Blob { artifact, .. } => artifact.blob().name().unwrap_or("memory"),
     }
 }
 
@@ -407,9 +401,6 @@ fn query_text(request: &ContextRequest) -> String {
 /// Apply the request's budget to `entries` in order, then attach a cache key
 /// computed from `(id, last_confirmed_at)` pairs of the accepted items in
 /// their final order.
-///
-/// Returns the built contribution plus the accepted ids (for stable-prefix
-/// bookkeeping).
 fn apply_budget(
     entries: Vec<RecallEntry>,
     request: &ContextRequest,

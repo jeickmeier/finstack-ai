@@ -49,8 +49,9 @@ mod skills;
 mod store;
 mod toolsets;
 
+use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
 use pyo3::create_exception;
-use pyo3::exceptions::PyException;
+use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
 
 use agent::{PyAgent, PyHistoryCachePolicy};
@@ -84,6 +85,13 @@ use store::{PyS3ArtifactStore, PySqliteDurability};
 use toolsets::{PyCalculatorToolset, PyFileSystemToolset, PyMcpToolset, PyShellToolset};
 
 pub(crate) const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Parse `id` into the versioned component reference a native handle registers under.
+pub(crate) fn component_ref(id: &str, version: Version) -> PyResult<ComponentRef> {
+    ComponentId::parse(id)
+        .map(|id| ComponentRef::new(id, Some(version)))
+        .map_err(|error| PyValueError::new_err(error.to_string()))
+}
 
 create_exception!(
     _finstack_ai,

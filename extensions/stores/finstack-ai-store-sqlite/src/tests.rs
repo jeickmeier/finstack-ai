@@ -339,8 +339,7 @@ fn scan_verifies_page_from_stored_checkpoint() {
 fn list_sessions_enumerates_rows_with_heads_and_metadata() {
     let store = memory_store();
     block_on(store.append(request(70, 7, 1, vec![draft(70, 7)]))).expect("session 7");
-    block_on(store.append(request(80, 8, 1, vec![draft(80, 8), draft(81, 8)])))
-        .expect("session 8");
+    block_on(store.append(request(80, 8, 1, vec![draft(80, 8), draft(81, 8)]))).expect("session 8");
     let mut rows = block_on(store.list_sessions(16)).expect("list");
     rows.sort_by_key(|row| row.head_sequence);
     assert_eq!(rows.len(), 2);
@@ -350,7 +349,11 @@ fn list_sessions_enumerates_rows_with_heads_and_metadata() {
     assert_eq!(rows[1].head_sequence, 2);
     // Empty store lists empty; zero limit is invalid.
     let empty = memory_store();
-    assert!(block_on(empty.list_sessions(16)).expect("empty list").is_empty());
+    assert!(
+        block_on(empty.list_sessions(16))
+            .expect("empty list")
+            .is_empty()
+    );
     assert!(block_on(store.list_sessions(0)).is_err());
 }
 
@@ -784,7 +787,7 @@ fn append_identity_encoding_is_stable() {
     // `append_batch_id_reuse`. Do not update the constant without a schema
     // migration story.
     let frozen = request(7, 3, 1, vec![draft(70, 3), draft(71, 3)]);
-    let bytes = crate::append::request_cbor(&frozen).expect("encode identity");
+    let bytes = finstack_ai_store_common::request_cbor(&frozen).expect("encode identity");
     let digest = finstack_ai_kernel::Digest::raw_json(&bytes);
     assert_eq!(
         digest.to_hex(),

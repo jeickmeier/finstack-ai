@@ -11,8 +11,8 @@
 use finstack_ai_kernel::{Digest, SessionId};
 use tokio_postgres::{Statement, Transaction};
 
-use crate::error::{Failure, u64_from_i64};
-use crate::load::{digest_from_bytes, usize_from_i64};
+use crate::error::{Failure, u64_from_i64, usize_from_i64};
+use crate::load::digest_from_bytes;
 
 /// The session row's committed footprint, read under `FOR UPDATE`.
 pub(crate) struct LockedSession {

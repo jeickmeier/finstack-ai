@@ -2,7 +2,7 @@
 //! non-durable deployments.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use finstack_ai_kernel::{SessionId, Timestamp};
 
@@ -38,36 +38,28 @@ impl MemoryWorkerStore {
     }
 }
 
+/// Lock one adapter table, failing closed on a poisoned mutex.
+fn locked<T>(table: &Mutex<T>) -> Result<MutexGuard<'_, T>, WorkerError> {
+    table.lock().map_err(|_| WorkerError::StoreUnavailable {
+        code: "memory_worker_lock_poisoned",
+    })
+}
+
 impl WakeIndexStore for MemoryWorkerStore {
     fn upsert(&self, row: &WakeRow) -> Result<(), WorkerError> {
-        let mut wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut wake = locked(&self.wake)?;
         wake.insert((Arc::clone(&row.tenant_scope), row.session_id), row.clone());
         Ok(())
     }
 
     fn delete(&self, tenant_scope: &str, session_id: SessionId) -> Result<(), WorkerError> {
-        let mut wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut wake = locked(&self.wake)?;
         wake.remove(&(Arc::from(tenant_scope), session_id));
         Ok(())
     }
 
     fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
-        let wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let wake = locked(&self.wake)?;
         Ok(wake
             .values()
             .filter(|row| lease_open(row, now) && wake_due(row, now))
@@ -77,12 +69,7 @@ impl WakeIndexStore for MemoryWorkerStore {
     }
 
     fn load_tenant(&self, tenant_scope: &str) -> Result<Vec<WakeRow>, WorkerError> {
-        let wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let wake = locked(&self.wake)?;
         Ok(wake
             .values()
             .filter(|row| row.tenant_scope.as_ref() == tenant_scope)
@@ -95,12 +82,7 @@ impl WakeIndexStore for MemoryWorkerStore {
         tenant_scope: &str,
         pending_id: &str,
     ) -> Result<bool, WorkerError> {
-        let wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let wake = locked(&self.wake)?;
         Ok(wake.values().any(|row| {
             row.tenant_scope.as_ref() == tenant_scope
                 && row.reason == crate::wake::WakeReason::Interaction
@@ -116,12 +98,7 @@ impl WakeIndexStore for MemoryWorkerStore {
         now: Timestamp,
         lease_ttl_ms: u64,
     ) -> Result<bool, WorkerError> {
-        let mut wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut wake = locked(&self.wake)?;
         let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
             return Ok(false);
         };
@@ -141,12 +118,7 @@ impl WakeIndexStore for MemoryWorkerStore {
         now: Timestamp,
         lease_ttl_ms: u64,
     ) -> Result<bool, WorkerError> {
-        let mut wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut wake = locked(&self.wake)?;
         let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
             return Ok(false);
         };
@@ -163,12 +135,7 @@ impl WakeIndexStore for MemoryWorkerStore {
         session_id: SessionId,
         worker_id: &str,
     ) -> Result<bool, WorkerError> {
-        let mut wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut wake = locked(&self.wake)?;
         let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
             return Ok(false);
         };
@@ -186,12 +153,7 @@ impl WakeIndexStore for MemoryWorkerStore {
         session_id: SessionId,
         retry_at: Timestamp,
     ) -> Result<(), WorkerError> {
-        let mut wake = self
-            .wake
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut wake = locked(&self.wake)?;
         let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
             return Ok(());
         };
@@ -205,12 +167,7 @@ impl WakeIndexStore for MemoryWorkerStore {
 
 impl FireStore for MemoryWorkerStore {
     fn record_claimed(&self, row: &FireRow) -> Result<(), WorkerError> {
-        let mut fires = self
-            .fires
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut fires = locked(&self.fires)?;
         let key = (
             Arc::clone(&row.tenant_scope),
             Arc::clone(&row.schedule_id),
@@ -227,12 +184,7 @@ impl FireStore for MemoryWorkerStore {
         fire_count: u64,
         started_session: SessionId,
     ) -> Result<FireStartOutcome, WorkerError> {
-        let mut fires = self
-            .fires
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut fires = locked(&self.fires)?;
         let key = (Arc::from(tenant_scope), Arc::from(schedule_id), fire_count);
         let row = fires.get_mut(&key).ok_or(WorkerError::StoreIntegrity {
             code: "fire_missing",
@@ -253,12 +205,7 @@ impl FireStore for MemoryWorkerStore {
     }
 
     fn load_unstarted(&self, limit: usize) -> Result<Vec<FireRow>, WorkerError> {
-        let fires = self
-            .fires
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let fires = locked(&self.fires)?;
         Ok(fires
             .values()
             .filter(|row| row.status == FireStatus::Claimed)
@@ -268,12 +215,7 @@ impl FireStore for MemoryWorkerStore {
     }
 
     fn purge_started(&self, before: Timestamp, limit: usize) -> Result<usize, WorkerError> {
-        let mut fires = self
-            .fires
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut fires = locked(&self.fires)?;
         let keys: Vec<_> = fires
             .iter()
             .filter(|(_, row)| row.status == FireStatus::Started && row.fired_at < before)
@@ -294,12 +236,7 @@ impl InboxStore for MemoryWorkerStore {
                 code: "inbox_digest",
             });
         }
-        let mut inbox = self
-            .inbox
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut inbox = locked(&self.inbox)?;
         let key = (
             Arc::clone(&row.tenant_scope),
             row.session_id,
@@ -327,12 +264,7 @@ impl InboxStore for MemoryWorkerStore {
         session_id: SessionId,
         pending_id: &str,
     ) -> Result<Option<InboxRow>, WorkerError> {
-        let inbox = self
-            .inbox
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let inbox = locked(&self.inbox)?;
         Ok(inbox
             .active
             .get(&(Arc::from(tenant_scope), session_id, Arc::from(pending_id)))
@@ -340,12 +272,7 @@ impl InboxStore for MemoryWorkerStore {
     }
 
     fn load_batch(&self, limit: usize) -> Result<Vec<InboxRow>, WorkerError> {
-        let inbox = self
-            .inbox
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let inbox = locked(&self.inbox)?;
         Ok(inbox.active.values().take(limit).cloned().collect())
     }
 
@@ -356,12 +283,7 @@ impl InboxStore for MemoryWorkerStore {
         pending_id: &str,
         expected_digest: finstack_ai_kernel::Digest,
     ) -> Result<bool, WorkerError> {
-        let mut inbox = self
-            .inbox
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut inbox = locked(&self.inbox)?;
         let key = (Arc::from(tenant_scope), session_id, Arc::from(pending_id));
         if inbox
             .active
@@ -384,12 +306,7 @@ impl InboxStore for MemoryWorkerStore {
         rejected_at: Timestamp,
     ) -> Result<bool, WorkerError> {
         let key = (Arc::from(tenant_scope), session_id, Arc::from(pending_id));
-        let mut inbox = self
-            .inbox
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut inbox = locked(&self.inbox)?;
         if inbox
             .active
             .get(&key)
@@ -417,22 +334,12 @@ impl InboxStore for MemoryWorkerStore {
     }
 
     fn load_dead_letters(&self, limit: usize) -> Result<Vec<DeadLetterRow>, WorkerError> {
-        let inbox = self
-            .inbox
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let inbox = locked(&self.inbox)?;
         Ok(inbox.dead_letters.iter().take(limit).cloned().collect())
     }
 
     fn purge_dead_letters(&self, before: Timestamp, limit: usize) -> Result<usize, WorkerError> {
-        let mut inbox = self
-            .inbox
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "memory_worker_lock_poisoned",
-            })?;
+        let mut inbox = locked(&self.inbox)?;
         let mut removed = 0_usize;
         inbox.dead_letters.retain(|row| {
             if removed < limit && row.rejected_at < before {

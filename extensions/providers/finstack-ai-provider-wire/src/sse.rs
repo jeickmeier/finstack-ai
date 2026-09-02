@@ -1,87 +1,5 @@
 //! Target-neutral SSE framing and event-field parsing.
 
-/// Incremental SSE frame splitter. Event interpretation stays in the caller.
-#[derive(Debug)]
-pub(crate) struct SseFrameParser {
-    buffer: Vec<u8>,
-    total_bytes: usize,
-    max_event_bytes: usize,
-    max_stream_bytes: usize,
-}
-
-impl SseFrameParser {
-    /// Construct a bounded frame parser.
-    #[must_use]
-    pub const fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
-        Self {
-            buffer: Vec::new(),
-            total_bytes: 0,
-            max_event_bytes,
-            max_stream_bytes,
-        }
-    }
-
-    /// Push bytes and return complete frames without their separators.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SseFrameError::Limit`] when an event or the stream exceeds its ceiling.
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Vec<u8>>, SseFrameError> {
-        self.total_bytes = self
-            .total_bytes
-            .checked_add(bytes.len())
-            .ok_or(SseFrameError::Limit)?;
-        if self.total_bytes > self.max_stream_bytes {
-            return Err(SseFrameError::Limit);
-        }
-        self.buffer.extend_from_slice(bytes);
-        let mut frames = Vec::new();
-        let mut cursor = 0;
-        while let Some((boundary, separator_len)) = event_boundary(&self.buffer[cursor..]) {
-            if boundary > self.max_event_bytes {
-                return Err(SseFrameError::Limit);
-            }
-            frames.push(self.buffer[cursor..cursor + boundary].to_vec());
-            cursor += boundary + separator_len;
-        }
-        if cursor > 0 {
-            self.buffer.drain(..cursor);
-        }
-        if self.buffer.len() > self.max_event_bytes {
-            return Err(SseFrameError::Limit);
-        }
-        Ok(frames)
-    }
-
-    /// Whether any unfinished non-whitespace bytes remain.
-    #[must_use]
-    pub fn finish_clean(&self) -> bool {
-        self.buffer.iter().all(u8::is_ascii_whitespace)
-    }
-}
-
-/// SSE framing failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SseFrameError {
-    /// An event or the accumulated stream exceeded its configured ceiling.
-    Limit,
-}
-
-fn event_boundary(bytes: &[u8]) -> Option<(usize, usize)> {
-    let lf = bytes
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|position| (position, 2));
-    let crlf = bytes
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|position| (position, 4));
-    match (lf, crlf) {
-        (Some(left), Some(right)) => Some(if left.0 < right.0 { left } else { right }),
-        (left, right) => left.or(right),
-    }
-}
-
 /// One parsed SSE event after `event:` / `data:` field splitting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SseEvent {
@@ -105,7 +23,10 @@ pub enum SseParseError {
 /// Incremental SSE event parser used by every first-party wire protocol.
 #[derive(Debug)]
 pub struct SseEventParser {
-    frames: SseFrameParser,
+    buffer: Vec<u8>,
+    total_bytes: usize,
+    max_event_bytes: usize,
+    max_stream_bytes: usize,
 }
 
 impl SseEventParser {
@@ -113,7 +34,10 @@ impl SseEventParser {
     #[must_use]
     pub const fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
         Self {
-            frames: SseFrameParser::new(max_event_bytes, max_stream_bytes),
+            buffer: Vec::new(),
+            total_bytes: 0,
+            max_event_bytes,
+            max_stream_bytes,
         }
     }
 
@@ -123,20 +47,55 @@ impl SseEventParser {
     ///
     /// Returns [`SseParseError`] when framing, UTF-8, or event-name rules fail.
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, SseParseError> {
-        let frames = self.frames.push(bytes).map_err(|_| SseParseError::Limit)?;
+        self.total_bytes = self
+            .total_bytes
+            .checked_add(bytes.len())
+            .ok_or(SseParseError::Limit)?;
+        if self.total_bytes > self.max_stream_bytes {
+            return Err(SseParseError::Limit);
+        }
+        self.buffer.extend_from_slice(bytes);
+        let mut frames = Vec::new();
+        let mut cursor = 0;
+        while let Some((boundary, separator_len)) = event_boundary(&self.buffer[cursor..]) {
+            if boundary > self.max_event_bytes {
+                return Err(SseParseError::Limit);
+            }
+            frames.push(cursor..cursor + boundary);
+            cursor += boundary + separator_len;
+        }
+        if self.buffer.len() - cursor > self.max_event_bytes {
+            return Err(SseParseError::Limit);
+        }
         let mut events = Vec::new();
         for frame in frames {
-            if let Some(event) = parse_frame(&frame)? {
+            if let Some(event) = parse_frame(&self.buffer[frame])? {
                 events.push(event);
             }
         }
+        self.buffer.drain(..cursor);
         Ok(events)
     }
 
     /// Whether any unfinished non-whitespace bytes remain.
     #[must_use]
     pub fn finish_clean(&self) -> bool {
-        self.frames.finish_clean()
+        self.buffer.iter().all(u8::is_ascii_whitespace)
+    }
+}
+
+fn event_boundary(bytes: &[u8]) -> Option<(usize, usize)> {
+    let lf = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|position| (position, 2));
+    let crlf = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| (position, 4));
+    match (lf, crlf) {
+        (Some(left), Some(right)) => Some(if left.0 < right.0 { left } else { right }),
+        (left, right) => left.or(right),
     }
 }
 

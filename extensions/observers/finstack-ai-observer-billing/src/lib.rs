@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, EffectId, EffectInput, EffectKind, EffectOutputKind, Metadata,
-    RunEvent, RunEventBody, RunEventKind, RunId, SessionId, Usage, Version, label_is_valid,
+    RunEvent, RunEventBody, RunId, SessionId, Usage, Version, label_is_valid,
 };
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::observer::{
@@ -323,14 +323,10 @@ impl BillingObserver {
     }
 
     fn ingest(&self, event: &RunEvent) {
-        // Compute the EffectRequested origin (provider + model name) before
+        // Parse the model-request origin (provider + model name) before
         // taking the state lock; the parse work does not need the lock held.
-        let mut model_name_invalid = false;
-        let requested_origin =
-            if let (RunEventKind::EffectRequested, RunEventBody::EffectRequested(body)) =
-                (event.kind(), event.body())
-                && body.kind() == EffectKind::Model
-            {
+        let requested = match event.body() {
+            RunEventBody::EffectRequested(body) if body.kind() == EffectKind::Model => {
                 let provider = body.component().map(|invocation| {
                     ComponentRef::new(invocation.component.clone(), Some(invocation.version))
                 });
@@ -338,74 +334,64 @@ impl BillingObserver {
                     EffectInput::Model { request } => parse_model_name(request.as_str()),
                     _ => None,
                 };
-                if model.is_none() {
-                    model_name_invalid = true;
-                }
                 Some((body.effect_id(), EffectOrigin { provider, model }))
-            } else {
-                None
-            };
+            }
+            _ => None,
+        };
 
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let mut saturated = false;
-        let mut pending_saturated = false;
-        match event.kind() {
-            RunEventKind::EffectCompleted => {
-                if let RunEventBody::EffectCompleted(body) = event.body() {
-                    saturated = !settle_effect(
-                        &mut state,
-                        self.max_entries,
-                        event.session_id(),
-                        event.run_id(),
-                        body.effect_id(),
-                        body.output_contract().kind == EffectOutputKind::ModelResponse,
-                        body.usage(),
-                    );
+        let diagnostic = match event.body() {
+            RunEventBody::EffectRequested(_) => requested.and_then(|(effect_id, origin)| {
+                let model_name_invalid = origin.model.is_none();
+                let pending_saturated = state.pending.len() >= MAX_PENDING_EFFECTS;
+                if pending_saturated {
+                    state.pending.pop_first();
                 }
-            }
-            RunEventKind::EffectRequested => {
-                if let Some((effect_id, origin)) = requested_origin {
-                    if state.pending.len() >= MAX_PENDING_EFFECTS {
-                        pending_saturated = true;
-                        state.pending.pop_first();
-                    }
-                    state.pending.insert(effect_id, origin);
+                state.pending.insert(effect_id, origin);
+                if model_name_invalid {
+                    Some(BILLING_MODEL_NAME_INVALID)
+                } else if pending_saturated {
+                    Some(BILLING_PENDING_SATURATED)
+                } else {
+                    None
                 }
-            }
-            RunEventKind::EffectFailed => {
-                if let RunEventBody::EffectFailed(body) = event.body() {
-                    saturated = !settle_effect(
-                        &mut state,
-                        self.max_entries,
-                        event.session_id(),
-                        event.run_id(),
-                        body.effect_id(),
-                        body.output_contract().kind == EffectOutputKind::ModelResponse,
-                        body.usage(),
-                    );
-                }
-            }
-            RunEventKind::EffectCancelled => {
+            }),
+            RunEventBody::EffectCompleted(body) => settle(
+                &mut state,
+                self.max_entries,
+                event.session_id(),
+                event.run_id(),
+                body.effect_id(),
+                body.output_contract().kind == EffectOutputKind::ModelResponse,
+                body.usage(),
+            ),
+            RunEventBody::EffectFailed(body) => settle(
+                &mut state,
+                self.max_entries,
+                event.session_id(),
+                event.run_id(),
+                body.effect_id(),
+                body.output_contract().kind == EffectOutputKind::ModelResponse,
+                body.usage(),
+            ),
+            RunEventBody::EffectCancelled(_) => {
                 if let Some(effect_id) = event.effect_id() {
                     state.pending.remove(&effect_id);
                 }
+                None
             }
             // `EffectDeferred` intentionally falls through here: deferral
             // then completion under the same EffectId is the kernel's
             // intended lifecycle, so the pending origin must survive it.
-            _ => {}
-        }
+            _ => None,
+        };
         drop(state);
-        if saturated && let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(BILLING_LEDGER_SATURATED);
-        }
-        if pending_saturated && let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(BILLING_PENDING_SATURATED);
-        }
-        if model_name_invalid && let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(BILLING_MODEL_NAME_INVALID);
+        if let Some(diagnostic) = diagnostic
+            && let Ok(mut slot) = self.diagnostic.lock()
+        {
+            *slot = Some(diagnostic);
         }
     }
 }
@@ -424,11 +410,13 @@ impl Observer for BillingObserver {
 }
 
 /// Remove any pending origin tracked for `effect_id` and fold the settled
-/// effect into the ledger. Bumps `unattributed_effects` only when `is_model`
-/// is true and no pending origin was found — non-model (tool, context)
-/// effects are never attribution-tracked, so their settlement without a
-/// pending origin is expected, not a miss.
-fn settle_effect(
+/// effect into the ledger. `usage` may be absent. Bumps
+/// `unattributed_effects` only when `is_model` is true and no pending origin
+/// was found — non-model (tool, context) effects are never
+/// attribution-tracked, so their settlement without a pending origin is
+/// expected, not a miss. Returns the saturation diagnostic when the ledger's
+/// entry bound rejected a new attribution key.
+fn settle(
     state: &mut LedgerState,
     max_entries: usize,
     session_id: SessionId,
@@ -436,38 +424,22 @@ fn settle_effect(
     effect_id: EffectId,
     is_model: bool,
     usage: Option<&Usage>,
-) -> bool {
+) -> Option<ObserverDiagnostic> {
     let origin = state.pending.remove(&effect_id);
     if origin.is_none() && is_model {
         state.unattributed_effects = state.unattributed_effects.saturating_add(1);
     }
-    settle(state, max_entries, session_id, run_id, origin, usage)
-}
-
-/// Fold one settled effect into the ledger. `usage` may be absent.
-fn settle(
-    state: &mut LedgerState,
-    max_entries: usize,
-    session_id: SessionId,
-    run_id: RunId,
-    origin: Option<EffectOrigin>,
-    usage: Option<&Usage>,
-) -> bool {
-    let (provider, model) = match origin {
-        Some(origin) => (origin.provider, origin.model),
-        None => (None, None),
-    };
+    let (provider, model) = origin.map_or((None, None), |origin| (origin.provider, origin.model));
     let key = (session_id, run_id, model);
     if !state.entries.contains_key(&key) && state.entries.len() >= max_entries {
         state.overflowed_events = state.overflowed_events.saturating_add(1);
-        return false;
+        return Some(BILLING_LEDGER_SATURATED);
     }
     let entry = state.entries.entry(key).or_default();
     if entry.provider.is_none() {
         entry.provider = provider;
     }
     entry.effects = entry.effects.saturating_add(1);
-    let cost = usage.and_then(Usage::cost);
     if let Some(usage) = usage {
         entry.input_tokens = entry
             .input_tokens
@@ -476,7 +448,7 @@ fn settle(
             .output_tokens
             .saturating_add(usage.output_tokens().unwrap_or(0));
     }
-    match cost {
+    match usage.and_then(Usage::cost) {
         Some(cost) => {
             let cell = entry
                 .spend
@@ -492,7 +464,7 @@ fn settle(
             entry.uncosted_effects = entry.uncosted_effects.saturating_add(1);
         }
     }
-    true
+    None
 }
 
 /// Render a component reference as `id@major.minor.patch`, or bare `id` when

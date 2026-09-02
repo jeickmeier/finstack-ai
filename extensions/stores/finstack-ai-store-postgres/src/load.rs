@@ -51,14 +51,14 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_protocol::{ChainAnchor, decode};
 use finstack_ai_runtime::ports::journal::{LoadWindow, LoadedSession, OpaqueSnapshot, StoreError};
-pub(crate) use finstack_ai_store_common::VerifiedHead;
 use finstack_ai_store_common::{
-    AppendIdentity, FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, WindowCodes, accelerated_from,
-    check_batch_alignment, protocol_error, verify_head_against_cache, verify_tail_records,
+    AppendIdentity, FROM_SEQUENCE_WINDOW, SNAPSHOT_WINDOW, VerifiedHead, WindowCodes,
+    accelerated_from, check_batch_alignment, protocol_error, verify_head_against_cache,
+    verify_tail_records,
 };
-use tokio_postgres::{Client, IsolationLevel, Statement, Transaction};
+use tokio_postgres::{Client, Statement, Transaction};
 
-use crate::error::{Failure, i64_from_u64, settle, u64_from_i64};
+use crate::error::{Failure, i64_from_u64, read_op, u64_from_i64};
 use crate::pool::PooledClient;
 
 /// Read the session row.
@@ -199,73 +199,22 @@ pub(crate) async fn load(
     window: LoadWindow,
     cached: Option<VerifiedHead>,
 ) -> Result<LoadedSession, StoreError> {
-    // Statements are prepared first: `Client::transaction` borrows the
-    // client mutably, and the statement cache lives on the checkout.
-    let outcome = match LoadStatements::prepare(client).await {
-        Ok(statements) => {
-            // `client` deref-coerces to the `&mut Client` this needs; the
-            // borrow (and the transaction that borrows from it) ends with
-            // the statement, before `poison` touches the checkout itself.
-            load_on_connection(
-                client,
-                &statements,
+    read_op(
+        client,
+        LoadStatements::prepare,
+        async |transaction, statements| {
+            load_session_window(
+                transaction,
+                statements,
                 session_id,
                 snapshot_bytes,
                 window,
                 cached,
             )
             .await
-        }
-        Err(failure) => Err(failure),
-    };
-    settle(outcome, client)
-}
-
-/// Run one load inside a read-only, repeatable-read transaction.
-async fn load_on_connection(
-    client: &mut Client,
-    statements: &LoadStatements,
-    session_id: SessionId,
-    snapshot_bytes: usize,
-    window: LoadWindow,
-    cached: Option<VerifiedHead>,
-) -> Result<LoadedSession, Failure> {
-    let transaction = client
-        .build_transaction()
-        .isolation_level(IsolationLevel::RepeatableRead)
-        .read_only(true)
-        .start()
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-
-    let loaded = match load_session_window(
-        &transaction,
-        statements,
-        session_id,
-        snapshot_bytes,
-        window,
-        cached,
+        },
     )
     .await
-    {
-        Ok(loaded) => loaded,
-        Err(mut failure) => {
-            // Same rule as append: a rollback that could not be delivered
-            // leaves the connection possibly still in a transaction, so it
-            // must not go back to the pool even for a logical failure.
-            if transaction.rollback().await.is_err() {
-                failure.poison = true;
-            }
-            return Err(failure);
-        }
-    };
-
-    // Nothing was written, but the read-only transaction still has to be
-    // ended before the connection is reusable.
-    match transaction.commit().await {
-        Ok(()) => Ok(loaded),
-        Err(error) => Err(Failure::from_driver(&error)),
-    }
 }
 
 /// Dispatch on the requested window (mirrors sqlite's `load_session_window`).
@@ -361,8 +310,7 @@ async fn load_session_from_sequence(
     from_sequence: u64,
     prior_checksum: Digest,
 ) -> Result<LoadedSession, Failure> {
-    let start = if from_sequence == 0 { 1 } else { from_sequence };
-    if start <= 1 {
+    if from_sequence <= 1 {
         // The window covers the whole journal: no prefix is omitted, so
         // there is nothing to chain from and this is a plain full load. The
         // cache is deliberately not consulted — the caller asked for a
@@ -376,8 +324,13 @@ async fn load_session_from_sequence(
         }
         .into());
     };
-    let stored =
-        load_records_from(transaction, &statements.records_from, session_id, start).await?;
+    let stored = load_records_from(
+        transaction,
+        &statements.records_from,
+        session_id,
+        from_sequence,
+    )
+    .await?;
     loaded_tail(
         transaction,
         statements,
@@ -386,7 +339,7 @@ async fn load_session_from_sequence(
         &session,
         stored,
         prior_checksum,
-        start,
+        from_sequence,
         FROM_SEQUENCE_WINDOW,
     )
     .await
@@ -788,7 +741,7 @@ pub(crate) async fn load_batch(
 
 /// Rebuild a [`RecordEnvelope`] from a stored row.
 ///
-/// Column order must match [`RECORD_COLUMNS`].
+/// Column order must match `record_columns!`.
 pub(crate) fn reconstruct_envelope(
     row: &tokio_postgres::Row,
 ) -> Result<RecordEnvelope, StoreError> {
@@ -838,11 +791,6 @@ pub(crate) fn reconstruct_envelope(
     .map_err(|_| StoreError::Integrity {
         reason_code: "postgres_envelope_invalid",
     })
-}
-
-/// Convert a stored `BIGINT` count to `usize`.
-pub(crate) fn usize_from_i64(value: i64, reason_code: &'static str) -> Result<usize, StoreError> {
-    usize::try_from(value).map_err(|_| StoreError::Integrity { reason_code })
 }
 
 /// Convert a stored `INTEGER` version column back to `u16`.

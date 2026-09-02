@@ -8,12 +8,6 @@ use crate::ENGINE_VERSION;
 use crate::callbacks::normalize_pydantic_schema;
 use crate::json_bridge::{json_to_py, py_to_json};
 
-pub(crate) const OPENAI_PROVIDER: &str = "openai";
-pub(crate) const ANTHROPIC_PROVIDER: &str = "anthropic";
-pub(crate) const GEMINI_PROVIDER: &str = "gemini";
-pub(crate) const OLLAMA_PROVIDER: &str = "ollama";
-pub(crate) const OPENROUTER_PROVIDER: &str = "openrouter";
-
 #[pyfunction]
 #[pyo3(text_signature = "()")]
 pub(crate) fn health() -> &'static str {
@@ -30,13 +24,7 @@ pub(crate) fn linked_providers() -> (
     &'static str,
 ) {
     let _ = finstack_ai_provider_anthropic::ANTHROPIC_MESSAGES_VERSION;
-    (
-        OPENAI_PROVIDER,
-        ANTHROPIC_PROVIDER,
-        GEMINI_PROVIDER,
-        OLLAMA_PROVIDER,
-        OPENROUTER_PROVIDER,
-    )
+    ("openai", "anthropic", "gemini", "ollama", "openrouter")
 }
 
 /// Compute journal known-answer hex through the one Rust engine.

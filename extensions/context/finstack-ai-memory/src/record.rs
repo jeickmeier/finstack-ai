@@ -10,6 +10,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use finstack_ai_embeddings::vector::truncate_to_bytes;
 use finstack_ai_kernel::{ArtifactRef, Duration, Sensitivity, Timestamp};
 use finstack_ai_runtime::artifact::{ArtifactScope, validate_artifact_scope};
 
@@ -66,7 +67,7 @@ impl MemoryId {
     /// Returns [`MemoryError::InvalidRecord`] when `value` is empty,
     /// contains a NUL byte, or exceeds [`MEMORY_ID_MAX_BYTES`] bytes.
     pub fn parse(value: &str) -> Result<Self, MemoryError> {
-        if value.is_empty() || value.len() > MEMORY_ID_MAX_BYTES || value.as_bytes().contains(&0) {
+        if !valid_bounded_text(value, MEMORY_ID_MAX_BYTES) {
             return Err(MemoryError::InvalidRecord {
                 reason: "invalid_memory_id",
             });
@@ -344,10 +345,7 @@ impl MemoryRecord {
     /// Returns [`MemoryError::InvalidRecord`] when any invariant above is
     /// violated.
     pub fn validate(&self) -> Result<(), MemoryError> {
-        if self.id.as_str().is_empty()
-            || self.id.as_str().len() > MEMORY_ID_MAX_BYTES
-            || self.id.as_str().as_bytes().contains(&0)
-        {
+        if !valid_bounded_text(self.id.as_str(), MEMORY_ID_MAX_BYTES) {
             return Err(MemoryError::InvalidRecord {
                 reason: "invalid_memory_id",
             });
@@ -472,14 +470,7 @@ fn valid_bounded_text(value: &str, max_bytes: usize) -> bool {
 /// of how many bytes each character occupies.
 #[must_use]
 pub fn preview_of(body: &str) -> Arc<str> {
-    if body.len() <= PREVIEW_MAX_BYTES {
-        return Arc::from(body);
-    }
-    let mut end = PREVIEW_MAX_BYTES;
-    while end > 0 && !body.is_char_boundary(end) {
-        end -= 1;
-    }
-    Arc::from(&body[..end])
+    Arc::from(truncate_to_bytes(body, PREVIEW_MAX_BYTES))
 }
 
 /// A source of timestamps for memory operations.

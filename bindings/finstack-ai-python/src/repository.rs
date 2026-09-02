@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use finstack_ai::runtime::ports::context::ContextProvider;
 use finstack_ai_context_repository::RepositoryContextProvider;
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{ComponentRef, Version};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+
+use crate::component_ref;
 
 const REPOSITORY_COMPONENT: &str = "finstack.context.repository";
 
@@ -49,11 +51,8 @@ impl PyRepositoryContextProvider {
             None => RepositoryContextProvider::try_new(root),
         }
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(REPOSITORY_COMPONENT)
-            .map(|id| ComponentRef::new(id, Some(REPOSITORY_VERSION)))
-            .map_err(|_| PyValueError::new_err("repository component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(REPOSITORY_COMPONENT, REPOSITORY_VERSION)?,
             inner: Arc::new(provider),
         })
     }

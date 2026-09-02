@@ -13,7 +13,6 @@ use reqwest::Url;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_OBJECT_BYTES: u64 = 5 * 1024 * 1024 * 1024;
-const DEFAULT_PRESIGN_EXPIRY_MAX: Duration = Duration::from_hours(168);
 
 /// Bucket path style used to build object URLs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,7 +38,6 @@ pub struct S3ObjectStoreConfig {
     secret_access_key: Option<SecretString>,
     timeout: Duration,
     max_object_bytes: u64,
-    presign_expiry_max: Duration,
 }
 
 impl fmt::Debug for S3ObjectStoreConfig {
@@ -55,7 +53,6 @@ impl fmt::Debug for S3ObjectStoreConfig {
             .field("secret_access_key", &self.secret_access_key)
             .field("timeout", &self.timeout)
             .field("max_object_bytes", &self.max_object_bytes)
-            .field("presign_expiry_max", &self.presign_expiry_max)
             .finish()
     }
 }
@@ -90,7 +87,6 @@ impl S3ObjectStoreConfig {
             secret_access_key: None,
             timeout: DEFAULT_TIMEOUT,
             max_object_bytes: DEFAULT_MAX_OBJECT_BYTES,
-            presign_expiry_max: DEFAULT_PRESIGN_EXPIRY_MAX,
         })
     }
 
@@ -169,13 +165,6 @@ impl S3ObjectStoreConfig {
         self
     }
 
-    /// Set the maximum expiry a caller may request for a presigned URL.
-    #[must_use]
-    pub const fn with_presign_expiry_max(mut self, presign_expiry_max: Duration) -> Self {
-        self.presign_expiry_max = presign_expiry_max;
-        self
-    }
-
     /// Configured endpoint.
     #[must_use]
     pub fn endpoint(&self) -> &str {
@@ -229,12 +218,6 @@ impl S3ObjectStoreConfig {
     #[must_use]
     pub const fn max_object_bytes(&self) -> u64 {
         self.max_object_bytes
-    }
-
-    /// Configured maximum presigned URL expiry.
-    #[must_use]
-    pub const fn presign_expiry_max(&self) -> Duration {
-        self.presign_expiry_max
     }
 }
 

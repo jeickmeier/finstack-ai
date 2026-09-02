@@ -76,10 +76,9 @@ impl CancellationRequest {
         initiator: CancellationInitiator,
         reason: Option<impl AsRef<str>>,
     ) -> Result<Self, RunError> {
-        let reason = match reason {
-            Some(value) => Some(validated_label(value.as_ref(), "cancellation_reason")?),
-            None => None,
-        };
+        let reason = reason
+            .map(|value| validated_label(value.as_ref(), "cancellation_reason"))
+            .transpose()?;
         Ok(Self {
             request_id,
             initiator,

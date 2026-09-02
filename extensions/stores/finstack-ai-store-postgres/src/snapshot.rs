@@ -53,9 +53,9 @@ use finstack_ai_store_common::{
     admit_snapshot_sequence, check_snapshot_size, encode_state_request, protocol_error,
     scan_next_sequence, scan_start, validate_scan_limit,
 };
-use tokio_postgres::{Client, IsolationLevel, Statement, Transaction};
+use tokio_postgres::{Client, Statement, Transaction};
 
-use crate::error::{Failure, commit_or_ambiguous, i64_from_u64, settle};
+use crate::error::{Failure, i64_from_u64, read_op, write_op};
 use crate::load::{
     SELECT_ENVELOPE_CHECKSUM, SELECT_SESSION_ROW, SessionRow, load_envelope_checksum,
     load_session_row, prepare, reconstruct_envelope,
@@ -133,13 +133,14 @@ pub(crate) async fn write_snapshot(
     limits: &StoreLimits,
 ) -> Result<SnapshotReceipt, StoreError> {
     check_snapshot_size(request.snapshot.bytes().len(), limits.snapshot_bytes)?;
-    // Prepared before the transaction opens: `Client::transaction` borrows
-    // the client, and the statement cache lives on the checkout.
-    let outcome = match prepare_snapshot_statements(client).await {
-        Ok(statements) => write_snapshot_on_connection(client, &statements, request).await,
-        Err(failure) => Err(failure),
-    };
-    settle(outcome, client)
+    write_op(
+        client,
+        prepare_snapshot_statements,
+        async |transaction, statements| {
+            write_snapshot_in_transaction(transaction, statements, request).await
+        },
+    )
+    .await
 }
 
 /// Encode a [`StateSnapshotRequest`] and write it through [`write_snapshot`].
@@ -180,31 +181,6 @@ async fn prepare_snapshot_statements(
         upsert: prepare(client, UPSERT_SNAPSHOT).await?,
         pointer: prepare(client, UPDATE_SNAPSHOT_POINTER).await?,
     })
-}
-
-/// Drive one `write_snapshot` transaction to `COMMIT` or `ROLLBACK`.
-async fn write_snapshot_on_connection(
-    client: &mut Client,
-    statements: &SnapshotStatements,
-    request: &SnapshotRequest,
-) -> Result<SnapshotReceipt, Failure> {
-    let transaction = client
-        .transaction()
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-
-    let receipt = match write_snapshot_in_transaction(&transaction, statements, request).await {
-        Ok(receipt) => receipt,
-        Err(mut failure) => {
-            if transaction.rollback().await.is_err() {
-                failure.poison = true;
-            }
-            return Err(failure);
-        }
-    };
-
-    commit_or_ambiguous(transaction).await?;
-    Ok(receipt)
 }
 
 /// The snapshot-write body, inside the transaction: lock the session row,
@@ -291,16 +267,15 @@ pub(crate) async fn scan(
     request: ScanRequest,
 ) -> Result<ScanPage, StoreError> {
     validate_scan_limit(request.limit)?;
-    // Prepared before the transaction opens, as everywhere else.
-    let outcome = match prepare_scan_statements(client).await {
-        Ok(statements) => scan_on_connection(client, &statements, request).await,
-        Err(failure) => Err(failure),
-    };
-    settle(outcome, client)
+    read_op(
+        client,
+        prepare_scan_statements,
+        async |transaction, statements| scan_in_transaction(transaction, statements, request).await,
+    )
+    .await
 }
 
-/// Run one scan inside a read-only, repeatable-read transaction, mirroring
-/// [`crate::load::load_on_connection`]'s isolation choice.
+/// Prepare (or reuse) the statements a scan needs.
 async fn prepare_scan_statements(
     client: &mut PooledClient<Client>,
 ) -> Result<ScanStatements, Failure> {
@@ -309,36 +284,6 @@ async fn prepare_scan_statements(
         page: prepare(client, SELECT_SCAN_PAGE).await?,
         envelope_checksum: prepare(client, SELECT_ENVELOPE_CHECKSUM).await?,
     })
-}
-
-/// Run one scan inside a read-only, repeatable-read transaction.
-async fn scan_on_connection(
-    client: &mut Client,
-    statements: &ScanStatements,
-    request: ScanRequest,
-) -> Result<ScanPage, Failure> {
-    let transaction = client
-        .build_transaction()
-        .isolation_level(IsolationLevel::RepeatableRead)
-        .read_only(true)
-        .start()
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-
-    let page = match scan_in_transaction(&transaction, statements, request).await {
-        Ok(page) => page,
-        Err(mut failure) => {
-            if transaction.rollback().await.is_err() {
-                failure.poison = true;
-            }
-            return Err(failure);
-        }
-    };
-
-    match transaction.commit().await {
-        Ok(()) => Ok(page),
-        Err(error) => Err(Failure::from_driver(&error)),
-    }
 }
 
 /// Fetch one page of records at or after `scan_start(request.from_sequence)`,
@@ -543,12 +488,14 @@ pub(crate) async fn write_metadata(
     client: &mut PooledClient<Client>,
     request: &WriteMetadataRequest,
 ) -> Result<MetadataReceipt, StoreError> {
-    // Prepared before the transaction opens, as everywhere else.
-    let outcome = match prepare_metadata_statements(client).await {
-        Ok(statements) => write_metadata_on_connection(client, &statements, request).await,
-        Err(failure) => Err(failure),
-    };
-    settle(outcome, client)
+    write_op(
+        client,
+        prepare_metadata_statements,
+        async |transaction, statements| {
+            write_metadata_in_transaction(transaction, statements, request).await
+        },
+    )
+    .await
 }
 
 /// Prepare (or reuse) the statements a metadata CAS needs.
@@ -559,31 +506,6 @@ async fn prepare_metadata_statements(
         lock_session: prepare(client, LOCK_SESSION_SQL).await?,
         update: prepare(client, UPDATE_METADATA).await?,
     })
-}
-
-/// Drive one `write_metadata` transaction to `COMMIT` or `ROLLBACK`.
-async fn write_metadata_on_connection(
-    client: &mut Client,
-    statements: &MetadataStatements,
-    request: &WriteMetadataRequest,
-) -> Result<MetadataReceipt, Failure> {
-    let transaction = client
-        .transaction()
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-
-    let receipt = match write_metadata_in_transaction(&transaction, statements, request).await {
-        Ok(receipt) => receipt,
-        Err(mut failure) => {
-            if transaction.rollback().await.is_err() {
-                failure.poison = true;
-            }
-            return Err(failure);
-        }
-    };
-
-    commit_or_ambiguous(transaction).await?;
-    Ok(receipt)
 }
 
 /// The metadata-CAS body, inside the transaction.

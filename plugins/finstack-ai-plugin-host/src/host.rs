@@ -207,13 +207,7 @@ pub struct PluginHost {
     toolset_linker_v1: Linker<HostState>,
     context_linker_v1: Linker<HostState>,
     cache: ComponentCache,
-    instance_policy: InstancePolicy,
-    max_concurrent_instances: u32,
-    application_grants: BTreeSet<String>,
-    signature_policy: SignaturePolicy,
-    trust_roots: BTreeMap<String, [u8; 32]>,
-    resources: GrantResources,
-    default_limits: EffectiveLimits,
+    config: PluginHostConfig,
 }
 
 /// Compiled component retained without a live instance.
@@ -254,26 +248,20 @@ impl PluginHost {
         wasm_config.consume_fuel(true);
         let engine = Engine::new(&wasm_config)
             .map_err(|error| PluginHostError::CompileFailed(format!("engine: {error}")))?;
-        let mut toolset_linker = Linker::new(&engine);
-        ToolsetPlugin::add_to_linker::<_, HasSelf<_>>(&mut toolset_linker, |state| state).map_err(
-            |error| PluginHostError::InstantiateFailed(format!("link toolset: {error}")),
-        )?;
-        let mut context_linker = Linker::new(&engine);
-        ContextPlugin::add_to_linker::<_, HasSelf<_>>(&mut context_linker, |state| state).map_err(
-            |error| PluginHostError::InstantiateFailed(format!("link context: {error}")),
-        )?;
-        let mut toolset_linker_v1 = Linker::new(&engine);
-        ToolsetPluginV1::add_to_linker::<_, HasSelf<_>>(&mut toolset_linker_v1, |state| state)
-            .map_err(|error| {
-                PluginHostError::InstantiateFailed(format!("link toolset v1: {error}"))
-            })?;
-        let mut context_linker_v1 = Linker::new(&engine);
-        ContextPluginV1::add_to_linker::<_, HasSelf<_>>(&mut context_linker_v1, |state| state)
-            .map_err(|error| {
-                PluginHostError::InstantiateFailed(format!("link context v1: {error}"))
-            })?;
-        let cache = match config.cache_dir {
-            Some(dir) => ComponentCache::directory(dir)?,
+        let toolset_linker = world_linker(&engine, "toolset", |linker| {
+            ToolsetPlugin::add_to_linker::<_, HasSelf<_>>(linker, |state| state)
+        })?;
+        let context_linker = world_linker(&engine, "context", |linker| {
+            ContextPlugin::add_to_linker::<_, HasSelf<_>>(linker, |state| state)
+        })?;
+        let toolset_linker_v1 = world_linker(&engine, "toolset v1", |linker| {
+            ToolsetPluginV1::add_to_linker::<_, HasSelf<_>>(linker, |state| state)
+        })?;
+        let context_linker_v1 = world_linker(&engine, "context v1", |linker| {
+            ContextPluginV1::add_to_linker::<_, HasSelf<_>>(linker, |state| state)
+        })?;
+        let cache = match &config.cache_dir {
+            Some(dir) => ComponentCache::directory(dir.clone())?,
             None => ComponentCache::memory(),
         };
         Ok(Self {
@@ -283,26 +271,20 @@ impl PluginHost {
             toolset_linker_v1,
             context_linker_v1,
             cache,
-            instance_policy: config.instance_policy,
-            max_concurrent_instances: config.max_concurrent_instances,
-            application_grants: config.application_grants,
-            signature_policy: config.signature_policy,
-            trust_roots: config.trust_roots,
-            resources: config.resources,
-            default_limits: config.default_limits,
+            config,
         })
     }
 
     /// Configured instance policy.
     #[must_use]
     pub const fn instance_policy(&self) -> InstancePolicy {
-        self.instance_policy
+        self.config.instance_policy
     }
 
     /// Configured concurrent-instance ceiling.
     #[must_use]
     pub const fn max_concurrent_instances(&self) -> u32 {
-        self.max_concurrent_instances
+        self.config.max_concurrent_instances
     }
 
     /// Borrow the process-local engine.
@@ -326,19 +308,19 @@ impl PluginHost {
     /// Host-offered grant set.
     #[must_use]
     pub const fn application_grants(&self) -> &BTreeSet<String> {
-        &self.application_grants
+        &self.config.application_grants
     }
 
     /// Concrete grant resources (preopens, HTTP allowlist, socket flag).
     #[must_use]
     pub const fn grant_resources(&self) -> &GrantResources {
-        &self.resources
+        &self.config.resources
     }
 
     /// Experimental host default limits.
     #[must_use]
     pub const fn default_limits(&self) -> EffectiveLimits {
-        self.default_limits
+        self.config.default_limits
     }
 
     /// Clone the world linker for `version` (`0.0.4` or `1.0.0`) and add
@@ -360,7 +342,7 @@ impl PluginHost {
             (PluginWorld::Toolset, _) => self.toolset_linker.clone(),
             (PluginWorld::Context, _) => self.context_linker.clone(),
         };
-        crate::instantiate::link_granted_wasi(&mut linker, granted, &self.resources)?;
+        crate::instantiate::link_granted_wasi(&mut linker, granted, &self.config.resources)?;
         Ok(linker)
     }
 
@@ -379,10 +361,14 @@ impl PluginHost {
     ) -> Result<ReadyWasm, PluginHostError> {
         validate_manifest(&manifest).map_err(|error| PluginHostError::from_map(&error))?;
         require_world(&manifest, world.as_str())?;
-        let granted = require_offered(&manifest.permissions, &self.application_grants)?;
-        verify_manifest(&manifest, self.signature_policy, &self.trust_roots)?;
+        let granted = require_offered(&manifest.permissions, &self.config.application_grants)?;
+        verify_manifest(
+            &manifest,
+            self.config.signature_policy,
+            &self.config.trust_roots,
+        )?;
         let digest = component_digest(bytes);
-        let limits = effective_limits(&manifest, self.default_limits);
+        let limits = effective_limits(&manifest, self.config.default_limits);
         let key = cache_key(&CacheKeyParts {
             digest: digest.clone(),
             engine: engine_fingerprint(&limits),
@@ -520,6 +506,17 @@ impl ReadyWasm {
     pub const fn granted(&self) -> &BTreeSet<String> {
         &self.granted
     }
+}
+
+fn world_linker(
+    engine: &Engine,
+    world: &str,
+    add: impl FnOnce(&mut Linker<HostState>) -> wasmtime::Result<()>,
+) -> Result<Linker<HostState>, PluginHostError> {
+    let mut linker = Linker::new(engine);
+    add(&mut linker)
+        .map_err(|error| PluginHostError::InstantiateFailed(format!("link {world}: {error}")))?;
+    Ok(linker)
 }
 
 #[allow(unsafe_code)]

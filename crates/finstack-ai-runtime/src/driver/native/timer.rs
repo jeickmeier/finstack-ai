@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::{EffectId, PostCommitAction, TimerFiredInput, Timestamp};
+use finstack_ai_kernel::{EffectId, PostCommitAction, TimerFiredInput};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
@@ -52,15 +52,11 @@ impl<C: Clock> TimerDispatcher<C> {
         }
     }
 
-    pub(crate) async fn resume(&self, seed: TimerDispatchSeed) -> Result<(), DispatchError> {
-        self.enqueue(seed).await
-    }
-
     pub(crate) fn active(&self) -> ActiveTimers {
         Arc::clone(&self.active)
     }
 
-    async fn enqueue(&self, seed: TimerDispatchSeed) -> Result<(), DispatchError> {
+    pub(crate) async fn resume(&self, seed: TimerDispatchSeed) -> Result<(), DispatchError> {
         let effect_id = seed.scheduled.timer_effect_id;
         let wait = MonotonicDeadline::from_persisted(
             self.clock.as_ref(),
@@ -143,7 +139,7 @@ where
                         active,
                         parent,
                     };
-                    dispatcher.enqueue(seed).await
+                    dispatcher.resume(seed).await
                 })
             }
         }
@@ -176,12 +172,11 @@ pub(crate) async fn run_timer_jobs<C>(
                                 let message = match clock.now() {
                                     Ok(observed) => {
                                         let due_at = job.seed.scheduled.due_at;
-                                        let fired_at = maximum_timestamp(observed, due_at);
                                         TimerDriverMessage::Fired(TimerDriverResult {
                                             input: TimerFiredInput {
                                                 effect_id,
                                                 due_at,
-                                                fired_at,
+                                                fired_at: observed.max(due_at),
                                             },
                                             diagnostic: job.wait.diagnostic(),
                                         })
@@ -209,17 +204,13 @@ pub(crate) async fn run_timer_jobs<C>(
     }
 }
 
-fn maximum_timestamp(left: Timestamp, right: Timestamp) -> Timestamp {
-    if left < right { right } else { left }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::time::Duration as StdDuration;
 
     use finstack_ai_kernel::{
-        ErrorCategory, ErrorDescriptor, Id, RetryClassification, RetryScheduled,
+        ErrorCategory, ErrorDescriptor, Id, RetryClassification, RetryScheduled, Timestamp,
     };
 
     use super::*;

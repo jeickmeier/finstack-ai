@@ -153,16 +153,16 @@ const BACKOFF_MAX_SHIFT: u32 = 6;
 /// Delay between state polls while a claimed row is being resumed.
 const POLL_INTERVAL: Duration = Duration::from_millis(1);
 
-#[derive(Clone, Copy)]
-enum ResponseSubmission {
-    Applied,
-    Rejected { reason_code: &'static str },
-}
-
 enum ResumeOutcome {
     Terminal,
     Reparked,
     Rejected,
+}
+
+/// Exponential retry delay after `attempts` failures, capped at
+/// `BACKOFF_BASE_MS << BACKOFF_MAX_SHIFT`.
+fn backoff_ms(attempts: u32) -> u64 {
+    BACKOFF_BASE_MS.saturating_mul(1_u64 << attempts.min(BACKOFF_MAX_SHIFT))
 }
 
 /// Whether `wait` is still the wait recorded on `row`.
@@ -527,16 +527,13 @@ impl WorkflowWorker {
             status: FireStatus::Claimed,
             started_session: None,
         })?;
-        if !self.cron.try_claim(
+        Ok(self.cron.try_claim(
             claimed.tenant_scope.as_ref(),
             claimed.schedule_id.as_ref(),
             expected_next,
             now,
             &claimed,
-        )? {
-            return Ok(false);
-        }
-        Ok(true)
+        )?)
     }
 
     /// Phase 3: bridge claimed-but-unstarted fires into started runs.
@@ -635,18 +632,14 @@ impl WorkflowWorker {
             let outcome =
                 Box::pin(self.resume_row(&row, entry.as_ref(), claim_now, &mut expired)).await;
             match outcome {
-                Ok(ResumeOutcome::Terminal) => {
+                Ok(resumed @ (ResumeOutcome::Terminal | ResumeOutcome::Reparked)) => {
                     if expired {
                         report.sessions_expired += 1;
                     }
                     report.sessions_resumed += 1;
-                }
-                Ok(ResumeOutcome::Reparked) => {
-                    if expired {
-                        report.sessions_expired += 1;
+                    if matches!(resumed, ResumeOutcome::Reparked) {
+                        report.sessions_reparked += 1;
                     }
-                    report.sessions_resumed += 1;
-                    report.sessions_reparked += 1;
                 }
                 Ok(ResumeOutcome::Rejected) => {
                     report.responses_rejected += 1;
@@ -674,25 +667,18 @@ impl WorkflowWorker {
         Ok(())
     }
 
+    /// Submit one buffered response and dead-letter it when the runtime
+    /// durably rejects it. `None` means the response was applied and the
+    /// resume continues.
     async fn apply_inbox_entry(
         &self,
         session: &WorkflowSession,
         entry: &InboxRow,
         now: Timestamp,
     ) -> Result<Option<ResumeOutcome>, WorkerError> {
-        match Box::pin(self.submit_response(session, entry, now)).await {
-            Ok(ResponseSubmission::Applied) => Ok(None),
-            Ok(ResponseSubmission::Rejected { reason_code }) => {
-                self.inbox.dead_letter(
-                    entry.tenant_scope.as_ref(),
-                    entry.session_id,
-                    entry.pending_id.as_ref(),
-                    entry.payload_digest,
-                    reason_code,
-                    now,
-                )?;
-                Ok(Some(ResumeOutcome::Rejected))
-            }
+        let reason_code = match Box::pin(self.submit_response(session, entry, now)).await {
+            Ok(InteractionDeliveryOutcome::Accepted) => return Ok(None),
+            Ok(InteractionDeliveryOutcome::Rejected { reason_code }) => reason_code,
             Err(error) => {
                 let Some(reason_code) = permanent_response_error(&error) else {
                     return Err(error);
@@ -707,21 +693,22 @@ impl WorkflowWorker {
                         now,
                     )?;
                 }
-                self.inbox.dead_letter(
-                    entry.tenant_scope.as_ref(),
-                    entry.session_id,
-                    entry.pending_id.as_ref(),
-                    entry.payload_digest,
-                    reason_code,
-                    now,
-                )?;
-                Ok(Some(ResumeOutcome::Rejected))
+                reason_code
             }
-        }
+        };
+        self.inbox.dead_letter(
+            entry.tenant_scope.as_ref(),
+            entry.session_id,
+            entry.pending_id.as_ref(),
+            entry.payload_digest,
+            reason_code,
+            now,
+        )?;
+        Ok(Some(ResumeOutcome::Rejected))
     }
 
-    /// Resume one claimed row. Returns `true` when the run reached a terminal
-    /// state, which deletes its wake row.
+    /// Resume one claimed row. A run that reaches a terminal state has its
+    /// wake row deleted by the park.
     ///
     /// The recorded wait is journal-authoritative:
     /// [`WorkflowSession::drive_until_wait`] would classify it and return
@@ -884,8 +871,8 @@ impl WorkflowWorker {
         session: &WorkflowSession,
         entry: &InboxRow,
         now: Timestamp,
-    ) -> Result<ResponseSubmission, WorkerError> {
-        match entry.kind {
+    ) -> Result<InteractionDeliveryOutcome, WorkerError> {
+        let outcome = match entry.kind {
             InboxKind::Interaction => {
                 let command: InteractionResolutionCommand =
                     serde_json::from_slice(entry.payload.as_ref()).map_err(|_| {
@@ -893,29 +880,7 @@ impl WorkflowWorker {
                             code: "inbox_payload",
                         }
                     })?;
-                let outcome = session.resolve_interaction(command, now).await?;
-                let submission = match outcome {
-                    ExternalRouteOutcome::Committed(_)
-                    | ExternalRouteOutcome::Idempotent { .. } => ResponseSubmission::Applied,
-                    ExternalRouteOutcome::Rejected { reason_code, .. } => {
-                        ResponseSubmission::Rejected { reason_code }
-                    }
-                };
-                if let Some(lifecycle) = &self.interaction_lifecycle {
-                    let outcome = match submission {
-                        ResponseSubmission::Applied => InteractionDeliveryOutcome::Accepted,
-                        ResponseSubmission::Rejected { reason_code } => {
-                            InteractionDeliveryOutcome::Rejected { reason_code }
-                        }
-                    };
-                    lifecycle.settled(
-                        entry.tenant_scope.as_ref(),
-                        entry.pending_id.as_ref(),
-                        outcome,
-                        now,
-                    )?;
-                }
-                return Ok(submission);
+                session.resolve_interaction(command, now).await?
             }
             InboxKind::External => {
                 let command: ExternalEffectCompletionCommand =
@@ -924,20 +889,33 @@ impl WorkflowWorker {
                             code: "inbox_payload",
                         }
                     })?;
-                let outcome = Box::pin(session.complete_external(command, now)).await?;
-                if let ExternalRouteOutcome::Rejected { reason_code, .. } = outcome {
-                    return Ok(ResponseSubmission::Rejected { reason_code });
-                }
+                Box::pin(session.complete_external(command, now)).await?
             }
+        };
+        let outcome = match outcome {
+            ExternalRouteOutcome::Committed(_) | ExternalRouteOutcome::Idempotent { .. } => {
+                InteractionDeliveryOutcome::Accepted
+            }
+            ExternalRouteOutcome::Rejected { reason_code, .. } => {
+                InteractionDeliveryOutcome::Rejected { reason_code }
+            }
+        };
+        if entry.kind == InboxKind::Interaction
+            && let Some(lifecycle) = &self.interaction_lifecycle
+        {
+            lifecycle.settled(
+                entry.tenant_scope.as_ref(),
+                entry.pending_id.as_ref(),
+                outcome,
+                now,
+            )?;
         }
-        Ok(ResponseSubmission::Applied)
+        Ok(outcome)
     }
 
     /// Record a failed resume with exponential backoff.
     fn back_off(&self, row: &WakeRow, now: Timestamp) -> Result<(), WorkerError> {
-        let shift = row.attempts.min(BACKOFF_MAX_SHIFT);
-        let backoff_ms = BACKOFF_BASE_MS.saturating_mul(1_u64 << shift);
-        let retry_at = lease_deadline(now, backoff_ms)?;
+        let retry_at = lease_deadline(now, backoff_ms(row.attempts))?;
         self.wake
             .record_failure(row.tenant_scope.as_ref(), row.session_id, retry_at)
     }
@@ -973,9 +951,7 @@ impl WorkflowWorker {
             return;
         };
         let attempts = backoff.get(&key).map_or(0, |(attempts, _)| *attempts);
-        let shift = attempts.min(BACKOFF_MAX_SHIFT);
-        let backoff_ms = BACKOFF_BASE_MS.saturating_mul(1_u64 << shift);
-        let Ok(retry_at) = lease_deadline(now, backoff_ms) else {
+        let Ok(retry_at) = lease_deadline(now, backoff_ms(attempts)) else {
             return;
         };
         backoff.insert(key, (attempts.saturating_add(1), retry_at));

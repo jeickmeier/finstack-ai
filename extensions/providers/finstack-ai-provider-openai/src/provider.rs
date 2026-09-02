@@ -9,9 +9,9 @@ use std::sync::{Arc, PoisonError, RwLock};
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_provider_wire::{OpenAiResponsesAssembly, StreamNormError, StreamNormKind};
 use finstack_ai_runtime::ports::model::{
-    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
-    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
-    ResolveDraftMediaError, resolve_draft_media,
+    MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
+    ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate,
+    ReconcileContext, ResolveDraftMediaError, resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -19,9 +19,10 @@ use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
 use crate::error::{
-    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR, error,
+    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR,
+    config_error, error, incomplete_error, request_error, response_error, stream_error,
+    stream_limit_error,
 };
-use crate::error::{incomplete_error, response_error, stream_error, stream_limit_error};
 use crate::request::{ResponsesRequest, serialize_request};
 use crate::sse::SseParser;
 use crate::{OpenAiConfig, OpenAiModelConfig};
@@ -92,7 +93,7 @@ impl OpenAiProvider {
             .default_headers(headers)
             .redirect(Policy::none())
             .build()
-            .map_err(|_| crate::error::config_error("provider HTTP client could not be built"))?;
+            .map_err(|_| config_error("provider HTTP client could not be built"))?;
         Ok(Self {
             client,
             endpoint,
@@ -129,7 +130,7 @@ impl OpenAiProvider {
         let mut models = self.models.write().unwrap_or_else(PoisonError::into_inner);
         let configured = models
             .get_mut(model)
-            .ok_or_else(|| crate::error::request_error("requested model is not configured"))?;
+            .ok_or_else(|| request_error("requested model is not configured"))?;
         configured.apply_capabilities(&update)
     }
 
@@ -139,7 +140,7 @@ impl OpenAiProvider {
             .unwrap_or_else(PoisonError::into_inner)
             .get(name)
             .cloned()
-            .ok_or_else(|| crate::error::request_error("requested model is not configured"))
+            .ok_or_else(|| request_error("requested model is not configured"))
     }
 }
 
@@ -150,15 +151,11 @@ fn catalog_from_models(
     for model in models {
         model.validate()?;
         if by_name.insert(model.name.clone(), model).is_some() {
-            return Err(crate::error::config_error(
-                "provider contains a duplicate model name",
-            ));
+            return Err(config_error("provider contains a duplicate model name"));
         }
     }
     if by_name.is_empty() {
-        return Err(crate::error::config_error(
-            "provider requires at least one model",
-        ));
+        return Err(config_error("provider requires at least one model"));
     }
     let descriptor = ModelDescriptor {
         provider: Arc::from("openai"),
@@ -363,9 +360,7 @@ async fn drive_response(
         };
         let Some(chunk) = chunk else {
             let error = match parser.finish() {
-                Ok(()) => {
-                    crate::error::stream_error("OpenAI SSE stream ended before response.completed")
-                }
+                Ok(()) => stream_error("OpenAI SSE stream ended before response.completed"),
                 Err(error) => error,
             };
             let _ = sender.send(Err(error)).await;
@@ -386,10 +381,7 @@ async fn drive_response(
             }
         };
         for event in events {
-            match assembly
-                .consume(&event.data)
-                .map_err(|error| map_norm(&error))
-            {
+            match assembly.consume(&event).map_err(|error| map_norm(&error)) {
                 Ok(items) => {
                     let mut completed = false;
                     for item in items {
@@ -420,27 +412,22 @@ fn map_norm(error: &StreamNormError) -> ModelError {
     }
 }
 
-fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
-    match error {
+fn map_draft_media(failure: ResolveDraftMediaError) -> ModelError {
+    match failure {
         ResolveDraftMediaError::MissingResolver => {
-            crate::error::request_error("media content requires a configured media resolver")
+            request_error("media content requires a configured media resolver")
         }
-        ResolveDraftMediaError::Resolve(inner) => map_resolve(inner),
-        ResolveDraftMediaError::Limit => crate::error::stream_limit_error(),
-    }
-}
-
-fn map_resolve(error: finstack_ai_runtime::ports::model::MediaResolveError) -> ModelError {
-    use finstack_ai_runtime::ports::model::MediaResolveKind;
-    match error.kind {
-        MediaResolveKind::NotFound => crate::error::request_error(error.message),
-        MediaResolveKind::Unavailable => crate::error::error(
-            TRANSPORT_ERROR,
-            ErrorCategory::Model,
-            true,
-            "OpenAI media resolution is unavailable",
-        ),
-        MediaResolveKind::Limit => crate::error::stream_limit_error(),
+        ResolveDraftMediaError::Resolve(inner) => match inner.kind {
+            MediaResolveKind::NotFound => request_error(inner.message),
+            MediaResolveKind::Unavailable => error(
+                TRANSPORT_ERROR,
+                ErrorCategory::Model,
+                true,
+                "OpenAI media resolution is unavailable",
+            ),
+            MediaResolveKind::Limit => stream_limit_error(),
+        },
+        ResolveDraftMediaError::Limit => stream_limit_error(),
     }
 }
 

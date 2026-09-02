@@ -54,7 +54,7 @@ pub(crate) fn stage_driver(
 /// `None` means no provider list was installed. An installed empty list still
 /// produces a driver so `BeforeModel` can apply the structural protected
 /// projection (system/developer and the trailing current user).
-pub(crate) fn context_driver(
+fn context_driver(
     coordinator: &CommitCoordinator,
     cancellation: &crate::ports::model::CancellationSignal,
 ) -> Option<ContextDriver> {
@@ -347,7 +347,7 @@ fn foldable_base(stage: Stage, outcome: &ReducerStageOutcome) -> bool {
 /// code, the fold's `middleware_stage_unlandable` /
 /// `middleware_stage_bounds_exceeded`, or
 /// `middleware_stage_identity_missing` when the run has no dispatch identity.
-pub(crate) async fn run_stage_chain<C: Clock, R: RandomSource>(
+pub(super) async fn run_stage_chain<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     driver: Option<&StageDriver>,
     sources: &SettlementSources<C, R>,

@@ -134,6 +134,24 @@ pub(crate) enum Container {
     Webm,
 }
 
+impl Container {
+    /// File extension of the rendered output.
+    pub(crate) const fn extension(self) -> &'static str {
+        match self {
+            Self::Mp4 => "mp4",
+            Self::Webm => "webm",
+        }
+    }
+
+    /// Media type recorded on the staged output artifact.
+    pub(crate) const fn media_type(self) -> &'static str {
+        match self {
+            Self::Mp4 => "video/mp4",
+            Self::Webm => "video/webm",
+        }
+    }
+}
+
 /// Output container and encoding hints.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -219,12 +237,13 @@ pub(crate) fn validate_spec(spec: &CompositionSpec) -> Result<(), &'static str> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use finstack_ai_kernel::{ArtifactId, BlobRef, Digest, Metadata};
 
     use super::*;
 
-    fn artifact_ref() -> ArtifactRef {
+    /// A structurally valid artifact reference that was never staged.
+    pub(crate) fn artifact_ref() -> ArtifactRef {
         let content = b"clip".as_slice();
         let digest = Digest::blob_content(content);
         let blob = BlobRef::try_new(
@@ -246,7 +265,10 @@ mod tests {
         .expect("artifact")
     }
 
-    fn minimal(clips: usize, transitions: Option<Vec<TransitionSpec>>) -> CompositionSpec {
+    pub(crate) fn minimal(
+        clips: usize,
+        transitions: Option<Vec<TransitionSpec>>,
+    ) -> CompositionSpec {
         CompositionSpec {
             version: 1,
             clips: (0..clips)

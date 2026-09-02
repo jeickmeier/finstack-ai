@@ -30,6 +30,7 @@ pub const COMPACTION_BUDGET_EXCEEDED: &str = "context_budget_exceeded";
 pub const COMPACTION_MODEL_NOT_AUTHORIZED: &str = "compaction_model_not_authorized";
 
 pub use chain::{MiddlewareRegistration, ResolvedMiddleware, ResolvedMiddlewareChain};
+pub(crate) use digest::sensitivity_rank;
 pub use digest::{
     compaction_checkpoint_compatible, compaction_projection_digest,
     compaction_protected_set_digest, compaction_source_digest, compaction_summary_digest,
@@ -37,8 +38,6 @@ pub use digest::{
 pub use error::MiddlewareError;
 pub use error::{MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE};
 pub use port::Middleware;
-#[cfg(test)]
-pub(crate) use types::parse_stage;
 #[cfg(any(test, feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use types::stage_name;
 pub use types::{
@@ -47,8 +46,6 @@ pub use types::{
     CompactionSourceEntry, MiddlewareContext, MiddlewareDescriptor, MiddlewareOrder,
     MiddlewareRole, OrderTier, PromptCacheImpact, StageInput, StageMask, StageOutcome,
 };
-#[cfg(test)]
-pub(crate) use validate::validate_compaction_model_effect;
 pub use validate::{
     authorize_compaction_model_request, validate_compaction_result, validate_stage_outcome,
 };

@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use finstack_ai::runtime::ports::journal::JournalStore;
-use finstack_ai::runtime::ports::model::{Model, ModelName};
+use finstack_ai::runtime::ports::model::{Authentication, Model, ModelName, SecretString};
 use finstack_ai::runtime::ports::observer::ObserverPayloadMode;
 use finstack_ai::{Agent, NativeCapabilityHost};
 use finstack_ai_embedder_ollama::config::OllamaEmbedderConfig;
@@ -41,7 +41,9 @@ use finstack_ai_tools_document::DocumentToolset;
 use finstack_ai_tools_fetch::{HostPattern, HttpFetchConfig, HttpFetchToolset};
 use finstack_ai_tools_skills::{SkillsHost, SkillsHostError, SkillsToolset};
 
-use crate::config::{EmbedderChoice, KnowledgeConfig, KnowledgeError, ProviderChoice};
+use crate::config::{
+    EmbedderChoice, KnowledgeConfig, KnowledgeError, ProviderChoice, compose_error,
+};
 use crate::docs::materialize_self_docs;
 
 /// Exact component version for every `finstack.know.*` registration.
@@ -505,28 +507,18 @@ fn provider(config: &KnowledgeConfig) -> Result<Arc<dyn Model>, KnowledgeError> 
     }
 }
 
-fn api_key_auth(
-    api_key: &str,
-) -> Result<finstack_ai::runtime::ports::model::Authentication, KnowledgeError> {
-    Ok(finstack_ai::runtime::ports::model::Authentication::ApiKey(
-        finstack_ai::runtime::ports::model::SecretString::try_new(api_key).map_err(|_| {
-            KnowledgeError::Config {
-                reason: "api_key_invalid",
-            }
-        })?,
-    ))
+fn api_key_auth(api_key: &str) -> Result<Authentication, KnowledgeError> {
+    Ok(Authentication::ApiKey(secret(api_key)?))
 }
 
-fn bearer_auth(
-    api_key: &str,
-) -> Result<finstack_ai::runtime::ports::model::Authentication, KnowledgeError> {
-    Ok(finstack_ai::runtime::ports::model::Authentication::Bearer(
-        finstack_ai::runtime::ports::model::SecretString::try_new(api_key).map_err(|_| {
-            KnowledgeError::Config {
-                reason: "api_key_invalid",
-            }
-        })?,
-    ))
+fn bearer_auth(api_key: &str) -> Result<Authentication, KnowledgeError> {
+    Ok(Authentication::Bearer(secret(api_key)?))
+}
+
+fn secret(api_key: &str) -> Result<SecretString, KnowledgeError> {
+    SecretString::try_new(api_key).map_err(|_| KnowledgeError::Config {
+        reason: "api_key_invalid",
+    })
 }
 
 fn repository_provider(
@@ -641,10 +633,4 @@ fn versioned(id: &str, major: u16, minor: u16, patch: u16) -> Result<ComponentRe
             patch,
         }),
     ))
-}
-
-fn compose_error(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Compose {
-        reason: error.to_string(),
-    }
 }

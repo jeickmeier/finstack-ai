@@ -163,9 +163,11 @@ impl<'a> BundleResolver<'a> {
                 .ok_or_else(|| BundleResolutionError::Invalid {
                     message: Arc::from("agent_was_not_bundle_resolved"),
                 })?;
-        let mut active = match expected {
-            CapabilityActivation::Application => current_recipe.active_application.clone(),
-            CapabilityActivation::Model => current_recipe.active_model.clone(),
+        let mut active_application = current_recipe.active_application.clone();
+        let mut active_model = current_recipe.active_model.clone();
+        let active = match expected {
+            CapabilityActivation::Application => &mut active_application,
+            CapabilityActivation::Model => &mut active_model,
             CapabilityActivation::Always | CapabilityActivation::Disabled => {
                 return Err(BundleResolutionError::Invalid {
                     message: Arc::from(invalid_kind),
@@ -187,15 +189,6 @@ impl<'a> BundleResolver<'a> {
             }
             active.insert(capability_id);
         }
-        let (active_application, active_model) = match expected {
-            CapabilityActivation::Application => (active, current_recipe.active_model.clone()),
-            CapabilityActivation::Model => (current_recipe.active_application.clone(), active),
-            CapabilityActivation::Always | CapabilityActivation::Disabled => {
-                return Err(BundleResolutionError::Invalid {
-                    message: Arc::from(invalid_kind),
-                });
-            }
-        };
         let recipe = Arc::new(CompositionRecipe {
             bundle: Arc::clone(&current_recipe.bundle),
             base_spec: Arc::clone(&current_recipe.base_spec),
@@ -259,28 +252,21 @@ impl<'a> BundleResolver<'a> {
                 context.clone(),
             )
             .await?;
-        let active = lock
-            .capabilities
-            .iter()
-            .filter(|capability| {
-                capability.active && capability.activation == CapabilityActivation::Application
-            })
-            .map(|capability| capability.id.clone())
-            .collect::<Vec<_>>();
+        let active_ids = |activation: CapabilityActivation| {
+            lock.capabilities
+                .iter()
+                .filter(|capability| capability.active && capability.activation == activation)
+                .map(|capability| capability.id.clone())
+                .collect::<Vec<_>>()
+        };
+        let active = active_ids(CapabilityActivation::Application);
         let resolved = if active.is_empty() {
             resolved
         } else {
             self.activate_application(registry, &resolved, active, context.clone())
                 .await?
         };
-        let active_model = lock
-            .capabilities
-            .iter()
-            .filter(|capability| {
-                capability.active && capability.activation == CapabilityActivation::Model
-            })
-            .map(|capability| capability.id.clone())
-            .collect::<Vec<_>>();
+        let active_model = active_ids(CapabilityActivation::Model);
         let resolved = if active_model.is_empty() {
             resolved
         } else {

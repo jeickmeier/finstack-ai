@@ -32,6 +32,35 @@ pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(5);
 #[cfg(test)]
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
+/// Validated `OpenRouter` route plus the delivery settings every handler reads.
+#[derive(Clone)]
+pub(crate) struct Route {
+    pub(crate) client: reqwest::Client,
+    pub(crate) authorization: HeaderValue,
+    pub(crate) endpoint: String,
+    pub(crate) endpoint_is_loopback: bool,
+    pub(crate) referer: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) max_result_bytes: usize,
+    pub(crate) store: Option<Arc<dyn ArtifactStore>>,
+}
+
+impl Route {
+    /// HTTP body cap when inlining generated media. Artifact staging may read
+    /// up to [`MAX_RESULT_BYTES_CEILING`]; inline results cap at
+    /// `max_result_bytes` (or the raw-byte inverse when the body will later be
+    /// base64-encoded).
+    pub(crate) fn inline_http_read_cap(&self, body_is_raw_bytes: bool) -> usize {
+        if self.store.is_some() {
+            MAX_RESULT_BYTES_CEILING
+        } else if body_is_raw_bytes {
+            (self.max_result_bytes / 4).saturating_mul(3)
+        } else {
+            self.max_result_bytes
+        }
+    }
+}
+
 /// Exact standard-base64 length of `byte_length` raw bytes (`4 * n.div_ceil(3)`).
 pub(crate) fn base64_encoded_len(byte_length: usize) -> usize {
     byte_length.div_ceil(3).saturating_mul(4)
@@ -42,25 +71,12 @@ pub(crate) struct DeliveredMedia {
     pub(crate) artifact: Option<ArtifactRef>,
 }
 
-/// Max raw bytes whose standard-base64 encoding still fits `max_result_bytes`.
-fn max_raw_bytes_for_base64_cap(max_result_bytes: usize) -> usize {
-    (max_result_bytes / 4).saturating_mul(3)
-}
-
-/// HTTP body cap when inlining generated media. Artifact staging may read up
-/// to [`MAX_RESULT_BYTES_CEILING`]; inline results cap at `max_result_bytes`
-/// (or the raw-byte inverse when the body will later be base64-encoded).
-pub(crate) fn inline_http_read_cap(
-    max_result_bytes: usize,
-    store_attached: bool,
-    body_is_raw_bytes: bool,
-) -> usize {
-    if store_attached {
-        MAX_RESULT_BYTES_CEILING
-    } else if body_is_raw_bytes {
-        max_raw_bytes_for_base64_cap(max_result_bytes)
-    } else {
-        max_result_bytes
+impl From<serde_json::Value> for DeliveredMedia {
+    fn from(value: serde_json::Value) -> Self {
+        Self {
+            value,
+            artifact: None,
+        }
     }
 }
 
@@ -85,6 +101,16 @@ pub(crate) fn parse_arguments<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Res
         .map_err(|_| invalid_arguments("openrouter media arguments are invalid"))
 }
 
+/// The Global Constraints artifact scope shared by every artifact operation.
+pub(crate) fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
+    ArtifactScope {
+        tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
+        session_id: ctx.run.locator.session_id,
+        run_id: Some(ctx.run.locator.run_id),
+        sensitivity: Sensitivity::Internal,
+    }
+}
+
 /// Hand generated media back to the model without inlining the bytes.
 ///
 /// Generated audio and images are hundreds of kilobytes that a model cannot
@@ -92,39 +118,30 @@ pub(crate) fn parse_arguments<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Res
 /// staged and only the reference travels in the result. Without a store the
 /// payload is inlined as base64, still bounded by `max_result_bytes`.
 pub(crate) async fn deliver_media(
+    route: &Route,
     bytes: Vec<u8>,
     media_type: &str,
     name: &'static str,
-    store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
-    max_result_bytes: usize,
 ) -> Result<DeliveredMedia, ToolError> {
     let byte_length = bytes.len();
-    let Some(store) = store else {
-        if base64_encoded_len(byte_length) > max_result_bytes {
+    let Some(store) = &route.store else {
+        if base64_encoded_len(byte_length) > route.max_result_bytes {
             return Err(tool_error(
                 OPENROUTER_MEDIA_LIMIT_EXCEEDED,
                 ErrorCategory::Limit,
                 "openrouter media result exceeds the configured byte limit",
             ));
         }
-        return Ok(DeliveredMedia {
-            value: serde_json::json!({
-                "b64_data": BASE64_STANDARD.encode(bytes),
-                "media_type": media_type,
-                "byte_length": byte_length,
-            }),
-            artifact: None,
-        });
+        return Ok(DeliveredMedia::from(serde_json::json!({
+            "b64_data": BASE64_STANDARD.encode(bytes),
+            "media_type": media_type,
+            "byte_length": byte_length,
+        })));
     };
     let artifact = stage_required_artifact(
         store.as_ref(),
-        ArtifactScope {
-            tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
-            session_id: ctx.run.locator.session_id,
-            run_id: Some(ctx.run.locator.run_id),
-            sensitivity: Sensitivity::Internal,
-        },
+        artifact_scope(ctx),
         Bytes::from(bytes),
         ArtifactMetadata {
             kind: Arc::from("tool-output"),
@@ -151,12 +168,8 @@ pub(crate) async fn deliver_media(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn dispatch(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
+    route: &Route,
     method: reqwest::Method,
     url: &str,
     body: Option<&serde_json::Value>,
@@ -165,13 +178,14 @@ async fn dispatch(
     if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
         return Err(timeout_error());
     }
-    let mut request = client
+    let mut request = route
+        .client
         .request(method, url)
-        .header(reqwest::header::AUTHORIZATION, authorization.clone());
-    if let Some(referer) = referer {
+        .header(reqwest::header::AUTHORIZATION, route.authorization.clone());
+    if let Some(referer) = &route.referer {
         request = request.header("HTTP-Referer", referer);
     }
-    if let Some(title) = title {
+    if let Some(title) = &route.title {
         request = request.header("X-Title", title);
     }
     if let Some(body) = body {
@@ -198,29 +212,15 @@ async fn dispatch(
     Ok(response)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_bytes(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
+    route: &Route,
     method: reqwest::Method,
     url: &str,
     body: Option<&serde_json::Value>,
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<(Vec<u8>, Option<String>), ToolError> {
-    let response = dispatch(
-        client,
-        authorization,
-        referer,
-        title,
-        method,
-        url,
-        body,
-        ctx,
-    )
-    .await?;
+    let response = dispatch(route, method, url, body, ctx).await?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -230,33 +230,26 @@ pub(crate) async fn send_bytes(
     Ok((bytes, content_type))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_json<T: for<'de> Deserialize<'de>>(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
+    route: &Route,
     method: reqwest::Method,
     url: &str,
     body: Option<&serde_json::Value>,
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<T, ToolError> {
-    let response = dispatch(
-        client,
-        authorization,
-        referer,
-        title,
-        method,
-        url,
-        body,
-        ctx,
-    )
-    .await?;
-    read_bounded_json(response, cap, ctx).await
+    let response = dispatch(route, method, url, body, ctx).await?;
+    let body = fetch_bytes_bounded(response, cap, ctx).await?;
+    serde_json::from_slice(&body).map_err(|_| {
+        tool_error(
+            OPENROUTER_MEDIA_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "openrouter media response is invalid",
+        )
+    })
 }
 
-pub(crate) async fn fetch_bytes_bounded(
+async fn fetch_bytes_bounded(
     response: reqwest::Response,
     cap: usize,
     ctx: &ToolCallContext,
@@ -286,26 +279,8 @@ pub(crate) async fn fetch_bytes_bounded(
     })
 }
 
-async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
-    response: reqwest::Response,
-    cap: usize,
-    ctx: &ToolCallContext,
-) -> Result<T, ToolError> {
-    let body = fetch_bytes_bounded(response, cap, ctx).await?;
-    serde_json::from_slice(&body).map_err(|_| {
-        tool_error(
-            OPENROUTER_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openrouter media response is invalid",
-        )
-    })
-}
-
 pub(crate) fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
-    let Some(deadline) = deadline else {
-        return false;
-    };
-    now_unix_ms() >= deadline.as_unix_ms()
+    deadline.is_some_and(|deadline| now_unix_ms() >= deadline.as_unix_ms())
 }
 
 pub(crate) async fn wait_deadline(deadline: Option<Timestamp>) {
@@ -410,13 +385,9 @@ async fn rejection_detail(response: reqwest::Response, ctx: &ToolCallContext) ->
     if detail.is_empty() {
         return None;
     }
-    Some(truncate_chars(&detail, ERROR_DETAIL_CHARS))
-}
-
-fn truncate_chars(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_owned();
+    if detail.chars().count() <= ERROR_DETAIL_CHARS {
+        return Some(detail);
     }
-    let kept: String = text.chars().take(max).collect();
-    format!("{kept}...")
+    let kept: String = detail.chars().take(ERROR_DETAIL_CHARS).collect();
+    Some(format!("{kept}..."))
 }

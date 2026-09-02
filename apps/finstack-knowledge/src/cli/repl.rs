@@ -17,6 +17,7 @@ use finstack_ai_kernel::{
 };
 
 use super::render::render_markup_plain;
+use crate::config::compose_error;
 use crate::{
     KnowledgeConfig, KnowledgeError, build_agent_with_journal, model_name, open_journal, security,
 };
@@ -93,7 +94,7 @@ async fn run_turn(
     interrupt: &AtomicBool,
 ) -> Result<(), KnowledgeError> {
     let request = AgentRunRequest::try_new(model_name(config)?, question, security.clone())
-        .map_err(compose)?;
+        .map_err(compose_error)?;
     let run = match lane.run(agent, request) {
         Ok(run) => run,
         Err(error) => {
@@ -142,11 +143,11 @@ async fn run_turn(
                             security.authorization_policy_version(),
                             security.authorization_decision_id(),
                         )
-                        .map_err(compose)?,
-                        RawJson::parse(payload.to_string().as_bytes()).map_err(compose)?,
+                        .map_err(compose_error)?,
+                        RawJson::parse(payload.to_string().as_bytes()).map_err(compose_error)?,
                         None::<&str>,
                     )
-                    .map_err(compose)?;
+                    .map_err(compose_error)?;
                     if let Err(error) = run.resolve_interaction(resolution).await {
                         write_line(output, &format!("interaction failed: {error}"));
                     }
@@ -169,10 +170,7 @@ async fn run_turn(
             };
             write_line(output, &render_markup_plain(&text));
         }
-        Err(error) if cancelled => {
-            let _ = error;
-            write_line(output, "run cancelled");
-        }
+        Err(_) if cancelled => write_line(output, "run cancelled"),
         Err(error) => write_line(output, &format!("run failed: {error}")),
     }
     Ok(())
@@ -193,11 +191,5 @@ fn read_line(input: &mut dyn BufRead) -> Option<String> {
     match input.read_line(&mut line) {
         Ok(count) if count > 0 => Some(line),
         Ok(_) | Err(_) => None,
-    }
-}
-
-fn compose(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Compose {
-        reason: error.to_string(),
     }
 }

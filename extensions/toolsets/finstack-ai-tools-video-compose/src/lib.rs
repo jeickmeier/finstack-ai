@@ -53,7 +53,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::graph::{ClipInput, build_ffmpeg_args};
-use crate::spec::{CompositionSpec, Container, validate_spec};
+use crate::spec::{CompositionSpec, validate_spec};
 
 /// Ceiling for [`VideoComposeConfig::render_timeout`].
 const MAX_RENDER_TIMEOUT: Duration = Duration::from_hours(1);
@@ -124,8 +124,6 @@ pub enum VideoComposeError {
 pub struct VideoComposeToolset {
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
-    compose_tool_id: ToolId,
-    probe_tool_id: ToolId,
     ffmpeg_path: PathBuf,
     ffprobe_path: PathBuf,
     artifact_store: Arc<dyn ArtifactStore>,
@@ -136,8 +134,6 @@ pub struct VideoComposeToolset {
 impl std::fmt::Debug for VideoComposeToolset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VideoComposeToolset")
-            .field("compose_tool_id", &self.compose_tool_id)
-            .field("probe_tool_id", &self.probe_tool_id)
             .field("ffmpeg_path", &self.ffmpeg_path)
             .field("ffprobe_path", &self.ffprobe_path)
             .field(
@@ -182,17 +178,10 @@ impl VideoComposeToolset {
             }
         })?;
 
-        let compose_tool_id =
-            ToolId::parse(COMPOSE_TOOL_ID).map_err(|_| VideoComposeError::ConfigInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let probe_tool_id =
-            ToolId::parse(PROBE_TOOL_ID).map_err(|_| VideoComposeError::ConfigInvalid {
-                reason: "invalid_tool_id",
-            })?;
-
         let compose_spec = ToolSpec {
-            id: compose_tool_id.clone(),
+            id: ToolId::parse(COMPOSE_TOOL_ID).map_err(|_| VideoComposeError::ConfigInvalid {
+                reason: "invalid_tool_id",
+            })?,
             model_name: Arc::from(COMPOSE_TOOL_NAME),
             title: Arc::from("Compose video"),
             description: Arc::from(
@@ -231,7 +220,9 @@ impl VideoComposeToolset {
             })?;
 
         let probe_spec = ToolSpec {
-            id: probe_tool_id.clone(),
+            id: ToolId::parse(PROBE_TOOL_ID).map_err(|_| VideoComposeError::ConfigInvalid {
+                reason: "invalid_tool_id",
+            })?,
             model_name: Arc::from(PROBE_TOOL_NAME),
             title: Arc::from("Probe media"),
             description: Arc::from(
@@ -275,8 +266,6 @@ impl VideoComposeToolset {
                 metadata: Metadata::empty(),
             },
             tools: Arc::from([compose_spec, probe_spec]),
-            compose_tool_id,
-            probe_tool_id,
             ffmpeg_path: config.ffmpeg_path,
             ffprobe_path: config.ffprobe_path,
             artifact_store: config.artifact_store,
@@ -300,8 +289,7 @@ impl Toolset for VideoComposeToolset {
         ctx: ToolCallContext,
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        let compose_tool_id = self.compose_tool_id.clone();
-        let probe_tool_id = self.probe_tool_id.clone();
+        let tools = Arc::clone(&self.tools);
         let ffmpeg_path = self.ffmpeg_path.clone();
         let ffprobe_path = self.ffprobe_path.clone();
         let artifact_store = Arc::clone(&self.artifact_store);
@@ -309,40 +297,46 @@ impl Toolset for VideoComposeToolset {
         let render_timeout = self.render_timeout;
         Box::pin(async move {
             verify_authority(&ctx)?;
-            if call.tool_id == compose_tool_id && call.call.tool_name() == COMPOSE_TOOL_NAME {
-                return handle_compose(
-                    &ctx,
-                    &call,
-                    &ffmpeg_path,
-                    &ffprobe_path,
-                    &artifact_store,
-                    &scratch_dir,
-                    render_timeout,
-                )
-                .await;
+            let tool_name = call.call.tool_name();
+            let known = tools
+                .iter()
+                .any(|spec| spec.id == call.tool_id && spec.model_name.as_ref() == tool_name);
+            match tool_name {
+                COMPOSE_TOOL_NAME if known => {
+                    handle_compose(
+                        &ctx,
+                        &call,
+                        &ffmpeg_path,
+                        &ffprobe_path,
+                        &artifact_store,
+                        &scratch_dir,
+                        render_timeout,
+                    )
+                    .await
+                }
+                PROBE_TOOL_NAME if known => {
+                    handle_probe(
+                        &ctx,
+                        &call,
+                        &ffprobe_path,
+                        &artifact_store,
+                        &scratch_dir,
+                        render_timeout,
+                    )
+                    .await
+                }
+                _ => Err(tool_error(
+                    VIDEO_COMPOSE_INVALID_ARGUMENTS,
+                    ErrorCategory::Validation,
+                    "video compose call identity is invalid",
+                )),
             }
-            if call.tool_id == probe_tool_id && call.call.tool_name() == PROBE_TOOL_NAME {
-                return handle_probe(
-                    &ctx,
-                    &call,
-                    &ffprobe_path,
-                    &artifact_store,
-                    &scratch_dir,
-                    render_timeout,
-                )
-                .await;
-            }
-            Err(tool_error(
-                VIDEO_COMPOSE_INVALID_ARGUMENTS,
-                ErrorCategory::Validation,
-                "video compose call identity is invalid",
-            ))
         })
     }
 }
 
 /// Exact scope binding for every artifact operation this Toolset performs.
-pub(crate) fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
+fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
     ArtifactScope {
         tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
         session_id: ctx.run.locator.session_id,
@@ -357,7 +351,7 @@ pub(crate) fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
 ///
 /// Returns [`VIDEO_COMPOSE_MEDIA_FAILURE`] when the store read fails, the
 /// returned bytes fail independent verification, or the scratch write fails.
-pub(crate) async fn fetch_artifact_to_file(
+async fn fetch_artifact_to_file(
     store: &Arc<dyn ArtifactStore>,
     scope: &ArtifactScope,
     artifact: &ArtifactRef,
@@ -401,7 +395,7 @@ pub(crate) async fn fetch_artifact_to_file(
 /// Returns [`VIDEO_COMPOSE_LIMIT_EXCEEDED`] when the store rejects the
 /// content as oversized, or [`VIDEO_COMPOSE_MEDIA_FAILURE`] for any other
 /// read or staging failure.
-pub(crate) async fn stage_output(
+async fn stage_output(
     store: &Arc<dyn ArtifactStore>,
     scope: &ArtifactScope,
     path: &Path,
@@ -607,12 +601,11 @@ async fn handle_compose(
         });
     }
 
-    let ext = match spec.output.container {
-        Container::Mp4 => "mp4",
-        Container::Webm => "webm",
-    };
-    let output_path =
-        scratch.track(scratch_dir.join(format!("{}.{ext}", render_file_stem(ctx.run.effect_id))));
+    let output_path = scratch.track(scratch_dir.join(format!(
+        "{}.{}",
+        render_file_stem(ctx.run.effect_id),
+        spec.output.container.extension()
+    )));
 
     let args = build_ffmpeg_args(
         &spec,
@@ -639,12 +632,13 @@ async fn handle_compose(
     )
     .await?;
 
-    let media_type = match spec.output.container {
-        Container::Mp4 => "video/mp4",
-        Container::Webm => "video/webm",
-    };
-    let (artifact, byte_length) =
-        stage_output(artifact_store, &scope, &output_path, media_type).await?;
+    let (artifact, byte_length) = stage_output(
+        artifact_store,
+        &scope,
+        &output_path,
+        spec.output.container.media_type(),
+    )
+    .await?;
     drop(scratch);
 
     let artifact_json = serde_json::to_value(&artifact).map_err(|_| {
@@ -709,7 +703,11 @@ pub(crate) fn timeout_error() -> ToolError {
     )
 }
 
-fn tool_error(code: &'static str, category: ErrorCategory, message: impl AsRef<str>) -> ToolError {
+pub(crate) fn tool_error(
+    code: &'static str,
+    category: ErrorCategory,
+    message: impl AsRef<str>,
+) -> ToolError {
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
@@ -722,9 +720,9 @@ mod tests {
 
     use bytes::Bytes;
     use finstack_ai_kernel::{
-        ArtifactId, BlobRef, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId,
-        Metadata, OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId,
-        ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
+        Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
+        OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId, ToolBatchId,
+        ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
     use finstack_ai_runtime::artifact::{
         ArtifactMetadata, ArtifactScope, ArtifactStore, InProcessArtifactStore,
@@ -816,30 +814,6 @@ mod tests {
         )
         .await
         .expect("stage")
-    }
-
-    /// A structurally valid but unstaged artifact reference: usable only
-    /// when a test expects rejection before any store fetch happens.
-    fn unstaged_artifact_ref() -> ArtifactRef {
-        let content = b"clip".as_slice();
-        let digest = Digest::blob_content(content);
-        let blob = BlobRef::try_new(
-            "blob-1",
-            "video/mp4",
-            u64::try_from(content.len()).expect("length"),
-            Some(digest),
-            None::<&str>,
-        )
-        .expect("blob");
-        ArtifactRef::try_new(
-            ArtifactId::from_bytes([9; 16]),
-            "video",
-            blob,
-            digest,
-            Digest::raw_json(b"scope"),
-            Metadata::empty(),
-        )
-        .expect("artifact")
     }
 
     fn toolset(
@@ -1135,7 +1109,9 @@ mod tests {
             Duration::from_secs(5),
         );
         let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
-        let clip = unstaged_artifact_ref();
+        // Structurally valid but unstaged: the spec must be rejected before
+        // any store fetch happens.
+        let clip = crate::spec::tests::artifact_ref();
         let args = serde_json::json!({
             "version": 1,
             "clips": [{"artifact": clip.clone()}, {"artifact": clip.clone()}, {"artifact": clip}],

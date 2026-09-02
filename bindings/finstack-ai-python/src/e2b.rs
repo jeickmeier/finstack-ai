@@ -3,9 +3,11 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::ports::tool::Toolset;
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{ComponentRef, Version};
 use finstack_ai_sandbox_e2b::{E2bSandboxConfig, E2bSandboxToolset};
 use pyo3::prelude::*;
+
+use crate::component_ref;
 
 const COMPONENT: &str = "finstack.tools.e2b";
 
@@ -33,20 +35,15 @@ impl PyE2bSandboxToolset {
             template,
         })
         .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(COMPONENT)
-            .map(|id| {
-                ComponentRef::new(
-                    id,
-                    Some(Version {
-                        major: 1,
-                        minor: 0,
-                        patch: 0,
-                    }),
-                )
-            })
-            .map_err(|_| pyo3::exceptions::PyValueError::new_err("e2b component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(
+                COMPONENT,
+                Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+            )?,
             inner: Arc::new(inner),
         })
     }

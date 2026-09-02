@@ -1,13 +1,12 @@
-//! `openrouter_generate_video` and `openrouter_get_video` handlers.
+//! `openrouter_generate_video`, `openrouter_get_video`, and
+//! `openrouter_download_video` handlers.
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use base64::Engine as _;
 use finstack_ai_kernel::{ArtifactRef, ErrorCategory};
-use finstack_ai_runtime::artifact::{ArtifactScope, ArtifactStore, validate_retrieved_artifact};
+use finstack_ai_runtime::artifact::validate_retrieved_artifact;
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
-use reqwest::header::HeaderValue;
 use serde::Deserialize;
 
 use crate::config::{
@@ -15,8 +14,8 @@ use crate::config::{
     OPENROUTER_MEDIA_TRANSPORT_FAILED,
 };
 use crate::http::{
-    BASE64_STANDARD, POLL_INTERVAL, deliver_media, invalid_arguments, parse_arguments, send_bytes,
-    send_json, timeout_error, tool_error, wait_deadline,
+    BASE64_STANDARD, POLL_INTERVAL, Route, artifact_scope, deliver_media, invalid_arguments,
+    parse_arguments, send_bytes, send_json, timeout_error, tool_error, wait_deadline,
 };
 
 pub(crate) const VIDEO_TOOL_ID: &str = "finstack.tools.openrouter_generate_video";
@@ -26,22 +25,14 @@ pub(crate) const VIDEO_STATUS_TOOL_NAME: &str = "openrouter_get_video";
 pub(crate) const VIDEO_DOWNLOAD_TOOL_ID: &str = "finstack.tools.openrouter_download_video";
 pub(crate) const VIDEO_DOWNLOAD_TOOL_NAME: &str = "openrouter_download_video";
 
-/// Ceiling for inline base64 data-URI frame/reference images.
-pub(crate) const MAX_INLINE_IMAGE_BYTES: usize = 8 * 1_048_576;
-
-/// Test-shrunk inline-image ceiling so oversize-rejection tests stay fast.
-fn inline_image_ceiling() -> usize {
-    if cfg!(test) {
-        1_024
-    } else {
-        MAX_INLINE_IMAGE_BYTES
-    }
-}
+/// Ceiling for inline base64 data-URI frame/reference images; shrunk under
+/// test so oversize-rejection tests stay fast.
+const MAX_INLINE_IMAGE_BYTES: usize = if cfg!(test) { 1_024 } else { 8 * 1_048_576 };
 
 /// One frame or reference image: exactly one of a URL or a stored artifact.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ImageInput {
+struct ImageInput {
     #[serde(default)]
     url: Option<String>,
     #[serde(default)]
@@ -73,30 +64,20 @@ struct VideoArguments {
     reference_images: Option<Vec<ImageInput>>,
 }
 
-/// The Global Constraints artifact scope shared by artifact-input tools.
-pub(crate) fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
-    ArtifactScope {
-        tenant_scope: Arc::clone(&ctx.run.locator.tenant_scope),
-        session_id: ctx.run.locator.session_id,
-        run_id: Some(ctx.run.locator.run_id),
-        sensitivity: finstack_ai_kernel::Sensitivity::Internal,
-    }
-}
-
 /// Resolve one frame/reference image input to a URL the endpoint accepts.
 ///
 /// Exactly one of `url`/`artifact` must be set. An artifact input requires a
 /// configured store and is read, verified, and bounded before being turned
 /// into a data URI.
-pub(crate) async fn resolve_image_input(
-    store: Option<&Arc<dyn ArtifactStore>>,
+async fn resolve_image_input(
+    route: &Route,
     ctx: &ToolCallContext,
     input: &ImageInput,
 ) -> Result<String, ToolError> {
     match (&input.url, &input.artifact) {
         (Some(url), None) => Ok(url.clone()),
         (None, Some(artifact)) => {
-            let Some(store) = store else {
+            let Some(store) = &route.store else {
                 return Err(tool_error(
                     OPENROUTER_MEDIA_STORE_REQUIRED,
                     ErrorCategory::Configuration,
@@ -121,7 +102,7 @@ pub(crate) async fn resolve_image_input(
                     "openrouter media frame artifact failed verification",
                 )
             })?;
-            if bytes.len() > inline_image_ceiling() {
+            if bytes.len() > MAX_INLINE_IMAGE_BYTES {
                 return Err(tool_error(
                     OPENROUTER_MEDIA_LIMIT_EXCEEDED,
                     ErrorCategory::Limit,
@@ -162,14 +143,8 @@ struct VideoStatusResponse {
     unsigned_urls: Vec<String>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_video_submit(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
-    endpoint: &str,
-    store: Option<&Arc<dyn ArtifactStore>>,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<serde_json::Value, ToolError> {
@@ -183,39 +158,13 @@ pub(crate) async fn handle_video_submit(
         "model": arguments.model,
         "prompt": arguments.prompt,
     });
-    if let Some(map) = body.as_object_mut() {
-        if let Some(duration) = arguments.duration {
-            map.insert("duration".into(), serde_json::Value::from(duration));
-        }
-        if let Some(resolution) = arguments.resolution {
-            map.insert("resolution".into(), serde_json::Value::String(resolution));
-        }
-        if let Some(aspect_ratio) = arguments.aspect_ratio {
-            map.insert(
-                "aspect_ratio".into(),
-                serde_json::Value::String(aspect_ratio),
-            );
-        }
-        if let Some(size) = arguments.size {
-            map.insert("size".into(), serde_json::Value::String(size));
-        }
-        if let Some(seed) = arguments.seed {
-            map.insert("seed".into(), serde_json::Value::from(seed));
-        }
-        if let Some(generate_audio) = arguments.generate_audio {
-            map.insert(
-                "generate_audio".into(),
-                serde_json::Value::from(generate_audio),
-            );
-        }
-    }
     let mut frame_images = Vec::new();
     for (input, frame_type) in [
         (arguments.first_frame.as_ref(), "first_frame"),
         (arguments.last_frame.as_ref(), "last_frame"),
     ] {
         if let Some(input) = input {
-            let url = resolve_image_input(store, ctx, input).await?;
+            let url = resolve_image_input(route, ctx, input).await?;
             frame_images.push(serde_json::json!({
                 "type": "image_url",
                 "image_url": { "url": url },
@@ -230,33 +179,39 @@ pub(crate) async fn handle_video_submit(
                 "openrouter media accepts at most four reference images",
             ));
         }
-        let url = resolve_image_input(store, ctx, input).await?;
+        let url = resolve_image_input(route, ctx, input).await?;
         input_references.push(serde_json::json!({
             "type": "image_url",
             "image_url": { "url": url },
         }));
     }
     if let Some(map) = body.as_object_mut() {
-        if !frame_images.is_empty() {
-            map.insert(
-                "frame_images".into(),
-                serde_json::Value::Array(frame_images),
-            );
-        }
-        if !input_references.is_empty() {
-            map.insert(
-                "input_references".into(),
-                serde_json::Value::Array(input_references),
-            );
+        use serde_json::Value;
+        for (key, value) in [
+            ("duration", arguments.duration.map(Value::from)),
+            ("resolution", arguments.resolution.map(Value::String)),
+            ("aspect_ratio", arguments.aspect_ratio.map(Value::String)),
+            ("size", arguments.size.map(Value::String)),
+            ("seed", arguments.seed.map(Value::from)),
+            ("generate_audio", arguments.generate_audio.map(Value::from)),
+            (
+                "frame_images",
+                (!frame_images.is_empty()).then_some(Value::Array(frame_images)),
+            ),
+            (
+                "input_references",
+                (!input_references.is_empty()).then_some(Value::Array(input_references)),
+            ),
+        ] {
+            if let Some(value) = value {
+                map.insert(key.into(), value);
+            }
         }
     }
     let response: VideoSubmitResponse = send_json(
-        client,
-        authorization,
-        referer,
-        title,
+        route,
         reqwest::Method::POST,
-        &format!("{endpoint}/api/v1/videos"),
+        &format!("{}/api/v1/videos", route.endpoint),
         Some(&body),
         ctx,
         MAX_RESULT_BYTES_CEILING,
@@ -266,11 +221,7 @@ pub(crate) async fn handle_video_submit(
 }
 
 pub(crate) async fn handle_video_status(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
-    endpoint: &str,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<serde_json::Value, ToolError> {
@@ -285,17 +236,15 @@ pub(crate) async fn handle_video_status(
         ));
     }
     let url = format!(
-        "{endpoint}/api/v1/videos/{}",
+        "{}/api/v1/videos/{}",
+        route.endpoint,
         percent_encode_path_segment(&arguments.id)
     );
-    let wait_deadline_local = (wait_seconds > 0)
+    let wait_until = (wait_seconds > 0)
         .then(|| Instant::now() + std::time::Duration::from_secs(u64::from(wait_seconds)));
     loop {
         let response: VideoStatusResponse = send_json(
-            client,
-            authorization,
-            referer,
-            title,
+            route,
             reqwest::Method::GET,
             &url,
             None,
@@ -304,16 +253,7 @@ pub(crate) async fn handle_video_status(
         )
         .await?;
         let terminal = !matches!(response.status.as_str(), "pending" | "in_progress");
-        if terminal || wait_deadline_local.is_none() {
-            return Ok(serde_json::json!({
-                "id": response.id,
-                "status": response.status,
-                "urls": response.unsigned_urls,
-            }));
-        }
-        if let Some(local_deadline) = wait_deadline_local
-            && Instant::now() >= local_deadline
-        {
+        if terminal || wait_until.is_none_or(|until| Instant::now() >= until) {
             return Ok(serde_json::json!({
                 "id": response.id,
                 "status": response.status,
@@ -334,14 +274,8 @@ struct VideoDownloadArguments {
     id: String,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_video_download(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
-    endpoint: &str,
-    store: Option<&Arc<dyn ArtifactStore>>,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<serde_json::Value, ToolError> {
@@ -349,40 +283,29 @@ pub(crate) async fn handle_video_download(
     if arguments.id.is_empty() {
         return Err(invalid_arguments("openrouter media video id is empty"));
     }
-    let Some(store) = store else {
+    let Some(store) = &route.store else {
         return Err(tool_error(
             OPENROUTER_MEDIA_STORE_REQUIRED,
             ErrorCategory::Configuration,
             "openrouter media video download requires an artifact store",
         ));
     };
-    let cap = store.limits().max_artifact_bytes;
     let url = format!(
-        "{endpoint}/api/v1/videos/{}/content",
+        "{}/api/v1/videos/{}/content",
+        route.endpoint,
         percent_encode_path_segment(&arguments.id)
     );
     let (bytes, content_type) = send_bytes(
-        client,
-        authorization,
-        referer,
-        title,
+        route,
         reqwest::Method::GET,
         &url,
         None,
         ctx,
-        cap,
+        store.limits().max_artifact_bytes,
     )
     .await?;
     let media_type = content_type.unwrap_or_else(|| "video/mp4".to_owned());
-    let delivered = deliver_media(
-        bytes,
-        &media_type,
-        "openrouter-video",
-        Some(store),
-        ctx,
-        usize::MAX,
-    )
-    .await?;
+    let delivered = deliver_media(route, bytes, &media_type, "openrouter-video", ctx).await?;
     Ok(delivered.value)
 }
 

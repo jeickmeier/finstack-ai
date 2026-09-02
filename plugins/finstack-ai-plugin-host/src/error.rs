@@ -29,7 +29,7 @@ pub const PLUGIN_LOCK_DIGEST_MISMATCH: &str = "plugin_lock_digest_mismatch";
 pub const PLUGIN_LOCK_NOT_FOUND: &str = "plugin_lock_not_found";
 /// Guest-supplied failure, namespaced so it can never impersonate a host code.
 pub const PLUGIN_GUEST_ERROR: &str = "plugin_guest_error";
-/// Lockfile JSON, version, or path is invalid.
+
 /// Fail-closed error for the isolated Wasmtime host.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PluginHostError {

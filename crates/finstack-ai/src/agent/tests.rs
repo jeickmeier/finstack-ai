@@ -53,12 +53,12 @@ use finstack_ai_tools_calculator::CalculatorToolset;
 use super::builder::validate_compact_catalog;
 use super::types::MAX_COMPACT_CATALOG_BYTES;
 use super::*;
+use crate::registry::ReadyComponent;
 use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
     BundleResolver, BundleSpec, CapabilityActivation, CapabilitySpec, ChildRunPolicy,
-    CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
-    Registrar, RegistrationError, RegistrationMetadata, RunPolicy, RuntimeServices, Session,
-    SessionError,
+    CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, Registrar,
+    RegistrationError, RegistrationMetadata, RunPolicy, RuntimeServices, Session, SessionError,
 };
 
 const VERSION: Version = Version {

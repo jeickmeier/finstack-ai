@@ -1,13 +1,11 @@
 //! [`S3ObjectStore`]: the `ObjectDriver` implementation over `SigV4`-signed
 //! HTTP calls to an S3-compatible bucket.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::driver::{
     ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
-    ObjectScope, ObjectStoreLimits, PageToken, PutPayload, physical_object_key,
-    validate_object_metadata,
+    ObjectScope, ObjectStoreLimits, PageToken, physical_object_key, validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
 use finstack_ai_runtime::Bytes;
@@ -15,17 +13,13 @@ use finstack_ai_runtime::ports::PortFuture;
 use futures_util::StreamExt;
 use reqwest::{Method, Response, StatusCode, Url};
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::s3::config::S3ObjectStoreConfig;
 use crate::s3::request::{
-    BlobDigestHasher, ListTarget, StreamingSha256, list_url, map_status_error, map_transport_error,
-    object_url, payload_sha256_hex,
+    ListTarget, list_url, map_status_error, map_transport_error, object_url, payload_sha256_hex,
 };
 use crate::s3::sigv4::{SigningParams, UtcStamp, sign_headers};
 
-/// 64 KiB read chunk used for both hash-pass and streaming-send file reads.
-const FILE_CHUNK_BYTES: usize = 64 * 1024;
 const LIST_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
 const LIST_MAX_ENTRIES: usize = 1000;
 
@@ -74,12 +68,14 @@ impl ObjectDriver for S3ObjectStore {
         &self,
         scope: ObjectScope,
         key: ObjectKey,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let client = self.client.clone();
         let config = self.config.clone();
-        Box::pin(async move { put_impl(&client, &config, scope, key, content, metadata).await })
+        Box::pin(
+            async move { put_impl(&client, &config, scope, key, content, metadata, None).await },
+        )
     }
 
     fn get(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<Bytes, ObjectError>> {
@@ -88,44 +84,23 @@ impl ObjectDriver for S3ObjectStore {
         Box::pin(async move { get_impl(&client, &config, scope, key).await })
     }
 
-    fn get_to_file(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-        dest: PathBuf,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
-        let client = self.client.clone();
-        let config = self.config.clone();
-        Box::pin(async move { get_to_file_impl(&client, &config, scope, key, dest).await })
-    }
-
-    fn head(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
-        let client = self.client.clone();
-        let config = self.config.clone();
-        Box::pin(async move { head_impl(&client, &config, scope, key).await })
-    }
-
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>> {
         let client = self.client.clone();
         let config = self.config.clone();
-        Box::pin(async move { delete_impl(&client, &config, scope, key).await })
+        Box::pin(async move { delete_impl(&client, &config, scope, key, None).await })
     }
 
     fn put_if_absent(
         &self,
         scope: ObjectScope,
         key: ObjectKey,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let client = self.client.clone();
         let config = self.config.clone();
         Box::pin(async move {
-            put_impl_condition(
+            put_impl(
                 &client,
                 &config,
                 scope,
@@ -143,7 +118,7 @@ impl ObjectDriver for S3ObjectStore {
         scope: ObjectScope,
         key: ObjectKey,
         expected: Digest,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let client = self.client.clone();
@@ -153,7 +128,7 @@ impl ObjectDriver for S3ObjectStore {
             if current != expected {
                 return Err(ObjectError::Conflict);
             }
-            put_impl_condition(
+            put_impl(
                 &client,
                 &config,
                 scope,
@@ -179,7 +154,7 @@ impl ObjectDriver for S3ObjectStore {
             if current != expected {
                 return Err(ObjectError::Conflict);
             }
-            delete_impl_condition(&client, &config, scope, key, Some(etag.as_str())).await
+            delete_impl(&client, &config, scope, key, Some(etag.as_str())).await
         })
     }
 
@@ -220,12 +195,6 @@ fn signing_params(
         service: "s3",
         timestamp,
     })
-}
-
-fn io_error(error: &std::io::Error) -> ObjectError {
-    ObjectError::Io {
-        message: Arc::from(error.to_string()),
-    }
 }
 
 fn send_signed(
@@ -292,120 +261,18 @@ fn reject_if_content_length_exceeds(
     Ok(())
 }
 
-/// Copy a caller-controlled file into one private snapshot while hashing it.
-/// The request body owns this exact handle, eliminating path-reopen races.
-async fn snapshot_file(path: &Path, max_bytes: u64) -> Result<PutSource, ObjectError> {
-    let mut source = tokio::fs::File::open(path)
-        .await
-        .map_err(|error| io_error(&error))?;
-    let temp = tempfile::tempfile().map_err(|error| io_error(&error))?;
-    let mut file = tokio::fs::File::from_std(temp);
-    let mut raw_hasher = StreamingSha256::new();
-    let mut blob_hasher = BlobDigestHasher::new();
-    let mut total: u64 = 0;
-    let mut buffer = vec![0_u8; FILE_CHUNK_BYTES];
-    loop {
-        let read = source
-            .read(&mut buffer)
-            .await
-            .map_err(|error| io_error(&error))?;
-        if read == 0 {
-            break;
-        }
-        let Some(chunk) = buffer.get(..read) else {
-            return Err(io_error(&std::io::Error::other("short read buffer")));
-        };
-        raw_hasher.update(chunk);
-        blob_hasher.update(chunk);
-        total = total.saturating_add(read as u64);
-        if total > max_bytes {
-            return Err(ObjectError::TooLarge {
-                len: total,
-                max: max_bytes,
-            });
-        }
-        file.write_all(chunk)
-            .await
-            .map_err(|error| io_error(&error))?;
-    }
-    file.flush().await.map_err(|error| io_error(&error))?;
-    file.seek(std::io::SeekFrom::Start(0))
-        .await
-        .map_err(|error| io_error(&error))?;
-    let payload_hash = raw_hasher.finish();
-    let (content_digest, _len) = blob_hasher.finish()?;
-    Ok(PutSource {
-        payload_hash,
-        content_digest,
-        length: total,
-        body: file_body_stream(file),
-    })
-}
-
-fn file_body_stream(file: tokio::fs::File) -> reqwest::Body {
-    let stream = futures_util::stream::unfold(file, |mut file| async move {
-        let mut buffer = vec![0_u8; FILE_CHUNK_BYTES];
-        match file.read(&mut buffer).await {
-            Ok(0) => None,
-            Ok(read) => {
-                buffer.truncate(read);
-                Some((Ok::<Bytes, std::io::Error>(Bytes::from(buffer)), file))
-            }
-            Err(error) => Some((Err(error), file)),
-        }
-    });
-    reqwest::Body::wrap_stream(stream)
-}
-
-struct PutSource {
-    payload_hash: String,
-    content_digest: Digest,
-    length: u64,
-    body: reqwest::Body,
-}
-
-async fn put_source(content: PutPayload, max_bytes: u64) -> Result<PutSource, ObjectError> {
-    match content {
-        PutPayload::Bytes(bytes) => {
-            let length = u64::try_from(bytes.len()).map_err(|_error| ObjectError::Io {
-                message: Arc::from("length_overflow"),
-            })?;
-            if length > max_bytes {
-                return Err(ObjectError::TooLarge {
-                    len: length,
-                    max: max_bytes,
-                });
-            }
-            let payload_hash = payload_sha256_hex(&bytes);
-            let content_digest = Digest::blob_content(&bytes);
-            Ok(PutSource {
-                payload_hash,
-                content_digest,
-                length,
-                body: reqwest::Body::from(bytes),
-            })
-        }
-        PutPayload::File(path) => snapshot_file(&path, max_bytes).await,
-    }
-}
-
+/// `PUT` one object, optionally under an `if-match` / `if-none-match`
+/// precondition header (a `412`/`409` answer is [`ObjectError::Conflict`]).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one argument per request part; the driver methods are thin wrappers"
+)]
 async fn put_impl(
     client: &reqwest::Client,
     config: &S3ObjectStoreConfig,
     scope: ObjectScope,
     key: ObjectKey,
-    content: PutPayload,
-    metadata: ObjectMetadata,
-) -> Result<ObjectRef, ObjectError> {
-    put_impl_condition(client, config, scope, key, content, metadata, None).await
-}
-
-async fn put_impl_condition(
-    client: &reqwest::Client,
-    config: &S3ObjectStoreConfig,
-    scope: ObjectScope,
-    key: ObjectKey,
-    content: PutPayload,
+    content: Bytes,
     metadata: ObjectMetadata,
     condition: Option<(&str, &str)>,
 ) -> Result<ObjectRef, ObjectError> {
@@ -413,15 +280,26 @@ async fn put_impl_condition(
     let scope_digest = scope.digest()?;
     let physical = physical_object_key(config.key_prefix(), &scope_digest, &key);
 
-    let source = put_source(content, config.max_object_bytes()).await?;
+    let max_bytes = config.max_object_bytes();
+    let length = u64::try_from(content.len()).map_err(|_error| ObjectError::Io {
+        message: Arc::from("length_overflow"),
+    })?;
+    if length > max_bytes {
+        return Err(ObjectError::TooLarge {
+            len: length,
+            max: max_bytes,
+        });
+    }
+    let payload_hash = payload_sha256_hex(&content);
+    let content_digest = Digest::blob_content(&content);
 
     let target = object_url(config, &physical)?;
     let params = signing_params(config, UtcStamp::now())?;
 
     let mut extra_headers = vec![
         ("content-type".to_owned(), metadata.media_type.to_string()),
-        ("content-length".to_owned(), source.length.to_string()),
-        (HEADER_DIGEST.to_owned(), source.content_digest.to_hex()),
+        ("content-length".to_owned(), length.to_string()),
+        (HEADER_DIGEST.to_owned(), content_digest.to_hex()),
         (HEADER_SCOPE.to_owned(), scope_digest.to_hex()),
     ];
     if let Some(name) = &metadata.name {
@@ -440,12 +318,12 @@ async fn put_impl_condition(
         &target.path,
         "",
         &target.host,
-        &source.payload_hash,
+        &payload_hash,
         &extra_headers,
     );
 
     let response = send_signed(client, Method::PUT, target.url, &signed)
-        .body(source.body)
+        .body(content)
         .send()
         .await
         .map_err(|_error| map_transport_error())?;
@@ -460,8 +338,8 @@ async fn put_impl_condition(
     Ok(ObjectRef {
         key,
         scope_digest,
-        content_digest: source.content_digest,
-        length: source.length,
+        content_digest,
+        length,
         media_type: Arc::clone(&metadata.media_type),
     })
 }
@@ -531,155 +409,6 @@ async fn get_impl(
     Ok(bytes)
 }
 
-async fn get_to_file_impl(
-    client: &reqwest::Client,
-    config: &S3ObjectStoreConfig,
-    scope: ObjectScope,
-    key: ObjectKey,
-    dest: PathBuf,
-) -> Result<ObjectRef, ObjectError> {
-    let scope_digest = scope.digest()?;
-    let physical = physical_object_key(config.key_prefix(), &scope_digest, &key);
-    let target = object_url(config, &physical)?;
-    let params = signing_params(config, UtcStamp::now())?;
-    let empty_hash = payload_sha256_hex(b"");
-    let signed = sign_headers(
-        &params,
-        "GET",
-        &target.path,
-        "",
-        &target.host,
-        &empty_hash,
-        &[],
-    );
-
-    let response = send_signed(client, Method::GET, target.url, &signed)
-        .send()
-        .await
-        .map_err(|_error| map_transport_error())?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(map_status_error(status));
-    }
-
-    let scope_header = header_value(&response, HEADER_SCOPE)?;
-    let digest_header = header_value(&response, HEADER_DIGEST)?;
-    let media_type = header_value(&response, "content-type")
-        .unwrap_or_else(|_error| "application/octet-stream".to_owned());
-    parse_scope_digest(&scope_header, scope_digest)?;
-
-    let max_bytes = config.max_object_bytes();
-    reject_if_content_length_exceeds(&response, max_bytes)?;
-
-    let parent = dest
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|error| io_error(&error))?;
-
-    let mut hasher = BlobDigestHasher::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_error| map_transport_error())?;
-        // Enforce the ceiling against the incremental counter, not just the
-        // (possibly absent or falsified) `content-length` header, so a
-        // hostile endpoint cannot exhaust disk before verification.
-        let projected = hasher.bytes_written().saturating_add(chunk.len() as u64);
-        if projected > max_bytes {
-            return Err(ObjectError::TooLarge {
-                len: projected,
-                max: max_bytes,
-            });
-        }
-        hasher.update(&chunk);
-        std::io::Write::write_all(&mut tmp, &chunk).map_err(|error| io_error(&error))?;
-    }
-
-    let (content_digest, length) = hasher.finish()?;
-    if content_digest.to_hex() != digest_header {
-        return Err(ObjectError::Integrity {
-            message: Arc::from("digest_mismatch"),
-        });
-    }
-
-    tmp.persist(&dest).map_err(|error| ObjectError::Io {
-        message: Arc::from(error.to_string()),
-    })?;
-
-    Ok(ObjectRef {
-        key,
-        scope_digest,
-        content_digest,
-        length,
-        media_type: Arc::from(media_type),
-    })
-}
-
-async fn head_impl(
-    client: &reqwest::Client,
-    config: &S3ObjectStoreConfig,
-    scope: ObjectScope,
-    key: ObjectKey,
-) -> Result<ObjectRef, ObjectError> {
-    let scope_digest = scope.digest()?;
-    let physical = physical_object_key(config.key_prefix(), &scope_digest, &key);
-    let target = object_url(config, &physical)?;
-    let params = signing_params(config, UtcStamp::now())?;
-    let empty_hash = payload_sha256_hex(b"");
-    let signed = sign_headers(
-        &params,
-        "HEAD",
-        &target.path,
-        "",
-        &target.host,
-        &empty_hash,
-        &[],
-    );
-
-    let response = send_signed(client, Method::HEAD, target.url, &signed)
-        .send()
-        .await
-        .map_err(|_error| map_transport_error())?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(map_status_error(status));
-    }
-
-    let scope_header = header_value(&response, HEADER_SCOPE)?;
-    let digest_header = header_value(&response, HEADER_DIGEST)?;
-    let content_length = header_value(&response, "content-length")?;
-    let media_type = header_value(&response, "content-type")
-        .unwrap_or_else(|_error| "application/octet-stream".to_owned());
-
-    parse_scope_digest(&scope_header, scope_digest)?;
-    let content_digest =
-        Digest::from_hex(&digest_header).map_err(|_error| ObjectError::Integrity {
-            message: Arc::from("malformed_digest_header"),
-        })?;
-    let length: u64 = content_length
-        .parse()
-        .map_err(|_error| ObjectError::Integrity {
-            message: Arc::from("malformed_content_length"),
-        })?;
-
-    Ok(ObjectRef {
-        key,
-        scope_digest,
-        content_digest,
-        length,
-        media_type: Arc::from(media_type),
-    })
-}
-
-async fn delete_impl(
-    client: &reqwest::Client,
-    config: &S3ObjectStoreConfig,
-    scope: ObjectScope,
-    key: ObjectKey,
-) -> Result<(), ObjectError> {
-    delete_impl_condition(client, config, scope, key, None).await
-}
-
 async fn current_digest_and_etag(
     client: &reqwest::Client,
     config: &S3ObjectStoreConfig,
@@ -717,7 +446,9 @@ async fn current_digest_and_etag(
     Ok((digest, etag))
 }
 
-async fn delete_impl_condition(
+/// `DELETE` one object, optionally only when its `etag` still matches. An
+/// unconditional delete of a missing object is not an error.
+async fn delete_impl(
     client: &reqwest::Client,
     config: &S3ObjectStoreConfig,
     scope: ObjectScope,

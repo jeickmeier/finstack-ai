@@ -61,7 +61,7 @@ use finstack_ai_store_common::{
 };
 use tokio_postgres::{Client, Statement, Transaction};
 
-use crate::error::{Failure, commit_or_ambiguous, i64_from_u64, settle};
+use crate::error::{Failure, i64_from_u64, write_op};
 use crate::load::{SELECT_SNAPSHOT, load_snapshot, prepare};
 use crate::pool::PooledClient;
 use crate::session::{LOCK_SESSION_SQL, lock_session};
@@ -141,39 +141,14 @@ pub(crate) async fn prune(
     request: &PruneRequest,
     snapshot_bytes: usize,
 ) -> Result<PruneReceipt, StoreError> {
-    // Prepared before the transaction opens, as on every other op path.
-    let outcome = match PruneStatements::prepare(client).await {
-        Ok(statements) => prune_on_connection(client, &statements, request, snapshot_bytes).await,
-        Err(failure) => Err(failure),
-    };
-    settle(outcome, client)
-}
-
-/// Drive one prune transaction to `COMMIT` or `ROLLBACK`.
-async fn prune_on_connection(
-    client: &mut Client,
-    statements: &PruneStatements,
-    request: &PruneRequest,
-    snapshot_bytes: usize,
-) -> Result<PruneReceipt, Failure> {
-    let transaction = client
-        .transaction()
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-
-    let receipt =
-        match prune_in_transaction(&transaction, statements, request, snapshot_bytes).await {
-            Ok(receipt) => receipt,
-            Err(mut failure) => {
-                if transaction.rollback().await.is_err() {
-                    failure.poison = true;
-                }
-                return Err(failure);
-            }
-        };
-
-    commit_or_ambiguous(transaction).await?;
-    Ok(receipt)
+    write_op(
+        client,
+        PruneStatements::prepare,
+        async |transaction, statements| {
+            prune_in_transaction(transaction, statements, request, snapshot_bytes).await
+        },
+    )
+    .await
 }
 
 /// The prune body, inside the transaction: lock the session row, admit and

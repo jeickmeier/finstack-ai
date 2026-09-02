@@ -53,12 +53,8 @@ pub(super) fn validate_batch_shape(
             matches!(records, [record] if matches!(
                 record.body(),
                 RecordBody::OutputConfigured(_) | RecordBody::CapabilitiesActivated(_)
-            )) || one_stage(records, state.cycle, Stage::BeforeRun, |disposition| {
-                matches!(
-                    disposition,
-                    StageDisposition::Continued | StageDisposition::Failed { .. }
-                )
-            }) || interaction_request_shape(records)
+            )) || one_settled_stage(records, state.cycle, Stage::BeforeRun)
+                || interaction_request_shape(records)
                 || extension_request_shape(state, records)
         }
         Some(RunPhase::PreparingContext) => {
@@ -86,12 +82,8 @@ pub(super) fn validate_batch_shape(
             matches!(records, [record] if matches!(
                 record.body(),
                 RecordBody::FinalResultRecorded(_) | RecordBody::OutputValidationFailed(_)
-            )) || one_stage(records, state.cycle, Stage::AfterModel, |disposition| {
-                matches!(
-                    disposition,
-                    StageDisposition::Continued | StageDisposition::Failed { .. }
-                )
-            }) || interaction_request_shape(records)
+            )) || one_settled_stage(records, state.cycle, Stage::AfterModel)
+                || interaction_request_shape(records)
                 || extension_request_shape(state, records)
         }
         Some(RunPhase::BeforeToolBatch) => {
@@ -106,12 +98,8 @@ pub(super) fn validate_batch_shape(
                 || compaction_model_request_shape(records)
         }
         Some(RunPhase::AfterToolBatch) => {
-            one_stage(records, state.cycle, Stage::AfterToolBatch, |disposition| {
-                matches!(
-                    disposition,
-                    StageDisposition::Continued | StageDisposition::Failed { .. }
-                )
-            }) || interaction_request_shape(records)
+            one_settled_stage(records, state.cycle, Stage::AfterToolBatch)
+                || interaction_request_shape(records)
                 || extension_request_shape(state, records)
                 || matches!(
                     records,
@@ -204,7 +192,7 @@ pub(super) fn foreign_run_shape(state: &KernelState, records: &[RecordEnvelope])
             .all(|record| record.body().is_structural() || is_foreign_run(state, record))
 }
 
-pub(super) fn composition_record_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn composition_record_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
     match records {
         [prepared]
             if matches!(prepared.body(), RecordBody::ChildRunPrepared(value)
@@ -244,7 +232,7 @@ pub(super) fn composition_record_shape(state: &KernelState, records: &[RecordEnv
     }
 }
 
-pub(super) fn retry_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn retry_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
     let [stage_record, retry_record, requested] = records else {
         return false;
     };
@@ -268,7 +256,7 @@ pub(super) fn retry_shape(state: &KernelState, records: &[RecordEnvelope]) -> bo
     )
 }
 
-pub(super) fn timer_fired_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn timer_fired_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
     matches!(
         records,
         [record] if matches!(
@@ -279,7 +267,7 @@ pub(super) fn timer_fired_shape(state: &KernelState, records: &[RecordEnvelope])
     )
 }
 
-pub(super) fn reconciliation_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn reconciliation_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
     let Some(cancellation) = state.cancellation.as_ref() else {
         return false;
     };
@@ -319,7 +307,7 @@ pub(super) fn reconciliation_shape(state: &KernelState, records: &[RecordEnvelop
     true
 }
 
-pub(super) fn tool_batch_open_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn tool_batch_open_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
     let Some((stage_record, tail)) = records.split_first() else {
         return false;
     };
@@ -419,7 +407,7 @@ pub(super) fn tool_batch_open_shape(state: &KernelState, records: &[RecordEnvelo
     clippy::too_many_lines,
     reason = "exact settlement replay mirrors source-prefix finalization, group dispatch, and closure"
 )]
-pub(super) fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
     let Some(batch) = state.active_tool_batch.as_ref() else {
         return false;
     };
@@ -564,7 +552,7 @@ pub(super) fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelo
         && close_matches
 }
 
-pub(super) fn one_stage(
+fn one_stage(
     records: &[RecordEnvelope],
     cycle: u64,
     stage: Stage,
@@ -582,13 +570,23 @@ pub(super) fn one_stage(
     )
 }
 
-pub(super) fn one_failed_stage(records: &[RecordEnvelope], cycle: u64, stage: Stage) -> bool {
+/// One `Continued` or `Failed` stage record at the expected cursor.
+fn one_settled_stage(records: &[RecordEnvelope], cycle: u64, stage: Stage) -> bool {
+    one_stage(records, cycle, stage, |disposition| {
+        matches!(
+            disposition,
+            StageDisposition::Continued | StageDisposition::Failed { .. }
+        )
+    })
+}
+
+fn one_failed_stage(records: &[RecordEnvelope], cycle: u64, stage: Stage) -> bool {
     one_stage(records, cycle, stage, |disposition| {
         matches!(disposition, StageDisposition::Failed { .. })
     })
 }
 
-pub(super) fn prepare_context_shape(records: &[RecordEnvelope], cycle: u64) -> bool {
+fn prepare_context_shape(records: &[RecordEnvelope], cycle: u64) -> bool {
     let [stage, context] = records else {
         return false;
     };
@@ -617,7 +615,7 @@ pub(super) fn prepare_context_shape(records: &[RecordEnvelope], cycle: u64) -> b
         && context.context_digest == *context_digest
 }
 
-pub(super) fn request_model_shape(kernel_state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn request_model_shape(kernel_state: &KernelState, records: &[RecordEnvelope]) -> bool {
     let [outcome_record, effect_record] = records else {
         return false;
     };
@@ -664,7 +662,7 @@ fn compaction_model_request_shape(records: &[RecordEnvelope]) -> bool {
     )
 }
 
-pub(super) fn model_settlement_shape(
+fn model_settlement_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
     allow_deferred: bool,
@@ -704,7 +702,7 @@ pub(super) fn model_settlement_shape(
     }
 }
 
-pub(super) fn entry_matches_completion(
+fn entry_matches_completion(
     state: &KernelState,
     pending: &PendingModelEffect,
     entry: &EntryAppended,
@@ -721,7 +719,7 @@ pub(super) fn entry_matches_completion(
         && entry.message.provider_ids() == completion.provider_ids()
 }
 
-pub(super) fn finalize_shape(kernel_state: &KernelState, records: &[RecordEnvelope]) -> bool {
+fn finalize_shape(kernel_state: &KernelState, records: &[RecordEnvelope]) -> bool {
     match records {
         [record] => matches!(
             record.body(),
@@ -770,7 +768,7 @@ pub(super) fn finalize_shape(kernel_state: &KernelState, records: &[RecordEnvelo
     }
 }
 
-pub(super) fn terminal_completed_matches(state: &KernelState, completed: &RunCompleted) -> bool {
+fn terminal_completed_matches(state: &KernelState, completed: &RunCompleted) -> bool {
     matches!(
         state.terminal_candidate.as_ref(),
         Some(TerminalCandidate::Completed {
@@ -789,7 +787,7 @@ pub(super) fn terminal_completed_matches(state: &KernelState, completed: &RunCom
     )
 }
 
-pub(super) fn terminal_failed_matches(state: &KernelState, failed: &RunFailed) -> bool {
+fn terminal_failed_matches(state: &KernelState, failed: &RunFailed) -> bool {
     matches!(
         state.terminal_candidate.as_ref(),
         Some(TerminalCandidate::Failed {
@@ -806,7 +804,7 @@ pub(super) fn terminal_failed_matches(state: &KernelState, failed: &RunFailed) -
     )
 }
 
-pub(super) fn interaction_request_shape(records: &[RecordEnvelope]) -> bool {
+fn interaction_request_shape(records: &[RecordEnvelope]) -> bool {
     if records.len() != 2 {
         return false;
     }
@@ -837,7 +835,7 @@ pub(super) fn interaction_request_shape(records: &[RecordEnvelope]) -> bool {
     }
 }
 
-pub(super) fn interaction_terminal_shape(records: &[RecordEnvelope]) -> bool {
+fn interaction_terminal_shape(records: &[RecordEnvelope]) -> bool {
     matches!(
         records,
         [left, right]

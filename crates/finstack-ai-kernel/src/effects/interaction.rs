@@ -19,8 +19,8 @@ use crate::primitives::{Metadata, RawJson};
 use super::EffectError;
 
 /// Interaction kind (approval is a profile, not a separate record family).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum InteractionKind {
     /// Approval profile.
     Approval,
@@ -37,42 +37,17 @@ pub enum InteractionKind {
     /// Custom.
     Custom {
         /// Custom name.
+        #[serde(deserialize_with = "deserialize_custom_name")]
         name: Arc<str>,
     },
 }
 
-impl<'de> Deserialize<'de> for InteractionKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
-        enum Wire {
-            Approval,
-            Choice,
-            Form,
-            FreeText,
-            Review,
-            Correction,
-            Custom {
-                name: BoundedString<LABEL_MAX_BYTES>,
-            },
-        }
-
-        Ok(match Wire::deserialize(deserializer)? {
-            Wire::Approval => Self::Approval,
-            Wire::Choice => Self::Choice,
-            Wire::Form => Self::Form,
-            Wire::FreeText => Self::FreeText,
-            Wire::Review => Self::Review,
-            Wire::Correction => Self::Correction,
-            Wire::Custom { name } => Self::Custom {
-                name: validated_label(&name.into_inner(), "interaction_kind")
-                    .map_err(de::Error::custom)?,
-            },
-        })
-    }
+fn deserialize_custom_name<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let name = BoundedString::<LABEL_MAX_BYTES>::deserialize(deserializer)?;
+    validated_label(&name.into_inner(), "interaction_kind").map_err(de::Error::custom)
 }
 
 /// Interaction request payload (`InteractionRequested` record body).
@@ -406,10 +381,9 @@ impl InteractionResolution {
             principal,
             authorization,
             response,
-            comment: match comment {
-                Some(value) => Some(validated_label(value.as_ref(), "comment")?),
-                None => None,
-            },
+            comment: comment
+                .map(|value| validated_label(value.as_ref(), "comment"))
+                .transpose()?,
         })
     }
 
@@ -549,10 +523,9 @@ impl InteractionCancelled {
             interaction_id,
             principal,
             authorization,
-            reason: match reason {
-                Some(value) => Some(validated_label(value.as_ref(), "reason")?),
-                None => None,
-            },
+            reason: reason
+                .map(|value| validated_label(value.as_ref(), "reason"))
+                .transpose()?,
         })
     }
 

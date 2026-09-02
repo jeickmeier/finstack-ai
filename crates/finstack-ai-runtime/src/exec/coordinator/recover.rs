@@ -17,6 +17,23 @@ use super::session_commit::apply_batch_to_session;
 use super::submit::update_pending_timer_timestamp;
 use super::{CommitCoordinator, CommitCoordinatorError, ReplayScope};
 
+/// Snapshots are never written from a scoped (run or structural-only) replay.
+const STRUCTURAL_SNAPSHOT_SCHEDULE: SnapshotSchedule = SnapshotSchedule {
+    every_n_records: u64::MAX,
+    write_timeout: Duration::from_millis(50),
+};
+
+/// The accelerated snapshot's sequence, when replay actually restored from it.
+pub(super) fn used_snapshot_sequence(loaded: &LoadedSession, used_snapshot: bool) -> Option<u64> {
+    if !used_snapshot {
+        return None;
+    }
+    loaded
+        .accelerated
+        .as_ref()
+        .map(|snapshot| snapshot.sequence)
+}
+
 impl CommitCoordinator {
     /// Reconstruct a coordinator solely by loading and replaying one session.
     ///
@@ -31,57 +48,12 @@ impl CommitCoordinator {
             .load(LoadRequest { session_id })
             .await
             .map_err(CommitCoordinatorError::Store)?;
-        let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
-            replay_loaded(&loaded)
-                .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
-        let last_model_continuation =
-            continuation_after_replay(&loaded, ReplayScope::Primary, used_snapshot)
-                .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
-        let session = project_loaded(&loaded)
-            .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
-        Ok(Self {
-            kernel,
-            session,
+        Self::from_loaded(
             store,
-            next_transient_sequence,
-            pending_timer_scheduled_at,
-            snapshot_schedule: SnapshotSchedule::default(),
-            last_snapshot_sequence: used_snapshot
-                .then(|| {
-                    loaded
-                        .accelerated
-                        .as_ref()
-                        .map(|snapshot| snapshot.sequence)
-                })
-                .flatten(),
-            head_checksum: loaded.head_checksum,
-            fault: None,
-            last_store_reason: None,
-            dispatcher: None,
-            #[cfg(feature = "native-tokio")]
-            manual_drive: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            event_publisher: None,
-            replay_scope: ReplayScope::Primary,
-            middleware_chain: None,
-            context_providers: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            context_projection: None,
-            last_model_continuation,
-            capability_owners: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            replayed_completed_effects: completed_effect_pairs(&loaded),
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            replayed_extension_envelopes: extension_request_envelopes(&loaded),
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            last_middleware_effect_id: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            compaction_checkpoint: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            live_state_publisher: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            record_kinds: loaded_record_kinds(&loaded),
-        })
+            &loaded,
+            ReplayScope::Primary,
+            SnapshotSchedule::default(),
+        )
     }
 
     /// Reconstruct a coordinator for one run, or for structural-only mutation.
@@ -108,59 +80,40 @@ impl CommitCoordinator {
             None => ReplayScope::StructuralOnly,
             Some(run_id) => ReplayScope::Run(run_id),
         };
+        Self::from_loaded(store, &loaded, scope, STRUCTURAL_SNAPSHOT_SCHEDULE)
+    }
+
+    /// A fresh coordinator whose replay state comes from `loaded` under `scope`.
+    fn from_loaded(
+        store: Arc<dyn JournalStore>,
+        loaded: &LoadedSession,
+        scope: ReplayScope,
+        snapshot_schedule: SnapshotSchedule,
+    ) -> Result<Self, CommitCoordinatorError> {
         let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
-            replay_scoped(&loaded, scope)
+            replay_scoped(loaded, scope)
                 .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
-        let last_model_continuation = continuation_after_replay(&loaded, scope, used_snapshot)
+        let last_model_continuation = continuation_after_replay(loaded, scope, used_snapshot)
             .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
-        let session = project_loaded(&loaded)
+        let session = project_loaded(loaded)
             .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
-        Ok(Self {
-            kernel,
-            session,
-            store,
-            next_transient_sequence,
-            pending_timer_scheduled_at,
-            snapshot_schedule: SnapshotSchedule {
-                every_n_records: u64::MAX,
-                write_timeout: Duration::from_millis(50),
-            },
-            last_snapshot_sequence: used_snapshot
-                .then(|| {
-                    loaded
-                        .accelerated
-                        .as_ref()
-                        .map(|snapshot| snapshot.sequence)
-                })
-                .flatten(),
-            head_checksum: loaded.head_checksum,
-            fault: None,
-            last_store_reason: None,
-            dispatcher: None,
-            #[cfg(feature = "native-tokio")]
-            manual_drive: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            event_publisher: None,
-            replay_scope: scope,
-            middleware_chain: None,
-            context_providers: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            context_projection: None,
-            last_model_continuation,
-            capability_owners: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            replayed_completed_effects: completed_effect_pairs(&loaded),
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            replayed_extension_envelopes: extension_request_envelopes(&loaded),
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            last_middleware_effect_id: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            compaction_checkpoint: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            live_state_publisher: None,
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-            record_kinds: loaded_record_kinds(&loaded),
-        })
+        let mut coordinator = Self::new(store);
+        coordinator.kernel = kernel;
+        coordinator.session = session;
+        coordinator.next_transient_sequence = next_transient_sequence;
+        coordinator.pending_timer_scheduled_at = pending_timer_scheduled_at;
+        coordinator.snapshot_schedule = snapshot_schedule;
+        coordinator.last_snapshot_sequence = used_snapshot_sequence(loaded, used_snapshot);
+        coordinator.head_checksum = loaded.head_checksum;
+        coordinator.replay_scope = scope;
+        coordinator.last_model_continuation = last_model_continuation;
+        #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+        {
+            coordinator.replayed_completed_effects = completed_effect_pairs(loaded);
+            coordinator.replayed_extension_envelopes = extension_request_envelopes(loaded);
+            coordinator.record_kinds = loaded_record_kinds(loaded);
+        }
+        Ok(coordinator)
     }
 
     /// Structural-only coordinator at a loaded session head.
@@ -183,10 +136,7 @@ impl CommitCoordinator {
 
     pub(crate) fn mark_structural_head(&mut self) {
         self.replay_scope = ReplayScope::StructuralOnly;
-        self.snapshot_schedule = SnapshotSchedule {
-            every_n_records: u64::MAX,
-            write_timeout: Duration::from_millis(50),
-        };
+        self.snapshot_schedule = STRUCTURAL_SNAPSHOT_SCHEDULE;
     }
 
     pub(crate) fn adopt_live_session(
@@ -403,15 +353,7 @@ pub(super) fn continuation_after_replay(
     scope: ReplayScope,
     used_snapshot: bool,
 ) -> Result<Option<RawJson>, &'static str> {
-    let snapshot_sequence = used_snapshot
-        .then(|| {
-            loaded
-                .accelerated
-                .as_ref()
-                .map(|snapshot| snapshot.sequence)
-        })
-        .flatten()
-        .unwrap_or(0);
+    let snapshot_sequence = used_snapshot_sequence(loaded, used_snapshot).unwrap_or(0);
     let mut continuation = used_snapshot
         .then(|| {
             loaded

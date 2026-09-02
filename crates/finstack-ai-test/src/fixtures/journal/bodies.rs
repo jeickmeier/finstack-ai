@@ -10,7 +10,7 @@ use finstack_ai_kernel::{
     ChildPlacement, ChildRunLocator, ChildRunPrepared, ComponentId, ComponentRef, ContentBlock,
     ContextPrepared, ConversationEntry, Digest, EffectCancelled, EffectCompleted, EffectDeferred,
     EffectFailed, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
-    ErrorCategory, ErrorCode, ErrorDescriptor, ExternalHandleRef, Id, IdTag, InteractionCancelled,
+    ErrorCategory, ErrorCode, ErrorDescriptor, ExternalHandleRef, InteractionCancelled,
     InteractionExpired, InteractionKind, InteractionRequest, InteractionResolution,
     JsonSchemaDraft, LaneCreated, LaneMoved, Message, MessageRole, Metadata, OperationLocator,
     OutputConfiguration, OutputValidationFailed, PrincipalRef, ProviderIds, RECORD_FORMAT_VERSION,
@@ -22,6 +22,7 @@ use finstack_ai_kernel::{
 };
 
 use crate::fixtures::public_api::load_public_api_fixture;
+use crate::fixtures::store::id;
 use crate::paths::compatibility_fixture;
 
 /// Every activated record-body family, in `kind_name` order after construction.
@@ -461,14 +462,6 @@ fn sample_budget_released() -> Result<BudgetReservationReleased, String> {
             receipt_digest: digest(),
         },
     })
-}
-
-fn id<T: IdTag>(ordinal: u64) -> Id<T> {
-    let mut bytes = [0_u8; 16];
-    bytes[6] = 0x70;
-    bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Id::from_bytes(bytes)
 }
 
 fn ts() -> Timestamp {

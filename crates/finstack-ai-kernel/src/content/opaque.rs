@@ -51,35 +51,23 @@ impl Serialize for OpaquePayload {
     where
         S: Serializer,
     {
-        if !serializer.is_human_readable() {
-            let mut state = serializer.serialize_struct("OpaquePayload", 2)?;
-            match self {
-                Self::Bytes(bytes) => {
-                    state.serialize_field("encoding", "bytes")?;
-                    state.serialize_field("data", &BinaryByteRef(bytes))?;
-                }
-                Self::Json(value) => {
-                    state.serialize_field("encoding", "json")?;
-                    state.serialize_field("data", value)?;
-                }
-            }
-            return state.end();
-        }
-
+        let human_readable = serializer.is_human_readable();
+        let mut state = serializer.serialize_struct("OpaquePayload", 2)?;
         match self {
-            Self::Bytes(bytes) => {
-                let mut state = serializer.serialize_struct("OpaquePayload", 2)?;
+            Self::Bytes(bytes) if human_readable => {
                 state.serialize_field("encoding", "bytes")?;
                 state.serialize_field("data_hex", &hex_encode(bytes))?;
-                state.end()
+            }
+            Self::Bytes(bytes) => {
+                state.serialize_field("encoding", "bytes")?;
+                state.serialize_field("data", &BinaryByteRef(bytes))?;
             }
             Self::Json(value) => {
-                let mut state = serializer.serialize_struct("OpaquePayload", 2)?;
                 state.serialize_field("encoding", "json")?;
                 state.serialize_field("data", value)?;
-                state.end()
             }
         }
+        state.end()
     }
 }
 

@@ -250,10 +250,7 @@ pub fn classify_pdf(bytes: &[u8]) -> Result<(DocumentClassification, u32), Docum
             message: bounded_message(&error.to_string()),
         }
     })?;
-    Ok((
-        map_pdf_type(&classification),
-        page_count_of(&classification),
-    ))
+    Ok((map_pdf_type(&classification), classification.page_count))
 }
 
 /// Parse a 1-based inclusive page range of a PDF to Markdown.
@@ -385,11 +382,6 @@ fn map_pdf_type(classification: &pdf_inspector::PdfClassification) -> DocumentCl
         pdf_inspector::PdfType::ImageBased => DocumentClassification::Image,
         pdf_inspector::PdfType::Mixed => DocumentClassification::Mixed,
     }
-}
-
-/// Read the page count off a pdf-inspector classification.
-fn page_count_of(classification: &pdf_inspector::PdfClassification) -> u32 {
-    classification.page_count
 }
 
 /// Truncate `text` to at most `max_bytes` at a UTF-8 char boundary.

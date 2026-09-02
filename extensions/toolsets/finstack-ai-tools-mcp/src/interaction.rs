@@ -23,19 +23,12 @@ pub(crate) fn interaction_from_input_required(
     effect_id: EffectId,
     result: &CallToolResult,
 ) -> Result<InteractionRequest, McpError> {
-    let schema_value = result
-        .input_requests
-        .clone()
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({"type": "object"}));
-    let kind = if result
-        .input_requests
-        .as_ref()
-        .is_some_and(serde_json::Value::is_object)
-    {
-        InteractionKind::Form
-    } else {
-        InteractionKind::FreeText
+    let (kind, schema_value) = match &result.input_requests {
+        Some(schema) if schema.is_object() => (InteractionKind::Form, schema.clone()),
+        _ => (
+            InteractionKind::FreeText,
+            serde_json::json!({"type": "object"}),
+        ),
     };
     let prompt = prompt_from_result(result)?;
     let response_schema = RawJson::parse(

@@ -13,6 +13,7 @@ use thiserror::Error;
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
 use crate::conversation::Message;
+use crate::label_is_valid;
 use crate::primitives::Digest;
 use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::primitives::{
@@ -164,10 +165,7 @@ impl RetryDirective {
         policy_version: impl AsRef<str>,
     ) -> Result<Self, EntryError> {
         let policy_version = policy_version.as_ref();
-        if policy_version.is_empty()
-            || policy_version.len() > LABEL_MAX_BYTES
-            || policy_version.as_bytes().contains(&0)
-        {
+        if !label_is_valid(policy_version) {
             return Err(EntryError::InvalidLabel);
         }
         Ok(Self {
@@ -273,7 +271,10 @@ impl RetryScheduled {
         if attempt == 0 {
             return Err(EntryError::InvalidAttempt);
         }
-        let directive = RetryDirective::try_new(classification, Duration::ZERO, policy_version)?;
+        let policy_version = policy_version.as_ref();
+        if !label_is_valid(policy_version) {
+            return Err(EntryError::InvalidLabel);
+        }
         prior_error
             .validate()
             .map_err(|_| EntryError::InvalidError)?;
@@ -281,7 +282,7 @@ impl RetryScheduled {
             cycle,
             attempt,
             classification,
-            policy_version: directive.policy_version,
+            policy_version: Arc::from(policy_version),
             timer_effect_id,
             due_at,
             prior_error,

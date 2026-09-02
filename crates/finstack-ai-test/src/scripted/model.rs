@@ -4,9 +4,9 @@
 //! without requiring a live model or Phase 1 reducer.
 
 use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
+use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{
@@ -23,6 +23,7 @@ use finstack_ai_runtime::ports::model::{
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 
+use crate::fakes::Gate;
 use crate::fixtures::trace::PayloadDeclaration;
 
 /// Kind discriminator for one scripted step.
@@ -96,17 +97,6 @@ pub struct ScriptedInput {
     pub steps: Vec<ScriptedStep>,
 }
 
-impl ScriptedInput {
-    /// Construct an empty scripted input.
-    #[must_use]
-    pub fn empty() -> Self {
-        Self {
-            format_version: 1,
-            steps: Vec::new(),
-        }
-    }
-}
-
 /// One fully expressive programmatic scripted model action.
 #[derive(Debug, Clone)]
 #[expect(
@@ -133,40 +123,6 @@ pub struct ScriptedModelPlan {
     pub actions: Vec<ScriptedModelAction>,
 }
 
-#[derive(Debug, Default)]
-struct Gate {
-    released: AtomicBool,
-    entered: AtomicUsize,
-    waiters: Mutex<Vec<Waker>>,
-}
-
-impl Gate {
-    fn release(&self) {
-        self.released.store(true, Ordering::Release);
-        if let Ok(mut waiters) = self.waiters.lock() {
-            for waiter in waiters.drain(..) {
-                waiter.wake();
-            }
-        }
-    }
-
-    fn poll(&self, cx: &mut Context<'_>) -> Poll<()> {
-        if self.released.load(Ordering::Acquire) {
-            return Poll::Ready(());
-        }
-        if let Ok(mut waiters) = self.waiters.lock()
-            && !waiters.iter().any(|waiter| waiter.will_wake(cx.waker()))
-        {
-            waiters.push(cx.waker().clone());
-        }
-        if self.released.load(Ordering::Acquire) {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
-    }
-}
-
 /// Deterministic blocking-point controller for a [`ScriptedModel`].
 #[derive(Debug, Clone, Default)]
 pub struct ScriptedModelControl {
@@ -182,9 +138,7 @@ impl ScriptedModelControl {
     /// Number of stream entries observed at a named gate.
     #[must_use]
     pub fn entries(&self, name: impl AsRef<str>) -> usize {
-        self.gate(Arc::from(name.as_ref()))
-            .entered
-            .load(Ordering::Acquire)
+        self.gate(Arc::from(name.as_ref())).entries()
     }
 
     fn gate(&self, name: Arc<str>) -> Arc<Gate> {
@@ -491,7 +445,7 @@ impl Stream for ScriptedStream {
                 ScriptedModelAction::Block(name) => {
                     let gate = self.control.gate(name.clone());
                     if self.active_gate.as_ref() != Some(&name) {
-                        gate.entered.fetch_add(1, Ordering::AcqRel);
+                        gate.enter();
                         self.active_gate = Some(name);
                     }
                     if gate.poll(cx).is_ready() {
@@ -509,7 +463,7 @@ impl Stream for ScriptedStream {
                 ScriptedModelAction::BlockUninterruptibly(name) => {
                     let gate = self.control.gate(name.clone());
                     if self.active_gate.as_ref() != Some(&name) {
-                        gate.entered.fetch_add(1, Ordering::AcqRel);
+                        gate.enter();
                         self.active_gate = Some(name);
                     }
                     if gate.poll(cx).is_ready() {

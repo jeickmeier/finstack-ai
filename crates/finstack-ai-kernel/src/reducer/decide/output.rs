@@ -11,7 +11,7 @@ use crate::{
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::super::decision::{Decision, KernelError};
 use super::super::validation::assistant_tool_calls;
-use super::{draft_for_state, duplicate_decision, next_sequence, reject_terminal};
+use super::{decision_for, duplicate_decision, reject_terminal};
 
 pub(super) fn decide_configure_output(
     state: &KernelState,
@@ -38,16 +38,12 @@ pub(super) fn decide_configure_output(
         });
     }
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(
-            state,
-            env,
-            vec![RecordBody::OutputConfigured(configuration)],
-        )?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(
+        state,
+        env,
+        vec![RecordBody::OutputConfigured(configuration)],
+        Vec::new(),
+    )
 }
 
 pub(super) fn decide_capabilities_activated(
@@ -67,7 +63,10 @@ pub(super) fn decide_capabilities_activated(
     {
         return duplicate_decision(state);
     }
-    if !capabilities_activated_phase_allowed(state.phase) {
+    if !matches!(
+        state.phase,
+        Some(RunPhase::BeforeRun | RunPhase::AfterToolBatch)
+    ) {
         return Err(KernelError::InvalidPhaseInput {
             phase: state.phase,
             input: "capabilities_activated",
@@ -77,20 +76,12 @@ pub(super) fn decide_capabilities_activated(
         return Err(KernelError::ConflictingSettlement);
     }
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(
-            state,
-            env,
-            vec![RecordBody::CapabilitiesActivated(activation)],
-        )?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
-}
-
-fn capabilities_activated_phase_allowed(phase: Option<RunPhase>) -> bool {
-    matches!(phase, Some(RunPhase::BeforeRun | RunPhase::AfterToolBatch))
+    decision_for(
+        state,
+        env,
+        vec![RecordBody::CapabilitiesActivated(activation)],
+        Vec::new(),
+    )
 }
 
 pub(super) fn decide_output_validated(
@@ -189,12 +180,7 @@ pub(super) fn decide_output_validated(
     };
     let body = output_validation_body(state, input, identity, *end_strategy, application_calls)?;
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(state, env, vec![body])?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(state, env, vec![body], Vec::new())
 }
 
 #[derive(Clone, Copy)]

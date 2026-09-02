@@ -103,10 +103,9 @@ impl MiddlewareRef {
         component: ComponentRef,
         stage: Option<impl AsRef<str>>,
     ) -> Result<Self, RefsError> {
-        let stage = match stage {
-            Some(value) => Some(validated_text(value.as_ref(), "stage")?),
-            None => None,
-        };
+        let stage = stage
+            .map(|value| validated_text(value.as_ref(), "stage"))
+            .transpose()?;
         Ok(Self { component, stage })
     }
 
@@ -181,10 +180,9 @@ impl PrincipalRef {
         Ok(Self {
             issuer: validated_label(issuer.as_ref(), "issuer")?,
             subject: validated_label(subject.as_ref(), "subject")?,
-            tenant_scope: match tenant_scope {
-                Some(value) => Some(validated_label(value.as_ref(), "tenant_scope")?),
-                None => None,
-            },
+            tenant_scope: tenant_scope
+                .map(|value| validated_label(value.as_ref(), "tenant_scope"))
+                .transpose()?,
         })
     }
 

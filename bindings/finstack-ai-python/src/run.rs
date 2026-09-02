@@ -11,16 +11,14 @@ use finstack_ai::{
     AgentRunError, AgentRunOutput, AgentRunRequest, AttachmentInput, DEFAULT_MAX_CYCLES,
     MAX_RUN_ATTACHMENTS, PrincipalRef, RemoteChildRouteSpec, RunSecurityContext,
 };
-use finstack_ai_kernel::{
-    CapabilityId, ChildPlacement, Metadata, OperationLocator, RawJson, Sensitivity, SessionId,
-};
+use finstack_ai_kernel::{CapabilityId, ChildPlacement, Metadata, RawJson, Sensitivity, SessionId};
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
 
 use crate::agent::PyAgent;
 use crate::callbacks::normalize_pydantic_schema;
-use crate::errors::{agent_error, configuration_error};
+use crate::errors::{agent_error, configuration_error, run_error};
 use crate::events::PyEventIterator;
 use crate::json_bridge::{json_to_py, py_to_json};
 use crate::locator::{PyLocator, locator_dict};
@@ -59,11 +57,11 @@ impl PyRun {
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            let result = run.result().await;
-            Python::attach(|py| {
-                result_to_python_with_locator(py, result, Some(&locator), output_adapter)
-            })
+            let output = run
+                .result()
+                .await
+                .map_err(|error| run_error(&run, &error))?;
+            Python::attach(|py| run_result(py, output, output_adapter))
         })
     }
 
@@ -71,11 +69,11 @@ impl PyRun {
     fn live_state<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            match run.live_state().await {
-                Ok(state) => Python::attach(|py| live_state_to_python(py, &state)),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
-            }
+            let state = run
+                .live_state()
+                .await
+                .map_err(|error| run_error(&run, &error))?;
+            Python::attach(|py| live_state_to_python(py, &state))
         })
     }
 
@@ -88,11 +86,11 @@ impl PyRun {
     ) -> PyResult<Bound<'py, PyAny>> {
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            match run.wait_for_live_state(revision).await {
-                Ok(state) => Python::attach(|py| live_state_to_python(py, &state)),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
-            }
+            let state = run
+                .wait_for_live_state(revision)
+                .await
+                .map_err(|error| run_error(&run, &error))?;
+            Python::attach(|py| live_state_to_python(py, &state))
         })
     }
 
@@ -101,13 +99,11 @@ impl PyRun {
     fn observer_diagnostics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            match run.observer_diagnostics().await {
-                Ok(diagnostics) => {
-                    Python::attach(|py| observer_diagnostics_to_python(py, &diagnostics))
-                }
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
-            }
+            let diagnostics = run
+                .observer_diagnostics()
+                .await
+                .map_err(|error| run_error(&run, &error))?;
+            Python::attach(|py| observer_diagnostics_to_python(py, &diagnostics))
         })
     }
 
@@ -116,16 +112,15 @@ impl PyRun {
     fn list_interactions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            match run.list_interactions().await {
-                Ok(requests) => Python::attach(|py| {
-                    let value = serde_json::to_value(&requests).map_err(|_| {
-                        PyException::new_err("interaction list serialization failed")
-                    })?;
-                    json_to_py(py, &value)
-                }),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
-            }
+            let requests = run
+                .list_interactions()
+                .await
+                .map_err(|error| run_error(&run, &error))?;
+            Python::attach(|py| {
+                let value = serde_json::to_value(&requests)
+                    .map_err(|_| PyException::new_err("interaction list serialization failed"))?;
+                json_to_py(py, &value)
+            })
         })
     }
 
@@ -141,11 +136,9 @@ impl PyRun {
                 .map_err(|error| PyTypeError::new_err(error.to_string()))?;
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            match run.resolve_interaction(resolution).await {
-                Ok(()) => Ok(()),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
-            }
+            run.resolve_interaction(resolution)
+                .await
+                .map_err(|error| run_error(&run, &error))
         })
     }
 
@@ -175,47 +168,35 @@ impl PyRun {
     ) -> PyResult<Bound<'py, PyAny>> {
         let placement = parse_child_placement(placement)?;
         let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
-        let borrowed = agent.borrow();
-        let child = Arc::clone(&borrowed.inner);
-        let child_compaction_authorization = borrowed.compaction_authorization.clone();
-        let model = borrowed.model.clone();
-        let settings = borrowed.settings.clone();
-        let timeout_seconds = timeout_seconds.unwrap_or(borrowed.default_timeout_seconds);
-        let output_adapter = borrowed
-            .output_adapter
-            .as_ref()
-            .map(|adapter| adapter.clone_ref(py));
-        drop(borrowed);
+        let child = agent.borrow().clone_ref(py);
+        let timeout_seconds = timeout_seconds.unwrap_or(child.default_timeout_seconds);
         let parent = self.inner.clone();
-        let tenant_scope = parent.locator().tenant_scope.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let request = run_request(
-                &model,
+                &child.model,
                 input,
                 timeout_seconds,
                 max_cycles,
                 max_output_retries,
                 capability,
-                settings,
-                &tenant_scope,
+                child.settings,
+                &parent.locator().tenant_scope,
                 Vec::new(),
-                child_compaction_authorization,
+                child.compaction_authorization,
             )
-            .map_err(|error| Python::attach(|py| agent_error(py, &error, None)))?;
-            match Box::pin(parent.start_child(&child, request, placement, remote)).await {
-                Ok(inner) => Python::attach(|py| {
-                    Py::new(
-                        py,
-                        PyRun {
-                            inner,
-                            output_adapter,
-                        },
-                    )
-                }),
-                Err(error) => {
-                    Python::attach(|py| Err(agent_error(py, &error, Some(parent.locator()))))
-                }
-            }
+            .map_err(|error| agent_error(&error, None))?;
+            let inner = Box::pin(parent.start_child(&child.inner, request, placement, remote))
+                .await
+                .map_err(|error| run_error(&parent, &error))?;
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyRun {
+                        inner,
+                        output_adapter: child.output_adapter,
+                    },
+                )
+            })
         })
     }
 
@@ -233,11 +214,10 @@ impl PyRun {
             .map_err(|error| PyTypeError::new_err(format!("invalid pre-beta shape: {error}")))?;
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            match Box::pin(run.complete_external(command)).await {
-                Ok(outcome) => Python::attach(|py| route_outcome_to_python(py, &outcome)),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
-            }
+            let outcome = Box::pin(run.complete_external(command))
+                .await
+                .map_err(|error| run_error(&run, &error))?;
+            Python::attach(|py| route_outcome_to_python(py, &outcome))
         })
     }
 
@@ -245,11 +225,7 @@ impl PyRun {
     fn cancel<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
-            match run.cancel().await {
-                Ok(()) => Ok(()),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
-            }
+            run.cancel().await.map_err(|error| run_error(&run, &error))
         })
     }
 
@@ -337,7 +313,7 @@ pub(crate) struct PyAttachment {
 
 /// V1 individual byte-string ceiling shared with `finstack-ai-runtime`'s
 /// `ArtifactStore` contract (spec decision 21).
-pub(crate) const MAX_ATTACHMENT_PATH_BYTES: usize = 4 * 1024 * 1024;
+const MAX_ATTACHMENT_PATH_BYTES: usize = 4 * 1024 * 1024;
 
 /// Resolve exactly one of `data`/`path` into owned bytes.
 ///
@@ -423,7 +399,7 @@ pub(crate) fn collect_attachments(
 /// only checks the staged artifact against the *same* scope passed to it.
 fn attachment_scope(tenant_scope: &str) -> finstack_ai::runtime::artifact::ArtifactScope {
     finstack_ai::runtime::artifact::ArtifactScope {
-        tenant_scope: std::sync::Arc::from(tenant_scope),
+        tenant_scope: Arc::from(tenant_scope),
         session_id: SessionId::from_bytes([0_u8; 16]),
         run_id: None,
         sensitivity: Sensitivity::Internal,
@@ -451,9 +427,9 @@ pub(crate) async fn stage_attachments(
             scope.clone(),
             Bytes::from(attachment.data),
             ArtifactMetadata {
-                kind: std::sync::Arc::from("attachment"),
-                media_type: std::sync::Arc::from(attachment.media_type),
-                name: attachment.name.map(std::sync::Arc::from),
+                kind: Arc::from("attachment"),
+                media_type: Arc::from(attachment.media_type),
+                name: attachment.name.map(Arc::from),
                 attributes: Metadata::empty(),
             },
         )
@@ -471,15 +447,12 @@ pub(crate) struct PyRunResult {
     output: Option<Py<PyAny>>,
 }
 
-pub(crate) struct PreparedPydanticOutput {
-    pub(crate) adapter: Py<PyAny>,
-    pub(crate) schema: RawJson,
-}
-
+/// Resolve `output_type` into its Pydantic `TypeAdapter` and the normalized
+/// structured-output schema the Rust run validates against.
 pub(crate) fn prepare_pydantic_output(
     py: Python<'_>,
     target: Py<PyAny>,
-) -> PyResult<PreparedPydanticOutput> {
+) -> PyResult<(Py<PyAny>, RawJson)> {
     let pydantic = py.import("pydantic").map_err(|_| {
         PyTypeError::new_err(
             "output_type requires the optional Pydantic extra: install finstack-ai[pydantic]",
@@ -496,19 +469,13 @@ pub(crate) fn prepare_pydantic_output(
     let schema = adapter
         .bind(py)
         .call_method("json_schema", (), Some(&kwargs))?;
-    let raw = raw_pydantic_schema(&schema, "structured_output")?;
-    Ok(PreparedPydanticOutput {
-        adapter,
-        schema: raw,
-    })
-}
-
-fn raw_pydantic_schema(schema: &Bound<'_, PyAny>, kind: &str) -> PyResult<RawJson> {
-    let value = py_to_json(schema)?;
-    let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
+    let normalized = normalize_pydantic_schema(py_to_json(&schema)?, "structured_output")
+        .map_err(PyTypeError::new_err)?;
     let bytes = serde_json::to_vec(&normalized)
         .map_err(|_| PyException::new_err("Pydantic schema normalization failed"))?;
-    RawJson::parse(bytes).map_err(|_| PyException::new_err("Pydantic schema is invalid JSON"))
+    let schema = RawJson::parse(bytes)
+        .map_err(|_| PyException::new_err("Pydantic schema is invalid JSON"))?;
+    Ok((adapter, schema))
 }
 
 #[pymethods]
@@ -689,24 +656,20 @@ fn route_outcome_to_python(py: Python<'_>, outcome: &ExternalRouteOutcome) -> Py
     json_to_py(py, &value)
 }
 
-pub(crate) fn result_to_python_with_locator(
+/// Wrap a successful terminal output, validating structured JSON through
+/// the run's Pydantic adapter when one was configured.
+pub(crate) fn run_result(
     py: Python<'_>,
-    result: Result<AgentRunOutput, AgentRunError>,
-    locator: Option<&OperationLocator>,
+    inner: AgentRunOutput,
     output_adapter: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyRunResult>> {
-    match result {
-        Ok(inner) => {
-            let output = output_adapter
-                .map(|adapter| {
-                    let raw = inner.structured_json().ok_or_else(|| {
-                        PyException::new_err("structured result is missing canonical JSON")
-                    })?;
-                    adapter.call_method1(py, "validate_json", (PyBytes::new(py, raw.as_bytes()),))
-                })
-                .transpose()?;
-            Py::new(py, PyRunResult { inner, output })
-        }
-        Err(error) => Err(agent_error(py, &error, locator)),
-    }
+    let output = output_adapter
+        .map(|adapter| {
+            let raw = inner.structured_json().ok_or_else(|| {
+                PyException::new_err("structured result is missing canonical JSON")
+            })?;
+            adapter.call_method1(py, "validate_json", (PyBytes::new(py, raw.as_bytes()),))
+        })
+        .transpose()?;
+    Py::new(py, PyRunResult { inner, output })
 }

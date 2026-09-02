@@ -114,52 +114,6 @@ impl MonotonicDeadline {
     }
 }
 
-/// Runtime-supplied jitter for a semantic retry directive.
-///
-/// The kernel receives only the resulting bounded backoff and never reads a
-/// random source itself.
-#[cfg(test)]
-pub(crate) trait RetryJitterSource {
-    /// Produce a non-negative jitter no greater than `maximum`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the source cannot produce a bounded value.
-    fn jitter(&self, attempt: u32, maximum: Duration) -> Result<Duration, RuntimeTimeError>;
-}
-
-/// Deterministic source that adds no jitter.
-#[cfg(test)]
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct NoRetryJitter;
-
-#[cfg(test)]
-impl RetryJitterSource for NoRetryJitter {
-    fn jitter(&self, _attempt: u32, _maximum: Duration) -> Result<Duration, RuntimeTimeError> {
-        Ok(Duration::ZERO)
-    }
-}
-
-/// Add runtime-supplied bounded jitter to a semantic retry backoff.
-///
-/// # Errors
-///
-/// Returns an error if the source exceeds its bound or addition overflows.
-#[cfg(test)]
-pub(crate) fn retry_backoff_with_jitter(
-    base: Duration,
-    maximum_jitter: Duration,
-    attempt: u32,
-    source: &impl RetryJitterSource,
-) -> Result<Duration, RuntimeTimeError> {
-    let jitter = source.jitter(attempt, maximum_jitter)?;
-    if jitter > maximum_jitter {
-        return Err(RuntimeTimeError::JitterOutOfRange);
-    }
-    base.checked_add(jitter)
-        .map_err(|_| RuntimeTimeError::DurationOverflow)
-}
-
 /// Deadline/timer conversion failure.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum RuntimeTimeError {
@@ -172,12 +126,6 @@ pub enum RuntimeTimeError {
     /// Process-local monotonic instant overflowed.
     #[error("monotonic deadline overflow")]
     MonotonicOverflow,
-    /// Jitter source exceeded the configured upper bound.
-    #[error("retry jitter exceeded its configured bound")]
-    JitterOutOfRange,
-    /// Base backoff plus jitter overflowed.
-    #[error("retry backoff overflow")]
-    DurationOverflow,
 }
 
 #[cfg(test)]
@@ -191,14 +139,6 @@ mod tests {
     impl Clock for MutableClock {
         fn now(&self) -> Result<Timestamp, IdGenerationError> {
             Timestamp::from_unix_ms(self.0.load(Ordering::Acquire)).map_err(IdGenerationError::Time)
-        }
-    }
-
-    struct MaximumJitter;
-
-    impl RetryJitterSource for MaximumJitter {
-        fn jitter(&self, _attempt: u32, maximum: Duration) -> Result<Duration, RuntimeTimeError> {
-            Ok(maximum)
         }
     }
 
@@ -236,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn overdue_deadlines_and_external_jitter_are_bounded() {
+    fn overdue_deadlines_are_already_due() {
         let clock = MutableClock(AtomicI64::new(2_000));
         let wait = MonotonicDeadline::from_persisted(
             &clock,
@@ -246,25 +186,5 @@ mod tests {
         .expect("wait");
         assert_eq!(wait.remaining(), Duration::ZERO);
         assert_eq!(wait.diagnostic(), DeadlineDiagnostic::AlreadyDue);
-        assert_eq!(
-            retry_backoff_with_jitter(
-                Duration::from_millis(100),
-                Duration::from_millis(20),
-                1,
-                &MaximumJitter,
-            )
-            .expect("backoff"),
-            Duration::from_millis(120)
-        );
-        assert_eq!(
-            retry_backoff_with_jitter(
-                Duration::from_millis(100),
-                Duration::from_millis(20),
-                1,
-                &NoRetryJitter,
-            )
-            .expect("no jitter"),
-            Duration::from_millis(100)
-        );
     }
 }

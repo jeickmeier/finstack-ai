@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use finstack_ai_kernel::{
     AllocatedIds, AppendBatchId, AppendBatchTag, CancellationRequestTag, EffectTag, EventId,
     EventTag, Id, InteractionTag, KernelError, KernelInput, MessageId, MessageTag, ModelRequestTag,
@@ -45,85 +47,43 @@ impl RuntimeIdAllocation {
     }
 }
 
-pub(super) fn allocate_for_runtime_input<C: Clock, R: RandomSource>(
-    coordinator: &CommitCoordinator,
-    now: finstack_ai_kernel::Timestamp,
-    input: &KernelInput,
-    sources: &SettlementSources<C, R>,
-) -> Result<AllocatedIds, RunHandleError> {
-    let append_batch_id = sources.generate::<AppendBatchTag>()?;
-    let mut allocation = RuntimeIdAllocation::default();
-    for _ in 0..finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS {
-        let ids = allocation.freeze(append_batch_id)?;
-        match coordinator.classify(
-            &TransitionEnv {
-                now,
-                ids: ids.clone(),
-            },
-            input.clone(),
-        ) {
-            Ok(_) => return Ok(ids),
-            Err(KernelError::AllocatedIdsExhausted { kind }) => match kind {
-                "record_ids" => allocation.records.push(sources.generate::<RecordTag>()?),
-                "event_ids" => allocation.events.push(sources.generate::<EventTag>()?),
-                "effect_ids" => allocation.effects.push(sources.generate::<EffectTag>()?),
-                "interaction_ids" => allocation
-                    .interactions
-                    .push(sources.generate::<InteractionTag>()?),
-                "message_ids" => allocation.messages.push(sources.generate::<MessageTag>()?),
-                "turn_ids" => allocation.turns.push(sources.generate::<TurnTag>()?),
-                "model_request_ids" => allocation
-                    .model_requests
-                    .push(sources.generate::<ModelRequestTag>()?),
-                "tool_batch_ids" => allocation
-                    .tool_batches
-                    .push(sources.generate::<ToolBatchTag>()?),
-                "tool_call_ids" => allocation
-                    .tool_calls
-                    .push(sources.generate::<ToolCallTag>()?),
-                "cancellation_request_ids" => allocation
-                    .cancellations
-                    .push(sources.generate::<CancellationRequestTag>()?),
-                _ => {
-                    return Err(RunHandleError::CancellationSettlement {
-                        code: "runtime_input_id_kind_unknown",
-                    });
-                }
-            },
-            Err(_) => {
-                return Err(RunHandleError::CancellationSettlement {
-                    code: "runtime_input_rejected",
-                });
-            }
-        }
-    }
-    Err(RunHandleError::CancellationSettlement {
-        code: "runtime_input_allocation_exhausted",
-    })
-}
-
-pub(super) async fn submit_resume_input<C: Clock, R: RandomSource>(
+/// Submit a runtime-authored input, growing the id bag until the kernel
+/// classifies it. `error` wraps the allocator's own stable codes; `rejected`
+/// maps any other kernel rejection.
+pub(super) async fn submit_runtime_input<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     input: KernelInput,
     sources: &SettlementSources<C, R>,
+    error: fn(&'static str) -> RunHandleError,
+    rejected: fn(KernelError) -> RunHandleError,
 ) -> Result<(), RunHandleError> {
     let now = sources.now()?;
-    let ids = allocate_resume_input(coordinator, now, &input, sources)?;
-    let outcome = coordinator
-        .submit(TransitionEnv { now, ids }, input)
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
-    Ok(())
+    let ids = allocate_runtime_input(coordinator, now, &input, sources, error, rejected)?;
+    super::committed(coordinator.submit(TransitionEnv { now, ids }, input).await)
 }
 
-fn allocate_resume_input<C: Clock, R: RandomSource>(
+/// [`submit_runtime_input`] with resume-path error classification.
+pub(super) fn submit_resume_input<'a, C: Clock, R: RandomSource>(
+    coordinator: &'a mut CommitCoordinator,
+    input: KernelInput,
+    sources: &'a SettlementSources<C, R>,
+) -> impl Future<Output = Result<(), RunHandleError>> + 'a {
+    submit_runtime_input(
+        coordinator,
+        input,
+        sources,
+        |code| RunHandleError::ModelSettlement { code },
+        |error| RunHandleError::ModelSettlement { code: error.code() },
+    )
+}
+
+pub(super) fn allocate_runtime_input<C: Clock, R: RandomSource>(
     coordinator: &CommitCoordinator,
     now: finstack_ai_kernel::Timestamp,
     input: &KernelInput,
     sources: &SettlementSources<C, R>,
+    error: fn(&'static str) -> RunHandleError,
+    rejected: fn(KernelError) -> RunHandleError,
 ) -> Result<AllocatedIds, RunHandleError> {
     let append_batch_id = sources.generate::<AppendBatchTag>()?;
     let mut allocation = RuntimeIdAllocation::default();
@@ -158,18 +118,10 @@ fn allocate_resume_input<C: Clock, R: RandomSource>(
                 "cancellation_request_ids" => allocation
                     .cancellations
                     .push(sources.generate::<CancellationRequestTag>()?),
-                _ => {
-                    return Err(RunHandleError::ModelSettlement {
-                        code: "runtime_input_id_kind_unknown",
-                    });
-                }
+                _ => return Err(error("runtime_input_id_kind_unknown")),
             },
-            Err(error) => {
-                return Err(RunHandleError::ModelSettlement { code: error.code() });
-            }
+            Err(other) => return Err(rejected(other)),
         }
     }
-    Err(RunHandleError::ModelSettlement {
-        code: "runtime_input_allocation_exhausted",
-    })
+    Err(error("runtime_input_allocation_exhausted"))
 }

@@ -291,14 +291,11 @@ fn host_error(error: &SkillsHostError) -> ToolError {
             ErrorCategory::Limit,
             "concurrent capability activations reached the configured bound",
         ),
-        SkillsHostError::Failed { reason } => {
-            let _ = reason;
-            tool_error(
-                SKILLS_ACTIVATION_FAILED,
-                ErrorCategory::Internal,
-                "capability activation host failed",
-            )
-        }
+        SkillsHostError::Failed { .. } => tool_error(
+            SKILLS_ACTIVATION_FAILED,
+            ErrorCategory::Internal,
+            "capability activation host failed",
+        ),
     }
 }
 

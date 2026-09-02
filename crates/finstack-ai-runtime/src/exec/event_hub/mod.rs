@@ -76,7 +76,8 @@ impl EventFilter {
         };
         class_allowed
             && (self.kinds.is_empty() || self.kinds.contains(&event.kind()))
-            && sensitivity_rank(event.sensitivity()) <= sensitivity_rank(self.max_sensitivity)
+            && crate::ports::middleware::sensitivity_rank(event.sensitivity())
+                <= crate::ports::middleware::sensitivity_rank(self.max_sensitivity)
     }
 }
 
@@ -257,17 +258,6 @@ pub enum EventSubscriptionError {
     HubClosed,
 }
 
-#[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
-const fn sensitivity_rank(value: Sensitivity) -> u8 {
-    match value {
-        Sensitivity::Public => 0,
-        Sensitivity::Internal => 1,
-        Sensitivity::Confidential => 2,
-        Sensitivity::Secret => 3,
-        Sensitivity::Credential => 4,
-    }
-}
-
 #[cfg(feature = "native-tokio")]
 mod batching;
 #[cfg(feature = "native-tokio")]
@@ -314,29 +304,11 @@ fn validate_event_sequences(
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 fn json_byte_len(event: &RunEvent) -> Result<usize, EventPublishError> {
-    let mut writer = CountingJsonWriter::default();
+    let mut writer = crate::ports::model::CountingWriter::default();
     serde_json::to_writer(&mut writer, event).map_err(|_| EventPublishError {
         code: "event_serialization_failed",
     })?;
     Ok(writer.len)
-}
-
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-#[derive(Default)]
-struct CountingJsonWriter {
-    len: usize,
-}
-
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-impl std::io::Write for CountingJsonWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.len = self.len.saturating_add(buf.len());
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }
 
 #[cfg(all(test, any(feature = "native-tokio", feature = "wasm-host")))]

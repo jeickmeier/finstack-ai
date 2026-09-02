@@ -1,4 +1,4 @@
-use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
+use crate::effects::{EffectInput, EffectKind, EffectOutputKind, EffectRequested};
 use crate::primitives::Digest;
 use crate::records::lifecycle::{
     RetryClassification, RetryScheduled, Stage, StageCursor, StageDisposition,
@@ -17,7 +17,7 @@ use super::bodies::{
     requested_model_bodies,
 };
 use super::shared::{stage_record, terminal_body_from_candidate, timer_firing_contract};
-use super::{draft_for_state, expected_stage_cursor, next_sequence, reject_terminal, required};
+use super::{decision_for, expected_stage_cursor, next_sequence, reject_terminal, required};
 use crate::content::TEXT_MAX_BYTES;
 use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
@@ -100,13 +100,7 @@ pub(super) fn decide_stage(
     )?;
     validate_allocated_ids(&env.ids, requirements)?;
     let (bodies, action) = stage_bodies(state, env, input, settlement_digest, context_canonical)?;
-    let records = draft_for_state(state, env, bodies)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
-        actions: action.into_iter().collect(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(state, env, bodies, action.into_iter().collect())
 }
 
 fn stage_id_requirements(
@@ -255,13 +249,33 @@ fn stage_bodies(
             )
         }
         ReducerStageOutcome::ModelRequestPrepared {
-            request: _,
-            component: _,
-            output_contract: _,
-            retry_safety: _,
-            deadline: _,
+            request,
+            component,
+            output_contract,
+            retry_safety,
+            deadline,
         } if cursor.stage == Stage::BeforeModel => {
-            requested_model_bodies(state, env, cursor, settlement_digest, &input.outcome)
+            let turn_id = state.current_turn.as_ref().map(|turn| turn.turn_id).ok_or(
+                KernelError::InvalidPhaseInput {
+                    phase: state.phase,
+                    input: "stage_settled",
+                },
+            )?;
+            let requested = EffectRequested::try_new(
+                required(env.ids.effect_ids(), 0, "effect_ids")?,
+                EffectKind::Model,
+                None,
+                component.clone(),
+                None,
+                output_contract.clone(),
+                EffectInput::Model {
+                    request: request.clone(),
+                },
+                *retry_safety,
+                *deadline,
+            )
+            .map_err(|_| KernelError::ModelRequestContractMismatch)?;
+            requested_model_bodies(env, cursor, settlement_digest, turn_id, requested)
         }
         ReducerStageOutcome::FinalizeAccepted if cursor.stage == Stage::BeforeFinalize => {
             accepted_finalize_bodies(state, cursor, settlement_digest)
@@ -379,7 +393,7 @@ fn retry_bodies(
         field: "retry",
         reason_code: "invalid",
     })?;
-    let requested = crate::EffectRequested::try_new(
+    let requested = EffectRequested::try_new(
         timer_effect_id,
         EffectKind::Timer,
         None,

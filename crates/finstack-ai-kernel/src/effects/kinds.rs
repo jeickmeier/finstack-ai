@@ -193,8 +193,8 @@ pub enum EffectPurpose {
 /// Serialized with externally tagged `snake_case` variants so `RawJson` members
 /// deserialize through the ordinary human-readable path (internally tagged
 /// enums buffer content and break `RawJson`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum EffectInput {
     /// Model request JSON.
     Model {
@@ -218,6 +218,7 @@ pub enum EffectInput {
         /// Exact stage invocation being extended.
         cursor: StageCursor,
         /// Stage name.
+        #[serde(deserialize_with = "deserialize_stage")]
         stage: Arc<str>,
         /// Input payload.
         input: RawJson,
@@ -239,65 +240,12 @@ pub enum EffectInput {
     },
 }
 
-impl<'de> Deserialize<'de> for EffectInput {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields, rename_all = "snake_case")]
-        enum Wire {
-            Model {
-                request: RawJson,
-            },
-            Tool {
-                call: ToolCallBlock,
-            },
-            Context {
-                cursor: StageCursor,
-                request: RawJson,
-            },
-            Middleware {
-                cursor: StageCursor,
-                stage: BoundedString<{ crate::content::TEXT_MAX_BYTES }>,
-                input: RawJson,
-                #[serde(default)]
-                resume: Option<RawJson>,
-            },
-            Interaction {
-                interaction_id: InteractionId,
-                request_digest: Digest,
-            },
-            Timer {
-                due_at: Timestamp,
-            },
-        }
-
-        Ok(match Wire::deserialize(deserializer)? {
-            Wire::Model { request } => Self::Model { request },
-            Wire::Tool { call } => Self::Tool { call },
-            Wire::Context { cursor, request } => Self::Context { cursor, request },
-            Wire::Middleware {
-                cursor,
-                stage,
-                input,
-                resume,
-            } => Self::Middleware {
-                cursor,
-                stage: Arc::from(stage.into_inner()),
-                input,
-                resume,
-            },
-            Wire::Interaction {
-                interaction_id,
-                request_digest,
-            } => Self::Interaction {
-                interaction_id,
-                request_digest,
-            },
-            Wire::Timer { due_at } => Self::Timer { due_at },
-        })
-    }
+fn deserialize_stage<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    BoundedString::<{ crate::content::TEXT_MAX_BYTES }>::deserialize(deserializer)
+        .map(|stage| Arc::from(stage.into_inner()))
 }
 
 impl EffectInput {

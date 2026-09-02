@@ -1,18 +1,14 @@
 //! `openrouter_generate_image` handler.
 
-use std::sync::Arc;
-
 use base64::Engine as _;
 use finstack_ai_kernel::ErrorCategory;
-use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
-use reqwest::header::HeaderValue;
 use serde::Deserialize;
 
 use crate::config::OPENROUTER_MEDIA_TRANSPORT_FAILED;
 use crate::http::{
-    BASE64_STANDARD, DeliveredMedia, deliver_media, inline_http_read_cap, invalid_arguments,
-    parse_arguments, send_json, tool_error,
+    BASE64_STANDARD, DeliveredMedia, Route, deliver_media, invalid_arguments, parse_arguments,
+    send_json, tool_error,
 };
 
 pub(crate) const IMAGE_TOOL_ID: &str = "finstack.tools.openrouter_generate_image";
@@ -43,15 +39,8 @@ struct ImageResponse {
     data: Vec<ImageResponseItem>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_image(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
-    endpoint: &str,
-    max_result_bytes: usize,
-    store: Option<&Arc<dyn ArtifactStore>>,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<DeliveredMedia, ToolError> {
@@ -66,32 +55,23 @@ pub(crate) async fn handle_image(
         "prompt": arguments.prompt,
     });
     if let Some(map) = body.as_object_mut() {
-        if let Some(resolution) = arguments.resolution {
-            map.insert("resolution".into(), serde_json::Value::String(resolution));
-        }
-        if let Some(aspect_ratio) = arguments.aspect_ratio {
-            map.insert(
-                "aspect_ratio".into(),
-                serde_json::Value::String(aspect_ratio),
-            );
-        }
-        if let Some(output_format) = arguments.output_format {
-            map.insert(
-                "output_format".into(),
-                serde_json::Value::String(output_format),
-            );
+        for (key, value) in [
+            ("resolution", arguments.resolution),
+            ("aspect_ratio", arguments.aspect_ratio),
+            ("output_format", arguments.output_format),
+        ] {
+            if let Some(value) = value {
+                map.insert(key.into(), serde_json::Value::String(value));
+            }
         }
     }
     let response: ImageResponse = send_json(
-        client,
-        authorization,
-        referer,
-        title,
+        route,
         reqwest::Method::POST,
-        &format!("{endpoint}/api/v1/images"),
+        &format!("{}/api/v1/images", route.endpoint),
         Some(&body),
         ctx,
-        inline_http_read_cap(max_result_bytes, store.is_some(), false),
+        route.inline_http_read_cap(false),
     )
     .await?;
     let item = response.data.into_iter().next().ok_or_else(|| {
@@ -109,13 +89,5 @@ pub(crate) async fn handle_image(
         )
     })?;
     let media_type = item.media_type.unwrap_or_else(|| "image/png".to_owned());
-    deliver_media(
-        bytes,
-        &media_type,
-        "openrouter-image",
-        store,
-        ctx,
-        max_result_bytes,
-    )
-    .await
+    deliver_media(route, bytes, &media_type, "openrouter-image", ctx).await
 }

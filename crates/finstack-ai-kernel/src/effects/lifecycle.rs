@@ -382,17 +382,10 @@ impl EffectCompleted {
                 max: SEMANTIC_ARRAY_MAX_ITEMS,
             });
         }
-        let usage_digest = match &usage {
-            Some(value) => {
-                value.validate()?;
-                Some(Digest::effect_output(&value.canonical_bytes()?))
-            }
-            None => None,
-        };
-        let completion_id = match completion_id {
-            Some(value) => Some(validated_label(value.as_ref(), "completion_id")?),
-            None => None,
-        };
+        let usage_digest = optional_usage_digest(usage.as_ref())?;
+        let completion_id = completion_id
+            .map(|value| validated_label(value.as_ref(), "completion_id"))
+            .transpose()?;
         Ok(Self {
             effect_id,
             output_contract,
@@ -582,17 +575,10 @@ impl EffectFailed {
         error
             .validate()
             .map_err(EffectError::InvalidErrorDescriptor)?;
-        let usage_digest = match &usage {
-            Some(value) => {
-                value.validate()?;
-                Some(Digest::effect_output(&value.canonical_bytes()?))
-            }
-            None => None,
-        };
-        let completion_id = match completion_id {
-            Some(value) => Some(validated_label(value.as_ref(), "completion_id")?),
-            None => None,
-        };
+        let usage_digest = optional_usage_digest(usage.as_ref())?;
+        let completion_id = completion_id
+            .map(|value| validated_label(value.as_ref(), "completion_id"))
+            .transpose()?;
         Ok(Self {
             effect_id,
             output_contract,
@@ -731,14 +717,12 @@ impl EffectCancelled {
         reason: Option<impl AsRef<str>>,
         completion_id: Option<impl AsRef<str>>,
     ) -> Result<Self, EffectError> {
-        let reason = match reason {
-            Some(value) => Some(validated_label(value.as_ref(), "reason")?),
-            None => None,
-        };
-        let completion_id = match completion_id {
-            Some(value) => Some(validated_label(value.as_ref(), "completion_id")?),
-            None => None,
-        };
+        let reason = reason
+            .map(|value| validated_label(value.as_ref(), "reason"))
+            .transpose()?;
+        let completion_id = completion_id
+            .map(|value| validated_label(value.as_ref(), "completion_id"))
+            .transpose()?;
         Ok(Self {
             effect_id,
             output_contract,
@@ -806,6 +790,17 @@ impl<'de> Deserialize<'de> for EffectCancelled {
         .map_err(de::Error::custom)
     }
 }
+
+/// Validate optional usage and digest its canonical bytes.
+fn optional_usage_digest(usage: Option<&Usage>) -> Result<Option<Digest>, EffectError> {
+    usage
+        .map(|value| {
+            value.validate()?;
+            Ok(Digest::effect_output(&value.canonical_bytes()?))
+        })
+        .transpose()
+}
+
 fn validate_settlement(
     requested: &EffectRequested,
     effect_id: EffectId,

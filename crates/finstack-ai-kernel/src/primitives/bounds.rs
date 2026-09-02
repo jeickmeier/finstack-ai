@@ -56,12 +56,7 @@ impl<'de, const MAX: usize> Deserialize<'de> for BoundedString<MAX> {
             where
                 E: de::Error,
             {
-                if value.len() > MAX {
-                    return Err(E::custom(format_args!(
-                        "string length {} exceeds max {MAX}",
-                        value.len()
-                    )));
-                }
+                check_len::<MAX, E>(value.len())?;
                 Ok(BoundedString(value.to_owned()))
             }
 
@@ -69,14 +64,18 @@ impl<'de, const MAX: usize> Deserialize<'de> for BoundedString<MAX> {
             where
                 E: de::Error,
             {
-                if value.len() > MAX {
-                    return Err(E::custom(format_args!(
-                        "string length {} exceeds max {MAX}",
-                        value.len()
-                    )));
-                }
+                check_len::<MAX, E>(value.len())?;
                 Ok(BoundedString(value))
             }
+        }
+
+        fn check_len<const MAX: usize, E: de::Error>(len: usize) -> Result<(), E> {
+            if len > MAX {
+                return Err(E::custom(format_args!(
+                    "string length {len} exceeds max {MAX}"
+                )));
+            }
+            Ok(())
         }
 
         // Internally tagged content uses serde's ContentDeserializer, which

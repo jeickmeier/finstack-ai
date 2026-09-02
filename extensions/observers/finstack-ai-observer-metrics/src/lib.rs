@@ -250,10 +250,12 @@ impl Observer for MetricsObserver {
 }
 
 fn emit_runtime_series(out: &mut String, state: &MetricsState) {
-    emit_gauge(
+    emit_labeled(
         out,
         "finstack_runtime_status",
         "Runtime lifecycle gauge",
+        "gauge",
+        "state",
         &state.status,
     );
     out.push_str("# HELP finstack_runtime_queue_depth Event hub queue depth\n");
@@ -287,20 +289,22 @@ fn emit_runtime_series(out: &mut String, state: &MetricsState) {
         "finstack_usage_tokens{{direction=\"output\"}} {}",
         state.usage_output
     );
-    emit_counter_map(
+    emit_labeled(
         out,
         "finstack_recovery_total",
         "Recovery outcomes",
+        "counter",
         "class",
         &state.recovery,
     );
 }
 
 fn emit_compaction_series(out: &mut String, state: &MetricsState) {
-    emit_counter_string_map(
+    emit_labeled(
         out,
         "finstack_compaction_trigger_total",
         "Compaction triggers",
+        "counter",
         "strategy_id",
         &state.compaction_trigger,
     );
@@ -316,10 +320,11 @@ fn emit_compaction_series(out: &mut String, state: &MetricsState) {
         "finstack_compaction_tokens{{bound=\"after\"}} {}",
         state.compaction_tokens_after
     );
-    emit_counter_map(
+    emit_labeled(
         out,
         "finstack_compaction_checkpoint_total",
         "Compaction checkpoint results",
+        "counter",
         "result",
         &state.compaction_checkpoint,
     );
@@ -336,10 +341,11 @@ fn emit_compaction_series(out: &mut String, state: &MetricsState) {
         "finstack_compaction_failure_total {}",
         state.compaction_failure
     );
-    emit_counter_map(
+    emit_labeled(
         out,
         "finstack_compaction_cache_impact_total",
         "Prompt-cache impact",
+        "counter",
         "impact",
         &state.compaction_cache_impact,
     );
@@ -353,39 +359,20 @@ fn cache_impact_label(impact: PromptCacheImpact) -> &'static str {
     }
 }
 
-fn emit_gauge(out: &mut String, name: &str, help: &str, values: &BTreeMap<&'static str, u64>) {
-    let _ = writeln!(out, "# HELP {name} {help}");
-    let _ = writeln!(out, "# TYPE {name} gauge");
-    for (label, value) in values {
-        let _ = writeln!(out, "{name}{{state=\"{label}\"}} {value}");
-    }
-}
-
-fn emit_counter_map(
+/// One labeled series: `# HELP`/`# TYPE` header, then one sample per
+/// entry with the label value escaped for the text exposition format.
+fn emit_labeled<K: AsRef<str>>(
     out: &mut String,
     name: &str,
     help: &str,
+    metric_type: &str,
     label: &str,
-    values: &BTreeMap<&'static str, u64>,
+    values: &BTreeMap<K, u64>,
 ) {
     let _ = writeln!(out, "# HELP {name} {help}");
-    let _ = writeln!(out, "# TYPE {name} counter");
+    let _ = writeln!(out, "# TYPE {name} {metric_type}");
     for (value, count) in values {
-        let _ = writeln!(out, "{name}{{{label}=\"{value}\"}} {count}");
-    }
-}
-
-fn emit_counter_string_map(
-    out: &mut String,
-    name: &str,
-    help: &str,
-    label: &str,
-    values: &BTreeMap<String, u64>,
-) {
-    let _ = writeln!(out, "# HELP {name} {help}");
-    let _ = writeln!(out, "# TYPE {name} counter");
-    for (value, count) in values {
-        let escaped = escape_label(value);
+        let escaped = escape_label(value.as_ref());
         let _ = writeln!(out, "{name}{{{label}=\"{escaped}\"}} {count}");
     }
 }

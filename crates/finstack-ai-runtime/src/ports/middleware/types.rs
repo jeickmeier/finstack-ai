@@ -3,7 +3,7 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ArtifactRef, BudgetScopeId, ComponentId, ComponentInvocation, ComponentRef, Digest, EntryId,
     ErrorDescriptor, InteractionRequest, Message, Metadata, ModelRequestId, RawJson,
-    RetryDirective, Sensitivity, ToolCallBlock,
+    RetryDirective, Sensitivity, ToolCallBlock, label_is_valid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -160,7 +160,12 @@ impl MiddlewareDescriptor {
                 strategy_id,
                 strategy_version,
             } => {
-                validate_label(strategy_id, "compaction strategy id is invalid")?;
+                if !label_is_valid(strategy_id) {
+                    return Err(MiddlewareError::stable(
+                        MIDDLEWARE_RESOLUTION_INVALID,
+                        "compaction strategy id is invalid",
+                    ));
+                }
                 if *strategy_version == 0
                     || !self.stages.contains(Stage::BeforeModel)
                     || self.order.tier != OrderTier::ContextCompaction
@@ -522,28 +527,4 @@ pub(crate) fn stage_name(stage: Stage) -> &'static str {
         Stage::AfterToolBatch => "after_tool_batch",
         Stage::BeforeFinalize => "before_finalize",
     }
-}
-
-#[cfg(test)]
-pub(crate) fn parse_stage(value: &str) -> Option<Stage> {
-    Some(match value {
-        "before_run" => Stage::BeforeRun,
-        "prepare_context" => Stage::PrepareContext,
-        "before_model" => Stage::BeforeModel,
-        "after_model" => Stage::AfterModel,
-        "before_tool_batch" => Stage::BeforeToolBatch,
-        "after_tool_batch" => Stage::AfterToolBatch,
-        "before_finalize" => Stage::BeforeFinalize,
-        _ => return None,
-    })
-}
-
-fn validate_label(value: &str, message: &'static str) -> Result<(), MiddlewareError> {
-    if value.is_empty() || value.len() > 256 || value.as_bytes().contains(&0) {
-        return Err(MiddlewareError::stable(
-            MIDDLEWARE_RESOLUTION_INVALID,
-            message,
-        ));
-    }
-    Ok(())
 }

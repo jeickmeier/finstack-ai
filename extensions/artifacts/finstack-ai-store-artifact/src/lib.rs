@@ -36,15 +36,20 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+#[cfg(any(feature = "s3", feature = "local", test))]
 mod artifact;
+#[cfg(any(feature = "s3", feature = "local", test))]
 mod driver;
 #[cfg(feature = "local")]
 mod local;
 #[cfg(feature = "s3")]
 mod s3;
+#[cfg(any(feature = "s3", feature = "local"))]
 mod stores;
 
-pub use artifact::DEFAULT_MAX_ARTIFACT_BYTES;
+/// Default artifact byte ceiling: 64 MiB, clamped to the backing object
+/// store's own single-object limit.
+pub const DEFAULT_MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 
 #[cfg(feature = "s3")]
 pub use s3::{Addressing, S3ObjectStoreConfig};

@@ -3,29 +3,24 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     Digest, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
     ExternalEffectCompletedInput, ExternalEffectCompletionCommand, ExternalEffectOutcome,
-    KernelInput, OperationLocator, PrincipalRef, RecordExternalCommandRejected, Timestamp,
+    KernelInput, Timestamp,
 };
 
 use crate::audit::SecurityAuditCategory;
 #[cfg(feature = "native-tokio")]
 use crate::audit::SecurityAuditGate;
 use crate::commit::{CommitCoordinator, CommitCoordinatorError};
-use crate::ports::journal::JournalStore;
+use crate::ports::journal::{IdempotencyHorizon, JournalStore};
 
 use super::shared::{
-    EXTERNAL_COMMAND_DIGEST_DOMAIN, OPERATION_LOCATOR_DIGEST_DOMAIN, allocate_transition_env,
-    audit_event, authorization_matches, known_effect, known_tool_effect, normalized_digest,
+    IngressCore, Submission, allocate_transition_env, known_effect, known_tool_effect,
 };
 use super::types::{ExternalRouteError, ExternalRouteOutcome};
-use super::{IngressIds, ingress_ids};
 
 /// Direct-locator router for authenticated deferred effect completions.
 pub struct ExternalCompletionRouter {
-    store: Arc<dyn JournalStore>,
-    #[cfg(feature = "native-tokio")]
-    audit: Arc<SecurityAuditGate>,
-    ids: IngressIds,
-    horizon: Option<crate::ports::journal::IdempotencyHorizon>,
+    core: IngressCore,
+    horizon: Option<IdempotencyHorizon>,
 }
 
 impl ExternalCompletionRouter {
@@ -34,16 +29,14 @@ impl ExternalCompletionRouter {
     #[cfg(feature = "native-tokio")]
     pub fn new(store: Arc<dyn JournalStore>, audit: Arc<SecurityAuditGate>) -> Self {
         Self {
-            store,
-            audit,
-            ids: ingress_ids(),
+            core: IngressCore::new(store, audit),
             horizon: None,
         }
     }
 
     /// Bind the application-configured settlement horizon.
     #[must_use]
-    pub fn with_horizon(mut self, horizon: crate::ports::journal::IdempotencyHorizon) -> Self {
+    pub fn with_horizon(mut self, horizon: IdempotencyHorizon) -> Self {
         self.horizon = Some(horizon);
         self
     }
@@ -54,29 +47,11 @@ impl ExternalCompletionRouter {
     ///
     /// Returns [`ExternalRouteError::IngressRejected`] when the trusted gate
     /// cannot be enabled.
-    #[cfg_attr(
-        all(feature = "wasm-host", not(feature = "native-tokio")),
-        expect(
-            clippy::unused_async,
-            reason = "the target-neutral constructor enables the audit gate asynchronously on native"
-        )
-    )]
     pub async fn trusted(store: Arc<dyn JournalStore>) -> Result<Self, ExternalRouteError> {
-        #[cfg(feature = "native-tokio")]
-        {
-            let audit = SecurityAuditGate::enable_noop()
-                .await
-                .map_err(|_| ExternalRouteError::IngressRejected)?;
-            Ok(Self::new(store, audit))
-        }
-        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-        {
-            Ok(Self {
-                store,
-                ids: ingress_ids(),
-                horizon: None,
-            })
-        }
+        Ok(Self {
+            core: IngressCore::trusted(store).await?,
+            horizon: None,
+        })
     }
 
     /// Route one fully authenticated command without accepting raw callback tokens.
@@ -87,83 +62,36 @@ impl ExternalCompletionRouter {
     /// or authorization failures, and fail-closed runtime errors otherwise.
     #[expect(
         clippy::too_many_lines,
-        reason = "the security-sensitive route keeps locator, authorization, classification, and durable rejection order explicit"
+        reason = "the security-sensitive route keeps horizon, target, classification, and durable rejection order explicit"
     )]
     pub async fn route(
         &self,
         command: ExternalEffectCompletionCommand,
         submitted_at: Timestamp,
     ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
-        let locator_digest = normalized_digest(OPERATION_LOCATOR_DIGEST_DOMAIN, &command.locator)?;
-        let submitted_digest = normalized_digest(EXTERNAL_COMMAND_DIGEST_DOMAIN, &command)?;
+        let submission = Submission::new(&command.locator, &command, submitted_at)?;
         if self
             .horizon
             .is_some_and(|horizon| submitted_at >= horizon.expire_at)
         {
-            return self
+            return Err(self
+                .core
                 .reject_unknown(
                     &command.locator,
-                    Some(command.principal.clone()),
+                    &command.principal,
                     SecurityAuditCategory::UnknownLocator,
                     "expired_locator",
-                    locator_digest,
-                    submitted_digest,
-                    submitted_at,
+                    submission,
                 )
-                .await;
+                .await);
         }
-        let Ok(mut coordinator) =
-            CommitCoordinator::recover(Arc::clone(&self.store), command.locator.session_id).await
-        else {
-            return self
-                .reject_unknown(
-                    &command.locator,
-                    Some(command.principal.clone()),
-                    SecurityAuditCategory::UnknownLocator,
-                    "unknown_locator",
-                    locator_digest,
-                    submitted_digest,
-                    submitted_at,
-                )
-                .await;
-        };
-
-        let identity_valid = coordinator.state().session_id() == Some(command.locator.session_id)
-            && coordinator.state().lane_id() == Some(command.locator.lane_id)
-            && coordinator.state().accepted().is_some_and(|accepted| {
-                accepted.run_id() == command.locator.run_id
-                    && accepted.security().tenant_scope() == command.locator.tenant_scope.as_ref()
-            });
-        if !identity_valid {
-            return self
-                .reject_unknown(
-                    &command.locator,
-                    Some(command.principal.clone()),
-                    SecurityAuditCategory::UnknownLocator,
-                    "unknown_locator",
-                    locator_digest,
-                    submitted_digest,
-                    submitted_at,
-                )
-                .await;
-        }
-        if !authorization_matches(
-            coordinator.state(),
+        let mut coordinator = Box::pin(self.core.authorize(
+            &command.locator,
             &command.principal,
             &command.authorization,
-        ) {
-            return self
-                .reject_unknown(
-                    &command.locator,
-                    Some(command.principal.clone()),
-                    SecurityAuditCategory::ScopeMismatch,
-                    "scope_mismatch",
-                    locator_digest,
-                    submitted_digest,
-                    submitted_at,
-                )
-                .await;
-        }
+            submission,
+        ))
+        .await?;
 
         let effect_id = command.completion.effect_id;
         let accepted_digest = coordinator
@@ -172,40 +100,37 @@ impl ExternalCompletionRouter {
             .get(command.completion.completion_id.as_ref())
             .map(|identity| identity.settlement_digest);
         if !known_effect(coordinator.state(), effect_id) {
-            return self
+            return Err(self
+                .core
                 .reject_unknown(
                     &command.locator,
-                    Some(command.principal.clone()),
+                    &command.principal,
                     SecurityAuditCategory::UnknownLocator,
                     "unknown_target",
-                    locator_digest,
-                    submitted_digest,
-                    submitted_at,
+                    submission,
                 )
-                .await;
+                .await);
         }
         if matches!(
             command.completion.outcome,
             ExternalEffectOutcome::Completed { .. }
         ) && !known_tool_effect(coordinator.state(), effect_id)
         {
-            return self
-                .record_rejection(
-                    &mut coordinator,
-                    &command,
-                    submitted_at,
-                    submitted_digest,
-                    accepted_digest,
-                    "model_response_decoder_unavailable",
-                )
-                .await;
+            return Self::record_rejection(
+                &mut coordinator,
+                &command,
+                submission,
+                accepted_digest,
+                "model_response_decoder_unavailable",
+            )
+            .await;
         }
 
         let input = KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
             completion: command.completion.clone(),
             assistant_message: None,
         });
-        let env = match allocate_transition_env(&coordinator, &input, submitted_at, self.ids) {
+        let env = match allocate_transition_env(&coordinator, &input, submitted_at) {
             Ok(env) => env,
             Err(ExternalRouteError::Runtime(CommitCoordinatorError::Decision {
                 code:
@@ -218,23 +143,21 @@ impl ExternalCompletionRouter {
                     | "tool_settlement_mismatch"
                     | "tool_result_mismatch",
             })) => {
-                return self
-                    .record_rejection(
-                        &mut coordinator,
-                        &command,
-                        submitted_at,
-                        submitted_digest,
-                        accepted_digest,
-                        "conflicting_or_invalid_completion",
-                    )
-                    .await;
+                return Self::record_rejection(
+                    &mut coordinator,
+                    &command,
+                    submission,
+                    accepted_digest,
+                    "conflicting_or_invalid_completion",
+                )
+                .await;
             }
             Err(error) => return Err(error),
         };
         match coordinator.submit(env, input).await {
             Ok(outcome) if outcome.committed.is_none() => Ok(ExternalRouteOutcome::Idempotent {
                 command_id: Arc::clone(&command.completion.completion_id),
-                submitted_digest,
+                submitted_digest: submission.submitted_digest,
             }),
             Ok(outcome) => Ok(ExternalRouteOutcome::Committed(outcome)),
             Err(CommitCoordinatorError::Decision {
@@ -247,11 +170,10 @@ impl ExternalCompletionRouter {
                     | "tool_settlement_mismatch"
                     | "tool_result_mismatch",
             }) => {
-                self.record_rejection(
+                Self::record_rejection(
                     &mut coordinator,
                     &command,
-                    submitted_at,
-                    submitted_digest,
+                    submission,
                     accepted_digest,
                     "conflicting_or_invalid_completion",
                 )
@@ -261,50 +183,10 @@ impl ExternalCompletionRouter {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    #[cfg_attr(
-        all(feature = "wasm-host", not(feature = "native-tokio")),
-        expect(
-            clippy::unused_async,
-            reason = "the target-neutral rejection path records the audit event asynchronously on native"
-        )
-    )]
-    async fn reject_unknown(
-        &self,
-        locator: &OperationLocator,
-        principal: Option<PrincipalRef>,
-        category: SecurityAuditCategory,
-        reason_code: &'static str,
-        locator_digest: Digest,
-        submission_digest: Digest,
-        submitted_at: Timestamp,
-    ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
-        let event = audit_event(
-            locator,
-            principal,
-            category,
-            reason_code,
-            locator_digest,
-            submission_digest,
-            submitted_at,
-        )?;
-        #[cfg(feature = "native-tokio")]
-        self.audit
-            .record(event)
-            .await
-            .map_err(|_| ExternalRouteError::IngressRejected)?;
-        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-        let _ = event;
-        Err(ExternalRouteError::IngressRejected)
-    }
-
-    #[allow(clippy::too_many_arguments)]
     async fn record_rejection(
-        &self,
         coordinator: &mut CommitCoordinator,
         command: &ExternalEffectCompletionCommand,
-        submitted_at: Timestamp,
-        submitted_digest: Digest,
+        submission: Submission,
         accepted_digest: Option<Digest>,
         reason_code: &'static str,
     ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
@@ -315,22 +197,17 @@ impl ExternalCompletionRouter {
             command.principal.clone(),
             command.authorization.clone(),
             reason_code,
-            submitted_digest,
+            submission.submitted_digest,
             accepted_digest,
         )
         .map_err(|_| ExternalRouteError::InvalidNormalizedCommand)?;
-        let input = KernelInput::RecordExternalCommandRejected(RecordExternalCommandRejected {
-            locator: command.locator.clone(),
+        Box::pin(IngressCore::commit_rejection(
+            coordinator,
+            &command.locator,
             rejection,
-        });
-        let env = allocate_transition_env(coordinator, &input, submitted_at, self.ids)?;
-        let evidence = coordinator
-            .submit(env, input)
-            .await
-            .map_err(ExternalRouteError::Runtime)?;
-        Ok(ExternalRouteOutcome::Rejected {
+            submission.submitted_at,
             reason_code,
-            evidence,
-        })
+        ))
+        .await
     }
 }

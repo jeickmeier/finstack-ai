@@ -9,15 +9,15 @@ use finstack_ai_kernel::{ArtifactRef, Digest, Sensitivity, Timestamp};
 use finstack_ai_runtime::artifact::ArtifactScope;
 
 use crate::record::{
-    INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryId,
-    MemoryProvenance, MemoryRecord, MemoryScope, RetentionPolicy,
+    MemoryBody, MemoryId, MemoryProvenance, MemoryRecord, MemoryScope, RetentionPolicy,
 };
 
 use super::super::{
-    EmbeddingSource, MEMORY_IDEMPOTENCY_KEY_MAX_BYTES, MatchEvidence, MemoryArtifactAction,
-    MemoryHit, MemoryListing, MemoryPage, MemoryQuery, MemoryStoreError, MemoryStoreLimits,
-    PutOutcome, artifact_transition_actions, embedding_source_digest, embedding_source_text,
-    normalize_search_tokens, similarity_score, validate_embedder_id, validate_new_record_lifecycle,
+    EmbeddingSource, MatchEvidence, MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage,
+    MemoryQuery, MemoryStoreError, MemoryStoreLimits, PutOutcome, artifact_transition_actions,
+    embedding_source_digest, embedding_source_text, normalize_search_tokens, operation_fingerprint,
+    similarity_score, validate_embedder_id, validate_idempotency_key,
+    validate_new_record_lifecycle, validate_query, validate_record, validate_scope,
 };
 
 pub(super) fn sqlite_put(
@@ -284,10 +284,6 @@ fn is_constraint_violation(error: &rusqlite::Error) -> bool {
     )
 }
 
-fn sensitivity_to_text(sensitivity: Sensitivity) -> Result<String, MemoryStoreError> {
-    serde_json::to_string(&sensitivity).map_err(|_| sqlite_unavailable())
-}
-
 /// Normalize and quote each alphanumeric token so `FTS5` syntax in caller
 /// input is never interpreted. Tokens are prefix-matched and joined with `OR`.
 fn sanitize_fts_query(text: &str) -> String {
@@ -432,13 +428,6 @@ fn body_columns(body: &MemoryBody) -> Result<(Option<String>, Option<String>), M
     }
 }
 
-fn body_text(body: &MemoryBody) -> String {
-    match body {
-        MemoryBody::Inline(text) => text.to_string(),
-        MemoryBody::Blob { .. } => String::new(),
-    }
-}
-
 /// Insert (or replace) `record`'s row and FTS entry within `transaction`.
 pub(super) fn write_record(
     transaction: &Transaction<'_>,
@@ -446,25 +435,15 @@ pub(super) fn write_record(
 ) -> Result<(), MemoryStoreError> {
     let scope_digest = scope_key(&record.scope)?;
     let (body_inline, blob_ref_json) = body_columns(&record.body)?;
-    let sensitivity_text = sensitivity_to_text(record.sensitivity)?;
+    let sensitivity_text =
+        serde_json::to_string(&record.sensitivity).map_err(|_| sqlite_unavailable())?;
     let keywords_json =
         serde_json::to_string(&record.keywords).map_err(|_| sqlite_unavailable())?;
     let provenance_json =
         serde_json::to_string(&record.provenance).map_err(|_| sqlite_unavailable())?;
     let retention_json =
         serde_json::to_string(&record.retention).map_err(|_| sqlite_unavailable())?;
-    let expires_at = match record.retention {
-        RetentionPolicy::KeepUntilDeleted => None,
-        RetentionPolicy::ExpireAfterMs(duration_ms) => Some(
-            record
-                .created_at
-                .checked_add(finstack_ai_kernel::Duration::from_millis(duration_ms))
-                .map_err(|_| MemoryStoreError::InvalidRecord {
-                    reason: "retention_overflow",
-                })?
-                .as_unix_ms(),
-        ),
-    };
+    let expires_at = expires_at(record)?;
 
     transaction
         .execute(
@@ -500,7 +479,7 @@ pub(super) fn write_record(
     transaction
         .execute(
             "DELETE FROM memory_fts WHERE scope_digest = ?1 AND id = ?2",
-            params![scope_key(&record.scope)?, record.id.as_str()],
+            params![scope_digest, record.id.as_str()],
         )
         .map_err(|_| sqlite_unavailable())?;
     // The written content supersedes whatever any space indexed for this id
@@ -513,15 +492,19 @@ pub(super) fn write_record(
         .map(std::convert::AsRef::as_ref)
         .collect::<Vec<_>>()
         .join(" ");
+    let body_text = match &record.body {
+        MemoryBody::Inline(text) => text.as_ref(),
+        MemoryBody::Blob { .. } => "",
+    };
     transaction
         .execute(
             "INSERT INTO memory_fts (scope_digest, id, preview, body, keywords)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                scope_key(&record.scope)?,
+                scope_digest,
                 record.id.as_str(),
                 record.preview.as_ref(),
-                body_text(&record.body),
+                body_text,
                 keywords_text,
             ],
         )
@@ -530,7 +513,7 @@ pub(super) fn write_record(
     transaction
         .execute(
             "DELETE FROM memory_keywords WHERE scope_digest = ?1 AND id = ?2",
-            params![scope_key(&record.scope)?, record.id.as_str()],
+            params![scope_digest, record.id.as_str()],
         )
         .map_err(|_| sqlite_unavailable())?;
     for (ordinal, keyword) in record.keywords.iter().enumerate() {
@@ -540,7 +523,7 @@ pub(super) fn write_record(
                  (scope_digest, id, ordinal, keyword, keyword_folded)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
-                    scope_key(&record.scope)?,
+                    scope_digest,
                     record.id.as_str(),
                     i64::try_from(ordinal).unwrap_or(i64::MAX),
                     keyword.as_ref(),
@@ -551,6 +534,21 @@ pub(super) fn write_record(
     }
 
     Ok(())
+}
+
+/// Hard-expiry instant stored in the `expires_at` column: `None` for
+/// records kept until deleted.
+fn expires_at(record: &MemoryRecord) -> Result<Option<i64>, MemoryStoreError> {
+    match record.retention {
+        RetentionPolicy::KeepUntilDeleted => Ok(None),
+        RetentionPolicy::ExpireAfterMs(duration_ms) => record
+            .created_at
+            .checked_add(finstack_ai_kernel::Duration::from_millis(duration_ms))
+            .map(|instant| Some(instant.as_unix_ms()))
+            .map_err(|_| MemoryStoreError::InvalidRecord {
+                reason: "retention_overflow",
+            }),
+    }
 }
 
 fn delete_fts_row(
@@ -703,41 +701,6 @@ fn check_replay(
     }
 }
 
-fn operation_fingerprint<T: serde::Serialize>(
-    operation: &'static str,
-    payload: &T,
-) -> Result<Digest, MemoryStoreError> {
-    let encoded = serde_json_canonicalizer::to_vec(&(operation, payload)).map_err(|_| {
-        MemoryStoreError::InvalidRequest {
-            reason: "memory_idempotency_payload_invalid",
-        }
-    })?;
-    Digest::domain_separated("memory-idempotency", 1, &encoded).map_err(|_| {
-        MemoryStoreError::InvalidRequest {
-            reason: "memory_idempotency_payload_invalid",
-        }
-    })
-}
-
-fn validate_record(record: &MemoryRecord) -> Result<(), MemoryStoreError> {
-    record
-        .validate()
-        .map_err(|error| MemoryStoreError::InvalidRecord {
-            reason: match error {
-                crate::record::MemoryError::InvalidRecord { reason }
-                | crate::record::MemoryError::Configuration { reason } => reason,
-            },
-        })
-}
-
-fn validate_scope(scope: &MemoryScope) -> Result<(), MemoryStoreError> {
-    scope
-        .validate()
-        .map_err(|_| MemoryStoreError::InvalidRequest {
-            reason: "memory_scope_invalid",
-        })
-}
-
 fn scope_key(scope: &MemoryScope) -> Result<String, MemoryStoreError> {
     scope
         .digest()
@@ -745,66 +708,6 @@ fn scope_key(scope: &MemoryScope) -> Result<String, MemoryStoreError> {
         .map_err(|_| MemoryStoreError::InvalidRequest {
             reason: "memory_scope_invalid",
         })
-}
-
-fn validate_idempotency_key(key: &str) -> Result<(), MemoryStoreError> {
-    if key.is_empty() || key.len() > MEMORY_IDEMPOTENCY_KEY_MAX_BYTES || key.as_bytes().contains(&0)
-    {
-        return Err(MemoryStoreError::InvalidRequest {
-            reason: "memory_idempotency_key_invalid",
-        });
-    }
-    Ok(())
-}
-
-fn validate_query(
-    query: &MemoryQuery,
-    limit: usize,
-    limits: MemoryStoreLimits,
-) -> Result<(), MemoryStoreError> {
-    if limit > limits.max_search_results {
-        return Err(MemoryStoreError::InvalidRequest {
-            reason: "memory_search_limit_exceeded",
-        });
-    }
-    match query {
-        MemoryQuery::ExactId(_) => Ok(()),
-        MemoryQuery::Keywords(keywords) => {
-            if keywords.is_empty()
-                || keywords.len() > KEYWORDS_MAX_COUNT
-                || keywords.iter().any(|keyword| {
-                    keyword.is_empty()
-                        || keyword.len() > KEYWORD_MAX_BYTES
-                        || keyword.as_bytes().contains(&0)
-                })
-            {
-                return Err(MemoryStoreError::InvalidRequest {
-                    reason: "memory_query_keywords_invalid",
-                });
-            }
-            Ok(())
-        }
-        MemoryQuery::FullText(text) => {
-            if text.len() > INLINE_BODY_MAX_BYTES || text.as_bytes().contains(&0) {
-                return Err(MemoryStoreError::InvalidRequest {
-                    reason: "memory_query_text_invalid",
-                });
-            }
-            Ok(())
-        }
-        MemoryQuery::Embedding {
-            embedder_id,
-            vector,
-        } => {
-            validate_embedder_id(embedder_id)?;
-            if vector.dimensions() > limits.max_embedding_dimensions {
-                return Err(MemoryStoreError::InvalidRequest {
-                    reason: "memory_embedding_dimensions_exceeded",
-                });
-            }
-            Ok(())
-        }
-    }
 }
 
 /// Write-path sweep: drop expired rows (enqueueing artifact unpins) and
@@ -1091,12 +994,11 @@ pub(super) fn store_embedding(
     // Staleness guard: only a live record whose current source digest still
     // matches takes the write; anything else is a silent no-op and the
     // anti-join re-surfaces the record.
-    let Some(record) = fetch_record(&transaction, &write.scope, &write.id, now)? else {
+    let current = fetch_record(&transaction, &write.scope, &write.id, now)?
+        .filter(|record| !record.tombstoned && record.superseded_by.is_none());
+    let Some(record) = current else {
         return transaction.commit().map_err(|_| sqlite_unavailable());
     };
-    if record.tombstoned || record.superseded_by.is_some() {
-        return transaction.commit().map_err(|_| sqlite_unavailable());
-    }
     if embedding_source_digest(&embedding_source_text(&record))? != write.source_digest {
         return transaction.commit().map_err(|_| sqlite_unavailable());
     }

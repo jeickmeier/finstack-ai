@@ -33,12 +33,6 @@
 
 #[cfg(target_arch = "wasm32")]
 mod agent;
-// Compiled for wasm32 builds, and additionally for native `cargo test` so
-// `DocumentArtifactStore`'s FIFO/byte-budget eviction has native unit-test
-// coverage (see `document_store::tests`) without needing a wasm32 test
-// target. `build_artifact` (from `host_artifact`, unconditionally
-// compiled) is available on both.
-#[cfg(any(target_arch = "wasm32", test))]
 mod document_store;
 mod executor;
 #[cfg(any(not(target_arch = "wasm32"), feature = "scripted-trace"))]
@@ -450,7 +444,7 @@ impl JsObserver {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsJournalStore)]
 pub struct JsJournalStore {
-    inner: std::sync::Arc<host_store::HostJournalStore>,
+    inner: Arc<host_store::HostJournalStore>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -465,7 +459,7 @@ impl JsJournalStore {
     pub fn new(adapter: JsValue, options: JsValue) -> Result<JsJournalStore, JsValue> {
         let options = parse_js_options(&options)?;
         Ok(Self {
-            inner: std::sync::Arc::new(
+            inner: Arc::new(
                 host_store::HostJournalStore::from_js(adapter, options)
                     .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
             ),
@@ -476,18 +470,15 @@ impl JsJournalStore {
     #[wasm_bindgen(js_name = cloneHandle)]
     pub fn clone_handle(&self) -> JsJournalStore {
         Self {
-            inner: std::sync::Arc::clone(&self.inner),
+            inner: Arc::clone(&self.inner),
         }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl JsJournalStore {
-    pub(crate) fn port(
-        &self,
-    ) -> std::sync::Arc<dyn finstack_ai::runtime::ports::journal::JournalStore> {
-        std::sync::Arc::clone(&self.inner)
-            as std::sync::Arc<dyn finstack_ai::runtime::ports::journal::JournalStore>
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ports::journal::JournalStore> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ports::journal::JournalStore>
     }
 }
 

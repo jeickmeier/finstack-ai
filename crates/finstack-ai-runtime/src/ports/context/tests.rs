@@ -4,12 +4,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use finstack_ai_kernel::{
-    CapabilityId, ComponentId, ComponentInvocation, ContentBlock, Digest, EffectCompleted,
-    EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested, EventTag, Id,
-    IdTag, InvocationRecovery, LaneTag, Message, MessageRole, Metadata, PipelinePosition,
-    PrincipalRef, ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
-    RecordEnvelope, RecordTag, RetrySafety, RunTag, Sensitivity, SessionTag, TextBlock, Timestamp,
-    Version,
+    ComponentId, ComponentInvocation, ContentBlock, Digest, EffectCompleted, EffectInput,
+    EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested, EventTag, Id, IdTag,
+    InvocationRecovery, LaneTag, Metadata, PipelinePosition, PrincipalRef, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, RecordBody, RecordEnvelope, RecordTag, RetrySafety, RunTag, Sensitivity,
+    SessionTag, TextBlock, Timestamp, Version,
 };
 
 use crate::ports::PortFuture;
@@ -41,19 +40,6 @@ fn item(priority: i32, source: &str, authority: ContextAuthority) -> ContextItem
         false,
     )
     .expect("item")
-}
-
-fn message(ordinal: u64, role: MessageRole, text: &str) -> Message {
-    Message::try_new(
-        id(ordinal),
-        role,
-        vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
-        Timestamp::from_unix_ms(i64::try_from(ordinal).expect("timestamp")).expect("timestamp"),
-        None,
-        ProviderIds::empty(),
-        Metadata::empty(),
-    )
-    .expect("message")
 }
 
 #[test]
@@ -128,67 +114,6 @@ fn provider_finish_order_cannot_change_assembly_and_chain_gaps_fail() {
             .expect_err("chain gap")
             .code(),
         CONTEXT_CONFIGURATION_INVALID
-    );
-}
-
-#[test]
-fn authority_projection_has_exact_fixed_groups_and_current_user_once_last() {
-    let capability = ContextItem::try_new(
-        ContextItemKind::Instruction,
-        vec![ContentBlock::Text(
-            TextBlock::try_new("capability").expect("text"),
-        )],
-        ContextProvenance {
-            source_id: Arc::from("capability"),
-            source_ref: None,
-            external: false,
-        },
-        ContextAuthority::TrustedApplication,
-        0,
-        1,
-        Sensitivity::Internal,
-        true,
-    )
-    .expect("capability");
-    let mut reminder = item(0, "reminder", ContextAuthority::TrustedApplication);
-    reminder.kind = ContextItemKind::Instruction;
-    reminder.provenance.external = false;
-    let providers = AssembledContext {
-        items: Arc::from([reminder, item(0, "external", ContextAuthority::Untrusted)]),
-        diagnostics: Arc::from([]),
-        estimated_tokens: 2,
-        bytes: 0,
-    };
-    let projection = assemble_context_projection(ContextProjectionInput {
-        system: Arc::from([message(1, MessageRole::System, "system")]),
-        developer: Arc::from([message(2, MessageRole::Developer, "developer")]),
-        capabilities: Arc::from([CapabilityContext {
-            capability_id: CapabilityId::parse("fixture.capability").expect("capability id"),
-            instructions: Arc::from([capability]),
-        }]),
-        providers,
-        history: Arc::from([message(3, MessageRole::Assistant, "history")]),
-        current_user: message(4, MessageRole::User, "current"),
-    })
-    .expect("projection");
-    let sources = projection
-        .iter()
-        .map(|item| match item {
-            ContextProjectionItem::Message { source, .. }
-            | ContextProjectionItem::Context { source, .. } => *source,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        sources,
-        vec![
-            ContextProjectionSource::System,
-            ContextProjectionSource::Developer,
-            ContextProjectionSource::Capability,
-            ContextProjectionSource::ProviderReminder,
-            ContextProjectionSource::ExternalContext,
-            ContextProjectionSource::History,
-            ContextProjectionSource::CurrentUser,
-        ]
     );
 }
 
@@ -417,12 +342,4 @@ async fn committed_guard_precedes_provider_io_and_untrusted_instruction_is_downg
     let recorded = RecordedContextContribution::try_from_records(&committed, &completed_envelope)
         .expect("recorded");
     assert_eq!(recorded.provider_index, 0);
-    assert_eq!(
-        context_resume_action(&requested, Some(&completed)),
-        InvocationResumeAction::UseRecorded
-    );
-    assert_eq!(
-        context_resume_action(&requested, None),
-        InvocationResumeAction::Recompute
-    );
 }

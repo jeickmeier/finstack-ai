@@ -9,7 +9,7 @@ use finstack_ai_runtime::ports::PortFuture;
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 
-use crate::config::OllamaEmbedderConfig;
+use crate::config::{MAX_INPUT_BYTES, OllamaEmbedderConfig, REQUEST_TIMEOUT};
 
 /// Upper bound on the serialized request payload and on the raw response
 /// body, in bytes. A worst-case legitimate backfill batch (64 texts at
@@ -91,11 +91,10 @@ impl OllamaEmbedder {
         let descriptor = TextEmbedderDescriptor {
             embedder_id: Arc::from(format!(
                 "embed.ollama.{}.{}",
-                config.model(),
-                config.dimensions()
+                config.model, config.dimensions
             )),
-            dimensions: config.dimensions(),
-            max_input_bytes: config.max_input_bytes(),
+            dimensions: config.dimensions,
+            max_input_bytes: MAX_INPUT_BYTES,
         };
         Ok(Self {
             client,
@@ -113,14 +112,14 @@ impl OllamaEmbedder {
                     reason: "embed_input_empty",
                 });
             }
-            if text.len() > self.config.max_input_bytes() {
+            if text.len() > MAX_INPUT_BYTES {
                 return Err(EmbedError::InvalidInput {
                     reason: "embed_input_too_long",
                 });
             }
         }
         let payload = serde_json::to_vec(&EmbedRequest {
-            model: self.config.model(),
+            model: &self.config.model,
             input: texts,
         })
         .map_err(|_| unavailable("ollama embed request could not be serialized"))?;
@@ -146,7 +145,6 @@ impl TextEmbedder for OllamaEmbedder {
         let prepared = self.prepare_payload(&texts);
         let client = self.client.clone();
         let endpoint = self.endpoint.clone();
-        let request_timeout = self.config.request_timeout();
         let expected_count = texts.len();
         let expected_dimensions = self.descriptor.dimensions;
         Box::pin(async move {
@@ -154,7 +152,7 @@ impl TextEmbedder for OllamaEmbedder {
             let response = client
                 .post(endpoint)
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .timeout(request_timeout)
+                .timeout(REQUEST_TIMEOUT)
                 .body(payload)
                 .send()
                 .await

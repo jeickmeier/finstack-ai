@@ -326,7 +326,7 @@ impl Toolset for FileSystemToolset {
                     operation.is_search().then_some(limits.search_timeout),
                 )?;
                 let output = tokio::task::spawn_blocking(move || {
-                    operation.execute(&root, ceilings, &protected, &cancellation, deadline)
+                    root.execute(operation, ceilings, &protected, &cancellation, deadline)
                 })
                 .await
                 .map_err(|_| {

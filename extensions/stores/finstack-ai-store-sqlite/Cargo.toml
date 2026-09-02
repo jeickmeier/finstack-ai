@@ -16,7 +16,6 @@ finstack-ai-protocol = { workspace = true }
 finstack-ai-runtime = { workspace = true }
 finstack-ai-store-common = { workspace = true }
 rusqlite = { workspace = true }
-serde = { workspace = true }
 tempfile = { workspace = true }
 
 [dev-dependencies]

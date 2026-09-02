@@ -1,6 +1,6 @@
 //! Durable shared-budget request, receipt, and journal value types.
 
-use serde::{Deserialize, Serialize, de};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
 const MAX_EXTENSION_COUNTERS: usize = 32;
 
 /// Optional shared-budget amount for a run or child reservation.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BudgetRequest {
     /// Input-token allowance.
@@ -45,35 +45,6 @@ impl BudgetRequest {
     }
 }
 
-impl<'de> Deserialize<'de> for BudgetRequest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Wire {
-            #[serde(default)]
-            input_tokens: Option<u64>,
-            #[serde(default)]
-            output_tokens: Option<u64>,
-            #[serde(default)]
-            cost: Option<CostLimit>,
-            #[serde(default)]
-            extension_counters: BoundedMap<LimitKey, u64, MAX_EXTENSION_COUNTERS>,
-        }
-        let wire = Wire::deserialize(deserializer)?;
-        let value = Self {
-            input_tokens: wire.input_tokens,
-            output_tokens: wire.output_tokens,
-            cost: wire.cost,
-            extension_counters: wire.extension_counters,
-        };
-        value.validate().map_err(de::Error::custom)?;
-        Ok(value)
-    }
-}
-
 /// One idempotent reservation request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -97,16 +68,12 @@ impl BudgetReserveRequest {
     ///
     /// Returns a stable durable-record error on mismatch.
     pub fn validate(&self) -> Result<(), BudgetRecordError> {
-        self.amount.validate()?;
-        let canonical = serde_json_canonicalizer::to_vec(&(
+        let expected = Self::compute_digest(
             self.scope_id,
             self.reservation_id,
             self.run_id,
             &self.amount,
-        ))
-        .map_err(|_| BudgetRecordError::Serialize)?;
-        let expected = Digest::domain_separated("budget-reserve-request", 1, &canonical)
-            .map_err(|_| BudgetRecordError::Serialize)?;
+        )?;
         if expected != self.request_digest {
             return Err(BudgetRecordError::DigestMismatch {
                 field: "request_digest",

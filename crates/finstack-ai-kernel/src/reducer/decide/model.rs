@@ -4,7 +4,7 @@ use crate::effects::{
     EffectCompleted, EffectDeferred, EffectFailed, EffectInput, EffectKind, EffectOutputKind,
     EffectPurpose, EffectRequested, NestedModelKind,
 };
-use crate::primitives::Digest;
+use crate::primitives::{Digest, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::records::RecordBody;
 use crate::records::lifecycle::EntryAppended;
 use crate::state::{KernelState, RunPhase, TransitionEnv};
@@ -17,10 +17,10 @@ use super::super::input::{
     RequestCompactionModel,
 };
 use super::super::validation::{
-    assistant_tool_calls, validate_assistant_message_id, validate_assistant_semantics,
-    validate_assistant_tool_call_ids, validate_error_descriptor,
+    assistant_tool_calls, validate_assistant_semantics, validate_assistant_tool_call_ids,
+    validate_error_descriptor,
 };
-use super::{draft_for_state, expected_stage_cursor, next_sequence, reject_terminal, required};
+use super::{decision_for, expected_stage_cursor, reject_terminal, required};
 
 /// Commit one runtime-owned compaction-summary model effect (ADR-042).
 ///
@@ -32,17 +32,21 @@ pub(super) fn decide_request_compaction_model(
     input: &RequestCompactionModel,
 ) -> Result<Decision, KernelError> {
     reject_terminal(state)?;
+    let input_name = match &input.relation.purpose {
+        EffectPurpose::CompactionSummary { .. } => "request_compaction_model",
+        EffectPurpose::NestedModel { .. } => "request_nested_model",
+    };
     match &input.relation.purpose {
         EffectPurpose::CompactionSummary { .. } => {
             if state.phase != Some(RunPhase::BeforeModel) || state.pending_model_effect.is_some() {
                 return Err(KernelError::InvalidPhaseInput {
                     phase: state.phase,
-                    input: "request_compaction_model",
+                    input: input_name,
                 });
             }
             expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
                 phase: state.phase,
-                input: "request_compaction_model",
+                input: input_name,
             })?;
         }
         EffectPurpose::NestedModel {
@@ -52,7 +56,7 @@ pub(super) fn decide_request_compaction_model(
             {
                 return Err(KernelError::InvalidPhaseInput {
                     phase: state.phase,
-                    input: "request_nested_model",
+                    input: input_name,
                 });
             }
             let parent = input.relation.parent_effect_id;
@@ -71,13 +75,9 @@ pub(super) fn decide_request_compaction_model(
         }
     }
     if state.current_turn.is_none() {
-        let input = match &input.relation.purpose {
-            EffectPurpose::CompactionSummary { .. } => "request_compaction_model",
-            EffectPurpose::NestedModel { .. } => "request_nested_model",
-        };
         return Err(KernelError::InvalidPhaseInput {
             phase: state.phase,
-            input,
+            input: input_name,
         });
     }
     if input.output_contract.kind != EffectOutputKind::ModelResponse {
@@ -99,15 +99,13 @@ pub(super) fn decide_request_compaction_model(
         input.deadline,
     )
     .map_err(|_| KernelError::ModelRequestContractMismatch)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(state, env, vec![RecordBody::EffectRequested(requested)])?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(
+        state,
+        env,
+        vec![RecordBody::EffectRequested(requested)],
+        Vec::new(),
+    )
 }
-
-use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
 pub(super) fn decide_model(
     state: &KernelState,
@@ -117,7 +115,7 @@ pub(super) fn decide_model(
     if let ModelSettlement::Failed(failed) = &input.outcome {
         validate_error_descriptor(failed.error())?;
     }
-    decide_normalized_model(state, env, input, "model_settled")
+    decide_normalized_model(state, env, input, "model_settled", RunPhase::AwaitingModel)
 }
 
 fn validate_external_completion_input(
@@ -228,7 +226,13 @@ pub(super) fn decide_external(
         model_request_id: pending.model_request_id,
         outcome,
     };
-    decide_normalized_model(state, env, &normalized, "external_effect_completed")
+    decide_normalized_model(
+        state,
+        env,
+        &normalized,
+        "external_effect_completed",
+        RunPhase::AwaitingExternal,
+    )
 }
 
 fn decide_normalized_model(
@@ -236,14 +240,10 @@ fn decide_normalized_model(
     env: &TransitionEnv,
     input: &ModelSettled,
     input_name: &'static str,
+    required_phase: RunPhase,
 ) -> Result<Decision, KernelError> {
     let effect_id = input.outcome.effect_id();
     reject_terminal(state)?;
-    let required_phase = match input_name {
-        "model_settled" => RunPhase::AwaitingModel,
-        "external_effect_completed" => RunPhase::AwaitingExternal,
-        _ => return Err(KernelError::InvariantViolation),
-    };
     if state.phase != Some(required_phase) {
         return Err(KernelError::InvalidPhaseInput {
             phase: state.phase,
@@ -266,13 +266,7 @@ fn decide_normalized_model(
 
     let (requirements, bodies) = model_settlement_bodies(state, env, pending, input, effect_id)?;
     validate_allocated_ids(&env.ids, requirements)?;
-    let records = draft_for_state(state, env, bodies)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(state, env, bodies, Vec::new())
 }
 
 fn model_settlement_bodies(
@@ -372,8 +366,9 @@ fn assistant_completion_bodies(
     )?;
     let requirements = IdRequirements::new(2, 2, 0, 0, 0, 1).with_tools(0, tool_call_ids.len());
     validate_allocated_ids(&env.ids, requirements)?;
-    let message_id = required(env.ids.message_ids(), 0, "message_ids")?;
-    validate_assistant_message_id(message_id, assistant_message)?;
+    if *assistant_message.id() != required(env.ids.message_ids(), 0, "message_ids")? {
+        return Err(KernelError::AssistantMessageMismatch);
+    }
     validate_assistant_tool_call_ids(env.ids.tool_call_ids(), assistant_message)?;
     let parent_message_id = state.messages.last().map(|message| *message.id());
     Ok((

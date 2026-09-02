@@ -103,7 +103,8 @@ pub fn compaction_checkpoint_compatible(
         && summary_is_safe)
 }
 
-pub(super) const fn sensitivity_rank(value: Sensitivity) -> u8 {
+/// Monotone rank used to compare sensitivity classes across ports and the event hub.
+pub(crate) const fn sensitivity_rank(value: Sensitivity) -> u8 {
     match value {
         Sensitivity::Public => 0,
         Sensitivity::Internal => 1,

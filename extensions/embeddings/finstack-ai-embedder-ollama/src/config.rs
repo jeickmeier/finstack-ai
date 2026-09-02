@@ -11,11 +11,11 @@ use reqwest::Url;
 /// Path of the Ollama embedding endpoint under the configured base URL.
 const DEFAULT_EMBED_PATH: &str = "/api/embed";
 
-/// Default whole-request timeout, from connecting through the body read.
-const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
+/// Whole-request timeout, from connecting through the body read.
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
-/// Default maximum accepted input length per text, in bytes.
-const DEFAULT_MAX_INPUT_BYTES: usize = 8_192;
+/// Maximum accepted input length per text, in bytes.
+pub(crate) const MAX_INPUT_BYTES: usize = 8_192;
 
 /// Maximum accepted model-name length, in bytes.
 const MODEL_MAX_BYTES: usize = 256;
@@ -29,10 +29,8 @@ const MODEL_MAX_BYTES: usize = 256;
 #[derive(Debug, Clone)]
 pub struct OllamaEmbedderConfig {
     base_url: Arc<str>,
-    model: Arc<str>,
-    dimensions: usize,
-    request_timeout: Duration,
-    max_input_bytes: usize,
+    pub(crate) model: Arc<str>,
+    pub(crate) dimensions: usize,
 }
 
 impl OllamaEmbedderConfig {
@@ -83,8 +81,6 @@ impl OllamaEmbedderConfig {
             base_url: Arc::from(base_url),
             model: Arc::from(model),
             dimensions,
-            request_timeout: DEFAULT_TIMEOUT,
-            max_input_bytes: DEFAULT_MAX_INPUT_BYTES,
         })
     }
 
@@ -94,22 +90,6 @@ impl OllamaEmbedderConfig {
         })?;
         url.set_path(DEFAULT_EMBED_PATH);
         Ok(url)
-    }
-
-    pub(crate) fn model(&self) -> &str {
-        &self.model
-    }
-
-    pub(crate) const fn dimensions(&self) -> usize {
-        self.dimensions
-    }
-
-    pub(crate) const fn request_timeout(&self) -> Duration {
-        self.request_timeout
-    }
-
-    pub(crate) const fn max_input_bytes(&self) -> usize {
-        self.max_input_bytes
     }
 }
 

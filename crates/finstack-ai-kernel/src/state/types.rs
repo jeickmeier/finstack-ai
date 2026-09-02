@@ -418,16 +418,24 @@ impl<'de> Deserialize<'de> for CompletionIdentityHashEntryV1 {
             settlement_digest: Digest,
         }
         let wire = Wire::deserialize(deserializer)?;
-        let completion_id = wire.completion_id.into_inner();
-        if completion_id.is_empty() || completion_id.as_bytes().contains(&0) {
-            return Err(de::Error::custom("invalid completion_id"));
-        }
         Ok(Self {
-            completion_id: completion_id.into(),
+            completion_id: identity_label(wire.completion_id, "invalid completion_id")?,
             effect_id: wire.effect_id,
             settlement_digest: wire.settlement_digest,
         })
     }
+}
+
+/// Reject empty or NUL-bearing identity labels (length is bounded by the wire type).
+fn identity_label<E: de::Error>(
+    label: BoundedString<LABEL_MAX_BYTES>,
+    invalid: &'static str,
+) -> Result<Arc<str>, E> {
+    let label = label.into_inner();
+    if label.is_empty() || label.as_bytes().contains(&0) {
+        return Err(de::Error::custom(invalid));
+    }
+    Ok(label.into())
 }
 
 /// Sorted state-hash projection entry for one interaction resolution identity.
@@ -454,12 +462,8 @@ impl<'de> Deserialize<'de> for ResolutionIdentityHashEntryV6 {
             settlement_digest: Digest,
         }
         let wire = Wire::deserialize(deserializer)?;
-        let resolution_id = wire.resolution_id.into_inner();
-        if resolution_id.is_empty() || resolution_id.as_bytes().contains(&0) {
-            return Err(de::Error::custom("invalid resolution_id"));
-        }
         Ok(Self {
-            resolution_id: resolution_id.into(),
+            resolution_id: identity_label(wire.resolution_id, "invalid resolution_id")?,
             interaction_id: wire.interaction_id,
             settlement_digest: wire.settlement_digest,
         })

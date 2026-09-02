@@ -92,46 +92,25 @@ pub(super) fn apply_interaction_resolved(
             settlement_digest: digest,
         },
     );
+    apply_interaction_terminal_outcome(state, resolved.interaction_id(), outcome)
+}
+
+/// Record the terminal outcome of the pending interaction identified by
+/// `interaction_id`; the effect record that follows restores the phase.
+pub(super) fn apply_interaction_terminal_outcome(
+    state: &mut KernelState,
+    interaction_id: crate::InteractionId,
+    outcome: InteractionTerminalOutcome,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_interaction
+        .as_ref()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    if pending.request.interaction_id() != interaction_id {
+        return Err(KernelError::InvalidRecordOrder);
+    }
     state.last_interaction_terminal = Some(super::super::interaction::terminal_from_pending(
         pending, outcome,
-    ));
-    state.state_version = state.state_version.max(6);
-    Ok(())
-}
-
-pub(super) fn apply_interaction_expired(
-    state: &mut KernelState,
-    expired: &crate::InteractionExpired,
-) -> Result<(), KernelError> {
-    let pending = state
-        .pending_interaction
-        .as_ref()
-        .ok_or(KernelError::InvalidRecordOrder)?;
-    if pending.request.interaction_id() != expired.interaction_id {
-        return Err(KernelError::InvalidRecordOrder);
-    }
-    state.last_interaction_terminal = Some(super::super::interaction::terminal_from_pending(
-        pending,
-        InteractionTerminalOutcome::Expired,
-    ));
-    state.state_version = state.state_version.max(6);
-    Ok(())
-}
-
-pub(super) fn apply_interaction_cancelled(
-    state: &mut KernelState,
-    cancelled: &crate::InteractionCancelled,
-) -> Result<(), KernelError> {
-    let pending = state
-        .pending_interaction
-        .as_ref()
-        .ok_or(KernelError::InvalidRecordOrder)?;
-    if pending.request.interaction_id() != cancelled.interaction_id() {
-        return Err(KernelError::InvalidRecordOrder);
-    }
-    state.last_interaction_terminal = Some(super::super::interaction::terminal_from_pending(
-        pending,
-        InteractionTerminalOutcome::Cancelled,
     ));
     state.state_version = state.state_version.max(6);
     Ok(())

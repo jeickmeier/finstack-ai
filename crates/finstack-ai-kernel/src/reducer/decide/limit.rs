@@ -16,7 +16,7 @@ use super::super::input::{
     ToolSettlement,
 };
 use super::super::tool::is_known_tool_effect;
-use super::{draft_for_state, expected_stage_cursor, next_sequence};
+use super::{decision_for, expected_stage_cursor};
 
 #[expect(
     clippy::too_many_lines,
@@ -32,13 +32,15 @@ pub(super) fn decide_limit(
     // run-limit failure. Approval `expires_at` is copied from the run
     // deadline, so expire-if-due would otherwise emit LimitReached+RunFailed
     // and fail apply with `pending_interaction` still set.
+    let Some(accepted) = state.accepted.as_ref() else {
+        return Ok(None);
+    };
     if matches!(
         input,
         KernelInput::AcceptRun(_)
             | KernelInput::InteractionSettled(_)
             | KernelInput::CancelRequested(_)
-    ) || state.accepted.is_none()
-        || state.cancellation.is_some()
+    ) || state.cancellation.is_some()
         || state.terminal.is_some()
         || state.pending_interaction.is_some()
         || matches!(
@@ -53,10 +55,6 @@ pub(super) fn decide_limit(
     {
         return Ok(None);
     }
-    let accepted = state
-        .accepted
-        .as_ref()
-        .ok_or(KernelError::InvariantViolation)?;
     if settlement_admissible_for_cost(state, input)
         && let Some(policy) = unknown_cost_policy(accepted, input)
     {
@@ -72,21 +70,18 @@ pub(super) fn decide_limit(
             }
             crate::UnknownUsagePolicy::SuspendForDecision => {
                 validate_allocated_ids(&env.ids, IdRequirements::new(1, 1, 0, 0, 0, 0))?;
-                let records = draft_for_state(
+                let suspended = RunSuspended {
+                    reason_code: ErrorCode::new("unknown_cost_usage")
+                        .map_err(|_| KernelError::InvariantViolation)?,
+                    cancellation_request_id: None,
+                };
+                return decision_for(
                     state,
                     env,
-                    vec![RecordBody::RunSuspended(RunSuspended {
-                        reason_code: ErrorCode::new("unknown_cost_usage")
-                            .map_err(|_| KernelError::InvariantViolation)?,
-                        cancellation_request_id: None,
-                    })],
-                )?;
-                return Ok(Some(Decision {
-                    expected_sequence: next_sequence(state)?,
-                    records,
-                    actions: Vec::new(),
-                    diagnostics: Vec::new(),
-                }));
+                    vec![RecordBody::RunSuspended(suspended)],
+                    Vec::new(),
+                )
+                .map(Some);
             }
             crate::UnknownUsagePolicy::AllowWithinReservedMaximum => {
                 let maximum = accepted
@@ -190,7 +185,7 @@ pub(super) fn decide_limit(
                 )?));
             };
             usage.tool_calls = tool_calls;
-            let Ok(largest) = largest_tool_group(calls) else {
+            let Some(largest) = largest_tool_group(calls) else {
                 return Ok(Some(control_failure_decision(
                     state,
                     env,
@@ -248,26 +243,21 @@ pub(super) fn decide_limit(
         KernelInput::ExternalEffectCompleted(input)
             if outstanding_external_completion(state, input) =>
         {
-            let ExternalEffectCompletedInput { completion, .. } = input;
             if let ExternalEffectOutcome::Completed {
                 output,
                 usage: completion_usage,
                 ..
-            } = &completion.outcome
-                && let Err(failure) = project_completed_usage(
-                    &mut usage,
-                    output,
-                    completion_usage.as_ref(),
-                    accepted.limits(),
-                )
-            {
-                return Ok(Some(control_failure_decision(
+            } = &input.completion.outcome
+                && let Some(decision) = project_or_fail(
                     state,
                     env,
-                    failure.code,
-                    failure.message,
-                    ErrorCategory::Limit,
-                )?));
+                    &mut usage,
+                    accepted,
+                    output,
+                    completion_usage.as_ref(),
+                )?
+            {
+                return Ok(Some(decision));
             }
         }
         _ => {}
@@ -314,20 +304,16 @@ pub(super) fn decide_limit(
     };
     let error = ErrorDescriptor::new(code, "configured run limit reached", category, false)
         .map_err(|_| KernelError::InvariantViolation)?;
-    let records = draft_for_state(
+    decision_for(
         state,
         env,
         vec![
             RecordBody::LimitReached(reached),
             RecordBody::RunFailed(failure_from_state(state, error)),
         ],
-    )?;
-    Ok(Some(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    }))
+        Vec::new(),
+    )
+    .map(Some)
 }
 
 fn settlement_admissible_for_cost(state: &KernelState, input: &KernelInput) -> bool {
@@ -452,8 +438,8 @@ fn unknown_cost_policy(
             outcome: ModelSettlement::Completed { completion, .. },
             ..
         })
-        | KernelInput::ToolBatchSettled(super::super::input::ToolBatchSettled {
-            outcome: super::super::input::ToolSettlement::Completed(completion),
+        | KernelInput::ToolBatchSettled(ToolBatchSettled {
+            outcome: ToolSettlement::Completed(completion),
             ..
         }) => completion.usage(),
         KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
@@ -480,20 +466,15 @@ fn control_failure_decision(
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 1, 0, 0, 0, 0))?;
     let error = ErrorDescriptor::new(code, message, category, false)
         .map_err(|_| KernelError::InvariantViolation)?;
-    let records = draft_for_state(
+    decision_for(
         state,
         env,
         vec![RecordBody::RunFailed(failure_from_state(state, error))],
-    )?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+        Vec::new(),
+    )
 }
 
-fn largest_tool_group(calls: &[crate::ToolCallPlan]) -> Result<u32, ()> {
+fn largest_tool_group(calls: &[crate::ToolCallPlan]) -> Option<u32> {
     let mut largest = 0_u32;
     let mut current = 0_u32;
     for (index, call) in calls.iter().enumerate() {
@@ -501,13 +482,13 @@ fn largest_tool_group(calls: &[crate::ToolCallPlan]) -> Result<u32, ()> {
             || (calls[index - 1].execution() == crate::ToolExecutionMode::Parallel
                 && call.execution() == crate::ToolExecutionMode::Parallel)
         {
-            current = current.checked_add(1).ok_or(())?;
+            current = current.checked_add(1)?;
         } else {
             current = 1;
         }
         largest = largest.max(current);
     }
-    Ok(largest)
+    Some(largest)
 }
 
 fn project_completed_usage(

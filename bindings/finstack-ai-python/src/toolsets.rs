@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::ports::tool::Toolset;
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{ComponentRef, Version};
 use finstack_ai_tools_calculator::CalculatorToolset;
 use finstack_ai_tools_filesystem::FileSystemToolset;
 use finstack_ai_tools_mcp::{McpConfig, McpToolset, McpToolsetFactory, StdioConfig};
@@ -11,18 +11,14 @@ use finstack_ai_tools_shell::{ShellPolicy, ShellToolset};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+use crate::component_ref;
+
 /// Caller-named toolset registrations use the binding's stable version.
 const TOOLSET_VERSION: Version = Version {
     major: 1,
     minor: 0,
     patch: 0,
 };
-
-fn caller_component(id: &str) -> PyResult<ComponentRef> {
-    ComponentId::parse(id)
-        .map(|id| ComponentRef::new(id, Some(TOOLSET_VERSION)))
-        .map_err(|error| PyValueError::new_err(error.to_string()))
-}
 
 /// Deterministic arithmetic toolset backed by the Rust implementation.
 ///
@@ -49,7 +45,7 @@ impl PyCalculatorToolset {
         let toolset = CalculatorToolset::try_new()
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
-            component: caller_component(component)?,
+            component: component_ref(component, TOOLSET_VERSION)?,
             inner: Arc::new(toolset),
         })
     }
@@ -100,7 +96,7 @@ impl PyFileSystemToolset {
                 .map_err(|error| PyValueError::new_err(error.to_string()))?;
         }
         Ok(Self {
-            component: caller_component(component)?,
+            component: component_ref(component, TOOLSET_VERSION)?,
             inner: Arc::new(toolset),
         })
     }
@@ -148,7 +144,7 @@ impl PyShellToolset {
         let toolset = ShellToolset::try_new(policy, root.map(std::path::Path::new))
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self {
-            component: caller_component(component)?,
+            component: component_ref(component, TOOLSET_VERSION)?,
             inner: Arc::new(toolset),
         })
     }
@@ -197,7 +193,7 @@ impl PyMcpToolset {
         read_only_tools: Option<Vec<String>>,
         idempotent_tools: Option<Vec<String>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let component = caller_component(component)?;
+        let component = component_ref(component, TOOLSET_VERSION)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut config = McpConfig::default().allow_command(&program);
             if let Some(names) = read_only_tools {

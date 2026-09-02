@@ -32,7 +32,6 @@ pub struct Session {
     session_id: SessionId,
     tenant_scope: Arc<str>,
     runtime: Arc<Mutex<Option<Arc<SessionRuntime>>>>,
-    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     live: Arc<Mutex<BTreeMap<LaneId, crate::agent::LaneLive>>>,
 }
 
@@ -112,7 +111,6 @@ impl Session {
             session_id,
             tenant_scope,
             runtime: Arc::new(Mutex::new(runtime)),
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             live: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -129,13 +127,11 @@ impl Session {
             session_id: runtime.session_id(),
             tenant_scope: Arc::from(runtime.tenant_scope()),
             runtime: Arc::new(Mutex::new(Some(runtime))),
-            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             live: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
     /// Session-scoped in-process run table used by [`crate::Lane::suspend`].
-    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn live_lanes(&self) -> &Mutex<BTreeMap<LaneId, crate::agent::LaneLive>> {
         &self.live
     }
@@ -152,7 +148,8 @@ impl Session {
         &self.tenant_scope
     }
 
-    async fn ensure(&self) -> Result<Arc<SessionRuntime>, SessionError> {
+    /// Open the runtime on first use.
+    pub(crate) async fn runtime(&self) -> Result<Arc<SessionRuntime>, SessionError> {
         if let Some(runtime) = self
             .runtime
             .lock()
@@ -182,7 +179,7 @@ impl Session {
         fork: Option<EntryId>,
     ) -> Result<Lane, SessionError> {
         let ids = generated_lane_ids(fork.is_some())?;
-        let lane_id = self.ensure().await?.create_lane(name, fork, ids).await?;
+        let lane_id = self.runtime().await?.create_lane(name, fork, ids).await?;
         Ok(Lane {
             session: self.clone(),
             lane_id,
@@ -195,7 +192,7 @@ impl Session {
     ///
     /// Returns a recover failure when the journal cannot be loaded.
     pub async fn list_lanes(&self) -> Result<Vec<Lane>, SessionError> {
-        let projection = self.ensure().await?.refresh().await?;
+        let projection = self.runtime().await?.refresh().await?;
         Ok(projection
             .lanes()
             .keys()
@@ -213,7 +210,7 @@ impl Session {
     ///
     /// Returns [`SessionError::UnknownLane`] when the name is missing.
     pub async fn lane(&self, name: &str) -> Result<Lane, SessionError> {
-        let projection = self.ensure().await?.refresh().await?;
+        let projection = self.runtime().await?.refresh().await?;
         let (lane_id, _) = projection.lane(name).ok_or(SessionError::UnknownLane)?;
         Ok(Lane {
             session: self.clone(),
@@ -227,7 +224,7 @@ impl Session {
     ///
     /// Returns [`SessionError::UnknownLane`] when the identity is missing.
     pub async fn lane_by_id(&self, lane_id: LaneId) -> Result<Lane, SessionError> {
-        let projection = self.ensure().await?.refresh().await?;
+        let projection = self.runtime().await?.refresh().await?;
         if projection.lane_by_id(lane_id).is_none() {
             return Err(SessionError::UnknownLane);
         }
@@ -268,10 +265,6 @@ impl Session {
         map.resolve(key)
     }
 
-    pub(crate) async fn runtime(&self) -> Result<Arc<SessionRuntime>, SessionError> {
-        self.ensure().await
-    }
-
     pub(crate) fn journal_store(&self) -> Arc<dyn JournalStore> {
         Arc::clone(&self.store)
     }
@@ -305,7 +298,7 @@ impl Lane {
     pub async fn navigate(&self, entry_id: EntryId) -> Result<(), SessionError> {
         let now = generated_timestamp()?;
         self.session
-            .ensure()
+            .runtime()
             .await?
             .navigate(self.lane_id, entry_id, generate()?, generate()?, now)
             .await
@@ -317,7 +310,7 @@ impl Lane {
     ///
     /// Returns an unknown-lane or recover failure.
     pub async fn inspect(&self) -> Result<LaneInspect, SessionError> {
-        self.session.ensure().await?.inspect(self.lane_id).await
+        self.session.runtime().await?.inspect(self.lane_id).await
     }
 
     /// Cancel the active run on this lane and fan out through child mappings.
@@ -335,7 +328,7 @@ impl Lane {
         principal: PrincipalRef,
         authorization: AuthorizationEvidence,
     ) -> Result<(), SessionError> {
-        let runtime = self.session.ensure().await?;
+        let runtime = self.session.runtime().await?;
         let projection = runtime.refresh().await?;
         let Some(run_id) = projection.active_on_lane(self.lane_id) else {
             return Ok(());
@@ -344,7 +337,6 @@ impl Lane {
             principal,
             authorization,
         };
-        #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
         if let Some(run) = crate::agent::live_run(self)? {
             return run.cancel_with_initiator(initiator).await.map_err(|error| {
                 SessionError::Commit {
@@ -379,7 +371,7 @@ impl Lane {
             code: finstack_ai_kernel::static_error_code!("message_invalid"),
         })?;
         self.session
-            .ensure()
+            .runtime()
             .await?
             .append_message(
                 self.lane_id,

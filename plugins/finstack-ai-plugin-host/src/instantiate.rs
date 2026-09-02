@@ -7,7 +7,7 @@ use std::time::Duration;
 use finstack_ai_kernel::Timestamp;
 use finstack_ai_runtime::ports::model::CancellationSignal;
 use finstack_ai_wit::{MAX_STRING_BYTES, reject_before_allocation, reject_declared_len};
-use wasmtime::component::{Component, HasData, Linker, ResourceTable};
+use wasmtime::component::{HasData, Linker, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, Trap};
 use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
 use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
@@ -52,18 +52,22 @@ const MAX_LOG_LINES: usize = 1_024;
 const MAX_LOG_BYTES: usize = 1024 * 1024;
 
 impl HostState {
-    /// Construct deny-by-default host import state with `limits`.
-    #[must_use]
-    pub fn new(limits: StoreLimits) -> Self {
+    fn build(limits: StoreLimits, wasi: WasiCtx, granted: BTreeSet<String>) -> Self {
         Self {
             logs: Vec::new(),
             log_bytes: 0,
             blob: Vec::new(),
             limits,
-            wasi: WasiCtxBuilder::new().build(),
+            wasi,
             table: ResourceTable::new(),
-            granted: BTreeSet::new(),
+            granted,
         }
+    }
+
+    /// Construct deny-by-default host import state with `limits`.
+    #[must_use]
+    pub fn new(limits: StoreLimits) -> Self {
+        Self::build(limits, WasiCtxBuilder::new().build(), BTreeSet::new())
     }
 
     /// Construct state with granted, resource-backed preopens only.
@@ -79,31 +83,11 @@ impl HostState {
         granted: &BTreeSet<String>,
         resources: &GrantResources,
     ) -> Result<Self, PluginHostError> {
-        Ok(Self {
-            logs: Vec::new(),
-            log_bytes: 0,
-            blob: Vec::new(),
+        Ok(Self::build(
             limits,
-            wasi: wasi_ctx(granted, resources)?,
-            table: ResourceTable::new(),
-            granted: granted.clone(),
-        })
-    }
-
-    /// Construct state that can serve one blob body.
-    #[must_use]
-    pub fn with_blob(limits: StoreLimits, bytes: Vec<u8>) -> Self {
-        Self {
-            logs: Vec::new(),
-            log_bytes: 0,
-            blob: bytes,
-            limits,
-            wasi: WasiCtxBuilder::new().build(),
-            table: ResourceTable::new(),
-            // This constructor exists to serve one blob body, so the blobs
-            // capability is its whole reason to be.
-            granted: ["blobs".to_owned()].into_iter().collect(),
-        }
+            wasi_ctx(granted, resources)?,
+            granted.clone(),
+        ))
     }
 
     /// Recorded log lines for diagnostics.
@@ -125,6 +109,35 @@ impl HostState {
             "plugin_permission_denied".to_owned(),
             format!("host capability `{capability}` was not granted"),
         ))
+    }
+
+    /// `logging.log` body shared by both world versions. Errors are
+    /// `(code, message)` parts for the caller's generated `PluginError`.
+    fn log_line(&mut self, level: String, message: String) -> Result<(), (String, String)> {
+        if let Some(denied) = self.deny_ungranted("logging") {
+            return Err(denied);
+        }
+        reject_before_allocation(message.as_bytes(), MAX_STRING_BYTES, "log.message")
+            .map_err(|error| (error.code().to_owned(), error.to_string()))?;
+        self.push_log(level, message);
+        Ok(())
+    }
+
+    /// `blobs.read` body shared by both world versions. Errors are
+    /// `(code, message)` parts for the caller's generated `PluginError`.
+    fn read_blob(&self, offset: u64, max_bytes: u64) -> Result<Vec<u8>, (String, String)> {
+        if let Some(denied) = self.deny_ungranted("blobs") {
+            return Err(denied);
+        }
+        reject_declared_len(max_bytes, MAX_STRING_BYTES, "blobs.read")
+            .map_err(|error| (error.code().to_owned(), error.to_string()))?;
+        let start = usize::try_from(offset).unwrap_or(self.blob.len());
+        let take = usize::try_from(max_bytes).unwrap_or(0);
+        if start >= self.blob.len() {
+            return Ok(Vec::new());
+        }
+        let end = start.saturating_add(take).min(self.blob.len());
+        Ok(self.blob[start..end].to_vec())
     }
 
     /// Record one log line, dropping the oldest past the retained window.
@@ -164,22 +177,12 @@ impl logging::Host for HostState {
         level: Level,
         message: String,
     ) -> Result<(), PluginError> {
-        if let Some((code, message)) = self.deny_ungranted("logging") {
-            return Err(PluginError {
+        self.log_line(format!("{level:?}"), message)
+            .map_err(|(code, message)| PluginError {
                 code,
                 message,
                 retryable: false,
-            });
-        }
-        reject_before_allocation(message.as_bytes(), MAX_STRING_BYTES, "log.message").map_err(
-            |error| PluginError {
-                code: error.code().to_owned(),
-                message: error.to_string(),
-                retryable: false,
-            },
-        )?;
-        self.push_log(format!("{level:?}"), message);
-        Ok(())
+            })
     }
 }
 
@@ -191,27 +194,12 @@ impl blobs::Host for HostState {
         offset: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, PluginError> {
-        if let Some((code, message)) = self.deny_ungranted("blobs") {
-            return Err(PluginError {
+        self.read_blob(offset, max_bytes)
+            .map_err(|(code, message)| PluginError {
                 code,
                 message,
                 retryable: false,
-            });
-        }
-        reject_declared_len(max_bytes, MAX_STRING_BYTES, "blobs.read").map_err(|error| {
-            PluginError {
-                code: error.code().to_owned(),
-                message: error.to_string(),
-                retryable: false,
-            }
-        })?;
-        let start = usize::try_from(offset).unwrap_or(self.blob.len());
-        let take = usize::try_from(max_bytes).unwrap_or(0);
-        if start >= self.blob.len() {
-            return Ok(Vec::new());
-        }
-        let end = start.saturating_add(take).min(self.blob.len());
-        Ok(self.blob[start..end].to_vec())
+            })
     }
 }
 
@@ -224,22 +212,12 @@ impl logging_v1::Host for HostState {
         level: logging_v1::Level,
         message: String,
     ) -> Result<(), types_v1::PluginError> {
-        if let Some((code, message)) = self.deny_ungranted("logging") {
-            return Err(types_v1::PluginError {
+        self.log_line(format!("{level:?}"), message)
+            .map_err(|(code, message)| types_v1::PluginError {
                 code,
                 message,
                 retryable: false,
-            });
-        }
-        reject_before_allocation(message.as_bytes(), MAX_STRING_BYTES, "log.message").map_err(
-            |error| types_v1::PluginError {
-                code: error.code().to_owned(),
-                message: error.to_string(),
-                retryable: false,
-            },
-        )?;
-        self.push_log(format!("{level:?}"), message);
-        Ok(())
+            })
     }
 }
 
@@ -251,27 +229,12 @@ impl blobs_v1::Host for HostState {
         offset: u64,
         max_bytes: u64,
     ) -> Result<Vec<u8>, types_v1::PluginError> {
-        if let Some((code, message)) = self.deny_ungranted("blobs") {
-            return Err(types_v1::PluginError {
+        self.read_blob(offset, max_bytes)
+            .map_err(|(code, message)| types_v1::PluginError {
                 code,
                 message,
                 retryable: false,
-            });
-        }
-        reject_declared_len(max_bytes, MAX_STRING_BYTES, "blobs.read").map_err(|error| {
-            types_v1::PluginError {
-                code: error.code().to_owned(),
-                message: error.to_string(),
-                retryable: false,
-            }
-        })?;
-        let start = usize::try_from(offset).unwrap_or(self.blob.len());
-        let take = usize::try_from(max_bytes).unwrap_or(0);
-        if start >= self.blob.len() {
-            return Ok(Vec::new());
-        }
-        let end = start.saturating_add(take).min(self.blob.len());
-        Ok(self.blob[start..end].to_vec())
+            })
     }
 }
 
@@ -616,15 +579,11 @@ fn unix_now_ms() -> i64 {
 
 /// Instantiate `component` with host imports only. Unresolved `wasi:*` fails
 /// closed as [`PluginHostError::InstantiateFailed`].
-///
-/// # Errors
-///
-/// Returns [`PluginHostError::InstantiateFailed`] when linking fails.
-#[allow(dead_code)]
-pub async fn instantiate_with_host_imports(
+#[cfg(test)]
+async fn instantiate_with_host_imports(
     engine: &Engine,
     linker: &Linker<HostState>,
-    component: &Component,
+    component: &wasmtime::component::Component,
 ) -> Result<Store<HostState>, PluginHostError> {
     let limits = EffectiveLimits::default();
     let mut store = new_store(engine, HostState::new(store_limits(limits)), limits.fuel)?;

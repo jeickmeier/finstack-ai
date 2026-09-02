@@ -46,18 +46,16 @@ const RENDER_ID_SCHEMA: &[u8] =
 pub struct MediaPipelineToolset {
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
-    render_movie_id: ToolId,
-    advance_render_id: ToolId,
-    get_render_status_id: ToolId,
     driver: Arc<MediaPipelineDriver>,
 }
 
 impl std::fmt::Debug for MediaPipelineToolset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MediaPipelineToolset")
-            .field("render_movie_id", &self.render_movie_id)
-            .field("advance_render_id", &self.advance_render_id)
-            .field("get_render_status_id", &self.get_render_status_id)
+            .field(
+                "tools",
+                &self.tools.iter().map(|spec| &spec.id).collect::<Vec<_>>(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -69,131 +67,106 @@ impl MediaPipelineToolset {
     ///
     /// Returns [`PipelineError::ConfigInvalid`] when a tool identity or one
     /// of the built-in [`ToolSpec`]s fails its own validation.
-    #[allow(clippy::too_many_lines)]
     pub fn try_new(driver: Arc<MediaPipelineDriver>) -> Result<Self, PipelineError> {
-        let render_movie_id =
-            ToolId::parse(RENDER_MOVIE_ID).map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let advance_render_id =
-            ToolId::parse(ADVANCE_RENDER_ID).map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let get_render_status_id =
-            ToolId::parse(GET_RENDER_STATUS_ID).map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_tool_id",
-            })?;
-
         let result_schema =
             RawJson::parse(RESULT_SCHEMA).map_err(|_| PipelineError::ConfigInvalid {
                 reason: "invalid_output_schema",
             })?;
-        let render_id_schema =
-            RawJson::parse(RENDER_ID_SCHEMA).map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_input_schema",
-            })?;
-
-        let render_movie_spec = ToolSpec {
-            id: render_movie_id.clone(),
-            model_name: Arc::from(RENDER_MOVIE_NAME),
-            title: Arc::from("Render movie"),
-            description: Arc::from(
+        let tools = Arc::from([
+            tool_spec(
+                RENDER_MOVIE_ID,
+                RENDER_MOVIE_NAME,
+                "Render movie",
                 "Validate and start one MoviePlan render, then run one pipeline tick.",
-            ),
-            input_schema: RawJson::parse(
                 br#"{"additionalProperties":false,"properties":{"plan":{"type":"object"}},"required":["plan"],"type":"object"}"#,
-            )
-            .map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(result_schema.clone()),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: ApprovalMetadata {
-                requirement: ApprovalRequirement::Policy,
-                reason: Some(Arc::from("paid multi-scene media generation")),
-                attributes: Metadata::empty(),
-            },
-            max_result_bytes: 262_144,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        render_movie_spec
-            .validate()
-            .map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let advance_render_spec = ToolSpec {
-            id: advance_render_id.clone(),
-            model_name: Arc::from(ADVANCE_RENDER_NAME),
-            title: Arc::from("Advance render"),
-            description: Arc::from(
+                result_schema.clone(),
+                false,
+            )?,
+            tool_spec(
+                ADVANCE_RENDER_ID,
+                ADVANCE_RENDER_NAME,
+                "Advance render",
                 "Run one bounded tick of a submitted render (generate frames, submit and poll \
                  jobs, download clips, compose when done).",
-            ),
-            input_schema: render_id_schema.clone(),
-            output_schema: Some(result_schema.clone()),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: ApprovalMetadata {
-                requirement: ApprovalRequirement::Policy,
-                reason: Some(Arc::from("paid multi-scene media generation")),
-                attributes: Metadata::empty(),
-            },
-            max_result_bytes: 262_144,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        advance_render_spec
-            .validate()
-            .map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let get_render_status_spec = ToolSpec {
-            id: get_render_status_id.clone(),
-            model_name: Arc::from(GET_RENDER_STATUS_NAME),
-            title: Arc::from("Get render status"),
-            description: Arc::from("Read one render's current progress."),
-            input_schema: render_id_schema,
-            output_schema: Some(result_schema),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::ReadOnly,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: ApprovalMetadata {
-                requirement: ApprovalRequirement::NotRequired,
-                reason: None,
-                attributes: Metadata::empty(),
-            },
-            max_result_bytes: 262_144,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        get_render_status_spec
-            .validate()
-            .map_err(|_| PipelineError::ConfigInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
+                RENDER_ID_SCHEMA,
+                result_schema.clone(),
+                false,
+            )?,
+            tool_spec(
+                GET_RENDER_STATUS_ID,
+                GET_RENDER_STATUS_NAME,
+                "Get render status",
+                "Read one render's current progress.",
+                RENDER_ID_SCHEMA,
+                result_schema,
+                true,
+            )?,
+        ]);
         Ok(Self {
             descriptor: ToolsetDescriptor {
                 name: Arc::from("finstack-media-pipeline"),
                 metadata: Metadata::empty(),
             },
-            tools: Arc::from([
-                render_movie_spec,
-                advance_render_spec,
-                get_render_status_spec,
-            ]),
-            render_movie_id,
-            advance_render_id,
-            get_render_status_id,
+            tools,
             driver,
         })
     }
+}
+
+/// One validated pipeline tool spec. `read_only` selects the status tool's
+/// side-effect and approval classes; the two mutating tools share the paid
+/// generation policy.
+fn tool_spec(
+    id: &str,
+    name: &str,
+    title: &str,
+    description: &str,
+    input_schema: &[u8],
+    output_schema: RawJson,
+    read_only: bool,
+) -> Result<ToolSpec, PipelineError> {
+    let (side_effect, approval) = if read_only {
+        (
+            SideEffectClass::ReadOnly,
+            ApprovalMetadata {
+                requirement: ApprovalRequirement::NotRequired,
+                reason: None,
+                attributes: Metadata::empty(),
+            },
+        )
+    } else {
+        (
+            SideEffectClass::NonIdempotentWrite,
+            ApprovalMetadata {
+                requirement: ApprovalRequirement::Policy,
+                reason: Some(Arc::from("paid multi-scene media generation")),
+                attributes: Metadata::empty(),
+            },
+        )
+    };
+    let spec = ToolSpec {
+        id: ToolId::parse(id).map_err(|_| PipelineError::ConfigInvalid {
+            reason: "invalid_tool_id",
+        })?,
+        model_name: Arc::from(name),
+        title: Arc::from(title),
+        description: Arc::from(description),
+        input_schema: RawJson::parse(input_schema).map_err(|_| PipelineError::ConfigInvalid {
+            reason: "invalid_input_schema",
+        })?,
+        output_schema: Some(output_schema),
+        execution: ToolExecutionMode::Sequential,
+        side_effect,
+        retry_safety: RetrySafety::AtMostOnce,
+        approval,
+        max_result_bytes: 262_144,
+        metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
+    };
+    spec.validate().map_err(|_| PipelineError::ConfigInvalid {
+        reason: "invalid_tool_spec",
+    })?;
+    Ok(spec)
 }
 
 impl Toolset for MediaPipelineToolset {
@@ -210,28 +183,44 @@ impl Toolset for MediaPipelineToolset {
         ctx: ToolCallContext,
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        let render_movie_id = self.render_movie_id.clone();
-        let advance_render_id = self.advance_render_id.clone();
-        let get_render_status_id = self.get_render_status_id.clone();
+        let tools = Arc::clone(&self.tools);
         let driver = Arc::clone(&self.driver);
         Box::pin(async move {
             verify_authority(&ctx)?;
-            if call.tool_id == render_movie_id && call.call.tool_name() == RENDER_MOVIE_NAME {
-                return handle_render_movie(&ctx, &call, driver.as_ref()).await;
+            let name = call.call.tool_name();
+            let known = tools
+                .iter()
+                .any(|spec| spec.id == call.tool_id && spec.model_name.as_ref() == name);
+            if !known {
+                return Err(tool_error(
+                    MEDIA_PIPELINE_INVALID_ARGUMENTS,
+                    ErrorCategory::Validation,
+                    "media pipeline call identity is invalid",
+                ));
             }
-            if call.tool_id == advance_render_id && call.call.tool_name() == ADVANCE_RENDER_NAME {
-                return handle_advance_render(&ctx, &call, driver.as_ref()).await;
-            }
-            if call.tool_id == get_render_status_id
-                && call.call.tool_name() == GET_RENDER_STATUS_NAME
-            {
-                return handle_get_render_status(&ctx, &call, driver.as_ref()).await;
-            }
-            Err(tool_error(
-                MEDIA_PIPELINE_INVALID_ARGUMENTS,
-                ErrorCategory::Validation,
-                "media pipeline call identity is invalid",
-            ))
+            let state = match name {
+                RENDER_MOVIE_NAME => {
+                    let args: RenderMovieArguments = parse_args(&call, name)?;
+                    let plan_bytes = serde_json::to_vec(&args.plan).map_err(|_| {
+                        tool_error(
+                            MEDIA_PIPELINE_INVALID_ARGUMENTS,
+                            ErrorCategory::Validation,
+                            "render_movie plan could not be re-serialized",
+                        )
+                    })?;
+                    let submitted = driver.submit_plan(&ctx, &plan_bytes).await?;
+                    driver.advance(&ctx, submitted.render_id.as_ref()).await?
+                }
+                ADVANCE_RENDER_NAME => {
+                    let args: RenderIdArguments = parse_args(&call, name)?;
+                    driver.advance(&ctx, &args.render_id).await?
+                }
+                _ => {
+                    let args: RenderIdArguments = parse_args(&call, name)?;
+                    driver.status(ctx.run.locator.tenant_scope.as_ref(), &args.render_id)?
+                }
+            };
+            completed_stream(&render_state_json(&state))
         })
     }
 }
@@ -248,67 +237,17 @@ struct RenderIdArguments {
     render_id: String,
 }
 
-async fn handle_render_movie(
-    ctx: &ToolCallContext,
+fn parse_args<T: for<'de> Deserialize<'de>>(
     call: &ValidatedToolCall,
-    driver: &MediaPipelineDriver,
-) -> Result<ToolEventStream, ToolError> {
-    let args: RenderMovieArguments = serde_json::from_slice(call.call.arguments().as_bytes())
-        .map_err(|_| {
-            tool_error(
-                MEDIA_PIPELINE_INVALID_ARGUMENTS,
-                ErrorCategory::Validation,
-                "render_movie arguments are invalid",
-            )
-        })?;
-    let plan_bytes = serde_json::to_vec(&args.plan).map_err(|_| {
+    tool: &str,
+) -> Result<T, ToolError> {
+    serde_json::from_slice(call.call.arguments().as_bytes()).map_err(|_| {
         tool_error(
             MEDIA_PIPELINE_INVALID_ARGUMENTS,
             ErrorCategory::Validation,
-            "render_movie plan could not be re-serialized",
+            format!("{tool} arguments are invalid"),
         )
-    })?;
-    let submitted = driver.submit_plan(ctx, &plan_bytes).await?;
-    let ticked = driver.advance(ctx, submitted.render_id.as_ref()).await?;
-    completed_stream(&render_state_json(&ticked))
-}
-
-async fn handle_advance_render(
-    ctx: &ToolCallContext,
-    call: &ValidatedToolCall,
-    driver: &MediaPipelineDriver,
-) -> Result<ToolEventStream, ToolError> {
-    let args: RenderIdArguments = serde_json::from_slice(call.call.arguments().as_bytes())
-        .map_err(|_| {
-            tool_error(
-                MEDIA_PIPELINE_INVALID_ARGUMENTS,
-                ErrorCategory::Validation,
-                "advance_render arguments are invalid",
-            )
-        })?;
-    let state = driver.advance(ctx, &args.render_id).await?;
-    completed_stream(&render_state_json(&state))
-}
-
-#[allow(
-    clippy::unused_async,
-    reason = "kept async so all three handlers share one call signature"
-)]
-async fn handle_get_render_status(
-    ctx: &ToolCallContext,
-    call: &ValidatedToolCall,
-    driver: &MediaPipelineDriver,
-) -> Result<ToolEventStream, ToolError> {
-    let args: RenderIdArguments = serde_json::from_slice(call.call.arguments().as_bytes())
-        .map_err(|_| {
-            tool_error(
-                MEDIA_PIPELINE_INVALID_ARGUMENTS,
-                ErrorCategory::Validation,
-                "get_render_status arguments are invalid",
-            )
-        })?;
-    let state = driver.status(ctx.run.locator.tenant_scope.as_ref(), &args.render_id)?;
-    completed_stream(&render_state_json(&state))
+    })
 }
 
 /// Shared result JSON for all three tools: stage/status names come from

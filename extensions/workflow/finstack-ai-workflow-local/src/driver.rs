@@ -48,13 +48,7 @@ impl LocalWorkflowDriver {
         cron: Arc<dyn CronScheduleStore>,
     ) -> Result<Self, WorkflowDriverError> {
         let session = WorkflowSession::trusted(store, locator, clock).await?;
-        let mut driver = Self::wrap(session, cron);
-        driver.catch_up = driver
-            .fire_due()
-            .map_err(|_| WorkflowDriverError::Recover {
-                code: "cron_catch_up",
-            })?;
-        Ok(driver)
+        Self::attached(session, cron)
     }
 
     /// Attach with deterministic entropy for tests and reproducible examples.
@@ -70,6 +64,14 @@ impl LocalWorkflowDriver {
         cron: Arc<dyn CronScheduleStore>,
     ) -> Result<Self, WorkflowDriverError> {
         let session = WorkflowSession::trusted_seeded(store, locator, clock, random_seed).await?;
+        Self::attached(session, cron)
+    }
+
+    /// Wrap an attached session and fire overdue schedules once.
+    fn attached(
+        session: WorkflowSession,
+        cron: Arc<dyn CronScheduleStore>,
+    ) -> Result<Self, WorkflowDriverError> {
         let mut driver = Self::wrap(session, cron);
         driver.catch_up = driver
             .fire_due()

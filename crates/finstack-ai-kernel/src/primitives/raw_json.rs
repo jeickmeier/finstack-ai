@@ -53,16 +53,7 @@ impl RawJson {
     /// assert_eq!(json.as_str(), r#"{"a":2,"b":1}"#);
     /// ```
     pub fn parse(input: impl AsRef<[u8]>) -> Result<Self, RawJsonError> {
-        Self::parse_with_limits(
-            input.as_ref(),
-            Limits {
-                max_bytes: RAW_JSON_MAX_BYTES,
-                max_depth: RAW_JSON_MAX_DEPTH,
-                require_object: false,
-                max_top_level_members: None,
-                max_key_bytes: None,
-            },
-        )
+        Self::parse_with_limits(input.as_ref(), RAW_JSON_LIMITS)
     }
 
     /// Borrow the canonical UTF-8 JSON bytes.
@@ -209,31 +200,27 @@ impl<'de> Visitor<'de> for RawJsonVisitor {
     }
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        let source = serde_json::to_string(value).map_err(E::custom)?;
-        RawJson::parse(source).map_err(E::custom)
+        scalar_json(&value)
     }
 
     fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
-        self.visit_str(&value)
+        scalar_json(&value)
     }
 
     fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
-        RawJson::parse(if value { "true" } else { "false" }).map_err(E::custom)
+        scalar_json(&value)
     }
 
     fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-        let source = serde_json::to_string(&value).map_err(E::custom)?;
-        RawJson::parse(source).map_err(E::custom)
+        scalar_json(&value)
     }
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-        let source = serde_json::to_string(&value).map_err(E::custom)?;
-        RawJson::parse(source).map_err(E::custom)
+        scalar_json(&value)
     }
 
     fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
-        let source = serde_json::to_string(&value).map_err(E::custom)?;
-        RawJson::parse(source).map_err(E::custom)
+        scalar_json(&value)
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
@@ -249,15 +236,8 @@ impl<'de> Visitor<'de> for RawJsonVisitor {
         A: SeqAccess<'de>,
     {
         let used = Cell::new(0);
-        let value = StrictValue {
-            depth: 0,
-            max_depth: RAW_JSON_MAX_DEPTH,
-            max_bytes: RAW_JSON_MAX_BYTES,
-            max_key_bytes: None,
-            max_top_level_members: None,
-            used: &used,
-        }
-        .deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+        let value = StrictValue::root(RAW_JSON_LIMITS, &used)
+            .deserialize(de::value::SeqAccessDeserializer::new(seq))?;
         raw_json_from_value(&value, RAW_JSON_MAX_BYTES).map_err(de::Error::custom)
     }
 
@@ -266,17 +246,15 @@ impl<'de> Visitor<'de> for RawJsonVisitor {
         A: MapAccess<'de>,
     {
         let used = Cell::new(0);
-        let value = StrictValue {
-            depth: 0,
-            max_depth: RAW_JSON_MAX_DEPTH,
-            max_bytes: RAW_JSON_MAX_BYTES,
-            max_key_bytes: None,
-            max_top_level_members: None,
-            used: &used,
-        }
-        .deserialize(de::value::MapAccessDeserializer::new(map))?;
+        let value = StrictValue::root(RAW_JSON_LIMITS, &used)
+            .deserialize(de::value::MapAccessDeserializer::new(map))?;
         raw_json_from_value(&value, RAW_JSON_MAX_BYTES).map_err(de::Error::custom)
     }
+}
+
+fn scalar_json<E: de::Error>(value: &impl Serialize) -> Result<RawJson, E> {
+    let source = serde_json::to_string(value).map_err(E::custom)?;
+    RawJson::parse(source).map_err(E::custom)
 }
 
 /// Bounded top-level JSON object metadata.
@@ -312,17 +290,7 @@ impl Metadata {
     /// assert!(Metadata::parse("[]").is_err());
     /// ```
     pub fn parse(input: impl AsRef<[u8]>) -> Result<Self, RawJsonError> {
-        let raw = RawJson::parse_with_limits(
-            input.as_ref(),
-            Limits {
-                max_bytes: METADATA_MAX_BYTES,
-                max_depth: METADATA_MAX_DEPTH,
-                require_object: true,
-                max_top_level_members: Some(METADATA_MAX_MEMBERS),
-                max_key_bytes: Some(METADATA_MAX_KEY_BYTES),
-            },
-        )?;
-        Ok(Self(raw))
+        RawJson::parse_with_limits(input.as_ref(), METADATA_LIMITS).map(Self)
     }
 
     /// Borrow the underlying [`RawJson`].
@@ -417,15 +385,8 @@ impl<'de> Visitor<'de> for MetadataVisitor {
         A: MapAccess<'de>,
     {
         let used = Cell::new(0);
-        let value = StrictValue {
-            depth: 0,
-            max_depth: METADATA_MAX_DEPTH,
-            max_bytes: METADATA_MAX_BYTES,
-            max_key_bytes: Some(METADATA_MAX_KEY_BYTES),
-            max_top_level_members: Some(METADATA_MAX_MEMBERS),
-            used: &used,
-        }
-        .deserialize(de::value::MapAccessDeserializer::new(map))?;
+        let value = StrictValue::root(METADATA_LIMITS, &used)
+            .deserialize(de::value::MapAccessDeserializer::new(map))?;
         if !value.is_object() {
             return Err(de::Error::custom(RawJsonError::ExpectedObject));
         }
@@ -507,6 +468,22 @@ struct Limits {
     max_key_bytes: Option<usize>,
 }
 
+const RAW_JSON_LIMITS: Limits = Limits {
+    max_bytes: RAW_JSON_MAX_BYTES,
+    max_depth: RAW_JSON_MAX_DEPTH,
+    require_object: false,
+    max_top_level_members: None,
+    max_key_bytes: None,
+};
+
+const METADATA_LIMITS: Limits = Limits {
+    max_bytes: METADATA_MAX_BYTES,
+    max_depth: METADATA_MAX_DEPTH,
+    require_object: true,
+    max_top_level_members: Some(METADATA_MAX_MEMBERS),
+    max_key_bytes: Some(METADATA_MAX_KEY_BYTES),
+};
+
 fn raw_json_from_value(value: &Value, max_bytes: usize) -> Result<RawJson, RawJsonError> {
     let canonical = serde_json_canonicalizer::to_vec(&value)
         .map_err(|error| RawJsonError::Canonicalize(error.to_string()))?;
@@ -519,87 +496,100 @@ fn raw_json_from_value(value: &Value, max_bytes: usize) -> Result<RawJson, RawJs
     Ok(RawJson(Bytes::from(canonical)))
 }
 
-fn charge_bytes<E: de::Error>(used: &Cell<usize>, add: usize, max: usize) -> Result<(), E> {
-    let next = used.get().saturating_add(add);
-    if next > max {
-        return Err(E::custom(format!(
-            "JSON source span too large: {next} > {max}"
-        )));
-    }
-    used.set(next);
-    Ok(())
-}
-
-fn json_number_len(value: &impl ToString) -> usize {
-    value.to_string().len()
-}
-
 fn strict_parse_value(input: &[u8], limits: Limits) -> Result<Value, RawJsonError> {
     let mut de = serde_json::Deserializer::from_slice(input);
     let used = Cell::new(0);
-    let value = StrictValue {
-        depth: 0,
-        max_depth: limits.max_depth,
-        max_bytes: limits.max_bytes,
-        max_key_bytes: limits.max_key_bytes,
-        max_top_level_members: limits.max_top_level_members,
-        used: &used,
-    }
-    .deserialize(&mut de)
-    .map_err(|error| map_de_error(&error))?;
+    let value = StrictValue::root(limits, &used)
+        .deserialize(&mut de)
+        .map_err(|error| map_de_error(&error))?;
     de.end().map_err(|_| RawJsonError::TrailingData)?;
     Ok(value)
 }
 
+/// Recover the typed ceiling error that `StrictValue` reported through
+/// `serde::de::Error::custom` (format: `<prefix><a> > <b>[ at line ...]`).
 fn map_de_error(error: &serde_json::Error) -> RawJsonError {
     let text = error.to_string();
-    if let Some(rest) = text.strip_prefix("duplicate object key: ") {
-        let key = rest.split(" at line ").next().unwrap_or(rest).to_owned();
-        return RawJsonError::DuplicateKey { key };
+    let detail = |prefix: &str| {
+        text.strip_prefix(prefix)
+            .map(|rest| rest.split(" at line ").next().unwrap_or(rest))
+    };
+    let pair = |prefix: &str| -> Option<(usize, usize)> {
+        let (left, right) = detail(prefix)?.split_once(" > ")?;
+        Some((left.parse().ok()?, right.parse().ok()?))
+    };
+    if let Some(key) = detail("duplicate object key: ") {
+        return RawJsonError::DuplicateKey {
+            key: key.to_owned(),
+        };
     }
-    if let Some(rest) = text.strip_prefix("JSON nesting too deep: ") {
-        // format: depth X > Y[ at line ...]
-        let head = rest.split(" at line ").next().unwrap_or(rest);
-        if let Some((depth, max)) = head.split_once(" > ")
-            && let (Ok(depth), Ok(max)) = (depth.parse(), max.parse())
-        {
-            return RawJsonError::TooDeep { depth, max };
-        }
+    if let Some((depth, max)) = pair("JSON nesting too deep: ") {
+        return RawJsonError::TooDeep { depth, max };
     }
-    if let Some(rest) = text.strip_prefix("JSON source span too large: ") {
-        let head = rest.split(" at line ").next().unwrap_or(rest);
-        if let Some((len, max)) = head.split_once(" > ")
-            && let (Ok(len), Ok(max)) = (len.parse(), max.parse())
-        {
-            return RawJsonError::SourceTooLarge { len, max };
-        }
+    if let Some((len, max)) = pair("JSON source span too large: ") {
+        return RawJsonError::SourceTooLarge { len, max };
     }
-    if let Some(rest) = text.strip_prefix("metadata key too long: ") {
-        let head = rest.split(" at line ").next().unwrap_or(rest);
-        if let Some((len, max)) = head.split_once(" > ")
-            && let (Ok(len), Ok(max)) = (len.parse(), max.parse())
-        {
-            return RawJsonError::KeyTooLong { len, max };
-        }
+    if let Some((len, max)) = pair("metadata key too long: ") {
+        return RawJsonError::KeyTooLong { len, max };
     }
-    if let Some(rest) = text.strip_prefix("too many metadata members: ") {
-        let head = rest.split(" at line ").next().unwrap_or(rest);
-        if let Some((count, max)) = head.split_once(" > ")
-            && let (Ok(count), Ok(max)) = (count.parse(), max.parse())
-        {
-            return RawJsonError::TooManyMembers { count, max };
-        }
+    if let Some((count, max)) = pair("too many metadata members: ") {
+        return RawJsonError::TooManyMembers { count, max };
     }
     RawJsonError::Parse(text)
 }
 
+/// Seed and visitor that materializes one JSON value while enforcing depth,
+/// source-span, key-length, and top-level-member ceilings as it streams.
 struct StrictValue<'a> {
     depth: usize,
-    max_depth: usize,
-    max_bytes: usize,
-    max_key_bytes: Option<usize>,
-    max_top_level_members: Option<usize>,
+    limits: Limits,
     used: &'a Cell<usize>,
+}
+
+impl<'a> StrictValue<'a> {
+    const fn root(limits: Limits, used: &'a Cell<usize>) -> Self {
+        Self {
+            depth: 0,
+            limits,
+            used,
+        }
+    }
+
+    fn charge<E: de::Error>(&self, add: usize) -> Result<(), E> {
+        let next = self.used.get().saturating_add(add);
+        let max = self.limits.max_bytes;
+        if next > max {
+            return Err(E::custom(format!(
+                "JSON source span too large: {next} > {max}"
+            )));
+        }
+        self.used.set(next);
+        Ok(())
+    }
+
+    fn enter<E: de::Error>(&self) -> Result<Self, E> {
+        let depth = self.depth + 1;
+        if depth > self.limits.max_depth {
+            return Err(E::custom(format!(
+                "JSON nesting too deep: {depth} > {}",
+                self.limits.max_depth
+            )));
+        }
+        self.charge(2)?;
+        Ok(Self {
+            depth,
+            limits: self.limits,
+            used: self.used,
+        })
+    }
+
+    fn child(&self) -> Self {
+        Self {
+            depth: self.depth,
+            limits: self.limits,
+            used: self.used,
+        }
+    }
 }
 
 impl<'de> DeserializeSeed<'de> for StrictValue<'_> {
@@ -609,27 +599,11 @@ impl<'de> DeserializeSeed<'de> for StrictValue<'_> {
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_any(StrictVisitor {
-            depth: self.depth,
-            max_depth: self.max_depth,
-            max_bytes: self.max_bytes,
-            max_key_bytes: self.max_key_bytes,
-            max_top_level_members: self.max_top_level_members,
-            used: self.used,
-        })
+        deserializer.deserialize_any(self)
     }
 }
 
-struct StrictVisitor<'a> {
-    depth: usize,
-    max_depth: usize,
-    max_bytes: usize,
-    max_key_bytes: Option<usize>,
-    max_top_level_members: Option<usize>,
-    used: &'a Cell<usize>,
-}
-
-impl<'de> Visitor<'de> for StrictVisitor<'_> {
+impl<'de> Visitor<'de> for StrictValue<'_> {
     type Value = Value;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -640,7 +614,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         E: de::Error,
     {
-        charge_bytes(self.used, if value { 4 } else { 5 }, self.max_bytes)?;
+        self.charge(if value { 4 } else { 5 })?;
         Ok(Value::Bool(value))
     }
 
@@ -648,7 +622,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         E: de::Error,
     {
-        charge_bytes(self.used, json_number_len(&value), self.max_bytes)?;
+        self.charge(value.to_string().len())?;
         Ok(Value::from(value))
     }
 
@@ -656,7 +630,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         E: de::Error,
     {
-        charge_bytes(self.used, json_number_len(&value), self.max_bytes)?;
+        self.charge(value.to_string().len())?;
         Ok(Value::from(value))
     }
 
@@ -667,7 +641,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
         if !value.is_finite() {
             return Err(E::custom("non-finite JSON number"));
         }
-        charge_bytes(self.used, json_number_len(&value), self.max_bytes)?;
+        self.charge(value.to_string().len())?;
         Ok(Value::from(value))
     }
 
@@ -675,7 +649,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         E: de::Error,
     {
-        charge_bytes(self.used, value.len().saturating_add(2), self.max_bytes)?;
+        self.charge(value.len().saturating_add(2))?;
         Ok(Value::String(value.to_owned()))
     }
 
@@ -683,7 +657,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         E: de::Error,
     {
-        charge_bytes(self.used, value.len().saturating_add(2), self.max_bytes)?;
+        self.charge(value.len().saturating_add(2))?;
         Ok(Value::String(value))
     }
 
@@ -691,7 +665,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         E: de::Error,
     {
-        charge_bytes(self.used, 4, self.max_bytes)?;
+        self.charge(4)?;
         Ok(Value::Null)
     }
 
@@ -699,7 +673,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         E: de::Error,
     {
-        charge_bytes(self.used, 4, self.max_bytes)?;
+        self.charge(4)?;
         Ok(Value::Null)
     }
 
@@ -707,25 +681,11 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         A: SeqAccess<'de>,
     {
-        let next_depth = self.depth + 1;
-        if next_depth > self.max_depth {
-            return Err(de::Error::custom(format!(
-                "JSON nesting too deep: {next_depth} > {}",
-                self.max_depth
-            )));
-        }
-        charge_bytes(self.used, 2, self.max_bytes)?;
+        let inner = self.enter()?;
         let mut values = Vec::new();
-        while let Some(value) = seq.next_element_seed(StrictValue {
-            depth: next_depth,
-            max_depth: self.max_depth,
-            max_bytes: self.max_bytes,
-            max_key_bytes: self.max_key_bytes,
-            max_top_level_members: None,
-            used: self.used,
-        })? {
+        while let Some(value) = seq.next_element_seed(inner.child())? {
             if !values.is_empty() {
-                charge_bytes(self.used, 1, self.max_bytes)?;
+                inner.charge(1)?;
             }
             values.push(value);
         }
@@ -736,18 +696,11 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     where
         A: MapAccess<'de>,
     {
-        let next_depth = self.depth + 1;
-        if next_depth > self.max_depth {
-            return Err(de::Error::custom(format!(
-                "JSON nesting too deep: {next_depth} > {}",
-                self.max_depth
-            )));
-        }
-        charge_bytes(self.used, 2, self.max_bytes)?;
+        let inner = self.enter()?;
         let mut object = serde_json::Map::new();
         while let Some(key) = map.next_key::<String>()? {
             if self.depth == 0
-                && let Some(max_members) = self.max_top_level_members
+                && let Some(max_members) = self.limits.max_top_level_members
                 && object.len() >= max_members
             {
                 return Err(de::Error::custom(format!(
@@ -755,7 +708,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
                     object.len().saturating_add(1)
                 )));
             }
-            if let Some(max_key_bytes) = self.max_key_bytes
+            if let Some(max_key_bytes) = self.limits.max_key_bytes
                 && key.len() > max_key_bytes
             {
                 return Err(de::Error::custom(format!(
@@ -767,17 +720,10 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
                 return Err(de::Error::custom(format!("duplicate object key: {key}")));
             }
             if !object.is_empty() {
-                charge_bytes(self.used, 1, self.max_bytes)?;
+                inner.charge(1)?;
             }
-            charge_bytes(self.used, key.len().saturating_add(3), self.max_bytes)?;
-            let value = map.next_value_seed(StrictValue {
-                depth: next_depth,
-                max_depth: self.max_depth,
-                max_bytes: self.max_bytes,
-                max_key_bytes: self.max_key_bytes,
-                max_top_level_members: None,
-                used: self.used,
-            })?;
+            inner.charge(key.len().saturating_add(3))?;
+            let value = map.next_value_seed(inner.child())?;
             object.insert(key, value);
         }
         Ok(Value::Object(object))

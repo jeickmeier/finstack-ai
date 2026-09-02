@@ -460,7 +460,7 @@ async fn remote_cancel_is_forwarded_to_the_invoker() {
         )
     };
     let cancel_starter = starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>);
-    let outcome = cancel_child(&cancel_starter, &children, &context(), &call)
+    let outcome = cancel_child(&cancel_starter, &Mutex::new(children), &context(), &call)
         .await
         .expect("cancel");
     assert!(!outcome.is_error);

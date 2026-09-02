@@ -335,8 +335,7 @@ fn principal_mismatch_and_unknown_interaction_are_audited_nonrevealing() {
         );
         let interaction_router = InteractionRouter::new(store, gate);
         assert_eq!(
-            interaction_router
-                .route(interaction(), timestamp(2_001))
+            Box::pin(interaction_router.route(interaction(), timestamp(2_001)))
                 .await
                 .expect_err("unknown target"),
             ExternalRouteError::IngressRejected

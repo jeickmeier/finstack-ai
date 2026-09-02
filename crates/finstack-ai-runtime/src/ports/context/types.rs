@@ -266,23 +266,7 @@ impl ContextContribution {
         items: Vec<ContextItem>,
         cache_key: Option<impl AsRef<str>>,
     ) -> Result<Self, ContextError> {
-        let mut tokens = 0_u64;
-        let mut bytes = 0_u64;
-        for item in &items {
-            item.validate()?;
-            tokens = tokens.checked_add(item.estimated_tokens).ok_or_else(|| {
-                ContextError::stable(
-                    CONTEXT_CONTRIBUTION_INVALID,
-                    "context token estimate overflowed",
-                )
-            })?;
-            bytes = bytes.checked_add(item.bytes).ok_or_else(|| {
-                ContextError::stable(
-                    CONTEXT_CONTRIBUTION_INVALID,
-                    "context byte estimate overflowed",
-                )
-            })?;
-        }
+        let (tokens, bytes) = item_totals(&items)?;
         let contribution = Self {
             items: items.into(),
             estimated_tokens: tokens,
@@ -303,23 +287,7 @@ impl ContextContribution {
         if let Some(value) = &self.cache_key {
             validate_label(value, "context cache key")?;
         }
-        let mut tokens = 0_u64;
-        let mut bytes = 0_u64;
-        for item in self.items.iter() {
-            item.validate()?;
-            tokens = tokens.checked_add(item.estimated_tokens).ok_or_else(|| {
-                ContextError::stable(
-                    CONTEXT_CONTRIBUTION_INVALID,
-                    "context token estimate overflowed",
-                )
-            })?;
-            bytes = bytes.checked_add(item.bytes).ok_or_else(|| {
-                ContextError::stable(
-                    CONTEXT_CONTRIBUTION_INVALID,
-                    "context byte estimate overflowed",
-                )
-            })?;
-        }
+        let (tokens, bytes) = item_totals(&self.items)?;
         if tokens != self.estimated_tokens || bytes != self.bytes {
             return Err(ContextError::stable(
                 CONTEXT_CONTRIBUTION_INVALID,
@@ -343,4 +311,26 @@ impl ContextContribution {
             )
         })
     }
+}
+
+/// Validate every item and return its checked `(tokens, bytes)` totals.
+fn item_totals(items: &[ContextItem]) -> Result<(u64, u64), ContextError> {
+    let mut tokens = 0_u64;
+    let mut bytes = 0_u64;
+    for item in items {
+        item.validate()?;
+        tokens = tokens.checked_add(item.estimated_tokens).ok_or_else(|| {
+            ContextError::stable(
+                CONTEXT_CONTRIBUTION_INVALID,
+                "context token estimate overflowed",
+            )
+        })?;
+        bytes = bytes.checked_add(item.bytes).ok_or_else(|| {
+            ContextError::stable(
+                CONTEXT_CONTRIBUTION_INVALID,
+                "context byte estimate overflowed",
+            )
+        })?;
+    }
+    Ok((tokens, bytes))
 }

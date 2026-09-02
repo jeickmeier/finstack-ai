@@ -40,14 +40,6 @@ fn tool_error(
         .unwrap_or_else(Into::into)
 }
 
-fn binary_without_store_error() -> ToolError {
-    tool_error(
-        FETCH_LIMIT_EXCEEDED,
-        ErrorCategory::Limit,
-        "fetch content is binary and requires an artifact store",
-    )
-}
-
 /// Is `essence` (already lowercased, parameters already stripped) in the
 /// inline-text set: `text/*`, exactly `application/json`/`application/xml`,
 /// or ending `+json`/`+xml`?
@@ -110,32 +102,22 @@ async fn deliver_auto_or_markdown(
     max_result_budget: usize,
 ) -> Result<DeliveredContent, ToolError> {
     let is_html = media_type == "text/html" || media_type == "application/xhtml+xml";
-    if is_html {
-        return match String::from_utf8(body) {
-            Ok(text) => {
-                // `output_cap` is intentionally `max_result_budget` (the
-                // same effective cap every other inline path here already
-                // enforces), not `max_result_bytes - 4096`: keeping one
-                // budget concept avoids a second, HTML-only cap that would
-                // need its own justification and tests.
-                let inline_text = match html_to_markdown(&text, max_result_budget) {
-                    Some(markdown) => markdown,
-                    None => text,
-                };
-                inline_within_budget(inline_text, max_result_budget)
-            }
-            Err(err) => stage_or_error(err.into_bytes(), media_type, store, ctx).await,
-        };
+    if !is_html && !is_inline_text_essence(media_type) {
+        return stage_or_error(body, media_type, store, ctx).await;
     }
-
-    if is_inline_text_essence(media_type) {
-        return match String::from_utf8(body) {
-            Ok(text) => inline_within_budget(text, max_result_budget),
-            Err(err) => stage_or_error(err.into_bytes(), media_type, store, ctx).await,
-        };
-    }
-
-    stage_or_error(body, media_type, store, ctx).await
+    let text = match String::from_utf8(body) {
+        Ok(text) => text,
+        Err(err) => return stage_or_error(err.into_bytes(), media_type, store, ctx).await,
+    };
+    // `output_cap` is intentionally `max_result_budget` (the same effective
+    // cap every other inline path here already enforces), not
+    // `max_result_bytes - 4096`: one budget concept, not an HTML-only cap.
+    let text = if is_html {
+        html_to_markdown(&text, max_result_budget).unwrap_or(text)
+    } else {
+        text
+    };
+    inline_within_budget(text, max_result_budget)
 }
 
 /// Stage `body` as an artifact, or fail with the shared binary-without-store
@@ -148,21 +130,12 @@ async fn stage_or_error(
     ctx: &ToolCallContext,
 ) -> Result<DeliveredContent, ToolError> {
     let Some(store) = store else {
-        return Err(binary_without_store_error());
+        return Err(tool_error(
+            FETCH_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "fetch content is binary and requires an artifact store",
+        ));
     };
-    stage_artifact(body, media_type, store, ctx)
-        .await
-        .map(DeliveredContent::Artifact)
-}
-
-/// Port of the `stage_required_artifact` call shape from
-/// `finstack-ai-tools-openrouter-media/src/http.rs:110-133`.
-async fn stage_artifact(
-    body: Vec<u8>,
-    media_type: &str,
-    store: &Arc<dyn ArtifactStore>,
-    ctx: &ToolCallContext,
-) -> Result<ArtifactRef, ToolError> {
     let artifact = stage_required_artifact(
         store.as_ref(),
         ArtifactScope {
@@ -192,7 +165,7 @@ async fn stage_artifact(
             "fetch artifact staging failed",
         ),
     })?;
-    Ok(artifact)
+    Ok(DeliveredContent::Artifact(artifact))
 }
 
 /// Inline `text` unless it exceeds `max_result_budget`.

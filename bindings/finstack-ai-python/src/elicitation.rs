@@ -3,12 +3,13 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::ports::tool::Toolset;
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{ComponentRef, Version};
 use finstack_ai_tools_elicitation::{ElicitationKind, ElicitationToolDef, ElicitationToolset};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use serde::Deserialize;
 
+use crate::component_ref;
 use crate::json_bridge::py_to_json;
 
 const ELICITATION_COMPONENT: &str = "finstack.tools.elicitation";
@@ -87,20 +88,15 @@ impl PyElicitationToolset {
         let toolset = builder
             .build()
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(ELICITATION_COMPONENT)
-            .map(|id| {
-                ComponentRef::new(
-                    id,
-                    Some(Version {
-                        major: 1,
-                        minor: 0,
-                        patch: 0,
-                    }),
-                )
-            })
-            .map_err(|_| PyValueError::new_err("elicitation component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(
+                ELICITATION_COMPONENT,
+                Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+            )?,
             inner: Arc::new(toolset),
         })
     }

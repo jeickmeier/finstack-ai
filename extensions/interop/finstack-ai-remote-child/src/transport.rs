@@ -29,33 +29,34 @@ pub(crate) async fn exchange(
 ) -> Result<RemoteCommandResult, AgentInvokeError> {
     match &route.endpoint {
         RemoteEndpoint::Tcp(addr) => {
-            let stream =
-                tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(*addr))
-                    .await
-                    .map_err(|_| unavailable("remote child connect timed out"))?
-                    .map_err(|error| unavailable(error.to_string()))?;
-            tokio::time::timeout(
-                EXCHANGE_TIMEOUT,
-                exchange_on(stream, route, locator, payload, command_id),
-            )
-            .await
-            .map_err(|_| unavailable("remote child exchange timed out"))?
+            let connect = tokio::net::TcpStream::connect(*addr);
+            exchange_over(connect, route, locator, payload, command_id).await
         }
+        #[cfg(unix)]
         RemoteEndpoint::Unix(path) => {
-            unix_exchange(path.clone(), route, locator, payload, command_id).await
+            let connect = tokio::net::UnixStream::connect(path);
+            exchange_over(connect, route, locator, payload, command_id).await
+        }
+        #[cfg(not(unix))]
+        RemoteEndpoint::Unix(_) => {
+            Err(unavailable("unix remote child endpoints are not supported"))
         }
     }
 }
 
-#[cfg(unix)]
-async fn unix_exchange(
-    path: std::path::PathBuf,
+/// Connect within [`CONNECT_TIMEOUT`], then run one exchange within
+/// [`EXCHANGE_TIMEOUT`].
+async fn exchange_over<S>(
+    connect: impl Future<Output = std::io::Result<S>>,
     route: &ResolvedRemoteRoute,
     locator: &ChildRunLocator,
     payload: RemoteCommandPayload,
     command_id: &str,
-) -> Result<RemoteCommandResult, AgentInvokeError> {
-    let stream = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::UnixStream::connect(path))
+) -> Result<RemoteCommandResult, AgentInvokeError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let stream = tokio::time::timeout(CONNECT_TIMEOUT, connect)
         .await
         .map_err(|_| unavailable("remote child connect timed out"))?
         .map_err(|error| unavailable(error.to_string()))?;
@@ -67,22 +68,11 @@ async fn unix_exchange(
     .map_err(|_| unavailable("remote child exchange timed out"))?
 }
 
-#[cfg(not(unix))]
-async fn unix_exchange(
-    _path: std::path::PathBuf,
-    _route: &ResolvedRemoteRoute,
-    _locator: &ChildRunLocator,
-    _payload: RemoteCommandPayload,
-    _command_id: &str,
-) -> Result<RemoteCommandResult, AgentInvokeError> {
-    Err(unavailable("unix remote child endpoints are not supported"))
-}
-
 #[expect(
     clippy::too_many_lines,
     reason = "the bounded handshake, reconnect, and receipt state machine is kept linear for auditability"
 )]
-pub(crate) async fn exchange_on<S>(
+async fn exchange_on<S>(
     mut stream: S,
     route: &ResolvedRemoteRoute,
     locator: &ChildRunLocator,

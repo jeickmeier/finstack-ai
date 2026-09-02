@@ -109,6 +109,9 @@ pub fn capture(
 
 /// Park a session for the worker and capture any interaction it parked on.
 ///
+/// Distinct from [`finstack_ai_workflow_worker::park_for_wake`], which parks
+/// on a timer or external wake and takes no inbox.
+///
 /// Classifies the wait before delegating, because
 /// [`finstack_ai_workflow_worker::park_for_wake`] consumes the session's state and
 /// aborts its owner. Non-interaction waits are indexed by the worker and
@@ -118,10 +121,6 @@ pub fn capture(
 ///
 /// Returns [`HitlError::Worker`] when the session is not parked or the wake
 /// index rejects the row, and [`capture`]'s errors otherwise.
-/// Park the session on a pending human interaction.
-///
-/// Distinct from `finstack_ai_workflow_worker::park_for_wake`, which parks
-/// on a timer or external wake and takes no inbox.
 pub fn park_for_interaction(
     session: &mut WorkflowSession,
     wake: &dyn WakeIndexStore,

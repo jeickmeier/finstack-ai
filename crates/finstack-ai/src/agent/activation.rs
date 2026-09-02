@@ -22,11 +22,11 @@ pub struct NativeCapabilityHost {
     active: Mutex<BTreeMap<RunId, Arc<[ActiveCapability]>>>,
     pending: Mutex<BTreeMap<RunId, Vec<Arc<[ActiveCapability]>>>>,
     in_flight: Mutex<BTreeMap<RunId, u16>>,
-    max_concurrent: u16,
 }
 
 impl NativeCapabilityHost {
-    /// Construct a host with a frozen compact catalog and the default bound.
+    /// Construct a host with a frozen compact catalog; the per-run bound is
+    /// [`MAX_CONCURRENT_CAPABILITY_ACTIVATIONS`].
     #[must_use]
     pub fn new(catalog: impl Into<String>) -> Self {
         Self {
@@ -35,7 +35,6 @@ impl NativeCapabilityHost {
             active: Mutex::new(BTreeMap::new()),
             pending: Mutex::new(BTreeMap::new()),
             in_flight: Mutex::new(BTreeMap::new()),
-            max_concurrent: MAX_CONCURRENT_CAPABILITY_ACTIVATIONS,
         }
     }
 
@@ -88,8 +87,9 @@ impl NativeCapabilityHost {
     ///
     /// # Errors
     ///
-    /// Returns [`ActivationHostError::Bound`] when `max_concurrent` in-flight
-    /// activations already exist for `run_id`, or
+    /// Returns [`ActivationHostError::Bound`] when
+    /// [`MAX_CONCURRENT_CAPABILITY_ACTIVATIONS`] in-flight activations already
+    /// exist for `run_id`, or
     /// [`ActivationHostError::Failed`] when the host lock is poisoned.
     pub fn queue_activation(
         &self,
@@ -104,7 +104,7 @@ impl NativeCapabilityHost {
                     reason: Arc::from("activation host lock poisoned"),
                 })?;
             let count = counts.entry(run_id).or_insert(0);
-            if *count >= self.max_concurrent {
+            if *count >= MAX_CONCURRENT_CAPABILITY_ACTIVATIONS {
                 return Err(ActivationHostError::Bound);
             }
             *count = count.saturating_add(1);

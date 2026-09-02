@@ -15,7 +15,6 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-protocol = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 serde_json_canonicalizer = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt", "sync", "time"] }
 uuid = { workspace = true, features = ["v7"] }
 

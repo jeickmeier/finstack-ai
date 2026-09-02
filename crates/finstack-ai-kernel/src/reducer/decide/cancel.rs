@@ -13,8 +13,7 @@ use super::super::decision::{Decision, KernelError, PostCommitAction};
 use super::super::input::{CancelRequested, CancellationReconciledInput, TimerFiredInput};
 use super::shared::timer_firing_contract;
 use super::{
-    draft_for_state, duplicate_decision, next_sequence, outstanding_requested_effects,
-    reject_terminal, required,
+    decision_for, duplicate_decision, outstanding_requested_effects, reject_terminal, required,
 };
 use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
@@ -56,23 +55,18 @@ pub(super) fn decide_cancel(
                 field: "reason",
                 reason_code: "invalid_label",
             })?;
-    let records = draft_for_state(
+    let actions = outstanding_requested_effects(state)
+        .into_iter()
+        .map(|effect_id| PostCommitAction::CancelEffect { effect_id })
+        .collect();
+    decision_for(
         state,
         env,
         vec![RecordBody::CancellationRequested(CancellationRequested {
             request,
         })],
-    )?;
-    let actions = outstanding_requested_effects(state)
-        .into_iter()
-        .map(|effect_id| PostCommitAction::CancelEffect { effect_id })
-        .collect();
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
         actions,
-        diagnostics: Vec::new(),
-    })
+    )
 }
 
 pub(super) fn validate_cancel_authorization(
@@ -319,13 +313,7 @@ pub(super) fn decide_reconciliation(
         &env.ids,
         IdRequirements::new(bodies.len(), event_count, 0, 0, 0, tool_followups.messages),
     )?;
-    let records = draft_for_state(state, env, bodies)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(state, env, bodies, Vec::new())
 }
 
 pub(super) fn decide_timer_fired(
@@ -372,7 +360,7 @@ pub(super) fn decide_timer_fired(
         },
     )?;
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
-    let records = draft_for_state(
+    decision_for(
         state,
         env,
         vec![RecordBody::TimerFired(TimerFired {
@@ -380,13 +368,8 @@ pub(super) fn decide_timer_fired(
             due_at: input.due_at,
             fired_at: input.fired_at,
         })],
-    )?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+        Vec::new(),
+    )
 }
 
 fn validate_reconciliation_input(

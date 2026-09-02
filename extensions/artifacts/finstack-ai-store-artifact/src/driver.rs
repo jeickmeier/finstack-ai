@@ -5,7 +5,6 @@
 //! algorithm in `artifact.rs` -- key scheme, envelope, pin and orphan GC --
 //! is written once over both the S3 and local drivers.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -142,16 +141,6 @@ impl From<ObjectKey> for Arc<str> {
     }
 }
 
-/// Payload for a put: in-memory bytes or a streamed local file.
-#[derive(Debug, Clone)]
-pub(crate) enum PutPayload {
-    /// Fully materialized content.
-    Bytes(Bytes),
-    /// Content streamed from a local file; never fully materialized.
-    #[expect(dead_code, reason = "kept for streamed puts; callers use Bytes today")]
-    File(PathBuf),
-}
-
 /// Exact metadata mapped to the returned [`ObjectRef`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -244,43 +233,20 @@ impl Default for ObjectStoreLimits {
 /// Scoped host-supplied unstructured object service.
 pub(crate) trait ObjectDriver: PortObject {
     /// Durably store exact content under the caller's scope.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "artifact algorithm uses put_if_absent")
+    #[allow(
+        dead_code,
+        reason = "S3 loopback tests call this; the algorithm uses put_if_absent"
     )]
     fn put(
         &self,
         scope: ObjectScope,
         key: ObjectKey,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>>;
 
     /// Read exact bytes; verifies content digest before returning.
     fn get(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<Bytes, ObjectError>>;
-
-    /// Stream the object to `dest`; verifies content digest after writing.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "artifact algorithm materializes via get")
-    )]
-    fn get_to_file(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-        dest: PathBuf,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>>;
-
-    /// Fetch the reference without content.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "artifact algorithm reads via get")
-    )]
-    fn head(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>>;
 
     /// Delete one object; deleting a missing object is not an error.
     #[allow(
@@ -294,7 +260,7 @@ pub(crate) trait ObjectDriver: PortObject {
         &self,
         _scope: ObjectScope,
         _key: ObjectKey,
-        _content: PutPayload,
+        _content: Bytes,
         _metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         Box::pin(async {
@@ -310,7 +276,7 @@ pub(crate) trait ObjectDriver: PortObject {
         _scope: ObjectScope,
         _key: ObjectKey,
         _expected: Digest,
-        _content: PutPayload,
+        _content: Bytes,
         _metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         Box::pin(async {

@@ -237,10 +237,9 @@ impl ProviderHeartbeat {
     ) -> Result<Self, EventError> {
         Ok(Self {
             provider: validated_label(provider.as_ref(), "provider")?,
-            detail: match detail {
-                Some(value) => Some(validated_text(value.as_ref(), "detail")?),
-                None => None,
-            },
+            detail: detail
+                .map(|value| validated_text(value.as_ref(), "detail"))
+                .transpose()?,
         })
     }
 

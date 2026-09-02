@@ -280,66 +280,9 @@ pub fn sign_headers(
     result
 }
 
-/// Build a complete presigned URL, query-string signed, `host`-only signed
-/// headers, `UNSIGNED-PAYLOAD` body hash.
-///
-/// Kept for hosts that mint download URLs from the same `SigV4` parameters
-/// as this driver. The artifact adapter does not call it.
-#[must_use]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "SigV4 query signing; covered by module tests")
-)]
-pub fn presign_url(
-    params: &SigningParams<'_>,
-    method: &str,
-    url_path: &str,
-    host: &str,
-    scheme: &str,
-    expiry_secs: u64,
-) -> String {
-    let scope = credential_scope(params);
-    let credential = format!("{}/{scope}", params.access_key_id);
-
-    let mut query_params: Vec<(&str, String)> = vec![
-        ("X-Amz-Algorithm", "AWS4-HMAC-SHA256".to_owned()),
-        ("X-Amz-Credential", credential),
-        ("X-Amz-Date", params.timestamp.datetime.clone()),
-        ("X-Amz-Expires", expiry_secs.to_string()),
-        ("X-Amz-SignedHeaders", "host".to_owned()),
-    ];
-    query_params.sort_by(|left, right| left.0.cmp(right.0));
-    let canonical_query: String = query_params
-        .iter()
-        .map(|(name, value)| format!("{}={}", uri_encode(name, true), uri_encode(value, true)))
-        .collect::<Vec<_>>()
-        .join("&");
-
-    let canonical_headers = format!("host:{host}\n");
-    let payload_hash = "UNSIGNED-PAYLOAD";
-    let request = canonical_request(
-        method,
-        url_path,
-        &canonical_query,
-        &canonical_headers,
-        "host",
-        payload_hash,
-    );
-    let to_sign = string_to_sign(&params.timestamp, &scope, &request);
-    let key = signing_key(
-        params.secret_key,
-        &params.timestamp.date,
-        params.region,
-        params.service,
-    );
-    let signature = to_hex(&hmac_sha256(&key, to_sign.as_bytes()));
-
-    format!("{scheme}://{host}{url_path}?{canonical_query}&X-Amz-Signature={signature}")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{SigningParams, UtcStamp, presign_url, sign_headers};
+    use super::{SigningParams, UtcStamp, sign_headers};
 
     const ACCESS_KEY_ID: &str = "AKIAIOSFODNN7EXAMPLE";
     const SECRET_KEY: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
@@ -414,41 +357,6 @@ mod tests {
             headers
                 .iter()
                 .any(|(name, value)| name == "range" && value == "bytes=0-9")
-        );
-    }
-
-    // AWS documented presign example, same credentials/bucket/key, 86400s expiry.
-    //
-    // AWS's canonical request for this example:
-    //   GET
-    //   /test.txt
-    //   X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host
-    //   host:examplebucket.s3.amazonaws.com
-    //   <empty>
-    //   host
-    //   UNSIGNED-PAYLOAD
-    //
-    // Expected signature:
-    // aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404
-    #[test]
-    fn sigv4_presign_matches_the_aws_known_answer() {
-        let url = presign_url(
-            &params(),
-            "GET",
-            "/test.txt",
-            "examplebucket.s3.amazonaws.com",
-            "https",
-            86_400,
-        );
-        assert_eq!(
-            url,
-            "https://examplebucket.s3.amazonaws.com/test.txt?\
-             X-Amz-Algorithm=AWS4-HMAC-SHA256&\
-             X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&\
-             X-Amz-Date=20130524T000000Z&\
-             X-Amz-Expires=86400&\
-             X-Amz-SignedHeaders=host&\
-             X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"
         );
     }
 

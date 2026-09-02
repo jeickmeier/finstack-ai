@@ -12,11 +12,12 @@ use std::sync::Arc;
 
 use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{AgentRunError, CapabilityActivation, CapabilitySpec, NativeCapabilityHost};
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{ComponentRef, Version};
 use finstack_ai_tools_skills::{SkillsHost, SkillsHostError, SkillsToolset};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+use crate::component_ref;
 use crate::errors::configuration_error;
 
 /// Caller-named toolset registrations use the binding's stable version.
@@ -51,10 +52,9 @@ impl PySkillsToolset {
     #[new]
     #[pyo3(signature = (component = "python.tools.skills"))]
     fn new(component: &str) -> PyResult<Self> {
-        let component = ComponentId::parse(component)
-            .map(|id| ComponentRef::new(id, Some(SKILLS_VERSION)))
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        Ok(Self { component })
+        Ok(Self {
+            component: component_ref(component, SKILLS_VERSION)?,
+        })
     }
 
     /// Exact registered component identity.

@@ -117,7 +117,7 @@ struct JsonSchemaToolValidator {
 impl ToolValidator for JsonSchemaToolValidator {
     fn validate(&self, instance: &RawJson) -> ValidationOutcome {
         let Ok(instance) = serde_json::from_slice(instance.as_bytes()) else {
-            return invalid_validator_outcome("", "", None, "canonical JSON is invalid");
+            return invalid_validator_outcome("canonical JSON is invalid");
         };
         let mut issues = self
             .validator
@@ -151,20 +151,15 @@ impl ToolValidator for JsonSchemaToolValidator {
         issues.dedup();
         let feedback = validation_feedback(&issues);
         ValidationOutcome::try_invalid(Arc::from(issues), Arc::<str>::from(feedback))
-            .unwrap_or_else(|_| invalid_validator_outcome("", "", None, "validation failed"))
+            .unwrap_or_else(|_| invalid_validator_outcome("validation failed"))
     }
 }
 
-fn invalid_validator_outcome(
-    instance_path: &str,
-    schema_path: &str,
-    keyword: Option<&str>,
-    message: &str,
-) -> ValidationOutcome {
+fn invalid_validator_outcome(message: &str) -> ValidationOutcome {
     let issue = ValidationIssue {
-        instance_path: Arc::from(instance_path),
-        schema_path: Arc::from(schema_path),
-        keyword: keyword.map(Arc::from),
+        instance_path: Arc::from(""),
+        schema_path: Arc::from(""),
+        keyword: None,
         message: Arc::from(message),
     };
     ValidationOutcome::try_invalid(

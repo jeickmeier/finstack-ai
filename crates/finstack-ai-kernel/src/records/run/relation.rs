@@ -88,10 +88,9 @@ impl RunRelation {
         external_work_ref: Option<impl AsRef<str>>,
     ) -> Result<Self, RunError> {
         validate_relation_shape(kind, parent_run_id, parent_effect_id, depth)?;
-        let external_work_ref = match external_work_ref {
-            Some(value) => Some(validated_label(value.as_ref(), "external_work_ref")?),
-            None => None,
-        };
+        let external_work_ref = external_work_ref
+            .map(|value| validated_label(value.as_ref(), "external_work_ref"))
+            .transpose()?;
         Ok(Self {
             root_run_id,
             parent_run_id,

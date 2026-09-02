@@ -241,67 +241,33 @@ fn query_rows(
     })?;
     let rows = stmt
         .query_map(args, |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, i64>(6)?,
-                row.get::<_, Option<i64>>(7)?,
-                row.get::<_, Vec<u8>>(8)?,
-                row.get::<_, Vec<u8>>(9)?,
-                row.get::<_, Vec<u8>>(10)?,
-                row.get::<_, String>(11)?,
-                row.get::<_, Option<String>>(12)?,
-                row.get::<_, Option<String>>(13)?,
-                row.get::<_, i64>(14)?,
-            ))
+            Ok(RawInteractionRow {
+                tenant_scope: row.get(0)?,
+                session_id: row.get(1)?,
+                lane_id: row.get(2)?,
+                run_id: row.get(3)?,
+                interaction_id: row.get(4)?,
+                kind: row.get(5)?,
+                requested_at_unix_ms: row.get(6)?,
+                expires_at_unix_ms: row.get(7)?,
+                request: row.get(8)?,
+                accepted_principal: row.get(9)?,
+                accepted_evidence: row.get(10)?,
+                status: row.get(11)?,
+                resolved_by: row.get(12)?,
+                outcome_code: row.get(13)?,
+                updated_at_unix_ms: row.get(14)?,
+            })
         })
         .map_err(|_| HitlError::StoreUnavailable {
             code: "sqlite_hitl_row",
         })?;
-    let mut out = Vec::new();
-    for row in rows {
-        let (
-            tenant_scope,
-            session_id,
-            lane_id,
-            run_id,
-            interaction_id,
-            kind,
-            requested_at_unix_ms,
-            expires_at_unix_ms,
-            request,
-            accepted_principal,
-            accepted_evidence,
-            status,
-            resolved_by,
-            outcome_code,
-            updated_at_unix_ms,
-        ) = row.map_err(|_| HitlError::StoreIntegrity {
+    rows.map(|row| {
+        decode_row(row.map_err(|_| HitlError::StoreIntegrity {
             code: "sqlite_hitl_row",
-        })?;
-        out.push(decode_row(RawInteractionRow {
-            tenant_scope,
-            session_id,
-            lane_id,
-            run_id,
-            interaction_id,
-            kind,
-            requested_at_unix_ms,
-            expires_at_unix_ms,
-            request,
-            accepted_principal,
-            accepted_evidence,
-            status,
-            resolved_by,
-            outcome_code,
-            updated_at_unix_ms,
-        })?);
-    }
-    Ok(out)
+        })?)
+    })
+    .collect()
 }
 
 impl HitlInboxStore for SqliteHitlStore {

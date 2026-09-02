@@ -99,8 +99,7 @@ fn finalize_buffered_prefix(
     let start =
         usize::try_from(batch.next_source_index).map_err(|_| KernelError::InvariantViolation)?;
     let mut message_index = 0_usize;
-    // Accumulated across the loop and written back once. Rebuilding the shared
-    // slice per iteration made finalizing a k-call batch O(k^2).
+    // Accumulated across the loop and written back to the shared slice once.
     let mut result_ids = batch.result_message_ids.to_vec();
     for index in start..batch.calls.len() {
         let ActiveToolCallStatus::Buffered {

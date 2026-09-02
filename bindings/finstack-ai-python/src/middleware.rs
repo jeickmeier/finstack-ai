@@ -19,6 +19,8 @@ use finstack_ai_middleware_verify::{
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+use crate::component_ref;
+
 const INSTRUCTIONS_COMPONENT: &str = "finstack.middleware.instructions";
 
 /// `InstructionsMiddleware`'s declared invocation version
@@ -63,11 +65,8 @@ impl PyInstructionsMiddleware {
         };
         let middleware = InstructionsMiddleware::try_new(config)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(INSTRUCTIONS_COMPONENT)
-            .map(|id| ComponentRef::new(id, Some(INSTRUCTIONS_VERSION)))
-            .map_err(|_| PyValueError::new_err("instructions component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(INSTRUCTIONS_COMPONENT, INSTRUCTIONS_VERSION)?,
             inner: Arc::new(middleware),
         })
     }
@@ -122,11 +121,8 @@ impl PyCompactionMiddleware {
     ) -> PyResult<Self> {
         let middleware = CompactionMiddleware::try_new(config)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(COMPACTION_COMPONENT)
-            .map(|id| ComponentRef::new(id, Some(COMPACTION_VERSION)))
-            .map_err(|_| PyValueError::new_err("compaction component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(COMPACTION_COMPONENT, COMPACTION_VERSION)?,
             inner: Arc::new(middleware),
             authorization,
         })
@@ -373,11 +369,8 @@ impl PyVerifyMiddleware {
             policy,
         )
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(VERIFY_COMPONENT)
-            .map(|id| ComponentRef::new(id, Some(VERIFY_VERSION)))
-            .map_err(|_| PyValueError::new_err("verify component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(VERIFY_COMPONENT, VERIFY_VERSION)?,
             inner: Arc::new(middleware),
         })
     }
@@ -452,11 +445,8 @@ impl PyRedactionMiddleware {
             output_policy,
         })
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(REDACTION_COMPONENT)
-            .map(|id| ComponentRef::new(id, Some(REDACTION_VERSION)))
-            .map_err(|_| PyValueError::new_err("redaction component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(REDACTION_COMPONENT, REDACTION_VERSION)?,
             inner: Arc::new(middleware),
         })
     }
@@ -576,11 +566,8 @@ impl PyToolPolicyMiddleware {
         }
         let middleware = ToolPolicyMiddleware::try_new(config)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = ComponentId::parse(TOOL_POLICY_COMPONENT)
-            .map(|id| ComponentRef::new(id, Some(TOOL_POLICY_VERSION)))
-            .map_err(|_| PyValueError::new_err("tool-policy component id is invalid"))?;
         Ok(Self {
-            component,
+            component: component_ref(TOOL_POLICY_COMPONENT, TOOL_POLICY_VERSION)?,
             inner: Arc::new(middleware),
         })
     }

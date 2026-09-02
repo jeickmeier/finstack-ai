@@ -1,7 +1,8 @@
 //! Record version, pairing, and creation validation.
 
 use crate::effects::{
-    EffectInput, EffectKind, EffectOutputKind, EffectRequested, InteractionRequest,
+    EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
+    InteractionRequest,
 };
 use crate::primitives::RunId;
 
@@ -38,80 +39,55 @@ pub(super) fn validate_interaction_request_pairs(
     records: &[RecordDraft],
 ) -> Result<(), RecordError> {
     for record in records {
-        match record.body() {
-            RecordBody::InteractionRequested(request) => {
-                let matches = records
-                    .iter()
-                    .filter(|candidate| {
-                        let RecordBody::EffectRequested(effect) = candidate.body() else {
-                            return false;
-                        };
-                        interaction_request_matches_effect(request, effect)
-                    })
-                    .count();
-                if matches != 1 {
-                    return Err(RecordError::InvalidInteractionPair);
-                }
-            }
+        let matches = match record.body() {
+            RecordBody::InteractionRequested(request) => records
+                .iter()
+                .filter(|candidate| {
+                    matches!(candidate.body(), RecordBody::EffectRequested(effect)
+                        if interaction_request_matches_effect(request, effect))
+                })
+                .count(),
             RecordBody::EffectRequested(effect) if effect.kind() == EffectKind::Interaction => {
-                let matches = records
+                records
                     .iter()
                     .filter(|candidate| {
-                        let RecordBody::InteractionRequested(request) = candidate.body() else {
-                            return false;
-                        };
-                        interaction_request_matches_effect(request, effect)
+                        matches!(candidate.body(), RecordBody::InteractionRequested(request)
+                            if interaction_request_matches_effect(request, effect))
                     })
-                    .count();
-                if matches != 1 {
-                    return Err(RecordError::InvalidInteractionPair);
-                }
+                    .count()
+            }
+            _ => continue,
+        };
+        if matches != 1 {
+            return Err(RecordError::InvalidInteractionPair);
+        }
+    }
+    let resolves_interaction =
+        |contract: &EffectOutputContract| contract.kind == EffectOutputKind::InteractionResolution;
+    let (mut resolved, mut completed) = (0_usize, 0_usize);
+    let (mut expired, mut failed) = (0_usize, 0_usize);
+    let (mut cancelled, mut effect_cancelled) = (0_usize, 0_usize);
+    for record in records {
+        match record.body() {
+            RecordBody::InteractionResolved(_) => resolved += 1,
+            RecordBody::EffectCompleted(effect)
+                if resolves_interaction(effect.output_contract()) =>
+            {
+                completed += 1;
+            }
+            RecordBody::InteractionExpired(_) => expired += 1,
+            RecordBody::EffectFailed(effect) if resolves_interaction(effect.output_contract()) => {
+                failed += 1;
+            }
+            RecordBody::InteractionCancelled(_) => cancelled += 1,
+            RecordBody::EffectCancelled(effect)
+                if resolves_interaction(effect.output_contract()) =>
+            {
+                effect_cancelled += 1;
             }
             _ => {}
         }
     }
-    let resolved = records
-        .iter()
-        .filter(|record| matches!(record.body(), RecordBody::InteractionResolved(_)))
-        .count();
-    let completed = records
-        .iter()
-        .filter(|record| {
-            matches!(
-                record.body(),
-                RecordBody::EffectCompleted(effect)
-                    if effect.output_contract().kind == EffectOutputKind::InteractionResolution
-            )
-        })
-        .count();
-    let expired = records
-        .iter()
-        .filter(|record| matches!(record.body(), RecordBody::InteractionExpired(_)))
-        .count();
-    let failed = records
-        .iter()
-        .filter(|record| {
-            matches!(
-                record.body(),
-                RecordBody::EffectFailed(effect)
-                    if effect.output_contract().kind == EffectOutputKind::InteractionResolution
-            )
-        })
-        .count();
-    let cancelled = records
-        .iter()
-        .filter(|record| matches!(record.body(), RecordBody::InteractionCancelled(_)))
-        .count();
-    let effect_cancelled = records
-        .iter()
-        .filter(|record| {
-            matches!(
-                record.body(),
-                RecordBody::EffectCancelled(effect)
-                    if effect.output_contract().kind == EffectOutputKind::InteractionResolution
-            )
-        })
-        .count();
     if resolved != completed || expired != failed || cancelled != effect_cancelled {
         return Err(RecordError::InvalidInteractionPair);
     }
@@ -165,26 +141,14 @@ pub(super) fn validate_body_for_creation(body: &RecordBody) -> Result<(), Record
             .validate()
             .map_err(RecordError::InvalidErrorDescriptor)?;
     }
-    match body {
-        RecordBody::BudgetReservationRequested(value) => value
-            .request
-            .validate()
-            .map_err(|_| RecordError::InvalidBudgetRecord)?,
-        RecordBody::BudgetReservationSettled(value) => value
-            .receipt
-            .validate()
-            .map_err(|_| RecordError::InvalidBudgetRecord)?,
-        RecordBody::BudgetChargeRecorded(value) => value
-            .receipt
-            .validate()
-            .map_err(|_| RecordError::InvalidBudgetRecord)?,
-        RecordBody::BudgetReservationReleased(value) => value
-            .receipt
-            .validate()
-            .map_err(|_| RecordError::InvalidBudgetRecord)?,
-        _ => {}
-    }
-    Ok(())
+    let budget = match body {
+        RecordBody::BudgetReservationRequested(value) => value.request.validate(),
+        RecordBody::BudgetReservationSettled(value) => value.receipt.validate(),
+        RecordBody::BudgetChargeRecorded(value) => value.receipt.validate(),
+        RecordBody::BudgetReservationReleased(value) => value.receipt.validate(),
+        _ => Ok(()),
+    };
+    budget.map_err(|_| RecordError::InvalidBudgetRecord)
 }
 
 pub(super) fn validate_record_run_id(
@@ -196,15 +160,7 @@ pub(super) fn validate_record_run_id(
     {
         return Err(RecordError::RecordRunMismatch);
     }
-    if matches!(
-        body,
-        RecordBody::SessionCreated(_)
-            | RecordBody::LaneCreated(_)
-            | RecordBody::LaneMoved(_)
-            | RecordBody::SnapshotWritten(_)
-            | RecordBody::ConversationEntry(_)
-    ) && run_id.is_some()
-    {
+    if body.is_structural() && run_id.is_some() {
         return Err(RecordError::Session(
             SessionRecordError::StructuralRunIdPresent,
         ));

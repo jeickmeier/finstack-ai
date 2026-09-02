@@ -19,7 +19,7 @@ use finstack_ai_test::{
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use super::agent::{PyAgent, component, empty_model_settings};
+use super::agent::{PREVIEW_VERSION, PyAgent, component, empty_model_settings};
 use super::errors::{agent_error, configuration_error};
 use super::run::run_request;
 
@@ -71,7 +71,7 @@ fn benchmark_agent(
         let built = build_agent(deltas, runs, gate).await;
         Python::attach(|py| match built {
             Ok((agent, control)) => Ok((Py::new(py, agent)?, Py::new(py, control)?)),
-            Err(error) => Err(agent_error(py, &error, None)),
+            Err(error) => Err(agent_error(&error, None)),
         })
     })
 }
@@ -84,7 +84,7 @@ fn benchmark_native(py: Python<'_>, deltas: usize, runs: usize) -> PyResult<Boun
         let result = run_native_workload(deltas, runs).await;
         match result {
             Ok(elapsed_ns) => Ok((elapsed_ns, deltas.saturating_mul(runs))),
-            Err(error) => Python::attach(|py| Err(agent_error(py, &error, None))),
+            Err(error) => Err(agent_error(&error, None)),
         }
     })
 }
@@ -157,8 +157,14 @@ async fn build_agent(
             .map_err(|error| configuration_error(error.to_string()))?,
         BundleId::parse("python.bundle.fast-path-benchmark")
             .map_err(|error| configuration_error(error.to_string()))?,
-        (component("python.model.fast-path-benchmark")?, model_port),
-        (component("python.store.fast-path-benchmark")?, store),
+        (
+            component("python.model.fast-path-benchmark", PREVIEW_VERSION)?,
+            model_port,
+        ),
+        (
+            component("python.store.fast-path-benchmark", PREVIEW_VERSION)?,
+            store,
+        ),
     )
     .build()
     .await?;

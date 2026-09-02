@@ -1,7 +1,7 @@
 //! In-process HITL inbox store for tests and non-durable deployments.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::HitlError;
 use crate::row::{InteractionRow, InteractionStatus};
@@ -21,23 +21,39 @@ impl MemoryHitlStore {
     pub fn new() -> Self {
         Self::default()
     }
-}
 
-/// Sort rows by `requested_at` then `interaction_id`, matching the ordering
-/// contract shared by `load_open` and `load_active`.
-fn sort_by_requested_then_id(rows: &mut [InteractionRow]) {
-    rows.sort_by(|a, b| {
-        a.requested_at
-            .cmp(&b.requested_at)
-            .then_with(|| a.interaction_id.cmp(&b.interaction_id))
-    });
+    fn rows(&self) -> Result<MutexGuard<'_, Rows>, HitlError> {
+        self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
+            code: "memory_hitl_lock_poisoned",
+        })
+    }
+
+    /// Rows matching `keep`, in the ordering contract shared by `load_open`
+    /// and `load_active`, cut to `limit`.
+    fn select(
+        &self,
+        limit: usize,
+        keep: impl Fn(&InteractionRow) -> bool,
+    ) -> Result<Vec<InteractionRow>, HitlError> {
+        let mut selected: Vec<InteractionRow> = self
+            .rows()?
+            .values()
+            .filter(|row| keep(row))
+            .cloned()
+            .collect();
+        selected.sort_by(|a, b| {
+            a.requested_at
+                .cmp(&b.requested_at)
+                .then_with(|| a.interaction_id.cmp(&b.interaction_id))
+        });
+        selected.truncate(limit);
+        Ok(selected)
+    }
 }
 
 impl HitlInboxStore for MemoryHitlStore {
     fn upsert(&self, row: &InteractionRow) -> Result<(), HitlError> {
-        let mut rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
-            code: "memory_hitl_lock_poisoned",
-        })?;
+        let mut rows = self.rows()?;
         let key = (
             Arc::clone(&row.tenant_scope),
             Arc::clone(&row.interaction_id),
@@ -60,10 +76,8 @@ impl HitlInboxStore for MemoryHitlStore {
         tenant_scope: &str,
         interaction_id: &str,
     ) -> Result<Option<InteractionRow>, HitlError> {
-        let rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
-            code: "memory_hitl_lock_poisoned",
-        })?;
-        Ok(rows
+        Ok(self
+            .rows()?
             .get(&(Arc::from(tenant_scope), Arc::from(interaction_id)))
             .cloned())
     }
@@ -73,42 +87,22 @@ impl HitlInboxStore for MemoryHitlStore {
         tenant_scope: &str,
         limit: usize,
     ) -> Result<Vec<InteractionRow>, HitlError> {
-        let rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
-            code: "memory_hitl_lock_poisoned",
-        })?;
-        let mut open: Vec<InteractionRow> = rows
-            .values()
-            .filter(|row| {
-                row.tenant_scope.as_ref() == tenant_scope
-                    && matches!(
-                        row.status,
-                        InteractionStatus::Open | InteractionStatus::Rejected
-                    )
-            })
-            .cloned()
-            .collect();
-        sort_by_requested_then_id(&mut open);
-        open.truncate(limit);
-        Ok(open)
+        self.select(limit, |row| {
+            row.tenant_scope.as_ref() == tenant_scope
+                && matches!(
+                    row.status,
+                    InteractionStatus::Open | InteractionStatus::Rejected
+                )
+        })
     }
 
     fn load_active(&self, limit: usize) -> Result<Vec<InteractionRow>, HitlError> {
-        let rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
-            code: "memory_hitl_lock_poisoned",
-        })?;
-        let mut active: Vec<InteractionRow> = rows
-            .values()
-            .filter(|row| {
-                matches!(
-                    row.status,
-                    InteractionStatus::Open | InteractionStatus::Buffered
-                )
-            })
-            .cloned()
-            .collect();
-        sort_by_requested_then_id(&mut active);
-        active.truncate(limit);
-        Ok(active)
+        self.select(limit, |row| {
+            matches!(
+                row.status,
+                InteractionStatus::Open | InteractionStatus::Buffered
+            )
+        })
     }
 
     fn transition(
@@ -117,9 +111,7 @@ impl HitlInboxStore for MemoryHitlStore {
         interaction_id: &str,
         transition: InteractionTransition<'_>,
     ) -> Result<bool, HitlError> {
-        let mut rows = self.rows.lock().map_err(|_| HitlError::StoreUnavailable {
-            code: "memory_hitl_lock_poisoned",
-        })?;
+        let mut rows = self.rows()?;
         let Some(row) = rows.get_mut(&(Arc::from(tenant_scope), Arc::from(interaction_id))) else {
             return Err(HitlError::UnknownInteraction);
         };

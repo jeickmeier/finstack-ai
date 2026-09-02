@@ -1,28 +1,27 @@
 //! `AgentRun` child-run prepare/accept and external-completion routing.
+//!
+//! Local placements (isolated session, compatible lane) are portable to
+//! `wasm-host`. Remote placement needs `native-tokio`; `wasm-host` rejects it
+//! with [`AGENT_RUN_UNSUPPORTED_PLAN`](crate::AGENT_RUN_UNSUPPORTED_PLAN).
 
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 use std::collections::BTreeSet;
 use std::sync::Arc;
 #[cfg(feature = "native-tokio")]
 use std::sync::{Mutex, OnceLock};
 
 use crate::ChildRunPolicy;
-use finstack_ai_kernel::ExternalEffectCompletionCommand;
-#[cfg(feature = "native-tokio")]
-use finstack_ai_kernel::{AppendBatchTag, EffectTag, RecordTag, RunTag};
 use finstack_ai_kernel::{
-    BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement, ChildRunLocator,
-    ChildRunPrepared, ContentBlock, DeadlinePropagation, EffectId, Metadata, OperationLocator,
-    PrincipalPropagation, RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind,
-    TextBlock, Timestamp,
+    AppendBatchTag, BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement,
+    ChildRunLocator, ChildRunPrepared, ContentBlock, DeadlinePropagation, EffectId, EffectTag,
+    ExternalEffectCompletionCommand, Metadata, OperationLocator, PrincipalPropagation, RecordTag,
+    RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind, RunTag, TextBlock, Timestamp,
 };
 use finstack_ai_runtime::child::{
-    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext,
-    ChildRunHandle, ChildRunRequest, child_relation_digest,
+    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
+    ChildCoordinationIds, ChildRunContext, ChildRunCoordinator, ChildRunHandle, ChildRunRequest,
+    child_relation_digest,
 };
-#[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::child::{ChildCoordinationIds, ChildRunCoordinator};
-use finstack_ai_runtime::commit::CommitCoordinator;
+use finstack_ai_runtime::commit::{CommitCoordinator, CommitCoordinatorError};
 use finstack_ai_runtime::ingress::{ExternalCompletionRouter, ExternalRouteOutcome};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::AuthorizationContext;
@@ -32,16 +31,17 @@ use finstack_ai_runtime::host_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::native_driver as driver;
 
-#[cfg(feature = "native-tokio")]
 use super::child_route::RemoteChildRouteSpec;
 use super::handle::Agent;
 use super::prepare::NativeIds;
 use super::run::AgentRun;
 #[cfg(feature = "native-tokio")]
 use super::run::{AgentRunInner, CancellationState, EventStreamState};
+#[cfg(not(feature = "native-tokio"))]
+use super::types::AGENT_RUN_UNSUPPORTED_PLAN;
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunRequest};
 
-pub(super) struct RecordingChildInvoker;
+struct RecordingChildInvoker;
 
 impl AgentInvoker for RecordingChildInvoker {
     fn start_or_attach(
@@ -70,6 +70,16 @@ impl AgentInvoker for RecordingChildInvoker {
 }
 
 impl AgentRun {
+    /// Recover the commit coordinator targeted at this run.
+    pub(crate) async fn recover_commit(&self) -> Result<CommitCoordinator, CommitCoordinatorError> {
+        CommitCoordinator::recover_run(
+            Arc::clone(&self.inner.store),
+            self.inner.locator.session_id,
+            Some(self.inner.locator.run_id),
+        )
+        .await
+    }
+
     /// Start or attach a child run for a parent effect via [`ChildRunCoordinator`].
     ///
     /// This is the effect-binding facade used by deferred child settlement.
@@ -100,13 +110,10 @@ impl AgentRun {
         parent_effect_id: EffectId,
         request: ChildRunRequest,
     ) -> Result<ChildRunHandle, AgentRunError> {
-        let mut commit = CommitCoordinator::recover_run(
-            Arc::clone(self.journal_store()),
-            self.locator().session_id,
-            Some(self.locator().run_id),
-        )
-        .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        let mut commit = self
+            .recover_commit()
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
         let accepted = commit
             .state()
             .accepted()
@@ -131,12 +138,7 @@ impl AgentRun {
                 decision_id: Arc::from(security.authorization_decision_id()),
             },
         };
-        let ids = ChildCoordinationIds {
-            preparation_batch_id: NativeIds::generate::<AppendBatchTag>()?,
-            preparation_record_id: NativeIds::generate::<RecordTag>()?,
-            reservation_request_record_id: None,
-            reservation_settlement: None,
-        };
+        let ids = coordination_ids()?;
         ChildRunCoordinator::new(invoker)
             .start_or_attach(&mut commit, context, request, None, ids, NativeIds::now()?)
             .await
@@ -152,8 +154,8 @@ impl AgentRun {
     /// acceptance handle; [`Self::accept_child`] starts the child agent on the
     /// frozen locator.
     ///
-    /// Remote placement requires an explicit `remote` route. Missing routes
-    /// stay fail-closed.
+    /// Remote placement requires an explicit `remote` route and `native-tokio`.
+    /// Missing routes stay fail-closed.
     ///
     /// # Arguments
     ///
@@ -169,7 +171,6 @@ impl AgentRun {
     /// Returns a configuration or runtime failure when the parent is not yet
     /// accepted, placement is remote without a route, the parent turn is still
     /// open for compatible-lane placement, or the durable mapping conflicts.
-    #[cfg(feature = "native-tokio")]
     pub async fn prepare_child(
         &self,
         child: &Agent,
@@ -177,6 +178,14 @@ impl AgentRun {
         placement: ChildPlacement,
         remote: Option<RemoteChildRouteSpec>,
     ) -> Result<ChildRunPrepared, AgentRunError> {
+        #[cfg(not(feature = "native-tokio"))]
+        if remote.is_some() || matches!(placement, ChildPlacement::RemoteChildSession) {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_UNSUPPORTED_PLAN,
+                "remote child placement is not portable to wasm-host",
+            ));
+        }
+        #[cfg(feature = "native-tokio")]
         if matches!(placement, ChildPlacement::RemoteChildSession) && remote.is_none() {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
@@ -198,26 +207,23 @@ impl AgentRun {
             child_depth(parent_accepted.relation().depth())?,
         )?;
         let parent = self.inner.locator.clone();
+        #[cfg(feature = "native-tokio")]
         let remote_invoker = remote.map(build_remote_invoker).transpose()?;
-        let (locator, session) = self
+        #[cfg(feature = "native-tokio")]
+        let locator = self
             .allocate_child_locator(placement, remote_invoker.as_ref())
             .await?;
+        #[cfg(not(feature = "native-tokio"))]
+        let locator = allocate_local_child_locator(self, placement).await?;
         let parent_effect_id = NativeIds::generate::<EffectTag>()?;
-        let child_request = child_run_request(child, &request, placement, locator.clone())?;
+        let child_request = child_run_request(child, &request, placement, locator)?;
         let context = child_run_context(&parent, parent_effect_id, &request);
-        let ids = ChildCoordinationIds {
-            preparation_batch_id: NativeIds::generate::<AppendBatchTag>()?,
-            preparation_record_id: NativeIds::generate::<RecordTag>()?,
-            reservation_request_record_id: None,
-            reservation_settlement: None,
-        };
-        let mut commit = CommitCoordinator::recover_run(
-            Arc::clone(&self.inner.store),
-            parent.session_id,
-            Some(parent.run_id),
-        )
-        .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        let ids = coordination_ids()?;
+        let mut commit = self
+            .recover_commit()
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        #[cfg(feature = "native-tokio")]
         let invoker: Arc<dyn AgentInvoker> = match remote_invoker {
             Some(invoker) => {
                 let invoker = Arc::new(invoker);
@@ -229,8 +235,9 @@ impl AgentRun {
             }
             None => Arc::new(RecordingChildInvoker),
         };
-        let coordinator = ChildRunCoordinator::new(invoker);
-        coordinator
+        #[cfg(not(feature = "native-tokio"))]
+        let invoker: Arc<dyn AgentInvoker> = Arc::new(RecordingChildInvoker);
+        ChildRunCoordinator::new(invoker)
             .start_or_attach(
                 &mut commit,
                 context,
@@ -241,16 +248,13 @@ impl AgentRun {
             )
             .await
             .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-        let prepared = commit
+        commit
             .session()
             .child_mapping(parent.run_id, parent_effect_id)
             .cloned()
             .ok_or_else(|| {
                 AgentRunError::runtime_message("child preparation did not become durable")
-            })?;
-        debug_assert_eq!(parent_accepted.run_id(), parent.run_id);
-        let _ = session;
-        Ok(prepared)
+            })
     }
 
     /// Accept a prepared child by starting `child` on the frozen locator.
@@ -266,7 +270,6 @@ impl AgentRun {
     ///
     /// Returns a configuration or runtime failure when the mapping is missing,
     /// the child relation is invalid, or the child agent cannot start.
-    #[cfg(feature = "native-tokio")]
     pub async fn accept_child(
         &self,
         prepared: &ChildRunPrepared,
@@ -274,17 +277,20 @@ impl AgentRun {
         request: AgentRunRequest,
     ) -> Result<Self, AgentRunError> {
         if matches!(prepared.placement, ChildPlacement::RemoteChildSession) {
+            #[cfg(feature = "native-tokio")]
             return accept_remote_child(self, prepared);
+            #[cfg(not(feature = "native-tokio"))]
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_UNSUPPORTED_PLAN,
+                "remote child placement is not portable to wasm-host",
+            ));
         }
         request.validate()?;
         let parent_accepted = self.wait_accepted().await?;
-        let commit = CommitCoordinator::recover_run(
-            Arc::clone(&self.inner.store),
-            self.inner.locator.session_id,
-            Some(self.inner.locator.run_id),
-        )
-        .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        let commit = self
+            .recover_commit()
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
         let mapped = commit
             .session()
             .child_mapping(prepared.parent_run_id, prepared.parent_effect_id)
@@ -323,7 +329,6 @@ impl AgentRun {
     /// # Errors
     ///
     /// Returns the prepare or accept failure.
-    #[cfg(feature = "native-tokio")]
     pub async fn start_child(
         &self,
         child: &Agent,
@@ -404,7 +409,9 @@ impl AgentRun {
             if !should_start {
                 continue;
             }
-            let result = child.submit_cancellation().await;
+            let result = child
+                .submit_cancellation_with(child.inner.cancellation_initiator.clone())
+                .await;
             if let Ok(mut cancellation) = child.inner.cancellation.lock() {
                 cancellation.result = Some(result.clone());
             }
@@ -417,7 +424,6 @@ impl AgentRun {
     /// Rebuild isolated children from journaled mappings when live handles
     /// are gone. Compatible mappings stay on the recovered parent journal
     /// and are not accepted again. Remote stays a no-op.
-    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) async fn recover_children(&self) -> Result<(), AgentRunError> {
         let live = self.live_child_run_ids()?;
         for prepared in self.journaled_child_mappings().await? {
@@ -450,7 +456,6 @@ impl AgentRun {
         Ok(result.is_none())
     }
 
-    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     fn live_child_run_ids(&self) -> Result<BTreeSet<finstack_ai_kernel::RunId>, AgentRunError> {
         let children = self
             .inner
@@ -463,16 +468,9 @@ impl AgentRun {
             .collect())
     }
 
-    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     async fn journaled_child_mappings(&self) -> Result<Vec<ChildRunPrepared>, AgentRunError> {
         let parent_run = self.inner.locator.run_id;
-        let Ok(commit) = CommitCoordinator::recover_run(
-            Arc::clone(&self.inner.store),
-            self.inner.locator.session_id,
-            Some(parent_run),
-        )
-        .await
-        else {
+        let Ok(commit) = self.recover_commit().await else {
             return Ok(Vec::new());
         };
         Ok(commit
@@ -524,17 +522,24 @@ impl AgentRun {
     /// Live child handles are the fast path. Isolated children without a
     /// live handle are cancelled through the child session journal.
     /// Compatible children are not cancelled through a second parent
-    /// coordinator while the parent turn is open.
+    /// coordinator while the parent turn is open. Remote locators need
+    /// `native-tokio`.
     ///
     /// # Errors
     ///
     /// Returns a configuration or runtime failure when cancellation cannot
     /// be submitted safely.
-    #[cfg(feature = "native-tokio")]
     pub async fn cancel_child_locator(
         &self,
         locator: &ChildRunLocator,
     ) -> Result<(), AgentRunError> {
+        #[cfg(not(feature = "native-tokio"))]
+        if locator.remote.is_some() {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_UNSUPPORTED_PLAN,
+                "remote child cancellation is not portable to wasm-host",
+            ));
+        }
         let children = self
             .inner
             .children
@@ -547,6 +552,7 @@ impl AgentRun {
         {
             return child.cancel().await;
         }
+        #[cfg(feature = "native-tokio")]
         if locator.remote.is_some() {
             return self.cancel_remote_child(locator).await;
         }
@@ -582,7 +588,6 @@ impl AgentRun {
             .map_err(|error| AgentRunError::runtime_message(error.to_string()))
     }
 
-    #[cfg(feature = "native-tokio")]
     async fn cancel_journaled_run(
         &self,
         session_id: finstack_ai_kernel::SessionId,
@@ -614,12 +619,7 @@ impl AgentRun {
     pub(super) async fn wait_accepted(&self) -> Result<RunAccepted, AgentRunError> {
         self.runtime_handle().await?;
         loop {
-            if let Ok(commit) = CommitCoordinator::recover_run(
-                Arc::clone(&self.inner.store),
-                self.inner.locator.session_id,
-                Some(self.inner.locator.run_id),
-            )
-            .await
+            if let Ok(commit) = self.recover_commit().await
                 && let Some(accepted) = commit.state().accepted().cloned()
                 && accepted.run_id() == self.inner.locator.run_id
             {
@@ -634,101 +634,79 @@ impl AgentRun {
         &self,
         placement: ChildPlacement,
         remote: Option<&finstack_ai_remote_child::RemoteChildInvoker>,
-    ) -> Result<(ChildRunLocator, crate::Session), AgentRunError> {
-        let run_id = NativeIds::generate::<RunTag>()?;
-        match placement {
-            ChildPlacement::CompatibleLaneInParentSession => {
-                let session = self.session();
-                let lane = session
-                    .create_lane(format!("child-{run_id}"), None)
-                    .await
-                    .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-                let locator = ChildRunLocator {
-                    operation: OperationLocator::try_new(
-                        self.inner.locator.tenant_scope.as_ref(),
-                        self.inner.locator.session_id,
-                        lane.lane_id(),
-                        run_id,
-                    )
-                    .map_err(|error| {
-                        AgentRunError::configuration(
-                            AGENT_RUN_INVALID_CONFIGURATION,
-                            error.to_string(),
-                        )
-                    })?,
-                    remote: None,
-                };
-                Ok((locator, session))
-            }
-            ChildPlacement::IsolatedChildSession => {
-                let session = crate::Session::create(
-                    Arc::clone(&self.inner.store),
-                    Arc::clone(&self.inner.locator.tenant_scope),
+    ) -> Result<ChildRunLocator, AgentRunError> {
+        let route = match placement {
+            ChildPlacement::RemoteChildSession => Some(remote.ok_or_else(|| {
+                AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "remote child placement requires an explicit route",
                 )
-                .await
-                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-                let lane = session
-                    .lane("main")
-                    .await
-                    .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-                let locator = ChildRunLocator {
-                    operation: OperationLocator::try_new(
-                        self.inner.locator.tenant_scope.as_ref(),
-                        session.session_id(),
-                        lane.lane_id(),
-                        run_id,
-                    )
-                    .map_err(|error| {
-                        AgentRunError::configuration(
-                            AGENT_RUN_INVALID_CONFIGURATION,
-                            error.to_string(),
-                        )
-                    })?,
-                    remote: None,
-                };
-                Ok((locator, session))
-            }
-            ChildPlacement::RemoteChildSession => {
-                let invoker = remote.ok_or_else(|| {
-                    AgentRunError::configuration(
-                        AGENT_RUN_INVALID_CONFIGURATION,
-                        "remote child placement requires an explicit route",
-                    )
-                })?;
-                let session = crate::Session::create(
-                    Arc::clone(&self.inner.store),
-                    Arc::clone(&self.inner.locator.tenant_scope),
-                )
-                .await
-                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-                let lane = session
-                    .lane("main")
-                    .await
-                    .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-                let locator = ChildRunLocator {
-                    operation: OperationLocator::try_new(
-                        self.inner.locator.tenant_scope.as_ref(),
-                        session.session_id(),
-                        lane.lane_id(),
-                        run_id,
-                    )
-                    .map_err(|error| {
-                        AgentRunError::configuration(
-                            AGENT_RUN_INVALID_CONFIGURATION,
-                            error.to_string(),
-                        )
-                    })?,
-                    remote: Some(invoker.route_ref().map_err(|error| {
-                        AgentRunError::configuration(
-                            AGENT_RUN_INVALID_CONFIGURATION,
-                            error.to_string(),
-                        )
-                    })?),
-                };
-                Ok((locator, session))
-            }
+            })?),
+            ChildPlacement::CompatibleLaneInParentSession
+            | ChildPlacement::IsolatedChildSession => None,
+        };
+        let mut locator = allocate_local_child_locator(self, placement).await?;
+        if let Some(invoker) = route {
+            locator.remote = Some(invoker.route_ref().map_err(|error| {
+                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+            })?);
         }
+        Ok(locator)
     }
+}
+
+/// Allocate a fresh child run on a new lane of the parent session or on the
+/// main lane of a new isolated session. Remote placement allocates the
+/// isolated session; the native caller attaches the route afterwards.
+async fn allocate_local_child_locator(
+    parent: &AgentRun,
+    placement: ChildPlacement,
+) -> Result<ChildRunLocator, AgentRunError> {
+    let run_id = NativeIds::generate::<RunTag>()?;
+    let (session_id, lane_id) = match placement {
+        ChildPlacement::CompatibleLaneInParentSession => {
+            let session = parent.session();
+            let lane = session
+                .create_lane(format!("child-{run_id}"), None)
+                .await
+                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+            (session.session_id(), lane.lane_id())
+        }
+        ChildPlacement::IsolatedChildSession | ChildPlacement::RemoteChildSession => {
+            let session = crate::Session::create(
+                Arc::clone(&parent.inner.store),
+                Arc::clone(&parent.inner.locator.tenant_scope),
+            )
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+            let lane = session
+                .lane("main")
+                .await
+                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+            (session.session_id(), lane.lane_id())
+        }
+    };
+    Ok(ChildRunLocator {
+        operation: OperationLocator::try_new(
+            parent.inner.locator.tenant_scope.as_ref(),
+            session_id,
+            lane_id,
+            run_id,
+        )
+        .map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?,
+        remote: None,
+    })
+}
+
+fn coordination_ids() -> Result<ChildCoordinationIds, AgentRunError> {
+    Ok(ChildCoordinationIds {
+        preparation_batch_id: NativeIds::generate::<AppendBatchTag>()?,
+        preparation_record_id: NativeIds::generate::<RecordTag>()?,
+        reservation_request_record_id: None,
+        reservation_settlement: None,
+    })
 }
 
 #[cfg(feature = "native-tokio")]
@@ -786,16 +764,13 @@ fn accept_remote_child(
     })
 }
 
-pub(super) fn child_depth(parent_depth: u16) -> Result<u16, AgentRunError> {
+fn child_depth(parent_depth: u16) -> Result<u16, AgentRunError> {
     parent_depth
         .checked_add(1)
         .ok_or_else(|| AgentRunError::runtime_message("child relation depth overflow"))
 }
 
-pub(super) fn enforce_child_run_policy(
-    policy: ChildRunPolicy,
-    child_depth: u16,
-) -> Result<(), AgentRunError> {
+fn enforce_child_run_policy(policy: ChildRunPolicy, child_depth: u16) -> Result<(), AgentRunError> {
     match policy {
         ChildRunPolicy::Deny => Err(AgentRunError::configuration(
             AGENT_INVOKE_INVALID_ACCEPTANCE,
@@ -811,12 +786,9 @@ pub(super) fn enforce_child_run_policy(
     }
 }
 
-pub(super) fn child_run_request(
+fn child_spec_and_lock(
     child: &Agent,
-    request: &AgentRunRequest,
-    placement: ChildPlacement,
-    locator: ChildRunLocator,
-) -> Result<ChildRunRequest, AgentRunError> {
+) -> Result<(&Arc<crate::AgentSpec>, &Arc<crate::ResolvedAgentLock>), AgentRunError> {
     let spec = child.resolved.spec().ok_or_else(|| {
         AgentRunError::configuration(
             AGENT_RUN_INVALID_CONFIGURATION,
@@ -829,6 +801,16 @@ pub(super) fn child_run_request(
             "child Agent requires a bundle-resolved lock",
         )
     })?;
+    Ok((spec, lock))
+}
+
+fn child_run_request(
+    child: &Agent,
+    request: &AgentRunRequest,
+    placement: ChildPlacement,
+    locator: ChildRunLocator,
+) -> Result<ChildRunRequest, AgentRunError> {
+    let (spec, lock) = child_spec_and_lock(child)?;
     let agent = AgentRef {
         id: spec.id.clone(),
         bundle: lock.bundle.as_ref().map(|bundle| bundle.id.clone()),
@@ -854,7 +836,7 @@ pub(super) fn child_run_request(
     .map_err(|error| AgentRunError::runtime_message(error.to_string()))
 }
 
-pub(super) fn child_run_context(
+fn child_run_context(
     parent: &OperationLocator,
     parent_effect_id: EffectId,
     request: &AgentRunRequest,
@@ -876,24 +858,13 @@ pub(super) fn child_run_context(
     }
 }
 
-pub(super) fn child_acceptance(
+fn child_acceptance(
     child: &Agent,
     request: &AgentRunRequest,
     prepared: &ChildRunPrepared,
     parent: &RunAccepted,
 ) -> Result<RunAccepted, AgentRunError> {
-    let spec = child.resolved.spec().ok_or_else(|| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "child Agent requires a bundle-resolved specification",
-        )
-    })?;
-    let lock = child.resolved.lock().ok_or_else(|| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "child Agent requires a bundle-resolved lock",
-        )
-    })?;
+    let (spec, lock) = child_spec_and_lock(child)?;
     let depth = child_depth(parent.relation().depth())?;
     let relation = RunRelation::try_new(
         parent.relation().root_run_id(),
@@ -909,7 +880,7 @@ pub(super) fn child_acceptance(
     })?;
     let limits = super::prepare::attenuated_run_limits(&spec.limits, request)?;
     let effective_deadline = super::prepare::request_deadline(
-        super::prepare::NativeIds::now()?,
+        NativeIds::now()?,
         request.timeout,
         parent.effective_deadline(),
     )?;
@@ -934,7 +905,7 @@ pub(super) fn child_acceptance(
     })
 }
 
-pub(super) async fn child_session(
+async fn child_session(
     parent: &AgentRun,
     prepared: &ChildRunPrepared,
 ) -> Result<crate::Session, AgentRunError> {

@@ -16,7 +16,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::error::config_error;
 
-const DEFAULT_CHAT_PATH: &str = "/api/chat";
+const CHAT_PATH: &str = "/api/chat";
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
@@ -26,7 +26,6 @@ const DEFAULT_CREDENTIAL_NAME: &str = "default";
 #[derive(Clone)]
 pub struct OllamaConfig {
     base_url: Arc<str>,
-    chat_path: Arc<str>,
     credentials: CredentialStore,
     credential: Option<CredentialReference>,
     request_timeout: Duration,
@@ -40,7 +39,6 @@ impl fmt::Debug for OllamaConfig {
         formatter
             .debug_struct("OllamaConfig")
             .field("base_url", &self.base_url)
-            .field("chat_path", &self.chat_path)
             .field("credentials", &self.credentials)
             .field("credential", &self.credential)
             .field("request_timeout", &self.request_timeout)
@@ -74,7 +72,6 @@ impl OllamaConfig {
         validate_base_url(base_url)?;
         Ok(Self {
             base_url: Arc::from(base_url),
-            chat_path: Arc::from(DEFAULT_CHAT_PATH),
             credentials: CredentialStore::empty(),
             credential: None,
             request_timeout: DEFAULT_TIMEOUT,
@@ -168,7 +165,7 @@ impl OllamaConfig {
     pub(crate) fn endpoint_url(&self) -> Result<Url, ModelError> {
         let mut base =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
-        base.set_path(&self.chat_path);
+        base.set_path(CHAT_PATH);
         Ok(base)
     }
 

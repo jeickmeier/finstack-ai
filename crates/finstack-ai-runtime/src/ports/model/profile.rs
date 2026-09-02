@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use finstack_ai_kernel::{Digest, LABEL_MAX_BYTES};
+use finstack_ai_kernel::{Digest, label_is_valid};
 use serde::{Deserialize, Serialize};
 
 use super::error::ModelError;
@@ -235,18 +235,12 @@ fn tighten_margin(current: &mut u64, candidate: Option<u64>) -> Result<(), Model
 }
 
 fn validate_profile(profile: &ModelContextProfile) -> Result<(), ModelError> {
-    if profile.provider.is_empty()
-        || profile.provider.len() > LABEL_MAX_BYTES
-        || profile.provider.as_bytes().contains(&0)
+    if !label_is_valid(&profile.provider)
+        || !label_is_valid(&profile.estimator.id)
+        || !label_is_valid(&profile.estimator.version)
         || profile.hard_input_bytes == 0
         || profile.context_window_tokens == 0
         || profile.max_output_tokens == 0
-        || profile.estimator.id.is_empty()
-        || profile.estimator.version.is_empty()
-        || profile.estimator.id.len() > LABEL_MAX_BYTES
-        || profile.estimator.version.len() > LABEL_MAX_BYTES
-        || profile.estimator.id.as_bytes().contains(&0)
-        || profile.estimator.version.as_bytes().contains(&0)
     {
         return Err(ModelError::validation(
             MODEL_PROFILE_INVALID,

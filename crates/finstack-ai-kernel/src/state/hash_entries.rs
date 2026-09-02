@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use crate::primitives::Digest;
 use crate::primitives::{EffectId, ToolCallId};
-use crate::records::lifecycle::{Stage, StageCursor};
+use crate::records::lifecycle::StageCursor;
 use crate::records::tools::{ToolCallIdentity, ToolSettlementFingerprint};
+use crate::reducer::extension::stage_name;
 
 use super::types::{
     CompletionIdentityHashEntryV1, ExtensionSettlementHashEntryV7, ModelSettlementHashEntryV1,
@@ -115,16 +116,4 @@ pub(super) fn tool_settlement_hash_entries(
             settlement_digest: settlement.digest,
         })
         .collect()
-}
-
-pub(super) const fn stage_name(stage: Stage) -> &'static str {
-    match stage {
-        Stage::BeforeRun => "before_run",
-        Stage::PrepareContext => "prepare_context",
-        Stage::BeforeModel => "before_model",
-        Stage::AfterModel => "after_model",
-        Stage::BeforeToolBatch => "before_tool_batch",
-        Stage::AfterToolBatch => "after_tool_batch",
-        Stage::BeforeFinalize => "before_finalize",
-    }
 }

@@ -84,12 +84,13 @@ struct WireUsage {
 enum OpenBlock {
     Text,
     Thinking,
-    Tool {
-        stream_index: u32,
-        name: String,
-        arguments: String,
-    },
+    Tool { stream_index: u32 },
     Redacted,
+}
+
+struct ToolAssembly {
+    name: String,
+    arguments: String,
 }
 
 /// Incremental Anthropic Messages assembler.
@@ -98,7 +99,7 @@ pub struct AnthropicMessagesAssembly {
     completion_id: Option<String>,
     text: String,
     thinking_signature: Option<String>,
-    tools: BTreeMap<u32, (String, String, String)>,
+    tools: BTreeMap<u32, ToolAssembly>,
     next_tool_index: u32,
     blocks: BTreeMap<u32, OpenBlock>,
     usage: Usage,
@@ -215,10 +216,9 @@ impl AnthropicMessagesAssembly {
                     .name
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| StreamNormError::response("tool_use omitted its name"))?;
-                let id = block
-                    .id
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| StreamNormError::response("tool_use omitted its id"))?;
+                if block.id.is_none_or(|value| value.is_empty()) {
+                    return Err(StreamNormError::response("tool_use omitted its id"));
+                }
                 let arguments = block.input.map_or_else(String::new, |value| {
                     if value == Value::Object(serde_json::Map::new()) {
                         String::new()
@@ -231,24 +231,16 @@ impl AnthropicMessagesAssembly {
                     .next_tool_index
                     .checked_add(1)
                     .ok_or_else(|| StreamNormError::response("tool-call index overflowed"))?;
-                let mut items = Vec::new();
-                if !name.is_empty() {
-                    items.push(ModelStreamItem::ToolCallDelta(ToolCallDelta {
-                        index: stream_index,
-                        name: Some(Arc::from(name.as_str())),
-                        arguments_delta: Arc::from(arguments.as_str()),
-                        provider_call_id: None,
-                    }));
-                }
+                let item = ModelStreamItem::ToolCallDelta(ToolCallDelta {
+                    index: stream_index,
+                    name: Some(Arc::from(name.as_str())),
+                    arguments_delta: Arc::from(arguments.as_str()),
+                    provider_call_id: None,
+                });
                 self.tools
-                    .insert(stream_index, (id, name.clone(), arguments.clone()));
-                let open = OpenBlock::Tool {
-                    stream_index,
-                    name,
-                    arguments,
-                };
-                self.blocks.insert(index, open);
-                return Ok(items);
+                    .insert(stream_index, ToolAssembly { name, arguments });
+                self.blocks.insert(index, OpenBlock::Tool { stream_index });
+                return Ok(vec![item]);
             }
             _ => return Err(StreamNormError::response("content block type is unknown")),
         };
@@ -318,24 +310,16 @@ impl AnthropicMessagesAssembly {
             }
             "input_json_delta" => {
                 let fragment = delta.partial_json.unwrap_or_default();
-                let (stream_index, name) = match self.blocks.get_mut(&index) {
-                    Some(OpenBlock::Tool {
-                        stream_index,
-                        arguments,
-                        name,
-                        ..
-                    }) => {
-                        arguments.push_str(&fragment);
-                        (*stream_index, name.clone())
-                    }
-                    _ => return Err(StreamNormError::response("content_block_delta is invalid")),
+                let Some(OpenBlock::Tool { stream_index }) = self.blocks.get(&index) else {
+                    return Err(StreamNormError::response("content_block_delta is invalid"));
                 };
-                if let Some((_, _, stored)) = self.tools.get_mut(&stream_index) {
-                    stored.push_str(&fragment);
-                }
+                let Some(tool) = self.tools.get_mut(stream_index) else {
+                    return Err(StreamNormError::response("content_block_delta is invalid"));
+                };
+                tool.arguments.push_str(&fragment);
                 Ok(vec![ModelStreamItem::ToolCallDelta(ToolCallDelta {
-                    index: stream_index,
-                    name: Some(Arc::from(name.as_str())),
+                    index: *stream_index,
+                    name: Some(Arc::from(tool.name.as_str())),
                     arguments_delta: Arc::from(fragment.as_str()),
                     provider_call_id: None,
                 })])
@@ -433,23 +417,21 @@ impl AnthropicMessagesAssembly {
             ));
         }
         let mut tool_calls = Vec::with_capacity(self.tools.len());
-        for (expected, (index, (_id, name, arguments))) in (0_u32..).zip(&self.tools) {
+        for (expected, (index, tool)) in (0_u32..).zip(&self.tools) {
             if expected != *index {
                 return Err(StreamNormError::response(
                     "tool-call indices are not contiguous",
                 ));
             }
-            let arguments = if arguments.is_empty() {
-                RawJson::parse(b"{}").map_err(|_| {
-                    StreamNormError::response("tool-call arguments are invalid JSON")
-                })?
+            let arguments = if tool.arguments.is_empty() {
+                b"{}".as_slice()
             } else {
-                RawJson::parse(arguments.as_bytes()).map_err(|_| {
-                    StreamNormError::response("tool-call arguments are invalid JSON")
-                })?
+                tool.arguments.as_bytes()
             };
+            let arguments = RawJson::parse(arguments)
+                .map_err(|_| StreamNormError::response("tool-call arguments are invalid JSON"))?;
             tool_calls.push(ModelToolCall {
-                name: Arc::from(name.as_str()),
+                name: Arc::from(tool.name.as_str()),
                 arguments,
                 provider_call_id: None,
             });

@@ -54,11 +54,15 @@ async fn cancellation_without_outstanding_effects_reaches_a_durable_terminal() {
         initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
         reason: None,
     });
-    let ids = super::ids::allocate_for_runtime_input(
+    let ids = super::ids::allocate_runtime_input(
         &coordinator,
         fixed_timestamp(1_100),
         &input,
         &sources,
+        |code| RunHandleError::CancellationSettlement { code },
+        |_| RunHandleError::CancellationSettlement {
+            code: "runtime_input_rejected",
+        },
     )
     .expect("cancellation ids");
     coordinator

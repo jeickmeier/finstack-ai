@@ -108,6 +108,23 @@ impl ExtensionSettlement {
             Self::Failed(value) => value.effect_id(),
         }
     }
+
+    pub(crate) fn completion_id(&self) -> Option<&str> {
+        match self {
+            Self::Completed(value) => value.completion_id(),
+            Self::Failed(value) => value.completion_id(),
+        }
+    }
+
+    pub(crate) fn validate_against(
+        &self,
+        requested: &crate::EffectRequested,
+    ) -> Result<(), crate::EffectError> {
+        match self {
+            Self::Completed(value) => value.validate_against(requested),
+            Self::Failed(value) => value.validate_against(requested),
+        }
+    }
 }
 
 /// Runtime-owned compaction-summary model request (ADR-042).

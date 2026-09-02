@@ -21,7 +21,7 @@ impl ModelName {
     ///
     /// Returns a stable request error when the name is empty, oversized, or NUL-bearing.
     pub fn try_new(value: impl AsRef<str>) -> Result<Self, ModelError> {
-        Ok(Self(validated_label(value.as_ref(), "model")?))
+        Ok(Self(validated_label(value.as_ref())?))
     }
 
     /// Borrow the model name.
@@ -70,9 +70,12 @@ impl ModelDescriptor {
     ///
     /// Returns `model_profile_invalid` for an invalid provider or model set.
     pub fn validate(&self) -> Result<(), ModelError> {
-        validated_label(&self.provider, "model_descriptor.provider").map_err(|_| {
-            ModelError::validation(MODEL_PROFILE_INVALID, "model provider identity is invalid")
-        })?;
+        if !label_is_valid(&self.provider) {
+            return Err(ModelError::validation(
+                MODEL_PROFILE_INVALID,
+                "model provider identity is invalid",
+            ));
+        }
         if self.models.is_empty() || self.models.len() > Self::MAX_MODELS {
             return Err(ModelError::validation(
                 MODEL_PROFILE_INVALID,
@@ -90,7 +93,7 @@ impl ModelDescriptor {
     }
 }
 
-pub(super) fn validated_label(value: &str, _field: &'static str) -> Result<Arc<str>, ModelError> {
+pub(super) fn validated_label(value: &str) -> Result<Arc<str>, ModelError> {
     if !label_is_valid(value) {
         return Err(ModelError::validation(
             MODEL_REQUEST_INVALID,

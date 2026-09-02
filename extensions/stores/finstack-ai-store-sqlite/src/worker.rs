@@ -10,11 +10,11 @@ use std::thread::{self, JoinHandle};
 
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::journal::StoreError;
+use finstack_ai_store_common::VerifiedHeadCache;
 use rusqlite::Connection;
 
 use crate::config::{SqliteStoreConfig, SqliteStoreLimits, is_memory_path};
 use crate::error::map_sqlite_error;
-use crate::load::VerifiedHeadCache;
 use crate::schema::{apply_durability, apply_schema, quick_check};
 
 /// In-flight jobs waiting for the single writer. Sized for the 64-session
@@ -175,9 +175,17 @@ fn open_context(config: &SqliteStoreConfig) -> Result<WorkerCtx, StoreError> {
     })
 }
 
+/// The reply slot shared by one job's sender and its awaiting future.
 struct OneshotInner<T> {
-    value: Mutex<Option<T>>,
-    waker: Mutex<Option<Waker>>,
+    slot: Mutex<(Option<T>, Option<Waker>)>,
+}
+
+impl<T> OneshotInner<T> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, (Option<T>, Option<Waker>)> {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 struct OneshotSender<T> {
@@ -190,12 +198,12 @@ struct Oneshot<T> {
 
 impl<T> OneshotSender<T> {
     fn send(self, value: T) {
-        if let Ok(mut slot) = self.inner.value.lock() {
-            *slot = Some(value);
-        }
-        if let Ok(mut waker) = self.inner.waker.lock()
-            && let Some(waker) = waker.take()
-        {
+        let waker = {
+            let mut slot = self.inner.lock();
+            slot.0 = Some(value);
+            slot.1.take()
+        };
+        if let Some(waker) = waker {
             waker.wake();
         }
     }
@@ -205,32 +213,18 @@ impl<T> Future for Oneshot<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        let mut slot = self
-            .inner
-            .value
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(value) = slot.take() {
+        let mut slot = self.inner.lock();
+        if let Some(value) = slot.0.take() {
             return Poll::Ready(value);
         }
-        let mut waker = self
-            .inner
-            .waker
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *waker = Some(cx.waker().clone());
-        if let Some(value) = slot.take() {
-            Poll::Ready(value)
-        } else {
-            Poll::Pending
-        }
+        slot.1 = Some(cx.waker().clone());
+        Poll::Pending
     }
 }
 
 fn oneshot<T>() -> (OneshotSender<T>, Oneshot<T>) {
     let inner = Arc::new(OneshotInner {
-        value: Mutex::new(None),
-        waker: Mutex::new(None),
+        slot: Mutex::new((None, None)),
     });
     (
         OneshotSender {

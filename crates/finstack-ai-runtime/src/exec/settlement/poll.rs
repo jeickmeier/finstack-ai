@@ -1,7 +1,6 @@
 #[cfg(feature = "native-tokio")]
 use std::collections::BTreeMap;
 
-#[cfg(any(feature = "native-tokio", test))]
 use finstack_ai_kernel::{
     ActiveToolCallStatus, EffectDeferred, EffectId, KernelState, ReconciliationPolicy, Timestamp,
 };
@@ -14,7 +13,9 @@ use finstack_ai_kernel::{
 use crate::coordinator::CommitCoordinator;
 #[cfg(feature = "native-tokio")]
 use crate::ids::{Clock, RandomSource};
+#[cfg(feature = "native-tokio")]
 use crate::ports::model::{CancellationSignal, ReconcileContext, RunCallContext};
+#[cfg(feature = "native-tokio")]
 use crate::ports::tool::{
     PendingToolEffect, ResolvedToolCatalog, TOOL_DEFERRAL_EXPIRED, TOOL_RECONCILIATION_UNSUPPORTED,
     ToolError, ToolReconcileResult, ToolResumeAction, map_tool_reconcile_result,
@@ -26,12 +27,11 @@ use crate::run_types::RunHandleError;
 #[cfg(feature = "native-tokio")]
 use super::ids::submit_resume_input;
 #[cfg(feature = "native-tokio")]
-use super::tool::{apply_tool_reconcile_result, deferred_tool_seed};
+use super::tool::apply_tool_reconcile_result;
 #[cfg(feature = "native-tokio")]
 use super::{SettlementSources, tool_handle_error};
 
 /// A committed deferred effect's next poll deadline.
-#[cfg(any(feature = "native-tokio", test))]
 pub(crate) struct DuePoll {
     /// Deferred effect identity.
     pub effect_id: EffectId,
@@ -43,7 +43,6 @@ pub(crate) struct DuePoll {
 ///
 /// Membership ignores `now`; the driver is responsible for filtering deadlines
 /// whose `at` is less than or equal to `now`.
-#[cfg(any(feature = "native-tokio", test))]
 pub(crate) fn due_polls(state: &KernelState, now: Timestamp) -> Vec<DuePoll> {
     let _ = now;
     state
@@ -73,7 +72,6 @@ pub(crate) fn due_polls(state: &KernelState, now: Timestamp) -> Vec<DuePoll> {
 }
 
 /// Return whether a deferred effect has reached its inclusive expiry.
-#[cfg(any(feature = "native-tokio", test))]
 pub(crate) fn expired(deferred: &EffectDeferred, now: Timestamp) -> bool {
     deferred
         .expires_at
@@ -218,8 +216,9 @@ async fn reconcile_due_tool<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
 ) -> Result<Option<Option<Timestamp>>, RunHandleError> {
-    let seed =
-        deferred_tool_seed(coordinator, effect_id).ok_or(RunHandleError::ToolSettlement {
+    let seed = coordinator
+        .tool_seed(effect_id)
+        .ok_or(RunHandleError::ToolSettlement {
             code: "tool_resume_seed_missing",
         })?;
     let resolved = catalog

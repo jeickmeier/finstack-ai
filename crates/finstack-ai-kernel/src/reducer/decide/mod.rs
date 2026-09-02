@@ -25,7 +25,7 @@ use settlement::{SettlementReview, review_settlement};
 use stage::{decide_accept, decide_stage};
 
 pub(super) use shared::{
-    draft_for_state, duplicate_decision, expected_stage_cursor, next_sequence,
+    decision_for, duplicate_decision, expected_stage_cursor, next_sequence,
     outstanding_requested_effects, reject_terminal, required,
 };
 

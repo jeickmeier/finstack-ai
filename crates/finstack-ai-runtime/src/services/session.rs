@@ -19,7 +19,7 @@ use finstack_ai_kernel::{
 use thiserror::Error;
 
 use crate::coordinator::{CommitCoordinator, CommitCoordinatorError, project_loaded};
-use crate::journal::{JournalStore, LoadRequest};
+use crate::journal::{JournalStore, LoadRequest, LoadedSession};
 use crate::services::identity_map::{ExternalIdentityKey, ExternalIdentityMap, IdentityMapError};
 use crate::services::session_intern::{self, InternDecision};
 use crate::services::session_sync::StructuralGate;
@@ -278,38 +278,15 @@ impl SessionRuntime {
                 }
                 InternDecision::Wait(follower) => follower.wait().await,
                 InternDecision::Lead(leader) => {
-                    let loaded = store
-                        .load(LoadRequest {
-                            session_id: ids.session_id,
-                        })
-                        .await
-                        .map_err(|_| SessionError::Recover {
-                            code: session_error_code("session_load_failed"),
-                        })?;
+                    let loaded = load_session(&store, ids.session_id).await?;
                     if loaded.head_sequence > 0 {
-                        let projection =
-                            project_loaded(&loaded).map_err(|code| SessionError::Recover {
-                                code: session_error_code(code),
-                            })?;
-                        let coordinator = CommitCoordinator::structural_from_loaded(
-                            Arc::clone(&store),
-                            &loaded,
-                            projection.clone(),
-                        )
-                        .map_err(|error| SessionError::recover(&error))?;
-                        return leader.complete(Self {
+                        let coordinator = structural_head(&store, &loaded)?;
+                        return leader.complete(Self::from_head(
                             store,
-                            session_id: ids.session_id,
+                            ids.session_id,
                             tenant_scope,
-                            inner: Mutex::new(SessionInner {
-                                projection,
-                                guards: BTreeMap::new(),
-                                #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-                                live_runs: BTreeMap::new(),
-                                head: Some(coordinator),
-                            }),
-                            structural: StructuralGate::default(),
-                        });
+                            coordinator,
+                        ));
                     }
                     let mut coordinator = CommitCoordinator::new(Arc::clone(&store));
                     coordinator
@@ -340,19 +317,12 @@ impl SessionRuntime {
                         .await
                         .map_err(|error| SessionError::commit(&error))?;
                     coordinator.mark_structural_head();
-                    return leader.complete(Self {
+                    return leader.complete(Self::from_head(
                         store,
-                        session_id: ids.session_id,
+                        ids.session_id,
                         tenant_scope,
-                        inner: Mutex::new(SessionInner {
-                            projection: coordinator.session().clone(),
-                            guards: BTreeMap::new(),
-                            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-                            live_runs: BTreeMap::new(),
-                            head: Some(coordinator),
-                        }),
-                        structural: StructuralGate::default(),
-                    });
+                        coordinator,
+                    ));
                 }
             }
         }
@@ -379,36 +349,37 @@ impl SessionRuntime {
                 }
                 InternDecision::Wait(follower) => follower.wait().await,
                 InternDecision::Lead(leader) => {
-                    let loaded = store.load(LoadRequest { session_id }).await.map_err(|_| {
-                        SessionError::Recover {
-                            code: session_error_code("session_load_failed"),
-                        }
-                    })?;
-                    let projection =
-                        project_loaded(&loaded).map_err(|code| SessionError::Recover {
-                            code: session_error_code(code),
-                        })?;
-                    let coordinator = CommitCoordinator::structural_from_loaded(
-                        Arc::clone(&store),
-                        &loaded,
-                        projection.clone(),
-                    )
-                    .map_err(|error| SessionError::recover(&error))?;
-                    return leader.complete(Self {
+                    let loaded = load_session(&store, session_id).await?;
+                    let coordinator = structural_head(&store, &loaded)?;
+                    return leader.complete(Self::from_head(
                         store,
                         session_id,
                         tenant_scope,
-                        inner: Mutex::new(SessionInner {
-                            projection,
-                            guards: BTreeMap::new(),
-                            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-                            live_runs: BTreeMap::new(),
-                            head: Some(coordinator),
-                        }),
-                        structural: StructuralGate::default(),
-                    });
+                        coordinator,
+                    ));
                 }
             }
+        }
+    }
+
+    fn from_head(
+        store: Arc<dyn JournalStore>,
+        session_id: SessionId,
+        tenant_scope: Arc<str>,
+        head: CommitCoordinator,
+    ) -> Self {
+        Self {
+            store,
+            session_id,
+            tenant_scope,
+            inner: Mutex::new(SessionInner {
+                projection: head.session().clone(),
+                guards: BTreeMap::new(),
+                #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+                live_runs: BTreeMap::new(),
+                head: Some(head),
+            }),
+            structural: StructuralGate::default(),
         }
     }
 
@@ -513,28 +484,17 @@ impl SessionRuntime {
     }
 
     async fn refresh_locked(&self) -> Result<SessionProjection, SessionError> {
-        let loaded = self
-            .store
-            .load(LoadRequest {
-                session_id: self.session_id,
-            })
-            .await
-            .map_err(|_| SessionError::Recover {
-                code: session_error_code("session_load_failed"),
-            })?;
-        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover {
-            code: session_error_code(code),
-        })?;
-        let coordinator = CommitCoordinator::structural_from_loaded(
-            Arc::clone(&self.store),
-            &loaded,
-            projection.clone(),
-        )
-        .map_err(|error| SessionError::recover(&error))?;
+        let coordinator = self.load_structural_head().await?;
+        let projection = coordinator.session().clone();
         let mut inner = self.lock()?;
         inner.projection = projection.clone();
         inner.head = Some(coordinator);
         Ok(projection)
+    }
+
+    async fn load_structural_head(&self) -> Result<CommitCoordinator, SessionError> {
+        let loaded = load_session(&self.store, self.session_id).await?;
+        structural_head(&self.store, &loaded)
     }
 
     /// Create a named lane, optionally forking from an existing entry.
@@ -674,29 +634,6 @@ impl SessionRuntime {
         self.release(lane_id);
         result?;
         Ok(entry_id)
-    }
-
-    /// Atomically reserve an idle lane for `run_id` and append its user input.
-    ///
-    /// The returned messages are the complete durable history immediately
-    /// preceding `message`. The active guard remains held on success and must
-    /// be released with [`Self::release_run`].
-    ///
-    /// # Errors
-    ///
-    /// Returns a busy-lane, unknown-lane, invalid-history, or commit failure.
-    pub async fn append_message_for_run(
-        &self,
-        lane_id: LaneId,
-        run_id: RunId,
-        message: &Message,
-        ids: LaneAppendIds,
-    ) -> Result<Vec<Message>, SessionError> {
-        let context = self
-            .begin_run_with_message(lane_id, run_id, message, ids)
-            .await?;
-        let prior_len = context.messages.len().saturating_sub(1);
-        Ok(context.messages[..prior_len].to_vec())
     }
 
     /// Atomically reserve an idle lane, append its user input, and return the
@@ -936,14 +873,6 @@ impl SessionRuntime {
         Ok(())
     }
 
-    /// Whether this process currently owns `(session_id, lane_id)`.
-    #[must_use]
-    pub fn is_guarded(&self, lane_id: LaneId) -> bool {
-        self.lock()
-            .ok()
-            .is_some_and(|inner| inner.guards.contains_key(&lane_id))
-    }
-
     /// Recover a one-run coordinator at the session head.
     ///
     /// # Errors
@@ -1118,20 +1047,7 @@ impl SessionRuntime {
         if let Some(coordinator) = self.lock()?.head.take() {
             return Ok(coordinator);
         }
-        let loaded = self
-            .store
-            .load(LoadRequest {
-                session_id: self.session_id,
-            })
-            .await
-            .map_err(|_| SessionError::Recover {
-                code: session_error_code("session_load_failed"),
-            })?;
-        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover {
-            code: session_error_code(code),
-        })?;
-        CommitCoordinator::structural_from_loaded(Arc::clone(&self.store), &loaded, projection)
-            .map_err(|error| SessionError::recover(&error))
+        self.load_structural_head().await
     }
 
     fn put_structural_head(&self, coordinator: CommitCoordinator) -> Result<(), SessionError> {
@@ -1214,6 +1130,29 @@ impl SessionRuntime {
             Err(SessionError::TenantScopeMismatch)
         }
     }
+}
+
+async fn load_session(
+    store: &Arc<dyn JournalStore>,
+    session_id: SessionId,
+) -> Result<LoadedSession, SessionError> {
+    store
+        .load(LoadRequest { session_id })
+        .await
+        .map_err(|_| SessionError::Recover {
+            code: session_error_code("session_load_failed"),
+        })
+}
+
+fn structural_head(
+    store: &Arc<dyn JournalStore>,
+    loaded: &LoadedSession,
+) -> Result<CommitCoordinator, SessionError> {
+    let projection = project_loaded(loaded).map_err(|code| SessionError::Recover {
+        code: session_error_code(code),
+    })?;
+    CommitCoordinator::structural_from_loaded(Arc::clone(store), loaded, projection)
+        .map_err(|error| SessionError::recover(&error))
 }
 
 fn fanout_initiator(

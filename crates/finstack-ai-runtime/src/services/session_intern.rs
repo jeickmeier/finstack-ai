@@ -147,36 +147,28 @@ pub(super) fn decide(
     session_id: SessionId,
 ) -> Result<InternDecision, SessionError> {
     let key = (store_key(store), session_id);
-    with_interns(|map| match map.get(&key) {
-        Some(InternSlot::Ready(runtime)) => {
-            if let Some(runtime) = runtime.upgrade() {
-                InternDecision::Existing(runtime)
-            } else {
-                let signal = Arc::new(InitSignal::default());
-                map.insert(key, InternSlot::Initializing(Arc::clone(&signal)));
-                InternDecision::Lead(InternLeader {
-                    key,
-                    signal,
-                    completed: false,
-                })
+    with_interns(|map| {
+        match map.get(&key) {
+            Some(InternSlot::Ready(runtime)) => {
+                if let Some(runtime) = runtime.upgrade() {
+                    return InternDecision::Existing(runtime);
+                }
             }
+            Some(InternSlot::Initializing(signal)) => {
+                return InternDecision::Wait(InternFollower {
+                    signal: Arc::clone(signal),
+                    generation: signal.generation.load(Ordering::Acquire),
+                });
+            }
+            None => {}
         }
-        Some(InternSlot::Initializing(signal)) => {
-            let generation = signal.generation.load(Ordering::Acquire);
-            InternDecision::Wait(InternFollower {
-                signal: Arc::clone(signal),
-                generation,
-            })
-        }
-        None => {
-            let signal = Arc::new(InitSignal::default());
-            map.insert(key, InternSlot::Initializing(Arc::clone(&signal)));
-            InternDecision::Lead(InternLeader {
-                key,
-                signal,
-                completed: false,
-            })
-        }
+        let signal = Arc::new(InitSignal::default());
+        map.insert(key, InternSlot::Initializing(Arc::clone(&signal)));
+        InternDecision::Lead(InternLeader {
+            key,
+            signal,
+            completed: false,
+        })
     })
 }
 

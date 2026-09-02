@@ -8,7 +8,7 @@ use crate::records::lifecycle::{
 use crate::records::{RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft};
 use crate::state::{KernelState, RunPhase, TerminalCandidate, TransitionEnv};
 
-use super::super::decision::{Decision, KernelError};
+use super::super::decision::{Decision, KernelError, PostCommitAction};
 
 pub(crate) fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
     let mut effects = state
@@ -44,7 +44,7 @@ pub(super) fn timer_firing_contract() -> EffectOutputContract {
     }
 }
 
-pub(crate) fn draft_for_state(
+fn draft_for_state(
     state: &KernelState,
     env: &TransitionEnv,
     bodies: Vec<RecordBody>,
@@ -83,6 +83,22 @@ pub(crate) fn draft_for_state(
         );
     }
     Ok(records)
+}
+
+/// Draft `bodies` for the accepted run and wrap them in a fresh decision.
+pub(crate) fn decision_for(
+    state: &KernelState,
+    env: &TransitionEnv,
+    bodies: Vec<RecordBody>,
+    actions: Vec<PostCommitAction>,
+) -> Result<Decision, KernelError> {
+    let expected_sequence = next_sequence(state)?;
+    Ok(Decision {
+        expected_sequence,
+        records: draft_for_state(state, env, bodies)?,
+        actions,
+        diagnostics: Vec::new(),
+    })
 }
 
 pub(super) fn stage_record(

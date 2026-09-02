@@ -1,7 +1,7 @@
 //! Six-port compile fixtures for the wasm package.
 //!
 //! Native builds keep `Send + Sync` handles. `wasm32` builds store JS promise
-//! factories in `Rc<RefCell<_>>` so the handles stay local (`!Send`).
+//! factories, so the handles stay local (`!Send`).
 
 use std::sync::Arc;
 
@@ -38,11 +38,6 @@ use finstack_ai_kernel::{
     ProviderIds, RawJson, RetrySafety, RunEvent, Stage, ToolExecutionMode, ToolId, Usage,
     ValidatedToolCall, Version,
 };
-
-#[cfg(target_arch = "wasm32")]
-use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
-use std::rc::Rc;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::Promise;
@@ -420,7 +415,7 @@ async fn await_promise(function: js_sys::Function) -> Result<(), ()> {
 #[cfg(target_arch = "wasm32")]
 pub struct JsModelProxy {
     profile: ModelContextProfile,
-    request: Rc<RefCell<js_sys::Function>>,
+    request: js_sys::Function,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -433,7 +428,7 @@ impl JsModelProxy {
     pub fn new(request: js_sys::Function) -> Result<Self, ModelError> {
         Ok(Self {
             profile: model_profile()?,
-            request: Rc::new(RefCell::new(request)),
+            request,
         })
     }
 }
@@ -464,7 +459,7 @@ impl Model for JsModelProxy {
     }
 
     fn request(&self, _request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
-        let function = self.request.borrow().clone();
+        let function = self.request.clone();
         Box::pin(async move {
             let _ = await_promise(function).await;
             Ok(Box::pin(SingleItemStream {
@@ -477,7 +472,7 @@ impl Model for JsModelProxy {
 /// Local JS promise proxy for the Toolset port.
 #[cfg(target_arch = "wasm32")]
 pub struct JsToolsetProxy {
-    call: Rc<RefCell<js_sys::Function>>,
+    call: js_sys::Function,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -485,9 +480,7 @@ impl JsToolsetProxy {
     /// Construct a local toolset proxy around a JS promise factory.
     #[must_use]
     pub fn new(call: js_sys::Function) -> Self {
-        Self {
-            call: Rc::new(RefCell::new(call)),
-        }
+        Self { call }
     }
 }
 
@@ -509,7 +502,7 @@ impl Toolset for JsToolsetProxy {
         _ctx: ToolCallContext,
         _call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        let function = self.call.borrow().clone();
+        let function = self.call.clone();
         Box::pin(async move {
             let _ = await_promise(function).await;
             Ok(Box::pin(SingleItemStream {
@@ -522,7 +515,7 @@ impl Toolset for JsToolsetProxy {
 /// Local JS promise proxy for the context-provider port.
 #[cfg(target_arch = "wasm32")]
 pub struct JsContextProviderProxy {
-    collect: Rc<RefCell<js_sys::Function>>,
+    collect: js_sys::Function,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -530,9 +523,7 @@ impl JsContextProviderProxy {
     /// Construct a local context-provider proxy around a JS promise factory.
     #[must_use]
     pub fn new(collect: js_sys::Function) -> Self {
-        Self {
-            collect: Rc::new(RefCell::new(collect)),
-        }
+        Self { collect }
     }
 }
 
@@ -554,7 +545,7 @@ impl ContextProvider for JsContextProviderProxy {
         _ctx: ContextCallContext,
         _request: ContextRequest,
     ) -> PortFuture<Result<ContextContribution, ContextError>> {
-        let function = self.collect.borrow().clone();
+        let function = self.collect.clone();
         Box::pin(async move {
             let _ = await_promise(function).await;
             ContextContribution::try_new(Vec::new(), None::<&str>)
@@ -565,7 +556,7 @@ impl ContextProvider for JsContextProviderProxy {
 /// Local JS promise proxy for the middleware port.
 #[cfg(target_arch = "wasm32")]
 pub struct JsMiddlewareProxy {
-    invoke: Rc<RefCell<js_sys::Function>>,
+    invoke: js_sys::Function,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -573,9 +564,7 @@ impl JsMiddlewareProxy {
     /// Construct a local middleware proxy around a JS promise factory.
     #[must_use]
     pub fn new(invoke: js_sys::Function) -> Self {
-        Self {
-            invoke: Rc::new(RefCell::new(invoke)),
-        }
+        Self { invoke }
     }
 }
 
@@ -604,7 +593,7 @@ impl Middleware for JsMiddlewareProxy {
         _ctx: MiddlewareContext,
         _input: StageInput,
     ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
-        let function = self.invoke.borrow().clone();
+        let function = self.invoke.clone();
         Box::pin(async move {
             let _ = await_promise(function).await;
             Ok(StageOutcome::Continue)
@@ -615,7 +604,7 @@ impl Middleware for JsMiddlewareProxy {
 /// Local JS promise proxy for the journal-store port.
 #[cfg(target_arch = "wasm32")]
 pub struct JsJournalStoreProxy {
-    health: Rc<RefCell<js_sys::Function>>,
+    health: js_sys::Function,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -623,9 +612,7 @@ impl JsJournalStoreProxy {
     /// Construct a local journal-store proxy around a JS promise factory.
     #[must_use]
     pub fn new(health: js_sys::Function) -> Self {
-        Self {
-            health: Rc::new(RefCell::new(health)),
-        }
+        Self { health }
     }
 }
 
@@ -659,7 +646,7 @@ impl JournalStore for JsJournalStoreProxy {
     }
 
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
-        let function = self.health.borrow().clone();
+        let function = self.health.clone();
         Box::pin(async move {
             let _ = await_promise(function).await;
             Ok(StoreHealth {
@@ -674,7 +661,7 @@ impl JournalStore for JsJournalStoreProxy {
 /// Local JS promise proxy for the observer port.
 #[cfg(target_arch = "wasm32")]
 pub struct JsObserverProxy {
-    observe: Rc<RefCell<js_sys::Function>>,
+    observe: js_sys::Function,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -682,9 +669,7 @@ impl JsObserverProxy {
     /// Construct a local observer proxy around a JS promise factory.
     #[must_use]
     pub fn new(observe: js_sys::Function) -> Self {
-        Self {
-            observe: Rc::new(RefCell::new(observe)),
-        }
+        Self { observe }
     }
 }
 
@@ -706,7 +691,7 @@ impl Observer for JsObserverProxy {
     }
 
     fn observe(&self, _batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>> {
-        let function = self.observe.borrow().clone();
+        let function = self.observe.clone();
         Box::pin(async move {
             let _ = await_promise(function).await;
             Ok(())
@@ -716,7 +701,7 @@ impl Observer for JsObserverProxy {
 
 /// Construct the six local JS promise/stream port fixtures.
 ///
-/// The handles store `Rc<RefCell<_>>` factories, so they are `!Send`.
+/// The handles store JS factories, so they are `!Send`.
 #[cfg(target_arch = "wasm32")]
 pub fn compile_js_port_proxies() {
     let ready = promise_factory("return Promise.resolve(undefined);");

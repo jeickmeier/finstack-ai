@@ -72,15 +72,13 @@ use finstack_ai_kernel::{
 use finstack_ai_protocol::encode;
 use finstack_ai_runtime::ports::journal::{StoreError, StoreLimits};
 use finstack_ai_store_common::{
-    SessionUsage, admit_append_limits, build_committed_batch, check_append_sequence,
-    classify_record_reuse, protocol_error, request_identity,
+    AppendIdentity, SessionUsage, admit_append_limits, build_committed_batch,
+    check_append_sequence, classify_record_reuse, protocol_error, request_identity,
 };
 use tokio_postgres::{Client, Statement, Transaction};
 
-use crate::error::{Failure, commit_or_ambiguous, i64_from_u64, settle};
-use crate::load::{
-    SELECT_BATCH, SELECT_BATCH_RECORDS, id_from_bytes, load_batch, prepare, usize_from_i64,
-};
+use crate::error::{Failure, i64_from_u64, usize_from_i64, write_op};
+use crate::load::{SELECT_BATCH, SELECT_BATCH_RECORDS, id_from_bytes, load_batch, prepare};
 use crate::pool::PooledClient;
 use crate::session::{LOCK_SESSION_SQL, lock_session};
 
@@ -187,52 +185,14 @@ pub(crate) async fn append(
     request: &AppendRequest,
     limits: &StoreLimits,
 ) -> Result<CommittedBatch, StoreError> {
-    // Statements are prepared first: `Client::transaction` borrows the
-    // client mutably, and the statement cache lives on the checkout.
-    let outcome = match AppendStatements::prepare(client).await {
-        // `client` deref-coerces to the `&mut Client` this needs; the borrow
-        // (and the transaction that borrows from it) ends with the
-        // statement, before `poison` touches the checkout itself.
-        Ok(statements) => append_on_connection(client, &statements, request, limits).await,
-        Err(failure) => Err(failure),
-    };
-    settle(outcome, client)
-}
-
-/// Drive one append transaction to `COMMIT` or `ROLLBACK`.
-async fn append_on_connection(
-    client: &mut Client,
-    statements: &AppendStatements,
-    request: &AppendRequest,
-    limits: &StoreLimits,
-) -> Result<CommittedBatch, Failure> {
-    let transaction = client
-        .transaction()
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-
-    let committed = match append_in_transaction(&transaction, statements, request, limits).await {
-        Ok(committed) => committed,
-        Err(mut failure) => {
-            // The rollback must never shadow the original error, but a
-            // rollback that could not be delivered leaves the connection
-            // possibly still inside a transaction (or dead), so it must not
-            // go back to the pool even when the original failure was purely
-            // logical.
-            if transaction.rollback().await.is_err() {
-                failure.poison = true;
-            }
-            return Err(failure);
-        }
-    };
-
-    // Spec D5: a `COMMIT` that fails with no SQLSTATE means the server never
-    // reported an outcome, so the commit may or may not be durable. It is
-    // reported as ambiguous and the connection discarded; the embedding
-    // application recovers by retrying the same request, which either
-    // replays or commits it fresh. See [`commit_or_ambiguous`].
-    commit_or_ambiguous(transaction).await?;
-    Ok(committed)
+    write_op(
+        client,
+        AppendStatements::prepare,
+        async |transaction, statements| {
+            append_in_transaction(transaction, statements, request, limits).await
+        },
+    )
+    .await
 }
 
 /// The spec D4 protocol body, inside the transaction.
@@ -283,7 +243,9 @@ async fn append_in_transaction(
             .into());
         }
 
-        if let Some(replayed) = replay_by_record_reuse(transaction, statements, request).await? {
+        if let Some(replayed) =
+            replay_by_record_reuse(transaction, statements, request, &incoming_identity).await?
+        {
             return Ok(replayed);
         }
 
@@ -404,6 +366,7 @@ async fn replay_by_record_reuse(
     transaction: &Transaction<'_>,
     statements: &AppendStatements,
     request: &AppendRequest,
+    incoming: &AppendIdentity,
 ) -> Result<Option<CommittedBatch>, Failure> {
     let record_ids = request
         .records()
@@ -442,7 +405,6 @@ async fn replay_by_record_reuse(
     .ok_or(StoreError::Integrity {
         reason_code: "missing_record_batch_index",
     })?;
-    let incoming = request_identity(request)?;
     let Some(committed) = existing.committed else {
         return Err(StoreError::InvalidRequest {
             reason_code: "append_history_pruned",

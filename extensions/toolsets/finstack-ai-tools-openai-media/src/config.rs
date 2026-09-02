@@ -2,9 +2,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use crate::{
-    MAX_RESULT_BYTES_CEILING, OPENAI_MEDIA_CREDENTIAL_REQUIRED, OPENAI_MEDIA_ENDPOINT_INVALID,
-};
+use crate::{OPENAI_MEDIA_CREDENTIAL_REQUIRED, OPENAI_MEDIA_ENDPOINT_INVALID};
 
 pub(crate) const DEFAULT_ENDPOINT: &str = "https://api.openai.com";
 
@@ -90,13 +88,4 @@ fn is_loopback_host(host: &str) -> bool {
         .map_or(host, |rest| rest.strip_suffix(']').unwrap_or(rest));
     host.eq_ignore_ascii_case("localhost")
         || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
-}
-
-pub(crate) fn validate_result_cap(cap: usize) -> Result<(), OpenAiMediaError> {
-    if cap == 0 || cap > MAX_RESULT_BYTES_CEILING {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "result cap out of range",
-        });
-    }
-    Ok(())
 }

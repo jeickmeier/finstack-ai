@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::driver::{
     OBJECT_INTEGRITY_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH, ObjectDriver, ObjectKey,
-    ObjectMetadata, ObjectScope, PutPayload,
+    ObjectMetadata, ObjectScope,
 };
 
 use super::request::payload_sha256_hex;
@@ -154,12 +154,7 @@ async fn put_signs_path_style_and_sends_metadata_headers() {
     let content = Bytes::from_static(b"hello world");
 
     let object_ref = store
-        .put(
-            scope(),
-            key,
-            PutPayload::Bytes(content.clone()),
-            metadata("application/pdf"),
-        )
+        .put(scope(), key, content.clone(), metadata("application/pdf"))
         .await
         .expect("put must succeed");
     assert_eq!(object_ref.length, content.len() as u64);

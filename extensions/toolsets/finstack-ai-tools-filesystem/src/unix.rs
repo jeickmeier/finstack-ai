@@ -422,8 +422,7 @@ impl Root {
         let Some((name, parents)) = path.components().split_last() else {
             return Err(invalid_error("filesystem file path is empty"));
         };
-        let parent = ValidatedPath::from_components_for_open(parents);
-        let directory = self.open_directory(&parent)?;
+        let directory = self.open_directory(&ValidatedPath::from_components(parents))?;
         self.before_final_open();
         openat(&directory, name.as_ref(), flags, mode).map_err(map_open_error)
     }
@@ -453,17 +452,6 @@ impl Root {
         {
             hook();
         }
-    }
-}
-
-impl ValidatedPath {
-    fn from_components_for_open(components: &[Arc<str>]) -> Self {
-        let normalized = components
-            .iter()
-            .map(AsRef::as_ref)
-            .collect::<Vec<&str>>()
-            .join("/");
-        Self::from_validated_parts(Arc::from(components.to_vec()), Arc::from(normalized))
     }
 }
 
@@ -525,29 +513,11 @@ fn read_bounded(
     limit: usize,
     cancellation: &CancellationSignal,
 ) -> Result<Vec<u8>, ToolError> {
-    let mut file = File::from(fd);
-    read_bounded_file(&mut file, limit, cancellation)
-}
-
-fn read_bounded_fd(
-    fd: &OwnedFd,
-    limit: usize,
-    cancellation: &CancellationSignal,
-) -> Result<Vec<u8>, ToolError> {
-    let duplicate =
-        rustix::io::dup(fd).map_err(|_| io_error("filesystem handle duplication failed"))?;
-    read_bounded(duplicate, limit, cancellation)
-}
-
-fn read_bounded_file(
-    file: &mut File,
-    limit: usize,
-    cancellation: &CancellationSignal,
-) -> Result<Vec<u8>, ToolError> {
     check_cancelled(cancellation)?;
     let take_limit = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
     let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
-    file.take(take_limit)
+    File::from(fd)
+        .take(take_limit)
         .read_to_end(&mut bytes)
         .map_err(|_| io_error("filesystem read failed"))?;
     check_cancelled(cancellation)?;
@@ -558,6 +528,16 @@ fn read_bounded_file(
     } else {
         Ok(bytes)
     }
+}
+
+fn read_bounded_fd(
+    fd: &OwnedFd,
+    limit: usize,
+    cancellation: &CancellationSignal,
+) -> Result<Vec<u8>, ToolError> {
+    let duplicate =
+        rustix::io::dup(fd).map_err(|_| io_error("filesystem handle duplication failed"))?;
+    read_bounded(duplicate, limit, cancellation)
 }
 
 fn check_cancelled(cancellation: &CancellationSignal) -> Result<(), ToolError> {

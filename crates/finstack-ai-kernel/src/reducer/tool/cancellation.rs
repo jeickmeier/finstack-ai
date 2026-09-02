@@ -17,15 +17,12 @@ use super::records::{
     tool_settled_record,
 };
 
+/// Records, post-commit actions, and growth accounting produced after a tool
+/// settlement or a cancellation closes part of the active batch.
+#[derive(Default)]
 pub struct ToolFollowups {
     pub bodies: Vec<RecordBody>,
     pub actions: Vec<PostCommitAction>,
-    pub settlements: Vec<crate::EffectId>,
-    pub messages: usize,
-}
-
-pub struct CancellationToolFollowups {
-    pub bodies: Vec<RecordBody>,
     pub settlements: Vec<crate::EffectId>,
     pub messages: usize,
 }
@@ -113,13 +110,9 @@ pub(crate) fn cancellation_followups(
     env: &TransitionEnv,
     newly_completed: &[crate::EffectId],
     newly_cancelled: &[crate::EffectId],
-) -> Result<CancellationToolFollowups, KernelError> {
+) -> Result<ToolFollowups, KernelError> {
     let Some(mut batch) = state.active_tool_batch.clone() else {
-        return Ok(CancellationToolFollowups {
-            bodies: Vec::new(),
-            settlements: Vec::new(),
-            messages: 0,
-        });
+        return Ok(ToolFollowups::default());
     };
     let error = cancelled_error()?;
     let batch_id = batch.opened.tool_batch_id;
@@ -195,8 +188,9 @@ pub(crate) fn cancellation_followups(
         )?));
     }
     ensure_record_batch_bound(bodies.len())?;
-    Ok(CancellationToolFollowups {
+    Ok(ToolFollowups {
         bodies,
+        actions: Vec::new(),
         settlements,
         messages: message_count,
     })

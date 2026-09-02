@@ -15,7 +15,6 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 opentelemetry = { workspace = true, default-features = false, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace"] }
-serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 

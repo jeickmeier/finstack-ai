@@ -61,17 +61,15 @@ pub fn is_forbidden_destination(addr: IpAddr) -> bool {
     }
 }
 
-/// True only for the exact loopback addresses `127.0.0.1` and `::1` (after
-/// canonicalization, which collapses `::ffff:127.0.0.1` to `127.0.0.1`).
-/// Narrower than `IpAddr::is_loopback`, which accepts the whole
-/// `127.0.0.0/8` block — see `vet::is_loopback_host`.
-fn is_exact_loopback(addr: IpAddr) -> bool {
-    addr == IpAddr::V4(Ipv4Addr::LOCALHOST) || addr == IpAddr::V6(Ipv6Addr::LOCALHOST)
-}
-
+/// `allow_loopback` exempts only the exact loopback addresses `127.0.0.1`
+/// and `::1` (after canonicalization, which collapses `::ffff:127.0.0.1` to
+/// `127.0.0.1`) — narrower than `IpAddr::is_loopback`, which accepts the
+/// whole `127.0.0.0/8` block; see `vet::is_loopback_host`.
 fn blocked(addr: IpAddr, allow_loopback: bool) -> bool {
     let addr = addr.to_canonical();
-    if allow_loopback && is_exact_loopback(addr) {
+    let exact_loopback =
+        addr == IpAddr::V4(Ipv4Addr::LOCALHOST) || addr == IpAddr::V6(Ipv6Addr::LOCALHOST);
+    if allow_loopback && exact_loopback {
         return false;
     }
     is_forbidden_destination(addr)
@@ -143,16 +141,13 @@ pub async fn resolve_and_pin(
         .resolve(&vetted.host, vetted.port)
         .await
         .map_err(|_| NetGuardError::ResolutionFailed)?;
-    let mut chosen = None;
-    for addr in addrs {
-        if blocked(addr.ip(), allow_loopback) {
-            return Err(NetGuardError::DestinationBlocked {
-                reason: "resolved_address_forbidden",
-            });
-        }
-        if chosen.is_none() {
-            chosen = Some(addr);
-        }
+    if addrs.iter().any(|addr| blocked(addr.ip(), allow_loopback)) {
+        return Err(NetGuardError::DestinationBlocked {
+            reason: "resolved_address_forbidden",
+        });
     }
-    chosen.ok_or(NetGuardError::ResolutionFailed)
+    addrs
+        .into_iter()
+        .next()
+        .ok_or(NetGuardError::ResolutionFailed)
 }

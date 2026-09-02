@@ -13,7 +13,6 @@ use crate::primitives::{EffectId, EntryId, LaneId, RunId, SessionId};
 use crate::records::run::{
     ChildRunPrepared, RunAccepted, RunPropagationPolicy, RunRelation, RunSecurityContext,
 };
-use crate::records::tools::ToolCallSettled;
 use crate::records::{LaneCreated, LaneMoved, RecordBody, RecordEnvelope};
 
 /// Canonical conversation entry with an immutable parent link.
@@ -611,14 +610,11 @@ impl SessionProjection {
                 if entry.lane_id() != draft.lane_id() {
                     return Err(ConversationError::EnvelopeMismatch);
                 }
-                if !self.lanes.contains_key(&draft.lane_id()) {
+                let Some(lane) = self.lanes.get_mut(&draft.lane_id()) else {
                     return Err(ConversationError::UnknownLane);
-                }
+                };
                 apply_conversation_entry(&mut self.entries, entry.clone())?;
-                self.lanes
-                    .get_mut(&draft.lane_id())
-                    .ok_or(ConversationError::UnknownLane)?
-                    .leaf_id = Some(entry.id());
+                lane.leaf_id = Some(entry.id());
             }
             RecordBody::LaneMoved(moved) => {
                 self.apply_lane_moved(draft.lane_id(), moved)?;
@@ -665,7 +661,7 @@ impl SessionProjection {
                 )?;
             }
             RecordBody::ToolCallSettled(settled) => {
-                self.synthesize_from_tool(settled, record)?;
+                self.synthesize_from_message(&settled.message, record, None)?;
             }
             RecordBody::RunAccepted(accepted) => {
                 self.apply_run_accepted(record.lane_id(), accepted);
@@ -735,16 +731,13 @@ impl SessionProjection {
         lane_id: LaneId,
         moved: &LaneMoved,
     ) -> Result<(), ConversationError> {
-        if !self.lanes.contains_key(&lane_id) {
+        let Some(lane) = self.lanes.get_mut(&lane_id) else {
             return Err(ConversationError::UnknownLane);
-        }
+        };
         if !self.entries.contains_key(&moved.leaf_id()) {
             return Err(ConversationError::UnknownLeaf);
         }
-        self.lanes
-            .get_mut(&lane_id)
-            .ok_or(ConversationError::UnknownLane)?
-            .leaf_id = Some(moved.leaf_id());
+        lane.leaf_id = Some(moved.leaf_id());
         Ok(())
     }
 
@@ -770,14 +763,6 @@ impl SessionProjection {
             lane.leaf_id = Some(id);
         }
         Ok(())
-    }
-
-    fn synthesize_from_tool(
-        &mut self,
-        settled: &ToolCallSettled,
-        record: &RecordEnvelope,
-    ) -> Result<(), ConversationError> {
-        self.synthesize_from_message(&settled.message, record, None)
     }
 
     fn apply_run_accepted(&mut self, lane_id: LaneId, accepted: &RunAccepted) {

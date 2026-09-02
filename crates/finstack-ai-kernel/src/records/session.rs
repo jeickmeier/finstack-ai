@@ -12,7 +12,8 @@ use crate::primitives::EntryId;
 use crate::primitives::Metadata;
 
 /// Session-creation body. Labels live in [`Metadata`] (Architecture §9.2).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionCreated {
     metadata: Metadata,
 }
@@ -28,21 +29,6 @@ impl SessionCreated {
     #[must_use]
     pub fn metadata(&self) -> &Metadata {
         &self.metadata
-    }
-}
-
-impl<'de> Deserialize<'de> for SessionCreated {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Wire {
-            metadata: Metadata,
-        }
-        let wire = Wire::deserialize(deserializer)?;
-        Ok(Self::new(wire.metadata))
     }
 }
 
@@ -104,7 +90,8 @@ impl<'de> Deserialize<'de> for LaneCreated {
 }
 
 /// Lane leaf-pointer body. The envelope carries `lane_id`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LaneMoved {
     leaf_id: EntryId,
 }
@@ -123,23 +110,9 @@ impl LaneMoved {
     }
 }
 
-impl<'de> Deserialize<'de> for LaneMoved {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Wire {
-            leaf_id: EntryId,
-        }
-        let wire = Wire::deserialize(deserializer)?;
-        Ok(Self::new(wire.leaf_id))
-    }
-}
-
 /// Disposable snapshot-written body. Bytes stay on `write_snapshot`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SnapshotWritten {
     sequence: u64,
     digest: Digest,
@@ -162,22 +135,6 @@ impl SnapshotWritten {
     #[must_use]
     pub const fn digest(&self) -> Digest {
         self.digest
-    }
-}
-
-impl<'de> Deserialize<'de> for SnapshotWritten {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Wire {
-            sequence: u64,
-            digest: Digest,
-        }
-        let wire = Wire::deserialize(deserializer)?;
-        Ok(Self::new(wire.sequence, wire.digest))
     }
 }
 

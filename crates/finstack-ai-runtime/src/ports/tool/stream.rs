@@ -12,7 +12,7 @@ use super::error::{
 };
 use super::types::{ToolDeferral, ToolEventStream, ToolResult, ToolStreamItem};
 use super::validator::ToolValidator;
-use crate::ports::model::ToolDeferralSupport;
+use crate::ports::model::{ToolDeferralSupport, usage_regressed, usage_total_consistent};
 
 /// Maximum exact artifact references accepted before one tool terminal.
 pub const MAX_TOOL_RESULT_ARTIFACTS: usize = 64;
@@ -277,49 +277,12 @@ pub fn normalize_tool_result(
 
 fn validate_usage(current: &Usage, previous: Option<&Usage>) -> Result<(), ToolError> {
     current.validate().map_err(|_| stream_invalid())?;
-    if let (Some(input), Some(output), Some(total)) = (
-        current.input_tokens(),
-        current.output_tokens(),
-        current.total_tokens(),
-    ) && input.checked_add(output) != Some(total)
-    {
-        return Err(stream_invalid());
-    }
-    if let Some(previous) = previous
-        && (regressed(previous.input_tokens(), current.input_tokens())
-            || regressed(previous.output_tokens(), current.output_tokens())
-            || regressed(previous.total_tokens(), current.total_tokens())
-            || cost_regressed(previous, current)
-            || previous.extension_counters().iter().any(|(key, value)| {
-                current
-                    .extension_counters()
-                    .get(key)
-                    .is_none_or(|current| current < value)
-            }))
+    if !usage_total_consistent(current)
+        || previous.is_some_and(|previous| usage_regressed(previous, current))
     {
         return Err(stream_invalid());
     }
     Ok(())
-}
-
-fn cost_regressed(previous: &Usage, current: &Usage) -> bool {
-    match (previous.cost(), current.cost()) {
-        (Some(_), None) => true,
-        (Some(previous), Some(current)) => {
-            previous.unit() != current.unit()
-                || previous.pricing_policy_version() != current.pricing_policy_version()
-                || previous.micros() > current.micros()
-        }
-        _ => false,
-    }
-}
-
-fn regressed(previous: Option<u64>, current: Option<u64>) -> bool {
-    match (previous, current) {
-        (Some(_), None) => true,
-        (Some(previous), Some(current)) => current < previous,
-        _ => false,
-    }
 }
 
 fn add_stream_bytes(total: &mut usize, add: usize, max: usize) -> Result<(), ToolError> {

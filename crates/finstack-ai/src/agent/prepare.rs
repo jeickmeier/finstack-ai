@@ -28,7 +28,9 @@ use finstack_ai_runtime::run::{
     ModelTaskConfig, RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
     ToolTaskConfig,
 };
-use finstack_ai_runtime::session::{LaneAppendIds, SessionCreateIds, SessionError, SessionRuntime};
+use finstack_ai_runtime::session::{
+    LaneAppendIds, LaneRunContext, SessionCreateIds, SessionError, SessionRuntime,
+};
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;
@@ -60,13 +62,6 @@ pub(super) struct PreparedAgentRun {
     pub(super) request: AgentRunRequest,
     pub(super) locator: OperationLocator,
     pub(super) session: Option<crate::Session>,
-}
-
-pub(super) struct RunContextSeed {
-    pub(super) messages: Arc<[Message]>,
-    pub(super) source_leaf_id: finstack_ai_kernel::EntryId,
-    pub(super) journal_sequence: u64,
-    pub(super) head_checksum: Option<Digest>,
 }
 
 const OWNER_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -254,10 +249,13 @@ impl Agent {
                 }
             }
         };
+        let session_id = prepared.session_id;
+        let lane_id = prepared.lane_id;
+        let run_id = prepared.accepted.run_id();
         let context_seed = match append_lane_input(
             &runtime,
-            prepared.lane_id,
-            prepared.accepted.run_id(),
+            lane_id,
+            run_id,
             &prepared.request.input,
             &prepared.request.attachments,
         )
@@ -269,34 +267,25 @@ impl Agent {
                 return Err(error);
             }
         };
-        let seeded_leaf = runtime.projection().ok().and_then(|projection| {
-            projection
-                .lane_by_id(prepared.lane_id)
-                .and_then(|lane| lane.leaf_id)
-        });
+        let seeded_leaf = runtime
+            .projection()
+            .ok()
+            .and_then(|projection| projection.lane_by_id(lane_id).and_then(|lane| lane.leaf_id));
         if seeded_leaf != Some(context_seed.source_leaf_id)
             || context_seed.journal_sequence == 0
             || context_seed.head_checksum.is_none()
         {
-            runtime.release_run(prepared.lane_id, prepared.accepted.run_id());
+            runtime.release_run(lane_id, run_id);
             let error = AgentRunError::runtime_message(
                 "accepted lane context does not match the confirmed session head",
             );
             publish_start_failure(execution, &error);
             return Err(error);
         }
-        let acquired_lane = Some((
-            Arc::clone(&runtime),
-            prepared.lane_id,
-            prepared.accepted.run_id(),
-        ));
-        let mut coordinator = match runtime
-            .coordinator_for_run(Some(prepared.accepted.run_id()))
-            .await
-        {
+        let mut coordinator = match runtime.coordinator_for_run(Some(run_id)).await {
             Ok(coordinator) => coordinator,
             Err(error) => {
-                runtime.release_run(prepared.lane_id, prepared.accepted.run_id());
+                runtime.release_run(lane_id, run_id);
                 let error = session_error(&error);
                 publish_start_failure(execution, &error);
                 return Err(error);
@@ -304,7 +293,7 @@ impl Agent {
         };
         coordinator
             .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
-        coordinator.install_capability_owners(self.capability_index().as_arc_owners());
+        coordinator.install_capability_owners(self.capability_index.as_arc_owners());
         let providers: Arc<[Arc<dyn ContextProvider>]> = self
             .resolved
             .run_plan()
@@ -315,11 +304,7 @@ impl Agent {
             .into();
         coordinator.install_context_providers(providers);
         if let Ok(mut cache) = self.history_cache.lock()
-            && let Some(checkpoint) = cache.candidate(
-                prepared.session_id,
-                prepared.lane_id,
-                prepared.profile.digest,
-            )
+            && let Some(checkpoint) = cache.candidate(session_id, lane_id, prepared.profile.digest)
         {
             coordinator.seed_compaction_checkpoint(checkpoint);
         }
@@ -365,31 +350,28 @@ impl Agent {
         let mut owner = match owner {
             Ok(owner) => owner,
             Err(error) => {
-                if let Some((runtime, lane_id, run_id)) = &acquired_lane {
-                    runtime.release_run(*lane_id, *run_id);
-                }
+                runtime.release_run(lane_id, run_id);
                 publish_start_failure(execution, &error);
                 return Err(error);
             }
         };
         let handle = owner.handle();
-        if let Some((runtime, lane_id, run_id)) = &acquired_lane
-            && let Err(error) = runtime.bind_run_handle(*lane_id, *run_id, handle.clone())
-        {
+        if let Err(error) = runtime.bind_run_handle(lane_id, run_id, handle.clone()) {
             let _shutdown = owner.shutdown().await;
-            runtime.release_run(*lane_id, *run_id);
+            runtime.release_run(lane_id, run_id);
             let error = session_error(&error);
             publish_start_failure(execution, &error);
             return Err(error);
         }
-        let subscription = match handle.subscribe_events(default_event_subscription()).await {
+        let subscription = match handle
+            .subscribe_events(event_subscription(Sensitivity::Confidential))
+            .await
+        {
             Ok(subscription) => subscription,
             Err(error) => {
                 let error = AgentRunError::runtime_message(error.to_string());
                 let _shutdown = owner.shutdown().await;
-                if let Some((runtime, lane_id, run_id)) = &acquired_lane {
-                    runtime.release_run(*lane_id, *run_id);
-                }
+                runtime.release_run(lane_id, run_id);
                 publish_start_failure(execution, &error);
                 return Err(error);
             }
@@ -399,14 +381,12 @@ impl Agent {
         let timeout = prepared.request.timeout;
         let locator = prepared.locator.clone();
         let effective_deadline = prepared.accepted.effective_deadline();
-        let cache_session_id = prepared.session_id;
-        let cache_lane_id = prepared.lane_id;
         let result = driver::timeout(
             timeout,
             Box::pin(self.drive(
                 &handle,
-                prepared.session_id,
-                prepared.lane_id,
+                session_id,
+                lane_id,
                 prepared.accepted,
                 prepared.request,
                 prepared.profile,
@@ -437,60 +417,59 @@ impl Agent {
             Err(_) => settle_deadline_timeout(&handle, locator, timeout, effective_deadline).await,
         };
         let shutdown = owner.shutdown().await;
-        if let Some((runtime, lane_id, run_id)) = acquired_lane {
-            let graceful = matches!(
-                shutdown.outcome,
-                finstack_ai_runtime::run::ShutdownOutcome::Graceful
-            ) && !matches!(
-                handle.status(),
-                finstack_ai_runtime::run::RunStatus::Faulted { .. }
-            );
-            if graceful {
-                let Some(update) = owner.take_session_head() else {
-                    let _invalidated = runtime.invalidate_session_head();
-                    runtime.release_run(lane_id, run_id);
-                    return Err(runtime_uncertainty(
-                        "graceful owner shutdown did not retain a confirmed session head",
-                    ));
-                };
-                if let Err(error) = runtime.adopt_session_head(update).await {
-                    let _invalidated = runtime.invalidate_session_head();
-                    runtime.release_run(lane_id, run_id);
-                    return Err(session_error(&error));
-                }
-                if let Some(checkpoint) = owner.take_compaction_checkpoint()
-                    && let Ok(mut cache) = self.history_cache.lock()
-                {
-                    cache.insert(cache_session_id, cache_lane_id, checkpoint);
-                }
-            } else if let Err(error) = runtime.invalidate_session_head() {
+        let graceful = matches!(
+            shutdown.outcome,
+            finstack_ai_runtime::run::ShutdownOutcome::Graceful
+        ) && !matches!(
+            handle.status(),
+            finstack_ai_runtime::run::RunStatus::Faulted { .. }
+        );
+        if graceful {
+            let Some(update) = owner.take_session_head() else {
+                let _invalidated = runtime.invalidate_session_head();
+                runtime.release_run(lane_id, run_id);
+                return Err(runtime_uncertainty(
+                    "graceful owner shutdown did not retain a confirmed session head",
+                ));
+            };
+            if let Err(error) = runtime.adopt_session_head(update).await {
+                let _invalidated = runtime.invalidate_session_head();
                 runtime.release_run(lane_id, run_id);
                 return Err(session_error(&error));
             }
-            if let Ok(output) = &result
-                && let Err(error) = runtime
-                    .append_message_from_run(
-                        lane_id,
-                        run_id,
-                        &output.message,
-                        LaneAppendIds {
-                            entry_record_id: NativeIds::generate()?,
-                            lane_moved_record_id: NativeIds::generate()?,
-                            batch_id: NativeIds::generate()?,
-                        },
-                    )
-                    .await
+            if let Some(checkpoint) = owner.take_compaction_checkpoint()
+                && let Ok(mut cache) = self.history_cache.lock()
             {
-                runtime.release_run(lane_id, run_id);
-                return Err(session_error(&error));
+                cache.insert(session_id, lane_id, checkpoint);
             }
+        } else if let Err(error) = runtime.invalidate_session_head() {
             runtime.release_run(lane_id, run_id);
+            return Err(session_error(&error));
         }
+        if let Ok(output) = &result
+            && let Err(error) = runtime
+                .append_message_from_run(
+                    lane_id,
+                    run_id,
+                    &output.message,
+                    LaneAppendIds {
+                        entry_record_id: NativeIds::generate()?,
+                        lane_moved_record_id: NativeIds::generate()?,
+                        batch_id: NativeIds::generate()?,
+                    },
+                )
+                .await
+        {
+            runtime.release_run(lane_id, run_id);
+            return Err(session_error(&error));
+        }
+        runtime.release_run(lane_id, run_id);
         result
     }
+
     pub(super) fn context_messages(
         &self,
-        seed: &RunContextSeed,
+        seed: &LaneRunContext,
         committed: &[Message],
         extra_capability_instructions: &[crate::InstructionSpec],
     ) -> Result<Arc<[Message]>, AgentRunError> {
@@ -558,26 +537,6 @@ impl NativeIds {
                 generate_many::<MessageTag>(messages)?,
                 generate_many::<TurnTag>(turns)?,
                 generate_many::<ModelRequestTag>(model_requests)?,
-                Vec::new(),
-                Vec::new(),
-                generate_many::<AppendBatchTag>(1)?,
-                Vec::new(),
-            )
-            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?,
-        })
-    }
-
-    pub(super) fn interaction_resolve_environment() -> Result<TransitionEnv, AgentRunError> {
-        Ok(TransitionEnv {
-            now: Self::now()?,
-            ids: AllocatedIds::try_new(
-                generate_many::<RecordTag>(2)?,
-                generate_many::<EventTag>(2)?,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 generate_many::<AppendBatchTag>(1)?,
@@ -955,7 +914,7 @@ pub(super) fn model_output_contract() -> EffectOutputContract {
     }
 }
 
-fn session_error(error: &SessionError) -> AgentRunError {
+pub(super) fn session_error(error: &SessionError) -> AgentRunError {
     AgentRunError::configuration(error.code(), error.to_string())
 }
 
@@ -1007,7 +966,7 @@ async fn append_lane_input(
     run_id: finstack_ai_kernel::RunId,
     input: &str,
     attachments: &[AttachmentInput],
-) -> Result<RunContextSeed, AgentRunError> {
+) -> Result<LaneRunContext, AgentRunError> {
     let now = NativeIds::now()?;
     let message = text_message(
         NativeIds::generate::<MessageTag>()?,
@@ -1028,12 +987,6 @@ async fn append_lane_input(
             },
         )
         .await
-        .map(|context| RunContextSeed {
-            messages: context.messages,
-            source_leaf_id: context.source_leaf_id,
-            journal_sequence: context.journal_sequence,
-            head_checksum: context.head_checksum,
-        })
         .map_err(|error| session_error(&error))
 }
 
@@ -1101,27 +1054,6 @@ fn run_task_config(observer_count: usize, approval_grant: ApprovalGrantMode) -> 
     }
 }
 
-fn observer_event_subscription() -> EventSubscriptionConfig {
-    EventSubscriptionConfig {
-        queue_capacity: DEFAULT_QUEUE_CAPACITY,
-        filter: EventFilter {
-            include_durable: true,
-            include_transient: true,
-            kinds: Arc::from([]),
-            max_sensitivity: Sensitivity::Credential,
-        },
-        batching: EventBatchConfig {
-            flush_count: DEFAULT_EVENT_BATCH_COUNT,
-            flush_bytes: DEFAULT_EVENT_BATCH_BYTES,
-            flush_interval: DEFAULT_EVENT_BATCH_INTERVAL,
-        },
-        progress_coalescing: ProgressCoalescing::Enabled,
-        lag_policy: EventLagPolicy::DropProgress {
-            durable_timeout: Duration::from_secs(2),
-        },
-    }
-}
-
 async fn attach_plan_observers(
     owner: &mut RunTaskOwner,
     observers: &[crate::ResolvedComponent<dyn Observer>],
@@ -1130,20 +1062,20 @@ async fn attach_plan_observers(
         let _ = owner
             .attach_observer(
                 Arc::clone(component.handle()),
-                observer_event_subscription(),
+                event_subscription(Sensitivity::Credential),
             )
             .await;
     }
 }
 
-fn default_event_subscription() -> EventSubscriptionConfig {
+fn event_subscription(max_sensitivity: Sensitivity) -> EventSubscriptionConfig {
     EventSubscriptionConfig {
         queue_capacity: DEFAULT_QUEUE_CAPACITY,
         filter: EventFilter {
             include_durable: true,
             include_transient: true,
             kinds: Arc::from([]),
-            max_sensitivity: Sensitivity::Confidential,
+            max_sensitivity,
         },
         batching: EventBatchConfig {
             flush_count: DEFAULT_EVENT_BATCH_COUNT,

@@ -4,14 +4,12 @@
 //! [`LocalArtifactStore`](crate::LocalArtifactStore) surface.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::driver::{
     ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
-    ObjectScope, ObjectStoreLimits, PageToken, PutPayload, physical_object_key,
-    validate_object_metadata,
+    ObjectScope, ObjectStoreLimits, PageToken, physical_object_key, validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
 use finstack_ai_runtime::Bytes;
@@ -26,27 +24,18 @@ struct StoredObject {
     scope_digest: Digest,
     content: Bytes,
     content_digest: Digest,
-    media_type: Arc<str>,
 }
 
 fn prepare_object(
     limits: ObjectStoreLimits,
     scope: &ObjectScope,
     key: ObjectKey,
-    content: PutPayload,
+    content: Bytes,
     metadata: ObjectMetadata,
 ) -> Result<(String, StoredObject, ObjectRef), ObjectError> {
     validate_object_metadata(&metadata)?;
     let scope_digest = scope.digest()?;
-    let bytes = match content {
-        PutPayload::Bytes(bytes) => bytes,
-        PutPayload::File(path) => {
-            let data = std::fs::read(&path).map_err(|error| ObjectError::Io {
-                message: Arc::from(error.to_string()),
-            })?;
-            Bytes::from(data)
-        }
-    };
+    let bytes = content;
     let length = u64::try_from(bytes.len()).map_err(|_error| ObjectError::Io {
         message: Arc::from("length_overflow"),
     })?;
@@ -62,7 +51,6 @@ fn prepare_object(
         scope_digest,
         content: bytes,
         content_digest,
-        media_type: Arc::clone(&metadata.media_type),
     };
     let object_ref = ObjectRef {
         key,
@@ -77,9 +65,7 @@ fn prepare_object(
 /// In-memory [`ObjectDriver`] fake intended for unit and contract tests.
 ///
 /// Objects are keyed by [`physical_object_key`] with no key prefix, exactly
-/// as the S3 and local-filesystem backends will key theirs. Presign support
-/// is unconditional (returns an opaque `fake://` URL) so this fake also
-/// exercises the presign-supported half of the contract suite.
+/// as the S3 backend keys its own.
 pub struct FakeObjectDriver {
     limits: ObjectStoreLimits,
     objects: Mutex<BTreeMap<String, StoredObject>>,
@@ -123,7 +109,7 @@ impl ObjectDriver for FakeObjectDriver {
         &self,
         scope: ObjectScope,
         key: ObjectKey,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let result = (|| {
@@ -164,81 +150,6 @@ impl ObjectDriver for FakeObjectDriver {
         Box::pin(async move { result })
     }
 
-    fn get_to_file(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-        dest: PathBuf,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
-        let poisoned = self.poison_next_get.swap(false, Ordering::SeqCst);
-        let result = (|| {
-            let scope_digest = scope.digest()?;
-            let physical = physical_object_key(None, &scope_digest, &key);
-            let objects = self.lock()?;
-            let stored = objects.get(&physical).ok_or(ObjectError::NotFound)?;
-            if stored.scope_digest != scope_digest {
-                return Err(ObjectError::ScopeMismatch {
-                    expected: scope_digest,
-                    actual: stored.scope_digest,
-                });
-            }
-            std::fs::write(&dest, &stored.content).map_err(|error| ObjectError::Io {
-                message: Arc::from(error.to_string()),
-            })?;
-            if poisoned {
-                return Err(ObjectError::Integrity {
-                    message: Arc::from("injected_failure"),
-                });
-            }
-            if Digest::blob_content(&stored.content) != stored.content_digest {
-                return Err(ObjectError::Integrity {
-                    message: Arc::from("digest_mismatch"),
-                });
-            }
-            let length = u64::try_from(stored.content.len()).map_err(|_error| ObjectError::Io {
-                message: Arc::from("length_overflow"),
-            })?;
-            Ok(ObjectRef {
-                key,
-                scope_digest,
-                content_digest: stored.content_digest,
-                length,
-                media_type: Arc::clone(&stored.media_type),
-            })
-        })();
-        Box::pin(async move { result })
-    }
-
-    fn head(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
-        let result = (|| {
-            let scope_digest = scope.digest()?;
-            let physical = physical_object_key(None, &scope_digest, &key);
-            let objects = self.lock()?;
-            let stored = objects.get(&physical).ok_or(ObjectError::NotFound)?;
-            if stored.scope_digest != scope_digest {
-                return Err(ObjectError::ScopeMismatch {
-                    expected: scope_digest,
-                    actual: stored.scope_digest,
-                });
-            }
-            let length = u64::try_from(stored.content.len()).map_err(|_error| ObjectError::Io {
-                message: Arc::from("length_overflow"),
-            })?;
-            Ok(ObjectRef {
-                key,
-                scope_digest,
-                content_digest: stored.content_digest,
-                length,
-                media_type: Arc::clone(&stored.media_type),
-            })
-        })();
-        Box::pin(async move { result })
-    }
-
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>> {
         let result = (|| {
             let scope_digest = scope.digest()?;
@@ -254,7 +165,7 @@ impl ObjectDriver for FakeObjectDriver {
         &self,
         scope: ObjectScope,
         key: ObjectKey,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let result = (|| {
@@ -275,7 +186,7 @@ impl ObjectDriver for FakeObjectDriver {
         scope: ObjectScope,
         key: ObjectKey,
         expected: Digest,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let result = (|| {

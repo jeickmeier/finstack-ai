@@ -183,7 +183,6 @@ pub use finstack_ai_runtime::session::{
     MemoryExternalIdentityMap, SessionError, SessionInspectPhase, SessionInspectSnapshot,
     inspect_session,
 };
-pub(crate) use registry::ReadyComponent;
 pub use registry::{
     AGENT_BUILD_CANCELLED, AGENT_BUILD_CONFIGURATION_CONFLICT, AGENT_BUILD_DUPLICATE_SELECTION,
     AGENT_BUILD_FACTORY_FAILED, AGENT_BUILD_INVALID_DESCRIPTOR, AGENT_BUILD_KIND_MISMATCH,

@@ -9,7 +9,7 @@ use finstack_ai::runtime::ports::observer::{
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Sensitivity};
 use serde::Deserialize;
 
-use crate::host::{HostFailure, host_component_version};
+use crate::host::{HOST_VERSION, HostFailure};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::host::NativeHostResult;
@@ -45,7 +45,7 @@ pub struct HostObserver {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    observe: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    observe: js_sys::Function,
 }
 
 impl HostObserver {
@@ -58,7 +58,7 @@ impl HostObserver {
         let component = ComponentRef::new(
             ComponentId::parse(&options.component)
                 .map_err(|_| ObserverError::ConfigurationInvalid)?,
-            Some(host_component_version()),
+            Some(HOST_VERSION),
         );
         let payload_mode = parse_payload_mode(&options.payload_mode)
             .map_err(|_| ObserverError::ConfigurationInvalid)?;
@@ -73,7 +73,7 @@ impl HostObserver {
             #[cfg(target_arch = "wasm32")]
             adapter,
             #[cfg(target_arch = "wasm32")]
-            observe: std::rc::Rc::new(std::cell::RefCell::new(observe)),
+            observe,
         })
     }
 
@@ -140,12 +140,12 @@ impl Observer for HostObserver {
         #[cfg(target_arch = "wasm32")]
         {
             let adapter = self.adapter.clone();
-            let method = self.observe.borrow().clone();
+            let method = self.observe.clone();
             Box::pin(async move {
                 crate::host::invoke_host(
                     &adapter,
                     &method,
-                    &[crate::host::json_string_value(&encoded)],
+                    &[wasm_bindgen::JsValue::from_str(&encoded)],
                     None,
                 )
                 .await

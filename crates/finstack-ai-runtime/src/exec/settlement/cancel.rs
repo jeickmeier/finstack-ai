@@ -1,8 +1,8 @@
+use std::future::Future;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ActiveToolCallStatus, CancellationReconciledInput, EffectId, KernelInput, RetrySafety,
-    RunPhase, TransitionEnv,
+    ActiveToolCallStatus, CancellationReconciledInput, EffectId, KernelInput, RetrySafety, RunPhase,
 };
 
 use crate::coordinator::CommitCoordinator;
@@ -10,7 +10,7 @@ use crate::ids::{Clock, RandomSource};
 use crate::run_types::RunHandleError;
 
 use super::SettlementSources;
-use super::ids::allocate_for_runtime_input;
+use super::ids::submit_runtime_input;
 
 enum IdleCancelClass {
     Cancelled,
@@ -69,22 +69,20 @@ async fn reconcile_classified_effect<C: Clock, R: RandomSource>(
     .await
 }
 
-async fn reconcile_effect_sets<C: Clock, R: RandomSource>(
-    coordinator: &mut CommitCoordinator,
-    sources: &SettlementSources<C, R>,
+fn reconcile_effect_sets<'a, C: Clock, R: RandomSource>(
+    coordinator: &'a mut CommitCoordinator,
+    sources: &'a SettlementSources<C, R>,
     reconciliation: CancellationReconciledInput,
-) -> Result<(), RunHandleError> {
-    let input = KernelInput::CancellationReconciled(reconciliation);
-    let now = sources.now()?;
-    let ids = allocate_for_runtime_input(coordinator, now, &input, sources)?;
-    let outcome = coordinator
-        .submit(TransitionEnv { now, ids }, input)
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
-    Ok(())
+) -> impl Future<Output = Result<(), RunHandleError>> + 'a {
+    submit_runtime_input(
+        coordinator,
+        KernelInput::CancellationReconciled(reconciliation),
+        sources,
+        |code| RunHandleError::CancellationSettlement { code },
+        |_| RunHandleError::CancellationSettlement {
+            code: "runtime_input_rejected",
+        },
+    )
 }
 
 pub(crate) async fn drain_idle_cancellation<C: Clock, R: RandomSource>(

@@ -7,7 +7,7 @@ use futures_util::StreamExt;
 use serde::Serialize;
 use wasm_bindgen::JsValue;
 
-use crate::host::{HostFailure, HostModelOptions, parse_model_options};
+use crate::host::{HostFailure, HostModelOptions, parse_host_json};
 use crate::host_model::HostModel;
 use crate::host_store::{HostJournalStore, HostJournalStoreOptions};
 use crate::host_toolset::{HostToolset, HostToolsetOptions};
@@ -73,8 +73,8 @@ pub async fn drive_scripted_model_request(
     options: JsValue,
     signal: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let options: HostModelOptions = parse_model_options(&stringify_js(&options)?)
-        .map_err(|_| js_error("invalid host options"))?;
+    let options: HostModelOptions =
+        parse_host_json(&stringify_js(&options)?).map_err(|_| js_error("invalid host options"))?;
     let model =
         HostModel::from_js(adapter, options).map_err(|_| js_error("invalid host options"))?;
     let cancellation = CancellationSignal::new();

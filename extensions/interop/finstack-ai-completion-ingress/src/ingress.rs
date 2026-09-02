@@ -3,16 +3,24 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    AuthorizationEvidence, EffectId, OperationLocator, PrincipalRef, Timestamp,
+    AuthorizationEvidence, EffectId, ExternalEffectCompletion, ExternalEffectCompletionCommand,
+    ExternalEffectOutcome, OperationLocator, PrincipalRef, Timestamp,
 };
-use finstack_ai_runtime::audit::SecurityAuditGate;
+use finstack_ai_runtime::audit::{SecurityAuditCategory, SecurityAuditGate};
+use finstack_ai_runtime::ingress::{
+    ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome,
+};
 use finstack_ai_runtime::ports::journal::{IdempotencyHorizon, JournalStore};
 use thiserror::Error;
 
+use crate::audit::{audit_and_reject, ingress_audit_event};
 use crate::config::{
     CompletionIngressConfig, CompletionIngressConfigError, ResolvedKeys, validated_keys,
 };
-use crate::token::{CLAIMS_VERSION, CallbackToken, Claims, KIND_EFFECT_COMPLETION, mint_token};
+use crate::token::{
+    CLAIMS_VERSION, CallbackToken, Claims, KIND_EFFECT_COMPLETION, VerifyFailure, mint_token,
+    verify_token,
+};
 
 /// Caller-visible delivery failures.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -141,7 +149,7 @@ impl CompletionIngress {
             effect_id: grant.effect_id,
             expires_at: grant.expires_at,
         };
-        mint_token(&self.keys, &claims).map_err(|_| MintError::Encoding)
+        mint_token(&self.keys, &claims)
     }
 
     /// Deliver one external completion: verify the token, decode the body,
@@ -158,29 +166,27 @@ impl CompletionIngress {
         token: &str,
         body: &[u8],
         submitted_at: Timestamp,
-    ) -> Result<finstack_ai_runtime::ingress::ExternalRouteOutcome, IngressError> {
-        use finstack_ai_runtime::audit::SecurityAuditCategory;
-
-        let claims = match crate::token::verify_token(&self.keys, token, submitted_at) {
+    ) -> Result<ExternalRouteOutcome, IngressError> {
+        let claims = match verify_token(&self.keys, token, submitted_at) {
             Ok(claims) => claims,
             Err(failure) => {
                 let (category, reason) = match failure {
-                    crate::token::VerifyFailure::Malformed => {
+                    VerifyFailure::Malformed => {
                         (SecurityAuditCategory::MalformedToken, "malformed_token")
                     }
-                    crate::token::VerifyFailure::UnknownKey => {
+                    VerifyFailure::UnknownKey => {
                         (SecurityAuditCategory::AuthenticationFailure, "unknown_key")
                     }
-                    crate::token::VerifyFailure::BadSignature => (
+                    VerifyFailure::BadSignature => (
                         SecurityAuditCategory::AuthenticationFailure,
                         "bad_signature",
                     ),
-                    crate::token::VerifyFailure::Expired => (
+                    VerifyFailure::Expired => (
                         SecurityAuditCategory::AuthenticationFailure,
                         "expired_token",
                     ),
                 };
-                let event = crate::audit::ingress_audit_event(
+                let event = ingress_audit_event(
                     category,
                     reason,
                     None,
@@ -189,77 +195,72 @@ impl CompletionIngress {
                     body,
                     submitted_at,
                 );
-                return Err(crate::audit::audit_and_reject(&self.audit, event).await);
+                return Err(audit_and_reject(&self.audit, event).await);
             }
         };
 
-        let reject_body = |reason: &'static str, claims: &crate::token::Claims| {
-            crate::audit::ingress_audit_event(
-                SecurityAuditCategory::MalformedToken,
-                reason,
-                Some(claims.principal.clone()),
-                Some(claims.locator.tenant_scope.as_ref()),
-                token.as_bytes(),
-                body,
-                submitted_at,
-            )
+        let command = match decode_command(&claims, body) {
+            Ok(command) => command,
+            Err(reason) => {
+                let event = ingress_audit_event(
+                    SecurityAuditCategory::MalformedToken,
+                    reason,
+                    Some(claims.principal.clone()),
+                    Some(claims.locator.tenant_scope.as_ref()),
+                    token.as_bytes(),
+                    body,
+                    submitted_at,
+                );
+                return Err(audit_and_reject(&self.audit, event).await);
+            }
         };
 
-        if body.len() > MAX_BODY_BYTES {
-            let event = reject_body("oversize_body", &claims);
-            return Err(crate::audit::audit_and_reject(&self.audit, event).await);
-        }
-        let Ok(decoded) = serde_json::from_slice::<DeliveryBody>(body) else {
-            let event = reject_body("invalid_body", &claims);
-            return Err(crate::audit::audit_and_reject(&self.audit, event).await);
-        };
-        let completion_id = decoded
-            .completion_id
-            .unwrap_or_else(|| claims.effect_id.to_canonical_string());
-        let Ok(completion) = finstack_ai_kernel::ExternalEffectCompletion::try_new(
-            claims.effect_id,
-            completion_id,
-            decoded.outcome,
-        ) else {
-            let event = reject_body("invalid_body", &claims);
-            return Err(crate::audit::audit_and_reject(&self.audit, event).await);
-        };
-        let Ok(command) = finstack_ai_kernel::ExternalEffectCompletionCommand::try_new(
-            claims.locator.clone(),
-            claims.principal.clone(),
-            claims.authorization.clone(),
-            completion,
-        ) else {
-            let event = reject_body("invalid_body", &claims);
-            return Err(crate::audit::audit_and_reject(&self.audit, event).await);
-        };
-
-        let mut router = finstack_ai_runtime::ingress::ExternalCompletionRouter::new(
-            Arc::clone(&self.store),
-            Arc::clone(&self.audit),
-        );
+        let mut router =
+            ExternalCompletionRouter::new(Arc::clone(&self.store), Arc::clone(&self.audit));
         if let Some(horizon) = self.horizon {
             router = router.with_horizon(horizon);
         }
         Box::pin(router.route(command, submitted_at))
             .await
             .map_err(|error| match error {
-                finstack_ai_runtime::ingress::ExternalRouteError::IngressRejected
-                | finstack_ai_runtime::ingress::ExternalRouteError::InvalidNormalizedCommand => {
-                    IngressError::Rejected
-                }
-                finstack_ai_runtime::ingress::ExternalRouteError::IdAllocation => {
-                    IngressError::Unavailable {
-                        reason_code: "id_allocation",
-                    }
-                }
-                finstack_ai_runtime::ingress::ExternalRouteError::Runtime(_) => {
-                    IngressError::Unavailable {
-                        reason_code: "runtime",
-                    }
-                }
+                ExternalRouteError::IngressRejected
+                | ExternalRouteError::InvalidNormalizedCommand => IngressError::Rejected,
+                ExternalRouteError::IdAllocation => IngressError::Unavailable {
+                    reason_code: "id_allocation",
+                },
+                ExternalRouteError::Runtime(_) => IngressError::Unavailable {
+                    reason_code: "runtime",
+                },
             })
     }
+}
+
+/// Decode an authenticated delivery body into the kernel command it names.
+///
+/// # Errors
+///
+/// Returns the audit reason code (`oversize_body` or `invalid_body`).
+fn decode_command(
+    claims: &Claims,
+    body: &[u8],
+) -> Result<ExternalEffectCompletionCommand, &'static str> {
+    if body.len() > MAX_BODY_BYTES {
+        return Err("oversize_body");
+    }
+    let decoded: DeliveryBody = serde_json::from_slice(body).map_err(|_| "invalid_body")?;
+    let completion_id = decoded
+        .completion_id
+        .unwrap_or_else(|| claims.effect_id.to_canonical_string());
+    let completion =
+        ExternalEffectCompletion::try_new(claims.effect_id, completion_id, decoded.outcome)
+            .map_err(|_| "invalid_body")?;
+    ExternalEffectCompletionCommand::try_new(
+        claims.locator.clone(),
+        claims.principal.clone(),
+        claims.authorization.clone(),
+        completion,
+    )
+    .map_err(|_| "invalid_body")
 }
 
 /// Maximum accepted delivery body in bytes.
@@ -273,7 +274,7 @@ pub const MAX_BODY_BYTES: usize = 1_048_576;
 struct DeliveryBody {
     #[serde(default)]
     completion_id: Option<String>,
-    outcome: finstack_ai_kernel::ExternalEffectOutcome,
+    outcome: ExternalEffectOutcome,
 }
 
 #[cfg(test)]

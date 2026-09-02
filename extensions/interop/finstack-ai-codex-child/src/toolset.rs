@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    BudgetRequest, ChildPlacement, ContentBlock, ErrorCategory, Metadata, RawJson, RemoteRouteRef,
-    RetrySafety, RunId, TextBlock, ToolExecutionMode, ToolId, ValidatedToolCall,
+    BudgetRequest, ChildPlacement, ChildRunLocator, ContentBlock, ErrorCategory, Metadata, RawJson,
+    RemoteRouteRef, RetrySafety, RunId, TextBlock, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
 use finstack_ai_runtime::child::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentRef, ChildRunStartRequest,
@@ -23,6 +23,7 @@ use serde::Deserialize;
 
 use crate::identity::{codex_agent_ref, codex_route_ref};
 use crate::invoker::CodexChildInvoker;
+use crate::state::CodexRunStatus;
 use crate::{CODEX_CHILD_NOT_FOUND, CODEX_INVALID_ARGUMENTS, CodexChildError};
 
 const START_ID: &str = "finstack.tools.codex.start";
@@ -31,7 +32,6 @@ const CANCEL_ID: &str = "finstack.tools.codex.cancel";
 const START_NAME: &str = "codex_start";
 const STATUS_NAME: &str = "codex_status";
 const CANCEL_NAME: &str = "codex_cancel";
-const MAX_MESSAGE_BYTES: usize = 4_096;
 const APPROVAL_REASON: &str = "codex child invocation edits the frozen workspace unless the host already authorized ChildRunPolicy::Allow";
 
 /// Codex toolset over one frozen [`CodexChildInvoker`]. The prompt is the
@@ -125,20 +125,17 @@ impl Toolset for CodexToolset {
         let remote = self.remote.clone();
         Box::pin(async move {
             verify_authority(&ctx)?;
-            let name = call.call.tool_name();
-            if name != START_NAME && name != STATUS_NAME && name != CANCEL_NAME {
-                return Err(tool_error(
-                    CODEX_INVALID_ARGUMENTS,
-                    ErrorCategory::Validation,
-                    "codex call identity is invalid",
-                ));
-            }
-            let result = if name == START_NAME {
-                Box::pin(start_child(&starter, &agent, remote, &ctx, &call)).await
-            } else if name == STATUS_NAME {
-                status_child(&invoker, &ctx, &call)
-            } else {
-                cancel_child(&starter, &invoker, &ctx, &call).await
+            let result = match call.call.tool_name() {
+                START_NAME => Box::pin(start_child(&starter, &agent, remote, &ctx, &call)).await,
+                STATUS_NAME => status_child(&invoker, &ctx, &call),
+                CANCEL_NAME => cancel_child(&starter, &invoker, &ctx, &call).await,
+                _ => {
+                    return Err(tool_error(
+                        CODEX_INVALID_ARGUMENTS,
+                        ErrorCategory::Validation,
+                        "codex call identity is invalid",
+                    ));
+                }
             }?;
             Ok(completed(result.output, result.is_error))
         })
@@ -184,18 +181,11 @@ async fn start_child(
         metadata: Metadata::empty(),
     };
     match Box::pin(starter.start_or_attach(ctx, request)).await {
-        Ok(handle) => {
-            let run_id = Arc::<str>::from(handle.locator.operation.run_id.to_string());
-            let output = result_json(&serde_json::json!({
-                "run_id": run_id.as_ref(),
-                "session_id": handle.locator.operation.session_id.to_string(),
-                "status": "accepted",
-            }))?;
-            Ok(CallOutcome {
-                output,
-                is_error: false,
-            })
-        }
+        Ok(handle) => ok_result(&serde_json::json!({
+            "run_id": handle.locator.operation.run_id.to_string(),
+            "session_id": handle.locator.operation.session_id.to_string(),
+            "status": "accepted",
+        })),
         Err(error) => Ok(invoke_error_result(&error)),
     }
 }
@@ -205,55 +195,29 @@ fn status_child(
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
-    let arguments: RunIdArguments = parse_args(call)?;
-    let Some(run_id) = arguments.run_id.as_ref() else {
-        return Ok(error_result(
-            CODEX_INVALID_ARGUMENTS,
-            "status requires run_id",
-        ));
+    let (_, locator) = match accepted_child(invoker, ctx, call, "status requires run_id")? {
+        Ok(found) => found,
+        Err(outcome) => return Ok(outcome),
     };
-    let Ok(run_id) = RunId::parse(run_id.as_ref()) else {
-        return Ok(error_result(
-            CODEX_CHILD_NOT_FOUND,
-            "no started child matches run_id",
-        ));
-    };
-    let Some(locator) = invoker.accepted_locator(&ctx.run.locator, &run_id) else {
-        return Ok(error_result(
-            CODEX_CHILD_NOT_FOUND,
-            "no started child matches run_id",
-        ));
-    };
+    let run_id = locator.operation.run_id.to_string();
     let Some(report) = invoker.run_status(&locator) else {
-        let output = result_json(&serde_json::json!({
-            "run_id": run_id.to_string(),
+        return ok_result(&serde_json::json!({
+            "run_id": run_id,
             "status": "unknown",
-        }))?;
-        return Ok(CallOutcome {
-            output,
-            is_error: false,
-        });
+        }));
     };
-    let last_message = report
-        .last_message
-        .as_deref()
-        .map(|text| truncate_message(text, MAX_MESSAGE_BYTES));
-    // Already bounded to STDERR_TAIL_BYTES at write time in `append_stderr`.
-    let stderr_tail = report.stderr_tail.as_deref();
-    let output = result_json(&serde_json::json!({
-        "run_id": run_id.to_string(),
+    // `last_message` and `stderr_tail` are already bounded by the run-state
+    // reducer at write time.
+    ok_result(&serde_json::json!({
+        "run_id": run_id,
         "status": status_name(report.status),
         "thread_id": report.thread_id,
-        "last_message": last_message,
+        "last_message": report.last_message,
         "failure_message": report.failure_message,
         "usage": report.usage,
         "exit_code": report.exit_code,
-        "stderr_tail": stderr_tail,
-    }))?;
-    Ok(CallOutcome {
-        output,
-        is_error: false,
-    })
+        "stderr_tail": report.stderr_tail,
+    }))
 }
 
 async fn cancel_child(
@@ -262,57 +226,50 @@ async fn cancel_child(
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
-    let arguments: RunIdArguments = parse_args(call)?;
-    let Some(run_id) = arguments.run_id.as_ref() else {
-        return Ok(error_result(
-            CODEX_INVALID_ARGUMENTS,
-            "cancel requires run_id",
-        ));
-    };
-    let Ok(parsed_run_id) = RunId::parse(run_id.as_ref()) else {
-        return Ok(error_result(
-            CODEX_CHILD_NOT_FOUND,
-            "no started child matches run_id",
-        ));
-    };
-    let Some(locator) = invoker.accepted_locator(&ctx.run.locator, &parsed_run_id) else {
-        return Ok(error_result(
-            CODEX_CHILD_NOT_FOUND,
-            "no started child matches run_id",
-        ));
+    let (run_id, locator) = match accepted_child(invoker, ctx, call, "cancel requires run_id")? {
+        Ok(found) => found,
+        Err(outcome) => return Ok(outcome),
     };
     if let Err(error) = starter.cancel(&locator).await {
         return Ok(invoke_error_result(&error));
     }
-    let output = result_json(&serde_json::json!({
+    ok_result(&serde_json::json!({
         "run_id": run_id.as_ref(),
         "cancelled": true,
         "placement": "remote_child_session",
-    }))?;
-    Ok(CallOutcome {
-        output,
-        is_error: false,
-    })
+    }))
 }
 
-fn status_name(status: crate::state::CodexRunStatus) -> &'static str {
+/// Resolve the `run_id` argument (returned verbatim) to the locator of a
+/// child this parent operation started.
+///
+/// The outer `Err` is a malformed call; the inner `Err` is the tool-visible
+/// error result for a missing argument or an unknown child.
+fn accepted_child(
+    invoker: &CodexChildInvoker,
+    ctx: &ToolCallContext,
+    call: &ValidatedToolCall,
+    missing: &'static str,
+) -> Result<Result<(Arc<str>, ChildRunLocator), CallOutcome>, ToolError> {
+    let arguments: RunIdArguments = parse_args(call)?;
+    let Some(run_id) = arguments.run_id else {
+        return Ok(Err(error_result(CODEX_INVALID_ARGUMENTS, missing)));
+    };
+    let found = RunId::parse(run_id.as_ref())
+        .ok()
+        .and_then(|parsed| invoker.accepted_locator(&ctx.run.locator, &parsed))
+        .map(|locator| (run_id, locator))
+        .ok_or_else(|| error_result(CODEX_CHILD_NOT_FOUND, "no started child matches run_id"));
+    Ok(found)
+}
+
+fn status_name(status: CodexRunStatus) -> &'static str {
     match status {
-        crate::state::CodexRunStatus::Running => "running",
-        crate::state::CodexRunStatus::Completed => "completed",
-        crate::state::CodexRunStatus::Failed => "failed",
-        crate::state::CodexRunStatus::Cancelled => "cancelled",
+        CodexRunStatus::Running => "running",
+        CodexRunStatus::Completed => "completed",
+        CodexRunStatus::Failed => "failed",
+        CodexRunStatus::Cancelled => "cancelled",
     }
-}
-
-fn truncate_message(text: &str, max: usize) -> &str {
-    if text.len() <= max {
-        return text;
-    }
-    let mut end = max;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text.get(..end).unwrap_or(text)
 }
 
 fn parse_args<T: for<'de> Deserialize<'de>>(call: &ValidatedToolCall) -> Result<T, ToolError> {
@@ -335,6 +292,13 @@ fn invoke_error_result(error: &AgentInvokeError) -> CallOutcome {
         },
         "child invocation was rejected",
     )
+}
+
+fn ok_result(value: &serde_json::Value) -> Result<CallOutcome, ToolError> {
+    Ok(CallOutcome {
+        output: result_json(value)?,
+        is_error: false,
+    })
 }
 
 fn error_result(code: &'static str, message: &'static str) -> CallOutcome {

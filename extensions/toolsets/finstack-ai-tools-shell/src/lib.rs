@@ -39,8 +39,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{
-    ErrorCategory, Metadata, RawJson, Sensitivity, Timestamp, ToolExecutionMode, ToolId,
-    ValidatedToolCall,
+    ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, Timestamp, ToolExecutionMode,
+    ToolId, ValidatedToolCall,
 };
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{
@@ -114,7 +114,7 @@ pub struct ShellPolicy {
     allowed: Arc<[Arc<str>]>,
     allow_path_search: bool,
     search_path: Arc<[Arc<str>]>,
-    extra_env: BTreeMap<Arc<str>, Arc<str>>,
+    extra_env: BTreeMap<String, String>,
 }
 
 impl ShellPolicy {
@@ -184,8 +184,8 @@ impl ShellPolicy {
     #[must_use]
     pub fn with_locale_env(mut self) -> Self {
         self.extra_env
-            .insert(Arc::from("LANG"), Arc::from("C.UTF-8"));
-        self.extra_env.insert(Arc::from("LC_ALL"), Arc::from("C"));
+            .insert("LANG".to_owned(), "C.UTF-8".to_owned());
+        self.extra_env.insert("LC_ALL".to_owned(), "C".to_owned());
         self
     }
 
@@ -193,28 +193,25 @@ impl ShellPolicy {
         if program.is_empty() || program.as_bytes().contains(&0) {
             return Err(invalid_error("shell program is invalid"));
         }
-        let has_separator = program.contains('/') || program.contains('\\');
-        if has_separator {
-            if self
-                .allowed
-                .iter()
-                .any(|allowed| allowed.as_ref() == program)
-            {
-                return Ok(PathBuf::from(program));
-            }
-            return Err(policy_error("shell program path is not allowlisted"));
-        }
-        if self
+        let listed = self
             .allowed
             .iter()
-            .any(|allowed| allowed.as_ref() == program)
-        {
-            if self.allow_path_search {
-                return self.search(program);
-            }
-            return Err(policy_error(
-                "shell basename requires an exact allowlisted path",
-            ));
+            .any(|allowed| allowed.as_ref() == program);
+        if program.contains('/') || program.contains('\\') {
+            return if listed {
+                Ok(PathBuf::from(program))
+            } else {
+                Err(policy_error("shell program path is not allowlisted"))
+            };
+        }
+        if listed {
+            return if self.allow_path_search {
+                self.search(program)
+            } else {
+                Err(policy_error(
+                    "shell basename requires an exact allowlisted path",
+                ))
+            };
         }
         if self.allow_path_search
             && self.allowed.iter().any(|allowed| {
@@ -239,13 +236,6 @@ impl ShellPolicy {
         Err(policy_error(
             "shell program was not found on the search path",
         ))
-    }
-
-    fn environment(&self) -> BTreeMap<String, String> {
-        self.extra_env
-            .iter()
-            .map(|(key, value)| (key.to_string(), value.to_string()))
-            .collect()
     }
 }
 
@@ -646,7 +636,7 @@ fn authorize_command(
             .map(|value| Arc::<str>::from(value.as_str()))
             .collect::<Vec<_>>()
             .into(),
-        env: policy.environment(),
+        env: policy.extra_env.clone(),
         cwd,
         timeout: limits.timeout,
         max_output_bytes: limits.max_output_bytes,
@@ -808,18 +798,15 @@ impl PipePumps {
         }
     }
 
+    fn running(&self) -> bool {
+        [&self.stdout_thread, &self.stderr_thread]
+            .into_iter()
+            .any(|thread| thread.as_ref().is_some_and(|thread| !thread.is_finished()))
+    }
+
     fn finish(&mut self, stdout: &mut Vec<u8>, stderr: &mut Vec<u8>) {
         let cleanup_deadline = Instant::now() + Duration::from_millis(250);
-        while (self
-            .stdout_thread
-            .as_ref()
-            .is_some_and(|thread| !thread.is_finished())
-            || self
-                .stderr_thread
-                .as_ref()
-                .is_some_and(|thread| !thread.is_finished()))
-            && Instant::now() < cleanup_deadline
-        {
+        while self.running() && Instant::now() < cleanup_deadline {
             self.drain(stdout, stderr);
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -834,16 +821,7 @@ impl PipePumps {
         self.stdout_rx = None;
         self.stderr_rx = None;
         let cleanup_deadline = Instant::now() + Duration::from_millis(250);
-        while (self
-            .stdout_thread
-            .as_ref()
-            .is_some_and(|thread| !thread.is_finished())
-            || self
-                .stderr_thread
-                .as_ref()
-                .is_some_and(|thread| !thread.is_finished()))
-            && Instant::now() < cleanup_deadline
-        {
+        while self.running() && Instant::now() < cleanup_deadline {
             std::thread::yield_now();
         }
         join_if_finished(&mut self.stdout_thread);
@@ -925,29 +903,21 @@ impl RunningChild {
 
     fn stdout(&mut self) -> Option<Box<dyn Read + Send>> {
         match self {
-            Self::Confined(child) => child
-                .stdout
-                .take()
-                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
-            Self::Plain(child) => child
-                .stdout
-                .take()
-                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
+            Self::Confined(child) => boxed_pipe(child.stdout.take()),
+            Self::Plain(child) => boxed_pipe(child.stdout.take()),
         }
     }
 
     fn stderr(&mut self) -> Option<Box<dyn Read + Send>> {
         match self {
-            Self::Confined(child) => child
-                .stderr
-                .take()
-                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
-            Self::Plain(child) => child
-                .stderr
-                .take()
-                .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>),
+            Self::Confined(child) => boxed_pipe(child.stderr.take()),
+            Self::Plain(child) => boxed_pipe(child.stderr.take()),
         }
     }
+}
+
+fn boxed_pipe<R: Read + Send + 'static>(pipe: Option<R>) -> Option<Box<dyn Read + Send>> {
+    pipe.map(|pipe| Box::new(pipe) as Box<dyn Read + Send>)
 }
 
 #[cfg(unix)]
@@ -1087,7 +1057,7 @@ fn build_tools() -> Result<(Arc<[ToolSpec]>, ToolId), ShellError> {
         output_schema: None,
         execution: ToolExecutionMode::Sequential,
         side_effect: SideEffectClass::NonIdempotentWrite,
-        retry_safety: finstack_ai_kernel::RetrySafety::AtMostOnce,
+        retry_safety: RetrySafety::AtMostOnce,
         approval: ApprovalMetadata {
             requirement: ApprovalRequirement::Policy,
             reason: None,

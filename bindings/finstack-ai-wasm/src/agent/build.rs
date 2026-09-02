@@ -15,7 +15,7 @@ use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_tools_document::DocumentToolset;
 use wasm_bindgen::prelude::*;
 
-use crate::document_store::DocumentArtifactStore;
+use crate::document_store::MemoryArtifactStore;
 
 use super::agent::Agent;
 use super::errors::{agent_error, configuration_error, session_error};
@@ -58,7 +58,7 @@ struct DocumentIngestPorts {
 }
 
 fn document_ingest_ports() -> Result<DocumentIngestPorts, JsValue> {
-    let artifact_store = Arc::new(DocumentArtifactStore::default());
+    let artifact_store = Arc::new(MemoryArtifactStore::document());
     let dyn_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>;
     let toolset = DocumentToolset::try_new(Arc::clone(&dyn_store))
         .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;

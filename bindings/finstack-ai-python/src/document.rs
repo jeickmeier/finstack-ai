@@ -4,9 +4,7 @@
 //! developer see exactly what Markdown the middleware would inject for a
 //! given file, without constructing an `Agent` or `Run`.
 
-use finstack_ai_tools_document::parser::{
-    self, DocumentClassification, DocumentFormat, DocumentLimits,
-};
+use finstack_ai_tools_document::parser::{self, DocumentLimits};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -63,29 +61,17 @@ pub(crate) fn parse_document(
     .map_err(|error| PyValueError::new_err(error.to_string()))?;
     let result = PyDict::new(py);
     result.set_item("markdown", &parsed.markdown)?;
-    result.set_item("format", format_str(parsed.format))?;
+    result.set_item("format", wire_name(parsed.format))?;
     result.set_item("page_count", parsed.page_count)?;
-    result.set_item(
-        "classification",
-        parsed.classification.map(classification_str),
-    )?;
+    result.set_item("classification", parsed.classification.map(wire_name))?;
     result.set_item("requires_ocr", parsed.requires_ocr)?;
     result.set_item("truncated", parsed.truncated)?;
     Ok(result.unbind())
 }
 
-/// Render `format`'s stable `snake_case` wire name (matches its `Serialize`).
-fn format_str(format: DocumentFormat) -> String {
-    serde_json::to_value(format)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_default()
-}
-
-/// Render `classification`'s stable `snake_case` wire name (matches its
-/// `Serialize`).
-fn classification_str(classification: DocumentClassification) -> String {
-    serde_json::to_value(classification)
+/// Render a parser enum's stable `snake_case` wire name (matches its `Serialize`).
+fn wire_name(value: impl serde::Serialize) -> String {
+    serde_json::to_value(value)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_default()

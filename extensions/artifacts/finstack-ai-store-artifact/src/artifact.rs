@@ -11,33 +11,10 @@
 //! the complete [`ArtifactRef`] next to the bytes so reads can verify exact
 //! scope, metadata, length, and content identity.
 
-#![warn(missing_docs)]
-#![forbid(unsafe_code)]
-#![warn(clippy::float_cmp)]
-#![deny(clippy::unwrap_used)]
-#![deny(clippy::expect_used)]
-#![deny(clippy::panic)]
-#![deny(clippy::unreachable)]
-#![cfg_attr(
-    test,
-    allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::panic,
-        clippy::unreachable,
-        clippy::indexing_slicing,
-        clippy::float_cmp,
-    )
-)]
-// Allow expect() in doc tests (they are test code)
-#![doc(test(attr(allow(clippy::expect_used))))]
-
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::driver::{
-    ObjectDriver, ObjectError, ObjectKey, ObjectMetadata, ObjectScope, PageToken, PutPayload,
-};
+use crate::driver::{ObjectDriver, ObjectError, ObjectKey, ObjectMetadata, ObjectScope, PageToken};
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Digest, Metadata, Timestamp};
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{
@@ -47,6 +24,8 @@ use finstack_ai_runtime::artifact::{
 };
 use finstack_ai_runtime::ports::PortFuture;
 use serde::{Deserialize, Serialize};
+
+use crate::DEFAULT_MAX_ARTIFACT_BYTES;
 
 const ENVELOPE_MAGIC: &[u8; 8] = b"FSAIART2";
 const ENVELOPE_HEADER_LEN_BYTES: usize = 4;
@@ -59,10 +38,6 @@ struct ArtifactEnvelopeHeader {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     unreferenced_since: Option<Timestamp>,
 }
-
-/// Default artifact byte ceiling: 64 MiB, clamped to the backing object
-/// store's `crate::driver::ObjectStoreLimits::max_object_bytes`.
-pub const DEFAULT_MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 
 /// `ArtifactStore` backed by a host-supplied [`ObjectDriver`].
 pub(crate) struct ObjectArtifactStore {
@@ -85,6 +60,7 @@ impl ObjectArtifactStore {
 
     /// Override the artifact byte ceiling, still clamped to the backing
     /// object store's [`ObjectDriver::limits`].
+    #[cfg(any(feature = "s3", feature = "local"))]
     #[must_use]
     pub(crate) fn with_max_artifact_bytes(mut self, max_artifact_bytes: usize) -> Self {
         self.max_artifact_bytes =
@@ -213,10 +189,10 @@ impl ArtifactStore for ObjectArtifactStore {
         metadata: ArtifactMetadata,
     ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
         let store = Arc::clone(&self.store);
-        let max_artifact_bytes = self.max_artifact_bytes;
-        Box::pin(async move {
-            stage_put_impl(store.as_ref(), scope, content, metadata, max_artifact_bytes).await
-        })
+        let limits = self.limits();
+        Box::pin(
+            async move { stage_put_impl(store.as_ref(), scope, content, metadata, limits).await },
+        )
     }
 
     fn get(
@@ -340,14 +316,8 @@ async fn stage_put_impl(
     scope: ArtifactScope,
     content: Bytes,
     metadata: ArtifactMetadata,
-    max_artifact_bytes: usize,
+    limits: ArtifactStoreLimits,
 ) -> Result<ArtifactRef, ArtifactError> {
-    let limits = ArtifactStoreLimits {
-        max_artifact_bytes,
-        max_artifacts: usize::MAX,
-        max_total_bytes: u64::MAX,
-        ..ArtifactStoreLimits::default()
-    };
     let artifact = build_artifact_ref(&scope, &content, &metadata, &limits)?;
     let key = artifact_key(&artifact_storage_key(&scope, &artifact)?)?;
     let header = ArtifactEnvelopeHeader {
@@ -363,7 +333,7 @@ async fn stage_put_impl(
         .put_if_absent(
             object_scope.clone(),
             key.clone(),
-            PutPayload::Bytes(envelope.clone()),
+            envelope.clone(),
             object_metadata,
         )
         .await;
@@ -433,20 +403,11 @@ async fn get_by_blob_impl(
             .await
             .map_err(map_object_error)?;
         for entry in listed.entries {
-            let envelope = match store.get(object_scope.clone(), entry.key.clone()).await {
-                Ok(value) => value,
-                Err(ObjectError::NotFound) => continue,
-                Err(error) => return Err(map_object_error(error)),
+            let Some((_, header, content)) =
+                listed_envelope(store, &scope, &object_scope, &entry.key).await?
+            else {
+                continue;
             };
-            let (header, content) = decode_envelope(&envelope)?;
-            validate_artifact_scope(&scope, &header.artifact)?;
-            let expected_key = artifact_key(&artifact_storage_key(&scope, &header.artifact)?)?;
-            if expected_key != entry.key {
-                return Err(ArtifactError::Integrity {
-                    message: Arc::from("stored_reference_mismatch"),
-                });
-            }
-            validate_retrieved_artifact(&scope, &header.artifact, &content)?;
             if header.artifact.blob() == &blob {
                 return Ok(ArtifactRead {
                     reference: header.artifact,
@@ -468,12 +429,9 @@ async fn pin_impl(
     owner: ArtifactOwnerId,
     limits: ArtifactStoreLimits,
 ) -> Result<(), ArtifactError> {
-    let key = artifact_key(&artifact_storage_key(&scope, &artifact)?)?;
-    let object_scope = to_object_scope(&scope);
-    for _ in 0..MAX_CONDITIONAL_RETRIES {
-        let (envelope, mut header, content) = load_envelope(store, &scope, &artifact).await?;
+    update_envelope(store, &scope, &artifact, |header| {
         if header.owners.contains(&owner) {
-            return Ok(());
+            return Ok(false);
         }
         if header.owners.len() >= limits.max_owners_per_artifact {
             return Err(ArtifactError::CapacityExceeded {
@@ -483,13 +441,55 @@ async fn pin_impl(
         }
         header.owners.insert(owner.clone());
         header.unreferenced_since = None;
+        Ok(true)
+    })
+    .await
+}
+
+async fn unpin_impl(
+    store: &dyn ObjectDriver,
+    scope: ArtifactScope,
+    artifact: ArtifactRef,
+    owner: ArtifactOwnerId,
+    now: Timestamp,
+) -> Result<(), ArtifactError> {
+    update_envelope(store, &scope, &artifact, |header| {
+        if !header.owners.remove(&owner) {
+            return Ok(false);
+        }
+        if header.owners.is_empty() {
+            header.unreferenced_since = Some(now);
+        }
+        Ok(true)
+    })
+    .await
+}
+
+/// Apply `update` to the stored envelope header and write it back under a
+/// digest precondition, retrying from a fresh read on every conflict.
+///
+/// `update` returns `Ok(false)` when the header already has the desired
+/// shape, in which case nothing is written.
+async fn update_envelope(
+    store: &dyn ObjectDriver,
+    scope: &ArtifactScope,
+    artifact: &ArtifactRef,
+    mut update: impl FnMut(&mut ArtifactEnvelopeHeader) -> Result<bool, ArtifactError>,
+) -> Result<(), ArtifactError> {
+    let key = artifact_key(&artifact_storage_key(scope, artifact)?)?;
+    let object_scope = to_object_scope(scope);
+    for _ in 0..MAX_CONDITIONAL_RETRIES {
+        let (envelope, mut header, content) = load_envelope(store, scope, artifact).await?;
+        if !update(&mut header)? {
+            return Ok(());
+        }
         let replacement = encode_envelope(&header, &content)?;
         let result = store
             .replace_if_digest(
                 object_scope.clone(),
                 key.clone(),
                 Digest::blob_content(&envelope),
-                PutPayload::Bytes(replacement.clone()),
+                replacement.clone(),
                 object_metadata(artifact.blob().name().map(Arc::from)),
             )
             .await;
@@ -507,45 +507,29 @@ async fn pin_impl(
     })
 }
 
-async fn unpin_impl(
+/// Fetch and validate one listed artifact envelope, or `None` when it was
+/// deleted between the listing and the read.
+async fn listed_envelope(
     store: &dyn ObjectDriver,
-    scope: ArtifactScope,
-    artifact: ArtifactRef,
-    owner: ArtifactOwnerId,
-    now: Timestamp,
-) -> Result<(), ArtifactError> {
-    let key = artifact_key(&artifact_storage_key(&scope, &artifact)?)?;
-    let object_scope = to_object_scope(&scope);
-    for _ in 0..MAX_CONDITIONAL_RETRIES {
-        let (envelope, mut header, content) = load_envelope(store, &scope, &artifact).await?;
-        if !header.owners.remove(&owner) {
-            return Ok(());
-        }
-        if header.owners.is_empty() {
-            header.unreferenced_since = Some(now);
-        }
-        let replacement = encode_envelope(&header, &content)?;
-        let result = store
-            .replace_if_digest(
-                object_scope.clone(),
-                key.clone(),
-                Digest::blob_content(&envelope),
-                PutPayload::Bytes(replacement.clone()),
-                object_metadata(artifact.blob().name().map(Arc::from)),
-            )
-            .await;
-        match result {
-            Ok(object_ref) => {
-                validate_object_ref(&object_ref, &object_scope, &key, &replacement)?;
-                return Ok(());
-            }
-            Err(ObjectError::Conflict) => {}
-            Err(error) => return Err(map_object_error(error)),
-        }
+    scope: &ArtifactScope,
+    object_scope: &ObjectScope,
+    key: &ObjectKey,
+) -> Result<Option<(Bytes, ArtifactEnvelopeHeader, Bytes)>, ArtifactError> {
+    let envelope = match store.get(object_scope.clone(), key.clone()).await {
+        Ok(value) => value,
+        Err(ObjectError::NotFound) => return Ok(None),
+        Err(error) => return Err(map_object_error(error)),
+    };
+    let (header, content) = decode_envelope(&envelope)?;
+    validate_artifact_scope(scope, &header.artifact)?;
+    let expected_key = artifact_key(&artifact_storage_key(scope, &header.artifact)?)?;
+    if expected_key != *key {
+        return Err(ArtifactError::Integrity {
+            message: Arc::from("stored_reference_mismatch"),
+        });
     }
-    Err(ArtifactError::Unavailable {
-        message: Arc::from("artifact_concurrent_mutation"),
-    })
+    validate_retrieved_artifact(scope, &header.artifact, &content)?;
+    Ok(Some((envelope, header, content)))
 }
 
 async fn collect_orphans_impl(
@@ -570,20 +554,11 @@ async fn collect_orphans_impl(
                 break;
             }
             report.examined += 1;
-            let envelope = match store.get(object_scope.clone(), entry.key.clone()).await {
-                Ok(value) => value,
-                Err(ObjectError::NotFound) => continue,
-                Err(error) => return Err(map_object_error(error)),
+            let Some((envelope, mut header, content)) =
+                listed_envelope(store, &scope, &object_scope, &entry.key).await?
+            else {
+                continue;
             };
-            let (mut header, content) = decode_envelope(&envelope)?;
-            validate_artifact_scope(&scope, &header.artifact)?;
-            let expected_key = artifact_key(&artifact_storage_key(&scope, &header.artifact)?)?;
-            if expected_key != entry.key {
-                return Err(ArtifactError::Integrity {
-                    message: Arc::from("stored_reference_mismatch"),
-                });
-            }
-            validate_retrieved_artifact(&scope, &header.artifact, &content)?;
             if !header.owners.is_empty() {
                 continue;
             }
@@ -596,7 +571,7 @@ async fn collect_orphans_impl(
                         object_scope.clone(),
                         entry.key.clone(),
                         envelope_digest,
-                        PutPayload::Bytes(replacement),
+                        replacement,
                         object_metadata(header.artifact.blob().name().map(Arc::from)),
                     )
                     .await

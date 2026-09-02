@@ -334,27 +334,17 @@ fn ask_user_wrapped_schema_value(
     match arguments.kind.unwrap_or(AskUserKind::FreeText) {
         AskUserKind::FreeText => Ok((
             InteractionKind::FreeText,
-            serde_json::json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {"answer": {"type": "string"}},
-                "required": ["answer"]
-            }),
+            wrap_answer_schema(&serde_json::json!({"type": "string"})),
         )),
         AskUserKind::Choice => {
             let options = arguments
                 .options
-                .clone()
+                .as_deref()
                 .filter(|options| !options.is_empty())
                 .ok_or_else(|| invalid_arguments("choice elicitation requires options"))?;
             Ok((
                 InteractionKind::Choice,
-                serde_json::json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {"answer": {"type": "string", "enum": options}},
-                    "required": ["answer"]
-                }),
+                wrap_answer_schema(&serde_json::json!({"type": "string", "enum": options})),
             ))
         }
         AskUserKind::Form => {
@@ -478,22 +468,18 @@ fn typed_tool(def: &ElicitationToolDef) -> Result<(ToolSpec, TypedTool), Elicita
             reason: "typed_tool_name_reserved",
         });
     }
-    let response_schema = if def.response_schema.is_object() {
-        RawJson::parse(
-            serde_json_canonicalizer::to_vec(&wrap_answer_schema(&def.response_schema)).map_err(
-                |_| ElicitationError::Configuration {
-                    reason: "invalid_response_schema",
-                },
-            )?,
-        )
-        .map_err(|_| ElicitationError::Configuration {
-            reason: "invalid_response_schema",
-        })?
-    } else {
+    if !def.response_schema.is_object() {
         return Err(ElicitationError::Configuration {
             reason: "response_schema_must_be_object",
         });
-    };
+    }
+    let response_schema =
+        serde_json_canonicalizer::to_vec(&wrap_answer_schema(&def.response_schema))
+            .ok()
+            .and_then(|bytes| RawJson::parse(bytes).ok())
+            .ok_or(ElicitationError::Configuration {
+                reason: "invalid_response_schema",
+            })?;
     let input_schema = RawJson::parse(
         br#"{"additionalProperties":false,"properties":{"context":{"description":"Call-specific details shown to the user beneath the registered prompt.","type":["string","null"]}},"required":["context"],"type":"object"}"#,
     )

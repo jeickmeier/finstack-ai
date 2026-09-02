@@ -8,7 +8,7 @@ use finstack_ai_protocol::{
     APPEND_BATCH_MAX_BYTES, ProtocolError, commit_record, decode, decode_value, encode,
     from_diagnostic_json, payload_digest, to_diagnostic_json, verify_chain, verify_envelope,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::paths::compatibility_fixture;
@@ -64,7 +64,7 @@ pub struct JournalFixture {
 }
 
 /// Deterministic constructors measured by the runner.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JournalRecipe {
     /// Unsigned integer encoded as a decimal string.
@@ -520,75 +520,6 @@ pub(crate) fn io_err(path: impl AsRef<Path>, error: impl std::fmt::Display) -> J
     JournalFixtureError::Io {
         path: path.as_ref().display().to_string(),
         message: error.to_string(),
-    }
-}
-
-impl serde::Serialize for JournalRecipe {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        match self {
-            Self::U64 { value } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "u64")?;
-                map.serialize_entry("value", value)?;
-                map.end()
-            }
-            Self::NegZero => {
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("kind", "neg_zero")?;
-                map.end()
-            }
-            Self::FloatOne => {
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("kind", "float_one")?;
-                map.end()
-            }
-            Self::CborHex { bytes } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "cbor_hex")?;
-                map.serialize_entry("bytes", bytes)?;
-                map.end()
-            }
-            Self::NestedArray { depth } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "nested_array")?;
-                map.serialize_entry("depth", depth)?;
-                map.end()
-            }
-            Self::ArrayItems { count } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "array_items")?;
-                map.serialize_entry("count", count)?;
-                map.end()
-            }
-            Self::MapEntries { count } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "map_entries")?;
-                map.serialize_entry("count", count)?;
-                map.end()
-            }
-            Self::TextString { bytes } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "text_string")?;
-                map.serialize_entry("bytes", bytes)?;
-                map.end()
-            }
-            Self::EnvelopeBytes { total_bytes } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "envelope_bytes")?;
-                map.serialize_entry("total_bytes", total_bytes)?;
-                map.end()
-            }
-            Self::BatchRecords { count } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("kind", "batch_records")?;
-                map.serialize_entry("count", count)?;
-                map.end()
-            }
-        }
     }
 }
 

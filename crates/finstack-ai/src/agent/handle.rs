@@ -296,9 +296,9 @@ impl Agent {
             .collect::<Vec<_>>()
             .into();
         if let Some(rebuild) = &self.rebuild {
-            let mut builder = rebuild.as_ref().clone();
-            builder.set_history_cache_policy(policy);
-            self.rebuild = Some(Arc::new(builder));
+            self.rebuild = Some(Arc::new(
+                rebuild.as_ref().clone().history_cache_policy(policy),
+            ));
         }
         self
     }
@@ -333,18 +333,6 @@ impl Agent {
         self.capability_index = index;
         self.activation_host = host;
         Ok(())
-    }
-
-    pub(super) fn capability_index(&self) -> &CapabilityContributionIndex {
-        &self.capability_index
-    }
-
-    pub(super) fn capability_specs(&self) -> &[CapabilitySpec] {
-        &self.capability_specs
-    }
-
-    pub(super) fn activation_host(&self) -> Option<&Arc<NativeCapabilityHost>> {
-        self.activation_host.as_ref()
     }
 
     pub(super) fn validate_restored_mask(

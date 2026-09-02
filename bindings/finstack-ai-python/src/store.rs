@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use finstack_ai::AgentRunError;
-use finstack_ai::runtime::ports::journal::JournalStore;
-use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+use finstack_ai::runtime::ports::journal::{JournalStore, StoreLimits};
+use finstack_ai_store_memory::MemoryJournalStore;
 use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
@@ -60,14 +60,12 @@ impl PySqliteDurability {
     }
 }
 
-pub(crate) fn default_store_limits() -> MemoryStoreLimits {
-    MemoryStoreLimits {
-        sessions: 64,
-        batches_per_session: 256,
-        records_per_session: 4_096,
-        snapshot_bytes: 64 * 1_024,
-    }
-}
+const STORE_LIMITS: StoreLimits = StoreLimits {
+    sessions: 64,
+    batches_per_session: 256,
+    records_per_session: 4_096,
+    snapshot_bytes: 64 * 1_024,
+};
 
 /// Open the configured journal: postgres when `postgres_dsn` is set,
 /// sqlite when `sqlite_path` is set, in-memory otherwise. The DSN arrives
@@ -84,16 +82,7 @@ pub(crate) async fn open_journal_store(
                 "postgres_dsn is mutually exclusive with sqlite_path/sqlite_durability",
             ));
         }
-        let limits = default_store_limits();
-        let config = PostgresStoreConfig::new(
-            dsn,
-            finstack_ai::runtime::ports::journal::StoreLimits {
-                sessions: limits.sessions,
-                batches_per_session: limits.batches_per_session,
-                records_per_session: limits.records_per_session,
-                snapshot_bytes: limits.snapshot_bytes,
-            },
-        );
+        let config = PostgresStoreConfig::new(dsn, STORE_LIMITS);
         return PostgresJournalStore::try_open(config)
             .await
             .map(|store| Arc::new(store) as Arc<dyn JournalStore>)
@@ -106,7 +95,7 @@ pub(crate) async fn open_journal_store(
                     "sqlite_durability requires sqlite_path",
                 ));
             }
-            MemoryJournalStore::try_new(default_store_limits())
+            MemoryJournalStore::try_new(STORE_LIMITS)
                 .map(|store| Arc::new(store) as Arc<dyn JournalStore>)
                 .map_err(|error| configuration_error(error.to_string()))
         }
@@ -115,7 +104,7 @@ pub(crate) async fn open_journal_store(
             SqliteJournalStore::try_open(SqliteStoreConfig {
                 path: PathBuf::from(path),
                 durability: durability.to_rust(),
-                limits: default_store_limits(),
+                limits: STORE_LIMITS,
                 busy_timeout: DEFAULT_BUSY_TIMEOUT,
             })
             .map(|store| Arc::new(store) as Arc<dyn JournalStore>)

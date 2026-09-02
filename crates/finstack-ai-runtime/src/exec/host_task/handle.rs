@@ -8,7 +8,7 @@ use crate::events::EventSubscription;
 use crate::events::{EventSubscriptionConfig, EventSubscriptionError};
 use crate::ports::observer::{ObserverDiagnostic, ObserverDiagnostics};
 use crate::run::LiveRunState;
-use crate::run_types::{RunHandleError, RunStatus, ShutdownReport, TimerDiagnostics};
+use crate::run_types::{RunHandleError, RunLifecycle, RunStatus, ShutdownReport, TimerDiagnostics};
 
 use super::oneshot::oneshot;
 use super::shared::{RunCommand, Shared};
@@ -95,7 +95,7 @@ impl RunHandle {
                 self.status(),
                 RunStatus::Faulted { .. } | RunStatus::Stopped
             ) {
-                self.set_status(RunStatus::ShuttingDown);
+                self.shared.publish_lifecycle(RunStatus::ShuttingDown);
             }
             self.shared.work.notify_waiters();
         }
@@ -104,12 +104,7 @@ impl RunHandle {
     /// Read the latest lifecycle state without blocking.
     #[must_use]
     pub fn status(&self) -> RunStatus {
-        self.shared.status.lock().map_or(
-            RunStatus::Faulted {
-                code: "run_status_lock_poisoned",
-            },
-            |status| *status,
-        )
+        self.shared.lifecycle_status()
     }
 
     /// Read the latest confirmed semantic and lifecycle snapshot.
@@ -212,9 +207,5 @@ impl RunHandle {
         if let Ok(mut diagnostics) = self.shared.observer_diagnostics.lock() {
             diagnostics.record(diagnostic);
         }
-    }
-
-    pub(super) fn set_status(&self, status: RunStatus) {
-        self.shared.publish_lifecycle(status);
     }
 }

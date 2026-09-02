@@ -296,9 +296,8 @@ fn raw_json_digest_hex(canonical: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        GuestError, MAX_RAW_JSON_BYTES, MAX_STRING_BYTES, ToolSpecParts, catalog_digest,
-        encode_json_result, parse_args, plugin_error, reject_log_message,
-        require_sanitized_context, schema_bytes,
+        MAX_RAW_JSON_BYTES, MAX_STRING_BYTES, ToolSpecParts, catalog_digest, encode_json_result,
+        parse_args, reject_log_message, require_sanitized_context, schema_bytes,
     };
     use serde::Deserialize;
 
@@ -423,11 +422,5 @@ mod tests {
             reject_log_message(&message).expect_err("log").code,
             "plugin_payload_too_large"
         );
-        let _ = plugin_error("plugin_unknown_tool", "unknown");
-        let _ = GuestError {
-            code: "x".into(),
-            message: "y".into(),
-            retryable: false,
-        };
     }
 }

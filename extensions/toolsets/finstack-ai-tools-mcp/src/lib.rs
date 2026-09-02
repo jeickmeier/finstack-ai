@@ -177,10 +177,7 @@ impl McpConfig {
     ///
     /// Rejects a program that is not on the command allowlist.
     pub fn stdio(mut self, config: StdioConfig) -> Result<Self, McpError> {
-        authorize_stdio(
-            &self.allowed_commands.iter().cloned().collect::<Vec<_>>(),
-            &config.program,
-        )?;
+        authorize_stdio(&self.allowed_commands, &config.program)?;
         self.server = Some(McpServerSpec::Stdio(config));
         Ok(self)
     }
@@ -208,10 +205,7 @@ impl McpConfig {
     ///
     /// Rejects a URL that is not on the URL allowlist.
     pub fn http(mut self, config: HttpConfig) -> Result<Self, McpError> {
-        authorize_http(
-            &self.allowed_urls.iter().cloned().collect::<Vec<_>>(),
-            config.url(),
-        )?;
+        authorize_http(&self.allowed_urls, config.url())?;
         self.server = Some(McpServerSpec::Http(config));
         Ok(self)
     }
@@ -252,16 +246,11 @@ impl McpConfig {
     }
 
     pub(crate) fn is_read_only(&self, name: &str) -> bool {
-        self.read_only_tools
-            .iter()
-            .any(|entry| entry.as_ref() == name)
+        self.read_only_tools.contains(name)
     }
 
     pub(crate) fn is_idempotent(&self, name: &str) -> bool {
-        self.idempotent_tools
-            .iter()
-            .any(|entry| entry.as_ref() == name)
-            || self.is_read_only(name)
+        self.idempotent_tools.contains(name) || self.is_read_only(name)
     }
 
     pub(crate) const fn inline_result_bytes(&self) -> u64 {
@@ -307,8 +296,7 @@ fn snapshot_mcp_json(document: &str) -> Result<McpConfig, McpError> {
         })?;
     let mut config = McpConfig::default();
     let mut bound: Option<McpServerSpec> = None;
-    for (name, server) in servers {
-        let _ = name;
+    for server in servers.values() {
         if server.get("cwd").is_some() || server.get("envFile").is_some() {
             return Err(McpError::stable(
                 MCP_PROTOCOL_VIOLATION,
@@ -334,11 +322,7 @@ fn snapshot_mcp_json(document: &str) -> Result<McpConfig, McpError> {
                 })
                 .unwrap_or_default();
             config = config.allow_command(command);
-            let spec = McpServerSpec::Stdio(StdioConfig::new(command, args));
-            bound = match bound {
-                Some(_) => None,
-                None => Some(spec),
-            };
+            bound = Some(McpServerSpec::Stdio(StdioConfig::new(command, args)));
             continue;
         }
         if let Some(url) = server
@@ -347,11 +331,7 @@ fn snapshot_mcp_json(document: &str) -> Result<McpConfig, McpError> {
             .and_then(serde_json::Value::as_str)
         {
             config = config.allow_url(url)?;
-            let spec = McpServerSpec::Http(HttpConfig::try_new(url)?);
-            bound = match bound {
-                Some(_) => None,
-                None => Some(spec),
-            };
+            bound = Some(McpServerSpec::Http(HttpConfig::try_new(url)?));
             continue;
         }
         return Err(McpError::stable(
@@ -623,22 +603,7 @@ impl Toolset for McpToolset {
                         .map_err(tool_error_from_mcp)?;
                 return Err(interaction_required_error(&request));
             }
-            if result.result_type != ResultType::Complete {
-                return Err(tool_error(
-                    MCP_RESULT_UNSUPPORTED,
-                    ErrorCategory::Validation,
-                    "MCP resultType is not complete",
-                ));
-            }
-            if result.is_error {
-                return Err(tool_error(
-                    TOOL_OUTPUT_INVALID,
-                    ErrorCategory::Validation,
-                    "MCP tool reported isError",
-                ));
-            }
-            let output = normalize_call_result(&result, max_bytes)?;
-            Ok(completed(output, false))
+            complete_call_result(&result, max_bytes)
         })
     }
 
@@ -647,8 +612,7 @@ impl Toolset for McpToolset {
         _ctx: ReconcileContext,
         effect: PendingToolEffect,
     ) -> PortFuture<Result<ToolReconcileResult, ToolError>> {
-        let name = effect.call.call.tool_name();
-        let retry_safe = self.config.is_read_only(name) || self.config.is_idempotent(name);
+        let retry_safe = self.config.is_idempotent(effect.call.call.tool_name());
         Box::pin(async move {
             if retry_safe {
                 Ok(ToolReconcileResult::Unknown)
@@ -707,24 +671,38 @@ impl Toolset for McpToolset {
                     "sampling completion result is invalid",
                 )
             })?;
-            if result.result_type != ResultType::Complete {
-                return Err(tool_error(
-                    MCP_RESULT_UNSUPPORTED,
-                    ErrorCategory::Validation,
-                    "MCP resultType is not complete",
-                ));
-            }
-            if result.is_error {
-                return Err(tool_error(
-                    TOOL_OUTPUT_INVALID,
-                    ErrorCategory::Validation,
-                    "MCP tool reported isError",
-                ));
-            }
-            let output = normalize_call_result(&result, max_bytes)?;
-            Ok(completed(output, false))
+            complete_call_result(&result, max_bytes)
         })
     }
+}
+
+/// Reject a non-`complete` or `isError` result, otherwise normalize it into
+/// the single `Completed` stream item.
+fn complete_call_result(
+    result: &CallToolResult,
+    max_bytes: u64,
+) -> Result<ToolEventStream, ToolError> {
+    if result.result_type != ResultType::Complete {
+        return Err(tool_error(
+            MCP_RESULT_UNSUPPORTED,
+            ErrorCategory::Validation,
+            "MCP resultType is not complete",
+        ));
+    }
+    if result.is_error {
+        return Err(tool_error(
+            TOOL_OUTPUT_INVALID,
+            ErrorCategory::Validation,
+            "MCP tool reported isError",
+        ));
+    }
+    let output = normalize_call_result(result, max_bytes)?;
+    Ok(Box::pin(stream::once(async move {
+        Ok(ToolStreamItem::Completed(ToolResult {
+            output,
+            is_error: false,
+        }))
+    })))
 }
 
 fn normalize_call_result(result: &CallToolResult, max_bytes: u64) -> Result<RawJson, ToolError> {
@@ -783,12 +761,6 @@ fn utf8_prefix(bytes: &[u8], max: usize) -> String {
             String::from_utf8_lossy(&bytes[..valid]).into_owned()
         }
     }
-}
-
-fn completed(output: RawJson, is_error: bool) -> ToolEventStream {
-    Box::pin(stream::once(async move {
-        Ok(ToolStreamItem::Completed(ToolResult { output, is_error }))
-    }))
 }
 
 fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {

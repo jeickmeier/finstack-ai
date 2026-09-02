@@ -5,7 +5,8 @@ use crate::effects::EffectOutputKind;
 use crate::records::tools::{ActiveToolCallStatus, ToolSettlementKind};
 use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::{
-    BudgetReservationReplay, CancellationState, CurrentTurn, KernelState, RunPhase, TerminalState,
+    BudgetReservationReplay, CancellationState, CurrentTurn, InteractionTerminalOutcome,
+    KernelState, RunPhase, TerminalState,
 };
 
 use super::super::decision::KernelError;
@@ -14,8 +15,8 @@ use super::effects::{
     apply_effect_requested, apply_entry_appended, apply_limit_reached, update_wall_usage,
 };
 use super::interactions::{
-    apply_interaction_cancelled, apply_interaction_effect_terminal, apply_interaction_expired,
-    apply_interaction_requested, apply_interaction_resolved, apply_timer_effect_cancelled,
+    apply_interaction_effect_terminal, apply_interaction_requested, apply_interaction_resolved,
+    apply_interaction_terminal_outcome, apply_timer_effect_cancelled,
 };
 use super::output::{apply_final_result, apply_validation_failure};
 use super::shapes::is_foreign_run;
@@ -52,9 +53,6 @@ pub(super) fn apply_record(
         }
         RecordBody::StageOutcomeRecorded(outcome) => apply_stage_outcome(state, outcome)?,
         RecordBody::ContextPrepared(context) => {
-            // Verifying the digest and measuring the context are the same
-            // canonicalization; doing them separately walked the whole
-            // conversation twice per turn.
             let (digest, context_bytes) =
                 crate::records::lifecycle::context_digest_and_len(&context.messages)
                     .map_err(|_| KernelError::ContextDigestMismatch)?;
@@ -525,10 +523,18 @@ pub(super) fn apply_record(
             apply_interaction_resolved(state, resolved)?;
         }
         RecordBody::InteractionExpired(expired) => {
-            apply_interaction_expired(state, expired)?;
+            apply_interaction_terminal_outcome(
+                state,
+                expired.interaction_id,
+                InteractionTerminalOutcome::Expired,
+            )?;
         }
         RecordBody::InteractionCancelled(cancelled) => {
-            apply_interaction_cancelled(state, cancelled)?;
+            apply_interaction_terminal_outcome(
+                state,
+                cancelled.interaction_id(),
+                InteractionTerminalOutcome::Cancelled,
+            )?;
         }
     }
     Ok(())

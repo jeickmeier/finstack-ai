@@ -82,14 +82,41 @@ impl CommitCoordinator {
             .collect()
     }
 
+    /// The dispatch seed for one requested call in the active batch, whether
+    /// or not it is deferred. `attempt` is always `1`: a seed rebuilt from
+    /// committed state carries no live retry count.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn tool_seed(&self, effect_id: EffectId) -> Option<ToolDispatchSeed> {
+        let state = self.kernel.state();
+        let batch = state.active_tool_batch()?;
+        let call = batch.call(effect_id)?;
+        let ActiveToolCallStatus::Requested { requested, .. } = &call.status else {
+            return None;
+        };
+        let finstack_ai_kernel::ToolCallPlan::Execute(validated) = &call.assigned.plan else {
+            return None;
+        };
+        let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
+        Some(ToolDispatchSeed {
+            requested: requested.clone(),
+            tool_batch_id: batch.opened.tool_batch_id,
+            tool_call_id: *validated.call.tool_call_id(),
+            call: validated.clone(),
+            locator,
+            authorization,
+            budget_scope_id,
+            attempt: 1,
+            requested_at: state.accepted_at()?,
+            relation_depth: relation_depth_from_state(state),
+        })
+    }
+
     /// Identity, authorization, budget scope, attempt, and deadline for a
     /// stage-driver invocation at the coordinator's current cursor.
     ///
     /// Exact peer of [`Self::pending_model_seed`] / [`Self::pending_tool_seeds`],
-    /// built from the same private [`dispatch_security_context`]. Exists
-    /// because that free fn is private to this module and the stage-driver
-    /// choke point cannot call it directly. `None` before a run is accepted,
-    /// matching the other seeds.
+    /// built from the same private [`dispatch_security_context`]. `None`
+    /// before a run is accepted, matching the other seeds.
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn stage_dispatch_seed(&self) -> Option<StageDispatchSeed> {
         let state = self.kernel.state();
@@ -140,12 +167,8 @@ pub(super) fn action_is_authorized(
     if state.terminal().is_some() {
         return false;
     }
-    let effect_id = match action {
-        PostCommitAction::ExecuteEffect { effect_id }
-        | PostCommitAction::CancelEffect { effect_id } => effect_id,
-    };
     match action {
-        PostCommitAction::ExecuteEffect { .. } => {
+        PostCommitAction::ExecuteEffect { effect_id } => {
             if state.cancellation().is_some() {
                 return false;
             }
@@ -153,7 +176,7 @@ pub(super) fn action_is_authorized(
                 .or_else(|| pending_effect_request(state, effect_id))
                 .is_some_and(|request| request.deadline().is_none_or(|deadline| deadline > now))
         }
-        PostCommitAction::CancelEffect { .. } => state
+        PostCommitAction::CancelEffect { effect_id } => state
             .cancellation()
             .is_some_and(|value| value.outstanding_effects.contains(&effect_id)),
     }

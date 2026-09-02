@@ -167,14 +167,12 @@ impl OllamaChatAssembly {
                 ));
             }
             let arguments = if tool.arguments.is_empty() {
-                RawJson::parse(b"{}").map_err(|_| {
-                    StreamNormError::response("tool-call arguments are invalid JSON")
-                })?
+                b"{}".as_slice()
             } else {
-                RawJson::parse(tool.arguments.as_bytes()).map_err(|_| {
-                    StreamNormError::response("tool-call arguments are invalid JSON")
-                })?
+                tool.arguments.as_bytes()
             };
+            let arguments = RawJson::parse(arguments)
+                .map_err(|_| StreamNormError::response("tool-call arguments are invalid JSON"))?;
             digest_tools.push((tool.name.clone(), arguments.as_str().to_owned()));
             tool_calls.push(ModelToolCall {
                 name: Arc::from(tool.name),
@@ -214,57 +212,31 @@ impl OllamaChatAssembly {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| StreamNormError::response("tool call omitted its name"))?;
         let arguments = encode_arguments(function.arguments)?;
-        let previous = self
-            .tools
-            .get(&index)
-            .map(|existing| (existing.name.clone(), existing.arguments.clone()));
-        match previous {
-            Some((existing_name, existing_args))
-                if existing_name == name && existing_args == arguments =>
-            {
-                return Ok(Vec::new());
-            }
-            Some((existing_name, _)) if existing_name != name => {
+        let delta: Arc<str> = match self.tools.get(&index) {
+            None => Arc::from(arguments.as_str()),
+            Some(existing) if existing.name != name => {
                 return Err(StreamNormError::response(
                     "tool-call name changed within one stream",
                 ));
             }
-            Some((_, existing_args)) if arguments.starts_with(&existing_args) => {
-                let suffix = arguments[existing_args.len()..].to_owned();
-                self.tools.insert(
-                    index,
-                    ToolAssembly {
-                        name: name.clone(),
-                        arguments,
-                    },
-                );
-                return Ok(vec![ModelStreamItem::ToolCallDelta(ToolCallDelta {
-                    index,
-                    name: Some(Arc::from(name.as_str())),
-                    arguments_delta: Arc::from(suffix.as_str()),
-                    provider_call_id: None,
-                })]);
-            }
-            Some(_) => {
-                return Err(StreamNormError::response(
-                    "tool-call arguments changed within one stream",
-                ));
-            }
-            None => {}
-        }
-        self.tools.insert(
-            index,
-            ToolAssembly {
-                name: name.clone(),
-                arguments: arguments.clone(),
+            Some(existing) if existing.arguments == arguments => return Ok(Vec::new()),
+            Some(existing) => match arguments.strip_prefix(existing.arguments.as_str()) {
+                Some(suffix) => Arc::from(suffix),
+                None => {
+                    return Err(StreamNormError::response(
+                        "tool-call arguments changed within one stream",
+                    ));
+                }
             },
-        );
-        Ok(vec![ModelStreamItem::ToolCallDelta(ToolCallDelta {
+        };
+        let item = ModelStreamItem::ToolCallDelta(ToolCallDelta {
             index,
             name: Some(Arc::from(name.as_str())),
-            arguments_delta: Arc::from(arguments.as_str()),
+            arguments_delta: delta,
             provider_call_id: None,
-        })])
+        });
+        self.tools.insert(index, ToolAssembly { name, arguments });
+        Ok(vec![item])
     }
 
     fn apply_usage(

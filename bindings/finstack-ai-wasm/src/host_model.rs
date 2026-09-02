@@ -7,14 +7,14 @@ use finstack_ai::runtime::ports::PortFuture;
 use finstack_ai::runtime::ports::model::{
     InputCapabilities, Model, ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError,
     ModelEventStream, ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate,
-    StructuredOutputCapability, TextDelta, TokenEstimatorSource, ToolCallDelta,
+    StructuredOutputCapability, TextDelta, ToolCallDelta,
 };
 use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata};
 use futures_util::stream;
 
 use crate::host::{
-    HostFailure, HostModelOptions, completed_from_stream_item, host_component_version,
-    js_estimator, model_failure, model_response, parse_host_json,
+    HOST_VERSION, HostFailure, HostModelOptions, completed_from_stream_item, js_estimator,
+    model_failure, model_response, parse_host_json,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -22,7 +22,6 @@ use crate::host::NativeHostResult;
 
 /// Host-backed Model port. Local (`!Send`) on wasm32; `Send + Sync` on native.
 pub struct HostModel {
-    #[allow(dead_code)]
     component: ComponentRef,
     descriptor: ModelDescriptor,
     capabilities: ModelCapabilities,
@@ -31,7 +30,7 @@ pub struct HostModel {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    request: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    request: js_sys::Function,
 }
 
 impl HostModel {
@@ -44,7 +43,7 @@ impl HostModel {
         let component = ComponentRef::new(
             ComponentId::parse(&options.component)
                 .map_err(|_| model_failure(HostFailure::InvalidResult))?,
-            Some(host_component_version()),
+            Some(HOST_VERSION),
         );
         let model = ModelName::try_new(options.model)
             .map_err(|_| model_failure(HostFailure::InvalidResult))?;
@@ -93,7 +92,7 @@ impl HostModel {
             #[cfg(target_arch = "wasm32")]
             adapter,
             #[cfg(target_arch = "wasm32")]
-            request: std::rc::Rc::new(std::cell::RefCell::new(request)),
+            request,
         })
     }
 
@@ -126,7 +125,6 @@ impl HostModel {
 
     /// Exact registered component identity.
     #[must_use]
-    #[allow(dead_code)]
     pub fn component(&self) -> &ComponentRef {
         &self.component
     }
@@ -152,11 +150,7 @@ impl Model for HostModel {
         Ok(ModelTokenEstimate {
             input_tokens: u64::try_from(canonical_request.len())
                 .map_err(|_| model_failure(HostFailure::InvalidResult))?,
-            estimator: finstack_ai::runtime::ports::model::TokenEstimatorRef {
-                id: Arc::from("finstack.js.bytes-upper-bound"),
-                version: Arc::from("1"),
-                source: TokenEstimatorSource::ConservativeUpperBound,
-            },
+            estimator: js_estimator(),
         })
     }
 
@@ -192,7 +186,7 @@ impl HostModel {
         signal: Option<wasm_bindgen::JsValue>,
     ) -> PortFuture<Result<ModelEventStream, ModelError>> {
         let adapter = self.adapter.clone();
-        let method = self.request.borrow().clone();
+        let method = self.request.clone();
         let cancellation = request.call.run.cancellation.clone();
         Box::pin(async move {
             let owned = if signal.is_none() {
@@ -214,7 +208,7 @@ impl HostModel {
             {
                 return Err(model_failure(HostFailure::Cancelled));
             }
-            let draft_value = crate::host::json_string_value(&draft);
+            let draft_value = wasm_bindgen::JsValue::from_str(&draft);
             let positional = [draft_value];
             let invoke =
                 crate::host::invoke_host(&adapter, &method, &positional, effective.as_ref());

@@ -14,8 +14,8 @@ use crate::ingress::{InteractionResumeAction, interaction_resume_action};
 use crate::ports::journal::LoadRequest;
 use crate::run_types::RunHandleError;
 
-use super::SettlementSources;
 use super::tool::{generate_tool_id, generate_tool_ids};
+use super::{SettlementSources, committed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ToolOpeningCounts {
@@ -359,14 +359,7 @@ async fn submit_interaction_request<C: Clock, R: RandomSource>(
             code: "interaction_request_allocation_mismatch",
         }
     })?;
-    let outcome = coordinator
-        .submit(env, input)
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
-    Ok(())
+    committed(coordinator.submit(env, input).await)
 }
 
 pub(crate) async fn apply_interaction_resume<C: Clock, R: RandomSource>(
@@ -414,13 +407,7 @@ pub(crate) async fn apply_interaction_resume<C: Clock, R: RandomSource>(
             code: "interaction_expire_allocation_mismatch",
         }
     })?;
-    let outcome = coordinator
-        .submit(env, input)
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
+    committed(coordinator.submit(env, input).await)?;
     Ok(action)
 }
 

@@ -36,19 +36,14 @@ use futures_util::stream;
 use serde::Deserialize;
 
 use crate::record::{
-    ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
-    MemoryRecord, MemoryScope, RetentionPolicy, preview_of,
+    ExtractionMethod, INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody,
+    MemoryClock, MemoryError, MemoryId, MemoryProvenance, MemoryRecord, MemoryScope,
+    RetentionPolicy, preview_of,
 };
 use crate::store::{
     MatchEvidence, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
     reconcile_memory_artifacts, reconcile_memory_embeddings,
 };
-
-/// Inline-vs-blob threshold for a memory record body, in bytes.
-///
-/// Re-exported from [`crate::record`], which owns the single definition
-/// shared with the observer's capture path.
-pub use crate::record::INLINE_BODY_MAX_BYTES;
 
 const REMEMBER_TOOL_ID: &str = "finstack.tools.memory.remember";
 const SEARCH_TOOL_ID: &str = "finstack.tools.memory.search";
@@ -102,8 +97,7 @@ const SEARCH_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":f
 const SEARCH_INPUT_SCHEMA_WITH_MODE: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":256},"keywords":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","minLength":1,"maxLength":128}},"text":{"type":"string","minLength":1,"maxLength":4096},"mode":{"type":"string","enum":["lexical","semantic"]},"limit":{"type":"integer","minimum":1,"maximum":25}},"required":[]}"#;
 
 const SEARCH_DESCRIPTION: &str = "Search memory records by exact id, keywords, or full text.";
-const SEARCH_DESCRIPTION_WITH_MODE: &str =
-    "Search memory records by exact id, keywords, or full text. With text, \
+const SEARCH_DESCRIPTION_WITH_MODE: &str = "Search memory records by exact id, keywords, or full text. With text, \
      set mode to \"semantic\" to rank by embedding similarity instead of \
      lexical matching; mode defaults to \"lexical\".";
 const SEARCH_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"hits":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"preview":{"type":"string"},"score":{"type":"integer"},"matched":{"type":"string"}},"required":["id","preview","score","matched"]}}},"required":["hits"]}"#;
@@ -517,26 +511,54 @@ impl MemoryToolset {
         )?;
         validate_memory_keywords(&args.keywords)?;
         let sensitivity = parse_sensitivity(args.sensitivity.as_deref())?;
-        let id = match args.id {
-            Some(id) => id,
+        let memory_id = match args.id {
+            Some(id) => {
+                MemoryId::parse(&id).map_err(|_| invalid_arguments("memory id is invalid"))?
+            }
             None => derive_id(&self.scope, &args.body)?,
         };
-        let memory_id =
-            MemoryId::parse(&id).map_err(|_| invalid_arguments("memory id is invalid"))?;
-        let (body, preview) = self
-            .build_body(run, &memory_id, &args.body, sensitivity)
+        let record = self
+            .new_record(
+                run,
+                memory_id.clone(),
+                &args.keywords,
+                &args.body,
+                sensitivity,
+            )
             .await?;
-        let keywords: Arc<[Arc<str>]> = Arc::from(
-            args.keywords
-                .iter()
-                .map(|k| Arc::from(k.as_str()))
-                .collect::<Vec<_>>(),
-        );
+        let outcome = match self.store.put(Self::idempotency_key(run), record).await {
+            Ok(outcome) => outcome,
+            // Surfaced to the model as a recoverable result rather than a
+            // tool failure: the fix is a `correct_memory` call, which records
+            // the supersession instead of destroying the existing record.
+            Err(MemoryStoreError::IdConflict) => return id_conflict_result(),
+            Err(error) => return Err(map_store_error(&error)),
+        };
+        self.reconcile_artifacts().await?;
+        self.drain_embeddings().await;
+        let outcome_str = match outcome {
+            PutOutcome::Inserted => "inserted",
+            PutOutcome::AlreadyApplied => "already_applied",
+        };
+        ok_result(&serde_json::json!({ "id": memory_id.as_str(), "outcome": outcome_str }))
+    }
+
+    /// Build the tool-written record for `id`, with the current run as its
+    /// provenance and the body stored through [`Self::build_body`].
+    async fn new_record(
+        &self,
+        run: &RunCallContext,
+        id: MemoryId,
+        keywords: &[String],
+        body: &str,
+        sensitivity: Sensitivity,
+    ) -> Result<MemoryRecord, ToolError> {
+        let (body, preview) = self.build_body(run, &id, body, sensitivity).await?;
         let timestamp = (self.clock)();
-        let record = MemoryRecord {
-            id: memory_id.clone(),
+        Ok(MemoryRecord {
+            id,
             scope: self.scope.clone(),
-            keywords,
+            keywords: keywords.iter().map(|k| Arc::from(k.as_str())).collect(),
             body,
             preview,
             sensitivity,
@@ -553,22 +575,7 @@ impl MemoryToolset {
             superseded_by: None,
             retention: RetentionPolicy::KeepUntilDeleted,
             tombstoned: false,
-        };
-        let outcome = match self.store.put(Self::idempotency_key(run), record).await {
-            Ok(outcome) => outcome,
-            // Surfaced to the model as a recoverable result rather than a
-            // tool failure: the fix is a `correct_memory` call, which records
-            // the supersession instead of destroying the existing record.
-            Err(MemoryStoreError::IdConflict) => return id_conflict_result(),
-            Err(error) => return Err(map_store_error(&error)),
-        };
-        self.reconcile_artifacts().await?;
-        self.drain_embeddings().await;
-        let outcome_str = match outcome {
-            PutOutcome::Inserted => "inserted",
-            PutOutcome::AlreadyApplied => "already_applied",
-        };
-        ok_result(&serde_json::json!({ "id": memory_id.as_str(), "outcome": outcome_str }))
+        })
     }
 
     /// Store small bodies inline; stage larger ones as blobs. Blob content
@@ -659,52 +666,35 @@ impl MemoryToolset {
                 "mode applies to text queries only",
             ));
         }
-        let provided = [
-            args.id.is_some(),
-            args.keywords.is_some(),
-            args.text.is_some(),
-        ]
-        .into_iter()
-        .filter(|present| *present)
-        .count();
-        if provided != 1 {
-            return Err(invalid_arguments_code(
-                "memory_query_invalid",
-                "exactly one of id, keywords, or text is required",
-            ));
-        }
-        let query = if let Some(id) = args.id {
-            let memory_id =
-                MemoryId::parse(&id).map_err(|_| invalid_arguments("memory id is invalid"))?;
-            MemoryQuery::ExactId(memory_id)
-        } else if let Some(keywords) = args.keywords {
-            let keywords: Arc<[Arc<str>]> = Arc::from(
-                keywords
-                    .iter()
-                    .map(|k| Arc::from(k.as_str()))
-                    .collect::<Vec<_>>(),
-            );
-            MemoryQuery::Keywords(keywords)
-        } else if let Some(text) = args.text {
-            // An empty or whitespace-only needle matches every record in a
-            // substring-matching store, turning `search_memory` into an
-            // enumeration of memories the caller never named.
-            if text.trim().is_empty() {
+        let query = match (args.id, args.keywords, args.text) {
+            (Some(id), None, None) => MemoryQuery::ExactId(
+                MemoryId::parse(&id).map_err(|_| invalid_arguments("memory id is invalid"))?,
+            ),
+            (None, Some(keywords), None) => {
+                MemoryQuery::Keywords(keywords.iter().map(|k| Arc::from(k.as_str())).collect())
+            }
+            (None, None, Some(text)) => {
+                // An empty or whitespace-only needle matches every record in
+                // a substring-matching store, turning `search_memory` into an
+                // enumeration of memories the caller never named.
+                if text.trim().is_empty() {
+                    return Err(invalid_arguments_code(
+                        "memory_query_invalid",
+                        "text must contain at least one non-whitespace character",
+                    ));
+                }
+                if semantic {
+                    self.semantic_query(&text).await?
+                } else {
+                    MemoryQuery::FullText(Arc::from(text.as_str()))
+                }
+            }
+            _ => {
                 return Err(invalid_arguments_code(
                     "memory_query_invalid",
-                    "text must contain at least one non-whitespace character",
+                    "exactly one of id, keywords, or text is required",
                 ));
             }
-            if semantic {
-                self.semantic_query(&text).await?
-            } else {
-                MemoryQuery::FullText(Arc::from(text.as_str()))
-            }
-        } else {
-            return Err(invalid_arguments_code(
-                "memory_query_invalid",
-                "exactly one of id, keywords, or text is required",
-            ));
         };
         let limit = args.limit.unwrap_or(8).clamp(1, 25) as usize;
         let hits = self
@@ -805,9 +795,7 @@ impl MemoryToolset {
         let old_id = MemoryId::parse(&args.old_id)
             .map_err(|_| invalid_arguments("memory old_id is invalid"))?;
         let sensitivity = parse_sensitivity(args.sensitivity.as_deref())?;
-        let new_id_str = derive_id(&self.scope, &args.body)?;
-        let new_id =
-            MemoryId::parse(&new_id_str).map_err(|_| invalid_arguments("memory id is invalid"))?;
+        let new_id = derive_id(&self.scope, &args.body)?;
         // The replacement id is derived from the replacement body, so an
         // unchanged body derives the id being corrected. Writing that record
         // would make it supersede itself and vanish from recall, so reject it
@@ -815,37 +803,9 @@ impl MemoryToolset {
         if new_id == old_id {
             return self_supersession_result();
         }
-        let (body, preview) = self
-            .build_body(run, &new_id, &args.body, sensitivity)
+        let replacement = self
+            .new_record(run, new_id.clone(), &args.keywords, &args.body, sensitivity)
             .await?;
-        let keywords: Arc<[Arc<str>]> = Arc::from(
-            args.keywords
-                .iter()
-                .map(|k| Arc::from(k.as_str()))
-                .collect::<Vec<_>>(),
-        );
-        let timestamp = (self.clock)();
-        let replacement = MemoryRecord {
-            id: new_id.clone(),
-            scope: self.scope.clone(),
-            keywords,
-            body,
-            preview,
-            sensitivity,
-            provenance: MemoryProvenance {
-                source_session: Some(Arc::from(run.locator.session_id.to_canonical_string())),
-                source_run: Some(Arc::from(run.locator.run_id.to_canonical_string())),
-                source_ref: None,
-                extraction: ExtractionMethod::ToolWrite,
-                confidence: 100,
-            },
-            created_at: timestamp,
-            last_confirmed_at: timestamp,
-            supersedes: None,
-            superseded_by: None,
-            retention: RetentionPolicy::KeepUntilDeleted,
-            tombstoned: false,
-        };
         match self
             .store
             .correct(
@@ -885,7 +845,7 @@ pub(crate) fn matched_str(matched: &MatchEvidence) -> String {
 /// text land on distinct ids: a shared store must not turn one tenant's
 /// first write into a conflict with another tenant's record, nor let the
 /// conflict reveal that some other scope holds that exact body.
-fn derive_id(scope: &MemoryScope, body: &str) -> Result<String, ToolError> {
+fn derive_id(scope: &MemoryScope, body: &str) -> Result<MemoryId, ToolError> {
     let encoded = serde_json_canonicalizer::to_vec(&(scope, body)).map_err(|_| {
         tool_error(
             MEMORY_TOOL_UNAVAILABLE,
@@ -905,7 +865,8 @@ fn derive_id(scope: &MemoryScope, body: &str) -> Result<String, ToolError> {
                 )
             })?;
     let hex = digest.to_hex();
-    Ok(format!("mem-{}", &hex[..16.min(hex.len())]))
+    MemoryId::parse(&format!("mem-{}", &hex[..16.min(hex.len())]))
+        .map_err(|_| invalid_arguments("memory id is invalid"))
 }
 
 fn parse_sensitivity(value: Option<&str>) -> Result<Sensitivity, ToolError> {
@@ -927,10 +888,10 @@ fn validate_memory_body(body: &str, max_bytes: usize) -> Result<(), ToolError> {
 }
 
 fn validate_memory_keywords(keywords: &[String]) -> Result<(), ToolError> {
-    if keywords.len() > crate::record::KEYWORDS_MAX_COUNT
+    if keywords.len() > KEYWORDS_MAX_COUNT
         || keywords.iter().any(|keyword| {
             keyword.is_empty()
-                || keyword.len() > crate::record::KEYWORD_MAX_BYTES
+                || keyword.len() > KEYWORD_MAX_BYTES
                 || keyword.as_bytes().contains(&0)
         })
     {

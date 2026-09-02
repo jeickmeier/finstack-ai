@@ -3,7 +3,9 @@
 use finstack_ai_kernel::{BlobRef, ContentBlock, Message, ToolCallId};
 use serde_json::Value;
 
-use crate::fixtures::public_api::{Expect, PublicApiFixture, PublicApiFixtureError};
+use crate::fixtures::public_api::{
+    Expect, PublicApiFixture, PublicApiFixtureError, assert_error_code, fail,
+};
 
 /// Execute a blob-ref / content-block / message fixture.
 pub(crate) fn run_message_subject(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
@@ -239,23 +241,4 @@ fn classify_message_error(error: &serde_json::Error) -> &'static str {
         }
     }
     classify_parse_error(error)
-}
-
-fn assert_error_code(expect: &Expect, actual: &str) -> Result<(), PublicApiFixtureError> {
-    if expect.ok {
-        return Err(fail(format!("expected success, got error {actual}")));
-    }
-    let Some(expected) = expect.error_code.as_deref() else {
-        return Err(fail("failed case requires expect.error_code"));
-    };
-    if expected != actual {
-        return Err(fail(format!(
-            "error_code mismatch: expected {expected}, got {actual}"
-        )));
-    }
-    Ok(())
-}
-
-fn fail(message: impl Into<String>) -> PublicApiFixtureError {
-    PublicApiFixtureError::Failed(message.into())
 }

@@ -2,11 +2,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{CompactionAuthorization, Message, ToolCallId};
-#[cfg(test)]
-use finstack_ai_kernel::{
-    EffectInput, EffectKind, EffectOutputKind, EffectPurpose, EffectRequested, RawJson, RecordBody,
-    RecordEnvelope,
-};
 
 use super::digest::{
     compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
@@ -18,62 +13,6 @@ use super::types::{
     MiddlewareDescriptor, MiddlewareRole, Stage, StageInput, StageOutcome, canonical_bytes,
 };
 use super::{COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED};
-
-/// Validate a related committed Model effect before model-assisted compaction dispatch.
-///
-/// # Errors
-///
-/// Returns `compaction_model_not_authorized` unless the child effect is
-/// related to the exact compaction parent and freezes the requested model
-/// draft.
-#[cfg(test)]
-pub(crate) fn validate_compaction_model_effect(
-    parent: &EffectRequested,
-    child_envelope: &RecordEnvelope,
-    request: &CompactionModelRequest,
-) -> Result<(), MiddlewareError> {
-    let RecordBody::EffectRequested(child) = child_envelope.body() else {
-        return Err(MiddlewareError::compaction_model_not_authorized());
-    };
-    let raw = RawJson::parse(request.request.canonical_bytes().map_err(|_| {
-        MiddlewareError::stable(
-            COMPACTION_MODEL_NOT_AUTHORIZED,
-            "compaction model request could not be normalized",
-        )
-    })?)
-    .map_err(|_| {
-        MiddlewareError::stable(
-            COMPACTION_MODEL_NOT_AUTHORIZED,
-            "compaction model request could not be normalized",
-        )
-    })?;
-    let relation_matches = child.relation().is_some_and(|relation| {
-        relation.parent_effect_id == parent.effect_id()
-            && matches!(
-                &relation.purpose,
-                EffectPurpose::CompactionSummary {
-                    middleware_component_id
-                } if parent.component().is_some_and(|component| &component.component == middleware_component_id)
-            )
-    });
-    if parent.kind() != EffectKind::Middleware
-        || child.kind() != EffectKind::Model
-        || child_envelope.sequence() == 0
-        || !relation_matches
-        || !child.component().is_some_and(|value| {
-            &value.component == request.model.id()
-                && request
-                    .model
-                    .version()
-                    .is_some_and(|version| value.version == version)
-        })
-        || !matches!(child.input(), EffectInput::Model { request } if request == &raw)
-        || child.output_contract().kind != EffectOutputKind::ModelResponse
-    {
-        return Err(MiddlewareError::compaction_model_not_authorized());
-    }
-    Ok(())
-}
 
 /// Validate the fixed stage/outcome matrix and descriptor-specific restrictions.
 ///

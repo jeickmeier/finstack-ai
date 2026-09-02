@@ -6,8 +6,8 @@ use finstack_ai_kernel::{
     EventTag, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
     ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, Id, IdTag,
     KernelInput, MessageTag, Metadata, ProviderIds, RawJson, RecordExternalCommandRejected,
-    RecordTag, ToolBatchSettled, ToolCallBlock, ToolCallPlan, ToolFailurePolicy, ToolSettlement,
-    TransitionEnv, ValidatedToolCall,
+    RecordTag, ToolBatchSettled, ToolCallBlock, ToolFailurePolicy, ToolSettlement, TransitionEnv,
+    ValidatedToolCall,
 };
 
 use crate::ToolProgress;
@@ -15,10 +15,10 @@ use crate::coordinator::{CommitCoordinator, CommitCoordinatorError, ToolDispatch
 use crate::ids::{Clock, RandomSource};
 use crate::ports::model::{CancellationSignal, ReconcileContext, RunCallContext};
 use crate::ports::tool::{
-    PendingToolEffect, ResolvedToolCatalog, ToolCallContext, ToolDeferral, ToolError,
-    ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamLimits,
-    ToolTerminal, map_tool_reconcile_result, normalize_tool_result, tool_resume_action,
-    tool_retry_allowed,
+    PendingToolEffect, ResolvedTool, ResolvedToolCatalog, ToolCallContext, ToolDeferral, ToolError,
+    ToolEventStream, ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler,
+    ToolStreamLimits, ToolTerminal, map_tool_reconcile_result, normalize_tool_result,
+    tool_resume_action, tool_retry_allowed,
 };
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
@@ -26,7 +26,7 @@ use crate::tool::AssembledToolTerminal;
 use super::cancel::reconcile_cancelled_effect;
 use super::ids::submit_resume_input;
 use super::interaction::request_tool_interaction;
-use super::{SettlementSources, ToolDriverResult, tool_handle_error};
+use super::{SettlementSources, ToolDriverResult, committed, tool_handle_error};
 
 /// How [`process_tool_result`] finished without failing the run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,27 +108,38 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
         ToolSettlement::Failed(_) | ToolSettlement::Deferred(_) => Vec::new(),
     };
     let input = KernelInput::ToolBatchSettled(settled.clone());
-    let allocation = allocate_tool_settlement(coordinator.state(), &settled, sources)?;
-    let env = TransitionEnv {
-        now,
-        ids: allocation,
-    };
+    let ids = allocate_tool_settlement(coordinator.state(), &settled, sources)?;
+    let env = TransitionEnv { now, ids };
     coordinator
         .classify(&env, input.clone())
         .map_err(|_| RunHandleError::ToolSettlement {
             code: "tool_settlement_allocation_mismatch",
         })?;
-    let outcome = coordinator
-        .submit(env, input)
-        .await
-        .map_err(RunHandleError::Coordinator)?;
-    if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
-    }
+    committed(coordinator.submit(env, input).await)?;
     sources
         .pin_committed_artifacts(&locator, &artifacts)
         .await?;
     Ok(ToolResultDisposition::Settled)
+}
+
+/// Drive one tool call's stream to its terminal under default stream limits.
+pub(super) async fn assemble_call(
+    resolved: &ResolvedTool,
+    stream: ToolEventStream,
+) -> Result<AssembledToolTerminal, ToolError> {
+    let assembled = ToolStreamAssembler::new(ToolStreamLimits::default())
+        .assemble(
+            stream,
+            resolved.output_validator.as_deref(),
+            resolved.spec.max_result_bytes,
+            resolved.spec.deferral,
+        )
+        .await?;
+    Ok(AssembledToolTerminal {
+        usage: assembled.usage,
+        artifacts: assembled.artifacts,
+        terminal: assembled.terminal,
+    })
 }
 
 pub(crate) async fn continue_parked_tool<C: Clock, R: RandomSource>(
@@ -161,19 +172,7 @@ pub(crate) async fn continue_parked_tool<C: Clock, R: RandomSource>(
         tool_call_id: seed.tool_call_id,
     };
     let result = match resolved.toolset.call(context, call).await {
-        Ok(stream) => ToolStreamAssembler::new(ToolStreamLimits::default())
-            .assemble(
-                stream,
-                resolved.output_validator.as_deref(),
-                resolved.spec.max_result_bytes,
-                resolved.spec.deferral,
-            )
-            .await
-            .map(|assembled| AssembledToolTerminal {
-                usage: assembled.usage,
-                artifacts: assembled.artifacts,
-                terminal: assembled.terminal,
-            }),
+        Ok(stream) => assemble_call(&resolved, stream).await,
         Err(error) => Err(error),
     };
     process_tool_result(coordinator, ToolDriverResult { seed, result }, sources).await
@@ -526,15 +525,9 @@ pub(crate) async fn resume_pending_tool_effects<C: Clock, R: RandomSource>(
     if to_reconcile.is_empty() {
         return Ok(aggregate_tool_resume_actions(&first_pass));
     }
-    let seeds = coordinator.pending_tool_seeds();
     let mut mapped = Vec::new();
     for effect_id in to_reconcile {
-        let Some(seed) = seeds
-            .iter()
-            .find(|seed| seed.requested.effect_id() == effect_id)
-            .cloned()
-            .or_else(|| tool_seed_for_deferred(coordinator, effect_id))
-        else {
+        let Some(seed) = coordinator.tool_seed(effect_id) else {
             return Ok(ToolResumeAction::SuspendUncertain);
         };
         let Some(resolved) = catalog.by_id(&seed.call.tool_id) else {
@@ -609,77 +602,6 @@ fn aggregate_tool_resume_actions(actions: &[ToolResumeAction]) -> ToolResumeActi
         return ToolResumeAction::Reconcile;
     }
     ToolResumeAction::NoOutstanding
-}
-
-fn tool_seed_for_deferred(
-    coordinator: &CommitCoordinator,
-    effect_id: EffectId,
-) -> Option<ToolDispatchSeed> {
-    coordinator
-        .pending_tool_seeds()
-        .into_iter()
-        .find(|seed| seed.requested.effect_id() == effect_id)
-        .or_else(|| deferred_tool_seed(coordinator, effect_id))
-}
-
-pub(super) fn deferred_tool_seed(
-    coordinator: &CommitCoordinator,
-    effect_id: EffectId,
-) -> Option<ToolDispatchSeed> {
-    let state = coordinator.state();
-    let batch = state.active_tool_batch()?;
-    let call = batch.call(effect_id)?;
-    let ActiveToolCallStatus::Requested { requested, .. } = &call.status else {
-        return None;
-    };
-    let ToolCallPlan::Execute(validated) = &call.assigned.plan else {
-        return None;
-    };
-    let (locator, authorization, budget_scope_id) = dispatch_security_from_state(state)?;
-    Some(ToolDispatchSeed {
-        requested: requested.clone(),
-        tool_batch_id: batch.opened.tool_batch_id,
-        tool_call_id: *validated.call.tool_call_id(),
-        call: validated.clone(),
-        locator,
-        authorization,
-        budget_scope_id,
-        attempt: 1,
-        requested_at: state.accepted_at()?,
-        relation_depth: coordinator.accepted_relation_depth(),
-    })
-}
-
-fn dispatch_security_from_state(
-    state: &finstack_ai_kernel::KernelState,
-) -> Option<(
-    finstack_ai_kernel::OperationLocator,
-    crate::ports::model::AuthorizationContext,
-    Option<finstack_ai_kernel::BudgetScopeId>,
-)> {
-    let accepted = state.accepted()?;
-    let security = accepted.security();
-    let locator = finstack_ai_kernel::OperationLocator::try_new(
-        security.tenant_scope(),
-        state.session_id()?,
-        state.lane_id()?,
-        accepted.run_id(),
-    )
-    .ok()?;
-    Some((
-        locator,
-        crate::ports::model::AuthorizationContext {
-            principal: security.principal().clone(),
-            authentication_method: Arc::from(security.authentication_method()),
-            assurance_level: Arc::from(security.assurance_level()),
-            roles: Arc::from([]),
-            permitted_scopes: Arc::from([Arc::from(security.tenant_scope())]),
-            safe_claims: Metadata::empty(),
-            policy_version: Arc::from(security.authorization_policy_version()),
-            decision_id: Arc::from(security.authorization_decision_id()),
-        },
-        accepted.relation().budget_scope_id(),
-    ))
 }
 
 /// Apply one reconciled outcome to the committed tool effect.
@@ -861,10 +783,7 @@ async fn submit_tool_fail_closed<C: Clock, R: RandomSource>(
         })?;
     let security = accepted.security();
     let locator = coordinator
-        .pending_tool_seeds()
-        .into_iter()
-        .find(|seed| seed.requested.effect_id() == effect_id)
-        .or_else(|| deferred_tool_seed(coordinator, effect_id))
+        .tool_seed(effect_id)
         .ok_or(RunHandleError::ToolSettlement {
             code: "tool_resume_seed_missing",
         })?

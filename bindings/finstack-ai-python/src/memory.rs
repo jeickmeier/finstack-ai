@@ -38,7 +38,7 @@ use finstack_ai::runtime::artifact::ArtifactStore;
 use finstack_ai::runtime::ports::context::ContextProvider;
 use finstack_ai::runtime::ports::observer::Observer;
 use finstack_ai::runtime::ports::tool::Toolset;
-use finstack_ai_kernel::{ComponentId, ComponentRef, Version};
+use finstack_ai_kernel::{ComponentRef, Version};
 use finstack_ai_memory::extract::RuleBasedExtractor;
 use finstack_ai_memory::observer::MemoryObserver;
 use finstack_ai_memory::provider::{MemoryContextProvider, RecallConfig};
@@ -48,6 +48,7 @@ use finstack_ai_memory::store::{InProcessMemoryStore, MemoryStore};
 use finstack_ai_memory::toolset::{MemoryPolicy, MemoryToolset};
 use pyo3::prelude::*;
 
+use crate::component_ref;
 use crate::errors::{agent_error, configuration_error};
 
 /// Tenant scope `Agent.run` and `Agent.start` bind their runs to; the
@@ -56,62 +57,62 @@ const DEFAULT_TENANT: &str = "python-local";
 
 /// Registered component identity of the native memory toolset.
 const MEMORY_TOOLSET_COMPONENT: &str = "finstack.tools.memory";
-const MEMORY_CONTEXT_COMPONENT: &str = "finstack.context.memory";
-const MEMORY_COMPONENT_VERSION: Version = Version {
+
+/// Registration version of the native memory toolset.
+///
+/// `MemoryToolset`'s `ToolsetDescriptor` carries no invocation identity
+/// (`finstack-ai-memory::toolset`), so `validate_toolset_descriptor` only
+/// checks the descriptor name and this version is owned by the binding
+/// rather than mirrored from the memory crate.
+const MEMORY_TOOLSET_VERSION: Version = Version {
     major: 0,
     minor: 1,
     patch: 0,
 };
 
+/// Registered component identity of the native memory recall provider.
+const MEMORY_CONTEXT_COMPONENT: &str = "finstack.context.memory";
+
+/// `MemoryContextProvider`'s declared invocation version
+/// (`MemoryContextProvider::try_new` in `finstack-ai-memory::provider`).
+/// `validate_context_descriptor` requires the registered `ComponentRef`
+/// to match the handle's own reported `(component id, version)` exactly.
+/// 0.2.0: the recall contract gained the optional semantic leg, whether
+/// or not this extension configures one.
+const MEMORY_CONTEXT_VERSION: Version = Version {
+    major: 0,
+    minor: 2,
+    patch: 0,
+};
+
 /// Map any memory-layer error onto the binding's `ConfigurationError`.
-fn memory_py_error(py: Python<'_>, error: &impl std::fmt::Display) -> PyErr {
-    agent_error(py, &configuration_error(error.to_string()), None)
-}
-
-fn memory_toolset_component(py: Python<'_>) -> PyResult<ComponentRef> {
-    ComponentId::parse(MEMORY_TOOLSET_COMPONENT)
-        .map(|id| ComponentRef::new(id, Some(MEMORY_COMPONENT_VERSION)))
-        .map_err(|error| memory_py_error(py, &error))
-}
-
-fn memory_context_component(py: Python<'_>) -> PyResult<ComponentRef> {
-    ComponentId::parse(MEMORY_CONTEXT_COMPONENT)
-        .map(|id| ComponentRef::new(id, Some(MEMORY_COMPONENT_VERSION)))
-        .map_err(|error| memory_py_error(py, &error))
+fn memory_py_error(error: &impl std::fmt::Display) -> PyErr {
+    agent_error(&configuration_error(error.to_string()), None)
 }
 
 fn build_scope(
-    py: Python<'_>,
     tenant: &str,
     user: Option<String>,
     agent: Option<String>,
     workspace: Option<String>,
 ) -> PyResult<MemoryScope> {
-    let mut scope = MemoryScope::try_new(tenant).map_err(|error| memory_py_error(py, &error))?;
+    let mut scope = MemoryScope::try_new(tenant).map_err(|error| memory_py_error(&error))?;
     if let Some(user) = user {
         scope = scope
             .try_with_user(&user)
-            .map_err(|error| memory_py_error(py, &error))?;
+            .map_err(|error| memory_py_error(&error))?;
     }
     if let Some(agent) = agent {
         scope = scope
             .try_with_agent(&agent)
-            .map_err(|error| memory_py_error(py, &error))?;
+            .map_err(|error| memory_py_error(&error))?;
     }
     if let Some(workspace) = workspace {
         scope = scope
             .try_with_workspace(&workspace)
-            .map_err(|error| memory_py_error(py, &error))?;
+            .map_err(|error| memory_py_error(&error))?;
     }
     Ok(scope)
-}
-
-fn build_policy(read: bool, write: bool, manage: bool) -> MemoryPolicy {
-    MemoryPolicy {
-        read,
-        write,
-        manage,
-    }
 }
 
 /// Native memory composition: one store, one scope, one policy.
@@ -153,12 +154,7 @@ impl PyMemoryExtension {
     #[pyo3(
         text_signature = "(*, tenant='python-local', user=None, agent=None, workspace=None, read=True, write=True, manage=False)"
     )]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "scope narrowing and policy flags are distinct keyword parameters"
-    )]
     fn in_process(
-        py: Python<'_>,
         tenant: &str,
         user: Option<String>,
         agent: Option<String>,
@@ -167,11 +163,14 @@ impl PyMemoryExtension {
         write: bool,
         manage: bool,
     ) -> PyResult<Self> {
-        let scope = build_scope(py, tenant, user, agent, workspace)?;
         Ok(Self {
-            store: Arc::new(InProcessMemoryStore::default()) as Arc<dyn MemoryStore>,
-            scope,
-            policy: build_policy(read, write, manage),
+            store: Arc::new(InProcessMemoryStore::default()),
+            scope: build_scope(tenant, user, agent, workspace)?,
+            policy: MemoryPolicy {
+                read,
+                write,
+                manage,
+            },
         })
     }
 
@@ -191,7 +190,6 @@ impl PyMemoryExtension {
         reason = "scope narrowing and policy flags are distinct keyword parameters"
     )]
     fn sqlite(
-        py: Python<'_>,
         path: &str,
         tenant: &str,
         user: Option<String>,
@@ -201,13 +199,17 @@ impl PyMemoryExtension {
         write: bool,
         manage: bool,
     ) -> PyResult<Self> {
-        let scope = build_scope(py, tenant, user, agent, workspace)?;
+        let scope = build_scope(tenant, user, agent, workspace)?;
         let store = SqliteMemoryStore::try_open(Path::new(path))
-            .map_err(|error| memory_py_error(py, &error))?;
+            .map_err(|error| memory_py_error(&error))?;
         Ok(Self {
-            store: Arc::new(store) as Arc<dyn MemoryStore>,
+            store: Arc::new(store),
             scope,
-            policy: build_policy(read, write, manage),
+            policy: MemoryPolicy {
+                read,
+                write,
+                manage,
+            },
         })
     }
 
@@ -221,27 +223,21 @@ impl PyMemoryExtension {
     ///
     /// `max_hits` bounds one recall.
     #[pyo3(signature = (*, max_hits = None))]
-    fn context_provider(
-        &self,
-        py: Python<'_>,
-        max_hits: Option<usize>,
-    ) -> PyResult<PyMemoryContextProvider> {
-        let defaults = RecallConfig::default();
-        let config = RecallConfig {
-            max_hits: max_hits.unwrap_or(defaults.max_hits),
-        };
+    fn context_provider(&self, max_hits: Option<usize>) -> PyResult<PyMemoryContextProvider> {
         Ok(PyMemoryContextProvider {
-            component: memory_context_component(py)?,
+            component: component_ref(MEMORY_CONTEXT_COMPONENT, MEMORY_CONTEXT_VERSION)?,
             store: Arc::clone(&self.store),
             scope: self.scope.clone(),
-            config,
+            config: RecallConfig {
+                max_hits: max_hits.unwrap_or(RecallConfig::default().max_hits),
+            },
         })
     }
 
     /// Memory toolset handle for `toolsets=[...]`.
-    fn toolset(&self, py: Python<'_>) -> PyResult<PyMemoryToolset> {
+    fn toolset(&self) -> PyResult<PyMemoryToolset> {
         Ok(PyMemoryToolset {
-            component: memory_toolset_component(py)?,
+            component: component_ref(MEMORY_TOOLSET_COMPONENT, MEMORY_TOOLSET_VERSION)?,
             store: Arc::clone(&self.store),
             scope: self.scope.clone(),
             policy: self.policy,
@@ -252,14 +248,14 @@ impl PyMemoryExtension {
     ///
     /// The observer extracts candidate memories from observed run events
     /// with the rule-based extractor and writes them to the same store.
-    fn observer(&self, py: Python<'_>) -> PyResult<PyMemoryObserver> {
+    fn observer(&self) -> PyResult<PyMemoryObserver> {
         let observer = MemoryObserver::try_new(
             Arc::clone(&self.store),
             self.scope.clone(),
             Arc::new(RuleBasedExtractor::default()),
             system_clock(),
         )
-        .map_err(|error| memory_py_error(py, &error))?;
+        .map_err(|error| memory_py_error(&error))?;
         Ok(PyMemoryObserver {
             inner: Arc::new(observer),
         })
@@ -292,7 +288,6 @@ impl PyMemoryContextProvider {
 impl PyMemoryContextProvider {
     pub(crate) fn registration(
         &self,
-        py: Python<'_>,
         artifact_store: &Arc<dyn ArtifactStore>,
     ) -> PyResult<(ComponentRef, Arc<dyn ContextProvider>)> {
         let provider = MemoryContextProvider::try_new(
@@ -301,11 +296,8 @@ impl PyMemoryContextProvider {
             self.scope.clone(),
             self.config,
         )
-        .map_err(|error| memory_py_error(py, &error))?;
-        Ok((
-            self.component.clone(),
-            Arc::new(provider) as Arc<dyn ContextProvider>,
-        ))
+        .map_err(|error| memory_py_error(&error))?;
+        Ok((self.component.clone(), Arc::new(provider)))
     }
 }
 
@@ -344,32 +336,20 @@ impl PyMemoryToolset {
 }
 
 impl PyMemoryToolset {
-    fn build(
+    /// Materialize the native toolset against the agent's artifact store.
+    pub(crate) fn registration(
         &self,
-        py: Python<'_>,
         artifact_store: Arc<dyn ArtifactStore>,
-    ) -> PyResult<MemoryToolset> {
-        MemoryToolset::try_new(
+    ) -> PyResult<(ComponentRef, Arc<dyn Toolset>)> {
+        let toolset = MemoryToolset::try_new(
             Arc::clone(&self.store),
             artifact_store,
             self.scope.clone(),
             self.policy,
             system_clock(),
         )
-        .map_err(|error| memory_py_error(py, &error))
-    }
-
-    /// Materialize the native toolset against the agent's artifact store.
-    pub(crate) fn registration(
-        &self,
-        py: Python<'_>,
-        artifact_store: Arc<dyn ArtifactStore>,
-    ) -> PyResult<(ComponentRef, Arc<dyn Toolset>)> {
-        let toolset = self.build(py, artifact_store)?;
-        Ok((
-            self.component.clone(),
-            Arc::new(toolset) as Arc<dyn Toolset>,
-        ))
+        .map_err(|error| memory_py_error(&error))?;
+        Ok((self.component.clone(), Arc::new(toolset)))
     }
 }
 
@@ -395,9 +375,6 @@ impl PyMemoryObserver {
 
 impl PyMemoryObserver {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
-        (
-            self.inner.descriptor().component.clone(),
-            Arc::clone(&self.inner) as Arc<dyn Observer>,
-        )
+        (self.inner.descriptor().component, self.inner.clone())
     }
 }

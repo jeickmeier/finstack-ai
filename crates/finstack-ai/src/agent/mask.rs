@@ -8,9 +8,12 @@ use finstack_ai_kernel::{ActiveCapability, CapabilityId, ComponentId};
 use crate::{CapabilityActivation, CapabilitySpec};
 
 /// Maps contributed components to the capability that owns them.
+///
+/// The map is shared: every run installs it on its coordinator and every
+/// `Agent` clone carries it, so cloning must not copy the index.
 #[derive(Clone, Debug, Default)]
 pub(super) struct CapabilityContributionIndex {
-    owners: BTreeMap<ComponentId, Arc<[CapabilityId]>>,
+    owners: Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>,
 }
 
 impl CapabilityContributionIndex {
@@ -33,14 +36,16 @@ impl CapabilityContributionIndex {
             }
         }
         Self {
-            owners: owners
-                .into_iter()
-                .map(|(component, mut ids)| {
-                    ids.sort();
-                    ids.dedup();
-                    (component, ids.into())
-                })
-                .collect(),
+            owners: Arc::new(
+                owners
+                    .into_iter()
+                    .map(|(component, mut ids)| {
+                        ids.sort();
+                        ids.dedup();
+                        (component, ids.into())
+                    })
+                    .collect(),
+            ),
         }
     }
 
@@ -58,6 +63,6 @@ impl CapabilityContributionIndex {
     }
 
     pub(super) fn as_arc_owners(&self) -> Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>> {
-        Arc::new(self.owners.clone())
+        Arc::clone(&self.owners)
     }
 }

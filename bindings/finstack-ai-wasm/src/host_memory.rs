@@ -35,9 +35,6 @@ const MEMORY_HOST_RESULT_INVALID: &str = "memory_host_result_invalid";
 #[cfg(not(target_arch = "wasm32"))]
 type NativeMethod = Arc<dyn Fn(&str) -> Result<NativeHostResult, HostFailure> + Send + Sync>;
 
-#[cfg(target_arch = "wasm32")]
-type JsMethod = std::rc::Rc<std::cell::RefCell<js_sys::Function>>;
-
 /// Native host callbacks backing one [`HostMemoryStore`]. Any field left
 /// `None` reports [`MemoryStoreError::Unavailable`] for that operation.
 #[cfg(not(target_arch = "wasm32"))]
@@ -75,17 +72,17 @@ pub struct HostMemoryStore {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    put: Option<JsMethod>,
+    put: Option<js_sys::Function>,
     #[cfg(target_arch = "wasm32")]
-    get: Option<JsMethod>,
+    get: Option<js_sys::Function>,
     #[cfg(target_arch = "wasm32")]
-    search: Option<JsMethod>,
+    search: Option<js_sys::Function>,
     #[cfg(target_arch = "wasm32")]
-    forget: Option<JsMethod>,
+    forget: Option<js_sys::Function>,
     #[cfg(target_arch = "wasm32")]
-    correct: Option<JsMethod>,
+    correct: Option<js_sys::Function>,
     #[cfg(target_arch = "wasm32")]
-    list: Option<JsMethod>,
+    list: Option<js_sys::Function>,
 }
 
 impl HostMemoryStore {
@@ -130,26 +127,15 @@ impl HostMemoryStore {
     #[cfg(target_arch = "wasm32")]
     #[must_use]
     pub fn from_js(adapter: wasm_bindgen::JsValue) -> Self {
-        let put = crate::host::extract_optional_method(&adapter, "memory_put")
-            .map(|method| std::rc::Rc::new(std::cell::RefCell::new(method)));
-        let get = crate::host::extract_optional_method(&adapter, "memory_get")
-            .map(|method| std::rc::Rc::new(std::cell::RefCell::new(method)));
-        let search = crate::host::extract_optional_method(&adapter, "memory_search")
-            .map(|method| std::rc::Rc::new(std::cell::RefCell::new(method)));
-        let forget = crate::host::extract_optional_method(&adapter, "memory_forget")
-            .map(|method| std::rc::Rc::new(std::cell::RefCell::new(method)));
-        let correct = crate::host::extract_optional_method(&adapter, "memory_correct")
-            .map(|method| std::rc::Rc::new(std::cell::RefCell::new(method)));
-        let list = crate::host::extract_optional_method(&adapter, "memory_list")
-            .map(|method| std::rc::Rc::new(std::cell::RefCell::new(method)));
+        let method = |name| crate::host::extract_optional_method(&adapter, name);
         Self {
+            put: method("memory_put"),
+            get: method("memory_get"),
+            search: method("memory_search"),
+            forget: method("memory_forget"),
+            correct: method("memory_correct"),
+            list: method("memory_list"),
             adapter,
-            put,
-            get,
-            search,
-            forget,
-            correct,
-            list,
         }
     }
 }
@@ -295,7 +281,7 @@ impl MemoryStore for HostMemoryStore {
 #[cfg(not(target_arch = "wasm32"))]
 type OptionalMethod = Option<NativeMethod>;
 #[cfg(target_arch = "wasm32")]
-type OptionalMethod = Option<JsMethod>;
+type OptionalMethod = Option<js_sys::Function>;
 
 impl HostMemoryStore {
     /// Dispatch one host round-trip for `encoded`, decoding the envelope
@@ -323,7 +309,7 @@ impl HostMemoryStore {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let Some(method) = method.map(|method| method.borrow().clone()) else {
+            let Some(method) = method else {
                 return Box::pin(async { Err(unavailable(MEMORY_HOST_UNAVAILABLE)) });
             };
             let adapter = self.adapter.clone();
@@ -357,7 +343,7 @@ async fn invoke_memory_json(
     let result = crate::host::invoke_host(
         adapter,
         method,
-        &[crate::host::json_string_value(encoded)],
+        &[wasm_bindgen::JsValue::from_str(encoded)],
         None,
     )
     .await

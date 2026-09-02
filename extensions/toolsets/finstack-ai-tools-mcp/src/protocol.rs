@@ -55,6 +55,33 @@ pub(crate) enum ResultType {
     Unknown,
 }
 
+/// One page of a cursor-paginated `*/list` result, consumed by
+/// `classify::list_all`.
+pub(crate) trait ListPage: serde::de::DeserializeOwned {
+    type Item;
+    fn into_parts(self) -> (ResultType, Vec<Self::Item>, Option<String>);
+}
+
+macro_rules! list_page {
+    ($page:ty, $item:ty, $items:ident) => {
+        impl ListPage for $page {
+            type Item = $item;
+            fn into_parts(self) -> (ResultType, Vec<$item>, Option<String>) {
+                (self.result_type, self.$items, self.next_cursor)
+            }
+        }
+    };
+}
+
+list_page!(ListToolsResult, Tool, tools);
+list_page!(ListResourcesResult, Resource, resources);
+list_page!(ListPromptsResult, Prompt, prompts);
+list_page!(
+    ListResourceTemplatesResult,
+    ResourceTemplate,
+    resource_templates
+);
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ListToolsResult {

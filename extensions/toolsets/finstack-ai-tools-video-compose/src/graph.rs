@@ -315,52 +315,9 @@ pub(crate) fn build_ffmpeg_args(
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_kernel::{ArtifactId, ArtifactRef, BlobRef, Digest, Metadata};
-
     use super::*;
+    use crate::spec::tests::{artifact_ref, minimal};
     use crate::spec::{AudioSpec, SubtitleStyle, SubtitlesSpec, TransitionSpec, TrimSpec};
-
-    fn artifact_ref() -> ArtifactRef {
-        let content = b"clip".as_slice();
-        let digest = Digest::blob_content(content);
-        let blob = BlobRef::try_new(
-            "blob-1",
-            "video/mp4",
-            u64::try_from(content.len()).expect("length"),
-            Some(digest),
-            None::<&str>,
-        )
-        .expect("blob");
-        ArtifactRef::try_new(
-            ArtifactId::from_bytes([7; 16]),
-            "video",
-            blob,
-            digest,
-            Digest::raw_json(b"scope"),
-            Metadata::empty(),
-        )
-        .expect("artifact")
-    }
-
-    fn minimal(clips: usize, transitions: Option<Vec<TransitionSpec>>) -> CompositionSpec {
-        CompositionSpec {
-            version: 1,
-            clips: (0..clips)
-                .map(|_| ClipSpec {
-                    artifact: artifact_ref(),
-                    trim: None,
-                })
-                .collect(),
-            transitions,
-            audio: None,
-            subtitles: None,
-            output: OutputSpec {
-                container: Container::Mp4,
-                resolution: None,
-                fps: None,
-            },
-        }
-    }
 
     fn clip(path: &str, duration_s: f64) -> ClipInput {
         ClipInput {

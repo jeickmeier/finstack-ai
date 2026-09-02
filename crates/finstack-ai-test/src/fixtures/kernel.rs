@@ -11,7 +11,10 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::conformance::reducer::execute_reducer_trace;
-use crate::fixtures::public_api::{Expect, PublicApiFixture, PublicApiFixtureError};
+use crate::fixtures::public_api::{
+    PublicApiFixture, PublicApiFixtureError, assert_error_code, fail, from_json_field,
+    from_json_value, require_input,
+};
 use crate::fixtures::trace::load_golden_trace;
 use crate::paths::try_compatibility_fixture;
 
@@ -50,7 +53,7 @@ where
         )));
     }
     let input = require_input(fixture)?;
-    match from_json::<T>(&input) {
+    match from_json_value::<T>(&input) {
         Ok(value) => {
             if !fixture.expect.ok {
                 return Err(fail(format!("expected {} parse failure", fixture.subject)));
@@ -115,7 +118,7 @@ fn run_corrupt_replay(fixture: &PublicApiFixture) -> Result<(), PublicApiFixture
         let mut encoded_state = serde_json::to_value(&execution.kernel_state)
             .map_err(|error| fail(format!("encode kernel state: {error}")))?;
         encoded_state["state_version"] = Value::from(99);
-        let Err(error) = from_json::<KernelState>(&encoded_state) else {
+        let Err(error) = from_json_value::<KernelState>(&encoded_state) else {
             return Err(fail("unsupported state version unexpectedly decoded"));
         };
         if !error.to_string().contains("state_version") {
@@ -130,7 +133,7 @@ fn run_corrupt_replay(fixture: &PublicApiFixture) -> Result<(), PublicApiFixture
         .map_err(|error| fail(format!("encode committed batch: {error}")))?;
     mutate_committed_batch_json(mutation, &mut encoded)?;
 
-    let decoded = from_json::<CommittedBatch>(&encoded);
+    let decoded = from_json_value::<CommittedBatch>(&encoded);
     if matches!(
         mutation,
         "unsupported_format_version" | "unsupported_kind_version" | "derived_event_count"
@@ -371,7 +374,7 @@ fn run_phase(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
                 return Err(fail("run-phase exact ordered vocabulary mismatch"));
             }
             for value in actual {
-                let phase: RunPhase = from_json(&Value::String(value.to_owned()))?;
+                let phase: RunPhase = from_json_value(&Value::String(value.to_owned()))?;
                 let encoded =
                     serde_json::to_value(phase).map_err(|error| fail(error.to_string()))?;
                 if encoded != value {
@@ -385,7 +388,7 @@ fn run_phase(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
             }
             Ok(())
         }
-        "parse" => match from_json::<RunPhase>(&input) {
+        "parse" => match from_json_value::<RunPhase>(&input) {
             Ok(_) if fixture.expect.ok => Ok(()),
             Ok(_) => Err(fail("expected run-phase parse failure")),
             Err(error) => {
@@ -422,7 +425,7 @@ const fn run_phase_wire_name(phase: RunPhase) -> &'static str {
 fn run_kernel_input(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     let input = require_input(fixture)?;
     match fixture.operation.as_str() {
-        "parse" => match from_json::<KernelInput>(&input) {
+        "parse" => match from_json_value::<KernelInput>(&input) {
             Ok(value) => {
                 if !fixture.expect.ok {
                     return Err(fail("expected KernelInput parse failure"));
@@ -496,7 +499,7 @@ fn run_committed_batch(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtur
 fn run_kernel_state(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     if fixture.operation == "roundtrip" {
         let input = require_input(fixture)?;
-        let decoded = from_json::<KernelState>(&input);
+        let decoded = from_json_value::<KernelState>(&input);
         return match decoded {
             Ok(state) => {
                 if !fixture.expect.ok {
@@ -504,7 +507,7 @@ fn run_kernel_state(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureEr
                 }
                 let encoded =
                     serde_json::to_value(&state).map_err(|error| fail(error.to_string()))?;
-                let reparsed = from_json::<KernelState>(&encoded)?;
+                let reparsed = from_json_value::<KernelState>(&encoded)?;
                 if reparsed != state {
                     return Err(fail("KernelState roundtrip changed semantic state"));
                 }
@@ -697,7 +700,7 @@ fn run_record(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
         )));
     }
     let input = require_input(fixture)?;
-    let record: RecordEnvelope = from_json(&input)?;
+    let record: RecordEnvelope = from_json_value(&input)?;
     if !fixture.expect.ok {
         return Err(fail(
             "expected model-only reducer baseline record parse failure",
@@ -775,28 +778,6 @@ fn run_record(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     Ok(())
 }
 
-fn require_input(fixture: &PublicApiFixture) -> Result<Value, PublicApiFixtureError> {
-    fixture
-        .input
-        .clone()
-        .ok_or_else(|| fail("fixture input required"))
-}
-
-fn from_json_field<T: DeserializeOwned>(
-    value: &Value,
-    field: &str,
-) -> Result<T, PublicApiFixtureError> {
-    let child = value
-        .get(field)
-        .ok_or_else(|| fail(format!("{field} required")))?;
-    from_json(child)
-}
-
-fn from_json<T: DeserializeOwned>(value: &Value) -> Result<T, PublicApiFixtureError> {
-    let text = serde_json::to_string(value).map_err(|error| fail(error.to_string()))?;
-    serde_json::from_str(&text).map_err(|error| fail(error.to_string()))
-}
-
 fn classify_serde_error(message: &str) -> &'static str {
     if message.contains("unknown field") {
         "unknown_field"
@@ -805,24 +786,4 @@ fn classify_serde_error(message: &str) -> &'static str {
     } else {
         "invalid_input_payload"
     }
-}
-
-fn assert_error_code(expect: &Expect, actual: &str) -> Result<(), PublicApiFixtureError> {
-    if expect.ok {
-        return Err(fail(format!("expected success, got error {actual}")));
-    }
-    let expected = expect
-        .error_code
-        .as_deref()
-        .ok_or_else(|| fail("failed fixture requires expect.error_code"))?;
-    if expected != actual {
-        return Err(fail(format!(
-            "error_code mismatch: expected {expected}, got {actual}"
-        )));
-    }
-    Ok(())
-}
-
-fn fail(message: impl Into<String>) -> PublicApiFixtureError {
-    PublicApiFixtureError::Failed(message.into())
 }

@@ -539,8 +539,8 @@ fn document_parse_spills_oversized_output_to_artifact() {
 #[test]
 fn media_type_for_extension_round_trips_supported_formats() {
     for extension in [
-        "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls", "odt", "ods", "odp", "rtf",
-        "epub", "csv",
+        "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls", "odt", "ods", "odp", "rtf", "epub",
+        "csv",
     ] {
         let media_type = DocumentFormat::media_type_for_extension(extension)
             .unwrap_or_else(|| panic!("{extension} maps"));

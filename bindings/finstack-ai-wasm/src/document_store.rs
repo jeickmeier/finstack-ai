@@ -1,16 +1,19 @@
-//! Internal in-memory `ArtifactStore` dedicated to document-attachment staging.
+//! Internal in-memory `ArtifactStore`. Not exposed to JavaScript.
 //!
-//! Not exposed to JavaScript, and distinct from [`crate::host_artifact::HostArtifactStore`]
-//! (which on `wasm32` delegates persistence to a JS host adapter). Run
-//! attachments never need cross-reload durability, so a plain in-memory map
-//! is sufficient here and keeps document ingestion usable without requiring
-//! every host to supply an artifact-store adapter.
+//! [`MemoryArtifactStore::document`] stages run attachments for document
+//! ingestion, distinct from [`crate::host_artifact::HostArtifactStore`] (which
+//! on `wasm32` delegates persistence to a JS host adapter). Run attachments
+//! never need cross-reload durability, so a plain in-memory map is sufficient
+//! and keeps document ingestion usable without requiring every host to supply
+//! an artifact-store adapter.
 //!
-//! One instance is shared between attachment staging (`Agent::start` /
-//! `Agent::run` / `Lane::run`), the registered `DocumentToolset`, and
+//! One document instance is shared between attachment staging (`Agent::start`
+//! / `Agent::run` / `Lane::run`), the registered `DocumentToolset`, and
 //! `DocumentIngestMiddleware` so all three resolve the exact same staged
 //! `ArtifactRef` (the single-instance invariant documented on
 //! `DocumentIngestMiddleware`).
+//!
+//! On native targets the same store also backs `HostArtifactStore::memory()`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -19,17 +22,17 @@ use finstack_ai::runtime::Bytes;
 use finstack_ai::runtime::artifact::{
     ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
     ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
-    artifact_storage_key, build_artifact_ref, validate_artifact_scope, validate_retrieved_artifact,
+    artifact_storage_key, build_artifact_ref, validate_retrieved_artifact,
 };
 use finstack_ai::runtime::ports::PortFuture;
 use finstack_ai_kernel::{ArtifactRef, BlobRef, Digest, Timestamp};
 
-/// Maximum total staged content bytes retained across all entries before
-/// oldest-first (FIFO) eviction kicks in. Keeps memory bounded for
-/// long-lived agents/hosts that stage many run attachments over their
-/// lifetime; 64 MiB comfortably covers many attachments at the toolset's
-/// per-attachment cap (`DocumentLimits::max_input_bytes`, 4 MiB by
-/// default) without growing unboundedly.
+/// Maximum total staged document content bytes. New writes are rejected at
+/// capacity; existing content is never evicted implicitly. 64 MiB comfortably
+/// covers many attachments at the toolset's per-attachment cap
+/// (`DocumentLimits::max_input_bytes`, 4 MiB by default) without growing
+/// unboundedly for long-lived agents/hosts.
+#[cfg(any(target_arch = "wasm32", test))]
 const MAX_TOTAL_CONTENT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Default)]
@@ -46,27 +49,46 @@ struct StoredArtifact {
     unreferenced_since: Option<Timestamp>,
 }
 
-type Entries = Arc<Mutex<StoreState>>;
-
-/// Bounded in-memory artifact store used only to stage run attachments for
-/// document ingestion.
-///
-/// Bounded by [`MAX_TOTAL_CONTENT_BYTES`] total staged content bytes. New
-/// writes are rejected at capacity; existing referenced content is never
-/// evicted implicitly.
-#[derive(Default)]
-pub struct DocumentArtifactStore {
-    entries: Entries,
+/// Bounded in-memory artifact store.
+pub struct MemoryArtifactStore {
+    store_id: &'static str,
+    limits: ArtifactStoreLimits,
+    entries: Arc<Mutex<StoreState>>,
 }
 
-impl ArtifactStore for DocumentArtifactStore {
+impl MemoryArtifactStore {
+    /// Empty store reporting `store_id` and enforcing `limits`.
+    pub fn new(store_id: &'static str, limits: ArtifactStoreLimits) -> Self {
+        Self {
+            store_id,
+            limits,
+            entries: Arc::default(),
+        }
+    }
+
+    /// Store used only to stage run attachments for document ingestion,
+    /// bounded by [`MAX_TOTAL_CONTENT_BYTES`].
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub fn document() -> Self {
+        Self::new(
+            "wasm.document-artifacts",
+            ArtifactStoreLimits {
+                max_artifact_bytes: usize::try_from(MAX_TOTAL_CONTENT_BYTES).unwrap_or(usize::MAX),
+                max_total_bytes: MAX_TOTAL_CONTENT_BYTES,
+                ..ArtifactStoreLimits::default()
+            },
+        )
+    }
+}
+
+impl ArtifactStore for MemoryArtifactStore {
     fn stage_put(
         &self,
         scope: ArtifactScope,
         content: Bytes,
         metadata: ArtifactMetadata,
     ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
-        let limits = self.limits();
+        let limits = self.limits;
         let artifact = match build_artifact_ref(&scope, &content, &metadata, &limits) {
             Ok(artifact) => artifact,
             Err(error) => return Box::pin(async move { Err(error) }),
@@ -132,7 +154,6 @@ impl ArtifactStore for DocumentArtifactStore {
         };
         let entries = Arc::clone(&self.entries);
         Box::pin(async move {
-            validate_artifact_scope(&scope, &artifact)?;
             let state = entries.lock().unwrap_or_else(PoisonError::into_inner);
             let stored = state.entries.get(&key).ok_or(ArtifactError::NotFound)?;
             if stored.scope != scope || stored.artifact != artifact {
@@ -157,6 +178,7 @@ impl ArtifactStore for DocumentArtifactStore {
                     message: Arc::from("blob_digest_required"),
                 });
             }
+            scope.digest()?;
             let state = entries.lock().unwrap_or_else(PoisonError::into_inner);
             let stored = state
                 .entries
@@ -172,18 +194,14 @@ impl ArtifactStore for DocumentArtifactStore {
     }
 
     fn limits(&self) -> ArtifactStoreLimits {
-        ArtifactStoreLimits {
-            max_artifact_bytes: usize::try_from(MAX_TOTAL_CONTENT_BYTES).unwrap_or(usize::MAX),
-            max_total_bytes: MAX_TOTAL_CONTENT_BYTES,
-            ..ArtifactStoreLimits::default()
-        }
+        self.limits
     }
 
     fn descriptor(&self) -> ArtifactStoreDescriptor {
         ArtifactStoreDescriptor {
-            store_id: Arc::from("wasm.document-artifacts"),
+            store_id: Arc::from(self.store_id),
             persistence: ArtifactPersistence::Ephemeral,
-            limits: self.limits(),
+            limits: self.limits,
         }
     }
 
@@ -198,7 +216,7 @@ impl ArtifactStore for DocumentArtifactStore {
             Err(error) => return Box::pin(async move { Err(error) }),
         };
         let entries = Arc::clone(&self.entries);
-        let limits = self.limits();
+        let limits = self.limits;
         Box::pin(async move {
             let mut state = entries.lock().unwrap_or_else(PoisonError::into_inner);
             let stored = state.entries.get_mut(&key).ok_or(ArtifactError::NotFound)?;
@@ -255,7 +273,7 @@ impl ArtifactStore for DocumentArtifactStore {
         limit: usize,
     ) -> PortFuture<Result<ArtifactGcReport, ArtifactError>> {
         let entries = Arc::clone(&self.entries);
-        let limits = self.limits();
+        let limits = self.limits;
         Box::pin(async move {
             scope.digest()?;
             let mut state = entries.lock().unwrap_or_else(PoisonError::into_inner);
@@ -299,7 +317,7 @@ impl ArtifactStore for DocumentArtifactStore {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::{DocumentArtifactStore, MAX_TOTAL_CONTENT_BYTES};
+    use super::{MAX_TOTAL_CONTENT_BYTES, MemoryArtifactStore};
     use crate::executor::block_on_ready;
     use finstack_ai::runtime::Bytes;
     use finstack_ai::runtime::artifact::{
@@ -327,7 +345,7 @@ mod tests {
 
     #[test]
     fn round_trips_bytes_within_budget() {
-        let store = DocumentArtifactStore::default();
+        let store = MemoryArtifactStore::document();
         let artifact =
             block_on_ready(store.stage_put(scope(), Bytes::from_static(b"hello"), metadata("a")))
                 .expect("stage");
@@ -337,9 +355,9 @@ mod tests {
 
     #[test]
     fn capacity_rejects_new_content_without_evicting_existing_content() {
-        let store = DocumentArtifactStore::default();
-        // Each chunk is over half the cap, so the second stage_put must
-        // evict the first before it fits.
+        let store = MemoryArtifactStore::document();
+        // Each chunk is over half the cap, so the second stage_put cannot fit
+        // beside the first.
         let chunk_len = usize::try_from(MAX_TOTAL_CONTENT_BYTES / 2 + 1).expect("fits usize");
         let first = vec![1_u8; chunk_len];
         let second = vec![2_u8; chunk_len];

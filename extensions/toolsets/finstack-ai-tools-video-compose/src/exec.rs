@@ -12,14 +12,13 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use finstack_ai_kernel::ErrorCategory;
-use finstack_ai_kernel::Metadata;
 use finstack_ai_runtime::ports::model::CancellationSignal;
 use finstack_ai_runtime::ports::tool::ToolError;
 use serde::Deserialize;
 
-use crate::timeout_error;
 use crate::{
     VIDEO_COMPOSE_CONFIG_INVALID, VIDEO_COMPOSE_FFMPEG_FAILED, VIDEO_COMPOSE_MEDIA_FAILURE,
+    timeout_error, tool_error,
 };
 
 /// Bound on the trailing `stderr` slice carried by a
@@ -210,10 +209,6 @@ fn parse_frame_rate(raw: &str) -> Option<f64> {
     let num: f64 = num.parse().ok()?;
     let den: f64 = den.parse().ok()?;
     if den == 0.0 { None } else { Some(num / den) }
-}
-
-fn tool_error(code: &'static str, category: ErrorCategory, message: impl AsRef<str>) -> ToolError {
-    ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
 #[cfg(test)]

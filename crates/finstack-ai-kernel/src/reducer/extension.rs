@@ -3,7 +3,7 @@
 use super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::canonical_digest;
 use super::capacity::{self, StateGrowth};
-use super::decide::{draft_for_state, duplicate_decision, expected_stage_cursor, next_sequence};
+use super::decide::{decision_for, duplicate_decision, expected_stage_cursor};
 use super::decision::{Decision, KernelError, PostCommitAction};
 use super::input::{ExtensionEffectSettled, ExtensionSettlement, RequestExtensionEffect};
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind, InvocationRecovery};
@@ -53,18 +53,14 @@ pub(super) fn decide_request(
     if env.ids.effect_ids().first().copied() != Some(requested.effect_id()) {
         return Err(KernelError::UnusedAllocatedIds { kind: "effect_ids" });
     }
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(
-            state,
-            env,
-            vec![RecordBody::EffectRequested(requested.clone())],
-        )?,
-        actions: vec![PostCommitAction::ExecuteEffect {
+    decision_for(
+        state,
+        env,
+        vec![RecordBody::EffectRequested(requested.clone())],
+        vec![PostCommitAction::ExecuteEffect {
             effect_id: requested.effect_id(),
         }],
-        diagnostics: Vec::new(),
-    })
+    )
 }
 
 pub(super) fn decide_settled(
@@ -72,24 +68,22 @@ pub(super) fn decide_settled(
     env: &TransitionEnv,
     input: &ExtensionEffectSettled,
 ) -> Result<Decision, KernelError> {
-    let digest = settlement_digest(input)?;
-    let kind = settlement_kind(&input.outcome);
+    let fingerprint = fingerprint(input)?;
     let effect_id = input.outcome.effect_id();
-    let completion = match &input.outcome {
-        ExtensionSettlement::Completed(value) => value.completion_id(),
-        ExtensionSettlement::Failed(value) => value.completion_id(),
-    };
+    let completion = input.outcome.completion_id();
     if let Some(completion_id) = completion
         && let Some(existing) = state.completion_identities.get(completion_id)
     {
-        return if existing.effect_id == effect_id && existing.settlement_digest == digest {
+        return if existing.effect_id == effect_id
+            && existing.settlement_digest == fingerprint.digest
+        {
             duplicate_decision(state)
         } else {
             Err(KernelError::ConflictingCompletionId)
         };
     }
     if let Some(existing) = state.extension_settlements.get(&effect_id) {
-        return if existing.kind == kind && existing.digest == digest {
+        return if *existing == fingerprint {
             duplicate_decision(state)
         } else {
             Err(KernelError::ConflictingSettlement)
@@ -108,14 +102,10 @@ pub(super) fn decide_settled(
     if pending.cursor != input.cursor || pending.requested.effect_id() != effect_id {
         return Err(KernelError::ConflictingSettlement);
     }
-    match &input.outcome {
-        ExtensionSettlement::Completed(value) => value
-            .validate_against(&pending.requested)
-            .map_err(|_| KernelError::ConflictingSettlement)?,
-        ExtensionSettlement::Failed(value) => value
-            .validate_against(&pending.requested)
-            .map_err(|_| KernelError::ConflictingSettlement)?,
-    }
+    input
+        .outcome
+        .validate_against(&pending.requested)
+        .map_err(|_| KernelError::ConflictingSettlement)?;
     capacity::preflight_decision(
         state,
         StateGrowth {
@@ -132,12 +122,7 @@ pub(super) fn decide_settled(
         .derived_event_count(RECORD_KIND_VERSION)
         .map_err(|_| KernelError::InvariantViolation)?;
     validate_allocated_ids(&env.ids, IdRequirements::new(1, event_count, 0, 0, 0, 0))?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(state, env, vec![body])?,
-        actions: Vec::new(),
-        diagnostics: Vec::new(),
-    })
+    decision_for(state, env, vec![body], Vec::new())
 }
 
 pub(super) fn request_cursor(
@@ -205,25 +190,15 @@ pub(crate) const fn stage_name(stage: crate::Stage) -> &'static str {
     }
 }
 
-pub(super) fn settlement_digest(
-    input: &ExtensionEffectSettled,
-) -> Result<crate::Digest, KernelError> {
-    canonical_digest("extension-settlement", input)
-}
-
-pub(super) const fn settlement_kind(outcome: &ExtensionSettlement) -> ExtensionSettlementKind {
-    match outcome {
-        ExtensionSettlement::Completed(_) => ExtensionSettlementKind::Completed,
-        ExtensionSettlement::Failed(_) => ExtensionSettlementKind::Failed,
-    }
-}
-
 pub(super) fn fingerprint(
     input: &ExtensionEffectSettled,
 ) -> Result<ExtensionSettlementFingerprint, KernelError> {
     Ok(ExtensionSettlementFingerprint {
-        kind: settlement_kind(&input.outcome),
-        digest: settlement_digest(input)?,
+        kind: match input.outcome {
+            ExtensionSettlement::Completed(_) => ExtensionSettlementKind::Completed,
+            ExtensionSettlement::Failed(_) => ExtensionSettlementKind::Failed,
+        },
+        digest: canonical_digest("extension-settlement", input)?,
     })
 }
 

@@ -152,8 +152,8 @@ impl ToolSpec {
     ///
     /// Returns `model_request_invalid` for invalid labels, text, or result bounds.
     pub fn validate(&self) -> Result<(), ModelError> {
-        validated_label(&self.model_name, "tool.model_name")?;
-        validated_label(&self.title, "tool.title")?;
+        validated_label(&self.model_name)?;
+        validated_label(&self.title)?;
         if self.description.is_empty()
             || self.description.len() > STREAM_TEXT_MAX_BYTES
             || self.description.as_bytes().contains(&0)

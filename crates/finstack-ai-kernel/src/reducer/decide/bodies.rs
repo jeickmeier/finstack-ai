@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::effects::{EffectInput, EffectKind, EffectOutputKind, EffectRequested};
+use crate::effects::EffectRequested;
 use crate::primitives::Digest;
 use crate::records::RecordBody;
 use crate::records::lifecycle::{ContextPrepared, Stage, StageCursor, StageDisposition};
@@ -8,7 +8,6 @@ use crate::state::{KernelState, TransitionEnv};
 
 use super::super::decision::{KernelError, PostCommitAction};
 use super::super::failure_from_state;
-use super::super::input::ReducerStageOutcome;
 use super::required;
 use super::shared::{stage_record, terminal_body_from_candidate};
 
@@ -20,9 +19,6 @@ pub(super) fn prepared_context_bodies(
     context_digest: Digest,
 ) -> Result<(Vec<RecordBody>, Option<PostCommitAction>), KernelError> {
     let turn_id = required(env.ids.turn_ids(), 0, "turn_ids")?;
-    // The messages are already a shared slice and already canonicalized; taking
-    // a `Vec` here and collecting back into an `Arc` copied the whole context
-    // twice for no change in value.
     let context =
         ContextPrepared::from_shared(cursor.cycle, turn_id, Arc::clone(messages), context_digest);
     Ok((
@@ -42,47 +38,14 @@ pub(super) fn prepared_context_bodies(
 }
 
 pub(super) fn requested_model_bodies(
-    state: &KernelState,
     env: &TransitionEnv,
     cursor: StageCursor,
     settlement_digest: Digest,
-    outcome: &ReducerStageOutcome,
+    turn_id: crate::TurnId,
+    requested: EffectRequested,
 ) -> Result<(Vec<RecordBody>, Option<PostCommitAction>), KernelError> {
-    let ReducerStageOutcome::ModelRequestPrepared {
-        request,
-        component,
-        output_contract,
-        retry_safety,
-        deadline,
-    } = outcome
-    else {
-        return Err(KernelError::InvariantViolation);
-    };
-    if output_contract.kind != EffectOutputKind::ModelResponse {
-        return Err(KernelError::ModelRequestContractMismatch);
-    }
-    let turn_id = state.current_turn.as_ref().map(|turn| turn.turn_id).ok_or(
-        KernelError::InvalidPhaseInput {
-            phase: state.phase,
-            input: "stage_settled",
-        },
-    )?;
     let model_request_id = required(env.ids.model_request_ids(), 0, "model_request_ids")?;
-    let effect_id = required(env.ids.effect_ids(), 0, "effect_ids")?;
-    let requested = EffectRequested::try_new(
-        effect_id,
-        EffectKind::Model,
-        None,
-        component.clone(),
-        None,
-        output_contract.clone(),
-        EffectInput::Model {
-            request: request.clone(),
-        },
-        *retry_safety,
-        *deadline,
-    )
-    .map_err(|_| KernelError::ModelRequestContractMismatch)?;
+    let effect_id = requested.effect_id();
     Ok((
         vec![
             stage_record(
@@ -144,34 +107,18 @@ pub(super) fn failed_stage_bodies(
     settlement_digest: Digest,
     error: &crate::ErrorDescriptor,
 ) -> (Vec<RecordBody>, Option<PostCommitAction>) {
-    match cursor.stage {
-        Stage::BeforeRun
-        | Stage::PrepareContext
-        | Stage::BeforeModel
-        | Stage::AfterModel
-        | Stage::BeforeToolBatch
-        | Stage::AfterToolBatch => (
-            vec![stage_record(
-                cursor,
-                StageDisposition::Failed {
-                    error: error.clone(),
-                },
-                settlement_digest,
-            )],
-            None,
-        ),
-        Stage::BeforeFinalize => (
-            vec![
-                stage_record(
-                    cursor,
-                    StageDisposition::Failed {
-                        error: error.clone(),
-                    },
-                    settlement_digest,
-                ),
-                RecordBody::RunFailed(failure_from_state(state, error.clone())),
-            ],
-            None,
-        ),
+    let mut bodies = vec![stage_record(
+        cursor,
+        StageDisposition::Failed {
+            error: error.clone(),
+        },
+        settlement_digest,
+    )];
+    if cursor.stage == Stage::BeforeFinalize {
+        bodies.push(RecordBody::RunFailed(failure_from_state(
+            state,
+            error.clone(),
+        )));
     }
+    (bodies, None)
 }

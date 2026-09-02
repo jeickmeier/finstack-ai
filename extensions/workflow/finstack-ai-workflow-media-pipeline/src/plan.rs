@@ -133,12 +133,8 @@ impl<'de> Deserialize<'de> for FrameSource {
         let serde_json::Value::Object(map) = value else {
             return Err(de::Error::custom("frame source must be a JSON object"));
         };
-        if map.len() != 1 {
-            return Err(de::Error::custom(
-                "frame source must have exactly one of: prompt, artifact, url",
-            ));
-        }
-        let Some((key, val)) = map.into_iter().next() else {
+        let mut entries = map.into_iter();
+        let (Some((key, val)), None) = (entries.next(), entries.next()) else {
             return Err(de::Error::custom(
                 "frame source must have exactly one of: prompt, artifact, url",
             ));
@@ -254,11 +250,6 @@ pub struct PlanBudget {
 /// transitions that name an unknown or final scene, an out-of-range transition
 /// duration, an unknown output container or audio mode, or an out-of-range
 /// output frame rate) or exceeds the supplied `limits`.
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "scene durations are bounded to 1..=60 seconds above; the cast to f64 for a \
-              caption-cue timing comparison never loses precision in practice"
-)]
 pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget, &'static str> {
     if plan.version != 1 {
         return Err("movie plan version must be 1");
@@ -288,7 +279,7 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
         if scene.video_prompt.is_empty() {
             return Err("scene video prompt must not be empty");
         }
-        let duration = u64::from(scene.duration_s.unwrap_or(plan.defaults.scene_duration_s));
+        let duration = scene.duration_s.unwrap_or(plan.defaults.scene_duration_s);
         if !(1..=60).contains(&duration) {
             return Err("scene duration must be between 1 and 60 seconds");
         }
@@ -322,14 +313,14 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
                     && cue.end_s.is_finite()
                     && cue.start_s >= previous_end
                     && cue.end_s > cue.start_s
-                    && cue.end_s <= duration as f64;
+                    && cue.end_s <= f64::from(duration);
                 if !in_order {
                     return Err("caption cues must be ordered and inside the scene duration");
                 }
                 previous_end = cue.end_s;
             }
         }
-        total_video_s = total_video_s.saturating_add(duration);
+        total_video_s = total_video_s.saturating_add(u64::from(duration));
     }
     if total_video_s > limits.max_total_video_s {
         return Err("movie plan exceeds the total video seconds ceiling");

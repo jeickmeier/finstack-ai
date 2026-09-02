@@ -39,8 +39,8 @@
 
 use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_net_guard::{
-    BodyReadInterrupt, NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client,
-    read_body_bounded_interruptible, reject_literal_destination, resolve_and_pin,
+    BodyReadInterrupt, NetGuardError, SystemResolver, UrlPolicy, VettedUrl, parse_and_vet_url,
+    pinned_client, read_body_bounded_interruptible, reject_literal_destination, resolve_and_pin,
 };
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 
@@ -96,13 +96,15 @@ fn map_net_guard_error(error: NetGuardError) -> ToolError {
     }
 }
 
+/// Vet a caller-supplied download URL before any network activity.
 pub(crate) fn validate_download_url(
     value: &str,
     endpoint_is_loopback: bool,
-) -> Result<(), ToolError> {
+) -> Result<VettedUrl, ToolError> {
     let policy = download_url_policy(endpoint_is_loopback);
     let vetted = parse_and_vet_url(value, &policy).map_err(|_| invalid_download_url())?;
-    reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())
+    reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())?;
+    Ok(vetted)
 }
 
 pub(crate) async fn download_bytes(
@@ -111,12 +113,10 @@ pub(crate) async fn download_bytes(
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<Vec<u8>, ToolError> {
+    let vetted = validate_download_url(url, endpoint_is_loopback)?;
     if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
         return Err(timeout_error());
     }
-    let policy = download_url_policy(endpoint_is_loopback);
-    let vetted = parse_and_vet_url(url, &policy).map_err(map_net_guard_error)?;
-    reject_literal_destination(&vetted, &policy).map_err(map_net_guard_error)?;
     let resolve = resolve_and_pin(&vetted, &SystemResolver);
     let addr = tokio::select! {
         () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),

@@ -19,12 +19,12 @@ use crate::model::{
 use crate::ports::model::{CancellationSignal, RunCallContext};
 use crate::ports::tool::{
     MCP_SAMPLING_REQUIRED, MCP_SAMPLING_UNAVAILABLE, NestedSample, ToolCallContext, ToolError,
-    ToolStreamAssembler, ToolStreamLimits,
 };
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 
-use super::{SettlementSources, ToolDriverResult, model_handle_error, tool::process_tool_result};
+use super::tool::{assemble_call, process_tool_result};
+use super::{SettlementSources, ToolDriverResult, model_handle_error};
 
 const NESTED_SAMPLE_UNAVAILABLE: &str = "mcp_sampling_unavailable";
 
@@ -100,7 +100,7 @@ async fn commit_nested_request<C: Clock, R: RandomSource>(
         })?;
     coordinator
         .submit(
-            nested_request_env(sources)?,
+            nested_env(sources, true)?,
             KernelInput::RequestCompactionModel(RequestCompactionModel {
                 request: request_json,
                 component: None,
@@ -153,19 +153,7 @@ async fn complete_parent_tool(
         .complete_nested_sample(context, driver_result.seed.call.clone(), sample)
         .await
     {
-        Ok(stream) => ToolStreamAssembler::new(ToolStreamLimits::default())
-            .assemble(
-                stream,
-                resolved.output_validator.as_deref(),
-                resolved.spec.max_result_bytes,
-                resolved.spec.deferral,
-            )
-            .await
-            .map(|assembled| AssembledToolTerminal {
-                usage: assembled.usage,
-                artifacts: assembled.artifacts,
-                terminal: assembled.terminal,
-            }),
+        Ok(stream) => assemble_call(&resolved, stream).await,
         Err(error) => Err(error),
     }
 }
@@ -262,7 +250,7 @@ async fn execute_nested_model<C: Clock, R: RandomSource>(
     })?;
     coordinator
         .submit(
-            nested_settlement_env(sources)?,
+            nested_env(sources, false)?,
             KernelInput::ModelSettled(ModelSettled {
                 turn_id: pending.turn_id,
                 model_request_id: pending.model_request_id,
@@ -308,39 +296,25 @@ fn draft_from_sampling(
     })
 }
 
-fn nested_request_env<C: Clock, R: RandomSource>(
+/// One record, one event, and — for the request — the nested effect id.
+fn nested_env<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
+    with_effect: bool,
 ) -> Result<TransitionEnv, RunHandleError> {
+    let now = sources.now()?;
+    let records = vec![sources.generate::<RecordTag>()?];
+    let events = vec![sources.generate::<EventTag>()?];
+    let effects = if with_effect {
+        vec![sources.generate::<EffectTag>()?]
+    } else {
+        Vec::new()
+    };
     Ok(TransitionEnv {
-        now: sources.now()?,
+        now,
         ids: AllocatedIds::try_new(
-            vec![sources.generate::<RecordTag>()?],
-            vec![sources.generate::<EventTag>()?],
-            vec![sources.generate::<EffectTag>()?],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            vec![sources.generate::<AppendBatchTag>()?],
-            Vec::new(),
-        )
-        .map_err(|_| RunHandleError::ToolSettlement {
-            code: NESTED_SAMPLE_UNAVAILABLE,
-        })?,
-    })
-}
-
-fn nested_settlement_env<C: Clock, R: RandomSource>(
-    sources: &SettlementSources<C, R>,
-) -> Result<TransitionEnv, RunHandleError> {
-    Ok(TransitionEnv {
-        now: sources.now()?,
-        ids: AllocatedIds::try_new(
-            vec![sources.generate::<RecordTag>()?],
-            vec![sources.generate::<EventTag>()?],
-            Vec::new(),
+            records,
+            events,
+            effects,
             Vec::new(),
             Vec::new(),
             Vec::new(),

@@ -17,7 +17,7 @@ use super::dispatch::{
 };
 use super::recover::{
     adopt_session_head, continuation_after_replay, project_loaded, replay_scoped,
-    update_last_model_continuation,
+    update_last_model_continuation, used_snapshot_sequence,
 };
 use super::session_commit::apply_batch_to_session;
 
@@ -225,14 +225,7 @@ impl CommitCoordinator {
             // not reconstructed from journal or snapshot state.
             self.discard_compaction_checkpoint();
         }
-        self.last_snapshot_sequence = used_snapshot
-            .then(|| {
-                loaded
-                    .accelerated
-                    .as_ref()
-                    .map(|snapshot| snapshot.sequence)
-            })
-            .flatten();
+        self.last_snapshot_sequence = used_snapshot_sequence(loaded, used_snapshot);
         self.head_checksum = loaded.head_checksum;
         if loaded.omits_prefix() {
             for batch in loaded.committed_batches.iter() {

@@ -7,7 +7,7 @@ use pyo3::exceptions::{PyException, PyStopAsyncIteration};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
-use crate::errors::agent_error;
+use crate::errors::run_error;
 
 /// Batch-first asynchronous event iterator.
 #[pyclass(
@@ -28,7 +28,6 @@ impl PyEventIterator {
     fn __anext__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let run = self.run.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let locator = run.locator().clone();
             match run.next_event_batch().await {
                 Ok(Some(batch)) => Python::attach(|py| {
                     Py::new(
@@ -40,7 +39,7 @@ impl PyEventIterator {
                     )
                 }),
                 Ok(None) => Err(PyStopAsyncIteration::new_err(())),
-                Err(error) => Err(Python::attach(|py| agent_error(py, &error, Some(&locator)))),
+                Err(error) => Err(run_error(&run, &error)),
             }
         })
     }

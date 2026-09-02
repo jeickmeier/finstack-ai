@@ -218,7 +218,7 @@ impl Toolset for CalculatorToolset {
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let expected_id = self.tool_id.clone();
         Box::pin(async move {
-            validate_call_context(&ctx, &call, &expected_id, TOOL_NAME)?;
+            validate_call_context(&ctx, &call, &expected_id)?;
             let arguments: CalculatorArguments =
                 serde_json::from_slice(call.call.arguments().as_bytes()).map_err(|_| {
                     tool_error(
@@ -270,9 +270,8 @@ fn validate_call_context(
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
     expected_id: &ToolId,
-    expected_name: &str,
 ) -> Result<(), ToolError> {
-    if call.tool_id != *expected_id || call.call.tool_name() != expected_name {
+    if call.tool_id != *expected_id || call.call.tool_name() != TOOL_NAME {
         return Err(tool_error(
             CALCULATOR_INVALID_ARGUMENTS,
             ErrorCategory::Validation,

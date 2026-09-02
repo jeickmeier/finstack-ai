@@ -107,12 +107,7 @@ impl LiveStatePublisher for Shared {
         if let Ok(mut current) = self.session_head.lock() {
             *current = session_head_update(state, session, head_checksum);
         }
-        let status = self.status.lock().map_or(
-            RunStatus::Faulted {
-                code: "run_status_lock_poisoned",
-            },
-            |status| *status,
-        );
+        let status = self.lifecycle_status();
         if let Ok(mut current) = self.live_state.lock() {
             *current = LiveRunState::next_semantic(
                 current.revision,

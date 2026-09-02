@@ -100,20 +100,11 @@ impl MessagesRequest {
         model: &AnthropicModelConfig,
         resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     ) -> Result<Self, ModelError> {
-        Self::try_from_draft_with_cache(draft, model, model.cache_breakpoints, resolved)
-    }
-
-    pub(crate) fn try_from_draft_with_cache(
-        draft: &ModelRequestDraft,
-        model: &AnthropicModelConfig,
-        cache_breakpoints: bool,
-        resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
-    ) -> Result<Self, ModelError> {
         draft.validate()?;
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
-        let (system, messages) = map_messages(&draft.messages, cache_breakpoints, resolved, model)?;
+        let (system, messages) = map_messages(&draft.messages, resolved, model)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -214,7 +205,6 @@ fn raw_value(value: &finstack_ai_kernel::RawJson) -> Result<Value, ModelError> {
 
 fn map_messages(
     messages: &[Message],
-    cache_breakpoints: bool,
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     model: &AnthropicModelConfig,
 ) -> Result<(Vec<SystemBlock>, Vec<WireMessage>), ModelError> {
@@ -240,7 +230,9 @@ fn map_messages(
             cache_control: None,
         });
     }
-    if cache_breakpoints && let Some(last) = system.last_mut() {
+    if model.cache_breakpoints
+        && let Some(last) = system.last_mut()
+    {
         last.cache_control = Some(CacheControl { kind: "ephemeral" });
     }
     let mut mapped = Vec::new();
@@ -491,13 +483,18 @@ mod tests {
                 max_output_tokens: 1_024,
             },
         };
-        let model = model().with_cache_breakpoints(true);
-        let cached =
-            MessagesRequest::try_from_draft_with_cache(&draft, &model, true, &BTreeMap::new())
-                .expect("cached");
-        let busted =
-            MessagesRequest::try_from_draft_with_cache(&draft, &model, false, &BTreeMap::new())
-                .expect("busted");
+        let cached = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_cache_breakpoints(true),
+            &BTreeMap::new(),
+        )
+        .expect("cached");
+        let busted = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_cache_breakpoints(false),
+            &BTreeMap::new(),
+        )
+        .expect("busted");
         let cached: Value = serde_json::from_slice(&serialize_request(&cached).unwrap()).unwrap();
         let busted: Value = serde_json::from_slice(&serialize_request(&busted).unwrap()).unwrap();
         assert_eq!(cached["system"][0]["cache_control"]["type"], "ephemeral");

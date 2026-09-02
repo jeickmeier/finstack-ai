@@ -22,7 +22,7 @@ use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::{CompletionIdentity, KernelState, RunPhase};
 
 use record::apply_record;
-use shapes::{foreign_run_shape, validate_batch_shape};
+use shapes::{foreign_run_shape, structural_record_shape, validate_batch_shape};
 use validate::{
     validate_batch_range, validate_identities, validate_model_digests, validate_record_sequences,
     validate_stage_digests, validate_tool_digests,
@@ -44,11 +44,7 @@ pub(super) fn apply(
         committed.records.as_ref(),
         [record] if matches!(record.body(), RecordBody::ExternalCommandRejected(_))
     );
-    let structural_only = !committed.records.is_empty()
-        && committed
-            .records
-            .iter()
-            .all(|record| record.body().is_structural());
+    let structural_only = structural_record_shape(&committed.records);
     let post_terminal_budget_release = committed
         .records
         .iter()

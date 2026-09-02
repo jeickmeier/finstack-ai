@@ -35,9 +35,6 @@ fn default_detail() -> String {
     "js_memory_prebeta".into()
 }
 
-#[cfg(target_arch = "wasm32")]
-type JsMethod = std::rc::Rc<std::cell::RefCell<js_sys::Function>>;
-
 /// Scripted host journal store. Health is never durable.
 pub struct HostJournalStore {
     detail: Arc<str>,
@@ -46,52 +43,26 @@ pub struct HostJournalStore {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    health: JsMethod,
+    health: js_sys::Function,
     #[cfg(target_arch = "wasm32")]
-    append: Option<JsMethod>,
+    append: Option<js_sys::Function>,
     #[cfg(target_arch = "wasm32")]
-    load: Option<JsMethod>,
+    load: Option<js_sys::Function>,
     #[cfg(target_arch = "wasm32")]
-    write_snapshot: Option<JsMethod>,
+    write_snapshot: Option<js_sys::Function>,
 }
 
 impl HostJournalStore {
-    fn from_parts(
-        options: HostJournalStoreOptions,
-        #[cfg(not(target_arch = "wasm32"))] health: Arc<
-            dyn Fn() -> Result<NativeHostResult, HostFailure> + Send + Sync,
-        >,
-        #[cfg(target_arch = "wasm32")] adapter: wasm_bindgen::JsValue,
-        #[cfg(target_arch = "wasm32")] health: js_sys::Function,
-        #[cfg(target_arch = "wasm32")] append: Option<js_sys::Function>,
-        #[cfg(target_arch = "wasm32")] load: Option<js_sys::Function>,
-        #[cfg(target_arch = "wasm32")] write_snapshot: Option<js_sys::Function>,
-    ) -> Self {
-        Self {
-            detail: Arc::from(options.detail),
-            #[cfg(not(target_arch = "wasm32"))]
-            health,
-            #[cfg(target_arch = "wasm32")]
-            adapter,
-            #[cfg(target_arch = "wasm32")]
-            health: std::rc::Rc::new(std::cell::RefCell::new(health)),
-            #[cfg(target_arch = "wasm32")]
-            append: append.map(|method| std::rc::Rc::new(std::cell::RefCell::new(method))),
-            #[cfg(target_arch = "wasm32")]
-            load: load.map(|method| std::rc::Rc::new(std::cell::RefCell::new(method))),
-            #[cfg(target_arch = "wasm32")]
-            write_snapshot: write_snapshot
-                .map(|method| std::rc::Rc::new(std::cell::RefCell::new(method))),
-        }
-    }
-
     /// Construct a native scripted store.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_callback(
         options: HostJournalStoreOptions,
         health: impl Fn() -> Result<NativeHostResult, HostFailure> + Send + Sync + 'static,
     ) -> Self {
-        Self::from_parts(options, Arc::new(health))
+        Self {
+            detail: Arc::from(options.detail),
+            health: Arc::new(health),
+        }
     }
 
     /// Construct a wasm32 store around a JS `HostJournalStore`.
@@ -109,17 +80,14 @@ impl HostJournalStore {
                 reason_code: crate::host::JS_HOST_FAILED,
             }
         })?;
-        let append = crate::host::extract_optional_method(&adapter, "append");
-        let load = crate::host::extract_optional_method(&adapter, "load");
-        let write_snapshot = crate::host::extract_optional_method(&adapter, "writeSnapshot");
-        Ok(Self::from_parts(
-            options,
-            adapter,
+        Ok(Self {
+            detail: Arc::from(options.detail),
             health,
-            append,
-            load,
-            write_snapshot,
-        ))
+            append: crate::host::extract_optional_method(&adapter, "append"),
+            load: crate::host::extract_optional_method(&adapter, "load"),
+            write_snapshot: crate::host::extract_optional_method(&adapter, "writeSnapshot"),
+            adapter,
+        })
     }
 }
 
@@ -143,7 +111,7 @@ impl JournalStore for HostJournalStore {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let Some(method) = self.append.as_ref().map(|method| method.borrow().clone()) else {
+            let Some(method) = self.append.clone() else {
                 return Box::pin(async {
                     Err(StoreError::Unavailable {
                         reason_code: "js_host_store_prebeta",
@@ -171,7 +139,7 @@ impl JournalStore for HostJournalStore {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let Some(method) = self.load.as_ref().map(|method| method.borrow().clone()) else {
+            let Some(method) = self.load.clone() else {
                 return Box::pin(async move { Ok(LoadedSession::empty(request.session_id)) });
             };
             let adapter = self.adapter.clone();
@@ -207,11 +175,7 @@ impl JournalStore for HostJournalStore {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let Some(method) = self
-                .write_snapshot
-                .as_ref()
-                .map(|method| method.borrow().clone())
-            else {
+            let Some(method) = self.write_snapshot.clone() else {
                 return Box::pin(async {
                     Err(StoreError::Unavailable {
                         reason_code: "js_host_store_prebeta",
@@ -270,7 +234,7 @@ impl JournalStore for HostJournalStore {
         #[cfg(target_arch = "wasm32")]
         {
             let adapter = self.adapter.clone();
-            let method = self.health.borrow().clone();
+            let method = self.health.clone();
             Box::pin(async move {
                 let result = crate::host::invoke_host(&adapter, &method, &[], None)
                     .await
@@ -408,7 +372,7 @@ async fn invoke_store_json(
     let value = crate::host::invoke_host_raw(
         adapter,
         method,
-        &[crate::host::json_string_value(encoded)],
+        &[wasm_bindgen::JsValue::from_str(encoded)],
         None,
     )
     .await

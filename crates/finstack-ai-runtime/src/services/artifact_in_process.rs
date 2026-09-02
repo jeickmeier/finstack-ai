@@ -6,7 +6,7 @@
 //! change.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
 
@@ -29,6 +29,24 @@ pub struct InProcessArtifactStore {
 struct ArtifactState {
     entries: BTreeMap<Digest, StoredArtifact>,
     total_bytes: u64,
+}
+
+impl ArtifactState {
+    /// Look up the exact stored entry for an already scope-validated reference.
+    fn stored(
+        &mut self,
+        scope: &ArtifactScope,
+        artifact: &ArtifactRef,
+    ) -> Result<&mut StoredArtifact, ArtifactError> {
+        let key = artifact_storage_key(scope, artifact)?;
+        let stored = self.entries.get_mut(&key).ok_or(ArtifactError::NotFound)?;
+        if stored.scope != *scope || stored.artifact != *artifact {
+            return Err(ArtifactError::Integrity {
+                message: Arc::from("stored_reference_mismatch"),
+            });
+        }
+        Ok(stored)
+    }
 }
 
 #[derive(Debug)]
@@ -63,6 +81,12 @@ impl InProcessArtifactStore {
         self.limits = limits;
         self
     }
+
+    fn lock(&self) -> Result<MutexGuard<'_, ArtifactState>, ArtifactError> {
+        self.state.lock().map_err(|_| ArtifactError::Unavailable {
+            message: Arc::from("memory artifact lock failed"),
+        })
+    }
 }
 
 impl ArtifactStore for InProcessArtifactStore {
@@ -79,10 +103,7 @@ impl ArtifactStore for InProcessArtifactStore {
                 u64::try_from(content.len()).map_err(|_| ArtifactError::InvalidMetadata {
                     message: Arc::from("invalid_length"),
                 })?;
-            let mut state = self.state.lock().map_err(|_| ArtifactError::Unavailable {
-                message: Arc::from("memory artifact lock failed"),
-            })?;
-
+            let mut state = self.lock()?;
             if let Some(stored) = state.entries.get(&key) {
                 if stored.scope != scope || stored.artifact != artifact || stored.content != content
                 {
@@ -133,16 +154,8 @@ impl ArtifactStore for InProcessArtifactStore {
     ) -> PortFuture<Result<Bytes, ArtifactError>> {
         let result = (|| {
             validate_artifact_scope(&scope, &artifact)?;
-            let key = artifact_storage_key(&scope, &artifact)?;
-            let state = self.state.lock().map_err(|_| ArtifactError::Unavailable {
-                message: Arc::from("memory artifact lock failed"),
-            })?;
-            let stored = state.entries.get(&key).ok_or(ArtifactError::NotFound)?;
-            if stored.scope != scope || stored.artifact != artifact {
-                return Err(ArtifactError::Integrity {
-                    message: Arc::from("stored_reference_mismatch"),
-                });
-            }
+            let mut state = self.lock()?;
+            let stored = state.stored(&scope, &artifact)?;
             validate_retrieved_artifact(&scope, &artifact, &stored.content)?;
             Ok(stored.content.clone())
         })();
@@ -160,9 +173,7 @@ impl ArtifactStore for InProcessArtifactStore {
                     message: Arc::from("blob_digest_required"),
                 });
             }
-            let state = self.state.lock().map_err(|_| ArtifactError::Unavailable {
-                message: Arc::from("memory artifact lock failed"),
-            })?;
+            let state = self.lock()?;
             let stored = state
                 .entries
                 .values()
@@ -197,16 +208,8 @@ impl ArtifactStore for InProcessArtifactStore {
     ) -> PortFuture<Result<(), ArtifactError>> {
         let result = (|| {
             validate_artifact_scope(&scope, &artifact)?;
-            let key = artifact_storage_key(&scope, &artifact)?;
-            let mut state = self.state.lock().map_err(|_| ArtifactError::Unavailable {
-                message: Arc::from("memory artifact lock failed"),
-            })?;
-            let stored = state.entries.get_mut(&key).ok_or(ArtifactError::NotFound)?;
-            if stored.scope != scope || stored.artifact != artifact {
-                return Err(ArtifactError::Integrity {
-                    message: Arc::from("stored_reference_mismatch"),
-                });
-            }
+            let mut state = self.lock()?;
+            let stored = state.stored(&scope, &artifact)?;
             if !stored.owners.contains(&owner)
                 && stored.owners.len() >= self.limits.max_owners_per_artifact
             {
@@ -231,16 +234,8 @@ impl ArtifactStore for InProcessArtifactStore {
     ) -> PortFuture<Result<(), ArtifactError>> {
         let result = (|| {
             validate_artifact_scope(&scope, &artifact)?;
-            let key = artifact_storage_key(&scope, &artifact)?;
-            let mut state = self.state.lock().map_err(|_| ArtifactError::Unavailable {
-                message: Arc::from("memory artifact lock failed"),
-            })?;
-            let stored = state.entries.get_mut(&key).ok_or(ArtifactError::NotFound)?;
-            if stored.scope != scope || stored.artifact != artifact {
-                return Err(ArtifactError::Integrity {
-                    message: Arc::from("stored_reference_mismatch"),
-                });
-            }
+            let mut state = self.lock()?;
+            let stored = state.stored(&scope, &artifact)?;
             if stored.owners.remove(&owner) && stored.owners.is_empty() {
                 stored.unreferenced_since = Some(now);
             }
@@ -258,9 +253,7 @@ impl ArtifactStore for InProcessArtifactStore {
         let result = (|| {
             scope.digest()?;
             let bounded_limit = limit.min(self.limits.max_gc_batch);
-            let mut state = self.state.lock().map_err(|_| ArtifactError::Unavailable {
-                message: Arc::from("memory artifact lock failed"),
-            })?;
+            let mut state = self.lock()?;
             let mut examined = 0_usize;
             let mut delete = Vec::new();
             for (key, stored) in &mut state.entries {

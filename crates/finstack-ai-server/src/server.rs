@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use finstack_ai_protocol::{PROTOCOL_VERSION_V1, VersionOffer};
 use finstack_ai_runtime::audit::{SecurityAuditGate, SecurityAuditSink};
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -12,7 +13,7 @@ use tokio::net::UnixListener;
 
 use crate::ServerError;
 use crate::auth::{AuthVerifier, TransportKind};
-use crate::connection::{ConnectionLimits, serve_connection};
+use crate::connection::serve_connection;
 use crate::credit::{CreditLimits, CreditWindow};
 use crate::listen::{ListenAddr, install_ring};
 use crate::session::SessionHub;
@@ -23,7 +24,7 @@ pub struct Server {
     auth: Arc<dyn AuthVerifier>,
     audit: Arc<SecurityAuditGate>,
     hub: Arc<SessionHub>,
-    limits: ConnectionLimits,
+    offer: VersionOffer,
     credit: CreditLimits,
     ids: AtomicU64,
 }
@@ -107,7 +108,11 @@ impl Server {
             auth,
             audit,
             hub: Arc::new(SessionHub::default()),
-            limits: ConnectionLimits::v1()?,
+            offer: VersionOffer::try_new(
+                vec![PROTOCOL_VERSION_V1],
+                PROTOCOL_VERSION_V1,
+                vec!["auth".into()],
+            )?,
             credit: CreditLimits::default(),
             ids: AtomicU64::new(1),
         })
@@ -134,10 +139,8 @@ impl Server {
     /// Returns listen, I/O, or protocol failures.
     pub async fn accept_once(&self) -> Result<(), ServerError> {
         match &self.listen {
-            ListenAddr::Tcp { tls: None, .. } => {
-                let addr = self.listen.tcp_addr().ok_or(ServerError::ListenInvalid)?;
-                let bind = addr.to_string();
-                let listener = TcpListener::bind(&bind).await?;
+            ListenAddr::Tcp { addr, tls: None } => {
+                let listener = TcpListener::bind(*addr).await?;
                 let (stream, _) = listener.accept().await?;
                 Box::pin(self.serve(stream, TransportKind::LoopbackPlaintext)).await
             }
@@ -184,7 +187,7 @@ impl Server {
             Arc::clone(&self.auth),
             Arc::clone(&self.audit),
             Arc::clone(&self.hub),
-            self.limits.clone(),
+            &self.offer,
             CreditWindow::new(self.credit),
             connection_id,
         )

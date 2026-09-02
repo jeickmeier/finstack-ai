@@ -1,20 +1,23 @@
 //! Rust-owned resolved agent handle and linked-provider builders.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use crate::approval_grant::PyApprovalGrantMode;
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PyS3ArtifactStore, PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::artifact::{ArtifactStore, InProcessArtifactStore};
+use finstack_ai::runtime::ports::context::ContextProvider;
 use finstack_ai::runtime::ports::middleware::Middleware;
 use finstack_ai::runtime::ports::model::{Model, ModelName, ModelSettings};
+use finstack_ai::runtime::ports::observer::Observer;
 use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{
-    Agent, AgentRunError, AnthropicAgentSpec, ApprovalGrantMode, CapabilitySpec, ChildRunPolicy,
-    DEFAULT_MAX_CYCLES, DEFAULT_RUN_TIMEOUT, GatewayAgentSpec, GeminiAgentSpec, HistoryCachePolicy,
-    LinkedAgent, LinkedAgentPorts, LinkedCommon, LinkedProviderSpec, MediaPipelineSpec,
-    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, OpenRouterMediaToolsSpec, Session,
-    VideoComposeSpec,
+    Agent, AgentRun, AgentRunError, AgentRunRequest, AnthropicAgentSpec, ApprovalGrantMode,
+    CapabilitySpec, ChildRunPolicy, DEFAULT_MAX_CYCLES, DEFAULT_RUN_TIMEOUT, GatewayAgentSpec,
+    GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts, LinkedCommon,
+    LinkedProviderSpec, MediaPipelineSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+    OpenRouterMediaToolsSpec, Session, VideoComposeSpec,
 };
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, CompactionAuthorization, ComponentId,
@@ -34,7 +37,7 @@ use crate::callbacks::{
 use crate::capability::PyCapability;
 use crate::e2b::PyE2bSandboxToolset;
 use crate::elicitation::PyElicitationToolset;
-use crate::errors::{agent_error, configuration_error, session_py_error};
+use crate::errors::{agent_error, configuration_error, run_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
 use crate::middleware::{
@@ -46,8 +49,8 @@ use crate::observers::{
 };
 use crate::repository::PyRepositoryContextProvider;
 use crate::run::{
-    PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
-    result_to_python_with_locator, run_request, stage_attachments,
+    PyAttachment, PyRun, collect_attachments, prepare_pydantic_output, run_request, run_result,
+    stage_attachments,
 };
 use crate::session::PySession;
 use crate::skills::{PySkillsToolset, build_skills_ports};
@@ -92,7 +95,7 @@ impl PyToolsetArg {
             Self::Memory(toolset) => toolset
                 .bind(py)
                 .borrow()
-                .registration(py, Arc::clone(artifact_store)),
+                .registration(Arc::clone(artifact_store)),
             Self::HttpFetch(toolset) => Ok(toolset.bind(py).borrow().registration()),
             Self::E2b(toolset) => Ok(toolset.bind(py).borrow().registration()),
             Self::Skills(_) => Err(PyValueError::new_err(
@@ -122,13 +125,10 @@ impl PyContextProviderArg {
         &self,
         py: Python<'_>,
         artifact_store: &Arc<dyn ArtifactStore>,
-    ) -> PyResult<(
-        ComponentRef,
-        Arc<dyn finstack_ai::runtime::ports::context::ContextProvider>,
-    )> {
+    ) -> PyResult<(ComponentRef, Arc<dyn ContextProvider>)> {
         match self {
             Self::Python(provider) => Ok(provider.bind(py).borrow().registration()),
-            Self::Memory(provider) => provider.bind(py).borrow().registration(py, artifact_store),
+            Self::Memory(provider) => provider.bind(py).borrow().registration(artifact_store),
             Self::Repository(provider) => Ok(provider.bind(py).borrow().registration()),
         }
     }
@@ -184,13 +184,7 @@ pub(crate) enum PyObserverArg {
 }
 
 impl PyObserverArg {
-    fn registration(
-        &self,
-        py: Python<'_>,
-    ) -> (
-        ComponentRef,
-        Arc<dyn finstack_ai::runtime::ports::observer::Observer>,
-    ) {
+    fn registration(&self, py: Python<'_>) -> (ComponentRef, Arc<dyn Observer>) {
         match self {
             Self::Python(observer) => observer.bind(py).borrow().registration(),
             Self::Memory(observer) => observer.bind(py).borrow().registration(),
@@ -203,7 +197,7 @@ impl PyObserverArg {
     }
 }
 
-const PREVIEW_VERSION: Version = Version {
+pub(crate) const PREVIEW_VERSION: Version = Version {
     major: 0,
     minor: 0,
     patch: 1,
@@ -277,23 +271,14 @@ pub(crate) struct PyAgent {
 impl PyAgent {
     /// Compose an agent with a fresh bounded process-local history cache.
     fn with_history_cache(&self, py: Python<'_>, policy: &Bound<'_, PyHistoryCachePolicy>) -> Self {
-        let policy = policy.borrow();
+        let inner = self
+            .inner
+            .as_ref()
+            .clone()
+            .with_history_cache_policy(policy.borrow().inner);
         Self {
-            inner: Arc::new(
-                self.inner
-                    .as_ref()
-                    .clone()
-                    .with_history_cache_policy(policy.inner),
-            ),
-            model: self.model.clone(),
-            output_adapter: self
-                .output_adapter
-                .as_ref()
-                .map(|adapter| adapter.clone_ref(py)),
-            settings: self.settings.clone(),
-            default_timeout_seconds: self.default_timeout_seconds,
-            artifact_store: Arc::clone(&self.artifact_store),
-            compaction_authorization: self.compaction_authorization.clone(),
+            inner: Arc::new(inner),
+            ..self.clone_ref(py)
         }
     }
 
@@ -339,69 +324,43 @@ impl PyAgent {
         artifact_path: Option<String>,
         artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
-        let (capabilities, active_capabilities) =
-            capability_configuration(py, capabilities, active_capabilities)?;
-        let openrouter_media = openrouter_media_spec(
+        let (common, sidecar) = linked_common(
+            py,
+            instruction,
+            capabilities,
+            active_capabilities,
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
-        )?;
-        let video_compose = video_compose_spec(
             video_compose_ffmpeg_path,
             video_compose_ffprobe_path,
             video_compose_scratch_dir,
             video_compose_render_timeout_s,
-        )?;
-        let media_pipeline = media_pipeline_spec(
             media_pipeline_max_scenes,
             media_pipeline_max_total_video_s,
             media_pipeline_max_concurrent_jobs,
             media_pipeline_sqlite_state_path,
-        )?;
-        let (ports, artifact_store, skills) = linked_ports(
-            py,
             toolsets,
             context_providers,
             middleware,
             observers,
             output_type,
+            child_runs,
+            approval_grant,
             artifact_path,
             artifact_store,
         )?;
-        reject_linked_skills(skills.as_ref())?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
-            let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
+        sidecar.build(
+            py,
+            Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
                 model,
                 api_key,
                 reasoning_effort,
                 reasoning_summary,
                 media_tools,
-                common: LinkedCommon {
-                    openrouter_media,
-                    video_compose,
-                    media_pipeline,
-                    instruction,
-                    capabilities,
-                    active_capabilities,
-                    ports,
-                    child_runs,
-                    approval_grant,
-                },
-            }))
-            .await;
-            Python::attach(|py| {
-                wrap_linked_agent(
-                    py,
-                    built,
-                    output_adapter,
-                    artifact_store,
-                    compaction_authorization,
-                )
-            })
-        })
+                common,
+            })),
+        )
     }
 
     /// Construct a Rust-backed `OpenRouter` Responses agent.
@@ -454,41 +413,35 @@ impl PyAgent {
         artifact_path: Option<String>,
         artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
-        let (capabilities, active_capabilities) =
-            capability_configuration(py, capabilities, active_capabilities)?;
-        let openrouter_media = openrouter_media_spec(
+        let (common, sidecar) = linked_common(
+            py,
+            instruction,
+            capabilities,
+            active_capabilities,
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
-        )?;
-        let video_compose = video_compose_spec(
             video_compose_ffmpeg_path,
             video_compose_ffprobe_path,
             video_compose_scratch_dir,
             video_compose_render_timeout_s,
-        )?;
-        let media_pipeline = media_pipeline_spec(
             media_pipeline_max_scenes,
             media_pipeline_max_total_video_s,
             media_pipeline_max_concurrent_jobs,
             media_pipeline_sqlite_state_path,
-        )?;
-        let (ports, artifact_store, skills) = linked_ports(
-            py,
             toolsets,
             context_providers,
             middleware,
             observers,
             output_type,
+            child_runs,
+            approval_grant,
             artifact_path,
             artifact_store,
         )?;
-        reject_linked_skills(skills.as_ref())?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
-            let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
+        sidecar.build(
+            py,
+            Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
                 model,
                 api_key,
                 referer,
@@ -496,29 +449,9 @@ impl PyAgent {
                 reasoning_effort,
                 reasoning_summary,
                 media_tools,
-                common: LinkedCommon {
-                    instruction,
-                    capabilities,
-                    active_capabilities,
-                    ports,
-                    child_runs,
-                    approval_grant,
-                    openrouter_media,
-                    video_compose,
-                    media_pipeline,
-                },
-            }))
-            .await;
-            Python::attach(|py| {
-                wrap_linked_agent(
-                    py,
-                    built,
-                    output_adapter,
-                    artifact_store,
-                    compaction_authorization,
-                )
-            })
-        })
+                common,
+            })),
+        )
     }
 
     /// Construct a Rust-backed Anthropic Messages agent.
@@ -561,67 +494,41 @@ impl PyAgent {
         artifact_path: Option<String>,
         artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
-        let (capabilities, active_capabilities) =
-            capability_configuration(py, capabilities, active_capabilities)?;
-        let openrouter_media = openrouter_media_spec(
+        let (common, sidecar) = linked_common(
+            py,
+            instruction,
+            capabilities,
+            active_capabilities,
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
-        )?;
-        let video_compose = video_compose_spec(
             video_compose_ffmpeg_path,
             video_compose_ffprobe_path,
             video_compose_scratch_dir,
             video_compose_render_timeout_s,
-        )?;
-        let media_pipeline = media_pipeline_spec(
             media_pipeline_max_scenes,
             media_pipeline_max_total_video_s,
             media_pipeline_max_concurrent_jobs,
             media_pipeline_sqlite_state_path,
-        )?;
-        let (ports, artifact_store, skills) = linked_ports(
-            py,
             toolsets,
             context_providers,
             middleware,
             observers,
             output_type,
+            child_runs,
+            approval_grant,
             artifact_path,
             artifact_store,
         )?;
-        reject_linked_skills(skills.as_ref())?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
-            let built = Agent::linked(LinkedProviderSpec::Anthropic(AnthropicAgentSpec {
+        sidecar.build(
+            py,
+            Agent::linked(LinkedProviderSpec::Anthropic(AnthropicAgentSpec {
                 base_url,
                 model,
                 api_key,
-                common: LinkedCommon {
-                    openrouter_media,
-                    video_compose,
-                    media_pipeline,
-                    instruction,
-                    capabilities,
-                    active_capabilities,
-                    ports,
-                    child_runs,
-                    approval_grant,
-                },
-            }))
-            .await;
-            Python::attach(|py| {
-                wrap_linked_agent(
-                    py,
-                    built,
-                    output_adapter,
-                    artifact_store,
-                    compaction_authorization,
-                )
-            })
-        })
+                common,
+            })),
+        )
     }
 
     /// Construct a Rust-backed Gemini `generateContent` agent.
@@ -665,67 +572,41 @@ impl PyAgent {
         artifact_path: Option<String>,
         artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
-        let (capabilities, active_capabilities) =
-            capability_configuration(py, capabilities, active_capabilities)?;
-        let openrouter_media = openrouter_media_spec(
+        let (common, sidecar) = linked_common(
+            py,
+            instruction,
+            capabilities,
+            active_capabilities,
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
-        )?;
-        let video_compose = video_compose_spec(
             video_compose_ffmpeg_path,
             video_compose_ffprobe_path,
             video_compose_scratch_dir,
             video_compose_render_timeout_s,
-        )?;
-        let media_pipeline = media_pipeline_spec(
             media_pipeline_max_scenes,
             media_pipeline_max_total_video_s,
             media_pipeline_max_concurrent_jobs,
             media_pipeline_sqlite_state_path,
-        )?;
-        let (ports, artifact_store, skills) = linked_ports(
-            py,
             toolsets,
             context_providers,
             middleware,
             observers,
             output_type,
+            child_runs,
+            approval_grant,
             artifact_path,
             artifact_store,
         )?;
-        reject_linked_skills(skills.as_ref())?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
-            let built = Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
+        sidecar.build(
+            py,
+            Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
                 endpoint,
                 model,
                 api_key,
-                common: LinkedCommon {
-                    openrouter_media,
-                    video_compose,
-                    media_pipeline,
-                    instruction,
-                    capabilities,
-                    active_capabilities,
-                    ports,
-                    child_runs,
-                    approval_grant,
-                },
-            }))
-            .await;
-            Python::attach(|py| {
-                wrap_linked_agent(
-                    py,
-                    built,
-                    output_adapter,
-                    artifact_store,
-                    compaction_authorization,
-                )
-            })
-        })
+                common,
+            })),
+        )
     }
 
     /// Construct a keyless Rust-backed Ollama/local agent.
@@ -766,66 +647,40 @@ impl PyAgent {
         artifact_path: Option<String>,
         artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
-        let (capabilities, active_capabilities) =
-            capability_configuration(py, capabilities, active_capabilities)?;
-        let openrouter_media = openrouter_media_spec(
+        let (common, sidecar) = linked_common(
+            py,
+            instruction,
+            capabilities,
+            active_capabilities,
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
-        )?;
-        let video_compose = video_compose_spec(
             video_compose_ffmpeg_path,
             video_compose_ffprobe_path,
             video_compose_scratch_dir,
             video_compose_render_timeout_s,
-        )?;
-        let media_pipeline = media_pipeline_spec(
             media_pipeline_max_scenes,
             media_pipeline_max_total_video_s,
             media_pipeline_max_concurrent_jobs,
             media_pipeline_sqlite_state_path,
-        )?;
-        let (ports, artifact_store, skills) = linked_ports(
-            py,
             toolsets,
             context_providers,
             middleware,
             observers,
             output_type,
+            child_runs,
+            approval_grant,
             artifact_path,
             artifact_store,
         )?;
-        reject_linked_skills(skills.as_ref())?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
-            let built = Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
+        sidecar.build(
+            py,
+            Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
                 base_url,
                 model,
-                common: LinkedCommon {
-                    openrouter_media,
-                    video_compose,
-                    media_pipeline,
-                    instruction,
-                    capabilities,
-                    active_capabilities,
-                    ports,
-                    child_runs,
-                    approval_grant,
-                },
-            }))
-            .await;
-            Python::attach(|py| {
-                wrap_linked_agent(
-                    py,
-                    built,
-                    output_adapter,
-                    artifact_store,
-                    compaction_authorization,
-                )
-            })
-        })
+                common,
+            })),
+        )
     }
 
     /// Construct a Rust-backed agent that dispatches to a dedicated provider.
@@ -872,41 +727,35 @@ impl PyAgent {
         artifact_path: Option<String>,
         artifact_store: Option<Py<PyS3ArtifactStore>>,
     ) -> PyResult<Bound<'_, PyAny>> {
-        let (capabilities, active_capabilities) =
-            capability_configuration(py, capabilities, active_capabilities)?;
-        let openrouter_media = openrouter_media_spec(
+        let (common, sidecar) = linked_common(
+            py,
+            instruction,
+            capabilities,
+            active_capabilities,
             openrouter_media_api_key,
             openrouter_media_referer,
             openrouter_media_title,
-        )?;
-        let video_compose = video_compose_spec(
             video_compose_ffmpeg_path,
             video_compose_ffprobe_path,
             video_compose_scratch_dir,
             video_compose_render_timeout_s,
-        )?;
-        let media_pipeline = media_pipeline_spec(
             media_pipeline_max_scenes,
             media_pipeline_max_total_video_s,
             media_pipeline_max_concurrent_jobs,
             media_pipeline_sqlite_state_path,
-        )?;
-        let (ports, artifact_store, skills) = linked_ports(
-            py,
             toolsets,
             context_providers,
             middleware,
             observers,
             output_type,
+            child_runs,
+            approval_grant,
             artifact_path,
             artifact_store,
         )?;
-        reject_linked_skills(skills.as_ref())?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (ports, output_adapter, compaction_authorization) = split_linked_ports(ports);
-            let built = Agent::linked(LinkedProviderSpec::Gateway(GatewayAgentSpec {
+        sidecar.build(
+            py,
+            Agent::linked(LinkedProviderSpec::Gateway(GatewayAgentSpec {
                 endpoint,
                 model,
                 wire_protocol,
@@ -914,29 +763,9 @@ impl PyAgent {
                 hard_input_bytes,
                 auth_kind: auth,
                 api_key,
-                common: LinkedCommon {
-                    instruction,
-                    capabilities,
-                    active_capabilities,
-                    ports,
-                    child_runs,
-                    approval_grant,
-                    openrouter_media,
-                    video_compose,
-                    media_pipeline,
-                },
-            }))
-            .await;
-            Python::attach(|py| {
-                wrap_linked_agent(
-                    py,
-                    built,
-                    output_adapter,
-                    artifact_store,
-                    compaction_authorization,
-                )
-            })
-        })
+                common,
+            })),
+        )
     }
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
@@ -969,7 +798,11 @@ impl PyAgent {
         let model = model.borrow();
         let model_name = model.model_name();
         let model = model.registration();
-        let (ports, artifact_store, skills) = linked_ports(
+        let LinkedPorts {
+            ports,
+            sidecar,
+            skills,
+        } = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -979,36 +812,35 @@ impl PyAgent {
             artifact_path,
             artifact_store,
         )?;
-        let capability_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = capability_toolsets
+        let capability_toolsets = capability_toolsets
             .unwrap_or_default()
             .into_iter()
-            .map(|toolset| toolset.registration(py, &artifact_store))
+            .map(|toolset| toolset.registration(py, &sidecar.artifact_store))
             .collect::<PyResult<Vec<_>>>()?;
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let child_runs = child_runs_or_deny(py, child_runs);
-        let approval_grant = approval_grant_or_per_call(py, approval_grant);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let built = build_python_agent(
+        let common = LinkedCommon {
+            instruction,
+            capabilities,
+            active_capabilities,
+            ports,
+            child_runs: child_runs_or_deny(py, child_runs),
+            approval_grant: approval_grant_or_per_call(py, approval_grant),
+            openrouter_media: None,
+            video_compose: None,
+            media_pipeline: None,
+        };
+        sidecar.build(
+            py,
+            build_python_agent(
                 model_name,
                 model,
-                instruction,
-                ports,
-                capabilities,
-                active_capabilities,
-                child_runs,
-                approval_grant,
+                common,
                 (sqlite_path, sqlite_durability, postgres_dsn),
-                artifact_store,
                 skills,
                 capability_toolsets,
-            )
-            .await;
-            Python::attach(|py| match built {
-                Ok(value) => Py::new(py, value),
-                Err(error) => Err(agent_error(py, &error, None)),
-            })
-        })
+            ),
+        )
     }
 
     /// Return the bounded model-activated catalog in stable identity order.
@@ -1034,34 +866,22 @@ impl PyAgent {
     ///
     /// In-flight runs keep the previous lock.
     fn re_resolve<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let agent = Arc::clone(&self.inner);
-        let model = self.model.clone();
-        let settings = self.settings.clone();
-        let default_timeout_seconds = self.default_timeout_seconds;
-        let output_adapter = self
-            .output_adapter
-            .as_ref()
-            .map(|adapter| adapter.clone_ref(py));
-        let artifact_store = Arc::clone(&self.artifact_store);
-        let compaction_authorization = self.compaction_authorization.clone();
+        let agent = self.clone_ref(py);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match agent.re_resolve().await {
-                Ok(inner) => Python::attach(|py| {
-                    Py::new(
-                        py,
-                        PyAgent {
-                            inner: Arc::new(inner),
-                            model,
-                            output_adapter,
-                            settings,
-                            default_timeout_seconds,
-                            artifact_store,
-                            compaction_authorization,
-                        },
-                    )
-                }),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, None))),
-            }
+            let inner = agent
+                .inner
+                .re_resolve()
+                .await
+                .map_err(|error| agent_error(&error, None))?;
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyAgent {
+                        inner: Arc::new(inner),
+                        ..agent
+                    },
+                )
+            })
         })
     }
 
@@ -1075,10 +895,10 @@ impl PyAgent {
         let store = self.inner.journal_store();
         let tenant_scope = tenant_scope.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match Session::create(store, tenant_scope).await {
-                Ok(inner) => Python::attach(|py| Py::new(py, PySession { inner })),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            let inner = Session::create(store, tenant_scope)
+                .await
+                .map_err(|error| session_py_error(&error))?;
+            Python::attach(|py| Py::new(py, PySession { inner }))
         })
     }
 
@@ -1091,12 +911,12 @@ impl PyAgent {
     ) -> PyResult<Bound<'py, PyAny>> {
         let store = self.inner.journal_store();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let session_id = finstack_ai_kernel::SessionId::parse(&session_id)
+            let session_id = SessionId::parse(&session_id)
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
-            match Session::open(store, session_id, tenant_scope).await {
-                Ok(inner) => Python::attach(|py| Py::new(py, PySession { inner })),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            let inner = Session::open(store, session_id, tenant_scope)
+                .await
+                .map_err(|error| session_py_error(&error))?;
+            Python::attach(|py| Py::new(py, PySession { inner }))
         })
     }
 
@@ -1118,7 +938,7 @@ impl PyAgent {
             let snapshot = agent
                 .inspect_session(session_id)
                 .await
-                .map_err(|error| Python::attach(|py| session_py_error(py, &error)))?;
+                .map_err(|error| session_py_error(&error))?;
             Python::attach(|py| {
                 let value = PyDict::new(py);
                 value.set_item("session_id", snapshot.session_id.to_string())?;
@@ -1154,43 +974,17 @@ impl PyAgent {
         capability: Option<String>,
         attachments: Option<Vec<Py<PyAttachment>>>,
     ) -> PyResult<PyRun> {
-        let model = self.model.clone();
-        let agent = Arc::clone(&self.inner);
-        let settings = self.settings.clone();
-        let timeout_seconds = timeout_seconds.unwrap_or(self.default_timeout_seconds);
-        let output_adapter = self
-            .output_adapter
-            .as_ref()
-            .map(|adapter| adapter.clone_ref(py));
-        let artifact_store = Arc::clone(&self.artifact_store);
-        let compaction_authorization = self.compaction_authorization.clone();
-        let attachments = collect_attachments(py, attachments);
-        py.detach(move || {
-            let runtime = pyo3_async_runtimes::tokio::get_runtime();
-            let _guard = runtime.enter();
-            let staged = runtime.block_on(stage_attachments(
-                artifact_store.as_ref(),
-                "python-local",
-                attachments,
-            ))?;
-            let request = run_request(
-                &model,
-                input,
-                timeout_seconds,
-                max_cycles,
-                max_output_retries,
-                capability,
-                settings,
-                "python-local",
-                staged,
-                compaction_authorization,
-            )?;
-            agent.start(request).map(|inner| PyRun {
-                inner,
-                output_adapter,
-            })
-        })
-        .map_err(|error| agent_error(py, &error, None))
+        self.launch(
+            py,
+            "python-local".to_owned(),
+            input,
+            timeout_seconds,
+            max_cycles,
+            max_output_retries,
+            capability,
+            attachments,
+            Agent::start,
+        )
     }
 
     /// Read back the bytes behind an artifact reference a tool returned.
@@ -1250,55 +1044,55 @@ impl PyAgent {
         capability: Option<String>,
         attachments: Option<Vec<Py<PyAttachment>>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let model = self.model.clone();
-        let agent = Arc::clone(&self.inner);
-        let settings = self.settings.clone();
-        let timeout_seconds = timeout_seconds.unwrap_or(self.default_timeout_seconds);
-        let output_adapter = self
-            .output_adapter
-            .as_ref()
-            .map(|adapter| adapter.clone_ref(py));
-        let artifact_store = Arc::clone(&self.artifact_store);
-        let compaction_authorization = self.compaction_authorization.clone();
+        let agent = self.clone_ref(py);
+        let timeout_seconds = timeout_seconds.unwrap_or(agent.default_timeout_seconds);
         let attachments = collect_attachments(py, attachments);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let staged =
-                match stage_attachments(artifact_store.as_ref(), "python-local", attachments).await
-                {
-                    Ok(staged) => staged,
-                    Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
-                };
-            let request = match run_request(
-                &model,
+                stage_attachments(agent.artifact_store.as_ref(), "python-local", attachments)
+                    .await
+                    .map_err(|error| agent_error(&error, None))?;
+            let request = run_request(
+                &agent.model,
                 input,
                 timeout_seconds,
                 max_cycles,
                 max_output_retries,
                 capability,
-                settings,
+                agent.settings,
                 "python-local",
                 staged,
-                compaction_authorization,
-            ) {
-                Ok(request) => request,
-                Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
-            };
-            let run = match agent.start(request) {
-                Ok(run) => run,
-                Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
-            };
-            let locator = run.locator().clone();
-            let result = run.result().await;
-            Python::attach(|py| {
-                result_to_python_with_locator(py, result, Some(&locator), output_adapter)
-            })
+                agent.compaction_authorization,
+            )
+            .map_err(|error| agent_error(&error, None))?;
+            let run = agent
+                .inner
+                .start(request)
+                .map_err(|error| agent_error(&error, None))?;
+            let output = run
+                .result()
+                .await
+                .map_err(|error| run_error(&run, &error))?;
+            Python::attach(|py| run_result(py, output, agent.output_adapter))
         })
     }
 }
 
 impl PyAgent {
-    pub(crate) fn clone_inner(&self) -> Arc<Agent> {
-        Arc::clone(&self.inner)
+    /// Clone the handle; every field is a shared reference or plain data.
+    pub(crate) fn clone_ref(&self, py: Python<'_>) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            model: self.model.clone(),
+            output_adapter: self
+                .output_adapter
+                .as_ref()
+                .map(|adapter| adapter.clone_ref(py)),
+            settings: self.settings.clone(),
+            default_timeout_seconds: self.default_timeout_seconds,
+            artifact_store: Arc::clone(&self.artifact_store),
+            compaction_authorization: self.compaction_authorization.clone(),
+        }
     }
 
     #[expect(
@@ -1316,19 +1110,50 @@ impl PyAgent {
         capability: Option<String>,
         attachments: Option<Vec<Py<PyAttachment>>>,
     ) -> PyResult<PyRun> {
-        let model = self.model.clone();
-        let agent = Arc::clone(&self.inner);
-        let settings = self.settings.clone();
-        let timeout_seconds = timeout_seconds.unwrap_or(self.default_timeout_seconds);
-        let output_adapter = self
-            .output_adapter
-            .as_ref()
-            .map(|adapter| adapter.clone_ref(py));
-        let artifact_store = Arc::clone(&self.artifact_store);
-        let compaction_authorization = self.compaction_authorization.clone();
-        let attachments = collect_attachments(py, attachments);
         let lane = lane.clone();
         let tenant_scope = lane.session().tenant_scope().to_string();
+        self.launch(
+            py,
+            tenant_scope,
+            input,
+            timeout_seconds,
+            max_cycles,
+            max_output_retries,
+            capability,
+            attachments,
+            move |agent, request| lane.run(agent, request),
+        )
+    }
+
+    /// Stage `attachments`, build the bounded run request, and hand it to
+    /// `launch`, all with the GIL released.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "forwards the bounded run inputs shared by Agent.start and Lane.run"
+    )]
+    fn launch(
+        &self,
+        py: Python<'_>,
+        tenant_scope: String,
+        input: String,
+        timeout_seconds: Option<f64>,
+        max_cycles: u64,
+        max_output_retries: u32,
+        capability: Option<String>,
+        attachments: Option<Vec<Py<PyAttachment>>>,
+        launch: impl FnOnce(&Agent, AgentRunRequest) -> Result<AgentRun, AgentRunError> + Send,
+    ) -> PyResult<PyRun> {
+        let PyAgent {
+            inner,
+            model,
+            output_adapter,
+            settings,
+            default_timeout_seconds,
+            artifact_store,
+            compaction_authorization,
+        } = self.clone_ref(py);
+        let timeout_seconds = timeout_seconds.unwrap_or(default_timeout_seconds);
+        let attachments = collect_attachments(py, attachments);
         py.detach(move || {
             let runtime = pyo3_async_runtimes::tokio::get_runtime();
             let _guard = runtime.enter();
@@ -1349,74 +1174,57 @@ impl PyAgent {
                 staged,
                 compaction_authorization,
             )?;
-            lane.run(&agent, request).map(|inner| PyRun {
+            launch(&inner, request).map(|inner| PyRun {
                 inner,
                 output_adapter,
             })
         })
-        .map_err(|error| agent_error(py, &error, None))
+        .map_err(|error| agent_error(&error, None))
     }
 }
 
-type SplitLinkedPorts = (
-    LinkedAgentPorts,
-    Option<Py<PyAny>>,
-    Option<CompactionAuthorization>,
-);
-
-fn split_linked_ports(ports: LinkedPorts) -> SplitLinkedPorts {
-    (
-        LinkedAgentPorts {
-            toolsets: ports.toolsets,
-            artifact_store: ports.artifact_store,
-            context_providers: ports.context_providers,
-            middleware: ports.middleware,
-            observers: ports.observers,
-            output_schema: ports.output.as_ref().map(|output| output.schema.clone()),
-        },
-        ports.output.map(|output| output.adapter),
-        ports.compaction_authorization,
-    )
-}
-
-fn wrap_linked_agent(
-    py: Python<'_>,
-    built: Result<LinkedAgent, AgentRunError>,
+/// Binding-side state the Python `Agent` carries beside the Rust agent.
+struct AgentSidecar {
     output_adapter: Option<Py<PyAny>>,
     artifact_store: Arc<dyn ArtifactStore>,
     compaction_authorization: Option<CompactionAuthorization>,
-) -> PyResult<Py<PyAgent>> {
-    match built {
-        Ok(value) => Py::new(
-            py,
-            PyAgent {
-                inner: Arc::new(value.agent),
-                model: value.model,
-                output_adapter,
-                settings: value.settings,
-                default_timeout_seconds: value.default_timeout.as_secs_f64(),
-                artifact_store,
-                compaction_authorization,
-            },
-        ),
-        Err(error) => Err(agent_error(py, &error, None)),
+}
+
+impl AgentSidecar {
+    /// Drive `build` on the Rust runtime and wrap its agent into the Python
+    /// handle.
+    fn build(
+        self,
+        py: Python<'_>,
+        build: impl Future<Output = Result<LinkedAgent, AgentRunError>> + Send + 'static,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let linked = build.await.map_err(|error| agent_error(&error, None))?;
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyAgent {
+                        inner: Arc::new(linked.agent),
+                        model: linked.model,
+                        output_adapter: self.output_adapter,
+                        settings: linked.settings,
+                        default_timeout_seconds: linked.default_timeout.as_secs_f64(),
+                        artifact_store: self.artifact_store,
+                        compaction_authorization: self.compaction_authorization,
+                    },
+                )
+            })
+        })
     }
 }
 
+/// Port registrations assembled from the factory keyword arguments.
 struct LinkedPorts {
-    toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
-    compaction_authorization: Option<CompactionAuthorization>,
-    artifact_store: Option<Arc<dyn ArtifactStore>>,
-    context_providers: Vec<(
-        ComponentRef,
-        Arc<dyn finstack_ai::runtime::ports::context::ContextProvider>,
-    )>,
-    middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
-    observers: Vec<(
-        ComponentRef,
-        Arc<dyn finstack_ai::runtime::ports::observer::Observer>,
-    )>,
-    output: Option<PreparedPydanticOutput>,
+    ports: LinkedAgentPorts,
+    sidecar: AgentSidecar,
+    /// Deferred skills toolset: its catalog depends on the declared
+    /// capabilities, so it is built at agent assembly (`from_python` only).
+    skills: Option<ComponentRef>,
 }
 
 /// Build the shared artifact store plus the
@@ -1451,13 +1259,6 @@ const DOCUMENT_INGEST_VERSION: Version = Version {
     patch: 0,
 };
 
-fn document_ingest_component(id: &str) -> Result<ComponentRef, AgentRunError> {
-    Ok(ComponentRef::new(
-        ComponentId::parse(id).map_err(|error| configuration_error(error.to_string()))?,
-        Some(DOCUMENT_INGEST_VERSION),
-    ))
-}
-
 fn document_ingest_ports(
     artifact_path: Option<String>,
     explicit_store: Option<Arc<dyn ArtifactStore>>,
@@ -1477,11 +1278,14 @@ fn document_ingest_ports(
     Ok((
         Arc::clone(&dyn_store),
         (
-            document_ingest_component("finstack.tools.document")?,
+            component("finstack.tools.document", DOCUMENT_INGEST_VERSION)?,
             Arc::new(toolset) as Arc<dyn Toolset>,
         ),
         (
-            document_ingest_component("finstack.middleware.document-ingest")?,
+            component(
+                "finstack.middleware.document-ingest",
+                DOCUMENT_INGEST_VERSION,
+            )?,
             Arc::new(middleware) as Arc<dyn Middleware>,
         ),
     ))
@@ -1500,7 +1304,7 @@ fn linked_ports(
     output_type: Option<Py<PyAny>>,
     artifact_path: Option<String>,
     artifact_store: Option<Py<PyS3ArtifactStore>>,
-) -> PyResult<(LinkedPorts, Arc<dyn ArtifactStore>, Option<ComponentRef>)> {
+) -> PyResult<LinkedPorts> {
     if artifact_path.is_some() && artifact_store.is_some() {
         return Err(PyValueError::new_err(
             "artifact_path and artifact_store are mutually exclusive",
@@ -1509,10 +1313,7 @@ fn linked_ports(
     let explicit_store = artifact_store.map(|store| Arc::clone(&store.bind(py).borrow().inner));
     let (artifact_store, document_toolset, document_middleware) =
         document_ingest_ports(artifact_path, explicit_store)
-            .map_err(|error| agent_error(py, &error, None))?;
-    let dyn_artifact_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store);
-    // The skills toolset is deferred: its catalog depends on the declared
-    // capabilities, so it is built at agent assembly (from_python only).
+            .map_err(|error| agent_error(&error, None))?;
     let mut skills: Option<ComponentRef> = None;
     let mut plain: Vec<PyToolsetArg> = Vec::new();
     for toolset in toolsets.unwrap_or_default() {
@@ -1528,9 +1329,9 @@ fn linked_ports(
             other => plain.push(other),
         }
     }
-    let mut toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = plain
+    let mut toolsets = plain
         .into_iter()
-        .map(|toolset| toolset.registration(py, &dyn_artifact_store))
+        .map(|toolset| toolset.registration(py, &artifact_store))
         .collect::<PyResult<Vec<_>>>()?;
     toolsets.push(document_toolset);
     let middleware_args = middleware.unwrap_or_default();
@@ -1538,74 +1339,159 @@ fn linked_ports(
         PyMiddlewareArg::Compaction(handle) => handle.bind(py).borrow().authorization(),
         _ => None,
     });
-    let mut middleware: Vec<(ComponentRef, Arc<dyn Middleware>)> = middleware_args
+    let mut middleware = middleware_args
         .into_iter()
         .map(|middleware| middleware.registration(py))
-        .collect();
+        .collect::<Vec<_>>();
     middleware.push(document_middleware);
-    Ok((
-        LinkedPorts {
+    let context_providers = context_providers
+        .unwrap_or_default()
+        .into_iter()
+        .map(|provider| provider.registration(py, &artifact_store))
+        .collect::<PyResult<Vec<_>>>()?;
+    let observers = observers
+        .unwrap_or_default()
+        .into_iter()
+        .map(|observer| observer.registration(py))
+        .collect();
+    let (output_adapter, output_schema) = output_type
+        .map(|target| prepare_pydantic_output(py, target))
+        .transpose()?
+        .unzip();
+    Ok(LinkedPorts {
+        ports: LinkedAgentPorts {
             toolsets,
-            compaction_authorization,
-            artifact_store: Some(Arc::clone(&dyn_artifact_store)),
-            context_providers: context_providers
-                .unwrap_or_default()
-                .into_iter()
-                .map(|provider| provider.registration(py, &dyn_artifact_store))
-                .collect::<PyResult<Vec<_>>>()?,
+            artifact_store: Some(Arc::clone(&artifact_store)),
+            context_providers,
             middleware,
-            observers: observers
-                .unwrap_or_default()
-                .into_iter()
-                .map(|observer| observer.registration(py))
-                .collect(),
-            output: output_type
-                .map(|target| prepare_pydantic_output(py, target))
-                .transpose()?,
+            observers,
+            output_schema,
         },
-        artifact_store,
+        sidecar: AgentSidecar {
+            output_adapter,
+            artifact_store,
+            compaction_authorization,
+        },
         skills,
+    })
+}
+
+/// Convert the keyword arguments every linked provider factory shares into
+/// the facade's `LinkedCommon` and the binding-side sidecar.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one parameter per shared factory keyword; grouping would only rename them"
+)]
+fn linked_common(
+    py: Python<'_>,
+    instruction: Option<String>,
+    capabilities: Option<Vec<Py<PyCapability>>>,
+    active_capabilities: Option<Vec<String>>,
+    openrouter_media_api_key: Option<String>,
+    openrouter_media_referer: Option<String>,
+    openrouter_media_title: Option<String>,
+    video_compose_ffmpeg_path: Option<String>,
+    video_compose_ffprobe_path: Option<String>,
+    video_compose_scratch_dir: Option<String>,
+    video_compose_render_timeout_s: Option<u64>,
+    media_pipeline_max_scenes: Option<usize>,
+    media_pipeline_max_total_video_s: Option<u64>,
+    media_pipeline_max_concurrent_jobs: Option<usize>,
+    media_pipeline_sqlite_state_path: Option<String>,
+    toolsets: Option<Vec<PyToolsetArg>>,
+    context_providers: Option<Vec<PyContextProviderArg>>,
+    middleware: Option<Vec<PyMiddlewareArg>>,
+    observers: Option<Vec<PyObserverArg>>,
+    output_type: Option<Py<PyAny>>,
+    child_runs: Option<Py<PyChildRunPolicy>>,
+    approval_grant: Option<Py<PyApprovalGrantMode>>,
+    artifact_path: Option<String>,
+    artifact_store: Option<Py<PyS3ArtifactStore>>,
+) -> PyResult<(LinkedCommon, AgentSidecar)> {
+    let (capabilities, active_capabilities) =
+        capability_configuration(py, capabilities, active_capabilities)?;
+    let openrouter_media = openrouter_media_spec(
+        openrouter_media_api_key,
+        openrouter_media_referer,
+        openrouter_media_title,
+    )?;
+    let video_compose = video_compose_spec(
+        video_compose_ffmpeg_path,
+        video_compose_ffprobe_path,
+        video_compose_scratch_dir,
+        video_compose_render_timeout_s,
+    )?;
+    let media_pipeline = media_pipeline_spec(
+        media_pipeline_max_scenes,
+        media_pipeline_max_total_video_s,
+        media_pipeline_max_concurrent_jobs,
+        media_pipeline_sqlite_state_path,
+    )?;
+    let LinkedPorts {
+        ports,
+        sidecar,
+        skills,
+    } = linked_ports(
+        py,
+        toolsets,
+        context_providers,
+        middleware,
+        observers,
+        output_type,
+        artifact_path,
+        artifact_store,
+    )?;
+    // The linked provider factories build through `Agent::linked`, which has
+    // no builder access, so the deferred skills toolset cannot attach its
+    // activation host there yet.
+    if skills.is_some() {
+        return Err(PyValueError::new_err(
+            "SkillsToolset is currently supported only by Agent.from_python",
+        ));
+    }
+    Ok((
+        LinkedCommon {
+            instruction,
+            capabilities,
+            active_capabilities,
+            ports,
+            child_runs: child_runs_or_deny(py, child_runs),
+            approval_grant: approval_grant_or_per_call(py, approval_grant),
+            openrouter_media,
+            video_compose,
+            media_pipeline,
+        },
+        sidecar,
     ))
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "callback factory forwards ports, child-run policy, and sqlite store distinctly"
-)]
 async fn build_python_agent(
     model_name: ModelName,
     model: (ComponentRef, Arc<dyn Model>),
-    instruction: Option<String>,
-    ports: LinkedPorts,
-    capabilities: Vec<CapabilitySpec>,
-    active_capabilities: Vec<CapabilityId>,
-    child_runs: ChildRunPolicy,
-    approval_grant: ApprovalGrantMode,
-    sqlite: (Option<String>, Option<PySqliteDurability>, Option<String>),
-    artifact_store: Arc<dyn ArtifactStore>,
+    common: LinkedCommon,
+    journal: (Option<String>, Option<PySqliteDurability>, Option<String>),
     skills: Option<ComponentRef>,
     capability_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
-) -> Result<PyAgent, AgentRunError> {
-    let store_component = if sqlite.2.is_some() {
+) -> Result<LinkedAgent, AgentRunError> {
+    let (sqlite_path, sqlite_durability, postgres_dsn) = journal;
+    let store_component = if postgres_dsn.is_some() {
         "python.store.postgres"
-    } else if sqlite.0.is_some() {
+    } else if sqlite_path.is_some() {
         "python.store.sqlite"
     } else {
         "python.store.memory"
     };
-    let store = open_journal_store(sqlite.0, sqlite.1, sqlite.2).await?;
-    let compaction_authorization = ports.compaction_authorization.clone();
-    let output = ports.output;
+    let store = open_journal_store(sqlite_path, sqlite_durability, postgres_dsn).await?;
     let mut builder = Agent::builder(
         AgentId::parse("python.agent.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
         BundleId::parse("python.bundle.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
         model,
-        (component(store_component)?, store),
+        (component(store_component, PREVIEW_VERSION)?, store),
     );
     if let Some(skills_component) = skills {
-        let (registration, host) = build_skills_ports(skills_component, &capabilities)?;
+        let (registration, host) = build_skills_ports(skills_component, &common.capabilities)?;
         builder = builder
             .toolset(registration.0, registration.1)
             .capability_activation_host(host);
@@ -1613,52 +1499,14 @@ async fn build_python_agent(
     for (component, toolset) in capability_toolsets {
         builder = builder.capability_toolset(component, toolset);
     }
-    let built = builder
+    builder
         .build_linked(
-            LinkedCommon {
-                instruction,
-                capabilities,
-                active_capabilities,
-                ports: LinkedAgentPorts {
-                    toolsets: ports.toolsets,
-                    artifact_store: ports.artifact_store,
-                    context_providers: ports.context_providers,
-                    middleware: ports.middleware,
-                    observers: ports.observers,
-                    output_schema: output.as_ref().map(|value| value.schema.clone()),
-                },
-                child_runs,
-                approval_grant,
-                openrouter_media: None,
-                video_compose: None,
-                media_pipeline: None,
-            },
+            common,
             model_name,
             empty_model_settings()?,
             DEFAULT_RUN_TIMEOUT,
         )
-        .await?;
-    Ok(PyAgent {
-        inner: Arc::new(built.agent),
-        model: built.model,
-        output_adapter: output.map(|value| value.adapter),
-        settings: built.settings,
-        default_timeout_seconds: built.default_timeout.as_secs_f64(),
-        artifact_store,
-        compaction_authorization,
-    })
-}
-
-/// The linked provider factories build through `Agent::linked`, which has
-/// no builder access, so the deferred skills toolset cannot attach its
-/// activation host there yet.
-fn reject_linked_skills(skills: Option<&ComponentRef>) -> PyResult<()> {
-    if skills.is_some() {
-        return Err(PyValueError::new_err(
-            "SkillsToolset is currently supported only by Agent.from_python",
-        ));
-    }
-    Ok(())
+        .await
 }
 
 fn child_runs_or_deny(py: Python<'_>, child_runs: Option<Py<PyChildRunPolicy>>) -> ChildRunPolicy {
@@ -1779,9 +1627,11 @@ fn capability_configuration(
     Ok((capabilities, active_capabilities))
 }
 
-pub(crate) fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
+/// Parse `id` into a versioned component reference inside agent assembly,
+/// where failures surface as configuration errors.
+pub(crate) fn component(id: &str, version: Version) -> Result<ComponentRef, AgentRunError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id).map_err(|error| configuration_error(error.to_string()))?,
-        Some(PREVIEW_VERSION),
+        Some(version),
     ))
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     ComponentInvocation, Digest, EffectOutputContract, EffectOutputKind, ErrorCode,
     ErrorDescriptor, ErrorIdentifiers, RawJson, SyntheticToolClosure, Timestamp, ToolCallBlock,
-    ToolCallPlan, ToolFailurePolicy, ToolId, ValidatedToolCall, ValidationOutcome,
+    ToolCallPlan, ToolFailurePolicy, ToolId, ValidatedToolCall, ValidationOutcome, label_is_valid,
 };
 
 use serde::{Deserialize, Serialize};
@@ -301,26 +301,14 @@ impl ResolvedToolCatalog {
             .approval
             .max(declared_floor)
             .max(middleware.unwrap_or(ToolPolicyDecision::Allow));
-        match effective {
-            ToolPolicyDecision::Deny => ToolCatalogPlan::Ready(synthetic(
+        match (effective, approval) {
+            (ToolPolicyDecision::Deny, _) => ToolCatalogPlan::Ready(synthetic(
                 call,
                 tool.spec.execution,
                 tool.policy.failure_policy,
                 &ToolError::stable(TOOL_POLICY_DENIED, "tool execution was denied by policy"),
             )),
-            ToolPolicyDecision::RequireApproval if approval == ApprovalState::Granted => {
-                ToolCatalogPlan::Ready(ToolCallPlan::Execute(ValidatedToolCall {
-                    call,
-                    tool_id: tool.spec.id.clone(),
-                    component: tool.component.clone(),
-                    output_contract: tool.output_contract.clone(),
-                    retry_safety: tool.spec.retry_safety,
-                    deadline,
-                    execution: tool.spec.execution,
-                    failure_policy: tool.policy.failure_policy,
-                }))
-            }
-            ToolPolicyDecision::RequireApproval if approval == ApprovalState::Refused => {
+            (ToolPolicyDecision::RequireApproval, ApprovalState::Refused) => {
                 ToolCatalogPlan::Ready(synthetic(
                     call,
                     tool.spec.execution,
@@ -334,8 +322,11 @@ impl ResolvedToolCatalog {
                     ),
                 ))
             }
-            ToolPolicyDecision::RequireApproval => ToolCatalogPlan::RequireApproval,
-            ToolPolicyDecision::Allow => {
+            (ToolPolicyDecision::RequireApproval, ApprovalState::Unpaid) => {
+                ToolCatalogPlan::RequireApproval
+            }
+            (ToolPolicyDecision::RequireApproval, ApprovalState::Granted)
+            | (ToolPolicyDecision::Allow, _) => {
                 ToolCatalogPlan::Ready(ToolCallPlan::Execute(ValidatedToolCall {
                     call,
                     tool_id: tool.spec.id.clone(),
@@ -374,10 +365,7 @@ impl ResolvedToolCatalog {
 }
 
 fn validate_descriptor(descriptor: &ToolsetDescriptor) -> Result<(), ToolError> {
-    if descriptor.name.is_empty()
-        || descriptor.name.len() > 256
-        || descriptor.name.as_bytes().contains(&0)
-    {
+    if !label_is_valid(&descriptor.name) {
         return Err(ToolError::registration(
             "toolset descriptor name is invalid",
         ));

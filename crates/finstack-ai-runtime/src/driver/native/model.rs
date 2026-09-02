@@ -13,6 +13,7 @@ use tokio::time::timeout;
 
 use crate::coordinator::{DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch};
 use crate::ids::Clock;
+use crate::native::tool::wait_or_pending;
 use crate::ports::PortFuture;
 use crate::ports::model::{
     CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelError,
@@ -227,78 +228,17 @@ pub(crate) async fn run_model_jobs<C>(
                     let results = results.clone();
                     let active = Arc::clone(&active);
                     let clock = Arc::clone(&clock);
-                    tasks.spawn(async move {
-                        let effect_id = job.seed.pending.requested.effect_id();
-                        let draft = job.request.draft.clone();
-                        let progress_sender = results.clone();
-                        let progress_provider = Arc::clone(&provider);
-                        let cancellation = job.request.call.run.cancellation.clone();
-                        let deadline = job
-                            .request
-                            .call
-                            .run
-                            .deadline
-                            .map(|deadline| {
-                                MonotonicDeadline::from_persisted(
-                                    clock.as_ref(),
-                                    job.seed.requested_at,
-                                    deadline,
-                                )
-                            })
-                            .transpose();
-                        let result = match model_job_preflight(deadline, &cancellation) {
-                            Err(error) => Err(error),
-                            Ok(deadline) => {
-                            let retry_deadline = deadline.clone();
-                            let mut child = tokio::spawn(async move {
-                                request_with_same_identity_retry(
-                                    model,
-                                    job.request,
-                                    assembler,
-                                    retry_policy,
-                                    clock,
-                                    effect_id,
-                                    progress_sender,
-                                    progress_provider,
-                                    retry_deadline,
-                                )
-                                .await
-                            });
-                            if let Some(deadline) = deadline {
-                                tokio::select! {
-                                    biased;
-                                    () = cancellation.cancelled() => {
-                                        settle_model_cancellation(&mut child, cancellation_grace).await
-                                    }
-                                    () = deadline.wait() => {
-                                        cancellation.cancel();
-                                        child.abort();
-                                        let _ = (&mut child).await;
-                                        Err(model_deadline_error())
-                                    }
-                                    joined = &mut child => joined_model_result(joined),
-                                }
-                            } else {
-                                tokio::select! {
-                                    biased;
-                                    () = cancellation.cancelled() => {
-                                        settle_model_cancellation(&mut child, cancellation_grace).await
-                                    }
-                                    joined = &mut child => joined_model_result(joined),
-                                }
-                            }
-                            }
-                        };
-                        if let Ok(mut values) = active.lock() {
-                            values.remove(&effect_id);
-                        }
-                        let _ = results.send(ModelDriverMessage::Terminal(Box::new(ModelDriverResult {
-                            seed: job.seed,
-                            draft,
-                            provider,
-                            result,
-                        }))).await;
-                    });
+                    tasks.spawn(run_model_job(
+                        job,
+                        model,
+                        assembler,
+                        provider,
+                        results,
+                        active,
+                        clock,
+                        cancellation_grace,
+                        retry_policy,
+                    ));
                 } else {
                     intake_open = false;
                     if let Ok(values) = active.lock() {
@@ -311,6 +251,83 @@ pub(crate) async fn run_model_jobs<C>(
             _ = tasks.join_next(), if !tasks.is_empty() => {}
         }
     }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one job owns the model, sinks, clock, and retry policy it was spawned with"
+)]
+async fn run_model_job<C>(
+    job: ModelJob,
+    model: Arc<dyn Model>,
+    assembler: ModelStreamAssembler,
+    provider: Arc<str>,
+    results: mpsc::Sender<ModelDriverMessage>,
+    active: ActiveEffects,
+    clock: Arc<C>,
+    cancellation_grace: Duration,
+    retry_policy: SameIdentityRetryPolicy,
+) where
+    C: Clock + Send + Sync + 'static,
+{
+    let effect_id = job.seed.pending.requested.effect_id();
+    let draft = job.request.draft.clone();
+    let cancellation = job.request.call.run.cancellation.clone();
+    let deadline = job
+        .request
+        .call
+        .run
+        .deadline
+        .map(|deadline| {
+            MonotonicDeadline::from_persisted(clock.as_ref(), job.seed.requested_at, deadline)
+        })
+        .transpose();
+    let result = match model_job_preflight(deadline, &cancellation) {
+        Err(error) => Err(error),
+        Ok(deadline) => {
+            let retry_deadline = deadline.clone();
+            let progress_sender = results.clone();
+            let progress_provider = Arc::clone(&provider);
+            let mut child = tokio::spawn(async move {
+                request_with_same_identity_retry(
+                    model,
+                    job.request,
+                    assembler,
+                    retry_policy,
+                    clock,
+                    effect_id,
+                    progress_sender,
+                    progress_provider,
+                    retry_deadline,
+                )
+                .await
+            });
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => {
+                    settle_model_cancellation(&mut child, cancellation_grace).await
+                }
+                () = wait_or_pending(deadline.as_ref()) => {
+                    cancellation.cancel();
+                    child.abort();
+                    let _ = (&mut child).await;
+                    Err(model_deadline_error())
+                }
+                joined = &mut child => joined_model_result(joined),
+            }
+        }
+    };
+    if let Ok(mut values) = active.lock() {
+        values.remove(&effect_id);
+    }
+    let _ = results
+        .send(ModelDriverMessage::Terminal(Box::new(ModelDriverResult {
+            seed: job.seed,
+            draft,
+            provider,
+            result,
+        })))
+        .await;
 }
 
 async fn settle_model_cancellation(

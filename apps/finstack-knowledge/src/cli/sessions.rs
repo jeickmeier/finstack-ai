@@ -8,10 +8,12 @@ use std::fmt::Write as _;
 
 use finstack_ai::runtime::ports::journal::{LoadRequest, WriteMetadataRequest};
 use finstack_ai_kernel::{ContentBlock, EntryBody, Metadata, SessionId};
+use finstack_ai_store_sqlite::SessionListRow;
 use rich_rust::console::Console;
 use rich_rust::markup::escape;
 use rich_rust::renderables::{Cell, Column, Row, Table};
 
+use crate::config::compose_error;
 use crate::{KnowledgeConfig, KnowledgeError};
 
 /// Metadata key holding the human-readable session name.
@@ -26,8 +28,7 @@ const LIST_LIMIT: u32 = 256;
 ///
 /// Returns [`KnowledgeError`] when the journal cannot be opened or listed.
 pub async fn run_list(config: &KnowledgeConfig) -> Result<String, KnowledgeError> {
-    let store = crate::open_journal_sqlite(config)?;
-    let mut rows = store.list_sessions(LIST_LIMIT).await.map_err(store_error)?;
+    let mut rows = list_rows(config).await?;
     rows.sort_by_key(|row| std::cmp::Reverse(row.head_sequence));
 
     let mut table = Table::new();
@@ -51,10 +52,8 @@ pub async fn run_list(config: &KnowledgeConfig) -> Result<String, KnowledgeError
 ///
 /// Returns [`KnowledgeError`] when the journal cannot be opened or listed.
 pub async fn run_list_json(config: &KnowledgeConfig) -> Result<String, KnowledgeError> {
-    let store = crate::open_journal_sqlite(config)?;
-    let rows = store.list_sessions(LIST_LIMIT).await.map_err(store_error)?;
     let mut lines = String::new();
-    for row in rows {
+    for row in list_rows(config).await? {
         let value = serde_json::json!({
             "session_id": row.session_id.to_string(),
             "name": session_name(&row.metadata),
@@ -79,10 +78,10 @@ pub async fn run_show(config: &KnowledgeConfig, id: &str) -> Result<String, Know
     })?;
     let session = finstack_ai::Session::open(journal, session_id, "local")
         .await
-        .map_err(compose)?;
+        .map_err(compose_error)?;
     let mut markup = String::new();
-    for lane in session.list_lanes().await.map_err(compose)? {
-        let inspect = lane.inspect().await.map_err(compose)?;
+    for lane in session.list_lanes().await.map_err(compose_error)? {
+        let inspect = lane.inspect().await.map_err(compose_error)?;
         let _ = writeln!(markup, "[bold]lane {}[/bold]", escape(&inspect.name));
         for entry in &inspect.history {
             match entry.body() {
@@ -134,7 +133,7 @@ pub async fn run_name(
         let loaded = journal
             .load(LoadRequest { session_id })
             .await
-            .map_err(store_error)?;
+            .map_err(compose_error)?;
         let metadata = with_name(&loaded.metadata, name)?;
         let result = journal
             .write_metadata(WriteMetadataRequest {
@@ -145,16 +144,22 @@ pub async fn run_name(
             .await;
         match result {
             Ok(_) => return Ok(()),
-            Err(error) if attempt == 0 => {
-                // CAS conflict: reload the fresh head once and retry.
-                let _ = error;
-            }
-            Err(error) => return Err(store_error(error)),
+            // CAS conflict: reload the fresh head once and retry.
+            Err(_) if attempt == 0 => {}
+            Err(error) => return Err(compose_error(error)),
         }
     }
     Err(KnowledgeError::Compose {
         reason: "session_name_cas_conflict".to_owned(),
     })
+}
+
+/// One listing page from the shared sqlite journal, in store order.
+async fn list_rows(config: &KnowledgeConfig) -> Result<Vec<SessionListRow>, KnowledgeError> {
+    crate::open_journal_sqlite(config)?
+        .list_sessions(LIST_LIMIT)
+        .await
+        .map_err(compose_error)
 }
 
 /// Read the stored name from session metadata, if any.
@@ -182,16 +187,4 @@ fn with_name(metadata: &Metadata, name: &str) -> Result<Metadata, KnowledgeError
     Metadata::parse(value.to_string().as_bytes()).map_err(|_| KnowledgeError::Config {
         reason: "session_name_invalid",
     })
-}
-
-fn compose(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Compose {
-        reason: error.to_string(),
-    }
-}
-
-fn store_error(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Compose {
-        reason: error.to_string(),
-    }
 }

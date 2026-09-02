@@ -487,57 +487,36 @@ where
             )
         })
         .transpose();
-    let deadline = match tool_job_preflight(deadline, &cancellation) {
-        Ok(deadline) => deadline,
-        Err(error) => {
-            remove_active(&context.active, effect_id);
-            drop(per_tool);
-            drop(global);
-            let _ = context
-                .results
-                .send(ToolDriverMessage::Terminal(Box::new(ToolDriverResult {
-                    seed: job.seed,
-                    result: Err(error),
-                })))
-                .await;
-            return;
-        }
-    };
-    let mut child = AbortOnDrop(tokio::spawn(async move {
-        execute_tool(
-            resolved,
-            job.context,
-            call,
-            assembler,
-            progress_results,
-            effect_id,
-        )
-        .await
-    }));
-    let result = if let Some(deadline) = deadline {
-        tokio::select! {
-            biased;
-            () = cancellation.cancelled() => {
-                settle_tool_cancellation(&mut child.0, cancellation_grace).await
+    let result = match tool_job_preflight(deadline, &cancellation) {
+        Err(error) => Err(error),
+        Ok(deadline) => {
+            let mut child = AbortOnDrop(tokio::spawn(async move {
+                execute_tool(
+                    resolved,
+                    job.context,
+                    call,
+                    assembler,
+                    progress_results,
+                    effect_id,
+                )
+                .await
+            }));
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => {
+                    settle_tool_cancellation(&mut child.0, cancellation_grace).await
+                }
+                () = wait_or_pending(deadline.as_ref()) => {
+                    cancellation.cancel();
+                    child.0.abort();
+                    let _ = (&mut child.0).await;
+                    Err(ToolError::stable(
+                        TOOL_DEADLINE_EXCEEDED,
+                        "tool call exceeded its committed deadline",
+                    ))
+                }
+                joined = &mut child.0 => joined_tool_result(joined),
             }
-            () = deadline.wait() => {
-                cancellation.cancel();
-                child.0.abort();
-                let _ = (&mut child.0).await;
-                Err(ToolError::stable(
-                    TOOL_DEADLINE_EXCEEDED,
-                    "tool call exceeded its committed deadline",
-                ))
-            }
-            joined = &mut child.0 => joined_tool_result(joined),
-        }
-    } else {
-        tokio::select! {
-            biased;
-            () = cancellation.cancelled() => {
-            settle_tool_cancellation(&mut child.0, cancellation_grace).await
-            }
-            joined = &mut child.0 => joined_tool_result(joined),
         }
     };
     remove_active(&context.active, effect_id);
@@ -579,6 +558,14 @@ fn tool_job_preflight(
         ));
     }
     Ok(deadline)
+}
+
+/// Wait for `deadline`, or forever when the job has none.
+pub(crate) async fn wait_or_pending(deadline: Option<&MonotonicDeadline>) {
+    match deadline {
+        Some(deadline) => deadline.wait().await,
+        None => std::future::pending().await,
+    }
 }
 
 fn remove_active(active: &ActiveEffects, effect_id: EffectId) {

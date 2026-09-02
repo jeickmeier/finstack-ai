@@ -19,10 +19,13 @@ mod tests;
 use std::sync::Arc;
 
 use finstack_ai::runtime::ports::journal::JournalStore;
+use finstack_ai::{Agent, AgentRunRequest, Lane};
 use finstack_ai_kernel::SessionId;
 use rich_rust::console::Console;
 use rich_rust::markup::escape;
 
+use self::render::EventSink;
+use crate::config::{compose_error, run_error};
 use crate::{KnowledgeError, SELF_DOCS};
 
 /// Open an existing session's `main` lane, or create a fresh session.
@@ -44,9 +47,7 @@ pub async fn session_lane(
         None => (
             finstack_ai::Session::create(journal, "local")
                 .await
-                .map_err(|error| KnowledgeError::Compose {
-                    reason: error.to_string(),
-                })?,
+                .map_err(compose_error)?,
             true,
         ),
         Some(id) => {
@@ -56,20 +57,35 @@ pub async fn session_lane(
             (
                 finstack_ai::Session::open(journal, id, "local")
                     .await
-                    .map_err(|error| KnowledgeError::Compose {
-                        reason: error.to_string(),
-                    })?,
+                    .map_err(compose_error)?,
                 false,
             )
         }
     };
-    let lane = session
-        .lane("main")
-        .await
-        .map_err(|error| KnowledgeError::Compose {
-            reason: error.to_string(),
-        })?;
+    let lane = session.lane("main").await.map_err(compose_error)?;
     Ok((session, lane, created))
+}
+
+/// Run one request on `lane`, streaming every event batch and then the
+/// final result text into `sink`.
+///
+/// # Errors
+///
+/// [`KnowledgeError::Run`] when the run cannot start, its stream breaks, or
+/// it ends in failure.
+pub(crate) async fn run_to_sink(
+    lane: &Lane,
+    agent: &Agent,
+    request: AgentRunRequest,
+    sink: &mut dyn EventSink,
+) -> Result<(), KnowledgeError> {
+    let run = lane.run(agent, request).map_err(run_error)?;
+    while let Some(batch) = run.next_event_batch().await.map_err(run_error)? {
+        sink.on_events(batch.events());
+    }
+    let output = run.result().await.map_err(run_error)?;
+    sink.finish(&output.text());
+    Ok(())
 }
 
 /// Render the `docs` command output: a topic listing, or one topic body.

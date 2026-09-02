@@ -107,10 +107,7 @@ pub(super) fn apply_stage_outcome(
     Ok(())
 }
 
-pub(super) fn failure_candidate(
-    state: &KernelState,
-    error: crate::ErrorDescriptor,
-) -> TerminalCandidate {
+fn failure_candidate(state: &KernelState, error: crate::ErrorDescriptor) -> TerminalCandidate {
     let turn = state.current_turn.as_ref();
     TerminalCandidate::Failed {
         cycle: state.cycle,

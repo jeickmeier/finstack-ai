@@ -1,9 +1,9 @@
 //! Deterministic target-neutral Toolset leaf and scheduler controls.
 
 use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
+use core::task::{Context, Poll};
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, ValidatedToolCall};
@@ -14,6 +14,8 @@ use finstack_ai_runtime::ports::tool::{
     ToolStreamItem, Toolset, ToolsetDescriptor,
 };
 use futures_core::Stream;
+
+use crate::fakes::Gate;
 
 /// One fully expressive scripted tool-stream action.
 #[derive(Debug, Clone)]
@@ -41,40 +43,6 @@ pub struct ScriptedToolPlan {
     pub actions: Vec<ScriptedToolAction>,
 }
 
-#[derive(Debug, Default)]
-struct Gate {
-    released: AtomicBool,
-    entered: AtomicUsize,
-    waiters: Mutex<Vec<Waker>>,
-}
-
-impl Gate {
-    fn release(&self) {
-        self.released.store(true, Ordering::Release);
-        if let Ok(mut waiters) = self.waiters.lock() {
-            for waiter in waiters.drain(..) {
-                waiter.wake();
-            }
-        }
-    }
-
-    fn poll(&self, cx: &mut Context<'_>) -> Poll<()> {
-        if self.released.load(Ordering::Acquire) {
-            return Poll::Ready(());
-        }
-        if let Ok(mut waiters) = self.waiters.lock()
-            && !waiters.iter().any(|waiter| waiter.will_wake(cx.waker()))
-        {
-            waiters.push(cx.waker().clone());
-        }
-        if self.released.load(Ordering::Acquire) {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
-    }
-}
-
 /// Deterministic gate and concurrency controller for [`ScriptedToolset`].
 #[derive(Debug, Clone, Default)]
 pub struct ScriptedToolsetControl {
@@ -90,9 +58,7 @@ impl ScriptedToolsetControl {
     /// Number of stream entries observed at a named gate.
     #[must_use]
     pub fn entries(&self, name: impl AsRef<str>) -> usize {
-        self.gate(Arc::from(name.as_ref()))
-            .entered
-            .load(Ordering::Acquire)
+        self.gate(Arc::from(name.as_ref())).entries()
     }
 
     fn gate(&self, name: Arc<str>) -> Arc<Gate> {
@@ -119,7 +85,6 @@ pub struct ScriptedToolset {
     last_call: Mutex<Option<ValidatedToolCall>>,
     active_calls: Arc<AtomicUsize>,
     max_active_calls: Arc<AtomicUsize>,
-    cancellations: Arc<AtomicUsize>,
 }
 
 impl ScriptedToolset {
@@ -141,7 +106,6 @@ impl ScriptedToolset {
             last_call: Mutex::new(None),
             active_calls: Arc::new(AtomicUsize::new(0)),
             max_active_calls: Arc::new(AtomicUsize::new(0)),
-            cancellations: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -202,12 +166,6 @@ impl ScriptedToolset {
     pub fn max_active_call_count(&self) -> usize {
         self.max_active_calls.load(Ordering::Acquire)
     }
-
-    /// Effect-local cancellation acknowledgements observed.
-    #[must_use]
-    pub fn cancellation_count(&self) -> usize {
-        self.cancellations.load(Ordering::Acquire)
-    }
 }
 
 impl Toolset for ScriptedToolset {
@@ -241,7 +199,6 @@ impl Toolset for ScriptedToolset {
         let control = self.control.clone();
         let active = Arc::clone(&self.active_calls);
         let maximum = Arc::clone(&self.max_active_calls);
-        let cancellations = Arc::clone(&self.cancellations);
         Box::pin(async move {
             let plan = plan.ok_or_else(|| {
                 scripted_error(
@@ -260,7 +217,6 @@ impl Toolset for ScriptedToolset {
                 cancellation_wait: None,
                 control,
                 active,
-                cancellations,
                 active_gate: None,
             }) as ToolEventStream)
         })
@@ -292,7 +248,6 @@ struct ScriptedToolStream {
     cancellation_wait: Option<PortFuture<()>>,
     control: ScriptedToolsetControl,
     active: Arc<AtomicUsize>,
-    cancellations: Arc<AtomicUsize>,
     active_gate: Option<Arc<str>>,
 }
 
@@ -313,14 +268,6 @@ impl ScriptedToolStream {
             .get_or_insert_with(|| Box::pin(async move { cancellation.cancelled().await }));
         wait.as_mut().poll(cx)
     }
-
-    fn cancellation_error(&self) -> Poll<Option<Result<ToolStreamItem, ToolError>>> {
-        self.cancellations.fetch_add(1, Ordering::AcqRel);
-        Poll::Ready(Some(Err(scripted_error(
-            "scripted_tool_cancelled",
-            "scripted tool acknowledged effect cancellation",
-        ))))
-    }
 }
 
 impl Stream for ScriptedToolStream {
@@ -339,14 +286,14 @@ impl Stream for ScriptedToolStream {
                 ScriptedToolAction::AwaitCancellation => {
                     if self.cancellation_poll(cx).is_ready() {
                         self.actions.pop_front();
-                        return self.cancellation_error();
+                        return cancellation_error();
                     }
                     return Poll::Pending;
                 }
                 ScriptedToolAction::Block(name) => {
                     let gate = self.control.gate(name.clone());
                     if self.active_gate.as_ref() != Some(&name) {
-                        gate.entered.fetch_add(1, Ordering::AcqRel);
+                        gate.enter();
                         self.active_gate = Some(name);
                     }
                     if gate.poll(cx).is_ready() {
@@ -357,7 +304,7 @@ impl Stream for ScriptedToolStream {
                     if self.cancellation_poll(cx).is_ready() {
                         self.actions.pop_front();
                         self.active_gate = None;
-                        return self.cancellation_error();
+                        return cancellation_error();
                     }
                     return Poll::Pending;
                 }
@@ -367,6 +314,13 @@ impl Stream for ScriptedToolStream {
             }
         }
     }
+}
+
+fn cancellation_error() -> Poll<Option<Result<ToolStreamItem, ToolError>>> {
+    Poll::Ready(Some(Err(scripted_error(
+        "scripted_tool_cancelled",
+        "scripted tool acknowledged effect cancellation",
+    ))))
 }
 
 fn scripted_error(code: &'static str, message: &'static str) -> ToolError {

@@ -2,10 +2,9 @@
 //!
 //! `attachments` arrives from JS as `[{ data, mediaType, name? }]`
 //! (`data: Uint8Array`, `mediaType`/`name: string`). Each entry is staged
-//! into the agent's internal [`crate::document_store::DocumentArtifactStore`]
-//! and recorded in the [the artifact store] shared with `DocumentToolset` and
-//! `DocumentIngestMiddleware`, mirroring `finstack-ai-python`'s
-//! `stage_attachments`.
+//! into the agent's internal [`crate::document_store::MemoryArtifactStore`]
+//! shared with `DocumentToolset` and `DocumentIngestMiddleware`, mirroring
+//! `finstack-ai-python`'s `stage_attachments`.
 
 use std::sync::Arc;
 
@@ -74,9 +73,9 @@ fn parse_attachments(value: &JsValue) -> Result<Vec<RawAttachment>, JsValue> {
     Ok(parsed)
 }
 
-/// Stage every JS attachment into `store`, recording each in `index` so
-/// `DocumentIngestMiddleware` can resolve the `BlobRef` it later sees on the
-/// journaled `File` block back to the exact staged `ArtifactRef`.
+/// Stage every JS attachment into `store` so `DocumentIngestMiddleware` can
+/// resolve the `BlobRef` it later sees on the journaled `File` block back to
+/// the exact staged `ArtifactRef`.
 pub(super) fn stage_attachments(
     store: &dyn ArtifactStore,
     attachments: &JsValue,

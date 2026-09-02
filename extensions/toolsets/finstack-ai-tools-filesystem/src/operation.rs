@@ -1,14 +1,10 @@
 use finstack_ai_kernel::ErrorCategory;
-#[cfg(unix)]
-use finstack_ai_runtime::ports::model::CancellationSignal;
 use finstack_ai_runtime::ports::tool::ToolError;
 
 #[cfg(unix)]
 use crate::FileSystemLimits;
-#[cfg(unix)]
-use crate::policy::ProtectedPaths;
 use crate::policy::ValidatedPath;
-use crate::{FILESYSTEM_LIMIT_EXCEEDED, fs_tool_error};
+use crate::{FILESYSTEM_IO_ERROR, FILESYSTEM_LIMIT_EXCEEDED, fs_tool_error};
 
 /// Resource ceilings threaded from the toolset into one operation: the
 /// explicit [`FileSystemLimits`] plus the artifact-store-derived byte
@@ -56,7 +52,7 @@ impl OperationOutput {
     ) -> Result<Self, ToolError> {
         let json = serde_json::to_vec(value).map_err(|_| {
             fs_tool_error(
-                "filesystem_io_error",
+                FILESYSTEM_IO_ERROR,
                 ErrorCategory::Internal,
                 "filesystem result serialization failed",
             )
@@ -79,16 +75,5 @@ impl OperationOutput {
 impl FileOperation {
     pub(crate) const fn is_search(&self) -> bool {
         matches!(self, Self::Search { .. })
-    }
-
-    pub(crate) fn execute(
-        self,
-        root: &crate::unix::Root,
-        ceilings: FileSystemCeilings,
-        protected: &ProtectedPaths,
-        cancellation: &CancellationSignal,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<OperationOutput, ToolError> {
-        root.execute(self, ceilings, protected, cancellation, deadline)
     }
 }

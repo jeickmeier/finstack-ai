@@ -1,18 +1,17 @@
 use finstack_ai_kernel::{AppendBatchId, AppendRequest, CommittedBatch, Metadata, RecordEnvelope};
 use finstack_ai_protocol::encode;
 use finstack_ai_runtime::ports::journal::StoreError;
-pub(crate) use finstack_ai_store_common::AppendIdentity;
-#[cfg(test)]
-pub(crate) use finstack_ai_store_common::request_cbor;
 use finstack_ai_store_common::{
-    SessionUsage, admit_append_limits, build_committed_batch, check_append_sequence,
-    classify_record_reuse, request_identity,
+    admit_append_limits, build_committed_batch, check_append_sequence, classify_record_reuse,
+    request_identity,
 };
 use rusqlite::{Transaction, params};
 
 use crate::config::SqliteStoreLimits;
 use crate::error::{i64_from_u64, map_sqlite_error, protocol_error};
-use crate::load::{count_sessions, load_batch, load_session_row, lookup_record_batch};
+use crate::load::{
+    count_sessions, load_batch, load_session_row, lookup_record_batch, session_usage,
+};
 
 pub(crate) fn append_in_transaction(
     transaction: &Transaction<'_>,
@@ -80,20 +79,12 @@ pub(crate) fn append_in_transaction(
     check_append_sequence(current_head, request.expected_sequence())?;
 
     let session_is_new = session.is_none();
-    let usage = session.as_ref().map(|row| SessionUsage {
-        batches: row.batches,
-        records: row.records,
-    });
-    admit_append_limits(
-        *limits,
-        if session_is_new {
-            count_sessions(transaction)?
-        } else {
-            0
-        },
-        usage,
-        request.records().len(),
-    )?;
+    let (sessions, usage) = if session_is_new {
+        (count_sessions(transaction)?, None)
+    } else {
+        (0, Some(session_usage(transaction, request.session_id())?))
+    };
+    admit_append_limits(*limits, sessions, usage, request.records().len())?;
 
     let previous_checksum = session.as_ref().and_then(|row| row.head_checksum);
     let committed = build_committed_batch(request, previous_checksum)?;

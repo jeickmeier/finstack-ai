@@ -8,18 +8,17 @@ use serde::Serialize;
 use thiserror::Error;
 
 /// Maximum number of roles in a [`RoleAllowlist`].
-pub(crate) const MAX_ROLES: usize = 128;
+const MAX_ROLES: usize = 128;
 /// Maximum number of tools in any tool set (aliases `ModelRequestDraft::MAX_TOOLS`).
-pub(crate) const MAX_TOOLS_PER_SET: usize =
-    finstack_ai_runtime::ports::model::ModelRequestDraft::MAX_TOOLS;
+const MAX_TOOLS_PER_SET: usize = finstack_ai_runtime::ports::model::ModelRequestDraft::MAX_TOOLS;
 /// Maximum number of jailbreak trigger patterns.
-pub(crate) const MAX_PATTERNS: usize = 64;
+const MAX_PATTERNS: usize = 64;
 /// Maximum byte length of a single jailbreak trigger pattern.
-pub(crate) const MAX_PATTERN_BYTES: usize = 256;
+const MAX_PATTERN_BYTES: usize = 256;
 /// Maximum byte length of a role name.
-pub(crate) const MAX_ROLE_NAME_BYTES: usize = 256;
+const MAX_ROLE_NAME_BYTES: usize = 256;
 /// Maximum run-relation depth accepted by the kernel (aliases `finstack_ai_kernel::MAX_RUN_RELATION_DEPTH`).
-pub(crate) const MAX_KERNEL_DEPTH: u16 = finstack_ai_kernel::MAX_RUN_RELATION_DEPTH;
+const MAX_KERNEL_DEPTH: u16 = finstack_ai_kernel::MAX_RUN_RELATION_DEPTH;
 
 /// Tool-policy leaf construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -46,22 +45,10 @@ pub enum JailbreakAction {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct RoleAllowlist {
-    roles: BTreeMap<Arc<str>, BTreeSet<ToolId>>,
-    default_allowed: BTreeSet<ToolId>,
-}
-
-impl RoleAllowlist {
     /// Per-role allowed tool sets.
-    #[must_use]
-    pub(crate) fn roles(&self) -> &BTreeMap<Arc<str>, BTreeSet<ToolId>> {
-        &self.roles
-    }
-
-    /// Tools allowed for roles absent from [`Self::roles`].
-    #[must_use]
-    pub(crate) fn default_allowed(&self) -> &BTreeSet<ToolId> {
-        &self.default_allowed
-    }
+    pub(crate) roles: BTreeMap<Arc<str>, BTreeSet<ToolId>>,
+    /// Tools allowed for roles absent from `roles`.
+    pub(crate) default_allowed: BTreeSet<ToolId>,
 }
 
 /// Per-run cap on the number of write-classified tool calls.
@@ -71,72 +58,41 @@ impl RoleAllowlist {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct WriteBudget {
-    max_write_calls: u32,
-}
-
-impl WriteBudget {
     /// Maximum number of write-classified tool calls allowed.
-    #[must_use]
-    pub(crate) fn max_write_calls(&self) -> u32 {
-        self.max_write_calls
-    }
+    pub(crate) max_write_calls: u32,
 }
 
 /// Jailbreak-trigger patterns and the action taken when one matches.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct JailbreakTriggers {
-    patterns: Arc<[Arc<str>]>,
-    action: JailbreakAction,
-}
-
-impl JailbreakTriggers {
-    /// Trigger patterns.
-    #[must_use]
-    pub(crate) fn patterns(&self) -> &[Arc<str>] {
-        &self.patterns
-    }
-
+    /// Trigger patterns, trimmed and lowercased.
+    pub(crate) patterns: Arc<[Arc<str>]>,
     /// Action taken when a pattern matches.
-    #[must_use]
-    pub(crate) fn action(&self) -> &JailbreakAction {
-        &self.action
-    }
+    pub(crate) action: JailbreakAction,
 }
 
 /// Restricts a tool set once the run's child-agent depth reaches a threshold.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct ChildDepthGate {
-    max_depth: u16,
-    restricted: BTreeSet<ToolId>,
-}
-
-impl ChildDepthGate {
     /// Depth at or beyond which `restricted` applies.
-    #[must_use]
-    pub(crate) fn max_depth(&self) -> u16 {
-        self.max_depth
-    }
-
+    pub(crate) max_depth: u16,
     /// Tools removed once `max_depth` is reached.
-    #[must_use]
-    pub(crate) fn restricted(&self) -> &BTreeSet<ToolId> {
-        &self.restricted
-    }
+    pub(crate) restricted: BTreeSet<ToolId>,
 }
 
 /// Validated tool-policy configuration, built incrementally via `with_*` methods.
 ///
-/// Construct with [`Self::new`] and the `with_*` builders. Rule structs and
-/// inspection accessors are crate-private.
+/// Construct with [`Self::new`] and the `with_*` builders. Rule structs are
+/// crate-private.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ToolPolicyConfig {
-    role_allowlist: Option<RoleAllowlist>,
-    write_budget: Option<WriteBudget>,
-    jailbreak: Option<JailbreakTriggers>,
-    child_depth: Option<ChildDepthGate>,
+    pub(crate) role_allowlist: Option<RoleAllowlist>,
+    pub(crate) write_budget: Option<WriteBudget>,
+    pub(crate) jailbreak: Option<JailbreakTriggers>,
+    pub(crate) child_depth: Option<ChildDepthGate>,
 }
 
 impl ToolPolicyConfig {
@@ -326,30 +282,6 @@ impl ToolPolicyConfig {
             restricted,
         });
         Ok(self)
-    }
-
-    /// The configured role allowlist, if any.
-    #[must_use]
-    pub(crate) fn role_allowlist(&self) -> Option<&RoleAllowlist> {
-        self.role_allowlist.as_ref()
-    }
-
-    /// The configured write budget, if any.
-    #[must_use]
-    pub(crate) fn write_budget(&self) -> Option<&WriteBudget> {
-        self.write_budget.as_ref()
-    }
-
-    /// The configured jailbreak triggers, if any.
-    #[must_use]
-    pub(crate) fn jailbreak(&self) -> Option<&JailbreakTriggers> {
-        self.jailbreak.as_ref()
-    }
-
-    /// The configured child-depth gate, if any.
-    #[must_use]
-    pub(crate) fn child_depth(&self) -> Option<&ChildDepthGate> {
-        self.child_depth.as_ref()
     }
 
     /// True when no rule has been configured.

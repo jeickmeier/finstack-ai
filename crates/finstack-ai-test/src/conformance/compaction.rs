@@ -288,10 +288,5 @@ fn ensure(
 }
 
 fn failure(contract: &'static str, detail: impl Into<String>) -> PortConformanceFailure {
-    PortConformanceFailure {
-        port: "Middleware",
-        contract,
-        suite_version: crate::PORT_CONFORMANCE_SUITE_VERSION,
-        detail: detail.into(),
-    }
+    PortConformanceFailure::new("Middleware", contract, detail)
 }

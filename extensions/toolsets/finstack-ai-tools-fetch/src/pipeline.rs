@@ -10,8 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, Timestamp};
 use finstack_ai_net_guard::{
-    BodyReadInterrupt, HostResolver, NetGuardError, SystemResolver, UrlPolicy, VettedUrl,
-    parse_and_vet_url, pinned_client, read_body_bounded_interruptible, resolve_and_pin,
+    BodyReadInterrupt, HostResolver, NetGuardError, UrlPolicy, VettedUrl, parse_and_vet_url,
+    pinned_client, read_body_bounded_interruptible, resolve_and_pin,
 };
 use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
@@ -20,11 +20,6 @@ use reqwest::header::{HeaderName, HeaderValue};
 
 use crate::config::HostPattern;
 use crate::deliver::{DeliveredContent, deliver};
-
-pub(crate) struct FetchOutput {
-    pub(crate) value: serde_json::Value,
-    pub(crate) artifact: Option<finstack_ai_kernel::ArtifactRef>,
-}
 use crate::toolset::FetchArguments;
 use crate::{
     FETCH_DESTINATION_BLOCKED, FETCH_HOST_NOT_ALLOWLISTED, FETCH_INVALID_ARGUMENTS,
@@ -36,40 +31,24 @@ use crate::{
 const ERROR_BODY_CAP: usize = 4096;
 /// Characters of endpoint reason kept in a tool-error message.
 const ERROR_DETAIL_CHARS: usize = 300;
-
 /// Default `User-Agent`, used when [`HttpFetchConfig::user_agent`] is unset.
-fn default_user_agent() -> String {
-    concat!(
-        "finstack-ai-tools-fetch/",
-        env!("CARGO_PKG_VERSION"),
-        " (+https://github.com/jeickmeier/finstack-ai)"
-    )
-    .to_owned()
+const DEFAULT_USER_AGENT: &str = concat!(
+    "finstack-ai-tools-fetch/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/jeickmeier/finstack-ai)"
+);
+
+pub(crate) struct FetchOutput {
+    pub(crate) value: serde_json::Value,
+    pub(crate) artifact: Option<finstack_ai_kernel::ArtifactRef>,
 }
 
 /// Bundled, validated pipeline state: parsed allowlist, validated config,
-/// and the injectable DNS resolver seam (defaults to [`SystemResolver`]).
+/// and the injectable DNS resolver seam (`SystemResolver` in production).
 pub(crate) struct FetchState {
     pub(crate) config: HttpFetchConfig,
     pub(crate) patterns: Vec<HostPattern>,
     pub(crate) resolver: Arc<dyn HostResolver>,
-}
-
-impl FetchState {
-    pub(crate) fn new(config: HttpFetchConfig, patterns: Vec<HostPattern>) -> Self {
-        Self {
-            config,
-            patterns,
-            resolver: Arc::new(SystemResolver),
-        }
-    }
-
-    /// Override the DNS resolver seam (test-only scripted resolvers).
-    #[cfg(test)]
-    pub(crate) fn with_resolver(mut self, resolver: Arc<dyn HostResolver>) -> Self {
-        self.resolver = resolver;
-        self
-    }
 }
 
 fn tool_error(
@@ -198,12 +177,10 @@ async fn rejection_detail(response: reqwest::Response, ctx: &ToolCallContext) ->
         }
         body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
     }
-    let text = String::from_utf8_lossy(&body);
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-    let detail = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let detail = String::from_utf8_lossy(&body)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if detail.is_empty() {
         return None;
     }
@@ -391,8 +368,8 @@ pub(crate) async fn execute_fetch(
     let user_agent = state
         .config
         .user_agent
-        .clone()
-        .unwrap_or_else(default_user_agent);
+        .as_deref()
+        .unwrap_or(DEFAULT_USER_AGENT);
 
     // Manual redirect loop (spec §4.4 step 7): each hop re-enters the entire
     // pipeline from the allowlist/vet step — new vet, new resolve, new
@@ -406,7 +383,7 @@ pub(crate) async fn execute_fetch(
             return Err(timeout_error());
         }
 
-        let response = send_hop(state, ctx, &current, origin_is_loopback, &user_agent).await?;
+        let response = send_hop(state, ctx, &current, origin_is_loopback, user_agent).await?;
         let status = response.status();
         if matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
             if hop >= state.config.max_redirects {

@@ -28,8 +28,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use finstack_ai_kernel::{
-    AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordDraft, RecordEnvelope,
-    RecordId, SessionId,
+    AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordEnvelope, RecordId,
+    SessionId,
 };
 use finstack_ai_protocol::ChainAnchor;
 use finstack_ai_runtime::ports::PortFuture;
@@ -125,7 +125,7 @@ impl MemoryJournalStore {
             .records()
             .iter()
             .filter_map(|record| inner.records_by_id.get(&record.record_id()))
-            .map(|entry| entry.batch_id)
+            .copied()
             .collect::<Vec<_>>();
         if hits.iter().any(|batch_id| {
             inner
@@ -187,7 +187,6 @@ impl MemoryJournalStore {
         let head_checksum = committed.records.last().map(RecordEnvelope::checksum);
         let batch_id = request.batch_id();
         let session_id = request.session_id();
-        let record_entries = record_index_entries(&request, batch_id);
 
         let session = inner.sessions.entry(session_id).or_default();
         session.head_sequence = last_sequence;
@@ -198,8 +197,8 @@ impl MemoryJournalStore {
             sequence: session.head_sequence,
             checksum: session.head_checksum,
         };
-        for (record_id, entry) in record_entries {
-            inner.records_by_id.insert(record_id, entry);
+        for record in request.records() {
+            inner.records_by_id.insert(record.record_id(), batch_id);
         }
         inner.batches_by_id.insert(
             batch_id,
@@ -273,10 +272,6 @@ impl MemoryJournalStore {
         }
     }
 
-    fn load_sync(&self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
-        self.load_full(request.session_id, CacheUse::Proving)
-    }
-
     /// Load and verify a whole session journal.
     ///
     /// `cache_use` is [`CacheUse::Windowed`] when a windowed request
@@ -293,15 +288,14 @@ impl MemoryJournalStore {
             return Ok(LoadedSession::empty(session_id));
         };
         self.verify_session_head(session_id, session, read, cache_use)?;
-        let snapshot = session.snapshot.clone();
         Ok(LoadedSession {
             session_id,
             head_sequence: session.head_sequence,
             head_checksum: session.head_checksum,
             metadata: session.metadata.clone(),
             committed_batches: session.batches.clone().into(),
-            snapshot: snapshot.clone(),
-            accelerated: snapshot.as_ref().and_then(accelerated_from),
+            accelerated: session.snapshot.as_ref().and_then(accelerated_from),
+            snapshot: session.snapshot.clone(),
         })
     }
 
@@ -333,8 +327,7 @@ impl MemoryJournalStore {
         from_sequence: u64,
         prior_checksum: Digest,
     ) -> Result<LoadedSession, StoreError> {
-        let start = if from_sequence == 0 { 1 } else { from_sequence };
-        if start <= 1 {
+        if from_sequence <= 1 {
             // The window covers the whole journal, so this is a plain full
             // load — but it arrived as a windowed request, and windowed
             // requests never touch the cache (sqlite and postgres pass no
@@ -350,7 +343,7 @@ impl MemoryJournalStore {
         loaded_from_batches(
             session_id,
             session,
-            start,
+            from_sequence,
             prior_checksum,
             FROM_SEQUENCE_WINDOW,
         )
@@ -565,7 +558,7 @@ impl MemoryJournalStore {
         let retained_batch_ids = inner.batches_by_id.keys().copied().collect::<Vec<_>>();
         inner
             .records_by_id
-            .retain(|_, entry| retained_batch_ids.contains(&entry.batch_id));
+            .retain(|_, batch_id| retained_batch_ids.contains(batch_id));
         // The retained journal is a different chain prefix than the one the
         // cached proof described, so the proof is dropped and the pruned
         // journal re-verified in full before a new one is recorded.
@@ -598,7 +591,6 @@ impl MemoryJournalStore {
                 self.verified.remember(request.session_id, read, head);
             }
         }
-        let _ = request.horizon;
         Ok(PruneReceipt {
             pruned_through_sequence,
             retained_outstanding,
@@ -633,26 +625,24 @@ impl JournalStore for MemoryJournalStore {
     }
 
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
-        let result = self.append_sync(request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(self.append_sync(request)))
     }
 
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
-        let result = self.load_sync(request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(
+            self.load_full(request.session_id, CacheUse::Proving),
+        ))
     }
 
     fn load_from(&self, request: LoadFromRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
-        let result = self.load_from_sync(request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(self.load_from_sync(request)))
     }
 
     fn write_snapshot(
         &self,
         request: SnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
-        let result = self.write_snapshot_sync(request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(self.write_snapshot_sync(request)))
     }
 
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
@@ -666,29 +656,27 @@ impl JournalStore for MemoryJournalStore {
     }
 
     fn scan(&self, request: ScanRequest) -> PortFuture<Result<ScanPage, StoreError>> {
-        let result = self.scan_sync(request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(self.scan_sync(request)))
     }
 
     fn write_metadata(
         &self,
         request: WriteMetadataRequest,
     ) -> PortFuture<Result<MetadataReceipt, StoreError>> {
-        let result = self.write_metadata_sync(request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(self.write_metadata_sync(request)))
     }
 
     fn write_state_snapshot(
         &self,
         request: StateSnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
-        let result = self.write_state_snapshot_sync(&request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(
+            self.write_state_snapshot_sync(&request),
+        ))
     }
 
     fn prune(&self, request: PruneRequest) -> PortFuture<Result<PruneReceipt, StoreError>> {
-        let result = self.prune_sync(request);
-        Box::pin(async move { result })
+        Box::pin(core::future::ready(self.prune_sync(request)))
     }
 }
 
@@ -709,7 +697,8 @@ enum CacheUse {
 struct Inner {
     sessions: BTreeMap<SessionId, SessionData>,
     batches_by_id: BTreeMap<AppendBatchId, BatchIndexEntry>,
-    records_by_id: BTreeMap<RecordId, RecordIndexEntry>,
+    /// Committing batch of every stored record id.
+    records_by_id: BTreeMap<RecordId, AppendBatchId>,
 }
 
 struct SessionData {
@@ -746,12 +735,6 @@ struct BatchIndexEntry {
     history_pruned: bool,
 }
 
-struct RecordIndexEntry {
-    batch_id: AppendBatchId,
-    #[allow(dead_code)]
-    draft: RecordDraft,
-}
-
 fn loaded_from_batches(
     session_id: SessionId,
     session: &SessionData,
@@ -773,36 +756,15 @@ fn loaded_from_batches(
         session.head_checksum,
         codes,
     )?;
-    let snapshot = session.snapshot.clone();
     Ok(LoadedSession {
         session_id,
         head_sequence: session.head_sequence,
         head_checksum: session.head_checksum,
         metadata: session.metadata.clone(),
         committed_batches: tail.to_vec().into(),
-        snapshot: snapshot.clone(),
-        accelerated: snapshot.as_ref().and_then(accelerated_from),
+        accelerated: session.snapshot.as_ref().and_then(accelerated_from),
+        snapshot: session.snapshot.clone(),
     })
-}
-
-/// Build the by-record-id index entries one append contributes.
-fn record_index_entries(
-    request: &AppendRequest,
-    batch_id: AppendBatchId,
-) -> Vec<(RecordId, RecordIndexEntry)> {
-    request
-        .records()
-        .iter()
-        .map(|record| {
-            (
-                record.record_id(),
-                RecordIndexEntry {
-                    batch_id,
-                    draft: record.clone(),
-                },
-            )
-        })
-        .collect()
 }
 
 fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {

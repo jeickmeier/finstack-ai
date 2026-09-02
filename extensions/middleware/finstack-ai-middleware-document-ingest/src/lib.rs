@@ -34,7 +34,6 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-use std::borrow::Borrow;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -89,68 +88,36 @@ struct ParseCacheKey {
 ///
 /// Only the pure `bytes -> note text` computation is cached: the blob is
 /// still fetched and digest-verified on every invocation, so fail-soft
-/// semantics for index misses, store failures, and digest mismatches are
-/// unchanged. Cached and recomputed notes are byte-identical because the
-/// note is a deterministic function of the key (the configured
-/// [`DocumentLimits`] are fixed per instance). Plain `std::sync::Mutex`, no
-/// tokio, so this stays usable on `wasm32` hosts.
-type ParseCache = BoundedFifoMap<ParseCacheKey, String, PARSE_CACHE_CAPACITY>;
-
-/// Bounded FIFO map: new keys append, reinsertion refreshes the value
-/// without changing eviction order, and a poisoned lock is recovered.
-///
-/// Capacity is a type-level constant so parse-cache and attachment-index
-/// uses share one implementation while keeping their distinct bounds.
-#[derive(Debug)]
-struct BoundedFifoMap<K, V, const CAP: usize> {
-    state: Mutex<BoundedFifoMapState<K, V>>,
+/// semantics for store failures and digest mismatches are unchanged. Cached
+/// and recomputed notes are byte-identical because the note is a
+/// deterministic function of the key (the configured [`DocumentLimits`] are
+/// fixed per instance). New keys append, reinsertion refreshes the value
+/// without changing eviction order, and a poisoned lock is recovered. Plain
+/// `std::sync::Mutex`, no tokio, so this stays usable on `wasm32` hosts.
+#[derive(Debug, Default)]
+struct ParseCache {
+    state: Mutex<ParseCacheState>,
 }
 
-#[derive(Debug)]
-struct BoundedFifoMapState<K, V> {
-    entries: BTreeMap<K, V>,
-    insertion_order: VecDeque<K>,
+#[derive(Debug, Default)]
+struct ParseCacheState {
+    entries: BTreeMap<ParseCacheKey, String>,
+    insertion_order: VecDeque<ParseCacheKey>,
 }
 
-impl<K, V> Default for BoundedFifoMapState<K, V> {
-    fn default() -> Self {
-        Self {
-            entries: BTreeMap::new(),
-            insertion_order: VecDeque::new(),
-        }
-    }
-}
-
-impl<K, V, const CAP: usize> Default for BoundedFifoMap<K, V, CAP> {
-    fn default() -> Self {
-        Self {
-            state: Mutex::new(BoundedFifoMapState::default()),
-        }
-    }
-}
-
-impl<K, V, const CAP: usize> BoundedFifoMap<K, V, CAP> {
-    #[must_use]
-    fn lookup<Q>(&self, key: &Q) -> Option<V>
-    where
-        K: Borrow<Q> + Ord,
-        Q: Ord + ?Sized,
-        V: Clone,
-    {
+impl ParseCache {
+    fn lookup(&self, key: &ParseCacheKey) -> Option<String> {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.entries.get(key).cloned()
     }
 
-    fn insert(&self, key: K, value: V)
-    where
-        K: Clone + Ord,
-    {
+    fn insert(&self, key: ParseCacheKey, value: String) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if !state.entries.contains_key(&key) {
             state.insertion_order.push_back(key.clone());
         }
         state.entries.insert(key, value);
-        while state.insertion_order.len() > CAP {
+        while state.insertion_order.len() > PARSE_CACHE_CAPACITY {
             if let Some(oldest) = state.insertion_order.pop_front() {
                 state.entries.remove(&oldest);
             }
@@ -161,7 +128,7 @@ impl<K, V, const CAP: usize> BoundedFifoMap<K, V, CAP> {
     fn poison(&self) {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            panic!("bounded-fifo-map test poison");
+            panic!("parse-cache test poison");
         }));
     }
 }
@@ -200,10 +167,6 @@ fn limits_identity_bytes(limits: &DocumentLimits) -> Result<Vec<u8>, DocumentIng
     serde_json_canonicalizer::to_vec(&identity).map_err(|_| DocumentIngestError::Configuration {
         reason: "invalid_configuration_encoding",
     })
-}
-
-fn limits_configuration_digest(limits: &DocumentLimits) -> Result<Digest, DocumentIngestError> {
-    Ok(Digest::raw_json(&limits_identity_bytes(limits)?))
 }
 
 /// Fail-soft document ingest middleware.
@@ -252,7 +215,7 @@ impl DocumentIngestMiddleware {
         store: Arc<dyn ArtifactStore>,
         limits: DocumentLimits,
     ) -> Result<Self, DocumentIngestError> {
-        let configuration_digest = limits_configuration_digest(&limits)?;
+        let configuration_digest = Digest::raw_json(&limits_identity_bytes(&limits)?);
         Ok(Self {
             descriptor: MiddlewareDescriptor {
                 invocation: ComponentInvocation {
@@ -279,12 +242,6 @@ impl DocumentIngestMiddleware {
             limits,
             parse_cache: Arc::new(ParseCache::default()),
         })
-    }
-
-    /// The parse limits this instance was constructed with.
-    #[cfg(test)]
-    pub(crate) fn limits(&self) -> &DocumentLimits {
-        &self.limits
     }
 }
 
@@ -377,7 +334,7 @@ impl DocumentIngestMiddleware {
     /// # Errors
     ///
     /// Returns a stable [`MiddlewareError`] when a fail-soft note cannot be
-    /// constructed. Index, store, and parser failures remain fail-soft notes.
+    /// constructed. Store and parser failures remain fail-soft notes.
     async fn ingest_block(
         &self,
         media: &finstack_ai_kernel::MediaRef,
@@ -392,12 +349,8 @@ impl DocumentIngestMiddleware {
             ));
         }
         let (bytes, digest) = self.fetch_blob(scope, blob, cancellation).await?;
-        // Memoize only the pure `bytes -> note text` computation. Every
-        // fail-soft branch above (index miss, store failure, digest
-        // mismatch) is transient and stays uncached; the branches below are
-        // deterministic functions of the fetched bytes, media type, name,
-        // and the per-instance limits, so a cached note is byte-identical
-        // to a recomputed one.
+        // Memoize only the pure `bytes -> note text` computation; the fetch
+        // failures above are transient and stay uncached.
         let key = ParseCacheKey {
             digest,
             media_type: blob.media_type().to_owned(),

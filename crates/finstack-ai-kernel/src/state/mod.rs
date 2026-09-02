@@ -30,11 +30,10 @@ use crate::records::tools::{
 };
 use crate::reducer::KernelError;
 
-use hash_entries::{
-    completion_hash_entries, extension_hash_entries, model_hash_entries, resolution_hash_entries,
-    stage_hash_entries, tool_call_hash_entries, tool_settlement_hash_entries,
+use hash_projection::{
+    KernelStateHashV1, KernelStateHashV2, KernelStateHashV3, KernelStateHashV4, KernelStateHashV5,
+    KernelStateHashV6, KernelStateHashV7,
 };
-use hash_projection::{KernelStateHashV1, KernelStateHashV2};
 
 pub use env::TransitionEnv;
 pub use types::{
@@ -641,91 +640,35 @@ impl KernelState {
         let mut writer =
             crate::primitives::DigestWriter::new("kernel-state", u32::from(self.state_version))
                 .map_err(|_| KernelError::StateHashFailed)?;
-        if self.state_version == 1 {
-            serde_json_canonicalizer::to_writer(
-                &KernelStateHashV1::from_state(
-                    self,
-                    stage_hash_entries(&self.stage_settlements),
-                    model_hash_entries(&self.model_settlements),
-                    completion_hash_entries(&self.completion_identities),
-                ),
+        match self.state_version {
+            1 => serde_json_canonicalizer::to_writer(
+                &KernelStateHashV1::from_state(self),
                 &mut writer,
-            )
-        } else if self.state_version == 2 {
-            serde_json_canonicalizer::to_writer(
-                &KernelStateHashV2::from_state(
-                    self,
-                    stage_hash_entries(&self.stage_settlements),
-                    model_hash_entries(&self.model_settlements),
-                    completion_hash_entries(&self.completion_identities),
-                    tool_call_hash_entries(&self.tool_calls),
-                    tool_settlement_hash_entries(&self.tool_settlements),
-                ),
+            ),
+            2 => serde_json_canonicalizer::to_writer(
+                &KernelStateHashV2::from_state(self),
                 &mut writer,
-            )
-        } else if self.state_version == 3 {
-            serde_json_canonicalizer::to_writer(
-                &hash_projection::KernelStateHashV3::from_state(
-                    self,
-                    stage_hash_entries(&self.stage_settlements),
-                    model_hash_entries(&self.model_settlements),
-                    completion_hash_entries(&self.completion_identities),
-                    tool_call_hash_entries(&self.tool_calls),
-                    tool_settlement_hash_entries(&self.tool_settlements),
-                ),
+            ),
+            3 => serde_json_canonicalizer::to_writer(
+                &KernelStateHashV3::from_state(self),
                 &mut writer,
-            )
-        } else if self.state_version == 4 {
-            serde_json_canonicalizer::to_writer(
-                &hash_projection::KernelStateHashV4::from_state(
-                    self,
-                    stage_hash_entries(&self.stage_settlements),
-                    model_hash_entries(&self.model_settlements),
-                    completion_hash_entries(&self.completion_identities),
-                    tool_call_hash_entries(&self.tool_calls),
-                    tool_settlement_hash_entries(&self.tool_settlements),
-                ),
+            ),
+            4 => serde_json_canonicalizer::to_writer(
+                &KernelStateHashV4::from_state(self),
                 &mut writer,
-            )
-        } else if self.state_version == 5 {
-            serde_json_canonicalizer::to_writer(
-                &hash_projection::KernelStateHashV5::from_state(
-                    self,
-                    stage_hash_entries(&self.stage_settlements),
-                    model_hash_entries(&self.model_settlements),
-                    completion_hash_entries(&self.completion_identities),
-                    tool_call_hash_entries(&self.tool_calls),
-                    tool_settlement_hash_entries(&self.tool_settlements),
-                ),
+            ),
+            5 => serde_json_canonicalizer::to_writer(
+                &KernelStateHashV5::from_state(self),
                 &mut writer,
-            )
-        } else if self.state_version == 6 {
-            serde_json_canonicalizer::to_writer(
-                &hash_projection::KernelStateHashV6::from_state(
-                    self,
-                    stage_hash_entries(&self.stage_settlements),
-                    model_hash_entries(&self.model_settlements),
-                    completion_hash_entries(&self.completion_identities),
-                    tool_call_hash_entries(&self.tool_calls),
-                    tool_settlement_hash_entries(&self.tool_settlements),
-                    resolution_hash_entries(&self.resolution_identities),
-                ),
+            ),
+            6 => serde_json_canonicalizer::to_writer(
+                &KernelStateHashV6::from_state(self),
                 &mut writer,
-            )
-        } else {
-            serde_json_canonicalizer::to_writer(
-                &hash_projection::KernelStateHashV7::from_state(
-                    self,
-                    stage_hash_entries(&self.stage_settlements),
-                    model_hash_entries(&self.model_settlements),
-                    completion_hash_entries(&self.completion_identities),
-                    tool_call_hash_entries(&self.tool_calls),
-                    tool_settlement_hash_entries(&self.tool_settlements),
-                    resolution_hash_entries(&self.resolution_identities),
-                    extension_hash_entries(&self.extension_settlements),
-                ),
+            ),
+            _ => serde_json_canonicalizer::to_writer(
+                &KernelStateHashV7::from_state(self),
                 &mut writer,
-            )
+            ),
         }
         .map_err(|_| KernelError::StateHashFailed)?;
         Ok(writer.finish().0)

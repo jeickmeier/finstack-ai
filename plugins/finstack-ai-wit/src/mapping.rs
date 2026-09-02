@@ -113,11 +113,11 @@ pub fn map_tool_spec(spec: &ToolSpec) -> Result<NativeToolSpec, WitMapError> {
         model_name: Arc::from(spec.model_name.as_str()),
         title: Arc::from(spec.title.as_str()),
         description: Arc::from(spec.description.as_str()),
-        input_schema: parse_raw_json(&spec.input_schema_json, "input-schema-json")?,
+        input_schema: parse_raw_json(&spec.input_schema_json, "input-schema-json is invalid")?,
         output_schema: spec
             .output_schema_json
             .as_deref()
-            .map(|bytes| parse_raw_json(bytes, "output-schema-json"))
+            .map(|bytes| parse_raw_json(bytes, "output-schema-json is invalid"))
             .transpose()?,
         execution: parse_execution_mode(&spec.execution_mode)?,
         side_effect: parse_side_effect(&spec.side_effect)?,
@@ -174,28 +174,27 @@ fn canonical_tool_value(spec: &ToolSpec) -> Result<Value, WitMapError> {
         "model-name": spec.model_name,
         "title": spec.title,
         "description": spec.description,
-        "input-schema-json": parse_json_value(&spec.input_schema_json, "input-schema-json")?,
+        "input-schema-json": parse_json_value(&spec.input_schema_json, "input-schema-json is invalid")?,
         "output-schema-json": spec
             .output_schema_json
             .as_deref()
-            .map(|bytes| parse_json_value(bytes, "output-schema-json"))
+            .map(|bytes| parse_json_value(bytes, "output-schema-json is invalid"))
             .transpose()?,
         "execution-mode": spec.execution_mode,
         "side-effect": spec.side_effect,
         "retry-safety": spec.retry_safety,
-        "approval-policy-json": parse_json_value(&spec.approval_policy_json, "approval-policy-json")?,
+        "approval-policy-json": parse_json_value(&spec.approval_policy_json, "approval-policy-json is invalid")?,
         "max-result-bytes": spec.max_result_bytes,
-        "metadata-json": parse_json_value(&spec.metadata_json, "metadata-json")?,
+        "metadata-json": parse_json_value(&spec.metadata_json, "metadata-json is invalid")?,
     }))
 }
 
-fn parse_json_value(bytes: &[u8], field: &'static str) -> Result<Value, WitMapError> {
-    serde_json::from_slice(bytes)
-        .map_err(|_| WitMapError::RegistrationInvalid(field_invalid(field)))
+fn parse_json_value(bytes: &[u8], invalid: &'static str) -> Result<Value, WitMapError> {
+    serde_json::from_slice(bytes).map_err(|_| WitMapError::RegistrationInvalid(invalid))
 }
 
-fn parse_raw_json(bytes: &[u8], field: &'static str) -> Result<RawJson, WitMapError> {
-    RawJson::parse(bytes).map_err(|_| WitMapError::RegistrationInvalid(field_invalid(field)))
+fn parse_raw_json(bytes: &[u8], invalid: &'static str) -> Result<RawJson, WitMapError> {
+    RawJson::parse(bytes).map_err(|_| WitMapError::RegistrationInvalid(invalid))
 }
 
 fn parse_metadata(bytes: &[u8]) -> Result<Metadata, WitMapError> {
@@ -234,16 +233,6 @@ fn parse_retry_safety(value: &str) -> Result<RetrySafety, WitMapError> {
         "at_most_once" => Ok(RetrySafety::AtMostOnce),
         "unknown" => Ok(RetrySafety::Unknown),
         _ => Err(WitMapError::RegistrationInvalid("retry-safety is unknown")),
-    }
-}
-
-fn field_invalid(field: &'static str) -> &'static str {
-    match field {
-        "input-schema-json" => "input-schema-json is invalid",
-        "output-schema-json" => "output-schema-json is invalid",
-        "approval-policy-json" => "approval-policy-json is invalid",
-        "metadata-json" => "metadata-json is invalid",
-        _ => "JSON field is invalid",
     }
 }
 

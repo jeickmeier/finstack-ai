@@ -4,7 +4,7 @@ use crate::content::ContentBlock;
 use crate::conversation::{Message, MessageRole};
 use crate::effects::EffectCompleted;
 use crate::primitives::ErrorDescriptor;
-use crate::primitives::{MessageId, ToolCallId};
+use crate::primitives::ToolCallId;
 use crate::state::{KernelState, TransitionEnv};
 
 use super::KernelError;
@@ -84,15 +84,6 @@ pub(super) fn validate_assistant_tool_call_ids(
         .map(|call| *call.tool_call_id())
         .ne(allocated.iter().copied())
     {
-        return Err(KernelError::AssistantMessageMismatch);
-    }
-    Ok(())
-}
-pub(super) fn validate_assistant_message_id(
-    message_id: MessageId,
-    message: &Message,
-) -> Result<(), KernelError> {
-    if *message.id() != message_id {
         return Err(KernelError::AssistantMessageMismatch);
     }
     Ok(())

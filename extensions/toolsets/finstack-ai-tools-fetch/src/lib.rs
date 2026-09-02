@@ -30,15 +30,6 @@ mod toolset;
 pub use config::{HostPattern, HttpFetchConfig, HttpFetchConfigSnapshot, HttpFetchError};
 pub use toolset::HttpFetchToolset;
 
-// Brought into the crate root so `tests.rs` can name them as `crate::X`,
-// mirroring the `finstack-ai-tools-openrouter-media` test helpers this was
-// copied from (there they land in the root because `lib.rs` itself imports
-// them for its own `Toolset` impl).
-#[cfg(test)]
-use finstack_ai_runtime::ports::model::ToolSpec;
-#[cfg(test)]
-use finstack_ai_runtime::ports::tool::ToolCallContext;
-
 /// Stable invalid-arguments error code.
 pub const FETCH_INVALID_ARGUMENTS: &str = "fetch_invalid_arguments";
 /// Stable host-not-allowlisted error code.

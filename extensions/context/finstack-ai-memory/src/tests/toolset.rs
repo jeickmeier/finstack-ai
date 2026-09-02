@@ -324,7 +324,7 @@ async fn remember_is_idempotent_across_replay() {
 async fn remember_stages_large_bodies_as_blobs() {
     let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
     let effect_id = EffectId::from_bytes([10; 16]);
-    let body = "x".repeat(crate::toolset::INLINE_BODY_MAX_BYTES + 1);
+    let body = "x".repeat(crate::record::INLINE_BODY_MAX_BYTES + 1);
     let args = serde_json::json!({
         "id": "mem-large",
         "keywords": ["alpha"],
@@ -578,7 +578,7 @@ async fn correct_memory_stages_large_replacement_bodies_as_blobs() {
     assert!(!remember_result.is_error);
 
     let correct_effect = EffectId::from_bytes([23; 16]);
-    let new_body = "y".repeat(crate::toolset::INLINE_BODY_MAX_BYTES + 1);
+    let new_body = "y".repeat(crate::record::INLINE_BODY_MAX_BYTES + 1);
     let correct_args = serde_json::json!({
         "old_id": "mem-old-large",
         "keywords": ["beta"],
@@ -927,7 +927,10 @@ async fn semantic_mode_without_an_embedder_is_a_stable_error() {
 async fn invalid_mode_arguments_are_query_invalid() {
     let (toolset, _store) = toolset_with_embedder(hash_embedder(64));
     for (seed, args) in [
-        (51_u8, br#"{"text":"night colors","mode":"cosine"}"# as &[u8]),
+        (
+            51_u8,
+            br#"{"text":"night colors","mode":"cosine"}"# as &[u8],
+        ),
         (52, br#"{"keywords":["alpha"],"mode":"semantic"}"#),
         (53, br#"{"keywords":["alpha"],"mode":"lexical"}"#),
     ] {

@@ -32,24 +32,20 @@ use crate::callbacks::parse_payload_mode;
 )]
 #[derive(Clone)]
 pub(crate) struct PyLogObserver {
-    component: ComponentRef,
     inner: Arc<LogObserver>,
 }
 
 impl PyLogObserver {
     fn from_writer(payload_mode: &str, writer: Arc<Mutex<dyn Write + Send>>) -> PyResult<Self> {
-        let mode = parse_payload_mode(payload_mode)?;
-        let observer = LogObserver::try_new(mode, writer)
+        let observer = LogObserver::try_new(parse_payload_mode(payload_mode)?, writer)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = observer.descriptor().component;
         Ok(Self {
-            component,
             inner: Arc::new(observer),
         })
     }
 
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
-        (self.component.clone(), self.inner.clone())
+        (self.inner.descriptor().component, self.inner.clone())
     }
 }
 
@@ -77,7 +73,7 @@ impl PyLogObserver {
     /// Exact registered component identity.
     #[getter]
     fn component(&self) -> String {
-        self.component.id().to_string()
+        self.inner.descriptor().component.id().to_string()
     }
 }
 
@@ -94,7 +90,6 @@ impl PyLogObserver {
 )]
 #[derive(Clone)]
 pub(crate) struct PyMetricsObserver {
-    component: ComponentRef,
     inner: Arc<MetricsObserver>,
 }
 
@@ -105,9 +100,7 @@ impl PyMetricsObserver {
     fn new() -> PyResult<Self> {
         let observer =
             MetricsObserver::try_new().map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = observer.descriptor().component;
         Ok(Self {
-            component,
             inner: Arc::new(observer),
         })
     }
@@ -120,13 +113,13 @@ impl PyMetricsObserver {
     /// Exact registered component identity.
     #[getter]
     fn component(&self) -> String {
-        self.component.id().to_string()
+        self.inner.descriptor().component.id().to_string()
     }
 }
 
 impl PyMetricsObserver {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
-        (self.component.clone(), self.inner.clone())
+        (self.inner.descriptor().component, self.inner.clone())
     }
 }
 
@@ -143,7 +136,6 @@ impl PyMetricsObserver {
 )]
 #[derive(Clone)]
 pub(crate) struct PyOtelObserver {
-    component: ComponentRef,
     inner: Arc<OtelObserver>,
 }
 
@@ -153,12 +145,9 @@ impl PyOtelObserver {
     #[new]
     #[pyo3(signature = (payload_mode = "metadata_only", capture_capacity = 1024))]
     fn new(payload_mode: &str, capture_capacity: usize) -> PyResult<Self> {
-        let mode = parse_payload_mode(payload_mode)?;
-        let observer = OtelObserver::try_new(mode, capture_capacity)
+        let observer = OtelObserver::try_new(parse_payload_mode(payload_mode)?, capture_capacity)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = observer.descriptor().component;
         Ok(Self {
-            component,
             inner: Arc::new(observer),
         })
     }
@@ -187,13 +176,13 @@ impl PyOtelObserver {
     /// Exact registered component identity.
     #[getter]
     fn component(&self) -> String {
-        self.component.id().to_string()
+        self.inner.descriptor().component.id().to_string()
     }
 }
 
 impl PyOtelObserver {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
-        (self.component.clone(), self.inner.clone())
+        (self.inner.descriptor().component, self.inner.clone())
     }
 }
 
@@ -209,7 +198,6 @@ impl PyOtelObserver {
 )]
 #[derive(Clone)]
 pub(crate) struct PyBillingObserver {
-    component: ComponentRef,
     inner: Arc<BillingObserver>,
 }
 
@@ -221,9 +209,7 @@ impl PyBillingObserver {
     fn new(max_entries: usize) -> PyResult<Self> {
         let observer = BillingObserver::try_new(max_entries)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = observer.descriptor().component;
         Ok(Self {
-            component,
             inner: Arc::new(observer),
         })
     }
@@ -238,13 +224,13 @@ impl PyBillingObserver {
     /// Exact registered component identity.
     #[getter]
     fn component(&self) -> String {
-        self.component.id().to_string()
+        self.inner.descriptor().component.id().to_string()
     }
 }
 
 impl PyBillingObserver {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
-        (self.component.clone(), self.inner.clone())
+        (self.inner.descriptor().component, self.inner.clone())
     }
 }
 
@@ -294,7 +280,6 @@ impl NotificationSink for PythonNotificationSink {
     skip_from_py_object
 )]
 pub(crate) struct PyNotifyObserver {
-    component: ComponentRef,
     inner: Arc<NotifyObserver>,
 }
 
@@ -318,9 +303,7 @@ impl PyNotifyObserver {
         let observer =
             NotifyObserver::try_new(Arc::new(PythonNotificationSink { callback: sink }), policy)
                 .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let component = observer.descriptor().component;
         Ok(Self {
-            component,
             inner: Arc::new(observer),
         })
     }
@@ -340,12 +323,12 @@ impl PyNotifyObserver {
     /// Exact registered component identity.
     #[getter]
     fn component(&self) -> String {
-        self.component.id().to_string()
+        self.inner.descriptor().component.id().to_string()
     }
 }
 
 impl PyNotifyObserver {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
-        (self.component.clone(), self.inner.clone())
+        (self.inner.descriptor().component, self.inner.clone())
     }
 }

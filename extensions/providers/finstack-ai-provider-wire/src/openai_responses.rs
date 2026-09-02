@@ -66,6 +66,7 @@ struct WireUsage {
     total_tokens: Option<u64>,
 }
 
+#[derive(Default)]
 struct ToolAssembly {
     call_id: Option<String>,
     name: Option<String>,
@@ -141,7 +142,7 @@ impl OpenAiResponsesAssembly {
     }
 
     fn consume_text_delta(&mut self, event: &WireEvent) -> Vec<ModelStreamItem> {
-        let Some(text) = string_delta(event.delta.as_ref()) else {
+        let Some(text) = event.delta.as_ref().and_then(Value::as_str) else {
             return Vec::new();
         };
         if text.is_empty() {
@@ -168,15 +169,8 @@ impl OpenAiResponsesAssembly {
             return Ok(Vec::new());
         }
         let output_index = event.output_index.unwrap_or(self.next_stream_index);
-        let stream_index = self.allocate_stream_index(output_index)?;
-        let tool = self
-            .tools
-            .entry(stream_index)
-            .or_insert_with(|| ToolAssembly {
-                call_id: None,
-                name: None,
-                arguments: String::new(),
-            });
+        let stream_index = self.stream_index_for(output_index)?;
+        let tool = self.tool_mut(stream_index);
         if let Some(call_id) = item.call_id.filter(|value| !value.is_empty()) {
             tool.call_id = Some(call_id);
         }
@@ -199,8 +193,8 @@ impl OpenAiResponsesAssembly {
         &mut self,
         event: &WireEvent,
     ) -> Result<Vec<ModelStreamItem>, StreamNormError> {
-        let fragment = string_delta(event.delta.as_ref()).unwrap_or("");
-        let stream_index = self.stream_index_for(event.output_index)?;
+        let fragment = event.delta.as_ref().and_then(Value::as_str).unwrap_or("");
+        let stream_index = self.stream_index_for(event.output_index.unwrap_or(0))?;
         let tool = self.tool_mut(stream_index);
         tool.arguments.push_str(fragment);
         Ok(vec![ModelStreamItem::ToolCallDelta(ToolCallDelta {
@@ -215,7 +209,7 @@ impl OpenAiResponsesAssembly {
         &mut self,
         event: WireEvent,
     ) -> Result<Vec<ModelStreamItem>, StreamNormError> {
-        let stream_index = self.stream_index_for(event.output_index)?;
+        let stream_index = self.stream_index_for(event.output_index.unwrap_or(0))?;
         let tool = self.tool_mut(stream_index);
         if tool.arguments.is_empty() {
             let arguments = event.arguments.unwrap_or_else(|| "{}".to_owned());
@@ -271,7 +265,7 @@ impl OpenAiResponsesAssembly {
         Ok(items)
     }
 
-    fn allocate_stream_index(&mut self, output_index: u32) -> Result<u32, StreamNormError> {
+    fn stream_index_for(&mut self, output_index: u32) -> Result<u32, StreamNormError> {
         if let Some(index) = self.output_to_stream.get(&output_index) {
             return Ok(*index);
         }
@@ -284,22 +278,8 @@ impl OpenAiResponsesAssembly {
         Ok(stream_index)
     }
 
-    fn stream_index_for(&mut self, output_index: Option<u32>) -> Result<u32, StreamNormError> {
-        let output_index = output_index.unwrap_or(0);
-        if let Some(index) = self.output_to_stream.get(&output_index) {
-            return Ok(*index);
-        }
-        self.allocate_stream_index(output_index)
-    }
-
     fn tool_mut(&mut self, stream_index: u32) -> &mut ToolAssembly {
-        self.tools
-            .entry(stream_index)
-            .or_insert_with(|| ToolAssembly {
-                call_id: None,
-                name: None,
-                arguments: String::new(),
-            })
+        self.tools.entry(stream_index).or_default()
     }
 
     fn finish(
@@ -332,14 +312,12 @@ impl OpenAiResponsesAssembly {
                 .as_deref()
                 .ok_or_else(|| StreamNormError::response("tool call omitted its name"))?;
             let arguments = if tool.arguments.is_empty() {
-                RawJson::parse(b"{}").map_err(|_| {
-                    StreamNormError::response("tool-call arguments are invalid JSON")
-                })?
+                b"{}".as_slice()
             } else {
-                RawJson::parse(tool.arguments.as_bytes()).map_err(|_| {
-                    StreamNormError::response("tool-call arguments are invalid JSON")
-                })?
+                tool.arguments.as_bytes()
             };
+            let arguments = RawJson::parse(arguments)
+                .map_err(|_| StreamNormError::response("tool-call arguments are invalid JSON"))?;
             tool_calls.push(ModelToolCall {
                 name: Arc::from(name),
                 arguments,
@@ -363,12 +341,8 @@ impl OpenAiResponsesAssembly {
     }
 }
 
-fn string_delta(delta: Option<&Value>) -> Option<&str> {
-    delta.and_then(Value::as_str)
-}
-
 fn reasoning_delta(event: &WireEvent) -> Vec<ModelStreamItem> {
-    let Some(text) = string_delta(event.delta.as_ref()) else {
+    let Some(text) = event.delta.as_ref().and_then(Value::as_str) else {
         return Vec::new();
     };
     if text.is_empty() {

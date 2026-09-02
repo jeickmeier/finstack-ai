@@ -15,7 +15,7 @@ pub struct HostClock {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    now: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    now: js_sys::Function,
 }
 
 impl HostClock {
@@ -35,10 +35,7 @@ impl HostClock {
     #[cfg(target_arch = "wasm32")]
     pub fn from_js(adapter: wasm_bindgen::JsValue) -> Result<Self, HostFailure> {
         let now = crate::host::extract_method(&adapter, "now")?;
-        Ok(Self {
-            adapter,
-            now: std::rc::Rc::new(std::cell::RefCell::new(now)),
-        })
+        Ok(Self { adapter, now })
     }
 }
 
@@ -52,7 +49,7 @@ impl Clock for HostClock {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let method = self.now.borrow().clone();
+            let method = self.now.clone();
             let value = method
                 .call0(&self.adapter)
                 .map_err(|_| IdGenerationError::Source("JavaScript host failed".into()))?;
@@ -76,7 +73,7 @@ pub struct HostRandomSource {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    fill: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    fill: js_sys::Function,
 }
 
 impl HostRandomSource {
@@ -98,10 +95,7 @@ impl HostRandomSource {
     #[cfg(target_arch = "wasm32")]
     pub fn from_js(adapter: wasm_bindgen::JsValue) -> Result<Self, HostFailure> {
         let fill = crate::host::extract_method(&adapter, "fillBytes")?;
-        Ok(Self {
-            adapter,
-            fill: std::rc::Rc::new(std::cell::RefCell::new(fill)),
-        })
+        Ok(Self { adapter, fill })
     }
 }
 
@@ -121,7 +115,7 @@ impl RandomSource for HostRandomSource {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let method = self.fill.borrow().clone();
+            let method = self.fill.clone();
             let value = method
                 .call1(
                     &self.adapter,

@@ -23,7 +23,9 @@ use finstack_ai_kernel::{
     InteractionTerminalOutcome, OperationLocator, Sensitivity, StageCursor, ToolCallId,
 };
 
-use crate::coordinator::{CommitCoordinator, ModelDispatchSeed, ToolDispatchSeed};
+use crate::coordinator::{
+    CommitCoordinator, CommitCoordinatorError, CommitOutcome, ModelDispatchSeed, ToolDispatchSeed,
+};
 use crate::ids::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
 use crate::ports::model::{
     ApprovalGrantMode, CancellationSignal, LockedModelContextProfile,
@@ -496,5 +498,15 @@ pub(crate) fn validate_model_binding(
 pub(crate) fn id_source_error(_error: IdGenerationError) -> RunHandleError {
     RunHandleError::ModelSettlement {
         code: "model_settlement_id_source_failed",
+    }
+}
+
+/// Map one commit result, surfacing a post-commit dispatch fault as an error.
+pub(super) fn committed(
+    result: Result<CommitOutcome, CommitCoordinatorError>,
+) -> Result<(), RunHandleError> {
+    match result.map_err(RunHandleError::Coordinator)?.fault {
+        Some(fault) => Err(RunHandleError::Faulted { code: fault.code }),
+        None => Ok(()),
     }
 }

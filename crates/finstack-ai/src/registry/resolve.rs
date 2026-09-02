@@ -82,7 +82,6 @@ impl Registry {
     ) -> Result<ResolvedAgent, AgentBuildError> {
         let mut diagnostics = Vec::new();
         let mut selected = BTreeSet::new();
-        let mut configured = BTreeSet::new();
         Self::validate_repeated_bounds(&request)?;
 
         let model_id = self.resolve_target(
@@ -93,9 +92,6 @@ impl Registry {
             &mut diagnostics,
         )?;
         let model_configuration = request.configurations.get(&model_id).cloned();
-        if model_configuration.is_some() {
-            configured.insert(model_id.clone());
-        }
         let model = self
             .resolve_model(
                 &model_id,
@@ -116,9 +112,6 @@ impl Registry {
                 &mut diagnostics,
             )?;
             let configuration = request.configurations.get(&id).cloned();
-            if configuration.is_some() {
-                configured.insert(id.clone());
-            }
             toolsets.push(
                 self.resolve_toolset(
                     &id,
@@ -141,9 +134,6 @@ impl Registry {
                 &mut diagnostics,
             )?;
             let configuration = request.configurations.get(&id).cloned();
-            if configuration.is_some() {
-                configured.insert(id.clone());
-            }
             context_providers.push(
                 self.resolve_context_provider(
                     &id,
@@ -166,9 +156,6 @@ impl Registry {
                 &mut diagnostics,
             )?;
             let configuration = request.configurations.get(&id).cloned();
-            if configuration.is_some() {
-                configured.insert(id.clone());
-            }
             middleware.push(
                 self.resolve_middleware(
                     &id,
@@ -189,9 +176,6 @@ impl Registry {
             &mut diagnostics,
         )?;
         let store_configuration = request.configurations.get(&store_id).cloned();
-        if store_configuration.is_some() {
-            configured.insert(store_id.clone());
-        }
         let store = self
             .resolve_store(
                 &store_id,
@@ -212,9 +196,6 @@ impl Registry {
                 &mut diagnostics,
             )?;
             let configuration = request.configurations.get(&id).cloned();
-            if configuration.is_some() {
-                configured.insert(id.clone());
-            }
             observers.push(
                 self.resolve_observer(
                     &id,
@@ -230,7 +211,7 @@ impl Registry {
         for component in request
             .configurations
             .keys()
-            .filter(|component| !configured.contains(*component))
+            .filter(|component| !selected.contains(*component))
         {
             diagnostics.push(ResolutionDiagnostic {
                 kind: ResolutionDiagnosticKind::UnusedConfiguration,

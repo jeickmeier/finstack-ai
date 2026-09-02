@@ -155,19 +155,6 @@ impl SqliteWorkerStore {
 
     fn with_conn<T>(
         &self,
-        body: impl FnOnce(&Connection) -> Result<T, WorkerError>,
-    ) -> Result<T, WorkerError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_worker_lock_poisoned",
-            })?;
-        body(&conn)
-    }
-
-    fn with_conn_mut<T>(
-        &self,
         body: impl FnOnce(&mut Connection) -> Result<T, WorkerError>,
     ) -> Result<T, WorkerError> {
         let mut conn = self
@@ -288,58 +275,30 @@ fn query_wake_rows(
         })?;
     let rows = stmt
         .query_map(args, |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, Option<i64>>(6)?,
-                row.get::<_, Option<i64>>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, Option<String>>(9)?,
-                row.get::<_, Option<i64>>(10)?,
-                row.get::<_, i64>(11)?,
-            ))
+            Ok(RawWakeRow {
+                tenant_scope: row.get(0)?,
+                session_id: row.get(1)?,
+                lane_id: row.get(2)?,
+                run_id: row.get(3)?,
+                workflow_kind: row.get(4)?,
+                reason: row.get(5)?,
+                wake_at_unix_ms: row.get(6)?,
+                expires_at_unix_ms: row.get(7)?,
+                pending_id: row.get(8)?,
+                leased_by: row.get(9)?,
+                lease_expires_unix_ms: row.get(10)?,
+                attempts: row.get(11)?,
+            })
         })
         .map_err(|_| WorkerError::StoreUnavailable {
             code: "sqlite_wake_row",
         })?;
-    let mut out = Vec::new();
-    for row in rows {
-        let (
-            tenant_scope,
-            session_id,
-            lane_id,
-            run_id,
-            workflow_kind,
-            reason,
-            wake_at_unix_ms,
-            expires_at_unix_ms,
-            pending_id,
-            leased_by,
-            lease_expires_unix_ms,
-            attempts,
-        ) = row.map_err(|_| WorkerError::StoreIntegrity {
+    rows.map(|row| {
+        decode_wake_row(row.map_err(|_| WorkerError::StoreIntegrity {
             code: "sqlite_wake_row",
-        })?;
-        out.push(decode_wake_row(RawWakeRow {
-            tenant_scope,
-            session_id,
-            lane_id,
-            run_id,
-            workflow_kind,
-            reason,
-            wake_at_unix_ms,
-            expires_at_unix_ms,
-            pending_id,
-            leased_by,
-            lease_expires_unix_ms,
-            attempts,
-        })?);
-    }
-    Ok(out)
+        })?)
+    })
+    .collect()
 }
 
 const WAKE_SELECT: &str = "SELECT tenant_scope, session_id, lane_id, run_id, workflow_kind, reason,
@@ -454,7 +413,7 @@ impl WakeIndexStore for SqliteWorkerStore {
         lease_ttl_ms: u64,
     ) -> Result<bool, WorkerError> {
         let deadline = lease_deadline(now, lease_ttl_ms)?;
-        self.with_conn_mut(|conn| {
+        self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| WorkerError::StoreUnavailable {
@@ -495,7 +454,7 @@ impl WakeIndexStore for SqliteWorkerStore {
         lease_ttl_ms: u64,
     ) -> Result<bool, WorkerError> {
         let deadline = lease_deadline(now, lease_ttl_ms)?;
-        self.with_conn_mut(|conn| {
+        self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| WorkerError::StoreUnavailable {
@@ -652,7 +611,7 @@ impl FireStore for SqliteWorkerStore {
         started_session: SessionId,
     ) -> Result<FireStartOutcome, WorkerError> {
         let fire_count = i64_from_fire_count(fire_count)?;
-        self.with_conn_mut(|conn| {
+        self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| WorkerError::StoreUnavailable {
@@ -788,38 +747,57 @@ const INBOX_SELECT: &str = "SELECT tenant_scope, session_id, pending_id, kind, p
        payload_digest, received_unix_ms
 FROM finstack_workflow_worker_inbox";
 
-/// Decode one row from [`INBOX_SELECT`] into an [`InboxRow`].
-fn decode_inbox_row(
+/// Raw columns of one [`INBOX_SELECT`] row, as read from sqlite before
+/// decoding. The dead-letter table shares this prefix.
+struct RawInboxRow {
     tenant_scope: String,
-    session_id: &str,
+    session_id: String,
     pending_id: String,
-    kind: &str,
+    kind: String,
     payload: Vec<u8>,
-    payload_digest: &str,
+    payload_digest: String,
     received_unix_ms: i64,
-) -> Result<InboxRow, WorkerError> {
-    let session_id: SessionId = Id::parse(session_id).map_err(|_| WorkerError::StoreIntegrity {
-        code: "sqlite_inbox_row",
-    })?;
-    let received_at =
-        Timestamp::from_unix_ms(received_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
+}
+
+impl RawInboxRow {
+    fn read(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            tenant_scope: row.get(0)?,
+            session_id: row.get(1)?,
+            pending_id: row.get(2)?,
+            kind: row.get(3)?,
+            payload: row.get(4)?,
+            payload_digest: row.get(5)?,
+            received_unix_ms: row.get(6)?,
+        })
+    }
+}
+
+/// Decode one [`RawInboxRow`] into an [`InboxRow`].
+fn decode_inbox_row(raw: RawInboxRow) -> Result<InboxRow, WorkerError> {
+    let session_id: SessionId =
+        Id::parse(&raw.session_id).map_err(|_| WorkerError::StoreIntegrity {
             code: "sqlite_inbox_row",
         })?;
-    if payload.len() > MAX_INBOX_PAYLOAD_BYTES {
+    let received_at =
+        Timestamp::from_unix_ms(raw.received_unix_ms).map_err(|_| WorkerError::StoreIntegrity {
+            code: "sqlite_inbox_row",
+        })?;
+    if raw.payload.len() > MAX_INBOX_PAYLOAD_BYTES {
         return Err(WorkerError::StoreIntegrity {
             code: "sqlite_inbox_payload_size",
         });
     }
     let payload_digest =
-        Digest::from_hex(payload_digest).map_err(|_| WorkerError::StoreIntegrity {
+        Digest::from_hex(&raw.payload_digest).map_err(|_| WorkerError::StoreIntegrity {
             code: "sqlite_inbox_digest",
         })?;
     let row = InboxRow {
-        tenant_scope: tenant_scope.into(),
+        tenant_scope: raw.tenant_scope.into(),
         session_id,
-        pending_id: pending_id.into(),
-        kind: InboxKind::parse(kind)?,
-        payload: Arc::from(payload.into_boxed_slice()),
+        pending_id: raw.pending_id.into(),
+        kind: InboxKind::parse(&raw.kind)?,
+        payload: Arc::from(raw.payload.into_boxed_slice()),
         payload_digest,
         received_at,
     };
@@ -838,7 +816,7 @@ impl InboxStore for SqliteWorkerStore {
                 code: "inbox_digest",
             });
         }
-        self.with_conn_mut(|conn| {
+        self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| WorkerError::StoreUnavailable {
@@ -911,46 +889,15 @@ impl InboxStore for SqliteWorkerStore {
                 .map_err(|_| WorkerError::StoreUnavailable {
                     code: "sqlite_inbox_query",
                 })?;
-            let raw = stmt
-                .query_row(
-                    params![tenant_scope, session_id.to_canonical_string(), pending_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, Vec<u8>>(4)?,
-                            row.get::<_, String>(5)?,
-                            row.get::<_, i64>(6)?,
-                        ))
-                    },
-                )
-                .optional()
-                .map_err(|_| WorkerError::StoreUnavailable {
-                    code: "sqlite_inbox_query",
-                })?;
-            raw.map(
-                |(
-                    tenant_scope,
-                    session_id,
-                    pending_id,
-                    kind,
-                    payload,
-                    payload_digest,
-                    received_unix_ms,
-                )| {
-                    decode_inbox_row(
-                        tenant_scope,
-                        &session_id,
-                        pending_id,
-                        &kind,
-                        payload,
-                        &payload_digest,
-                        received_unix_ms,
-                    )
-                },
+            stmt.query_row(
+                params![tenant_scope, session_id.to_canonical_string(), pending_id],
+                RawInboxRow::read,
             )
+            .optional()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_inbox_query",
+            })?
+            .map(decode_inbox_row)
             .transpose()
         })
     }
@@ -968,26 +915,17 @@ impl InboxStore for SqliteWorkerStore {
                     code: "sqlite_inbox_query",
                 })?;
             let rows = stmt
-                .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Vec<u8>>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, i64>(6)?,
-                    ))
-                })
+                .query_map(
+                    params![i64::try_from(limit).unwrap_or(i64::MAX)],
+                    RawInboxRow::read,
+                )
                 .map_err(|_| WorkerError::StoreUnavailable {
                     code: "sqlite_inbox_query",
                 })?;
             rows.map(|row| {
-                let (tenant, session, pending, kind, payload, digest, received) =
-                    row.map_err(|_| WorkerError::StoreIntegrity {
-                        code: "sqlite_inbox_row",
-                    })?;
-                decode_inbox_row(tenant, &session, pending, &kind, payload, &digest, received)
+                decode_inbox_row(row.map_err(|_| WorkerError::StoreIntegrity {
+                    code: "sqlite_inbox_row",
+                })?)
             })
             .collect()
         })
@@ -1028,7 +966,7 @@ impl InboxStore for SqliteWorkerStore {
         reason_code: &str,
         rejected_at: Timestamp,
     ) -> Result<bool, WorkerError> {
-        self.with_conn_mut(|conn| {
+        self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| WorkerError::StoreUnavailable {
@@ -1096,13 +1034,7 @@ impl InboxStore for SqliteWorkerStore {
             let rows = stmt
                 .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Vec<u8>>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, i64>(6)?,
+                        RawInboxRow::read(row)?,
                         row.get::<_, String>(7)?,
                         row.get::<_, i64>(8)?,
                     ))
@@ -1111,18 +1043,15 @@ impl InboxStore for SqliteWorkerStore {
                     code: "sqlite_inbox_dead_letter_query",
                 })?;
             rows.map(|row| {
-                let (tenant, session, pending, kind, payload, digest, received, reason, rejected) =
-                    row.map_err(|_| WorkerError::StoreIntegrity {
-                        code: "sqlite_inbox_dead_letter_row",
-                    })?;
-                let response =
-                    decode_inbox_row(tenant, &session, pending, &kind, payload, &digest, received)?;
+                let (raw, reason, rejected) = row.map_err(|_| WorkerError::StoreIntegrity {
+                    code: "sqlite_inbox_dead_letter_row",
+                })?;
                 let rejected_at =
                     Timestamp::from_unix_ms(rejected).map_err(|_| WorkerError::StoreIntegrity {
                         code: "sqlite_inbox_dead_letter_row",
                     })?;
                 Ok(DeadLetterRow {
-                    response,
+                    response: decode_inbox_row(raw)?,
                     reason_code: reason.into(),
                     rejected_at,
                 })

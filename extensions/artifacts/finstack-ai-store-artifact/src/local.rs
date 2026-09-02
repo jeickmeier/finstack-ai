@@ -4,24 +4,13 @@
 //! its full scope digest. The logical key is hashed only for the physical
 //! filename and retained in the envelope, so collisions fail closed.
 
-#![warn(missing_docs)]
-#![forbid(unsafe_code)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable
-)]
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
-#![doc(test(attr(allow(clippy::expect_used))))]
-
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::driver::{
     ObjectDriver, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata, ObjectPage, ObjectRef,
-    ObjectScope, ObjectStoreLimits, PageToken, PutPayload, validate_object_metadata,
+    ObjectScope, ObjectStoreLimits, PageToken, validate_object_metadata,
 };
 use finstack_ai_kernel::Digest;
 use finstack_ai_runtime::Bytes;
@@ -29,9 +18,6 @@ use finstack_ai_runtime::ports::PortFuture;
 use sha2::{Digest as _, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-const BLOB_CONTENT_DOMAIN: &[u8] = b"blob-content";
-const BLOB_CONTENT_SCHEMA_VERSION: u32 = 1;
-const STREAM_CHUNK_BYTES: usize = 8 * 1024;
 const LIST_PAGE_SIZE: usize = 1000;
 const ENVELOPE_MAGIC: &[u8; 8] = b"FSAIOBJ\0";
 const ENVELOPE_VERSION: u16 = 1;
@@ -103,34 +89,6 @@ struct OpenEnvelope {
     header: EnvelopeHeader,
 }
 
-struct StreamingBlobDigest {
-    hasher: Sha256,
-    len: u64,
-}
-
-impl StreamingBlobDigest {
-    fn new() -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(b"finstack-ai");
-        hasher.update([0_u8]);
-        hasher.update(BLOB_CONTENT_DOMAIN);
-        hasher.update([0_u8]);
-        hasher.update(BLOB_CONTENT_SCHEMA_VERSION.to_be_bytes());
-        hasher.update([0_u8]);
-        Self { hasher, len: 0 }
-    }
-
-    fn update(&mut self, chunk: &[u8]) {
-        self.hasher.update(chunk);
-        self.len = self.len.saturating_add(chunk.len() as u64);
-    }
-
-    fn finish(self) -> Result<(Digest, u64), ObjectError> {
-        let bytes: [u8; 32] = self.hasher.finalize().into();
-        Ok((digest_from_bytes(bytes)?, self.len))
-    }
-}
-
 struct CleanupGuard {
     path: PathBuf,
     armed: bool,
@@ -162,7 +120,7 @@ impl ObjectDriver for LocalObjectStore {
         &self,
         scope: ObjectScope,
         key: ObjectKey,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let root = self.root.clone();
@@ -178,25 +136,6 @@ impl ObjectDriver for LocalObjectStore {
         Box::pin(async move { get_impl(&root, scope, key).await })
     }
 
-    fn get_to_file(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-        dest: PathBuf,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
-        let root = self.root.clone();
-        Box::pin(async move { get_to_file_impl(&root, scope, key, dest).await })
-    }
-
-    fn head(
-        &self,
-        scope: ObjectScope,
-        key: ObjectKey,
-    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
-        let root = self.root.clone();
-        Box::pin(async move { head_impl(&root, scope, key).await })
-    }
-
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>> {
         let root = self.root.clone();
         Box::pin(async move {
@@ -209,7 +148,7 @@ impl ObjectDriver for LocalObjectStore {
         &self,
         scope: ObjectScope,
         key: ObjectKey,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let root = self.root.clone();
@@ -230,7 +169,7 @@ impl ObjectDriver for LocalObjectStore {
         scope: ObjectScope,
         key: ObjectKey,
         expected: Digest,
-        content: PutPayload,
+        content: Bytes,
         metadata: ObjectMetadata,
     ) -> PortFuture<Result<ObjectRef, ObjectError>> {
         let root = self.root.clone();
@@ -391,7 +330,7 @@ async fn put_impl(
     limits: ObjectStoreLimits,
     scope: ObjectScope,
     key: ObjectKey,
-    content: PutPayload,
+    content: Bytes,
     metadata: ObjectMetadata,
 ) -> Result<ObjectRef, ObjectError> {
     validate_object_metadata(&metadata)?;
@@ -469,58 +408,25 @@ async fn put_impl(
 }
 
 async fn write_payload(
-    content: PutPayload,
+    content: Bytes,
     output: &mut tokio::fs::File,
     max_object_bytes: u64,
     key: &ObjectKey,
 ) -> Result<(Digest, u64), ObjectError> {
-    match content {
-        PutPayload::Bytes(bytes) => {
-            let length = u64::try_from(bytes.len()).map_err(|_| ObjectError::Io {
-                message: Arc::from("length_overflow"),
-            })?;
-            if length > max_object_bytes {
-                return Err(ObjectError::TooLarge {
-                    len: length,
-                    max: max_object_bytes,
-                });
-            }
-            output
-                .write_all(&bytes)
-                .await
-                .map_err(|error| io_error(&error, key.as_str()))?;
-            Ok((Digest::blob_content(&bytes), length))
-        }
-        PutPayload::File(source_path) => {
-            let mut source = tokio::fs::File::open(source_path)
-                .await
-                .map_err(|error| io_error(&error, key.as_str()))?;
-            let mut hasher = StreamingBlobDigest::new();
-            let mut buffer = [0_u8; STREAM_CHUNK_BYTES];
-            loop {
-                let read = source
-                    .read(&mut buffer)
-                    .await
-                    .map_err(|error| io_error(&error, key.as_str()))?;
-                if read == 0 {
-                    break;
-                }
-                let chunk = buffer.get(..read).unwrap_or(&[]);
-                hasher.update(chunk);
-                if hasher.len > max_object_bytes {
-                    return Err(ObjectError::TooLarge {
-                        len: hasher.len,
-                        max: max_object_bytes,
-                    });
-                }
-                output
-                    .write_all(chunk)
-                    .await
-                    .map_err(|error| io_error(&error, key.as_str()))?;
-            }
-            hasher.finish()
-        }
+    let length = u64::try_from(content.len()).map_err(|_| ObjectError::Io {
+        message: Arc::from("length_overflow"),
+    })?;
+    if length > max_object_bytes {
+        return Err(ObjectError::TooLarge {
+            len: length,
+            max: max_object_bytes,
+        });
     }
+    output
+        .write_all(&content)
+        .await
+        .map_err(|error| io_error(&error, key.as_str()))?;
+    Ok((Digest::blob_content(&content), length))
 }
 
 async fn open_envelope(
@@ -712,88 +618,6 @@ async fn get_impl(root: &Path, scope: ObjectScope, key: ObjectKey) -> Result<Byt
     Ok(Bytes::from(content))
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "ObjectDriver::get_to_file is test-only today")
-)]
-async fn get_to_file_impl(
-    root: &Path,
-    scope: ObjectScope,
-    key: ObjectKey,
-    dest: PathBuf,
-) -> Result<ObjectRef, ObjectError> {
-    let mut opened = open_envelope(root, &scope, &key).await?;
-    let parent = dest
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-    let temp = create_temp(&parent, key.as_str()).await?;
-    let mut guard = CleanupGuard::new(temp.path());
-    let clone = temp
-        .as_file()
-        .try_clone()
-        .map_err(|error| io_error(&error, key.as_str()))?;
-    let mut output = tokio::fs::File::from_std(clone);
-    let mut hasher = StreamingBlobDigest::new();
-    let mut remaining = opened.header.length;
-    let mut buffer = [0_u8; STREAM_CHUNK_BYTES];
-    while remaining > 0 {
-        let maximum = usize::try_from(remaining.min(STREAM_CHUNK_BYTES as u64))
-            .map_err(|_| corrupt("envelope_length_overflow"))?;
-        let read = opened
-            .file
-            .read(buffer.get_mut(..maximum).unwrap_or(&mut []))
-            .await
-            .map_err(|error| io_error(&error, key.as_str()))?;
-        if read == 0 {
-            return Err(corrupt("envelope_truncated"));
-        }
-        let chunk = buffer.get(..read).unwrap_or(&[]);
-        hasher.update(chunk);
-        output
-            .write_all(chunk)
-            .await
-            .map_err(|error| io_error(&error, key.as_str()))?;
-        remaining = remaining.saturating_sub(read as u64);
-    }
-    let (actual_digest, actual_length) = hasher.finish()?;
-    if actual_digest != opened.header.content_digest || actual_length != opened.header.length {
-        return Err(corrupt("content_digest_mismatch"));
-    }
-    output
-        .flush()
-        .await
-        .map_err(|error| io_error(&error, key.as_str()))?;
-    output
-        .sync_all()
-        .await
-        .map_err(|error| io_error(&error, key.as_str()))?;
-    drop(output);
-    let key_label = key.as_str().to_owned();
-    tokio::task::spawn_blocking(move || temp.persist(dest))
-        .await
-        .map_err(|_| ObjectError::Io {
-            message: Arc::from("destination_publish_worker_failed"),
-        })?
-        .map_err(|error| io_error(&error.error, &key_label))?;
-    guard.disarm();
-    sync_directory(&parent, key.as_str()).await?;
-    Ok(object_ref(opened.header))
-}
-
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "ObjectDriver::head is test-only today")
-)]
-async fn head_impl(
-    root: &Path,
-    scope: ObjectScope,
-    key: ObjectKey,
-) -> Result<ObjectRef, ObjectError> {
-    Ok(object_ref(open_envelope(root, &scope, &key).await?.header))
-}
-
 async fn delete_impl(root: &Path, scope: ObjectScope, key: ObjectKey) -> Result<(), ObjectError> {
     let scope_digest = scope.digest()?;
     let path = envelope_path(root, &scope_digest, &key);
@@ -919,7 +743,7 @@ mod tests {
                 .put(
                     scope.clone(),
                     ObjectKey::try_new(key).expect("key"),
-                    PutPayload::Bytes(Bytes::copy_from_slice(body)),
+                    Bytes::copy_from_slice(body),
                     test_metadata(),
                 )
                 .await
@@ -951,7 +775,7 @@ mod tests {
             .put(
                 scope.clone(),
                 key.clone(),
-                PutPayload::Bytes(Bytes::from(vec![7_u8; 32])),
+                Bytes::from(vec![7_u8; 32]),
                 test_metadata(),
             )
             .await
@@ -967,46 +791,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_get_to_file_preserves_existing_destination() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let store = LocalObjectStore::try_new(dir.path().join("store")).expect("store");
-        let scope = scope("tenant-a");
-        let key = ObjectKey::try_new("docs/a.bin").expect("key");
-        store
-            .put(
-                scope.clone(),
-                key.clone(),
-                PutPayload::Bytes(Bytes::from_static(b"payload")),
-                test_metadata(),
-            )
-            .await
-            .expect("put");
-        let path = envelope_path(
-            &dir.path().join("store"),
-            &scope.digest().expect("digest"),
-            &key,
-        );
-        let mut bytes = std::fs::read(&path).expect("read envelope");
-        *bytes.last_mut().expect("payload byte") ^= 0xff;
-        std::fs::write(path, bytes).expect("tamper");
-        let destination = dir.path().join("destination.bin");
-        std::fs::write(&destination, b"keep-me").expect("seed destination");
-
-        assert_eq!(
-            store
-                .get_to_file(scope, key, destination.clone())
-                .await
-                .expect_err("must fail")
-                .code(),
-            crate::driver::OBJECT_INTEGRITY_FAILURE
-        );
-        assert_eq!(
-            std::fs::read(destination).expect("read destination"),
-            b"keep-me"
-        );
-    }
-
-    #[tokio::test]
     async fn concurrent_overwrite_reads_only_complete_envelopes() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(
@@ -1017,12 +801,7 @@ mod tests {
         let old = Bytes::from(vec![0x55_u8; 128 * 1024]);
         let new = Bytes::from(vec![0xaa_u8; 128 * 1024]);
         store
-            .put(
-                scope.clone(),
-                key.clone(),
-                PutPayload::Bytes(old.clone()),
-                test_metadata(),
-            )
+            .put(scope.clone(), key.clone(), old.clone(), test_metadata())
             .await
             .expect("seed");
 
@@ -1042,7 +821,7 @@ mod tests {
                     .put(
                         writer_scope.clone(),
                         writer_key.clone(),
-                        PutPayload::Bytes(body),
+                        body,
                         test_metadata(),
                     )
                     .await
@@ -1071,7 +850,7 @@ mod tests {
                 .put(
                     scope.clone(),
                     key.clone(),
-                    PutPayload::Bytes(Bytes::from_static(b"payload")),
+                    Bytes::from_static(b"payload"),
                     test_metadata(),
                 )
                 .await
@@ -1085,7 +864,7 @@ mod tests {
             }
             std::fs::write(path, bytes).expect("write");
             assert_eq!(
-                store.head(scope, key).await.expect_err("must fail").code(),
+                store.get(scope, key).await.expect_err("must fail").code(),
                 crate::driver::OBJECT_INTEGRITY_FAILURE
             );
         }

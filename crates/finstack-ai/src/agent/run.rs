@@ -20,10 +20,6 @@ use crate::ChildRunPolicy;
 pub(super) struct AgentRunInner {
     pub(super) locator: OperationLocator,
     pub(super) store: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
-    #[cfg_attr(
-        all(feature = "wasm-host", not(feature = "native-tokio")),
-        allow(dead_code)
-    )]
     pub(super) child_runs: ChildRunPolicy,
     pub(super) cancellation_initiator: CancellationInitiator,
     pub(super) handle: Mutex<Option<Result<RunHandle, AgentRunError>>>,
@@ -34,20 +30,8 @@ pub(super) struct AgentRunInner {
     pub(super) events_fault: OnceLock<AgentRunError>,
     pub(super) cancellation: Mutex<CancellationState>,
     pub(super) cancellation_ready: driver::Signal,
-    #[cfg_attr(
-        all(feature = "wasm-host", not(feature = "native-tokio")),
-        allow(dead_code)
-    )]
     pub(super) children: Mutex<Vec<AgentRun>>,
-    #[cfg_attr(
-        all(feature = "wasm-host", not(feature = "native-tokio")),
-        allow(dead_code)
-    )]
     pub(super) remote_invoker: Mutex<Option<Arc<dyn finstack_ai_runtime::child::AgentInvoker>>>,
-    #[cfg_attr(
-        all(feature = "wasm-host", not(feature = "native-tokio")),
-        allow(dead_code)
-    )]
     pub(super) remote_child: Option<finstack_ai_kernel::ChildRunLocator>,
 }
 
@@ -181,10 +165,6 @@ impl AgentRun {
 
     /// Borrow the journal store that owns this run.
     #[must_use]
-    #[cfg_attr(
-        all(feature = "wasm-host", not(feature = "native-tokio")),
-        allow(dead_code)
-    )]
     pub(crate) fn journal_store(
         &self,
     ) -> &Arc<dyn finstack_ai_runtime::ports::journal::JournalStore> {
@@ -274,7 +254,7 @@ impl AgentRun {
         let handle = self.runtime_handle().await?;
         submit(
             &handle,
-            NativeIds::interaction_resolve_environment()?,
+            NativeIds::environment(2, 2, 0, 0, 0, 0)?,
             KernelInput::InteractionSettled(InteractionSettled::Resolved(resolution)),
         )
         .await
@@ -474,13 +454,7 @@ impl AgentRun {
         }
     }
 
-    #[cfg(feature = "native-tokio")]
-    pub(super) async fn submit_cancellation(&self) -> Result<(), AgentRunError> {
-        self.submit_cancellation_with(self.inner.cancellation_initiator.clone())
-            .await
-    }
-
-    async fn submit_cancellation_with(
+    pub(super) async fn submit_cancellation_with(
         &self,
         initiator: CancellationInitiator,
     ) -> Result<(), AgentRunError> {

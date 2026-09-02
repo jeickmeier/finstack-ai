@@ -13,7 +13,6 @@ publish = false
 [dependencies]
 finstack-ai = { workspace = true, features = ["native-tokio"] }
 finstack-ai-kernel = { workspace = true }
-finstack-ai-provider-openai = { workspace = true }
 finstack-ai-provider-ollama = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-tools-calculator = { workspace = true }

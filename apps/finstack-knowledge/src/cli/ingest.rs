@@ -16,6 +16,7 @@ use finstack_ai_tools_document::parser::{DocumentFormat, DocumentLimits};
 
 use super::ask::AskOutcome;
 use super::render::EventSink;
+use crate::config::compose_error;
 use crate::{
     KnowledgeConfig, KnowledgeError, build_agent_with_stores, model_name, open_artifact_store,
     open_journal, security,
@@ -83,21 +84,15 @@ async fn run_ingest_inner(
         },
     )
     .await
-    .map_err(compose)?;
+    .map_err(compose_error)?;
 
     let (session, lane, created) = super::session_lane(journal, session).await?;
 
     let mut request =
         AgentRunRequest::try_new(model_name(config)?, INGEST_INSTRUCTION, security(os_user)?)
-            .map_err(compose)?;
+            .map_err(compose_error)?;
     request.attachments = std::sync::Arc::from([AttachmentInput { artifact }]);
-
-    let run = lane.run(&agent, request).map_err(run_error)?;
-    while let Some(batch) = run.next_event_batch().await.map_err(run_error)? {
-        sink.on_events(batch.events());
-    }
-    let output = run.result().await.map_err(run_error)?;
-    sink.finish(&output.text());
+    super::run_to_sink(&lane, &agent, request, sink).await?;
 
     Ok(AskOutcome {
         session_id: session.session_id().to_string(),
@@ -129,16 +124,4 @@ fn media_type_for(path: &Path) -> &'static str {
         .and_then(|extension| extension.to_str())
         .and_then(DocumentFormat::media_type_for_extension)
         .unwrap_or("application/octet-stream")
-}
-
-fn compose(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Compose {
-        reason: error.to_string(),
-    }
-}
-
-fn run_error(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Run {
-        reason: error.to_string(),
-    }
 }

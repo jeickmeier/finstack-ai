@@ -409,8 +409,7 @@ fn embedder_observer(
 #[tokio::test]
 async fn observer_drains_captured_candidates_into_the_embedding_index() {
     let store = Arc::new(InProcessMemoryStore::new());
-    let embedder: Arc<dyn TextEmbedder> =
-        Arc::new(HashEmbedder::try_new(64).expect("embedder"));
+    let embedder: Arc<dyn TextEmbedder> = Arc::new(HashEmbedder::try_new(64).expect("embedder"));
     let observer = embedder_observer(store.clone(), embedder);
 
     let batch: Arc<[RunEvent]> =

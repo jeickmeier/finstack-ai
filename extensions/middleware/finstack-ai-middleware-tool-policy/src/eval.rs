@@ -23,55 +23,30 @@ pub(crate) enum PolicyVerdict {
     Fail { reason: &'static str },
 }
 
-/// Compute the effective role-allowlist allow set, with the child-depth
-/// gate's restricted set subtracted if it fires. Used by [`narrow_universe`]'s
-/// role branch, which both `evaluate_before_model` and
-/// `evaluate_before_tool_batch` go through.
-///
-/// Role allowlist: effective allow = `default_allowed ∪ ⋃(roles[r] for r in
-/// granted_roles)`. Roles come from `ctx.run.authorization.roles`; unknown
-/// granted roles are ignored (they contribute nothing). Returns `None` when
-/// no role allowlist is configured.
-///
-/// Child-depth gate: if `relation_depth >= max_depth`, `restricted` is
-/// subtracted from the allow set. Below the threshold (or unconfigured) →
-/// no subtraction.
-pub(crate) fn compute_effective_allow(
-    config: &ToolPolicyConfig,
-    granted_roles: &[Arc<str>],
-    relation_depth: u16,
-) -> Option<BTreeSet<ToolId>> {
-    let role_allowlist = config.role_allowlist()?;
-    let mut effective_allow = role_allowlist.default_allowed().clone();
-    for role in granted_roles {
-        if let Some(tools) = role_allowlist.roles().get(role) {
-            effective_allow.extend(tools.iter().cloned());
+impl PolicyVerdict {
+    /// `Identity` when `retain` equals the full universe (keeps the fold
+    /// identity-clean); otherwise `Retain`.
+    fn narrowed(universe: &BTreeSet<ToolId>, retain: BTreeSet<ToolId>) -> Self {
+        if retain == *universe {
+            Self::Identity
+        } else {
+            Self::Retain(retain)
         }
     }
-
-    if let Some(gate) = config.child_depth()
-        && relation_depth >= gate.max_depth()
-    {
-        for tool in gate.restricted() {
-            effective_allow.remove(tool);
-        }
-    }
-
-    Some(effective_allow)
 }
 
 /// ToolId-set rules only (role allowlist + child-depth gate), applied to a
 /// known universe of visible tools. Pure; used by both stages.
 ///
-/// Role allowlist: deny-by-default — a tool not in
-/// [`compute_effective_allow`]'s result is dropped. No role rule configured
-/// → no narrowing from this rule.
+/// Role allowlist: deny-by-default — effective allow = `default_allowed ∪
+/// ⋃(roles[r] for r in granted_roles)`; a tool outside it is dropped. Roles
+/// come from `ctx.run.authorization.roles`; unknown granted roles are
+/// ignored (they contribute nothing). No role rule configured → no
+/// narrowing from this rule.
 ///
-/// Child-depth gate: when no role allowlist is configured, the gate's
-/// `restricted` set (if it fires) is still subtracted directly from the
-/// universe — [`compute_effective_allow`] returns `None` in that case, so
-/// its own gate handling never runs; this preserves depth-gate-only
-/// narrowing regardless of role-allowlist configuration.
+/// Child-depth gate: if `relation_depth >= max_depth`, `restricted` is
+/// subtracted, whether or not a role allowlist is configured. Below the
+/// threshold (or unconfigured) → no subtraction.
 ///
 /// Returns `universe ∩ (rule constraints)`; leaves never "add" tools
 /// (narrowing is monotone — the fold intersects anyway).
@@ -83,12 +58,20 @@ pub(crate) fn narrow_universe(
 ) -> BTreeSet<ToolId> {
     let mut result = universe.clone();
 
-    if let Some(effective_allow) = compute_effective_allow(config, granted_roles, relation_depth) {
+    if let Some(allowlist) = &config.role_allowlist {
+        let mut effective_allow = allowlist.default_allowed.clone();
+        for role in granted_roles {
+            if let Some(tools) = allowlist.roles.get(role) {
+                effective_allow.extend(tools.iter().cloned());
+            }
+        }
         result.retain(|tool| effective_allow.contains(tool));
-    } else if let Some(gate) = config.child_depth()
-        && relation_depth >= gate.max_depth()
+    }
+
+    if let Some(gate) = &config.child_depth
+        && relation_depth >= gate.max_depth
     {
-        for tool in gate.restricted() {
+        for tool in &gate.restricted {
             result.remove(tool);
         }
     }
@@ -132,9 +115,6 @@ pub(crate) fn narrow_universe(
 /// messages, each matched against at most `MAX_PATTERNS` (64) patterns of
 /// at most `MAX_PATTERN_BYTES` (256) bytes.
 ///
-/// Returns `PolicyVerdict::Identity` when the final retain set equals the
-/// full tool universe (keeps the fold identity-clean); otherwise
-/// `PolicyVerdict::Retain`.
 pub(crate) fn evaluate_before_model(
     config: &ToolPolicyConfig,
     input: &BeforeModelInput,
@@ -149,7 +129,7 @@ pub(crate) fn evaluate_before_model(
         .collect();
     let mut retain = narrow_universe(config, &universe, granted_roles, relation_depth);
 
-    if let Some(budget) = config.write_budget() {
+    if let Some(budget) = &config.write_budget {
         // One pre-pass over `input.request.tools` to classify write-class
         // tools, instead of re-scanning `tools` once per call (O(calls×tools))
         // and then again to rebuild the id set.
@@ -175,28 +155,28 @@ pub(crate) fn evaluate_before_model(
             .filter(|tool_name| write_model_names.contains(tool_name))
             .count();
         let write_call_count = u64::try_from(write_call_count).unwrap_or(u64::MAX);
-        if write_call_count >= u64::from(budget.max_write_calls()) {
+        if write_call_count >= u64::from(budget.max_write_calls) {
             retain.retain(|id| !write_tool_ids.contains(id));
         }
     }
 
-    if let Some(jailbreak) = config.jailbreak() {
+    if let Some(jailbreak) = &config.jailbreak {
         'scan: for message in input.request.messages.iter() {
             let triggered = match message.role() {
                 MessageRole::User => message.content().iter().any(|block| match block {
-                    ContentBlock::Text(text) => contains_pattern(text.text(), jailbreak.patterns()),
+                    ContentBlock::Text(text) => contains_pattern(text.text(), &jailbreak.patterns),
                     _ => false,
                 }),
                 MessageRole::Tool => message.content().iter().any(|block| match block {
                     ContentBlock::ToolResult(result) => result.content().iter().any(|block| {
-                        matches!(block, ContentBlock::Text(text) if contains_pattern(text.text(), jailbreak.patterns()))
+                        matches!(block, ContentBlock::Text(text) if contains_pattern(text.text(), &jailbreak.patterns))
                     }),
                     _ => false,
                 }),
                 MessageRole::System | MessageRole::Developer | MessageRole::Assistant => false,
             };
             if triggered {
-                match jailbreak.action() {
+                match &jailbreak.action {
                     JailbreakAction::Fail => {
                         return PolicyVerdict::Fail {
                             reason: TOOL_POLICY_JAILBREAK_TRIGGERED,
@@ -211,11 +191,7 @@ pub(crate) fn evaluate_before_model(
         }
     }
 
-    if retain == universe {
-        PolicyVerdict::Identity
-    } else {
-        PolicyVerdict::Retain(retain)
-    }
+    PolicyVerdict::narrowed(&universe, retain)
 }
 
 fn contains_pattern(text: &str, patterns: &[Arc<str>]) -> bool {
@@ -255,10 +231,6 @@ fn contains_pattern(text: &str, patterns: &[Arc<str>]) -> bool {
 /// conservatively as writes. A batch that would exceed the cap fails before
 /// dispatch. Jailbreak scanning stays `before_model`-only because this input
 /// deliberately carries no user/tool message text.
-///
-/// Returns `PolicyVerdict::Identity` when the narrowed retain set equals the
-/// carried universe (keeps the fold identity-clean); otherwise
-/// `PolicyVerdict::Retain`.
 pub(crate) fn evaluate_before_tool_batch(
     config: &ToolPolicyConfig,
     input: &BeforeToolBatchInput,
@@ -267,7 +239,7 @@ pub(crate) fn evaluate_before_tool_batch(
 ) -> PolicyVerdict {
     let universe: BTreeSet<ToolId> = input.tools.iter().map(|tool| tool.id.clone()).collect();
     let retain = narrow_universe(config, &universe, granted_roles, relation_depth);
-    if let Some(budget) = config.write_budget() {
+    if let Some(budget) = &config.write_budget {
         let read_only_names = input
             .tools
             .iter()
@@ -282,15 +254,11 @@ pub(crate) fn evaluate_before_tool_batch(
         let attempted = input
             .prior_write_tool_calls
             .saturating_add(u64::try_from(current_writes).unwrap_or(u64::MAX));
-        if attempted > u64::from(budget.max_write_calls()) {
+        if attempted > u64::from(budget.max_write_calls) {
             return PolicyVerdict::Fail {
                 reason: TOOL_POLICY_WRITE_BUDGET_EXCEEDED,
             };
         }
     }
-    if retain == universe {
-        PolicyVerdict::Identity
-    } else {
-        PolicyVerdict::Retain(retain)
-    }
+    PolicyVerdict::narrowed(&universe, retain)
 }

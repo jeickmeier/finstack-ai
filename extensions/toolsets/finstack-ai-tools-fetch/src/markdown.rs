@@ -558,10 +558,8 @@ fn exceeds_safe_nesting_depth(html: &str) -> bool {
 
 /// Outcome of one measurement pass. Exposed (rather than folded into a
 /// `bool`) so the tests can assert the exact depth at the cap boundary and
-/// that the conservative `saw_unexpected_shape` path never fires.
-// `depth` and `saw_unexpected_shape` exist for the tests' benefit -- they
-// pin the depth convention at the cap boundary and the never-fires claim
-// about the parentless-sibling fallback. Production only needs `exceeds`.
+/// that the conservative `saw_unexpected_shape` path never fires; production
+/// only needs `exceeds`.
 #[cfg_attr(not(test), allow(dead_code))]
 struct Measurement {
     /// Whether the document's real nesting depth exceeds [`MAX_SCAN_DEPTH`].

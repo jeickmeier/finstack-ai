@@ -8,7 +8,10 @@ use finstack_ai_kernel::{
 };
 use serde_json::Value;
 
-use crate::fixtures::public_api::{Expect, PublicApiFixture, PublicApiFixtureError};
+use crate::fixtures::public_api::{
+    PublicApiFixture, PublicApiFixtureError, assert_error_code, fail, from_json_field,
+    from_json_value, require_input,
+};
 
 /// Execute a record-and-event fixture baseline public-rust-api fixture subject.
 pub(crate) fn run_pr008_subject(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
@@ -24,7 +27,7 @@ pub(crate) fn run_pr008_subject(fixture: &PublicApiFixture) -> Result<(), Public
 }
 
 fn run_run_accepted(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
-    let input = require_input_value(fixture)?;
+    let input = require_input(fixture)?;
     match fixture.operation.as_str() {
         "parse" => match from_json_value::<RunAccepted>(&input) {
             Ok(value) => {
@@ -77,7 +80,7 @@ fn run_run_accepted(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureEr
 }
 
 fn run_effect_requested(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
-    let input = require_input_value(fixture)?;
+    let input = require_input(fixture)?;
     match fixture.operation.as_str() {
         "construct" => {
             let effect_id = parse_effect_id(&input)?;
@@ -123,7 +126,7 @@ fn run_effect_requested(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtu
 }
 
 fn run_record_draft(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
-    let input = require_input_value(fixture)?;
+    let input = require_input(fixture)?;
     match fixture.operation.as_str() {
         "parse" => match from_json_value::<RecordDraft>(&input) {
             Ok(_) => {
@@ -141,7 +144,7 @@ fn run_record_draft(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureEr
 }
 
 fn run_append_request(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
-    let input = require_input_value(fixture)?;
+    let input = require_input(fixture)?;
     match fixture.operation.as_str() {
         "construct_count" => {
             let count = usize::try_from(
@@ -187,7 +190,7 @@ fn run_append_request(fixture: &PublicApiFixture) -> Result<(), PublicApiFixture
 }
 
 fn run_run_event(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
-    let input = require_input_value(fixture)?;
+    let input = require_input(fixture)?;
     if fixture.operation == "parse" {
         return run_run_event_parse(fixture, &input);
     }
@@ -303,7 +306,7 @@ fn run_run_event_parse(
 }
 
 fn run_interaction_cancelled(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
-    let input = require_input_value(fixture)?;
+    let input = require_input(fixture)?;
     match fixture.operation.as_str() {
         "parse" => match from_json_value::<InteractionCancelled>(&input) {
             Ok(value) => {
@@ -347,44 +350,6 @@ fn parse_uuid_field<T, E: std::fmt::Display>(
         .and_then(Value::as_str)
         .ok_or_else(|| fail(format!("missing {field}")))?;
     parse(text).map_err(|error| fail(error.to_string()))
-}
-
-fn require_input_value(fixture: &PublicApiFixture) -> Result<Value, PublicApiFixtureError> {
-    fixture
-        .input
-        .clone()
-        .ok_or_else(|| fail("fixture input required"))
-}
-
-fn from_json_field<T: serde::de::DeserializeOwned>(
-    input: &Value,
-    field: &str,
-) -> Result<T, PublicApiFixtureError> {
-    let value = input
-        .get(field)
-        .ok_or_else(|| fail(format!("missing {field}")))?;
-    from_json_value(value)
-}
-
-fn from_json_value<T: serde::de::DeserializeOwned>(
-    value: &Value,
-) -> Result<T, PublicApiFixtureError> {
-    // Round-trip through text so `RawJson` human-readable deserialization works.
-    let text = serde_json::to_string(value).map_err(|error| fail(error.to_string()))?;
-    serde_json::from_str(&text).map_err(|error| fail(error.to_string()))
-}
-
-fn assert_error_code(expect: &Expect, actual: &str) -> Result<(), PublicApiFixtureError> {
-    if expect.ok {
-        return Err(fail(format!("expected success, got error {actual}")));
-    }
-    let Some(expected) = expect.error_code.as_deref() else {
-        return Err(fail("expect.error_code required for failures"));
-    };
-    if expected != actual {
-        return Err(fail(format!("error_code mismatch: {actual} != {expected}")));
-    }
-    Ok(())
 }
 
 fn classify_run_error(message: &str) -> &'static str {
@@ -435,8 +400,4 @@ fn classify_interaction_error(message: &str) -> &'static str {
     } else {
         "invalid_json"
     }
-}
-
-fn fail(message: impl Into<String>) -> PublicApiFixtureError {
-    PublicApiFixtureError::Failed(message.into())
 }

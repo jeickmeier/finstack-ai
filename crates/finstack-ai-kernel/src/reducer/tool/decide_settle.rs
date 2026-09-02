@@ -2,7 +2,7 @@
 
 use super::super::allocated_ids::validate_allocated_ids;
 use super::super::capacity::{self, StateGrowth};
-use super::super::decide::{draft_for_state, next_sequence, reject_terminal};
+use super::super::decide::{decision_for, reject_terminal};
 use super::super::decision::{Decision, KernelError};
 use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ToolBatchSettled, ToolSettlement,
@@ -261,12 +261,7 @@ fn settle_normalized_tool(
             bodies.push(RecordBody::EffectDeferred(value.clone()));
             let requirements = requirements_for_bodies(&bodies, 0, 0, 0)?;
             validate_allocated_ids(&env.ids, requirements)?;
-            return Ok(Decision {
-                expected_sequence: next_sequence(state)?,
-                records: draft_for_state(state, env, bodies)?,
-                actions: Vec::new(),
-                diagnostics: Vec::new(),
-            });
+            return decision_for(state, env, bodies, Vec::new());
         }
     }
 
@@ -285,10 +280,5 @@ fn settle_normalized_tool(
     )?;
     let requirements = requirements_for_bodies(&bodies, followups.messages, 0, 0)?;
     validate_allocated_ids(&env.ids, requirements)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records: draft_for_state(state, env, bodies)?,
-        actions: followups.actions,
-        diagnostics: Vec::new(),
-    })
+    decision_for(state, env, bodies, followups.actions)
 }

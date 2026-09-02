@@ -455,7 +455,7 @@ impl RunLimits {
             && opt_le(self.max_context_bytes, child.max_context_bytes)
             && opt_le(self.max_output_bytes, child.max_output_bytes)
             && opt_le(self.max_retries, child.max_retries)
-            && opt_duration_le(self.max_wall_time, child.max_wall_time)
+            && opt_le(self.max_wall_time, child.max_wall_time)
             && cost_le(self.max_cost.as_ref(), child.max_cost.as_ref())
             && counters_attenuated(&self.extension_counters, &child.extension_counters)
     }
@@ -512,7 +512,7 @@ impl<'de> Deserialize<'de> for RunLimits {
         }
 
         let wire = Wire::deserialize(deserializer)?;
-        let limits = Self {
+        Ok(Self {
             max_model_requests: wire.max_model_requests,
             max_turns: wire.max_turns,
             max_tool_calls: wire.max_tool_calls,
@@ -525,9 +525,7 @@ impl<'de> Deserialize<'de> for RunLimits {
             max_wall_time: wire.max_wall_time,
             max_cost: wire.max_cost,
             extension_counters: wire.extension_counters.into_inner(),
-        };
-        limits.validate().map_err(de::Error::custom)?;
-        Ok(limits)
+        })
     }
 }
 
@@ -575,14 +573,6 @@ impl LimitsError {
 fn opt_le<T: PartialOrd>(parent: Option<T>, child: Option<T>) -> bool {
     match (parent, child) {
         (Some(p), Some(c)) => c <= p,
-        (None, _) => true,
-        (Some(_), None) => false,
-    }
-}
-
-fn opt_duration_le(parent: Option<Duration>, child: Option<Duration>) -> bool {
-    match (parent, child) {
-        (Some(p), Some(c)) => c.as_millis() <= p.as_millis(),
         (None, _) => true,
         (Some(_), None) => false,
     }

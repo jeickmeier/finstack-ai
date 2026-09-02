@@ -1,15 +1,10 @@
 //! `openrouter_generate_speech` handler.
 
-use std::sync::Arc;
-
-use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
-use reqwest::header::HeaderValue;
 use serde::Deserialize;
 
 use crate::http::{
-    DeliveredMedia, deliver_media, inline_http_read_cap, invalid_arguments, parse_arguments,
-    send_bytes,
+    DeliveredMedia, Route, deliver_media, invalid_arguments, parse_arguments, send_bytes,
 };
 
 pub(crate) const SPEECH_TOOL_ID: &str = "finstack.tools.openrouter_generate_speech";
@@ -26,15 +21,8 @@ struct SpeechArguments {
     response_format: Option<String>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_speech(
-    client: &reqwest::Client,
-    authorization: &HeaderValue,
-    referer: Option<&str>,
-    title: Option<&str>,
-    endpoint: &str,
-    max_result_bytes: usize,
-    store: Option<&Arc<dyn ArtifactStore>>,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<DeliveredMedia, ToolError> {
@@ -60,25 +48,14 @@ pub(crate) async fn handle_speech(
         map.insert("voice".into(), serde_json::Value::String(voice));
     }
     let (bytes, content_type) = send_bytes(
-        client,
-        authorization,
-        referer,
-        title,
+        route,
         reqwest::Method::POST,
-        &format!("{endpoint}/api/v1/audio/speech"),
+        &format!("{}/api/v1/audio/speech", route.endpoint),
         Some(&body),
         ctx,
-        inline_http_read_cap(max_result_bytes, store.is_some(), true),
+        route.inline_http_read_cap(true),
     )
     .await?;
     let media_type = content_type.unwrap_or_else(|| "audio/mpeg".to_owned());
-    deliver_media(
-        bytes,
-        &media_type,
-        "openrouter-speech",
-        store,
-        ctx,
-        max_result_bytes,
-    )
-    .await
+    deliver_media(route, bytes, &media_type, "openrouter-speech", ctx).await
 }

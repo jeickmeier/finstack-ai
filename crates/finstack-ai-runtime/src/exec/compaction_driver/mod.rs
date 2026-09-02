@@ -26,6 +26,8 @@ use crate::model::{
     Model, ModelCallContext, ModelRequest, ModelResponse, ModelStreamAssembler, ModelStreamLimits,
     ModelTerminal, validate_model_request,
 };
+#[cfg(any(test, all(feature = "wasm-host", not(feature = "native-tokio"))))]
+use crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED;
 use crate::ports::model::{CancellationSignal, LockedModelContextProfile, RunCallContext};
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
@@ -87,7 +89,7 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
                 configuration_digest: finstack_ai_kernel::Digest::raw_json(b"compaction-summary"),
                 recovery: finstack_ai_kernel::InvocationRecovery::Reconcile,
             });
-    let env = compaction_request_env(sources)?;
+    let env = compaction_env(sources, true)?;
     coordinator
         .submit(
             env,
@@ -142,12 +144,10 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
     let seed = coordinator
         .stage_dispatch_seed()
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
-    let authorization =
-        seed.compaction_authorization
-            .as_ref()
-            .ok_or_else(|| RunHandleError::Middleware {
-                code: Arc::from(crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED),
-            })?;
+    let authorization = seed
+        .compaction_authorization
+        .as_ref()
+        .ok_or_else(|| stage_error(COMPACTION_MODEL_NOT_AUTHORIZED))?;
     // Recheck the accepted lock. Never fabricate resume model/digest/sensitivity:
     // prefer the committed component when present; otherwise the lock binds the
     // exact unversioned model that was authorized at commit time.
@@ -157,17 +157,13 @@ pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
             Some(invocation.version),
         );
         if authorization.allowed_model() != &model_ref {
-            return Err(RunHandleError::Middleware {
-                code: Arc::from(crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED),
-            });
+            return Err(stage_error(COMPACTION_MODEL_NOT_AUTHORIZED));
         }
         model_ref
     } else {
         let model_ref = authorization.allowed_model().clone();
         if model_ref.version().is_some() {
-            return Err(RunHandleError::Middleware {
-                code: Arc::from(crate::ports::middleware::COMPACTION_MODEL_NOT_AUTHORIZED),
-            });
+            return Err(stage_error(COMPACTION_MODEL_NOT_AUTHORIZED));
         }
         model_ref
     };
@@ -305,7 +301,7 @@ async fn submit_compaction_settlement<C: Clock, R: RandomSource>(
     .map_err(|_| RunHandleError::ModelSettlement {
         code: "model_assistant_message_invalid",
     })?;
-    let env = compaction_settlement_env(sources)?;
+    let env = compaction_env(sources, false)?;
     coordinator
         .submit(
             env,
@@ -323,37 +319,25 @@ async fn submit_compaction_settlement<C: Clock, R: RandomSource>(
     Ok(())
 }
 
-fn compaction_request_env<C: Clock, R: RandomSource>(
+/// One record, one derived event, an optional fresh effect id, and one batch id.
+fn compaction_env<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
+    with_effect: bool,
 ) -> Result<TransitionEnv, RunHandleError> {
+    let now = sources.now()?;
+    let record = sources.generate::<RecordTag>()?;
+    let event = sources.generate::<EventTag>()?;
+    let effect_ids = if with_effect {
+        vec![sources.generate::<EffectTag>()?]
+    } else {
+        Vec::new()
+    };
     Ok(TransitionEnv {
-        now: sources.now()?,
+        now,
         ids: AllocatedIds::try_new(
-            vec![sources.generate::<RecordTag>()?],
-            vec![sources.generate::<EventTag>()?],
-            vec![sources.generate::<EffectTag>()?],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            vec![sources.generate::<AppendBatchTag>()?],
-            Vec::new(),
-        )
-        .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?,
-    })
-}
-
-fn compaction_settlement_env<C: Clock, R: RandomSource>(
-    sources: &SettlementSources<C, R>,
-) -> Result<TransitionEnv, RunHandleError> {
-    Ok(TransitionEnv {
-        now: sources.now()?,
-        ids: AllocatedIds::try_new(
-            vec![sources.generate::<RecordTag>()?],
-            vec![sources.generate::<EventTag>()?],
-            Vec::new(),
+            vec![record],
+            vec![event],
+            effect_ids,
             Vec::new(),
             Vec::new(),
             Vec::new(),

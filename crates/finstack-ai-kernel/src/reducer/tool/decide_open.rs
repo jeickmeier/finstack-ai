@@ -2,7 +2,7 @@
 
 use super::super::allocated_ids::validate_allocated_ids;
 use super::super::capacity::{self, StateGrowth};
-use super::super::decide::{draft_for_state, next_sequence, required};
+use super::super::decide::{decision_for, required};
 use super::super::decision::{Decision, KernelError};
 use super::super::fingerprint::{synthetic_tool_digest, tool_batch_plan_digest};
 use super::super::input::StageSettled;
@@ -165,11 +165,5 @@ pub(crate) fn decide_batch_prepared(
     )?;
     let requirements = requirements_for_bodies(&bodies, result_ids.len(), assigned.len(), 1)?;
     validate_allocated_ids(&env.ids, requirements)?;
-    let records = draft_for_state(state, env, bodies)?;
-    Ok(Decision {
-        expected_sequence: next_sequence(state)?,
-        records,
-        actions,
-        diagnostics: Vec::new(),
-    })
+    decision_for(state, env, bodies, actions)
 }

@@ -350,10 +350,8 @@ impl ContextProvider for WasmContextAdapter {
 /// Extension that registers isolated Wasmtime adapters named by one manifest.
 pub struct WasmPluginExtension {
     manifest: PluginManifest,
-    context: Option<Arc<dyn ContextProvider>>,
-    context_lifecycle: Option<Arc<PluginLifecycle>>,
-    toolset: Option<Arc<dyn Toolset>>,
-    toolset_lifecycle: Option<Arc<PluginLifecycle>>,
+    context: Option<(Arc<dyn ContextProvider>, Arc<PluginLifecycle>)>,
+    toolset: Option<(Arc<dyn Toolset>, Arc<PluginLifecycle>)>,
 }
 
 impl WasmPluginExtension {
@@ -377,11 +375,10 @@ impl WasmPluginExtension {
             Arc::new(NoopPluginHooks),
         )
         .await?;
+        let lifecycle = adapter.lifecycle();
         Ok(Self {
-            toolset_lifecycle: Some(adapter.lifecycle()),
-            toolset: Some(Arc::new(adapter)),
+            toolset: Some((Arc::new(adapter), lifecycle)),
             context: None,
-            context_lifecycle: None,
             manifest,
         })
     }
@@ -405,11 +402,10 @@ impl WasmPluginExtension {
             Arc::new(NoopPluginHooks),
         )
         .await?;
+        let lifecycle = adapter.lifecycle();
         Ok(Self {
-            context_lifecycle: Some(adapter.lifecycle()),
-            context: Some(Arc::new(adapter)),
+            context: Some((Arc::new(adapter), lifecycle)),
             toolset: None,
-            toolset_lifecycle: None,
             manifest,
         })
     }
@@ -430,44 +426,21 @@ impl Extension for WasmPluginExtension {
             self.manifest.identity.clone(),
             adapter_version(&self.manifest),
         );
-        match (&self.context, &self.context_lifecycle) {
-            (Some(provider), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
-                registrar.context_provider(
-                    metadata.clone(),
-                    ReadyComponent::new(Arc::clone(provider))
-                        .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
-                )?;
-            }
-            (None, None) => {}
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(RegistrationError::InvalidDescriptor {
-                    message: Arc::from("context adapter is missing lifecycle hooks"),
-                });
-            }
+        if let Some((provider, lifecycle)) = &self.context {
+            let hooks = Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
+            registrar.context_provider(
+                metadata.clone(),
+                ReadyComponent::new(Arc::clone(provider))
+                    .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
+            )?;
         }
-        match (&self.toolset, &self.toolset_lifecycle) {
-            (Some(toolset), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
-                registrar.toolset(
-                    metadata,
-                    ReadyComponent::new(Arc::clone(toolset))
-                        .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
-                )?;
-            }
-            (None, None) => {}
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(RegistrationError::InvalidDescriptor {
-                    message: Arc::from("toolset adapter is missing lifecycle hooks"),
-                });
-            }
-        }
-        if self.context.is_none() && self.toolset.is_none() {
-            return Err(RegistrationError::InvalidDescriptor {
-                message: Arc::from("plugin extension registered no port"),
-            });
+        if let Some((toolset, lifecycle)) = &self.toolset {
+            let hooks = Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
+            registrar.toolset(
+                metadata,
+                ReadyComponent::new(Arc::clone(toolset))
+                    .with_lifecycle(LifecycleBinding::resolved_agent(hooks)),
+            )?;
         }
         Ok(())
     }
@@ -678,22 +651,28 @@ async fn collect_items_on(
     }
 }
 
-async fn list_tools(
+/// Run `op` on a guest instance under the host's instance policy.
+///
+/// `Exclusive` instantiates a fresh store per call behind a permit;
+/// `Serialized` reuses one store behind a mutex and fails closed when it is
+/// already held. Both bound the call by `cancel` and `deadline`.
+async fn with_instance<L, T>(
     host: &PluginHost,
-    ready: &ReadyWasm,
     exclusive: &Semaphore,
-    serialized: &SerializedToolset,
+    serialized: &Mutex<Option<L>>,
     cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     deadline: Option<Timestamp>,
-) -> Result<finstack_ai_wit::ToolCatalog, PluginHostError> {
+    instantiate: impl AsyncFnOnce() -> Result<L, PluginHostError>,
+    op: impl AsyncFnOnce(&mut L) -> Result<T, PluginHostError>,
+) -> Result<T, PluginHostError> {
     match host.instance_policy() {
         InstancePolicy::Exclusive => {
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
             with_cancellation(cancel, deadline, async {
-                let mut live = instantiate_toolset(host, ready, cancel).await?;
-                list_tools_on(&mut live, cancel).await
+                let mut live = instantiate().await?;
+                op(&mut live).await
             })
             .await
         }
@@ -703,16 +682,36 @@ async fn list_tools(
                 .map_err(|_| PluginHostError::InstanceLimit)?;
             with_cancellation(cancel, deadline, async {
                 if slot.is_none() {
-                    *slot = Some(instantiate_toolset(host, ready, cancel).await?);
+                    *slot = Some(instantiate().await?);
                 }
                 let slot = slot.as_mut().ok_or_else(|| {
                     PluginHostError::InstantiateFailed("serialized instance slot is empty".into())
                 })?;
-                list_tools_on(slot, cancel).await
+                op(slot).await
             })
             .await
         }
     }
+}
+
+async fn list_tools(
+    host: &PluginHost,
+    ready: &ReadyWasm,
+    exclusive: &Semaphore,
+    serialized: &SerializedToolset,
+    cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
+    deadline: Option<Timestamp>,
+) -> Result<finstack_ai_wit::ToolCatalog, PluginHostError> {
+    with_instance(
+        host,
+        exclusive,
+        serialized,
+        cancel,
+        deadline,
+        async || instantiate_toolset(host, ready, cancel).await,
+        async |live| list_tools_on(live, cancel).await,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -727,33 +726,16 @@ async fn call_tool(
     tool_id: &str,
     args: &[u8],
 ) -> Result<finstack_ai_wit::ToolResult, PluginHostError> {
-    match host.instance_policy() {
-        InstancePolicy::Exclusive => {
-            let _permit = exclusive
-                .try_acquire()
-                .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(cancel, deadline, async {
-                let mut live = instantiate_toolset(host, ready, cancel).await?;
-                call_tool_on(&mut live, cancel, context, tool_id, args).await
-            })
-            .await
-        }
-        InstancePolicy::Serialized => {
-            let mut slot = serialized
-                .try_lock()
-                .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(cancel, deadline, async {
-                if slot.is_none() {
-                    *slot = Some(instantiate_toolset(host, ready, cancel).await?);
-                }
-                let slot = slot.as_mut().ok_or_else(|| {
-                    PluginHostError::InstantiateFailed("serialized instance slot is empty".into())
-                })?;
-                call_tool_on(slot, cancel, context, tool_id, args).await
-            })
-            .await
-        }
-    }
+    with_instance(
+        host,
+        exclusive,
+        serialized,
+        cancel,
+        deadline,
+        async || instantiate_toolset(host, ready, cancel).await,
+        async |live| call_tool_on(live, cancel, context, tool_id, args).await,
+    )
+    .await
 }
 
 async fn collect_items(
@@ -765,33 +747,16 @@ async fn collect_items(
     deadline: Option<Timestamp>,
     query: &finstack_ai_wit::ContextQuery,
 ) -> Result<Vec<finstack_ai_wit::generated::ContextItem>, PluginHostError> {
-    match host.instance_policy() {
-        InstancePolicy::Exclusive => {
-            let _permit = exclusive
-                .try_acquire()
-                .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(cancel, deadline, async {
-                let mut live = instantiate_context(host, ready, cancel).await?;
-                collect_items_on(&mut live, cancel, query).await
-            })
-            .await
-        }
-        InstancePolicy::Serialized => {
-            let mut slot = serialized
-                .try_lock()
-                .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(cancel, deadline, async {
-                if slot.is_none() {
-                    *slot = Some(instantiate_context(host, ready, cancel).await?);
-                }
-                let slot = slot.as_mut().ok_or_else(|| {
-                    PluginHostError::InstantiateFailed("serialized instance slot is empty".into())
-                })?;
-                collect_items_on(slot, cancel, query).await
-            })
-            .await
-        }
-    }
+    with_instance(
+        host,
+        exclusive,
+        serialized,
+        cancel,
+        deadline,
+        async || instantiate_context(host, ready, cancel).await,
+        async |live| collect_items_on(live, cancel, query).await,
+    )
+    .await
 }
 
 fn tool_error(error: &PluginHostError, metadata: Metadata) -> ToolError {
@@ -824,8 +789,6 @@ fn plugin_metadata(ready: &ReadyWasm) -> Metadata {
 
 #[cfg(test)]
 mod tests {
-    use super::construction_context;
-    use crate::error::PluginHostError;
     use crate::host::{InstancePolicy, PluginHost, PluginHostConfig};
     use finstack_ai_wit::manifest::manifest_digest_hex;
     use finstack_ai_wit::parse_manifest;
@@ -864,8 +827,6 @@ mod tests {
             panic!("mismatch");
         };
         assert_eq!(error.code(), "plugin_registration_invalid");
-        let _ = construction_context;
-        let _ = PluginHostError::Timeout;
     }
 
     #[test]

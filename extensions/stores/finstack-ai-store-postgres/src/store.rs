@@ -57,8 +57,8 @@ impl PostgresJournalStore {
     ///
     /// # Errors
     ///
-    /// Returns [`StoreError::InvalidRequest`] for an invalid config or a
-    /// connection URL that demands TLS (see the module doc comment).
+    /// Returns [`StoreError::InvalidRequest`] for an invalid config or an
+    /// unparseable connection URL / TLS trust anchor.
     /// Returns [`StoreError::Unavailable`] if the initial connection cannot
     /// be established within `config.connect_timeout`, or the mapped error
     /// from `ensure_schema` otherwise.
@@ -116,32 +116,11 @@ pub(crate) async fn connect_and_prepare(
     let client = match config.tls_mode {
         PostgresTlsMode::Disable => {
             postgres.ssl_mode(tokio_postgres::config::SslMode::Disable);
-            let connect = postgres.connect(tokio_postgres::NoTls);
-            let (client, connection) = tokio::time::timeout(config.connect_timeout, connect)
-                .await
-                .map_err(|_| StoreError::Unavailable {
-                    reason_code: "postgres_unavailable",
-                })?
-                .map_err(|error| map_postgres_error(&error))?;
-            tokio::spawn(async move {
-                let _ = connection.await;
-            });
-            client
+            connect(&postgres, tokio_postgres::NoTls, config.connect_timeout).await?
         }
         PostgresTlsMode::Require => {
             postgres.ssl_mode(tokio_postgres::config::SslMode::Require);
-            let tls = postgres_tls(config)?;
-            let connect = postgres.connect(tls);
-            let (client, connection) = tokio::time::timeout(config.connect_timeout, connect)
-                .await
-                .map_err(|_| StoreError::Unavailable {
-                    reason_code: "postgres_unavailable",
-                })?
-                .map_err(|error| map_postgres_error(&error))?;
-            tokio::spawn(async move {
-                let _ = connection.await;
-            });
-            client
+            connect(&postgres, postgres_tls(config)?, config.connect_timeout).await?
         }
     };
 
@@ -169,6 +148,28 @@ pub(crate) async fn connect_and_prepare(
             reason_code: "postgres_operation_timeout",
         })??;
 
+    Ok(client)
+}
+
+/// Open the connection within `timeout` and spawn its driving task.
+async fn connect<T>(
+    postgres: &tokio_postgres::Config,
+    tls: T,
+    timeout: std::time::Duration,
+) -> Result<tokio_postgres::Client, StoreError>
+where
+    T: tokio_postgres::tls::MakeTlsConnect<tokio_postgres::Socket>,
+    T::Stream: Send + 'static,
+{
+    let (client, connection) = tokio::time::timeout(timeout, postgres.connect(tls))
+        .await
+        .map_err(|_| StoreError::Unavailable {
+            reason_code: "postgres_unavailable",
+        })?
+        .map_err(|error| map_postgres_error(&error))?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
     Ok(client)
 }
 

@@ -536,17 +536,10 @@ impl WorkflowSession {
         locator: OperationLocator,
         clock: ExternalClock,
     ) -> Result<Self, WorkflowDriverError> {
-        #[cfg(feature = "native-tokio")]
-        let audit = SecurityAuditGate::enable_noop()
-            .await
-            .map_err(|_| WorkflowDriverError::AuditNotReady)?;
-        #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-        let audit = ();
-        Self::attach_with_random(
+        Self::attach_trusted(
             store,
             locator,
             clock,
-            audit,
             WorkflowRandom::Native(WorkflowHostRandom),
         )
         .await
@@ -564,20 +557,28 @@ impl WorkflowSession {
         clock: ExternalClock,
         random_seed: u64,
     ) -> Result<Self, WorkflowDriverError> {
+        Self::attach_trusted(
+            store,
+            locator,
+            clock,
+            WorkflowRandom::Seeded(SeededRandom::new(random_seed)),
+        )
+        .await
+    }
+
+    async fn attach_trusted(
+        store: Arc<dyn JournalStore>,
+        locator: OperationLocator,
+        clock: ExternalClock,
+        random: WorkflowRandom,
+    ) -> Result<Self, WorkflowDriverError> {
         #[cfg(feature = "native-tokio")]
         let audit = SecurityAuditGate::enable_noop()
             .await
             .map_err(|_| WorkflowDriverError::AuditNotReady)?;
         #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
         let audit = ();
-        Self::attach_with_random(
-            store,
-            locator,
-            clock,
-            audit,
-            WorkflowRandom::Seeded(SeededRandom::new(random_seed)),
-        )
-        .await
+        Self::attach_with_random(store, locator, clock, audit, random).await
     }
 
     /// Bind model/tool ports used when the driver must spawn [`RunTaskOwner`].
@@ -716,55 +717,6 @@ impl WorkflowSession {
         .map_err(|_| WorkflowDriverError::DriveTimeout)?
     }
 
-    /// Reopen the journal without continuing the previous owner.
-    ///
-    /// `SessionRuntime::open` stays inspect-not-continue. Restore is journal
-    /// load plus recover. A conflicting checkpoint sequence is ignored; the
-    /// journal wins.
-    ///
-    /// # Errors
-    ///
-    /// Returns locator or recover failures.
-    #[cfg(feature = "native-tokio")]
-    pub async fn resume(
-        store: Arc<dyn JournalStore>,
-        locator: OperationLocator,
-        clock: ExternalClock,
-        audit: Arc<SecurityAuditGate>,
-        hint: Option<&WorkflowCheckpoint>,
-    ) -> Result<Self, WorkflowDriverError> {
-        let session = Self::attach(store, locator, clock, audit).await?;
-        let journal_seq = session.last_state.last_applied_sequence();
-        let _ = resolve_checkpoint_sequence(
-            journal_seq,
-            hint.map(|checkpoint| checkpoint.last_applied_seq),
-        );
-        Ok(session)
-    }
-
-    /// Resume with deterministic entropy for tests and reproducible examples.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same failures as [`Self::resume`].
-    #[cfg(feature = "native-tokio")]
-    pub async fn resume_seeded(
-        store: Arc<dyn JournalStore>,
-        locator: OperationLocator,
-        clock: ExternalClock,
-        random_seed: u64,
-        audit: Arc<SecurityAuditGate>,
-        hint: Option<&WorkflowCheckpoint>,
-    ) -> Result<Self, WorkflowDriverError> {
-        let session = Self::attach_seeded(store, locator, clock, random_seed, audit).await?;
-        let journal_seq = session.last_state.last_applied_sequence();
-        let _ = resolve_checkpoint_sequence(
-            journal_seq,
-            hint.map(|checkpoint| checkpoint.last_applied_seq),
-        );
-        Ok(session)
-    }
-
     /// Route one authenticated external completion through the existing ingress.
     ///
     /// # Errors
@@ -807,8 +759,7 @@ impl WorkflowSession {
         let router = InteractionRouter::trusted(Arc::clone(&self.store))
             .await
             .map_err(WorkflowDriverError::Ingress)?;
-        router
-            .route(command, submitted_at)
+        Box::pin(router.route(command, submitted_at))
             .await
             .map_err(WorkflowDriverError::Ingress)
     }
@@ -873,10 +824,16 @@ impl WorkflowSession {
     }
 
     async fn refresh_state(&mut self) -> Result<(), WorkflowDriverError> {
+        self.last_state = self.recover_run().await?.state().clone();
+        Ok(())
+    }
+
+    /// Recover the run's coordinator and confirm it still carries this locator's run.
+    async fn recover_run(&self) -> Result<CommitCoordinator, WorkflowDriverError> {
         let coordinator =
             CommitCoordinator::recover(Arc::clone(&self.store), self.locator.session_id)
                 .await
-                .map_err(|error| recover_error(&error))?;
+                .map_err(|error| WorkflowDriverError::Recover { code: error.code() })?;
         if coordinator
             .state()
             .accepted()
@@ -884,8 +841,7 @@ impl WorkflowSession {
         {
             return Err(WorkflowDriverError::UnknownLocator);
         }
-        self.last_state = coordinator.state().clone();
-        Ok(())
+        Ok(coordinator)
     }
 
     /// Spawn [`RunTaskOwner`] when the journal is still in the model/tool loop.
@@ -954,17 +910,7 @@ impl WorkflowSession {
             .profile
             .clone()
             .ok_or(WorkflowDriverError::PortsRequired)?;
-        let mut coordinator =
-            CommitCoordinator::recover(Arc::clone(&self.store), self.locator.session_id)
-                .await
-                .map_err(|error| recover_error(&error))?;
-        if coordinator
-            .state()
-            .accepted()
-            .is_none_or(|accepted| accepted.run_id() != self.locator.run_id)
-        {
-            return Err(WorkflowDriverError::UnknownLocator);
-        }
+        let mut coordinator = self.recover_run().await?;
         reinstall_runtime_ports(
             &mut coordinator,
             self.capability_owners.clone(),
@@ -1022,10 +968,6 @@ impl WorkflowSession {
         self.owner = Some(owner);
         Ok(())
     }
-}
-
-fn recover_error(error: &crate::commit::CommitCoordinatorError) -> WorkflowDriverError {
-    WorkflowDriverError::Recover { code: error.code() }
 }
 
 fn reinstall_runtime_ports(

@@ -215,35 +215,33 @@ impl Toolset for SubagentToolset {
         let max_tracked_children = self.max_tracked_children;
         Box::pin(async move {
             verify_authority(&ctx)?;
-            let name = call.call.tool_name();
-            if name != START_NAME && name != STATUS_NAME && name != CANCEL_NAME {
-                return Err(tool_error(
-                    SUBAGENT_INVALID_ARGUMENTS,
-                    ErrorCategory::Validation,
-                    "subagent call identity is invalid",
-                ));
-            }
-            let snapshot = table.lock().map(|guard| guard.clone()).unwrap_or_default();
-            let result = if name == START_NAME {
-                if !reserve_child_slot(&tracked_slots, max_tracked_children) {
-                    return Ok(completed(
-                        error_result(
-                            SUBAGENT_LIMIT_EXCEEDED,
-                            "subagent child tracking limit is reached",
-                        )
-                        .output,
-                        true,
+            let result = match call.call.tool_name() {
+                START_NAME => {
+                    if !reserve_child_slot(&tracked_slots, max_tracked_children) {
+                        return Ok(completed(
+                            error_result(
+                                SUBAGENT_LIMIT_EXCEEDED,
+                                "subagent child tracking limit is reached",
+                            )
+                            .output,
+                            true,
+                        ));
+                    }
+                    let result = Box::pin(start_child(&starter, &allow_list, &ctx, &call)).await;
+                    if !matches!(result.as_ref(), Ok(outcome) if outcome.started.is_some()) {
+                        release_child_slot(&tracked_slots);
+                    }
+                    result
+                }
+                STATUS_NAME => status_child(&starter, &table, &ctx, &call).await,
+                CANCEL_NAME => cancel_child(&starter, &table, &ctx, &call).await,
+                _ => {
+                    return Err(tool_error(
+                        SUBAGENT_INVALID_ARGUMENTS,
+                        ErrorCategory::Validation,
+                        "subagent call identity is invalid",
                     ));
                 }
-                let result = Box::pin(start_child(&starter, &allow_list, &ctx, &call)).await;
-                if !matches!(result.as_ref(), Ok(outcome) if outcome.started.is_some()) {
-                    release_child_slot(&tracked_slots);
-                }
-                result
-            } else if name == STATUS_NAME {
-                status_child(&starter, &snapshot, &ctx, &call).await
-            } else {
-                cancel_child(&starter, &snapshot, &ctx, &call).await
             }?;
             if let Some(key) = result.remove.as_ref()
                 && let Ok(mut children) = table.lock()
@@ -350,7 +348,7 @@ async fn start_child(
 
 async fn status_child(
     starter: &Arc<ChildRunStarter>,
-    children: &BTreeMap<ChildKey, StartedChild>,
+    children: &Mutex<BTreeMap<ChildKey, StartedChild>>,
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
@@ -380,26 +378,28 @@ async fn status_child(
         output,
         is_error: false,
         started: None,
-        remove: status.is_terminal().then(|| key.clone()),
+        remove: status.is_terminal().then_some(key),
     })
 }
 
-fn lookup_child<'a>(
-    children: &'a BTreeMap<ChildKey, StartedChild>,
+/// Copy out the caller's own child under `run_id`, if it is tracked.
+fn lookup_child(
+    children: &Mutex<BTreeMap<ChildKey, StartedChild>>,
     owner: &finstack_ai_kernel::OperationLocator,
     run_id: &str,
-) -> Option<(&'a ChildKey, &'a StartedChild)> {
+) -> Option<(ChildKey, StartedChild)> {
     let key = ChildKey {
         tenant_scope: Arc::clone(&owner.tenant_scope),
         owner_session_id: Arc::from(owner.session_id.to_string()),
         run_id: Arc::from(run_id),
     };
-    children.get_key_value(&key)
+    let child = children.lock().ok()?.get(&key)?.clone();
+    Some((key, child))
 }
 
 async fn cancel_child(
     starter: &Arc<ChildRunStarter>,
-    children: &BTreeMap<ChildKey, StartedChild>,
+    children: &Mutex<BTreeMap<ChildKey, StartedChild>>,
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
@@ -416,12 +416,11 @@ async fn cancel_child(
             "no started child matches run_id",
         ));
     };
-    let run_id = &key.run_id;
     if let Err(error) = starter.cancel(&child.handle.locator).await {
         return Ok(invoke_error_result(&error));
     }
     let output = result_json(&serde_json::json!({
-        "run_id": run_id.as_ref(),
+        "run_id": key.run_id.as_ref(),
         "cancelled": true,
         "placement": placement_name(child.placement),
     }))?;
@@ -429,7 +428,7 @@ async fn cancel_child(
         output,
         is_error: false,
         started: None,
-        remove: Some(key.clone()),
+        remove: Some(key),
     })
 }
 

@@ -6,7 +6,6 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
     ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
@@ -15,7 +14,7 @@ use finstack_ai_runtime::ports::model::{
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-use crate::error::{GEMINI_CONFIG_INVALID, error};
+use crate::error::config_error;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
@@ -24,15 +23,6 @@ const DEFAULT_CREDENTIAL_NAME: &str = "default";
 const GENERATIVE_LANGUAGE_API_VERSION: &str = "v1beta";
 const VERTEX_API_VERSION: &str = "v1";
 const MAX_LABEL_BYTES: usize = 255;
-
-pub(crate) fn config_error(message: &'static str) -> ModelError {
-    error(
-        GEMINI_CONFIG_INVALID,
-        ErrorCategory::Configuration,
-        false,
-        message,
-    )
-}
 
 /// Resolved Gemini transport target.
 #[derive(Clone, PartialEq, Eq)]

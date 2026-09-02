@@ -5,24 +5,10 @@
 //! An explicit event name other than the empty name or `message` is treated
 //! as a protocol violation.
 
-use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_provider_wire::{SseEvent, SseEventParser, SseParseError};
 use finstack_ai_runtime::ports::model::ModelError;
 
-use crate::error::{GEMINI_STREAM_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED, error};
-
-pub(crate) fn stream_error(message: &'static str) -> ModelError {
-    error(GEMINI_STREAM_INVALID, ErrorCategory::Model, false, message)
-}
-
-pub(crate) fn stream_limit_error() -> ModelError {
-    error(
-        GEMINI_STREAM_LIMIT_EXCEEDED,
-        ErrorCategory::Limit,
-        false,
-        "Gemini response exceeded a configured stream limit",
-    )
-}
+use crate::error::{stream_error, stream_limit_error};
 
 pub(crate) struct GeminiSse {
     inner: SseEventParser,

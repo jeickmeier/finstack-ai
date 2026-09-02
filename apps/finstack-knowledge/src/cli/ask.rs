@@ -1,6 +1,7 @@
 //! The `ask` command: one question on a new or existing session.
 
 use super::render::EventSink;
+use crate::config::compose_error;
 use crate::{
     KnowledgeConfig, KnowledgeError, build_agent_with_journal, model_name, open_journal, security,
 };
@@ -49,28 +50,11 @@ async fn run_ask_inner(
     let (session, lane, created) = super::session_lane(journal, session).await?;
 
     let request = AgentRunRequest::try_new(model_name(config)?, question, security(os_user)?)
-        .map_err(compose)?;
-    let run = lane.run(&agent, request).map_err(run_error)?;
-    while let Some(batch) = run.next_event_batch().await.map_err(run_error)? {
-        sink.on_events(batch.events());
-    }
-    let output = run.result().await.map_err(run_error)?;
-    sink.finish(&output.text());
+        .map_err(compose_error)?;
+    super::run_to_sink(&lane, &agent, request, sink).await?;
 
     Ok(AskOutcome {
         session_id: session.session_id().to_string(),
         created,
     })
-}
-
-fn compose(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Compose {
-        reason: error.to_string(),
-    }
-}
-
-fn run_error(error: impl std::fmt::Display) -> KnowledgeError {
-    KnowledgeError::Run {
-        reason: error.to_string(),
-    }
 }

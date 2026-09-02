@@ -17,17 +17,13 @@ pub(crate) const BODY_DIGEST_DOMAIN: &str = "completion-ingress-body";
 const SECURITY_AUDIT_EVENT_DOMAIN: &str = "security-audit-event";
 const OVERSIZE_DIGEST_WINDOW_BYTES: usize = 64 * 1_024;
 
-fn raw_digest(domain: &'static str, bytes: &[u8]) -> Option<Digest> {
-    Digest::domain_separated(domain, 1, bytes).ok()
-}
-
 fn body_digest(body: &[u8]) -> Option<Digest> {
     bounded_digest(BODY_DIGEST_DOMAIN, body, crate::MAX_BODY_BYTES)
 }
 
 fn bounded_digest(domain: &'static str, bytes: &[u8], normal_max: usize) -> Option<Digest> {
     if bytes.len() <= normal_max {
-        return raw_digest(domain, bytes);
+        return Digest::domain_separated(domain, 1, bytes).ok();
     }
     let prefix = &bytes[..OVERSIZE_DIGEST_WINDOW_BYTES.min(bytes.len())];
     let suffix_start = bytes.len().saturating_sub(OVERSIZE_DIGEST_WINDOW_BYTES);
@@ -40,7 +36,6 @@ fn bounded_digest(domain: &'static str, bytes: &[u8], normal_max: usize) -> Opti
 ///
 /// Returns `None` on any internal failure (digesting, canonicalization, or
 /// event construction); the caller rejects either way.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn ingress_audit_event(
     category: SecurityAuditCategory,
     reason_code: &'static str,
@@ -55,7 +50,7 @@ pub(crate) fn ingress_audit_event(
     let id_bytes =
         serde_json_canonicalizer::to_vec(&(token_digest, body_digest, submitted_at, reason_code))
             .ok()?;
-    let id_digest = raw_digest(SECURITY_AUDIT_EVENT_DOMAIN, &id_bytes)?;
+    let id_digest = Digest::domain_separated(SECURITY_AUDIT_EVENT_DOMAIN, 1, &id_bytes).ok()?;
     SecurityAuditEvent::try_new(
         id_digest.to_hex(),
         submitted_at,

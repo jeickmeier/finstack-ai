@@ -1,5 +1,7 @@
 //! Live session, lane, and in-process external-identity handles.
 
+use std::sync::Arc;
+
 use finstack_ai::{
     DEFAULT_MAX_CYCLES, ExternalIdentityKey, ExternalIdentityMap, Lane, MemoryExternalIdentityMap,
     Session,
@@ -46,10 +48,11 @@ impl PySession {
                 .map(|value| finstack_ai_kernel::EntryId::parse(&value))
                 .transpose()
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
-            match session.create_lane(name, fork).await {
-                Ok(inner) => Python::attach(|py| Py::new(py, PyLane { inner })),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            let inner = session
+                .create_lane(name, fork)
+                .await
+                .map_err(|error| session_py_error(&error))?;
+            Python::attach(|py| Py::new(py, PyLane { inner }))
         })
     }
 
@@ -57,15 +60,16 @@ impl PySession {
     fn list_lanes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let session = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match session.list_lanes().await {
-                Ok(lanes) => Python::attach(|py| {
-                    lanes
-                        .into_iter()
-                        .map(|inner| Py::new(py, PyLane { inner }))
-                        .collect::<PyResult<Vec<_>>>()
-                }),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            let lanes = session
+                .list_lanes()
+                .await
+                .map_err(|error| session_py_error(&error))?;
+            Python::attach(|py| {
+                lanes
+                    .into_iter()
+                    .map(|inner| Py::new(py, PyLane { inner }))
+                    .collect::<PyResult<Vec<_>>>()
+            })
         })
     }
 
@@ -73,10 +77,11 @@ impl PySession {
     fn lane<'py>(&self, py: Python<'py>, name: String) -> PyResult<Bound<'py, PyAny>> {
         let session = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match session.lane(&name).await {
-                Ok(inner) => Python::attach(|py| Py::new(py, PyLane { inner })),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            let inner = session
+                .lane(&name)
+                .await
+                .map_err(|error| session_py_error(&error))?;
+            Python::attach(|py| Py::new(py, PyLane { inner }))
         })
     }
 
@@ -86,10 +91,11 @@ impl PySession {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let lane_id = finstack_ai_kernel::LaneId::parse(&lane_id)
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
-            match session.lane_by_id(lane_id).await {
-                Ok(inner) => Python::attach(|py| Py::new(py, PyLane { inner })),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            let inner = session
+                .lane_by_id(lane_id)
+                .await
+                .map_err(|error| session_py_error(&error))?;
+            Python::attach(|py| Py::new(py, PyLane { inner }))
         })
     }
 
@@ -156,10 +162,9 @@ impl PyLane {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let entry_id = finstack_ai_kernel::EntryId::parse(&entry_id)
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
-            match lane.navigate(entry_id).await {
-                Ok(()) => Ok(()),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            lane.navigate(entry_id)
+                .await
+                .map_err(|error| session_py_error(&error))
         })
     }
 
@@ -167,21 +172,22 @@ impl PyLane {
     fn inspect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let lane = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match lane.inspect().await {
-                Ok(inspect) => Python::attach(|py| {
-                    let value = PyDict::new(py);
-                    value.set_item("lane_id", inspect.lane_id.to_string())?;
-                    value.set_item("name", inspect.name.as_ref())?;
-                    value.set_item("leaf_id", inspect.leaf_id.map(|id| id.to_string()))?;
-                    value.set_item(
-                        "active_run_id",
-                        inspect.active_run_id.map(|id| id.to_string()),
-                    )?;
-                    value.set_item("history_len", inspect.history.len())?;
-                    Ok(value.unbind())
-                }),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            let inspect = lane
+                .inspect()
+                .await
+                .map_err(|error| session_py_error(&error))?;
+            Python::attach(|py| {
+                let value = PyDict::new(py);
+                value.set_item("lane_id", inspect.lane_id.to_string())?;
+                value.set_item("name", inspect.name.as_ref())?;
+                value.set_item("leaf_id", inspect.leaf_id.map(|id| id.to_string()))?;
+                value.set_item(
+                    "active_run_id",
+                    inspect.active_run_id.map(|id| id.to_string()),
+                )?;
+                value.set_item("history_len", inspect.history.len())?;
+                Ok(value.unbind())
+            })
         })
     }
 
@@ -189,10 +195,10 @@ impl PyLane {
     fn append_text<'py>(&self, py: Python<'py>, text: String) -> PyResult<Bound<'py, PyAny>> {
         let lane = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match lane.append_text(&text).await {
-                Ok(entry_id) => Ok(entry_id.to_string()),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            lane.append_text(&text)
+                .await
+                .map(|entry_id| entry_id.to_string())
+                .map_err(|error| session_py_error(&error))
         })
     }
 
@@ -232,10 +238,9 @@ impl PyLane {
     fn suspend<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let lane = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match lane.suspend().await {
-                Ok(()) => Ok(()),
-                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
-            }
+            lane.suspend()
+                .await
+                .map_err(|error| session_py_error(&error))
         })
     }
 
@@ -246,12 +251,11 @@ impl PyLane {
         agent: &Bound<'_, PyAgent>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let lane = self.inner.clone();
-        let agent = agent.borrow().clone_inner();
+        let agent = Arc::clone(&agent.borrow().inner);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            match lane.resume(&agent).await {
-                Ok(()) => Ok(()),
-                Err(error) => Python::attach(|py| Err(agent_error(py, &error, None))),
-            }
+            lane.resume(&agent)
+                .await
+                .map_err(|error| agent_error(&error, None))
         })
     }
 }

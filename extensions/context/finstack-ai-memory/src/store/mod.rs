@@ -15,7 +15,10 @@ use finstack_ai_kernel::{ArtifactRef, Digest, Timestamp};
 use finstack_ai_runtime::artifact::{ArtifactOwnerId, ArtifactScope, ArtifactStore};
 use finstack_ai_runtime::ports::{PortFuture, PortObject};
 
-use crate::record::{MemoryBody, MemoryId, MemoryRecord, MemoryScope};
+use crate::record::{
+    INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryError,
+    MemoryId, MemoryRecord, MemoryScope,
+};
 
 mod in_process;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
@@ -745,6 +748,105 @@ pub(crate) fn validate_new_record_lifecycle(record: &MemoryRecord) -> Result<(),
         });
     }
     Ok(())
+}
+
+pub(crate) fn validate_record(record: &MemoryRecord) -> Result<(), MemoryStoreError> {
+    record
+        .validate()
+        .map_err(|error| MemoryStoreError::InvalidRecord {
+            reason: match error {
+                MemoryError::InvalidRecord { reason } | MemoryError::Configuration { reason } => {
+                    reason
+                }
+            },
+        })
+}
+
+pub(crate) fn validate_scope(scope: &MemoryScope) -> Result<(), MemoryStoreError> {
+    scope
+        .validate()
+        .map_err(|_| MemoryStoreError::InvalidRequest {
+            reason: "memory_scope_invalid",
+        })
+}
+
+pub(crate) fn validate_idempotency_key(key: &str) -> Result<(), MemoryStoreError> {
+    if key.is_empty() || key.len() > MEMORY_IDEMPOTENCY_KEY_MAX_BYTES || key.as_bytes().contains(&0)
+    {
+        return Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_idempotency_key_invalid",
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_query(
+    query: &MemoryQuery,
+    limit: usize,
+    limits: MemoryStoreLimits,
+) -> Result<(), MemoryStoreError> {
+    if limit > limits.max_search_results {
+        return Err(MemoryStoreError::InvalidRequest {
+            reason: "memory_search_limit_exceeded",
+        });
+    }
+    match query {
+        MemoryQuery::ExactId(_) => Ok(()),
+        MemoryQuery::Keywords(keywords) => {
+            if keywords.is_empty()
+                || keywords.len() > KEYWORDS_MAX_COUNT
+                || keywords.iter().any(|keyword| {
+                    keyword.is_empty()
+                        || keyword.len() > KEYWORD_MAX_BYTES
+                        || keyword.as_bytes().contains(&0)
+                })
+            {
+                return Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_query_keywords_invalid",
+                });
+            }
+            Ok(())
+        }
+        MemoryQuery::FullText(text) => {
+            if text.len() > INLINE_BODY_MAX_BYTES || text.as_bytes().contains(&0) {
+                return Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_query_text_invalid",
+                });
+            }
+            Ok(())
+        }
+        MemoryQuery::Embedding {
+            embedder_id,
+            vector,
+        } => {
+            validate_embedder_id(embedder_id)?;
+            if vector.dimensions() > limits.max_embedding_dimensions {
+                return Err(MemoryStoreError::InvalidRequest {
+                    reason: "memory_embedding_dimensions_exceeded",
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Canonical digest of one mutation (`operation` plus its payload), stored
+/// with the idempotency receipt so a replayed key can be told apart from a
+/// reused one.
+pub(crate) fn operation_fingerprint<T: serde::Serialize>(
+    operation: &'static str,
+    payload: &T,
+) -> Result<Digest, MemoryStoreError> {
+    let encoded = serde_json_canonicalizer::to_vec(&(operation, payload)).map_err(|_| {
+        MemoryStoreError::InvalidRequest {
+            reason: "memory_idempotency_payload_invalid",
+        }
+    })?;
+    Digest::domain_separated("memory-idempotency", 1, &encoded).map_err(|_| {
+        MemoryStoreError::InvalidRequest {
+            reason: "memory_idempotency_payload_invalid",
+        }
+    })
 }
 
 fn memory_artifact_owner(record: &MemoryRecord) -> Result<ArtifactOwnerId, MemoryStoreError> {

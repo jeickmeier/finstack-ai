@@ -124,15 +124,6 @@ impl HostDispatcher {
         self.enqueue_tool(seed.requested.effect_id(), seed)
     }
 
-    fn dispatch_model(
-        &self,
-        effect_id: EffectId,
-        seed: ModelDispatchSeed,
-    ) -> PortFuture<Result<(), DispatchError>> {
-        let result = self.enqueue_model(effect_id, seed);
-        Box::pin(async move { result })
-    }
-
     fn enqueue_tool(
         &self,
         effect_id: EffectId,
@@ -171,15 +162,6 @@ impl HostDispatcher {
             context,
             resolved,
         })
-    }
-
-    fn dispatch_tool(
-        &self,
-        effect_id: EffectId,
-        seed: ToolDispatchSeed,
-    ) -> PortFuture<Result<(), DispatchError>> {
-        let result = self.enqueue_tool(effect_id, seed);
-        Box::pin(async move { result })
     }
 }
 
@@ -235,23 +217,21 @@ impl PostCommitDispatcher for HostDispatcher {
                 Box::pin(async { Ok(()) })
             }
             PostCommitAction::ExecuteEffect { effect_id } => {
-                if let Some(seed) = dispatch.model {
-                    return self.dispatch_model(effect_id, seed);
-                }
-                if let Some(seed) = dispatch.tool {
-                    return self.dispatch_tool(effect_id, seed);
-                }
-                if dispatch.context.is_some() {
+                let result = if let Some(seed) = dispatch.model {
+                    self.enqueue_model(effect_id, seed)
+                } else if let Some(seed) = dispatch.tool {
+                    self.enqueue_tool(effect_id, seed)
+                } else if dispatch.context.is_some() {
                     // The stage driver owns context invocation and settlement.
                     // This dispatcher only acknowledges the committed intent;
                     // run cancellation is carried by the stage-driver call.
-                    return Box::pin(async { Ok(()) });
-                }
-                Box::pin(async {
+                    Ok(())
+                } else {
                     Err(DispatchError {
                         code: "unsupported_effect_driver",
                     })
-                })
+                };
+                Box::pin(async move { result })
             }
         }
     }

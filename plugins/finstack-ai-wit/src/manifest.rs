@@ -127,9 +127,6 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<PluginManifest, WitMapError> {
 pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), WitMapError> {
     validate_worlds(&manifest.worlds)?;
     validate_permissions(&manifest.permissions)?;
-    if let Some(limits) = &manifest.resource_limits {
-        validate_resource_limits(limits)?;
-    }
     if manifest.digest.is_empty() {
         return Err(WitMapError::ManifestInvalid("digest is omitted"));
     }
@@ -142,6 +139,9 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), WitMapError> {
             "signature metadata is malformed",
         ));
     }
+    if let Some(limits) = &manifest.resource_limits {
+        validate_resource_limits(limits)?;
+    }
     let expected = manifest_digest_hex(
         manifest.identity.as_str(),
         &manifest.version,
@@ -153,6 +153,7 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), WitMapError> {
     }
     Ok(())
 }
+
 /// Reject duplicate identities across a candidate set.
 ///
 /// # Errors
@@ -249,45 +250,21 @@ fn validate_wire(wire: ManifestWire) -> Result<PluginManifest, WitMapError> {
         MAX_RAW_JSON_BYTES,
         "configuration_schema",
     )?;
-    if wire.digest.is_empty() {
-        return Err(WitMapError::ManifestInvalid("digest is omitted"));
-    }
     reject_before_allocation(wire.digest.as_bytes(), MAX_RAW_JSON_BYTES, "digest")?;
-    if let Some(signature) = &wire.signature
-        && (signature.algorithm.is_empty()
-            || signature.key_id.is_empty()
-            || signature.signature.is_empty())
-    {
-        return Err(WitMapError::ManifestInvalid(
-            "signature metadata is malformed",
-        ));
-    }
-    if let Some(limits) = &wire.resource_limits {
-        validate_resource_limits(limits)?;
-    }
-    let expected = manifest_digest_hex(
-        identity.as_str(),
-        &wire.version,
-        &wire.worlds,
-        &wire.permissions,
-    )?;
-    if wire.digest != expected {
-        return Err(WitMapError::ManifestDigestMismatch);
-    }
-    let mut worlds = BTreeSet::new();
-    worlds.extend(wire.worlds);
-    let mut permissions = BTreeSet::new();
-    permissions.extend(wire.permissions);
-    Ok(PluginManifest {
+    let mut manifest = PluginManifest {
         identity,
         version: wire.version,
-        worlds: worlds.into_iter().collect(),
-        permissions: permissions.into_iter().collect(),
+        worlds: wire.worlds,
+        permissions: wire.permissions,
         configuration_schema,
         digest: wire.digest,
         signature: wire.signature,
         resource_limits: wire.resource_limits,
-    })
+    };
+    validate_manifest(&manifest)?;
+    manifest.worlds.sort();
+    manifest.permissions.sort();
+    Ok(manifest)
 }
 
 fn validate_worlds(worlds: &[String]) -> Result<(), WitMapError> {

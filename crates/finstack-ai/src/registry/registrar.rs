@@ -38,6 +38,16 @@ pub(super) enum RegistrationSlot<T: ?Sized> {
     Factory(Arc<dyn ComponentFactory<T>>),
 }
 
+impl<T: ?Sized> RegistrationSlot<T> {
+    fn ready(component: ReadyComponent<T>) -> Self {
+        Self::Ready {
+            component,
+            factory_configuration: None,
+            ready_model: None,
+        }
+    }
+}
+
 impl<T: ?Sized> Clone for RegistrationSlot<T> {
     fn clone(&self) -> Self {
         match self {
@@ -168,11 +178,7 @@ impl Registrar {
         self.insert(metadata, ComponentKind::Model, |descriptor| {
             RegisteredEntry::Model(TypedRegistration {
                 descriptor,
-                slot: RegistrationSlot::Ready {
-                    component,
-                    factory_configuration: None,
-                    ready_model: None,
-                },
+                slot: RegistrationSlot::ready(component),
             })
         })
     }
@@ -213,11 +219,7 @@ impl Registrar {
         self.insert(metadata, ComponentKind::Toolset, |descriptor| {
             RegisteredEntry::Toolset(TypedRegistration {
                 descriptor,
-                slot: RegistrationSlot::Ready {
-                    component,
-                    factory_configuration: None,
-                    ready_model: None,
-                },
+                slot: RegistrationSlot::ready(component),
             })
         })
     }
@@ -258,11 +260,7 @@ impl Registrar {
         self.insert(metadata, ComponentKind::ContextProvider, |descriptor| {
             RegisteredEntry::ContextProvider(TypedRegistration {
                 descriptor,
-                slot: RegistrationSlot::Ready {
-                    component,
-                    factory_configuration: None,
-                    ready_model: None,
-                },
+                slot: RegistrationSlot::ready(component),
             })
         })
     }
@@ -303,11 +301,7 @@ impl Registrar {
         self.insert(metadata, ComponentKind::Middleware, |descriptor| {
             RegisteredEntry::Middleware(TypedRegistration {
                 descriptor,
-                slot: RegistrationSlot::Ready {
-                    component,
-                    factory_configuration: None,
-                    ready_model: None,
-                },
+                slot: RegistrationSlot::ready(component),
             })
         })
     }
@@ -348,11 +342,7 @@ impl Registrar {
         self.insert(metadata, ComponentKind::Store, |descriptor| {
             RegisteredEntry::Store(TypedRegistration {
                 descriptor,
-                slot: RegistrationSlot::Ready {
-                    component,
-                    factory_configuration: None,
-                    ready_model: None,
-                },
+                slot: RegistrationSlot::ready(component),
             })
         })
     }
@@ -393,11 +383,7 @@ impl Registrar {
         self.insert(metadata, ComponentKind::Observer, |descriptor| {
             RegisteredEntry::Observer(TypedRegistration {
                 descriptor,
-                slot: RegistrationSlot::Ready {
-                    component,
-                    factory_configuration: None,
-                    ready_model: None,
-                },
+                slot: RegistrationSlot::ready(component),
             })
         })
     }

@@ -56,7 +56,7 @@ fn write_cbor_map_order(dir: &Path) -> Result<(), JournalFixtureError> {
     write_case(
         dir,
         "valid--map-order.json",
-        json_ok(
+        &json_ok(
             "cbor-profile",
             "map-order",
             Some(&map_bytes),
@@ -96,11 +96,11 @@ fn write_cbor_floats(dir: &Path) -> Result<(), JournalFixtureError> {
     write_case(
         dir,
         "valid--float-one.json",
-        recipe_ok(
+        &recipe_ok(
             "cbor-profile",
             "float-one",
             Some(&one),
-            JournalRecipe::FloatOne,
+            &JournalRecipe::FloatOne,
         ),
         Some(&one),
     )?;
@@ -108,11 +108,11 @@ fn write_cbor_floats(dir: &Path) -> Result<(), JournalFixtureError> {
     write_case(
         dir,
         "valid--neg-zero.json",
-        recipe_ok(
+        &recipe_ok(
             "cbor-profile",
             "neg-zero",
             Some(&neg),
-            JournalRecipe::NegZero,
+            &JournalRecipe::NegZero,
         ),
         Some(&neg),
     )
@@ -124,7 +124,7 @@ fn write_cbor_rejections(dir: &Path) -> Result<(), JournalFixtureError> {
         "cbor-profile",
         "invalid--bignum-tag-2.json",
         "bignum-tag-2",
-        JournalRecipe::CborHex {
+        &JournalRecipe::CborHex {
             bytes: "c24101".into(),
         },
         "bignum_tag",
@@ -134,7 +134,7 @@ fn write_cbor_rejections(dir: &Path) -> Result<(), JournalFixtureError> {
         "cbor-profile",
         "invalid--bignum-tag-3.json",
         "bignum-tag-3",
-        JournalRecipe::CborHex {
+        &JournalRecipe::CborHex {
             bytes: "c34101".into(),
         },
         "bignum_tag",
@@ -144,7 +144,7 @@ fn write_cbor_rejections(dir: &Path) -> Result<(), JournalFixtureError> {
         "cbor-profile",
         "invalid--non-finite-nan.json",
         "non-finite-nan",
-        JournalRecipe::CborHex {
+        &JournalRecipe::CborHex {
             bytes: "f97e00".into(),
         },
         "non_finite_float",
@@ -160,7 +160,7 @@ fn write_cbor_cost_amount(dir: &Path) -> Result<(), JournalFixtureError> {
     write_case(
         dir,
         "valid--cost-amount-micros.json",
-        json_ok(
+        &json_ok(
             "cbor-profile",
             "cost-amount-micros",
             Some(&amount_bytes),
@@ -179,7 +179,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         &dir,
         "valid--array-items-exact.json",
         "array-items-exact",
-        JournalRecipe::ArrayItems {
+        &JournalRecipe::ArrayItems {
             count: CANONICAL_ARRAY_MAX_ITEMS,
         },
     )?;
@@ -188,7 +188,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         "limits",
         "invalid--array-items-one-over.json",
         "array-items-one-over",
-        JournalRecipe::ArrayItems {
+        &JournalRecipe::ArrayItems {
             count: CANONICAL_ARRAY_MAX_ITEMS + 1,
         },
         "canonical_limit_exceeded",
@@ -197,7 +197,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         &dir,
         "valid--map-entries-exact.json",
         "map-entries-exact",
-        JournalRecipe::MapEntries {
+        &JournalRecipe::MapEntries {
             count: CANONICAL_MAP_MAX_ENTRIES,
         },
     )?;
@@ -206,7 +206,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         "limits",
         "invalid--map-entries-one-over.json",
         "map-entries-one-over",
-        JournalRecipe::MapEntries {
+        &JournalRecipe::MapEntries {
             count: CANONICAL_MAP_MAX_ENTRIES + 1,
         },
         "canonical_limit_exceeded",
@@ -215,7 +215,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         &dir,
         "valid--text-string-exact.json",
         "text-string-exact",
-        JournalRecipe::TextString {
+        &JournalRecipe::TextString {
             bytes: CANONICAL_STRING_MAX_BYTES,
         },
     )?;
@@ -224,7 +224,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         "limits",
         "invalid--text-string-one-over.json",
         "text-string-one-over",
-        JournalRecipe::TextString {
+        &JournalRecipe::TextString {
             bytes: CANONICAL_STRING_MAX_BYTES + 1,
         },
         "canonical_limit_exceeded",
@@ -233,7 +233,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         &dir,
         "valid--nesting-exact.json",
         "nesting-exact",
-        JournalRecipe::NestedArray {
+        &JournalRecipe::NestedArray {
             depth: CANONICAL_NESTING_DEPTH,
         },
     )?;
@@ -242,7 +242,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         "limits",
         "invalid--nesting-one-over.json",
         "nesting-one-over",
-        JournalRecipe::NestedArray {
+        &JournalRecipe::NestedArray {
             depth: CANONICAL_NESTING_DEPTH + 1,
         },
         "canonical_limit_exceeded",
@@ -252,7 +252,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         "limits",
         "invalid--envelope-bytes-one-over.json",
         "envelope-bytes-one-over",
-        JournalRecipe::EnvelopeBytes {
+        &JournalRecipe::EnvelopeBytes {
             total_bytes: CANONICAL_ENVELOPE_MAX_BYTES + 1,
         },
         "canonical_limit_exceeded",
@@ -262,7 +262,7 @@ fn write_limits(root: &Path) -> Result<usize, JournalFixtureError> {
         "limits",
         "invalid--batch-records-one-over.json",
         "batch-records-one-over",
-        JournalRecipe::BatchRecords {
+        &JournalRecipe::BatchRecords {
             count: APPEND_BATCH_MAX_RECORDS + 1,
         },
         "canonical_limit_exceeded",
@@ -281,7 +281,7 @@ fn write_record_payloads(root: &Path) -> Result<usize, JournalFixtureError> {
         write_case(
             &dir,
             &format!("valid--{}.json", body.kind_name().replace('_', "-")),
-            json_ok(
+            &json_ok(
                 "record-payload",
                 body.kind_name(),
                 Some(&bytes),
@@ -312,7 +312,7 @@ fn write_envelopes(root: &Path) -> Result<usize, JournalFixtureError> {
         write_case(
             &dir,
             &format!("valid--{}.json", body.kind_name().replace('_', "-")),
-            json_ok(
+            &json_ok(
                 "envelope",
                 body.kind_name(),
                 Some(&bytes),
@@ -348,14 +348,14 @@ fn write_tamper(root: &Path) -> Result<usize, JournalFixtureError> {
         &dir,
         "invalid--reordered.json",
         "reordered",
-        vec![json_envelope(&second)?, json_envelope(&first)?],
+        &[json_envelope(&second)?, json_envelope(&first)?],
         "checksum_chain_break",
     )?;
     write_tamper_case_with_head(
         &dir,
         "invalid--truncated.json",
         "truncated",
-        vec![json_envelope(&first)?],
+        &[json_envelope(&first)?],
         Some(second.checksum().to_hex()),
         "head_checksum_mismatch",
     )?;
@@ -365,7 +365,7 @@ fn write_tamper(root: &Path) -> Result<usize, JournalFixtureError> {
         &dir,
         "invalid--payload-modified.json",
         "payload-modified",
-        vec![modified],
+        &[modified],
         "payload_digest_mismatch",
     )?;
     let mut wrong_head = json_envelope(&first)?;
@@ -374,7 +374,7 @@ fn write_tamper(root: &Path) -> Result<usize, JournalFixtureError> {
         &dir,
         "invalid--wrong-head.json",
         "wrong-head",
-        vec![wrong_head],
+        &[wrong_head],
         "envelope_checksum_mismatch",
     )?;
     Ok(4)
@@ -394,11 +394,11 @@ fn write_int(dir: &Path, name: &str, case: &str, value: u64) -> Result<(), Journ
     write_case(
         dir,
         name,
-        recipe_ok(
+        &recipe_ok(
             "cbor-profile",
             case,
             Some(&bytes),
-            JournalRecipe::U64 {
+            &JournalRecipe::U64 {
                 value: value.to_string(),
             },
         ),
@@ -406,35 +406,27 @@ fn write_int(dir: &Path, name: &str, case: &str, value: u64) -> Result<(), Journ
     )
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "one-shot fixture writers own their payloads"
-)]
 fn write_limit_ok(
     dir: &Path,
     name: &str,
     case: &str,
-    recipe: JournalRecipe,
+    recipe: &JournalRecipe,
 ) -> Result<(), JournalFixtureError> {
-    write_case(dir, name, recipe_ok("limits", case, None, recipe), None)
+    write_case(dir, name, &recipe_ok("limits", case, None, recipe), None)
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "one-shot fixture writers own their payloads"
-)]
 fn write_invalid(
     dir: &Path,
     subject: &str,
     name: &str,
     case: &str,
-    recipe: JournalRecipe,
+    recipe: &JournalRecipe,
     code: &str,
 ) -> Result<(), JournalFixtureError> {
     write_case(
         dir,
         name,
-        serde_json::json!({
+        &serde_json::json!({
             "format_version": 1,
             "subject": subject,
             "case": case,
@@ -445,29 +437,21 @@ fn write_invalid(
     )
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "one-shot fixture writers own their payloads"
-)]
 fn write_tamper_case(
     dir: &Path,
     name: &str,
     case: &str,
-    envelopes: Vec<Value>,
+    envelopes: &[Value],
     code: &str,
 ) -> Result<(), JournalFixtureError> {
     write_tamper_case_with_head(dir, name, case, envelopes, None, code)
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "one-shot fixture writers own their payloads"
-)]
 fn write_tamper_case_with_head(
     dir: &Path,
     name: &str,
     case: &str,
-    envelopes: Vec<Value>,
+    envelopes: &[Value],
     claimed_head_checksum: Option<String>,
     code: &str,
 ) -> Result<(), JournalFixtureError> {
@@ -481,21 +465,17 @@ fn write_tamper_case_with_head(
     if let Some(head) = claimed_head_checksum {
         value["claimed_head_checksum"] = Value::String(head);
     }
-    write_case(dir, name, value, None)
+    write_case(dir, name, &value, None)
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "one-shot fixture writers own their payloads"
-)]
 fn write_case(
     dir: &Path,
     name: &str,
-    value: Value,
+    value: &Value,
     cbor: Option<&[u8]>,
 ) -> Result<(), JournalFixtureError> {
     let path = dir.join(name);
-    let text = serde_json::to_string_pretty(&value)
+    let text = serde_json::to_string_pretty(value)
         .map_err(|error| JournalFixtureError::Failed(error.to_string()))?;
     fs::write(&path, format!("{text}\n")).map_err(|error| io_err(&path, error))?;
     if let Some(bytes) = cbor {
@@ -512,7 +492,7 @@ fn json_ok(
     payload: Option<&Digest>,
     checksum: Option<&Digest>,
     diagnostic_json: Option<Value>,
-    recipe: Option<JournalRecipe>,
+    recipe: Option<&JournalRecipe>,
 ) -> Value {
     let mut value = serde_json::json!({
         "format_version": 1,
@@ -538,7 +518,7 @@ fn json_ok(
     value
 }
 
-fn recipe_ok(subject: &str, case: &str, cbor: Option<&[u8]>, recipe: JournalRecipe) -> Value {
+fn recipe_ok(subject: &str, case: &str, cbor: Option<&[u8]>, recipe: &JournalRecipe) -> Value {
     json_ok(subject, case, cbor, None, None, None, Some(recipe))
 }
 

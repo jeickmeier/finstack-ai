@@ -15,12 +15,12 @@
 //! `src/snapshot.rs`), and the snapshot-aligned prefix `prune` (see
 //! `src/prune.rs`).
 //!
-//! Every pooled connection is opened with `tokio_postgres::NoTls`; a
-//! connection URL whose `sslmode` demands TLS is rejected up front by
-//! `try_open` rather than silently connecting in plaintext (see the TLS
-//! note on `src/store.rs`). Multiple writers, including across processes,
-//! may append to the same session concurrently: per-session ordering is
-//! enforced by Postgres row locks rather than client-side serialization.
+//! TLS (rustls, hostname-verified against the bundled `WebPKI` roots plus any
+//! configured PEM anchors) is required by default; plaintext transport needs
+//! the explicit `PostgresTlsMode::Disable` setting (see the TLS note on
+//! `src/store.rs`). Multiple writers, including across processes, may append
+//! to the same session concurrently: per-session ordering is enforced by
+//! Postgres row locks rather than client-side serialization.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -71,14 +71,6 @@ mod schema;
 mod session;
 mod snapshot;
 mod store;
-
-// Task 2 temporarily widened `schema` to `#[doc(hidden)] pub mod schema;` so
-// its integration tests (a separate crate) could drive `ensure_schema`
-// directly ahead of `PostgresJournalStore` existing. Now that
-// `PostgresJournalStore::try_open` calls `ensure_schema` itself, `schema` is
-// back to a private `mod` (`pub(crate)` within, per the brief) and its
-// former integration tests moved to in-crate unit tests in `src/schema.rs`,
-// which can see `pub(crate)` items.
 
 pub use config::{
     DEFAULT_CHECKOUT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_OPERATION_TIMEOUT,

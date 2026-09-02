@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 
-use super::refs_error::{RefsError, validated_label};
+use super::refs_error::{RefsError, validated_label, validated_text};
 use crate::primitives::Metadata;
 
 /// Sensitivity classification.
@@ -70,16 +70,10 @@ impl Diagnostic {
         severity: DiagnosticSeverity,
         metadata: Metadata,
     ) -> Result<Self, RefsError> {
-        let message = message.as_ref();
-        if message.is_empty()
-            || message.len() > crate::content::TEXT_MAX_BYTES
-            || message.as_bytes().contains(&0)
-        {
-            return Err(RefsError::InvalidLabel { field: "message" });
-        }
+        let message = validated_text(message.as_ref(), "message")?;
         Ok(Self {
             code: validated_label(code.as_ref(), "code")?,
-            message: Arc::<str>::from(message),
+            message,
             severity,
             metadata,
         })

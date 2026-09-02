@@ -41,7 +41,16 @@ pub(super) fn apply_tool_batch_opened(
     {
         return Err(KernelError::InvalidRecordOrder);
     }
-    let source_calls = source_tool_calls_for_open(state, opened)?;
+    // Hold the source message through its own `Arc` so the tool-call
+    // references stay valid while `state.tool_calls` is updated below.
+    let messages = Arc::clone(&state.messages);
+    let source_calls = assistant_tool_calls(
+        messages.last().ok_or(KernelError::InvalidRecordOrder)?,
+        true,
+    );
+    if source_calls.len() != opened.calls.len() {
+        return Err(KernelError::ToolBatchPlanMismatch);
+    }
     let mut calls = Vec::with_capacity(opened.calls.len());
     let mut prior_group = 0_u32;
     for (index, assigned) in opened.calls.iter().enumerate() {
@@ -51,7 +60,7 @@ pub(super) fn apply_tool_batch_opened(
             .get_mut(assigned.plan.call().tool_call_id())
             .ok_or(KernelError::ToolBatchPlanMismatch)?;
         if assigned.source_index != source_index
-            || assigned.plan.call() != &source_calls[index]
+            || assigned.plan.call() != source_calls[index]
             || identity.call != *assigned.plan.call()
             || identity.source_message_id != opened.source_message_id
             || identity.effect_id.is_some()
@@ -127,24 +136,6 @@ pub(super) fn apply_tool_batch_opened(
     state.last_tool_batch = None;
     state.phase = Some(RunPhase::AwaitingTools);
     Ok(())
-}
-
-pub(super) fn source_tool_calls_for_open(
-    state: &KernelState,
-    opened: &crate::ToolBatchOpened,
-) -> Result<Vec<crate::ToolCallBlock>, KernelError> {
-    let source = state
-        .messages
-        .last()
-        .ok_or(KernelError::InvalidRecordOrder)?;
-    let calls = assistant_tool_calls(source, true)
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    if calls.len() != opened.calls.len() {
-        return Err(KernelError::ToolBatchPlanMismatch);
-    }
-    Ok(calls)
 }
 
 pub(super) fn apply_tool_effect_completed(
@@ -461,7 +452,7 @@ pub(super) fn insert_tool_identity(
     super::insert_completion_identity(state, effect_id, digest, completion_id)
 }
 
-pub(super) fn tool_wait_phase(batch: &ActiveToolBatch) -> RunPhase {
+fn tool_wait_phase(batch: &ActiveToolBatch) -> RunPhase {
     if batch.calls.iter().any(|call| {
         matches!(
             call.status,

@@ -53,15 +53,13 @@ use serde::Deserialize;
 mod config;
 mod http;
 
-use config::{DEFAULT_ENDPOINT, validate_endpoint, validate_result_cap};
+use config::{DEFAULT_ENDPOINT, validate_endpoint};
 pub use config::{OpenAiMediaConfig, OpenAiMediaError};
 use http::{
-    REQUEST_TIMEOUT, check_interrupted, download_bytes, read_bounded_json, send_bytes, send_json,
-    timeout_error, validate_download_url, wait_deadline,
+    REQUEST_TIMEOUT, Route, check_interrupted, download_bytes, read_bounded_json, send, send_bytes,
+    send_json,
 };
 
-#[allow(dead_code)]
-const DEFAULT_MAX_RESULT_BYTES: usize = 256 * 1_024;
 const MAX_RESULT_BYTES_CEILING: usize = 8 * 1_048_576;
 // OpenAI documents an audio-file upload limit in the 26 MB region.
 const MAX_AUDIO_DOWNLOAD_BYTES: usize = 26 * 1_048_576;
@@ -86,26 +84,84 @@ pub const OPENAI_MEDIA_LIMIT_EXCEEDED: &str = "openai_media_limit_exceeded";
 /// Stable cancellation/deadline code.
 pub const OPENAI_MEDIA_TIMEOUT: &str = "openai_media_timeout";
 
+/// Checked-in identity and contract of one media tool.
+struct ToolDef {
+    id: &'static str,
+    name: &'static str,
+    title: &'static str,
+    description: &'static str,
+    input_schema: &'static [u8],
+    output_schema: &'static [u8],
+}
+
+const TOOL_DEFS: [ToolDef; 3] = [
+    ToolDef {
+        id: IMAGE_TOOL_ID,
+        name: IMAGE_TOOL_NAME,
+        title: "OpenAI generate image",
+        description: "Generate an image via OpenAI and return the first data[] item only (a hosted URL when the model provides one, otherwise base64 or a staged artifact). Additional images in the response are discarded.",
+        input_schema: br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"size":{"type":["string","null"]}},"required":["model","prompt","size"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the image bytes. Present when the host configured an artifact store and the model returned base64.","type":"object"},"b64_json":{"type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"},"url":{"type":"string"}},"type":"object"}"#,
+    },
+    ToolDef {
+        id: SPEECH_TOOL_ID,
+        name: SPEECH_TOOL_NAME,
+        title: "OpenAI generate speech",
+        description: "Synthesize speech from text via OpenAI.",
+        input_schema: br#"{"additionalProperties":false,"properties":{"input":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"},"voice":{"type":["string","null"]}},"required":["model","input","voice"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the audio bytes. Present when the host configured an artifact store.","type":"object"},"b64_audio":{"description":"Base64 audio bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type"],"type":"object"}"#,
+    },
+    ToolDef {
+        id: TRANSCRIBE_TOOL_ID,
+        name: TRANSCRIBE_TOOL_NAME,
+        title: "OpenAI transcribe audio",
+        description: "Transcribe audio at an HTTPS URL via OpenAI (the toolset downloads it, then uploads it as multipart/form-data).",
+        input_schema: br#"{"additionalProperties":false,"properties":{"audio_url":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"}},"required":["model","audio_url"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"text":{"type":"string"}},"required":["text"],"type":"object"}"#,
+    },
+];
+
+fn tool_spec(def: &ToolDef, max_result_bytes: u64) -> Result<ToolSpec, OpenAiMediaError> {
+    let invalid = |reason| OpenAiMediaError::EndpointInvalid { reason };
+    let spec = ToolSpec {
+        id: ToolId::parse(def.id).map_err(|_| invalid("invalid_tool_id"))?,
+        model_name: Arc::from(def.name),
+        title: Arc::from(def.title),
+        description: Arc::from(def.description),
+        input_schema: RawJson::parse(def.input_schema)
+            .map_err(|_| invalid("invalid_input_schema"))?,
+        output_schema: Some(
+            RawJson::parse(def.output_schema).map_err(|_| invalid("invalid_output_schema"))?,
+        ),
+        execution: ToolExecutionMode::Sequential,
+        side_effect: SideEffectClass::NonIdempotentWrite,
+        retry_safety: RetrySafety::AtMostOnce,
+        approval: ApprovalMetadata {
+            requirement: ApprovalRequirement::Policy,
+            reason: Some(Arc::from("paid OpenAI media generation")),
+            attributes: Metadata::empty(),
+        },
+        max_result_bytes,
+        metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
+    };
+    spec.validate().map_err(|_| invalid("invalid_tool_spec"))?;
+    Ok(spec)
+}
+
 /// T1 native `OpenAI` media-generation Toolset.
 pub struct OpenAiMediaToolset {
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
-    image_tool_id: ToolId,
-    speech_tool_id: ToolId,
-    transcribe_tool_id: ToolId,
-    api_key: String,
-    endpoint: String,
-    max_result_bytes: usize,
-    artifact_store: Option<Arc<dyn ArtifactStore>>,
-    client: reqwest::Client,
+    route: Route,
 }
 
 impl std::fmt::Debug for OpenAiMediaToolset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenAiMediaToolset")
-            .field("endpoint", &self.endpoint)
-            .field("max_result_bytes", &self.max_result_bytes)
-            .field("artifact_store", &self.artifact_store.is_some())
+            .field("endpoint", &self.route.endpoint)
+            .field("max_result_bytes", &self.route.max_result_bytes)
+            .field("artifact_store", &self.route.store.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -118,12 +174,15 @@ impl OpenAiMediaToolset {
     /// Returns [`OpenAiMediaError::CredentialRequired`] when `api_key` is empty.
     /// Returns [`OpenAiMediaError::EndpointInvalid`] for a non-HTTP URL, userinfo,
     /// query, fragment, plaintext HTTP off loopback, or an out-of-range result cap.
-    #[allow(clippy::too_many_lines)]
     pub fn try_new(config: OpenAiMediaConfig) -> Result<Self, OpenAiMediaError> {
         if config.api_key.is_empty() {
             return Err(OpenAiMediaError::CredentialRequired);
         }
-        validate_result_cap(config.max_result_bytes)?;
+        if config.max_result_bytes == 0 || config.max_result_bytes > MAX_RESULT_BYTES_CEILING {
+            return Err(OpenAiMediaError::EndpointInvalid {
+                reason: "result cap out of range",
+            });
+        }
         let endpoint = if config.endpoint.is_empty() {
             DEFAULT_ENDPOINT.to_owned()
         } else {
@@ -133,128 +192,10 @@ impl OpenAiMediaToolset {
         let endpoint = endpoint.trim_end_matches('/').to_owned();
 
         let max_result_bytes_u64 = u64::try_from(config.max_result_bytes).unwrap_or(u64::MAX);
-
-        let image_tool_id =
-            ToolId::parse(IMAGE_TOOL_ID).map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let speech_tool_id =
-            ToolId::parse(SPEECH_TOOL_ID).map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let transcribe_tool_id =
-            ToolId::parse(TRANSCRIBE_TOOL_ID).map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            })?;
-
-        let paid_approval = ApprovalMetadata {
-            requirement: ApprovalRequirement::Policy,
-            reason: Some(Arc::from("paid OpenAI media generation")),
-            attributes: Metadata::empty(),
-        };
-
-        let image_spec = ToolSpec {
-            id: image_tool_id.clone(),
-            model_name: Arc::from(IMAGE_TOOL_NAME),
-            title: Arc::from("OpenAI generate image"),
-            description: Arc::from(
-                "Generate an image via OpenAI and return the first data[] item only (a hosted URL when the model provides one, otherwise base64 or a staged artifact). Additional images in the response are discarded.",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"size":{"type":["string","null"]}},"required":["model","prompt","size"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the image bytes. Present when the host configured an artifact store and the model returned base64.","type":"object"},"b64_json":{"type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"},"url":{"type":"string"}},"type":"object"}"#,
-                )
-                .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval.clone(),
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        image_spec
-            .validate()
-            .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let speech_spec = ToolSpec {
-            id: speech_tool_id.clone(),
-            model_name: Arc::from(SPEECH_TOOL_NAME),
-            title: Arc::from("OpenAI generate speech"),
-            description: Arc::from("Synthesize speech from text via OpenAI."),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"input":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"},"voice":{"type":["string","null"]}},"required":["model","input","voice"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the audio bytes. Present when the host configured an artifact store.","type":"object"},"b64_audio":{"description":"Base64 audio bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval.clone(),
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        speech_spec
-            .validate()
-            .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let transcribe_spec = ToolSpec {
-            id: transcribe_tool_id.clone(),
-            model_name: Arc::from(TRANSCRIBE_TOOL_NAME),
-            title: Arc::from("OpenAI transcribe audio"),
-            description: Arc::from(
-                "Transcribe audio at an HTTPS URL via OpenAI (the toolset downloads it, then uploads it as multipart/form-data).",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"audio_url":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"}},"required":["model","audio_url"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"text":{"type":"string"}},"required":["text"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval,
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        transcribe_spec
-            .validate()
-            .map_err(|_| OpenAiMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
+        let tools = TOOL_DEFS
+            .iter()
+            .map(|def| tool_spec(def, max_result_bytes_u64))
+            .collect::<Result<Vec<_>, _>>()?;
 
         // This client serves the toolset's own OpenAI API calls (image and
         // speech generation, plus the transcription POST after the audio
@@ -278,15 +219,14 @@ impl OpenAiMediaToolset {
                 name: Arc::from("finstack-openai-media"),
                 metadata: Metadata::empty(),
             },
-            tools: Arc::from([image_spec, speech_spec, transcribe_spec]),
-            image_tool_id,
-            speech_tool_id,
-            transcribe_tool_id,
-            api_key: config.api_key,
-            endpoint,
-            max_result_bytes: config.max_result_bytes,
-            artifact_store: None,
-            client,
+            tools: Arc::from(tools),
+            route: Route {
+                client,
+                api_key: config.api_key,
+                endpoint,
+                max_result_bytes: config.max_result_bytes,
+                store: None,
+            },
         })
     }
 
@@ -296,7 +236,7 @@ impl OpenAiMediaToolset {
     /// `artifact` reference and the model never receives the base64 payload.
     #[must_use]
     pub fn with_artifact_store(mut self, store: Arc<dyn ArtifactStore>) -> Self {
-        self.artifact_store = Some(store);
+        self.route.store = Some(store);
         self
     }
 }
@@ -358,59 +298,26 @@ impl Toolset for OpenAiMediaToolset {
         ctx: ToolCallContext,
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        let client = self.client.clone();
-        let api_key = self.api_key.clone();
-        let endpoint = self.endpoint.clone();
-        let max_result_bytes = self.max_result_bytes;
-        let artifact_store = self.artifact_store.clone();
-        let image_tool_id = self.image_tool_id.clone();
-        let speech_tool_id = self.speech_tool_id.clone();
-        let transcribe_tool_id = self.transcribe_tool_id.clone();
+        let route = self.route.clone();
+        let tools = Arc::clone(&self.tools);
         Box::pin(async move {
             verify_authority(&ctx)?;
             let tool_name = call.call.tool_name();
-            let delivered = if call.tool_id == image_tool_id && tool_name == IMAGE_TOOL_NAME {
-                handle_image(
-                    &client,
-                    &api_key,
-                    &endpoint,
-                    max_result_bytes,
-                    artifact_store.as_ref(),
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
-            } else if call.tool_id == speech_tool_id && tool_name == SPEECH_TOOL_NAME {
-                handle_speech(
-                    &client,
-                    &api_key,
-                    &endpoint,
-                    max_result_bytes,
-                    artifact_store.as_ref(),
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
-            } else if call.tool_id == transcribe_tool_id && tool_name == TRANSCRIBE_TOOL_NAME {
-                MediaOutput {
-                    value: handle_transcribe(
-                        &client,
-                        &api_key,
-                        &endpoint,
-                        &ctx,
-                        call.call.arguments().as_bytes(),
-                    )
-                    .await?,
-                    artifact: None,
-                }
-            } else {
-                return Err(tool_error(
-                    OPENAI_MEDIA_INVALID_ARGUMENTS,
-                    ErrorCategory::Validation,
-                    "openai media call identity is invalid",
-                ));
+            let known = tools
+                .iter()
+                .any(|spec| spec.id == call.tool_id && spec.model_name.as_ref() == tool_name);
+            if !known {
+                return Err(invalid_arguments("openai media call identity is invalid"));
+            }
+            let arguments = call.call.arguments().as_bytes();
+            let delivered = match tool_name {
+                IMAGE_TOOL_NAME => handle_image(&route, &ctx, arguments).await?,
+                SPEECH_TOOL_NAME => handle_speech(&route, &ctx, arguments).await?,
+                TRANSCRIBE_TOOL_NAME => handle_transcribe(&route, &ctx, arguments).await?.into(),
+                _ => return Err(invalid_arguments("openai media call identity is invalid")),
             };
-            let output_bytes = serde_json::to_vec(&delivered.value).map_err(|_| {
+            let MediaOutput { value, artifact } = delivered;
+            let output_bytes = serde_json::to_vec(&value).map_err(|_| {
                 tool_error(
                     OPENAI_MEDIA_TRANSPORT_FAILED,
                     ErrorCategory::Internal,
@@ -428,7 +335,7 @@ impl Toolset for OpenAiMediaToolset {
                 is_error: false,
             };
             let mut items = Vec::with_capacity(2);
-            if let Some(artifact) = delivered.artifact {
+            if let Some(artifact) = artifact {
                 items.push(Ok(ToolStreamItem::Artifact(artifact)));
             }
             items.push(Ok(ToolStreamItem::Completed(result)));
@@ -459,33 +366,38 @@ struct MediaOutput {
     artifact: Option<finstack_ai_kernel::ArtifactRef>,
 }
 
+impl From<serde_json::Value> for MediaOutput {
+    fn from(value: serde_json::Value) -> Self {
+        Self {
+            value,
+            artifact: None,
+        }
+    }
+}
+
 /// Hand generated media back without inlining the bytes when a store is set.
 async fn deliver_media(
+    route: &Route,
     bytes: Vec<u8>,
     media_type: &str,
     inline_field: &'static str,
     name: &'static str,
-    store: Option<&Arc<dyn ArtifactStore>>,
     ctx: &ToolCallContext,
-    max_result_bytes: usize,
 ) -> Result<MediaOutput, ToolError> {
     let byte_length = bytes.len();
-    let Some(store) = store else {
-        if base64_encoded_len(byte_length) > max_result_bytes {
+    let Some(store) = &route.store else {
+        if base64_encoded_len(byte_length) > route.max_result_bytes {
             return Err(tool_error(
                 OPENAI_MEDIA_LIMIT_EXCEEDED,
                 ErrorCategory::Limit,
                 "openai media result exceeds the configured byte limit",
             ));
         }
-        return Ok(MediaOutput {
-            value: serde_json::json!({
-                inline_field: BASE64_STANDARD.encode(bytes),
-                "media_type": media_type,
-                "byte_length": byte_length,
-            }),
-            artifact: None,
-        });
+        return Ok(MediaOutput::from(serde_json::json!({
+            inline_field: BASE64_STANDARD.encode(bytes),
+            "media_type": media_type,
+            "byte_length": byte_length,
+        })));
     };
     let artifact = stage_required_artifact(
         store.as_ref(),
@@ -522,11 +434,7 @@ async fn deliver_media(
 }
 
 async fn handle_image(
-    client: &reqwest::Client,
-    api_key: &str,
-    endpoint: &str,
-    max_result_bytes: usize,
-    store: Option<&Arc<dyn ArtifactStore>>,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<MediaOutput, ToolError> {
@@ -544,11 +452,9 @@ async fn handle_image(
         map.insert("size".into(), serde_json::Value::String(size));
     }
     let response: ImageResponse = send_json(
-        client,
-        api_key,
-        reqwest::Method::POST,
-        &format!("{endpoint}/v1/images/generations"),
-        Some(&body),
+        route,
+        &format!("{}/v1/images/generations", route.endpoint),
+        &body,
         ctx,
         MAX_RESULT_BYTES_CEILING,
     )
@@ -563,17 +469,14 @@ async fn handle_image(
     if let Some(url) = item.url {
         let value = serde_json::json!({ "url": url });
         let size = serde_json::to_vec(&value).map_or(usize::MAX, |bytes| bytes.len());
-        if size > max_result_bytes {
+        if size > route.max_result_bytes {
             return Err(tool_error(
                 OPENAI_MEDIA_LIMIT_EXCEEDED,
                 ErrorCategory::Limit,
                 "openai media image result exceeds the configured byte limit",
             ));
         }
-        return Ok(MediaOutput {
-            value,
-            artifact: None,
-        });
+        return Ok(MediaOutput::from(value));
     }
     let Some(b64_json) = item.b64_json else {
         return Err(tool_error(
@@ -589,24 +492,11 @@ async fn handle_image(
             "openai media image data is not valid base64",
         )
     })?;
-    deliver_media(
-        bytes,
-        "image/png",
-        "b64_json",
-        "openai-image",
-        store,
-        ctx,
-        max_result_bytes,
-    )
-    .await
+    deliver_media(route, bytes, "image/png", "b64_json", "openai-image", ctx).await
 }
 
 async fn handle_speech(
-    client: &reqwest::Client,
-    api_key: &str,
-    endpoint: &str,
-    max_result_bytes: usize,
-    store: Option<&Arc<dyn ArtifactStore>>,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<MediaOutput, ToolError> {
@@ -623,37 +513,25 @@ async fn handle_speech(
     {
         map.insert("voice".into(), serde_json::Value::String(voice));
     }
+    let cap = if route.store.is_some() {
+        MAX_RESULT_BYTES_CEILING
+    } else {
+        (route.max_result_bytes / 4).saturating_mul(3)
+    };
     let (bytes, content_type) = send_bytes(
-        client,
-        api_key,
-        reqwest::Method::POST,
-        &format!("{endpoint}/v1/audio/speech"),
-        Some(&body),
+        route,
+        &format!("{}/v1/audio/speech", route.endpoint),
+        &body,
         ctx,
-        if store.is_some() {
-            MAX_RESULT_BYTES_CEILING
-        } else {
-            (max_result_bytes / 4).saturating_mul(3)
-        },
+        cap,
     )
     .await?;
     let media_type = content_type.unwrap_or_else(|| "audio/mpeg".to_owned());
-    deliver_media(
-        bytes,
-        &media_type,
-        "b64_audio",
-        "openai-speech",
-        store,
-        ctx,
-        max_result_bytes,
-    )
-    .await
+    deliver_media(route, bytes, &media_type, "b64_audio", "openai-speech", ctx).await
 }
 
 async fn handle_transcribe(
-    client: &reqwest::Client,
-    api_key: &str,
-    endpoint: &str,
+    route: &Route,
     ctx: &ToolCallContext,
     arguments: &[u8],
 ) -> Result<serde_json::Value, ToolError> {
@@ -663,7 +541,6 @@ async fn handle_transcribe(
             "openai media model or audio_url is empty",
         ));
     }
-    validate_download_url(&arguments.audio_url)?;
     let downloaded = download_bytes(&arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
     // Presigned/signed download URLs commonly carry a query string (and
     // occasionally a fragment) after the real file name, e.g.
@@ -688,30 +565,11 @@ async fn handle_transcribe(
             "file",
             reqwest::multipart::Part::bytes(downloaded).file_name(file_name),
         );
-    let request = client
-        .post(format!("{endpoint}/v1/audio/transcriptions"))
-        .header("Authorization", format!("Bearer {api_key}"))
+    let request = route
+        .client
+        .post(format!("{}/v1/audio/transcriptions", route.endpoint))
         .multipart(form);
-    let send = request.send();
-    let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
-        result = send => result.map_err(|_| {
-            tool_error(
-                OPENAI_MEDIA_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "openai media request failed",
-            )
-        })?,
-    };
-    let status = response.status();
-    if !status.is_success() {
-        return Err(tool_error(
-            OPENAI_MEDIA_TRANSPORT_FAILED,
-            ErrorCategory::Tool,
-            "openai media endpoint rejected the request",
-        ));
-    }
+    let response = send(route, request, ctx).await?;
     let response: TranscribeResponse =
         read_bounded_json(response, MAX_RESULT_BYTES_CEILING, ctx).await?;
     Ok(serde_json::json!({ "text": response.text }))
@@ -750,10 +608,10 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
 
+    use super::http::validate_download_url;
     use super::{
         BASE64_STANDARD, IMAGE_TOOL_NAME, OPENAI_MEDIA_CREDENTIAL_REQUIRED, OpenAiMediaConfig,
         OpenAiMediaError, OpenAiMediaToolset, SPEECH_TOOL_NAME, TRANSCRIBE_TOOL_NAME,
-        validate_download_url,
     };
 
     const CANARY: &str = "oa-media-secret-canary-046";

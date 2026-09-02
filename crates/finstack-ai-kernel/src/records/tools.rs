@@ -459,25 +459,11 @@ impl ActiveToolBatch {
             if let Ok(index) = u32::try_from(index) {
                 self.effect_index.insert(call.assigned.effect_id, index);
             }
-            match &call.status {
-                ActiveToolCallStatus::Undispatched => {
-                    self.undispatched_count = self.undispatched_count.saturating_add(1);
-                    self.unsettled_count = self.unsettled_count.saturating_add(1);
-                    if call.assigned.group_index == self.current_group {
-                        self.current_group_open = self.current_group_open.saturating_add(1);
-                    }
-                }
-                ActiveToolCallStatus::Requested { .. } => {
-                    self.unsettled_count = self.unsettled_count.saturating_add(1);
-                    if call.assigned.group_index == self.current_group {
-                        self.current_group_open = self.current_group_open.saturating_add(1);
-                    }
-                }
-                ActiveToolCallStatus::Buffered { .. } => {
-                    self.unsettled_count = self.unsettled_count.saturating_add(1);
-                }
-                ActiveToolCallStatus::Settled { .. } => {}
-            }
+            let kind = status_kind(&call.status);
+            bump(&mut self.undispatched_count, false, kind.undispatched);
+            bump(&mut self.unsettled_count, false, kind.unsettled);
+            let open = kind.open && call.assigned.group_index == self.current_group;
+            bump(&mut self.current_group_open, false, open);
         }
     }
 
@@ -500,13 +486,7 @@ impl ActiveToolBatch {
         self.current_group_open = self
             .calls
             .iter()
-            .filter(|call| {
-                call.assigned.group_index == group
-                    && matches!(
-                        call.status,
-                        ActiveToolCallStatus::Undispatched | ActiveToolCallStatus::Requested { .. }
-                    )
-            })
+            .filter(|call| call.assigned.group_index == group && status_kind(&call.status).open)
             .count()
             .try_into()
             .unwrap_or(u32::MAX);
@@ -516,11 +496,8 @@ impl ActiveToolBatch {
         let Some(call) = self.calls.get(target) else {
             return self.current_group_open == 0;
         };
-        let target_open = call.assigned.group_index == self.current_group
-            && matches!(
-                call.status,
-                ActiveToolCallStatus::Undispatched | ActiveToolCallStatus::Requested { .. }
-            );
+        let target_open =
+            call.assigned.group_index == self.current_group && status_kind(&call.status).open;
         if target_open {
             self.current_group_open <= 1
         } else {
@@ -529,29 +506,33 @@ impl ActiveToolBatch {
     }
 
     fn adjust_counters(&mut self, group: u32, previous: StatusKind, next: StatusKind) {
-        if previous.undispatched != next.undispatched {
-            if next.undispatched {
-                self.undispatched_count = self.undispatched_count.saturating_add(1);
-            } else {
-                self.undispatched_count = self.undispatched_count.saturating_sub(1);
-            }
-        }
-        if previous.unsettled != next.unsettled {
-            if next.unsettled {
-                self.unsettled_count = self.unsettled_count.saturating_add(1);
-            } else {
-                self.unsettled_count = self.unsettled_count.saturating_sub(1);
-            }
-        }
-        let was_open = group == self.current_group && previous.open;
-        let now_open = group == self.current_group && next.open;
-        if was_open != now_open {
-            if now_open {
-                self.current_group_open = self.current_group_open.saturating_add(1);
-            } else {
-                self.current_group_open = self.current_group_open.saturating_sub(1);
-            }
-        }
+        bump(
+            &mut self.undispatched_count,
+            previous.undispatched,
+            next.undispatched,
+        );
+        bump(
+            &mut self.unsettled_count,
+            previous.unsettled,
+            next.unsettled,
+        );
+        let in_group = group == self.current_group;
+        bump(
+            &mut self.current_group_open,
+            in_group && previous.open,
+            in_group && next.open,
+        );
+    }
+}
+
+/// Saturating `+1`/`-1` on a counter when a membership flag flips.
+fn bump(counter: &mut u32, was: bool, now: bool) {
+    if was != now {
+        *counter = if now {
+            counter.saturating_add(1)
+        } else {
+            counter.saturating_sub(1)
+        };
     }
 }
 

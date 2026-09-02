@@ -23,6 +23,7 @@
 //! concurrent load found corruption could write its head afterwards and
 //! permanently resurrect the invalidated proof.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, Metadata, SessionId};
@@ -33,19 +34,17 @@ use finstack_ai_runtime::ports::journal::{
     SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
-use finstack_ai_store_common::{VerifiedHead, VerifiedHeadCache};
+use finstack_ai_store_common::VerifiedHead;
+use tokio_postgres::Client;
 
 use crate::append::append;
 use crate::config::PostgresDurability;
 use crate::load::load;
+use crate::pool::PooledClient;
 use crate::prune;
 use crate::snapshot;
 use crate::store::{DURABLE_DETAIL, PostgresJournalStore, RELAXED_DETAIL};
 
-#[allow(
-    clippy::single_match_else,
-    reason = "deadline settlement keeps success and connection-poison paths explicit"
-)]
 impl JournalStore for PostgresJournalStore {
     fn descriptor(&self) -> JournalStoreDescriptor {
         JournalStoreDescriptor {
@@ -66,22 +65,12 @@ impl JournalStore for PostgresJournalStore {
     /// application's policy. Retrying the same request is safe either way —
     /// the idempotency contract guarantees it.
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
-        let pool = self.pool.clone();
         let limits = self.config.limits;
-        let checkout_timeout = self.config.checkout_timeout;
-        let operation_timeout = self.config.operation_timeout;
-        Box::pin(async move {
-            let mut client = pool.get_with_timeout(checkout_timeout).await?;
-            match tokio::time::timeout(operation_timeout, append(&mut client, &request, &limits))
-                .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    client.poison();
-                    Err(StoreError::AmbiguousAcknowledgement)
-                }
-            }
-        })
+        Box::pin(
+            self.run(StoreError::AmbiguousAcknowledgement, async move |client| {
+                append(client, &request, &limits).await
+            }),
+        )
     }
 
     /// Full, chain-verified load of one session journal (spec D9).
@@ -106,25 +95,12 @@ impl JournalStore for PostgresJournalStore {
         &self,
         request: SnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
-        let pool = self.pool.clone();
         let limits = self.config.limits;
-        let checkout_timeout = self.config.checkout_timeout;
-        let operation_timeout = self.config.operation_timeout;
-        Box::pin(async move {
-            let mut client = pool.get_with_timeout(checkout_timeout).await?;
-            match tokio::time::timeout(
-                operation_timeout,
-                snapshot::write_snapshot(&mut client, &request, &limits),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    client.poison();
-                    Err(StoreError::AmbiguousAcknowledgement)
-                }
-            }
-        })
+        Box::pin(
+            self.run(StoreError::AmbiguousAcknowledgement, async move |client| {
+                snapshot::write_snapshot(client, &request, &limits).await
+            }),
+        )
     }
 
     /// Encode and replace one session's disposable kernel-state snapshot,
@@ -133,46 +109,19 @@ impl JournalStore for PostgresJournalStore {
         &self,
         request: StateSnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
-        let pool = self.pool.clone();
         let limits = self.config.limits;
-        let checkout_timeout = self.config.checkout_timeout;
-        let operation_timeout = self.config.operation_timeout;
-        Box::pin(async move {
-            let mut client = pool.get_with_timeout(checkout_timeout).await?;
-            match tokio::time::timeout(
-                operation_timeout,
-                snapshot::write_state_snapshot(&mut client, &request, &limits),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    client.poison();
-                    Err(StoreError::AmbiguousAcknowledgement)
-                }
-            }
-        })
+        Box::pin(
+            self.run(StoreError::AmbiguousAcknowledgement, async move |client| {
+                snapshot::write_state_snapshot(client, &request, &limits).await
+            }),
+        )
     }
 
     /// Scan committed envelopes of one session, per `crate::snapshot::scan`.
     fn scan(&self, request: ScanRequest) -> PortFuture<Result<ScanPage, StoreError>> {
-        let pool = self.pool.clone();
-        let checkout_timeout = self.config.checkout_timeout;
-        let operation_timeout = self.config.operation_timeout;
-        Box::pin(async move {
-            let mut client = pool.get_with_timeout(checkout_timeout).await?;
-            match tokio::time::timeout(operation_timeout, snapshot::scan(&mut client, request))
-                .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    client.poison();
-                    Err(StoreError::Unavailable {
-                        reason_code: "postgres_operation_timeout",
-                    })
-                }
-            }
-        })
+        Box::pin(self.run(OPERATION_TIMEOUT, async move |client| {
+            snapshot::scan(client, request).await
+        }))
     }
 
     /// Compare-and-swap session metadata, per
@@ -181,24 +130,11 @@ impl JournalStore for PostgresJournalStore {
         &self,
         request: WriteMetadataRequest,
     ) -> PortFuture<Result<MetadataReceipt, StoreError>> {
-        let pool = self.pool.clone();
-        let checkout_timeout = self.config.checkout_timeout;
-        let operation_timeout = self.config.operation_timeout;
-        Box::pin(async move {
-            let mut client = pool.get_with_timeout(checkout_timeout).await?;
-            match tokio::time::timeout(
-                operation_timeout,
-                snapshot::write_metadata(&mut client, &request),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    client.poison();
-                    Err(StoreError::AmbiguousAcknowledgement)
-                }
-            }
-        })
+        Box::pin(
+            self.run(StoreError::AmbiguousAcknowledgement, async move |client| {
+                snapshot::write_metadata(client, &request).await
+            }),
+        )
     }
 
     /// Snapshot-aligned prefix prune, per `crate::prune::prune`.
@@ -207,25 +143,12 @@ impl JournalStore for PostgresJournalStore {
     /// already-pruned prefix a cached suffix proof does not depend on, so
     /// the cached head (if any) is left exactly as it was.
     fn prune(&self, request: PruneRequest) -> PortFuture<Result<PruneReceipt, StoreError>> {
-        let pool = self.pool.clone();
         let snapshot_bytes = self.config.limits.snapshot_bytes;
-        let checkout_timeout = self.config.checkout_timeout;
-        let operation_timeout = self.config.operation_timeout;
-        Box::pin(async move {
-            let mut client = pool.get_with_timeout(checkout_timeout).await?;
-            match tokio::time::timeout(
-                operation_timeout,
-                prune::prune(&mut client, &request, snapshot_bytes),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    client.poison();
-                    Err(StoreError::AmbiguousAcknowledgement)
-                }
-            }
-        })
+        Box::pin(
+            self.run(StoreError::AmbiguousAcknowledgement, async move |client| {
+                prune::prune(client, &request, snapshot_bytes).await
+            }),
+        )
     }
 
     /// `SELECT 1` round-trip on a pooled connection (spec D6).
@@ -296,26 +219,57 @@ impl JournalStore for PostgresJournalStore {
     }
 }
 
+/// What a read-only operation reports when it outruns the operation timeout.
+///
+/// Write operations report [`StoreError::AmbiguousAcknowledgement`] instead:
+/// their `COMMIT` may or may not have landed.
+const OPERATION_TIMEOUT: StoreError = StoreError::Unavailable {
+    reason_code: "postgres_operation_timeout",
+};
+
 impl PostgresJournalStore {
+    /// Check out a pooled connection and run `op` on it under the operation
+    /// timeout.
+    ///
+    /// A checkout that does not resolve within `checkout_timeout` is
+    /// `Unavailable{postgres_pool_timeout}`. An `op` that does not resolve
+    /// within `operation_timeout` poisons the checkout — the statement may
+    /// still be running on it — and reports `on_timeout`.
+    ///
+    /// Returns a `'static` future (nothing of `self` is captured) so every
+    /// port method can box it directly.
+    fn run<T, F>(
+        &self,
+        on_timeout: StoreError,
+        op: F,
+    ) -> impl Future<Output = Result<T, StoreError>> + use<T, F>
+    where
+        F: AsyncFnOnce(&mut PooledClient<Client>) -> Result<T, StoreError>,
+    {
+        let pool = self.pool.clone();
+        let checkout_timeout = self.config.checkout_timeout;
+        let operation_timeout = self.config.operation_timeout;
+        async move {
+            let mut client = pool.get_with_timeout(checkout_timeout).await?;
+            let Ok(result) = tokio::time::timeout(operation_timeout, op(&mut client)).await else {
+                client.poison();
+                return Err(on_timeout);
+            };
+            result
+        }
+    }
+
     /// Shared body of [`JournalStore::load`] and [`JournalStore::load_from`]:
     /// run the load under the session's cached verified head and maintain
     /// that cache from the outcome (spec D9).
-    #[allow(
-        clippy::single_match_else,
-        reason = "deadline settlement keeps success and connection-poison paths explicit"
-    )]
     fn verified_load(
         &self,
         session_id: SessionId,
         window: LoadWindow,
     ) -> PortFuture<Result<LoadedSession, StoreError>> {
-        let pool = self.pool.clone();
         let snapshot_bytes = self.config.limits.snapshot_bytes;
-        let cache: Arc<VerifiedHeadCache> = Arc::clone(&self.verified);
-        let checkout_timeout = self.config.checkout_timeout;
-        let operation_timeout = self.config.operation_timeout;
-        Box::pin(async move {
-            let mut client = pool.get_with_timeout(checkout_timeout).await?;
+        let cache = Arc::clone(&self.verified);
+        Box::pin(self.run(OPERATION_TIMEOUT, async move |client| {
             // Read the cache as late as possible — after the (potentially
             // blocking) checkout — so the window in which another load can
             // invalidate between the read and the write-back is as small as
@@ -323,20 +277,7 @@ impl PostgresJournalStore {
             // small: `VerifiedHeadCache::remember` rejects a write whose
             // generation is stale.
             let read = cache.read(session_id);
-            let result = match tokio::time::timeout(
-                operation_timeout,
-                load(&mut client, session_id, snapshot_bytes, window, read.head),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    client.poison();
-                    Err(StoreError::Unavailable {
-                        reason_code: "postgres_operation_timeout",
-                    })
-                }
-            };
+            let result = load(client, session_id, snapshot_bytes, window, read.head).await;
             match &result {
                 // Only a full load establishes a proof over the *whole*
                 // chain. A window's tail was verified against a checksum the
@@ -358,6 +299,6 @@ impl PostgresJournalStore {
                 Err(_other) => {}
             }
             result
-        })
+        }))
     }
 }

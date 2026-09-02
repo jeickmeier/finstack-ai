@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use base64::Engine;
 use finstack_ai_kernel::{
-    ContentBlock, ErrorCategory, MediaRef, Message, MessageRole, OutputSpec, RawJson,
-    SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId,
+    ContentBlock, MediaRef, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
+    ToolCallId,
 };
 use finstack_ai_provider_wire::GEMINI_CONTINUATION_PROVIDER;
 use finstack_ai_runtime::ports::model::{
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::GeminiModelConfig;
-use crate::error::{GEMINI_REQUEST_INVALID, error};
+use crate::error::request_error;
 
 const CONTINUATION_VERSION: u64 = 1;
 const CANDIDATE_COUNT: u32 = 1;
@@ -38,15 +38,6 @@ const RESERVED_SETTINGS: &[&str] = &[
     "responseJsonSchema",
     "responseMimeType",
 ];
-
-pub(crate) fn request_error(message: &'static str) -> ModelError {
-    error(
-        GEMINI_REQUEST_INVALID,
-        ErrorCategory::Validation,
-        false,
-        message,
-    )
-}
 
 /// One `generateContent` request body.
 ///
@@ -582,6 +573,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::error::GEMINI_REQUEST_INVALID;
     use base64::Engine;
     use finstack_ai_kernel::{
         BlobRef, ContentBlock, JsonSchemaDraft, MediaRef, Message, MessageId, MessageRole,

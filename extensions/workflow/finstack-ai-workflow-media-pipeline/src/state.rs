@@ -282,16 +282,6 @@ impl SqliteRenderStateStore {
 
     fn with_conn<T>(
         &self,
-        body: impl FnOnce(&Connection) -> Result<T, StateError>,
-    ) -> Result<T, StateError> {
-        let conn = self.conn.lock().map_err(|_| StateError::Unavailable {
-            code: "sqlite_state_lock_poisoned",
-        })?;
-        body(&conn)
-    }
-
-    fn with_conn_mut<T>(
-        &self,
         body: impl FnOnce(&mut Connection) -> Result<T, StateError>,
     ) -> Result<T, StateError> {
         let mut conn = self.conn.lock().map_err(|_| StateError::Unavailable {
@@ -365,7 +355,7 @@ impl RenderStateStore for SqliteRenderStateStore {
             code: "state_json_encode",
         })?;
         let expected_revision = i64_from_u64(state.revision)?;
-        self.with_conn_mut(|conn| {
+        self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|_| StateError::Unavailable {

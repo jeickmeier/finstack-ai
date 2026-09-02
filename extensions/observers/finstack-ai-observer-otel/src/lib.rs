@@ -181,7 +181,10 @@ impl OtelObserver {
             attributes.push(("finstack.tool_call_id".to_owned(), tool_call_id.to_string()));
         }
         if let Some(body) = &view.body {
-            attributes.push(("finstack.body".to_owned(), serde_json_string(body)));
+            attributes.push((
+                "finstack.body".to_owned(),
+                serde_json::to_string(body).unwrap_or_default(),
+            ));
         }
         CapturedSpan {
             name: span_name(view.kind).to_owned(),
@@ -236,10 +239,6 @@ fn span_name(kind: RunEventKind) -> &'static str {
         RunEventKind::ToolSettled | RunEventKind::ToolProgress => "finstack.tool",
         _ => "finstack.run",
     }
-}
-
-fn serde_json_string(value: &impl serde::Serialize) -> String {
-    serde_json::to_string(value).unwrap_or_default()
 }
 
 #[cfg(test)]

@@ -217,16 +217,17 @@ impl<'de> Deserialize<'de> for VersionOffer {
 /// assert_eq!(select_version(&client, &server).expect("v1"), 1);
 /// ```
 pub fn select_version(client: &VersionOffer, server: &VersionOffer) -> Result<u16, ProtocolError> {
-    let mut chosen = None;
-    for version in &client.supported_versions {
-        if *version < client.downgrade_floor || *version < server.downgrade_floor {
-            continue;
-        }
-        if server.supported_versions.contains(version) {
-            chosen = Some(chosen.map_or(*version, |current: u16| current.max(*version)));
-        }
-    }
-    chosen.ok_or_else(|| ProtocolError::unsupported_version("unknown_protocol_version"))
+    client
+        .supported_versions
+        .iter()
+        .copied()
+        .filter(|version| {
+            *version >= client.downgrade_floor
+                && *version >= server.downgrade_floor
+                && server.supported_versions.contains(version)
+        })
+        .max()
+        .ok_or_else(|| ProtocolError::unsupported_version("unknown_protocol_version"))
 }
 
 /// Require every mandatory server feature to be present on the client offer.

@@ -8,9 +8,7 @@ use crate::ids::UuidV7Generator;
 #[cfg(feature = "native-tokio")]
 use crate::ids::{OsRandomSource as IngressRandom, SystemClock as IngressClock};
 
-type IngressIds = UuidV7Generator<IngressClock, IngressRandom>;
-
-fn ingress_ids() -> IngressIds {
+fn ingress_ids() -> UuidV7Generator<IngressClock, IngressRandom> {
     UuidV7Generator::new(IngressClock, IngressRandom)
 }
 

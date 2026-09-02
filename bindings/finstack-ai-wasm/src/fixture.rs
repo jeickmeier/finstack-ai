@@ -142,7 +142,6 @@ pub fn tool_call(
 
 /// Default echo tool schema used by scripted toolset constructors.
 #[must_use]
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn echo_tool_json() -> &'static str {
     r#"{
         "id": "js.echo",

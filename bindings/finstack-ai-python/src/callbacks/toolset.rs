@@ -14,7 +14,7 @@ use serde::Deserialize;
 
 use super::context::PyCallbackContext;
 use super::engine::{CallbackFailure, PythonCallback};
-use super::shared::{configuration_error, exact_component, python_value};
+use super::shared::{configuration_error, exact_component};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -115,7 +115,7 @@ impl PyPythonToolset {
             callback,
             callback_timeout_seconds,
         )?);
-        let tools = python_value::<Vec<ToolSpec>>(py, &callback, tools)?;
+        let tools = callback.decode::<Vec<ToolSpec>>(py, tools)?;
         if tools.is_empty() {
             return Err(PyTypeError::new_err("tools must not be empty"));
         }

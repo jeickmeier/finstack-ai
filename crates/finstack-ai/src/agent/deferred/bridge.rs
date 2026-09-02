@@ -11,7 +11,6 @@ use finstack_ai_kernel::{
     TextBlock, ToolResultBlock,
 };
 use finstack_ai_runtime::child::AgentInvoker;
-use finstack_ai_runtime::commit::CommitCoordinator;
 use finstack_ai_runtime::ingress::ExternalRouteOutcome;
 use finstack_ai_runtime::native_driver as driver;
 use thiserror::Error;
@@ -224,13 +223,10 @@ impl ChildRunBridge {
         &self,
         parent: &AgentRun,
     ) -> Result<Vec<ChildSettleOutcome>, ChildRunBridgeError> {
-        let commit = CommitCoordinator::recover_run(
-            Arc::clone(parent.journal_store()),
-            parent.locator().session_id,
-            Some(parent.locator().run_id),
-        )
-        .await
-        .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
+        let commit = parent
+            .recover_commit()
+            .await
+            .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
         let mut outcomes = Vec::new();
         for pending in super::scan::outstanding_deferrals(commit.state()) {
             outcomes.push(self.settle(parent, &pending.deferred).await?);
@@ -270,13 +266,10 @@ async fn completion_command(
     deferred: &EffectDeferred,
     outcome: ExternalEffectOutcome,
 ) -> Result<ExternalEffectCompletionCommand, ChildRunBridgeError> {
-    let commit = CommitCoordinator::recover_run(
-        Arc::clone(parent.journal_store()),
-        parent.locator().session_id,
-        Some(parent.locator().run_id),
-    )
-    .await
-    .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
+    let commit = parent
+        .recover_commit()
+        .await
+        .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
     let accepted = commit
         .state()
         .accepted()
@@ -308,13 +301,10 @@ async fn tool_result_output(
     text: &str,
     is_error: bool,
 ) -> Result<RawJson, ChildRunBridgeError> {
-    let commit = CommitCoordinator::recover_run(
-        Arc::clone(parent.journal_store()),
-        parent.locator().session_id,
-        Some(parent.locator().run_id),
-    )
-    .await
-    .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
+    let commit = parent
+        .recover_commit()
+        .await
+        .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
     let call = commit
         .state()
         .active_tool_batch()

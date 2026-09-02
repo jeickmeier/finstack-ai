@@ -71,10 +71,9 @@ impl ToolCallBlock {
         provider_call_id: Option<impl AsRef<str>>,
     ) -> Result<Self, ContentError> {
         let tool_name = validated_label(tool_name.as_ref(), "tool_name")?;
-        let provider_call_id = match provider_call_id {
-            Some(value) => Some(validated_label(value.as_ref(), "provider_call_id")?),
-            None => None,
-        };
+        let provider_call_id = provider_call_id
+            .map(|value| validated_label(value.as_ref(), "provider_call_id"))
+            .transpose()?;
         Ok(Self {
             tool_call_id,
             tool_name,

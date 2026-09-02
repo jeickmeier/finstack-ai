@@ -45,7 +45,10 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
     base_messages: &[Message],
 ) -> Result<ContextStagePlan, RunHandleError> {
     if driver.cancellation().is_cancelled() {
-        return Ok(plan_from_messages(base_messages, &empty_assembled()));
+        return Ok(ContextStagePlan {
+            messages: Arc::from(base_messages.to_vec()),
+            projection: project_protected(base_messages, &[]),
+        });
     }
     let seed = coordinator
         .stage_dispatch_seed()
@@ -56,14 +59,15 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
     let digest = chain_digest(driver.providers());
     let mut recorded = Vec::with_capacity(driver.providers().len());
     for (index, provider) in driver.providers().iter().enumerate() {
-        if !coordinator.component_is_active(&provider.descriptor().invocation.component) {
+        let invocation = provider.descriptor().invocation;
+        if !coordinator.component_is_active(&invocation.component) {
             continue;
         }
         let provider_index = u32::try_from(index).map_err(|_| RunHandleError::Middleware {
             code: Arc::from(crate::ports::context::CONTEXT_CONFIGURATION_INVALID),
         })?;
         let replay = ContextReplay {
-            component: &provider.descriptor().invocation,
+            component: &invocation,
             chain_digest: digest,
             provider_index,
             cursor,
@@ -71,7 +75,7 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
         };
         if let Some(contribution) = replayed_context_contribution(coordinator, &replay)? {
             recorded.push(RecordedContextContribution {
-                component: provider.descriptor().invocation.component,
+                component: invocation.component,
                 provider_index,
                 contribution,
             });
@@ -82,7 +86,7 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
             .pending_extension_effect()
             .filter(|pending| {
                 pending.cursor == cursor
-                    && pending.requested.component() == Some(&provider.descriptor().invocation)
+                    && pending.requested.component() == Some(&invocation)
                     && matches!(pending.requested.input(), EffectInput::Context { .. })
                     && pending
                         .requested
@@ -117,7 +121,7 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
         )
         .await?;
         recorded.push(RecordedContextContribution {
-            component: provider.descriptor().invocation.component,
+            component: invocation.component,
             provider_index,
             contribution,
         });
@@ -321,15 +325,4 @@ fn project_protected(messages: &[Message], items: &[ContextItem]) -> ProtectedPr
 pub(crate) fn structural_protected(message: &Message, is_last: bool) -> bool {
     matches!(message.role(), MessageRole::System | MessageRole::Developer)
         || (is_last && message.role() == MessageRole::User)
-}
-
-fn plan_from_messages(
-    messages: &[Message],
-    assembled: &crate::context::AssembledContext,
-) -> ContextStagePlan {
-    let projection = project_protected(messages, &assembled.items);
-    ContextStagePlan {
-        messages: Arc::from(messages.to_vec()),
-        projection,
-    }
 }

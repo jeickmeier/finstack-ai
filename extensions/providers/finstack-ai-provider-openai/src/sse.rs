@@ -1,14 +1,9 @@
 //! Incremental, bounded official `OpenAI` Responses Server-Sent Events framing.
 
-use finstack_ai_provider_wire::{SseEvent, SseEventParser, SseParseError};
+use finstack_ai_provider_wire::{SseEventParser, SseParseError};
 use finstack_ai_runtime::ports::model::ModelError;
 
 use crate::error::{stream_error, stream_limit_error};
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct SseEventData {
-    pub(crate) data: String,
-}
 
 pub(crate) struct SseParser {
     inner: SseEventParser,
@@ -21,12 +16,14 @@ impl SseParser {
         }
     }
 
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEventData>, ModelError> {
+    /// Push bytes and return the `data:` payloads of complete events, minus
+    /// empty frames and the `[DONE]` sentinel.
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, ModelError> {
         let events = self.inner.push(bytes).map_err(map_parse)?;
         Ok(events
             .into_iter()
-            .filter(|event| !event.data.is_empty() && event.data != "[DONE]")
-            .map(|SseEvent { data, .. }| SseEventData { data })
+            .map(|event| event.data)
+            .filter(|data| !data.is_empty() && data != "[DONE]")
             .collect())
     }
 
@@ -57,9 +54,7 @@ mod tests {
         assert!(parser.push(b"data: {\"id\":").unwrap().is_empty());
         assert_eq!(
             parser.push(b"\"one\"}\r\n\r\ndata: [DONE]\n\n").unwrap(),
-            vec![SseEventData {
-                data: "{\"id\":\"one\"}".to_owned(),
-            }]
+            vec!["{\"id\":\"one\"}".to_owned()]
         );
         parser.finish().unwrap();
     }

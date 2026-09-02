@@ -42,6 +42,20 @@ pub enum KnowledgeError {
     },
 }
 
+/// [`KnowledgeError::Compose`] carrying a released component's own diagnostic.
+pub(crate) fn compose_error(error: impl fmt::Display) -> KnowledgeError {
+    KnowledgeError::Compose {
+        reason: error.to_string(),
+    }
+}
+
+/// [`KnowledgeError::Run`] carrying the runtime's own diagnostic.
+pub(crate) fn run_error(error: impl fmt::Display) -> KnowledgeError {
+    KnowledgeError::Run {
+        reason: error.to_string(),
+    }
+}
+
 /// Which model provider backs the agent.
 ///
 /// `Debug` redacts API keys; only the model name and endpoint survive.

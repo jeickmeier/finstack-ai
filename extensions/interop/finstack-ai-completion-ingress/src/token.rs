@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use crate::config::ResolvedKeys;
+use crate::ingress::MintError;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -66,13 +67,6 @@ pub(crate) struct Claims {
     pub(crate) expires_at: Timestamp,
 }
 
-/// Why [`mint_token`] failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MintErrorKind {
-    /// Claims could not be canonically encoded, or no active key was available.
-    Encoding,
-}
-
 /// Why [`verify_token`] failed. Drives the audit reason code; never shown to callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VerifyFailure {
@@ -103,18 +97,14 @@ struct KidOnly {
 ///
 /// # Errors
 ///
-/// Returns [`MintErrorKind::Encoding`] when the claims cannot be canonically
+/// Returns [`MintError::Encoding`] when the claims cannot be canonically
 /// encoded or no active signing key is available.
-pub(crate) fn mint_token(
-    keys: &ResolvedKeys,
-    claims: &Claims,
-) -> Result<CallbackToken, MintErrorKind> {
-    let claims_bytes =
-        serde_json_canonicalizer::to_vec(claims).map_err(|_| MintErrorKind::Encoding)?;
+pub(crate) fn mint_token(keys: &ResolvedKeys, claims: &Claims) -> Result<CallbackToken, MintError> {
+    let claims_bytes = serde_json_canonicalizer::to_vec(claims).map_err(|_| MintError::Encoding)?;
     let claims_b64 = URL_SAFE_NO_PAD.encode(claims_bytes);
     let message = format!("{TOKEN_PREFIX}{claims_b64}");
-    let (_, key) = keys.keys.first().ok_or(MintErrorKind::Encoding)?;
-    let mac = mac_for(key.expose(), message.as_bytes()).map_err(|()| MintErrorKind::Encoding)?;
+    let (_, key) = keys.keys.first().ok_or(MintError::Encoding)?;
+    let mac = mac_for(key.expose(), message.as_bytes()).map_err(|()| MintError::Encoding)?;
     let tag = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     Ok(CallbackToken(format!("{message}.{tag}")))
 }

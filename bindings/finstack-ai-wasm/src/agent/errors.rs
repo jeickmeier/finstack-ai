@@ -23,13 +23,12 @@ pub(super) fn js_safe_integer(value: u64, field: &'static str) -> Result<f64, Ag
     Ok(value as f64)
 }
 
-pub(super) fn session_error(error: &finstack_ai::SessionError) -> JsValue {
-    // Must be a real `Error`, not a plain object: `FinstackError.fromUnknown`
-    // reads `code`/`retryable` only off values that are `instanceof Error`, and
-    // falls back to `String(value)` otherwise — which renders a plain object as
-    // the literal "[object Object]", losing the stable code *and* the message.
-    // This mirrors `agent_error` below.
-    let object = js_sys::Error::new(&error.to_string());
+/// Build a real `Error` carrying the stable `code`. `FinstackError.fromUnknown`
+/// reads `code`/`retryable` only off values that are `instanceof Error`, and
+/// falls back to `String(value)` otherwise, which renders a plain object as the
+/// literal "[object Object]", losing the stable code *and* the message.
+fn finstack_error(message: &str, code: &str, retryable: bool) -> js_sys::Error {
+    let object = js_sys::Error::new(message);
     let _ = js_sys::Reflect::set(
         &object,
         &JsValue::from_str("name"),
@@ -38,29 +37,22 @@ pub(super) fn session_error(error: &finstack_ai::SessionError) -> JsValue {
     let _ = js_sys::Reflect::set(
         &object,
         &JsValue::from_str("code"),
-        &JsValue::from_str(error.code()),
-    );
-    let _ = js_sys::Reflect::set(&object, &JsValue::from_str("retryable"), &JsValue::FALSE);
-    object.into()
-}
-
-pub(super) fn agent_error(error: &AgentRunError, locator: Option<&OperationLocator>) -> JsValue {
-    let object = js_sys::Error::new(&error.to_string());
-    let _ = js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("name"),
-        &JsValue::from_str("FinstackError"),
-    );
-    let _ = js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("code"),
-        &JsValue::from_str(error.code()),
+        &JsValue::from_str(code),
     );
     let _ = js_sys::Reflect::set(
         &object,
         &JsValue::from_str("retryable"),
-        &JsValue::from_bool(error.retryable()),
+        &JsValue::from_bool(retryable),
     );
+    object
+}
+
+pub(super) fn session_error(error: &finstack_ai::SessionError) -> JsValue {
+    finstack_error(&error.to_string(), error.code(), false).into()
+}
+
+pub(super) fn agent_error(error: &AgentRunError, locator: Option<&OperationLocator>) -> JsValue {
+    let object = finstack_error(&error.to_string(), error.code(), error.retryable());
     if let Some(locator) = locator
         && let Ok(context) = locator_object(locator)
     {

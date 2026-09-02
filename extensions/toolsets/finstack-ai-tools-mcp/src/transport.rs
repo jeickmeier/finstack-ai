@@ -1,5 +1,6 @@
 //! MCP transports: scripted (tests), stdio, and streamable HTTP.
 
+use std::collections::BTreeSet;
 #[cfg(test)]
 use std::collections::VecDeque;
 use std::net::IpAddr;
@@ -15,8 +16,8 @@ use base64::Engine;
 use futures_util::future::BoxFuture;
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 
 use crate::protocol::{Meta, PROTOCOL_VERSION, jsonrpc_request};
 use finstack_ai_kernel::Timestamp;
@@ -97,13 +98,6 @@ fn timeout_error() -> McpError {
     McpError::stable(
         MCP_TIMEOUT,
         "MCP request was cancelled or exceeded its deadline",
-    )
-}
-
-fn read_timeout_error() -> McpError {
-    McpError::stable(
-        MCP_TIMEOUT,
-        "stdio response exceeded the configured read timeout",
     )
 }
 
@@ -332,17 +326,18 @@ impl StdioConfig {
     }
 }
 
-enum StdioState {
-    Unconfined {
-        child: Child,
-        stdin: ChildStdin,
-        stdout: BufReader<ChildStdout>,
-    },
-    Confined {
-        child: finstack_ai_runtime::confinement::ConfinedChild,
-        stdin: tokio::fs::File,
-        stdout: BufReader<tokio::fs::File>,
-    },
+enum StdioChild {
+    Unconfined(Child),
+    Confined(finstack_ai_runtime::confinement::ConfinedChild),
+}
+
+/// One spawned server process with its owned stdio pipes. The pipes are
+/// type-erased so the framing code below is written once for both spawn
+/// paths.
+struct StdioState {
+    child: StdioChild,
+    stdin: Box<dyn AsyncWrite + Send + Unpin>,
+    stdout: BufReader<Box<dyn AsyncRead + Send + Unpin>>,
 }
 
 /// Newline-framed stdio transport. T1; not a sandbox.
@@ -379,13 +374,17 @@ impl StdioTransport {
             let stdout = child.stdout.take().ok_or_else(|| {
                 McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdout is unavailable")
             })?;
-            if let Some(stderr) = child.stderr.take() {
-                drain_std_stderr(stderr);
+            if let Some(mut stderr) = child.stderr.take() {
+                std::thread::spawn(move || {
+                    use std::io::Read as _;
+                    let mut chunk = [0_u8; 8_192];
+                    while stderr.read(&mut chunk).unwrap_or(0) > 0 {}
+                });
             }
-            StdioState::Confined {
-                child,
-                stdin: tokio_file_from_stdin(stdin),
-                stdout: BufReader::new(tokio_file_from_stdout(stdout)),
+            StdioState {
+                child: StdioChild::Confined(child),
+                stdin: Box::new(tokio::fs::File::from_std(stdin)),
+                stdout: BufReader::new(Box::new(tokio::fs::File::from_std(stdout))),
             }
         } else {
             let mut command = Command::new(&config.program);
@@ -415,10 +414,10 @@ impl StdioTransport {
                     while stderr.read(&mut chunk).await.unwrap_or(0) > 0 {}
                 });
             }
-            StdioState::Unconfined {
-                child,
-                stdin,
-                stdout: BufReader::new(stdout),
+            StdioState {
+                child: StdioChild::Unconfined(child),
+                stdin: Box::new(stdin),
+                stdout: BufReader::new(Box::new(stdout)),
             }
         };
         Ok(Self {
@@ -472,10 +471,19 @@ impl StdioTransport {
         let line = Self::encode_line(&message)?;
         let mut state = self.state.lock().await;
         let io = async {
-            write_stdio_line(&mut state, line.as_bytes()).await?;
+            state
+                .stdin
+                .write_all(line.as_bytes())
+                .await
+                .map_err(|error| stdio_io(&error))?;
+            state
+                .stdin
+                .flush()
+                .await
+                .map_err(|error| stdio_io(&error))?;
             let mut dispatch = FrameDispatch::new(&id, &self.notifications);
             loop {
-                let frame = read_stdio_frame(&mut state).await?;
+                let frame = read_limited_line(&mut state.stdout).await?;
                 let value = decode_frame(&frame)?;
                 if let Some(result) = dispatch.push(&value)? {
                     return Ok(result);
@@ -489,7 +497,12 @@ impl StdioTransport {
             () = control.cancellation.cancelled() => Err(timeout_error()),
             () = control.wait_deadline() => Err(timeout_error()),
             timed = tokio::time::timeout(self.read_timeout, io) => {
-                timed.unwrap_or_else(|_elapsed| Err(read_timeout_error()))
+                timed.unwrap_or_else(|_elapsed| {
+                    Err(McpError::stable(
+                        MCP_TIMEOUT,
+                        "stdio response exceeded the configured read timeout",
+                    ))
+                })
             }
         };
         // A JSON-RPC error *response* (tagged with a code by
@@ -506,32 +519,6 @@ impl StdioTransport {
             terminate_stdio_state(&mut state).await;
         }
         result
-    }
-}
-
-async fn write_stdio_line(state: &mut StdioState, line: &[u8]) -> Result<(), McpError> {
-    match state {
-        StdioState::Unconfined { stdin, .. } => {
-            stdin
-                .write_all(line)
-                .await
-                .map_err(|error| stdio_io(&error))?;
-            stdin.flush().await.map_err(|error| stdio_io(&error))
-        }
-        StdioState::Confined { stdin, .. } => {
-            stdin
-                .write_all(line)
-                .await
-                .map_err(|error| stdio_io(&error))?;
-            stdin.flush().await.map_err(|error| stdio_io(&error))
-        }
-    }
-}
-
-async fn read_stdio_frame(state: &mut StdioState) -> Result<String, McpError> {
-    match state {
-        StdioState::Unconfined { stdout, .. } => read_limited_line(stdout).await,
-        StdioState::Confined { stdout, .. } => read_limited_line(stdout).await,
     }
 }
 
@@ -562,38 +549,20 @@ fn stdio_io(error: &std::io::Error) -> McpError {
     McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio i/o failed: {error}"))
 }
 
-fn drain_std_stderr(stderr: std::fs::File) {
-    std::thread::spawn(move || {
-        use std::io::Read as _;
-        let mut stderr = stderr;
-        let mut chunk = [0_u8; 8_192];
-        while stderr.read(&mut chunk).unwrap_or(0) > 0 {}
-    });
-}
-
 async fn terminate_stdio_state(state: &mut StdioState) {
-    match state {
-        StdioState::Unconfined { child, stdin, .. } => {
-            let _ = stdin.shutdown().await;
+    let _ = state.stdin.shutdown().await;
+    match &mut state.child {
+        StdioChild::Unconfined(child) => {
             if let Some(process_id) = child.id() {
                 let _ = finstack_ai_runtime::confinement::terminate_process_tree(process_id);
             }
             let _ = child.wait().await;
         }
-        StdioState::Confined { child, stdin, .. } => {
-            let _ = stdin.shutdown().await;
+        StdioChild::Confined(child) => {
             let _ = child.kill();
             let _ = child.wait();
         }
     }
-}
-
-fn tokio_file_from_stdin(stdin: std::fs::File) -> tokio::fs::File {
-    tokio::fs::File::from_std(stdin)
-}
-
-fn tokio_file_from_stdout(stdout: std::fs::File) -> tokio::fs::File {
-    tokio::fs::File::from_std(stdout)
 }
 
 impl McpTransport for StdioTransport {
@@ -679,10 +648,6 @@ impl HttpConfig {
     pub(crate) fn url(&self) -> &str {
         &self.url
     }
-
-    pub(crate) fn max_response_bytes(&self) -> usize {
-        self.max_response_bytes
-    }
 }
 
 /// Streamable HTTP transport. T4; not isolated.
@@ -721,7 +686,7 @@ impl HttpTransport {
         Ok(Self {
             url: config.url.clone(),
             client,
-            max_response_bytes: config.max_response_bytes(),
+            max_response_bytes: config.max_response_bytes,
             next_id: AtomicU64::new(1),
             notifications: Mutex::new(Vec::new()),
         })
@@ -782,14 +747,13 @@ impl HttpTransport {
                 McpError::stable(MCP_TRANSPORT_ERROR, format!("http post failed: {error}"))
             })?,
         };
-        let content_type = response
+        let is_event_stream = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_owned();
+            .is_some_and(|value| value.starts_with("text/event-stream"));
         let text = read_bounded_body(response, self.max_response_bytes, &control).await?;
-        if content_type.starts_with("text/event-stream") {
+        if is_event_stream {
             return parse_sse_jsonrpc(&text, &id, &self.notifications);
         }
         let value = decode_frame(&text)?;
@@ -997,16 +961,15 @@ fn map_net_guard_error(error: NetGuardError) -> McpError {
     }
 }
 
-pub(crate) fn authorize_stdio(allowed: &[Arc<str>], program: &Path) -> Result<(), McpError> {
-    let displayed = program.to_string_lossy();
-    if allowed
-        .iter()
-        .any(|entry| entry.as_ref() == displayed.as_ref())
-    {
+pub(crate) fn authorize_stdio(
+    allowed: &BTreeSet<Arc<str>>,
+    program: &Path,
+) -> Result<(), McpError> {
+    if allowed.contains(program.to_string_lossy().as_ref()) {
         return Ok(());
     }
     if let Some(name) = program.file_name().and_then(|name| name.to_str())
-        && allowed.iter().any(|entry| entry.as_ref() == name)
+        && allowed.contains(name)
     {
         return Ok(());
     }
@@ -1050,8 +1013,8 @@ pub(crate) fn validate_http_url(value: &str) -> Result<(), McpError> {
     Ok(())
 }
 
-pub(crate) fn authorize_http(allowed: &[Arc<str>], url: &str) -> Result<(), McpError> {
-    if allowed.iter().any(|entry| entry.as_ref() == url) {
+pub(crate) fn authorize_http(allowed: &BTreeSet<Arc<str>>, url: &str) -> Result<(), McpError> {
+    if allowed.contains(url) {
         return Ok(());
     }
     Err(McpError::stable(

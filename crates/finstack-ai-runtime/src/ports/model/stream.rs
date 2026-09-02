@@ -271,7 +271,7 @@ impl ModelStreamAssembler {
                     }
                     let partial = tools.entry(delta.index).or_default();
                     if let Some(name) = delta.name {
-                        validated_label(&name, "tool_call.name")?;
+                        validated_label(&name)?;
                         add_bytes(&mut byte_count, name.len(), self.limits.max_bytes)?;
                         if partial
                             .name
@@ -292,7 +292,7 @@ impl ModelStreamAssembler {
                     )?;
                     partial.arguments.push_str(&delta.arguments_delta);
                     if let Some(provider_call_id) = delta.provider_call_id {
-                        validated_label(&provider_call_id, "tool_call.provider_call_id")?;
+                        validated_label(&provider_call_id)?;
                         if partial
                             .provider_call_id
                             .as_ref()
@@ -319,7 +319,7 @@ impl ModelStreamAssembler {
                     emit_progress(ModelProgress::Heartbeat(metadata)).await?;
                 }
                 ModelStreamItem::ProviderEvent(event) => {
-                    validated_label(&event.namespace, "provider_event.namespace")?;
+                    validated_label(&event.namespace)?;
                     add_bytes(
                         &mut byte_count,
                         event.namespace.len(),
@@ -394,7 +394,7 @@ fn validate_completed_response(
     order: &[u32],
     usage: Option<&Usage>,
 ) -> Result<(), ModelError> {
-    validated_label(&response.completion_id, "completion_id")?;
+    validated_label(&response.completion_id)?;
     let mut final_text = String::new();
     for block in response.assistant_content.iter() {
         match block {
@@ -461,35 +461,45 @@ fn validate_usage(current: &Usage, previous: Option<&Usage>) -> Result<(), Model
     current
         .validate()
         .map_err(|_| ModelError::validation(MODEL_USAGE_INVALID, "model usage is invalid"))?;
-    if let (Some(input), Some(output), Some(total)) = (
-        current.input_tokens(),
-        current.output_tokens(),
-        current.total_tokens(),
-    ) && input.checked_add(output) != Some(total)
-    {
+    if !usage_total_consistent(current) {
         return Err(ModelError::validation(
             MODEL_USAGE_INVALID,
             "model usage total is inconsistent",
         ));
     }
-    if let Some(previous) = previous
-        && (regressed(previous.input_tokens(), current.input_tokens())
-            || regressed(previous.output_tokens(), current.output_tokens())
-            || regressed(previous.total_tokens(), current.total_tokens())
-            || cost_regressed(previous, current)
-            || previous.extension_counters().iter().any(|(key, value)| {
-                current
-                    .extension_counters()
-                    .get(key)
-                    .is_none_or(|current| current < value)
-            }))
-    {
+    if previous.is_some_and(|previous| usage_regressed(previous, current)) {
         return Err(ModelError::validation(
             MODEL_USAGE_INVALID,
             "model usage regressed across cumulative snapshots",
         ));
     }
     Ok(())
+}
+
+/// Whether `input + output == total` when all three counters are present.
+pub(crate) fn usage_total_consistent(usage: &Usage) -> bool {
+    match (
+        usage.input_tokens(),
+        usage.output_tokens(),
+        usage.total_tokens(),
+    ) {
+        (Some(input), Some(output), Some(total)) => input.checked_add(output) == Some(total),
+        _ => true,
+    }
+}
+
+/// Whether any cumulative counter, cost, or extension counter went backwards.
+pub(crate) fn usage_regressed(previous: &Usage, current: &Usage) -> bool {
+    regressed(previous.input_tokens(), current.input_tokens())
+        || regressed(previous.output_tokens(), current.output_tokens())
+        || regressed(previous.total_tokens(), current.total_tokens())
+        || cost_regressed(previous, current)
+        || previous.extension_counters().iter().any(|(key, value)| {
+            current
+                .extension_counters()
+                .get(key)
+                .is_none_or(|current| current < value)
+        })
 }
 
 fn cost_regressed(previous: &Usage, current: &Usage) -> bool {
@@ -537,9 +547,10 @@ fn canonical_byte_len<T: Serialize>(value: &T) -> Option<usize> {
     Some(writer.len)
 }
 
+/// `io::Write` sink that only counts bytes, for size checks without a buffer.
 #[derive(Default)]
-struct CountingWriter {
-    len: usize,
+pub(crate) struct CountingWriter {
+    pub(crate) len: usize,
 }
 
 impl std::io::Write for CountingWriter {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_kernel::{ErrorCategory, ErrorCode, ErrorDescriptor, Metadata};
+use finstack_ai_kernel::{ErrorCategory, ErrorCode, ErrorDescriptor, Metadata, label_is_valid};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -111,7 +111,7 @@ pub(super) fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, Contex
 }
 
 pub(super) fn validate_label(value: &str, field: &'static str) -> Result<(), ContextError> {
-    if value.is_empty() || value.len() > 256 || value.as_bytes().contains(&0) {
+    if !label_is_valid(value) {
         return Err(ContextError::stable(CONTEXT_CONTRIBUTION_INVALID, field));
     }
     Ok(())

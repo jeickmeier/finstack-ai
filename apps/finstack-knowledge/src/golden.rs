@@ -84,7 +84,10 @@ pub fn golden_entries() -> Result<Vec<GoldenEntry>, KnowledgeError> {
         if let Some(seed) = &entry.memory_seed
             && (seed.body.trim().is_empty()
                 || seed.keywords.is_empty()
-                || seed.keywords.iter().any(|keyword| keyword.trim().is_empty()))
+                || seed
+                    .keywords
+                    .iter()
+                    .any(|keyword| keyword.trim().is_empty()))
         {
             return Err(KnowledgeError::Config {
                 reason: "golden_fixture_entry_invalid",

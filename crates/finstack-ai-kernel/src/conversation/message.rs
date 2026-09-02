@@ -502,27 +502,23 @@ impl Message {
             return Ok(());
         }
         let mut seen = BTreeSet::new();
-        let mut count = 0_usize;
         for block in self.content.iter() {
             let ContentBlock::ToolResult(result) = block else {
                 continue;
             };
-            count += 1;
-            let id = result.tool_call_id().to_canonical_string();
+            let id = *result.tool_call_id();
             if !seen.insert(id) {
                 return Err(MessageError::DuplicateToolAssociation {
-                    tool_call_id: result.tool_call_id().to_canonical_string(),
+                    tool_call_id: id.to_canonical_string(),
                 });
             }
-            if let Some(known) = known_calls
-                && !known.iter().any(|item| item == result.tool_call_id())
-            {
+            if known_calls.is_some_and(|known| !known.contains(&id)) {
                 return Err(MessageError::UnknownToolAssociation {
-                    tool_call_id: result.tool_call_id().to_canonical_string(),
+                    tool_call_id: id.to_canonical_string(),
                 });
             }
         }
-        if count == 0 {
+        if seen.is_empty() {
             return Err(MessageError::MissingToolResult);
         }
         Ok(())

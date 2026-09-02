@@ -11,8 +11,10 @@ use finstack_ai_kernel::{
 use finstack_ai_net_guard::{HostResolver, UrlPolicy, parse_and_vet_url};
 use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::artifact::InProcessArtifactStore;
-use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
-use finstack_ai_runtime::ports::tool::{ToolError, Toolset};
+use finstack_ai_runtime::ports::model::{
+    AuthorizationContext, CancellationSignal, RunCallContext, ToolSpec,
+};
+use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError, Toolset};
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -24,11 +26,8 @@ use super::{
 
 const HEADER_CANARY: &str = "fetch-secret-canary-091";
 
-/// Verbatim copy of the helper from
-/// `finstack-ai-tools-openrouter-media/src/lib.rs:583-636`, adjusted to this
-/// crate's `crate::` re-exports.
-fn tool_context() -> crate::ToolCallContext {
-    crate::ToolCallContext {
+fn tool_context() -> ToolCallContext {
+    ToolCallContext {
         run: RunCallContext {
             locator: OperationLocator::try_new(
                 "tenant-a",
@@ -65,8 +64,8 @@ fn tool_context() -> crate::ToolCallContext {
 fn tool_context_with(
     deadline: Option<Timestamp>,
     cancellation: CancellationSignal,
-) -> crate::ToolCallContext {
-    crate::ToolCallContext {
+) -> ToolCallContext {
+    ToolCallContext {
         run: RunCallContext {
             deadline,
             cancellation,
@@ -76,10 +75,7 @@ fn tool_context_with(
     }
 }
 
-/// Verbatim copy of the helper from
-/// `finstack-ai-tools-openrouter-media/src/lib.rs:583-636`, adjusted to this
-/// crate's `crate::` re-exports.
-fn call_for(spec: &crate::ToolSpec, args: &[u8]) -> ValidatedToolCall {
+fn call_for(spec: &ToolSpec, args: &[u8]) -> ValidatedToolCall {
     ValidatedToolCall {
         call: ToolCallBlock::try_new(
             ToolCallId::from_bytes([6; 16]),
@@ -110,7 +106,7 @@ async fn drive_to_error(toolset: &HttpFetchToolset, call: ValidatedToolCall) -> 
 /// Like [`drive_to_error`], but with a caller-supplied `ToolCallContext`.
 async fn drive_to_error_with_ctx(
     toolset: &HttpFetchToolset,
-    ctx: crate::ToolCallContext,
+    ctx: ToolCallContext,
     call: ValidatedToolCall,
 ) -> ToolError {
     match toolset.call(ctx, call).await {
@@ -126,7 +122,7 @@ async fn drive_to_error_with_ctx(
 /// Drive one `call()` to its terminal success value.
 async fn drive_to_success(
     toolset: &HttpFetchToolset,
-    ctx: crate::ToolCallContext,
+    ctx: ToolCallContext,
     call: ValidatedToolCall,
 ) -> serde_json::Value {
     let mut stream = toolset.call(ctx, call).await.expect("call succeeded");

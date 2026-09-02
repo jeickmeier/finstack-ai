@@ -70,7 +70,7 @@ use reqwest::header::HeaderValue;
 use crate::config::{
     DEFAULT_ENDPOINT, MAX_RESULT_BYTES_CEILING, endpoint_host, is_loopback_host, validate_endpoint,
 };
-use crate::http::{DeliveredMedia, REQUEST_TIMEOUT, tool_error};
+use crate::http::{DeliveredMedia, REQUEST_TIMEOUT, Route, invalid_arguments, tool_error};
 use crate::image::{IMAGE_TOOL_ID, IMAGE_TOOL_NAME, handle_image};
 use crate::speech::{SPEECH_TOOL_ID, SPEECH_TOOL_NAME, handle_speech};
 use crate::transcribe::{TRANSCRIBE_TOOL_ID, TRANSCRIBE_TOOL_NAME, handle_transcribe};
@@ -87,32 +87,132 @@ pub use crate::config::{
     OpenRouterMediaConfig, OpenRouterMediaError,
 };
 
+/// Checked-in identity, contract, and policy of one media tool.
+struct ToolDef {
+    id: &'static str,
+    name: &'static str,
+    title: &'static str,
+    description: &'static str,
+    input_schema: &'static [u8],
+    output_schema: &'static [u8],
+    /// Paid generation is an approval-gated non-idempotent write; the only
+    /// unpaid tool is the read-only job-status check.
+    paid: bool,
+}
+
+const TOOL_DEFS: [ToolDef; 6] = [
+    ToolDef {
+        id: IMAGE_TOOL_ID,
+        name: IMAGE_TOOL_NAME,
+        title: "OpenRouter generate image",
+        description: "Generate an image via OpenRouter and return the first data[] item only (base64 or a staged artifact). Additional images in the response are discarded.",
+        input_schema: br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 1:1. Null uses the model default.","type":["string","null"]},"model":{"description":"OpenRouter model id that produces image output, for example google/gemini-3-pro-image or openai/gpt-5-image. A text-only chat model id is rejected.","minLength":1,"type":"string"},"output_format":{"description":"Image container such as png or jpeg. Null uses the model default.","type":["string","null"]},"prompt":{"description":"Text description of the image to generate.","minLength":1,"type":"string"},"resolution":{"description":"Resolution token the chosen model accepts. Each model defines its own set, so prefer null unless a specific size is required: bytedance-seed/seedream-5-0-pro takes 512, 1K, 2K, or 4K, while other models take pixel pairs such as 1024x1024. A rejected value is reported with the accepted list.","type":["string","null"]}},"required":["aspect_ratio","model","output_format","prompt","resolution"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the image bytes. Present when the host configured an artifact store; pass it to tools that accept an artifact.","type":"object"},"b64_data":{"description":"Base64 image bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type","byte_length"],"type":"object"}"#,
+        paid: true,
+    },
+    ToolDef {
+        id: VIDEO_TOOL_ID,
+        name: VIDEO_TOOL_NAME,
+        title: "OpenRouter generate video",
+        description: "Submit one asynchronous video-generation job via OpenRouter; it returns a job id immediately, then poll that id with openrouter_get_video. Every call starts a new separately billed job, so call this at most once per requested video: if a job is already pending, poll its id instead of submitting again. Optional first/last frame and reference images accept a URL or a stored artifact reference.",
+        input_schema: br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 9:16. Null uses the model default.","type":["string","null"]},"duration":{"description":"Clip length in seconds. Each model accepts a fixed set, most commonly 4 to 15; durations under 4 are supported by only a few models. Null uses the model default.","type":["integer","null"]},"first_frame":{"anyOf":[{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image. Null when url is used.","type":["object","null"]},"url":{"description":"Publicly fetchable image URL. Null when artifact is used.","minLength":1,"type":["string","null"]}},"required":["artifact","url"],"type":"object"},{"type":"null"}],"description":"Image to use as the video's first frame. Exactly one of url or artifact."},"generate_audio":{"description":"Generate audio when the model supports it. Null uses the model default.","type":["boolean","null"]},"last_frame":{"anyOf":[{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image. Null when url is used.","type":["object","null"]},"url":{"description":"Publicly fetchable image URL. Null when artifact is used.","minLength":1,"type":["string","null"]}},"required":["artifact","url"],"type":"object"},{"type":"null"}],"description":"Image to use as the video's last frame. Exactly one of url or artifact."},"model":{"description":"OpenRouter video model id, for example bytedance/seedance-2.0-mini, google/veo-3.1-fast, or openai/sora-2-pro. Video models are a separate catalogue from chat models; a chat model id is rejected.","minLength":1,"type":"string"},"prompt":{"description":"Text description of the video to generate.","minLength":1,"type":"string"},"reference_images":{"description":"Style or content reference images.","items":{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image. Null when url is used.","type":["object","null"]},"url":{"description":"Publicly fetchable image URL. Null when artifact is used.","minLength":1,"type":["string","null"]}},"required":["artifact","url"],"type":"object"},"maxItems":4,"type":["array","null"]},"resolution":{"description":"Resolution such as 480p, 720p, or 1080p. Must be supported by the chosen model. Null uses the model default.","type":["string","null"]},"seed":{"description":"Deterministic generation seed. Null lets the provider choose.","type":["integer","null"]},"size":{"description":"Pixel dimensions as WIDTHxHEIGHT. Null uses the model default.","type":["string","null"]}},"required":["aspect_ratio","duration","first_frame","generate_audio","last_frame","model","prompt","reference_images","resolution","seed","size"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"}},"required":["id","status"],"type":"object"}"#,
+        paid: true,
+    },
+    ToolDef {
+        id: VIDEO_STATUS_TOOL_ID,
+        name: VIDEO_STATUS_TOOL_NAME,
+        title: "OpenRouter get video",
+        description: "Check one OpenRouter video job; returns download URLs when completed. Set wait_seconds (0-300) to keep polling inside this call so one call covers the whole job. Generation commonly takes 30 seconds to several minutes, so prefer a single call with wait_seconds=300 over repeated short calls. A pending or in_progress result means that budget ran out, not that the job failed: call this tool again with the same id. Never submit a new job because one is still running.",
+        input_schema: br#"{"additionalProperties":false,"properties":{"id":{"description":"Job id returned by openrouter_generate_video.","minLength":1,"type":"string"},"wait_seconds":{"description":"Seconds to keep polling inside this call before returning whatever status the job has. 0 or null returns immediately; 300 waits out a typical generation in a single call.","maximum":300,"minimum":0,"type":["integer","null"]}},"required":["id","wait_seconds"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"},"urls":{"items":{"type":"string"},"type":"array"}},"required":["id","status"],"type":"object"}"#,
+        paid: false,
+    },
+    ToolDef {
+        id: VIDEO_DOWNLOAD_TOOL_ID,
+        name: VIDEO_DOWNLOAD_TOOL_NAME,
+        title: "OpenRouter download video",
+        description: "Download one completed OpenRouter video job's content into the configured artifact store and return the artifact reference. Requires openrouter_get_video to report status completed first.",
+        input_schema: br#"{"additionalProperties":false,"properties":{"id":{"description":"Job id returned by openrouter_generate_video.","minLength":1,"type":"string"}},"required":["id"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the video bytes.","type":"object"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["artifact","media_type","byte_length"],"type":"object"}"#,
+        paid: true,
+    },
+    ToolDef {
+        id: SPEECH_TOOL_ID,
+        name: SPEECH_TOOL_NAME,
+        title: "OpenRouter generate speech",
+        description: "Synthesize speech from text via OpenRouter. Returns the audio as base64 with its media type.",
+        input_schema: br#"{"additionalProperties":false,"properties":{"input":{"description":"Text to speak.","minLength":1,"type":"string"},"model":{"description":"OpenRouter text-to-speech model id, for example x-ai/grok-voice-tts-1.0, deepgram/aura-2, minimax/speech-2.8-turbo, or hexgrad/kokoro-82m. Chat model ids and OpenAI ids such as openai/tts-1 are rejected. The current list is GET /api/v1/models?output_modalities=speech.","minLength":1,"type":"string"},"response_format":{"description":"Audio container. Null selects mp3, a self-contained file any player opens; pcm returns headerless samples that most players cannot open on their own.","enum":["mp3","pcm",null],"type":["string","null"]},"voice":{"description":"Voice name accepted by the chosen model, for example eve for x-ai/grok-voice-tts-1.0. Null uses the model default.","type":["string","null"]}},"required":["input","model","response_format","voice"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the audio bytes. Present when the host configured an artifact store; pass it to tools that accept an artifact.","type":"object"},"b64_data":{"description":"Base64 audio bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type","byte_length"],"type":"object"}"#,
+        paid: true,
+    },
+    ToolDef {
+        id: TRANSCRIBE_TOOL_ID,
+        name: TRANSCRIBE_TOOL_NAME,
+        title: "OpenRouter transcribe audio",
+        description: "Transcribe audio at an HTTPS URL via OpenRouter (the toolset downloads and base64-submits it; OpenRouter accepts no audio URLs).",
+        input_schema: br#"{"additionalProperties":false,"properties":{"audio_url":{"description":"HTTPS URL of the audio to transcribe.","minLength":1,"type":"string"},"format":{"description":"Container format such as wav, mp3, flac, ogg, or m4a. The bytes must actually be in that container: headerless PCM labelled wav is rejected. Null derives the format from the URL extension.","type":["string","null"]},"model":{"description":"OpenRouter speech-to-text model id, for example openai/whisper-1 or deepgram/nova-3. Chat model ids are rejected by this endpoint.","minLength":1,"type":"string"}},"required":["audio_url","format","model"],"type":"object"}"#,
+        output_schema: br#"{"additionalProperties":false,"properties":{"text":{"type":"string"}},"required":["text"],"type":"object"}"#,
+        paid: true,
+    },
+];
+
+fn tool_spec(def: &ToolDef, max_result_bytes: u64) -> Result<ToolSpec, OpenRouterMediaError> {
+    let invalid = |reason| OpenRouterMediaError::EndpointInvalid { reason };
+    let (side_effect, approval) = if def.paid {
+        (
+            SideEffectClass::NonIdempotentWrite,
+            ApprovalMetadata {
+                requirement: ApprovalRequirement::Policy,
+                reason: Some(Arc::from("paid OpenRouter media generation")),
+                attributes: Metadata::empty(),
+            },
+        )
+    } else {
+        (
+            SideEffectClass::ReadOnly,
+            ApprovalMetadata {
+                requirement: ApprovalRequirement::NotRequired,
+                reason: None,
+                attributes: Metadata::empty(),
+            },
+        )
+    };
+    let spec = ToolSpec {
+        id: ToolId::parse(def.id).map_err(|_| invalid("invalid_tool_id"))?,
+        model_name: Arc::from(def.name),
+        title: Arc::from(def.title),
+        description: Arc::from(def.description),
+        input_schema: RawJson::parse(def.input_schema)
+            .map_err(|_| invalid("invalid_input_schema"))?,
+        output_schema: Some(
+            RawJson::parse(def.output_schema).map_err(|_| invalid("invalid_output_schema"))?,
+        ),
+        execution: ToolExecutionMode::Sequential,
+        side_effect,
+        retry_safety: RetrySafety::AtMostOnce,
+        approval,
+        max_result_bytes,
+        metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
+    };
+    spec.validate().map_err(|_| invalid("invalid_tool_spec"))?;
+    Ok(spec)
+}
+
 /// T1 `OpenRouter` media-generation Toolset.
 pub struct OpenRouterMediaToolset {
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
-    image_tool_id: ToolId,
-    video_tool_id: ToolId,
-    video_status_tool_id: ToolId,
-    video_download_tool_id: ToolId,
-    speech_tool_id: ToolId,
-    transcribe_tool_id: ToolId,
-    authorization: HeaderValue,
-    endpoint: String,
-    endpoint_is_loopback: bool,
-    referer: Option<String>,
-    title: Option<String>,
-    max_result_bytes: usize,
-    artifact_store: Option<Arc<dyn ArtifactStore>>,
-    client: reqwest::Client,
+    route: Route,
 }
 
 impl std::fmt::Debug for OpenRouterMediaToolset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenRouterMediaToolset")
-            .field("endpoint", &self.endpoint)
-            .field("max_result_bytes", &self.max_result_bytes)
-            .field("artifact_store", &self.artifact_store.is_some())
+            .field("endpoint", &self.route.endpoint)
+            .field("max_result_bytes", &self.route.max_result_bytes)
+            .field("artifact_store", &self.route.store.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -125,7 +225,6 @@ impl OpenRouterMediaToolset {
     /// Returns [`OpenRouterMediaError::CredentialRequired`] when `api_key` is empty.
     /// Returns [`OpenRouterMediaError::EndpointInvalid`] for a non-HTTP URL, userinfo,
     /// query, fragment, plaintext HTTP off loopback, or an out-of-range result cap.
-    #[allow(clippy::too_many_lines)]
     pub fn try_new(config: OpenRouterMediaConfig) -> Result<Self, OpenRouterMediaError> {
         let secret = SecretString::try_new(config.api_key).map_err(|rejected| match rejected {
             SecretRejected::Empty => OpenRouterMediaError::CredentialRequired,
@@ -159,254 +258,10 @@ impl OpenRouterMediaToolset {
             .is_some_and(is_loopback_host);
 
         let max_result_bytes_u64 = u64::try_from(config.max_result_bytes).unwrap_or(u64::MAX);
-
-        let image_tool_id =
-            ToolId::parse(IMAGE_TOOL_ID).map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let video_tool_id =
-            ToolId::parse(VIDEO_TOOL_ID).map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let video_status_tool_id = ToolId::parse(VIDEO_STATUS_TOOL_ID).map_err(|_| {
-            OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            }
-        })?;
-        let video_download_tool_id = ToolId::parse(VIDEO_DOWNLOAD_TOOL_ID).map_err(|_| {
-            OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            }
-        })?;
-        let speech_tool_id =
-            ToolId::parse(SPEECH_TOOL_ID).map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            })?;
-        let transcribe_tool_id = ToolId::parse(TRANSCRIBE_TOOL_ID).map_err(|_| {
-            OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_id",
-            }
-        })?;
-
-        let paid_approval = ApprovalMetadata {
-            requirement: ApprovalRequirement::Policy,
-            reason: Some(Arc::from("paid OpenRouter media generation")),
-            attributes: Metadata::empty(),
-        };
-
-        let image_spec = ToolSpec {
-            id: image_tool_id.clone(),
-            model_name: Arc::from(IMAGE_TOOL_NAME),
-            title: Arc::from("OpenRouter generate image"),
-            description: Arc::from(
-                "Generate an image via OpenRouter and return the first data[] item only (base64 or a staged artifact). Additional images in the response are discarded.",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 1:1. Null uses the model default.","type":["string","null"]},"model":{"description":"OpenRouter model id that produces image output, for example google/gemini-3-pro-image or openai/gpt-5-image. A text-only chat model id is rejected.","minLength":1,"type":"string"},"output_format":{"description":"Image container such as png or jpeg. Null uses the model default.","type":["string","null"]},"prompt":{"description":"Text description of the image to generate.","minLength":1,"type":"string"},"resolution":{"description":"Resolution token the chosen model accepts. Each model defines its own set, so prefer null unless a specific size is required: bytedance-seed/seedream-5-0-pro takes 512, 1K, 2K, or 4K, while other models take pixel pairs such as 1024x1024. A rejected value is reported with the accepted list.","type":["string","null"]}},"required":["aspect_ratio","model","output_format","prompt","resolution"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the image bytes. Present when the host configured an artifact store; pass it to tools that accept an artifact.","type":"object"},"b64_data":{"description":"Base64 image bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type","byte_length"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval.clone(),
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        image_spec
-            .validate()
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let video_spec = ToolSpec {
-            id: video_tool_id.clone(),
-            model_name: Arc::from(VIDEO_TOOL_NAME),
-            title: Arc::from("OpenRouter generate video"),
-            description: Arc::from(
-                "Submit one asynchronous video-generation job via OpenRouter; it returns a job id immediately, then poll that id with openrouter_get_video. Every call starts a new separately billed job, so call this at most once per requested video: if a job is already pending, poll its id instead of submitting again. Optional first/last frame and reference images accept a URL or a stored artifact reference.",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"description":"Aspect ratio such as 16:9 or 9:16. Null uses the model default.","type":["string","null"]},"duration":{"description":"Clip length in seconds. Each model accepts a fixed set, most commonly 4 to 15; durations under 4 are supported by only a few models. Null uses the model default.","type":["integer","null"]},"first_frame":{"anyOf":[{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image. Null when url is used.","type":["object","null"]},"url":{"description":"Publicly fetchable image URL. Null when artifact is used.","minLength":1,"type":["string","null"]}},"required":["artifact","url"],"type":"object"},{"type":"null"}],"description":"Image to use as the video's first frame. Exactly one of url or artifact."},"generate_audio":{"description":"Generate audio when the model supports it. Null uses the model default.","type":["boolean","null"]},"last_frame":{"anyOf":[{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image. Null when url is used.","type":["object","null"]},"url":{"description":"Publicly fetchable image URL. Null when artifact is used.","minLength":1,"type":["string","null"]}},"required":["artifact","url"],"type":"object"},{"type":"null"}],"description":"Image to use as the video's last frame. Exactly one of url or artifact."},"model":{"description":"OpenRouter video model id, for example bytedance/seedance-2.0-mini, google/veo-3.1-fast, or openai/sora-2-pro. Video models are a separate catalogue from chat models; a chat model id is rejected.","minLength":1,"type":"string"},"prompt":{"description":"Text description of the video to generate.","minLength":1,"type":"string"},"reference_images":{"description":"Style or content reference images.","items":{"additionalProperties":false,"properties":{"artifact":{"description":"Artifact reference to a stored image, e.g. from openrouter_generate_image. Null when url is used.","type":["object","null"]},"url":{"description":"Publicly fetchable image URL. Null when artifact is used.","minLength":1,"type":["string","null"]}},"required":["artifact","url"],"type":"object"},"maxItems":4,"type":["array","null"]},"resolution":{"description":"Resolution such as 480p, 720p, or 1080p. Must be supported by the chosen model. Null uses the model default.","type":["string","null"]},"seed":{"description":"Deterministic generation seed. Null lets the provider choose.","type":["integer","null"]},"size":{"description":"Pixel dimensions as WIDTHxHEIGHT. Null uses the model default.","type":["string","null"]}},"required":["aspect_ratio","duration","first_frame","generate_audio","last_frame","model","prompt","reference_images","resolution","seed","size"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"}},"required":["id","status"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval.clone(),
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        video_spec
-            .validate()
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let video_status_spec = ToolSpec {
-            id: video_status_tool_id.clone(),
-            model_name: Arc::from(VIDEO_STATUS_TOOL_NAME),
-            title: Arc::from("OpenRouter get video"),
-            description: Arc::from(
-                "Check one OpenRouter video job; returns download URLs when completed. Set wait_seconds (0-300) to keep polling inside this call so one call covers the whole job. Generation commonly takes 30 seconds to several minutes, so prefer a single call with wait_seconds=300 over repeated short calls. A pending or in_progress result means that budget ran out, not that the job failed: call this tool again with the same id. Never submit a new job because one is still running.",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"id":{"description":"Job id returned by openrouter_generate_video.","minLength":1,"type":"string"},"wait_seconds":{"description":"Seconds to keep polling inside this call before returning whatever status the job has. 0 or null returns immediately; 300 waits out a typical generation in a single call.","maximum":300,"minimum":0,"type":["integer","null"]}},"required":["id","wait_seconds"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"},"urls":{"items":{"type":"string"},"type":"array"}},"required":["id","status"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::ReadOnly,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: ApprovalMetadata {
-                requirement: ApprovalRequirement::NotRequired,
-                reason: None,
-                attributes: Metadata::empty(),
-            },
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        video_status_spec
-            .validate()
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let video_download_spec = ToolSpec {
-            id: video_download_tool_id.clone(),
-            model_name: Arc::from(VIDEO_DOWNLOAD_TOOL_NAME),
-            title: Arc::from("OpenRouter download video"),
-            description: Arc::from(
-                "Download one completed OpenRouter video job's content into the configured artifact store and return the artifact reference. Requires openrouter_get_video to report status completed first.",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"id":{"description":"Job id returned by openrouter_generate_video.","minLength":1,"type":"string"}},"required":["id"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the video bytes.","type":"object"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["artifact","media_type","byte_length"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval.clone(),
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        video_download_spec
-            .validate()
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let speech_spec = ToolSpec {
-            id: speech_tool_id.clone(),
-            model_name: Arc::from(SPEECH_TOOL_NAME),
-            title: Arc::from("OpenRouter generate speech"),
-            description: Arc::from(
-                "Synthesize speech from text via OpenRouter. Returns the audio as base64 with its media type.",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"input":{"description":"Text to speak.","minLength":1,"type":"string"},"model":{"description":"OpenRouter text-to-speech model id, for example x-ai/grok-voice-tts-1.0, deepgram/aura-2, minimax/speech-2.8-turbo, or hexgrad/kokoro-82m. Chat model ids and OpenAI ids such as openai/tts-1 are rejected. The current list is GET /api/v1/models?output_modalities=speech.","minLength":1,"type":"string"},"response_format":{"description":"Audio container. Null selects mp3, a self-contained file any player opens; pcm returns headerless samples that most players cannot open on their own.","enum":["mp3","pcm",null],"type":["string","null"]},"voice":{"description":"Voice name accepted by the chosen model, for example eve for x-ai/grok-voice-tts-1.0. Null uses the model default.","type":["string","null"]}},"required":["input","model","response_format","voice"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"artifact":{"description":"Staged artifact reference holding the audio bytes. Present when the host configured an artifact store; pass it to tools that accept an artifact.","type":"object"},"b64_data":{"description":"Base64 audio bytes. Present only when no artifact store is configured.","type":"string"},"byte_length":{"type":"integer"},"media_type":{"type":"string"}},"required":["media_type","byte_length"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval.clone(),
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        speech_spec
-            .validate()
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
-
-        let transcribe_spec = ToolSpec {
-            id: transcribe_tool_id.clone(),
-            model_name: Arc::from(TRANSCRIBE_TOOL_NAME),
-            title: Arc::from("OpenRouter transcribe audio"),
-            description: Arc::from(
-                "Transcribe audio at an HTTPS URL via OpenRouter (the toolset downloads and base64-submits it; OpenRouter accepts no audio URLs).",
-            ),
-            input_schema: RawJson::parse(
-                br#"{"additionalProperties":false,"properties":{"audio_url":{"description":"HTTPS URL of the audio to transcribe.","minLength":1,"type":"string"},"format":{"description":"Container format such as wav, mp3, flac, ogg, or m4a. The bytes must actually be in that container: headerless PCM labelled wav is rejected. Null derives the format from the URL extension.","type":["string","null"]},"model":{"description":"OpenRouter speech-to-text model id, for example openai/whisper-1 or deepgram/nova-3. Chat model ids are rejected by this endpoint.","minLength":1,"type":"string"}},"required":["audio_url","format","model"],"type":"object"}"#,
-            )
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_input_schema",
-            })?,
-            output_schema: Some(
-                RawJson::parse(
-                    br#"{"additionalProperties":false,"properties":{"text":{"type":"string"}},"required":["text"],"type":"object"}"#,
-                )
-                .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                    reason: "invalid_output_schema",
-                })?,
-            ),
-            execution: ToolExecutionMode::Sequential,
-            side_effect: SideEffectClass::NonIdempotentWrite,
-            retry_safety: RetrySafety::AtMostOnce,
-            approval: paid_approval,
-            max_result_bytes: max_result_bytes_u64,
-            metadata: Metadata::empty(),
-            deferral: ToolDeferralSupport::Never,
-        };
-        transcribe_spec
-            .validate()
-            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
-                reason: "invalid_tool_spec",
-            })?;
+        let tools = TOOL_DEFS
+            .iter()
+            .map(|def| tool_spec(def, max_result_bytes_u64))
+            .collect::<Result<Vec<_>, _>>()?;
 
         // This client serves the toolset's own OpenRouter API calls (image,
         // speech, video, and the transcription POST after the audio is
@@ -430,28 +285,17 @@ impl OpenRouterMediaToolset {
                 name: Arc::from("finstack-openrouter-media"),
                 metadata: Metadata::empty(),
             },
-            tools: Arc::from([
-                image_spec,
-                video_spec,
-                video_status_spec,
-                video_download_spec,
-                speech_spec,
-                transcribe_spec,
-            ]),
-            image_tool_id,
-            video_tool_id,
-            video_status_tool_id,
-            video_download_tool_id,
-            speech_tool_id,
-            transcribe_tool_id,
-            authorization,
-            endpoint,
-            endpoint_is_loopback,
-            referer: config.referer,
-            title: config.title,
-            max_result_bytes: config.max_result_bytes,
-            artifact_store: None,
-            client,
+            tools: Arc::from(tools),
+            route: Route {
+                client,
+                authorization,
+                endpoint,
+                endpoint_is_loopback,
+                referer: config.referer,
+                title: config.title,
+                max_result_bytes: config.max_result_bytes,
+                store: None,
+            },
         })
     }
 
@@ -461,7 +305,7 @@ impl OpenRouterMediaToolset {
     /// reference and the model never receives the base64 payload.
     #[must_use]
     pub fn with_artifact_store(mut self, store: Arc<dyn ArtifactStore>) -> Self {
-        self.artifact_store = Some(store);
+        self.route.store = Some(store);
         self
     }
 }
@@ -475,124 +319,44 @@ impl Toolset for OpenRouterMediaToolset {
         Arc::clone(&self.tools)
     }
 
-    #[allow(clippy::too_many_lines)]
     fn call(
         &self,
         ctx: ToolCallContext,
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        let client = self.client.clone();
-        let authorization = self.authorization.clone();
-        let endpoint = self.endpoint.clone();
-        let endpoint_is_loopback = self.endpoint_is_loopback;
-        let referer = self.referer.clone();
-        let title = self.title.clone();
-        let max_result_bytes = self.max_result_bytes;
-        let artifact_store = self.artifact_store.clone();
-        let image_tool_id = self.image_tool_id.clone();
-        let video_tool_id = self.video_tool_id.clone();
-        let video_status_tool_id = self.video_status_tool_id.clone();
-        let video_download_tool_id = self.video_download_tool_id.clone();
-        let speech_tool_id = self.speech_tool_id.clone();
-        let transcribe_tool_id = self.transcribe_tool_id.clone();
+        let route = self.route.clone();
+        let tools = Arc::clone(&self.tools);
         Box::pin(async move {
             verify_authority(&ctx)?;
             let tool_name = call.call.tool_name();
-            let delivered = if call.tool_id == image_tool_id && tool_name == IMAGE_TOOL_NAME {
-                handle_image(
-                    &client,
-                    &authorization,
-                    referer.as_deref(),
-                    title.as_deref(),
-                    &endpoint,
-                    max_result_bytes,
-                    artifact_store.as_ref(),
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
-            } else if call.tool_id == video_tool_id && tool_name == VIDEO_TOOL_NAME {
-                DeliveredMedia {
-                    value: handle_video_submit(
-                        &client,
-                        &authorization,
-                        referer.as_deref(),
-                        title.as_deref(),
-                        &endpoint,
-                        artifact_store.as_ref(),
-                        &ctx,
-                        call.call.arguments().as_bytes(),
-                    )
-                    .await?,
-                    artifact: None,
-                }
-            } else if call.tool_id == video_status_tool_id && tool_name == VIDEO_STATUS_TOOL_NAME {
-                DeliveredMedia {
-                    value: handle_video_status(
-                        &client,
-                        &authorization,
-                        referer.as_deref(),
-                        title.as_deref(),
-                        &endpoint,
-                        &ctx,
-                        call.call.arguments().as_bytes(),
-                    )
-                    .await?,
-                    artifact: None,
-                }
-            } else if call.tool_id == video_download_tool_id
-                && tool_name == VIDEO_DOWNLOAD_TOOL_NAME
-            {
-                DeliveredMedia {
-                    value: handle_video_download(
-                        &client,
-                        &authorization,
-                        referer.as_deref(),
-                        title.as_deref(),
-                        &endpoint,
-                        artifact_store.as_ref(),
-                        &ctx,
-                        call.call.arguments().as_bytes(),
-                    )
-                    .await?,
-                    artifact: None,
-                }
-            } else if call.tool_id == speech_tool_id && tool_name == SPEECH_TOOL_NAME {
-                handle_speech(
-                    &client,
-                    &authorization,
-                    referer.as_deref(),
-                    title.as_deref(),
-                    &endpoint,
-                    max_result_bytes,
-                    artifact_store.as_ref(),
-                    &ctx,
-                    call.call.arguments().as_bytes(),
-                )
-                .await?
-            } else if call.tool_id == transcribe_tool_id && tool_name == TRANSCRIBE_TOOL_NAME {
-                DeliveredMedia {
-                    value: handle_transcribe(
-                        &client,
-                        &authorization,
-                        referer.as_deref(),
-                        title.as_deref(),
-                        &endpoint,
-                        endpoint_is_loopback,
-                        &ctx,
-                        call.call.arguments().as_bytes(),
-                    )
-                    .await?,
-                    artifact: None,
-                }
-            } else {
-                return Err(tool_error(
-                    OPENROUTER_MEDIA_INVALID_ARGUMENTS,
-                    ErrorCategory::Validation,
+            let known = tools
+                .iter()
+                .any(|spec| spec.id == call.tool_id && spec.model_name.as_ref() == tool_name);
+            if !known {
+                return Err(invalid_arguments(
                     "openrouter media call identity is invalid",
                 ));
+            }
+            let arguments = call.call.arguments().as_bytes();
+            let delivered = match tool_name {
+                IMAGE_TOOL_NAME => handle_image(&route, &ctx, arguments).await?,
+                VIDEO_TOOL_NAME => handle_video_submit(&route, &ctx, arguments).await?.into(),
+                VIDEO_STATUS_TOOL_NAME => {
+                    handle_video_status(&route, &ctx, arguments).await?.into()
+                }
+                VIDEO_DOWNLOAD_TOOL_NAME => {
+                    handle_video_download(&route, &ctx, arguments).await?.into()
+                }
+                SPEECH_TOOL_NAME => handle_speech(&route, &ctx, arguments).await?,
+                TRANSCRIBE_TOOL_NAME => handle_transcribe(&route, &ctx, arguments).await?.into(),
+                _ => {
+                    return Err(invalid_arguments(
+                        "openrouter media call identity is invalid",
+                    ));
+                }
             };
-            let output_bytes = serde_json::to_vec(&delivered.value).map_err(|_| {
+            let DeliveredMedia { value, artifact } = delivered;
+            let output_bytes = serde_json::to_vec(&value).map_err(|_| {
                 tool_error(
                     OPENROUTER_MEDIA_TRANSPORT_FAILED,
                     ErrorCategory::Internal,
@@ -610,7 +374,7 @@ impl Toolset for OpenRouterMediaToolset {
                 is_error: false,
             };
             let mut items = Vec::with_capacity(2);
-            if let Some(artifact) = delivered.artifact {
+            if let Some(artifact) = artifact {
                 items.push(Ok(ToolStreamItem::Artifact(artifact)));
             }
             items.push(Ok(ToolStreamItem::Completed(result)));

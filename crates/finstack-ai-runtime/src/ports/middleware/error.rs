@@ -5,8 +5,6 @@ use thiserror::Error;
 
 use crate::error::{PortErrorData, PortErrorInvalid};
 
-#[cfg(test)]
-use super::COMPACTION_MODEL_NOT_AUTHORIZED;
 use super::{
     COMPACTION_BUDGET_EXCEEDED, COMPACTION_RESULT_INVALID, MIDDLEWARE_OUTCOME_NOT_ALLOWED,
 };
@@ -79,14 +77,6 @@ impl MiddlewareError {
         Self::stable(
             COMPACTION_RESULT_INVALID,
             "compaction projection or evidence violates the frozen integrity contract",
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn compaction_model_not_authorized() -> Self {
-        Self::stable(
-            COMPACTION_MODEL_NOT_AUTHORIZED,
-            "compaction child model is not backed by an authorized related effect",
         )
     }
 

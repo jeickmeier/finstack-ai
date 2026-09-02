@@ -117,7 +117,7 @@ fn callback_port_conformance<'py>(
         };
         check_model_conformance(model.1.as_ref(), model_case)
             .await
-            .map_err(|error| pyo3::exceptions::PyAssertionError::new_err(error.to_string()))?;
+            .map_err(fixture_error)?;
 
         let spec = toolset
             .1
@@ -167,7 +167,7 @@ fn callback_port_conformance<'py>(
         };
         check_toolset_conformance(toolset.1.as_ref(), tool_case)
             .await
-            .map_err(|error| pyo3::exceptions::PyAssertionError::new_err(error.to_string()))?;
+            .map_err(fixture_error)?;
         Ok(("model", "toolset"))
     })
 }

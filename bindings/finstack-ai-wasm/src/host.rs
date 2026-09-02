@@ -17,7 +17,8 @@ pub const JS_HOST_FAILED: &str = "js_host_failed";
 /// Stable validation code for a malformed JS host result.
 pub const JS_HOST_RESULT_INVALID: &str = "js_host_result_invalid";
 
-const HOST_VERSION: finstack_ai_kernel::Version = finstack_ai_kernel::Version {
+/// Frozen callback-component version used by JS wrappers.
+pub const HOST_VERSION: finstack_ai_kernel::Version = finstack_ai_kernel::Version {
     major: 0,
     minor: 0,
     patch: 1,
@@ -263,12 +264,6 @@ pub fn tool_output_bytes(output: &HostToolOutput) -> Result<(RawJson, bool), Hos
     ))
 }
 
-/// Frozen callback-component version used by JS wrappers.
-#[must_use]
-pub const fn host_component_version() -> finstack_ai_kernel::Version {
-    HOST_VERSION
-}
-
 /// Conservative byte-upper-bound estimator identity for JS hosts.
 #[must_use]
 pub fn js_estimator() -> finstack_ai::runtime::ports::model::TokenEstimatorRef {
@@ -290,16 +285,6 @@ pub fn model_failure(failure: HostFailure) -> ModelError {
         Metadata::empty(),
     )
     .unwrap_or_else(ModelError::from)
-}
-
-/// Parse constructor options from a JSON object.
-///
-/// # Errors
-///
-/// Returns [`HostFailure::InvalidResult`] when required fields are missing.
-#[allow(dead_code)]
-pub fn parse_model_options(encoded: &str) -> Result<HostModelOptions, HostFailure> {
-    parse_host_json(encoded)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -360,35 +345,8 @@ mod wasm_invoke {
         }
     }
 
-    /// Invoke a host method with JSON-string arguments and an optional AbortSignal.
-    pub async fn invoke_host(
-        this: &JsValue,
-        method: &Function,
-        positional: &[JsValue],
-        signal: Option<&JsValue>,
-    ) -> Result<HostJsResult, HostFailure> {
-        if let Some(signal) = signal
-            && is_aborted(signal)
-        {
-            return Err(HostFailure::Cancelled);
-        }
-        let options = js_sys::Object::new();
-        if let Some(signal) = signal {
-            Reflect::set(&options, &JsValue::from_str("signal"), signal)
-                .map_err(|_| HostFailure::Failed)?;
-        }
-        let args = js_sys::Array::new();
-        for value in positional {
-            args.push(value);
-        }
-        args.push(&options);
-        let result = method.apply(this, &args).map_err(|_| HostFailure::Failed)?;
-        let awaited = await_with_abort(result, signal).await?;
-        normalize_js_result(awaited, signal).await
-    }
-
-    /// Invoke a host method and preserve the raw JavaScript rejection value.
-    pub async fn invoke_host_raw(
+    /// Call `method` with `positional` plus a trailing `{ signal }` options object.
+    fn apply_with_signal(
         this: &JsValue,
         method: &Function,
         positional: &[JsValue],
@@ -403,7 +361,35 @@ mod wasm_invoke {
             args.push(value);
         }
         args.push(&options);
-        let result = method.apply(this, &args)?;
+        method.apply(this, &args)
+    }
+
+    /// Invoke a host method with JSON-string arguments and an optional AbortSignal.
+    pub async fn invoke_host(
+        this: &JsValue,
+        method: &Function,
+        positional: &[JsValue],
+        signal: Option<&JsValue>,
+    ) -> Result<HostJsResult, HostFailure> {
+        if let Some(signal) = signal
+            && is_aborted(signal)
+        {
+            return Err(HostFailure::Cancelled);
+        }
+        let result =
+            apply_with_signal(this, method, positional, signal).map_err(|_| HostFailure::Failed)?;
+        let awaited = await_with_abort(result, signal).await?;
+        normalize_js_result(awaited, signal).await
+    }
+
+    /// Invoke a host method and preserve the raw JavaScript rejection value.
+    pub async fn invoke_host_raw(
+        this: &JsValue,
+        method: &Function,
+        positional: &[JsValue],
+        signal: Option<&JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let result = apply_with_signal(this, method, positional, signal)?;
         if is_promise(&result) {
             JsFuture::from(Promise::from(result)).await
         } else {
@@ -447,10 +433,6 @@ mod wasm_invoke {
             .ok()
             .and_then(|encoded| encoded.as_string())
             .ok_or(HostFailure::InvalidResult)
-    }
-
-    pub fn json_string_value(encoded: &str) -> JsValue {
-        JsValue::from_str(encoded)
     }
 
     pub fn extract_method(adapter: &JsValue, name: &str) -> Result<Function, HostFailure> {
@@ -678,8 +660,7 @@ mod wasm_invoke {
 #[cfg(target_arch = "wasm32")]
 pub use wasm_invoke::{
     AbortOnDrop, HostJsResult, bytes_from_uint8_array, create_abort_controller, extract_method,
-    extract_optional_method, invoke_host, invoke_host_raw, json_string_value, stringify_js,
-    uint8_array_from_bytes,
+    extract_optional_method, invoke_host, invoke_host_raw, stringify_js, uint8_array_from_bytes,
 };
 
 /// Native callback result used to prove DTO and stream-item paths without JS.

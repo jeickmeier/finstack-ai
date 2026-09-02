@@ -43,12 +43,12 @@ struct TerminalChild {
 enum ChildEntry {
     Pending {
         request_digest: Digest,
-        shared: Arc<PendingResult>,
+        shared: Arc<Pending<ChildRunHandle>>,
     },
     Accepted(AcceptedChild),
     Cancelling {
         accepted: AcceptedChild,
-        shared: Arc<PendingCancelResult>,
+        shared: Arc<Pending<()>>,
     },
 }
 
@@ -59,14 +59,53 @@ struct ChildState {
     terminal_order: VecDeque<Digest>,
 }
 
-struct PendingResult {
-    result: Mutex<Option<Result<ChildRunHandle, AgentInvokeError>>>,
+/// One in-flight exchange shared by every caller that attached to it.
+struct Pending<T> {
+    result: Mutex<Option<Result<T, AgentInvokeError>>>,
     notify: tokio::sync::Notify,
 }
 
-struct PendingCancelResult {
-    result: Mutex<Option<Result<(), AgentInvokeError>>>,
-    notify: tokio::sync::Notify,
+impl<T: Clone> Pending<T> {
+    fn new(result: Option<Result<T, AgentInvokeError>>) -> Arc<Self> {
+        Arc::new(Self {
+            result: Mutex::new(result),
+            notify: tokio::sync::Notify::new(),
+        })
+    }
+
+    async fn wait(self: Arc<Self>) -> Result<T, AgentInvokeError> {
+        loop {
+            let notified = self.notify.notified();
+            if let Some(result) = self
+                .result
+                .lock()
+                .map_err(|_| unavailable("remote child pending result is poisoned"))?
+                .clone()
+            {
+                return result;
+            }
+            notified.await;
+        }
+    }
+
+    /// Publish the exchange's result and wake every waiter.
+    fn publish(&self, result: Result<T, AgentInvokeError>) {
+        if let Ok(mut slot) = self.result.lock() {
+            *slot = Some(result);
+        }
+        self.notify.notify_waiters();
+    }
+
+    /// Fail every waiter with `message` unless a result was already
+    /// published; used when the worker dies before publishing.
+    fn abandon(&self, message: &'static str) {
+        if let Ok(mut slot) = self.result.lock()
+            && slot.is_none()
+        {
+            *slot = Some(Err(unavailable(message)));
+        }
+        self.notify.notify_waiters();
+    }
 }
 
 impl RemoteChildInvoker {
@@ -156,7 +195,7 @@ impl AgentInvoker for RemoteChildInvoker {
                     completion.publish(result, accepted);
                 });
             }
-            wait_pending(shared).await
+            shared.wait().await
         })
     }
 
@@ -207,7 +246,7 @@ impl AgentInvoker for RemoteChildInvoker {
                     completion.publish(result, status);
                 });
             }
-            wait_pending_cancel(shared).await
+            shared.wait().await
         })
     }
 
@@ -248,12 +287,16 @@ fn deterministic_command_id(domain: &str, digest: Digest) -> Result<String, Agen
 struct PendingCompletion {
     state: Arc<Mutex<ChildState>>,
     key: Digest,
-    shared: Arc<PendingResult>,
+    shared: Arc<Pending<ChildRunHandle>>,
     armed: bool,
 }
 
 impl PendingCompletion {
-    fn new(state: Arc<Mutex<ChildState>>, key: Digest, shared: Arc<PendingResult>) -> Self {
+    fn new(
+        state: Arc<Mutex<ChildState>>,
+        key: Digest,
+        shared: Arc<Pending<ChildRunHandle>>,
+    ) -> Self {
         Self {
             state,
             key,
@@ -288,10 +331,7 @@ impl PendingCompletion {
                 result = Err(unavailable("remote child entry lock is poisoned"));
             }
         }
-        if let Ok(mut slot) = self.shared.result.lock() {
-            *slot = Some(result);
-        }
-        self.shared.notify.notify_waiters();
+        self.shared.publish(result);
         self.armed = false;
     }
 }
@@ -311,14 +351,8 @@ impl Drop for PendingCompletion {
                 state.active.remove(&self.key);
             }
         }
-        if let Ok(mut slot) = self.shared.result.lock()
-            && slot.is_none()
-        {
-            *slot = Some(Err(unavailable(
-                "remote child start worker terminated before publishing a result",
-            )));
-        }
-        self.shared.notify.notify_waiters();
+        self.shared
+            .abandon("remote child start worker terminated before publishing a result");
     }
 }
 
@@ -326,7 +360,7 @@ fn reserve_entry(
     state: &Mutex<ChildState>,
     key: Digest,
     request: &ChildRunRequest,
-) -> Result<(Arc<PendingResult>, bool), AgentInvokeError> {
+) -> Result<(Arc<Pending<ChildRunHandle>>, bool), AgentInvokeError> {
     let mut state = state
         .lock()
         .map_err(|_| unavailable("remote child entry lock is poisoned"))?;
@@ -357,10 +391,7 @@ fn reserve_entry(
     if state.active.len() >= MAX_ACTIVE_CHILDREN {
         return Err(unavailable("remote child active entry map is full"));
     }
-    let shared = Arc::new(PendingResult {
-        result: Mutex::new(None),
-        notify: tokio::sync::Notify::new(),
-    });
+    let shared = Pending::new(None);
     state.active.insert(
         key,
         ChildEntry::Pending {
@@ -374,7 +405,7 @@ fn reserve_entry(
 fn completed_entry(
     existing: &AcceptedChild,
     request: &ChildRunRequest,
-) -> Result<(Arc<PendingResult>, bool), AgentInvokeError> {
+) -> Result<(Arc<Pending<ChildRunHandle>>, bool), AgentInvokeError> {
     if &existing.handle.locator != request.locator() {
         return Err(invalid("remote child locator digest collision"));
     }
@@ -384,35 +415,14 @@ fn completed_entry(
             submitted: request.request_digest(),
         });
     }
-    Ok((
-        Arc::new(PendingResult {
-            result: Mutex::new(Some(Ok(existing.handle.clone()))),
-            notify: tokio::sync::Notify::new(),
-        }),
-        false,
-    ))
-}
-
-async fn wait_pending(shared: Arc<PendingResult>) -> Result<ChildRunHandle, AgentInvokeError> {
-    loop {
-        let notified = shared.notify.notified();
-        if let Some(result) = shared
-            .result
-            .lock()
-            .map_err(|_| unavailable("remote child pending result is poisoned"))?
-            .clone()
-        {
-            return result;
-        }
-        notified.await;
-    }
+    Ok((Pending::new(Some(Ok(existing.handle.clone()))), false))
 }
 
 struct PendingCancelCompletion {
     state: Arc<Mutex<ChildState>>,
     key: Digest,
     accepted: AcceptedChild,
-    shared: Arc<PendingCancelResult>,
+    shared: Arc<Pending<()>>,
     armed: bool,
 }
 
@@ -421,7 +431,7 @@ impl PendingCancelCompletion {
         state: Arc<Mutex<ChildState>>,
         key: Digest,
         accepted: AcceptedChild,
-        shared: Arc<PendingCancelResult>,
+        shared: Arc<Pending<()>>,
     ) -> Self {
         Self {
             state,
@@ -468,10 +478,7 @@ impl PendingCancelCompletion {
                 result = Err(unavailable("remote child entry lock is poisoned"));
             }
         }
-        if let Ok(mut slot) = self.shared.result.lock() {
-            *slot = Some(result);
-        }
-        self.shared.notify.notify_waiters();
+        self.shared.publish(result);
         self.armed = false;
     }
 }
@@ -493,14 +500,8 @@ impl Drop for PendingCancelCompletion {
                     .insert(self.key, ChildEntry::Accepted(self.accepted.clone()));
             }
         }
-        if let Ok(mut slot) = self.shared.result.lock()
-            && slot.is_none()
-        {
-            *slot = Some(Err(unavailable(
-                "remote child cancel worker terminated before publishing a result",
-            )));
-        }
-        self.shared.notify.notify_waiters();
+        self.shared
+            .abandon("remote child cancel worker terminated before publishing a result");
     }
 }
 
@@ -508,16 +509,13 @@ fn reserve_cancel(
     state: &Mutex<ChildState>,
     key: Digest,
     locator: &ChildRunLocator,
-) -> Result<(Arc<PendingCancelResult>, bool, AcceptedChild), AgentInvokeError> {
+) -> Result<(Arc<Pending<()>>, bool, AcceptedChild), AgentInvokeError> {
     let mut state = state
         .lock()
         .map_err(|_| unavailable("remote child entry lock is poisoned"))?;
     match state.active.get(&key).cloned() {
         Some(ChildEntry::Accepted(accepted)) if accepted.handle.locator == *locator => {
-            let shared = Arc::new(PendingCancelResult {
-                result: Mutex::new(None),
-                notify: tokio::sync::Notify::new(),
-            });
+            let shared = Pending::new(None);
             state.active.insert(
                 key,
                 ChildEntry::Cancelling {
@@ -535,32 +533,12 @@ fn reserve_cancel(
         Some(ChildEntry::Pending { .. }) => Err(unavailable("remote child start is still pending")),
         Some(_) => Err(invalid("remote child locator digest collision")),
         None => match state.terminal.get(&key) {
-            Some(terminal) if terminal.accepted.handle.locator == *locator => Ok((
-                Arc::new(PendingCancelResult {
-                    result: Mutex::new(Some(Ok(()))),
-                    notify: tokio::sync::Notify::new(),
-                }),
-                false,
-                terminal.accepted.clone(),
-            )),
+            Some(terminal) if terminal.accepted.handle.locator == *locator => {
+                Ok((Pending::new(Some(Ok(()))), false, terminal.accepted.clone()))
+            }
             Some(_) => Err(invalid("remote child locator digest collision")),
             None => Err(invalid("remote child locator was never accepted")),
         },
-    }
-}
-
-async fn wait_pending_cancel(shared: Arc<PendingCancelResult>) -> Result<(), AgentInvokeError> {
-    loop {
-        let notified = shared.notify.notified();
-        if let Some(result) = shared
-            .result
-            .lock()
-            .map_err(|_| unavailable("remote child pending cancel result is poisoned"))?
-            .clone()
-        {
-            return result;
-        }
-        notified.await;
     }
 }
 
@@ -705,10 +683,7 @@ mod tests {
             state.active.insert(key, ChildEntry::Accepted(accepted));
         }
         let (key, accepted) = target.expect("target");
-        let shared = Arc::new(PendingCancelResult {
-            result: Mutex::new(None),
-            notify: tokio::sync::Notify::new(),
-        });
+        let shared = Pending::new(None);
         state.active.insert(
             key,
             ChildEntry::Cancelling {
@@ -757,10 +732,7 @@ mod tests {
     fn pending_start_status_fails_closed() {
         let locator = locator();
         let key = Digest::raw_json(b"pending");
-        let shared = Arc::new(PendingResult {
-            result: Mutex::new(None),
-            notify: tokio::sync::Notify::new(),
-        });
+        let shared = Pending::new(None);
         let mut state = ChildState::default();
         state.active.insert(
             key,
@@ -795,10 +767,7 @@ mod tests {
     #[tokio::test]
     async fn abandoned_pending_worker_wakes_waiters_and_releases_capacity() {
         let key = Digest::raw_json(b"pending");
-        let shared = Arc::new(PendingResult {
-            result: Mutex::new(None),
-            notify: tokio::sync::Notify::new(),
-        });
+        let shared = Pending::new(None);
         let state = Arc::new(Mutex::new(ChildState::default()));
         state.lock().expect("state").active.insert(
             key,
@@ -812,7 +781,7 @@ mod tests {
             key,
             Arc::clone(&shared),
         ));
-        let error = wait_pending(shared).await.expect_err("abandoned worker");
+        let error = shared.wait().await.expect_err("abandoned worker");
         assert!(error.to_string().contains("terminated"));
         assert!(state.lock().expect("state").active.is_empty());
     }

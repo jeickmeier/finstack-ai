@@ -175,12 +175,17 @@ fn ollama_embedder(base_url: String) -> EmbedderChoice {
 
 /// Does any registered toolset advertise `mode` on `search_memory`?
 fn search_memory_advertises_mode(agent: &finstack_ai::Agent) -> bool {
-    agent.resolved().run_plan().toolsets().iter().any(|toolset| {
-        toolset.handle().tools().iter().any(|spec| {
-            spec.model_name.as_ref() == "search_memory"
-                && spec.input_schema.as_str().contains("\"mode\"")
+    agent
+        .resolved()
+        .run_plan()
+        .toolsets()
+        .iter()
+        .any(|toolset| {
+            toolset.handle().tools().iter().any(|spec| {
+                spec.model_name.as_ref() == "search_memory"
+                    && spec.input_schema.as_str().contains("\"mode\"")
+            })
         })
-    })
 }
 
 #[test]
@@ -375,7 +380,10 @@ async fn run_semantic_entry(
     with_embedder: bool,
 ) -> (crate::GoldenEntry, String, String, Vec<String>) {
     let entry = semantic_entry();
-    let seed = entry.memory_seed.clone().expect("semantic entry has a seed");
+    let seed = entry
+        .memory_seed
+        .clone()
+        .expect("semantic entry has a seed");
     let dir = tempfile::tempdir().expect("tempdir");
     let (base_url, server) = loopback::serve_ollama_scripted(
         vec![
@@ -474,7 +482,10 @@ async fn semantic_golden_misses_under_lexical_recall() {
 #[tokio::test]
 async fn semantic_golden_surfaces_with_embedder() {
     let (entry, ask_request, answer, observed_kinds) = run_semantic_entry(true).await;
-    let seed = entry.memory_seed.clone().expect("semantic entry has a seed");
+    let seed = entry
+        .memory_seed
+        .clone()
+        .expect("semantic entry has a seed");
     assert!(
         ask_request.contains(seed.body.as_str()),
         "semantic recall did not surface the seed in the model request: {ask_request}"

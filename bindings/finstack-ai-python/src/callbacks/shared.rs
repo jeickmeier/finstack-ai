@@ -3,9 +3,6 @@ use finstack_ai_kernel::{
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use serde::de::DeserializeOwned;
-
-use super::engine::PythonCallback;
 
 const CALLBACK_VERSION: Version = Version {
     major: 0,
@@ -35,18 +32,6 @@ pub(super) fn parse_stage(value: &str) -> PyResult<Stage> {
             "unsupported middleware stage: {value}"
         ))),
     }
-}
-
-pub(super) fn python_value<T: DeserializeOwned>(
-    py: Python<'_>,
-    callback: &PythonCallback,
-    value: Py<PyAny>,
-) -> PyResult<T> {
-    let encoded = callback
-        .json_dumps
-        .call1(py, (value,))?
-        .extract::<String>(py)?;
-    serde_json::from_str(&encoded).map_err(|error| PyTypeError::new_err(error.to_string()))
 }
 
 pub(super) fn exact_component(value: &str) -> PyResult<ComponentRef> {

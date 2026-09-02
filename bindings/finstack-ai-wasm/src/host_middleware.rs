@@ -13,7 +13,7 @@ use finstack_ai_kernel::{
 };
 use serde::Deserialize;
 
-use crate::host::{HostFailure, host_component_version, parse_host_json};
+use crate::host::{HOST_VERSION, HostFailure, parse_host_json};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::host::NativeHostResult;
@@ -38,7 +38,7 @@ pub struct HostMiddleware {
     #[cfg(target_arch = "wasm32")]
     adapter: wasm_bindgen::JsValue,
     #[cfg(target_arch = "wasm32")]
-    invoke: std::rc::Rc<std::cell::RefCell<js_sys::Function>>,
+    invoke: js_sys::Function,
 }
 
 fn middleware_failure(failure: HostFailure) -> MiddlewareError {
@@ -83,13 +83,13 @@ impl HostMiddleware {
         let component = ComponentRef::new(
             ComponentId::parse(&options.component)
                 .map_err(|_| middleware_failure(HostFailure::InvalidResult))?,
-            Some(host_component_version()),
+            Some(HOST_VERSION),
         );
         Ok(Self {
             descriptor: MiddlewareDescriptor {
                 invocation: ComponentInvocation {
                     component: component.id().clone(),
-                    version: host_component_version(),
+                    version: HOST_VERSION,
                     configuration_digest: Digest::raw_json(b"{}"),
                     recovery: InvocationRecovery::NonRepeatable,
                 },
@@ -108,7 +108,7 @@ impl HostMiddleware {
             #[cfg(target_arch = "wasm32")]
             adapter,
             #[cfg(target_arch = "wasm32")]
-            invoke: std::rc::Rc::new(std::cell::RefCell::new(invoke)),
+            invoke,
         })
     }
 
@@ -182,12 +182,12 @@ impl Middleware for HostMiddleware {
         #[cfg(target_arch = "wasm32")]
         {
             let adapter = self.adapter.clone();
-            let method = self.invoke.borrow().clone();
+            let method = self.invoke.clone();
             Box::pin(async move {
                 let result = crate::host::invoke_host(
                     &adapter,
                     &method,
-                    &[crate::host::json_string_value(&encoded)],
+                    &[wasm_bindgen::JsValue::from_str(&encoded)],
                     None,
                 )
                 .await

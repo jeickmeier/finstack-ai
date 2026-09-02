@@ -66,16 +66,7 @@ impl MemoryStore for SqliteMemoryStore {
         key: Arc<str>,
         record: MemoryRecord,
     ) -> PortFuture<Result<PutOutcome, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Put { key, record, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
+        self.dispatch(move |reply| Command::Put { key, record, reply })
     }
 
     fn get(
@@ -83,16 +74,7 @@ impl MemoryStore for SqliteMemoryStore {
         scope: MemoryScope,
         id: MemoryId,
     ) -> PortFuture<Result<Option<MemoryRecord>, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Get { scope, id, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
+        self.dispatch(move |reply| Command::Get { scope, id, reply })
     }
 
     fn search(
@@ -101,20 +83,11 @@ impl MemoryStore for SqliteMemoryStore {
         query: MemoryQuery,
         limit: usize,
     ) -> PortFuture<Result<Vec<MemoryHit>, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Search {
-                    scope,
-                    query,
-                    limit,
-                    reply,
-                })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
+        self.dispatch(move |reply| Command::Search {
+            scope,
+            query,
+            limit,
+            reply,
         })
     }
 
@@ -124,20 +97,11 @@ impl MemoryStore for SqliteMemoryStore {
         scope: MemoryScope,
         id: MemoryId,
     ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Forget {
-                    key,
-                    scope,
-                    id,
-                    reply,
-                })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
+        self.dispatch(move |reply| Command::Forget {
+            key,
+            scope,
+            id,
+            reply,
         })
     }
 
@@ -148,21 +112,12 @@ impl MemoryStore for SqliteMemoryStore {
         old: MemoryId,
         replacement: MemoryRecord,
     ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::Correct {
-                    key,
-                    scope,
-                    old,
-                    replacement,
-                    reply,
-                })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
+        self.dispatch(move |reply| Command::Correct {
+            key,
+            scope,
+            old,
+            replacement,
+            reply,
         })
     }
 
@@ -171,48 +126,21 @@ impl MemoryStore for SqliteMemoryStore {
         scope: MemoryScope,
         page: MemoryPage,
     ) -> PortFuture<Result<MemoryListing, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::List { scope, page, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
+        self.dispatch(move |reply| Command::List { scope, page, reply })
     }
 
     fn pending_artifact_actions(
         &self,
         limit: usize,
     ) -> PortFuture<Result<Vec<MemoryArtifactAction>, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::PendingArtifactActions { limit, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
+        self.dispatch(move |reply| Command::PendingArtifactActions { limit, reply })
     }
 
     fn acknowledge_artifact_action(
         &self,
         action_id: Digest,
     ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::AcknowledgeArtifactAction { action_id, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
+        self.dispatch(move |reply| Command::AcknowledgeArtifactAction { action_id, reply })
     }
 
     fn pending_embedding_sources(
@@ -220,19 +148,10 @@ impl MemoryStore for SqliteMemoryStore {
         embedder_id: Arc<str>,
         limit: usize,
     ) -> PortFuture<Result<Vec<EmbeddingSource>, MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::PendingEmbeddingSources {
-                    embedder_id,
-                    limit,
-                    reply,
-                })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
+        self.dispatch(move |reply| Command::PendingEmbeddingSources {
+            embedder_id,
+            limit,
+            reply,
         })
     }
 
@@ -244,7 +163,6 @@ impl MemoryStore for SqliteMemoryStore {
         source_digest: Digest,
         vector: EmbeddingVector,
     ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
         let write = EmbeddingWrite {
             embedder_id,
             scope,
@@ -252,31 +170,14 @@ impl MemoryStore for SqliteMemoryStore {
             source_digest,
             vector,
         };
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::StoreEmbedding { write, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
+        self.dispatch(move |reply| Command::StoreEmbedding { write, reply })
     }
 
     fn forget_embedding_space(
         &self,
         embedder_id: Arc<str>,
     ) -> PortFuture<Result<(), MemoryStoreError>> {
-        let sender = self.sender.clone();
-        Box::pin(async move {
-            let sender = sender.ok_or_else(sqlite_unavailable)?;
-            let (reply, receive) = oneshot::channel();
-            sender
-                .send(Command::ForgetEmbeddingSpace { embedder_id, reply })
-                .await
-                .map_err(|_| sqlite_unavailable())?;
-            receive.await.map_err(|_| sqlite_unavailable())?
-        })
+        self.dispatch(move |reply| Command::ForgetEmbeddingSpace { embedder_id, reply })
     }
 }
 
@@ -401,6 +302,25 @@ impl SqliteMemoryStore {
             limits,
             "memory.sqlite-v2.in-memory",
         )
+    }
+
+    /// Queue one command for the worker and await its reply. Every store
+    /// operation funnels through here, so a dropped sender (store closed)
+    /// or a dead worker surfaces as the same stable `Unavailable` error.
+    fn dispatch<T: Send + 'static>(
+        &self,
+        command: impl FnOnce(oneshot::Sender<Result<T, MemoryStoreError>>) -> Command + Send + 'static,
+    ) -> PortFuture<Result<T, MemoryStoreError>> {
+        let sender = self.sender.clone();
+        Box::pin(async move {
+            let sender = sender.ok_or_else(sqlite_unavailable)?;
+            let (reply, receive) = oneshot::channel();
+            sender
+                .send(command(reply))
+                .await
+                .map_err(|_| sqlite_unavailable())?;
+            receive.await.map_err(|_| sqlite_unavailable())?
+        })
     }
 
     fn from_connection(

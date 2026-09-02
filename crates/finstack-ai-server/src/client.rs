@@ -79,9 +79,7 @@ where
             return Err(ServerError::AuthenticationFailure);
         };
         if selected_version != select_version(offer, &server_offer)? {
-            return Err(ServerError::Protocol(
-                finstack_ai_protocol::ProtocolError::codec("invalid server version selection"),
-            ));
+            return Err(codec_error("invalid server version selection"));
         }
         require_features(&server_offer, &["auth"])?;
         self.protocol_version = selected_version;
@@ -124,11 +122,7 @@ where
                         || value.sequence() != sequence
                         || value.locator() != &expected_locator
                     {
-                        return Err(ServerError::Protocol(
-                            finstack_ai_protocol::ProtocolError::codec(
-                                "invalid reconnect snapshot",
-                            ),
-                        ));
+                        return Err(codec_error("invalid reconnect snapshot"));
                     }
                     saw_snapshot_choice = true;
                     snapshot_sequence = sequence;
@@ -137,11 +131,7 @@ where
                 }
                 RemotePostAuth::NoSnapshot { sequence } => {
                     if saw_snapshot_choice {
-                        return Err(ServerError::Protocol(
-                            finstack_ai_protocol::ProtocolError::codec(
-                                "duplicate reconnect snapshot choice",
-                            ),
-                        ));
+                        return Err(codec_error("duplicate reconnect snapshot choice"));
                     }
                     saw_snapshot_choice = true;
                     snapshot_sequence = sequence;
@@ -157,32 +147,20 @@ where
                         || steps.first().map(RemoteDurableStep::sequence) != Some(from_sequence)
                         || steps.last().map(RemoteDurableStep::sequence) != Some(to_sequence)
                     {
-                        return Err(ServerError::Protocol(
-                            finstack_ai_protocol::ProtocolError::codec(
-                                "invalid durable tail range",
-                            ),
-                        ));
+                        return Err(codec_error("invalid durable tail range"));
                     }
                     for step in &steps {
-                        let expected = cursor.checked_add(1).ok_or_else(|| {
-                            ServerError::Protocol(finstack_ai_protocol::ProtocolError::codec(
-                                "durable cursor exhausted",
-                            ))
-                        })?;
+                        let expected = cursor
+                            .checked_add(1)
+                            .ok_or_else(|| codec_error("durable cursor exhausted"))?;
                         if step.sequence() != expected {
-                            return Err(ServerError::Protocol(
-                                finstack_ai_protocol::ProtocolError::codec("durable tail gap"),
-                            ));
+                            return Err(codec_error("durable tail gap"));
                         }
                         if step.events().iter().any(|event| {
                             !event_matches_locator(event, &expected_locator)
                                 || event.durable_sequence() != Some(expected)
                         }) {
-                            return Err(ServerError::Protocol(
-                                finstack_ai_protocol::ProtocolError::codec(
-                                    "durable event locator mismatch",
-                                ),
-                            ));
+                            return Err(codec_error("durable event locator mismatch"));
                         }
                         cursor = expected;
                     }
@@ -190,9 +168,7 @@ where
                 }
                 RemotePostAuth::SyncBarrier { sequence } => {
                     if !saw_snapshot_choice || sequence != cursor {
-                        return Err(ServerError::Protocol(
-                            finstack_ai_protocol::ProtocolError::codec("invalid sync barrier"),
-                        ));
+                        return Err(codec_error("invalid sync barrier"));
                     }
                     self.barrier_seen = true;
                     self.durable_cursor = sequence;
@@ -207,9 +183,7 @@ where
                     return Err(ServerError::LiveBeforeBarrier);
                 }
                 RemotePostAuth::Close { reason_code } => {
-                    return Err(ServerError::Protocol(
-                        finstack_ai_protocol::ProtocolError::codec(reason_code),
-                    ));
+                    return Err(codec_error(reason_code));
                 }
                 _ => return Err(ServerError::UnknownLocator),
             }
@@ -233,11 +207,10 @@ where
                 if !self.barrier_seen {
                     return Err(ServerError::LiveBeforeBarrier);
                 }
-                let locator = self.locator.as_ref().ok_or_else(|| {
-                    ServerError::Protocol(finstack_ai_protocol::ProtocolError::codec(
-                        "live event without locator",
-                    ))
-                })?;
+                let locator = self
+                    .locator
+                    .as_ref()
+                    .ok_or_else(|| codec_error("live event without locator"))?;
                 for event in events {
                     if event.durable_sequence().is_some()
                         || !event_matches_locator(event, locator)
@@ -245,11 +218,7 @@ where
                             .last_transient_sequence
                             .is_some_and(|value| event.transient_sequence() <= value)
                     {
-                        return Err(ServerError::Protocol(
-                            finstack_ai_protocol::ProtocolError::codec(
-                                "invalid live event sequence",
-                            ),
-                        ));
+                        return Err(codec_error("invalid live event sequence"));
                     }
                     self.last_transient_sequence = Some(event.transient_sequence());
                 }
@@ -291,28 +260,17 @@ where
                         result.durable_sequence() == self.durable_cursor
                     };
                     if !cursor_valid {
-                        return Err(ServerError::Protocol(
-                            finstack_ai_protocol::ProtocolError::codec(
-                                "invalid command receipt cursor",
-                            ),
-                        ));
+                        return Err(codec_error("invalid command receipt cursor"));
                     }
                     self.durable_cursor = result.durable_sequence();
                     return Ok(result);
                 }
                 RemotePostAuth::CommandResult { .. } => {
-                    return Err(ServerError::Protocol(
-                        finstack_ai_protocol::ProtocolError::codec("unrelated command receipt"),
-                    ));
+                    return Err(codec_error("unrelated command receipt"));
                 }
                 RemotePostAuth::EventBatch { .. } | RemotePostAuth::Grant { .. } => {}
                 other => {
-                    return Err(ServerError::Protocol(
-                        finstack_ai_protocol::ProtocolError::codec(format!(
-                            "unexpected {}",
-                            other.kind()
-                        )),
-                    ));
+                    return Err(codec_error(format!("unexpected {}", other.kind())));
                 }
             }
         }
@@ -336,6 +294,10 @@ where
         )
         .await
     }
+}
+
+fn codec_error(message: impl Into<String>) -> ServerError {
+    ServerError::Protocol(finstack_ai_protocol::ProtocolError::codec(message))
 }
 
 fn event_matches_locator(event: &RemoteEventView, locator: &RemoteLocator) -> bool {
