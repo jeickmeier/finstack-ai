@@ -92,6 +92,7 @@ ON finstack_workflow_worker_dead_letters (rejected_unix_ms, id);
 pub struct SqliteWorkerStore {
     path: PathBuf,
     conn: Mutex<Connection>,
+    wake_cursor: Mutex<Option<(String, String)>>,
 }
 
 impl SqliteWorkerStore {
@@ -144,6 +145,7 @@ impl SqliteWorkerStore {
         Ok(Self {
             path,
             conn: Mutex::new(conn),
+            wake_cursor: Mutex::new(None),
         })
     }
 
@@ -353,23 +355,35 @@ impl WakeIndexStore for SqliteWorkerStore {
 
     fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
         self.with_conn(|conn| {
-            let sql = format!(
+            let mut cursor = self.wake_cursor.lock().map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_wake_cursor",
+            })?;
+            let due = format!(
                 "{WAKE_SELECT}
-                 WHERE (leased_by IS NULL
-                        OR lease_expires_unix_ms IS NULL
-                        OR lease_expires_unix_ms <= ?1)
+                 WHERE (leased_by IS NULL OR lease_expires_unix_ms IS NULL OR lease_expires_unix_ms <= ?1)
                    AND (CASE WHEN reason = 'timer'
                              THEN wake_at_unix_ms IS NOT NULL AND wake_at_unix_ms <= ?1
-                             ELSE wake_at_unix_ms IS NULL OR wake_at_unix_ms <= ?1
-                        END)
-                 ORDER BY tenant_scope, session_id
-                 LIMIT ?2"
+                             ELSE wake_at_unix_ms IS NULL OR wake_at_unix_ms <= ?1 END)"
             );
-            query_wake_rows(
-                conn,
-                &sql,
-                params![now.as_unix_ms(), i64::try_from(limit).unwrap_or(i64::MAX)],
-            )
+            let bounded = i64::try_from(limit).unwrap_or(i64::MAX);
+            let mut rows = if let Some((tenant, session)) = cursor.as_ref() {
+                let sql = format!("{due} AND (tenant_scope, session_id) > (?2, ?3)
+                                   ORDER BY tenant_scope, session_id LIMIT ?4");
+                query_wake_rows(conn, &sql, params![now.as_unix_ms(), tenant, session, bounded])?
+            } else {
+                let sql = format!("{due} ORDER BY tenant_scope, session_id LIMIT ?2");
+                query_wake_rows(conn, &sql, params![now.as_unix_ms(), bounded])?
+            };
+            if rows.len() < limit && let Some((tenant, session)) = cursor.as_ref() {
+                let remaining = i64::try_from(limit - rows.len()).unwrap_or(i64::MAX);
+                let sql = format!("{due} AND (tenant_scope, session_id) <= (?2, ?3)
+                                   ORDER BY tenant_scope, session_id LIMIT ?4");
+                rows.extend(query_wake_rows(conn, &sql, params![now.as_unix_ms(), tenant, session, remaining])?);
+            }
+            if let Some(last) = rows.last() {
+                *cursor = Some((last.tenant_scope.to_string(), last.session_id.to_canonical_string()));
+            }
+            Ok(rows)
         })
     }
 

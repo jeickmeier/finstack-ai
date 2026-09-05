@@ -532,6 +532,38 @@ async fn listed_envelope(
     Ok(Some((envelope, header, content)))
 }
 
+/// Durable scan hint, outside the artifact prefix. Losing a concurrent cursor
+/// update can repeat work but cannot authorize deletion or bypass the grace.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GcCursor {
+    page: PageToken,
+    offset: usize,
+}
+
+impl Default for GcCursor {
+    fn default() -> Self {
+        Self {
+            page: PageToken::first(),
+            offset: 0,
+        }
+    }
+}
+
+async fn load_gc_cursor(
+    store: &dyn ObjectDriver,
+    scope: &ObjectScope,
+    key: &ObjectKey,
+) -> Result<GcCursor, ArtifactError> {
+    match store.get(scope.clone(), key.clone()).await {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| ArtifactError::Integrity {
+            message: Arc::from("artifact_gc_cursor_invalid"),
+        }),
+        Err(ObjectError::NotFound) => Ok(GcCursor::default()),
+        Err(error) => Err(map_object_error(error)),
+    }
+}
+
 async fn collect_orphans_impl(
     store: &dyn ObjectDriver,
     scope: ArtifactScope,
@@ -542,17 +574,30 @@ async fn collect_orphans_impl(
     scope.digest()?;
     let object_scope = to_object_scope(&scope);
     let prefix = ObjectKey::try_new("artifacts/v2").map_err(map_object_error)?;
-    let mut page = PageToken::first();
+    if limit == 0 {
+        return Ok(ArtifactGcReport::default());
+    }
+    let cursor_key = ObjectKey::try_new("artifacts/gc-cursor/v1").map_err(map_object_error)?;
+    let mut cursor = load_gc_cursor(store, &object_scope, &cursor_key).await?;
     let mut report = ArtifactGcReport::default();
     while report.examined < limit {
         let listed = store
-            .list(object_scope.clone(), Some(prefix.clone()), page)
+            .list(
+                object_scope.clone(),
+                Some(prefix.clone()),
+                cursor.page.clone(),
+            )
             .await
             .map_err(map_object_error)?;
-        for entry in listed.entries {
+        let start = cursor.offset;
+        let page_len = listed.entries.len();
+        let mut consumed = start;
+        let mut deleted_on_page = 0;
+        for entry in listed.entries.into_iter().skip(start) {
             if report.examined >= limit {
                 break;
             }
+            consumed += 1;
             report.examined += 1;
             let Some((envelope, mut header, content)) =
                 listed_envelope(store, &scope, &object_scope, &entry.key).await?
@@ -593,6 +638,7 @@ async fn collect_orphans_impl(
                 .await
             {
                 Ok(()) => {
+                    deleted_on_page += 1;
                     report.deleted += 1;
                     report.bytes_deleted = report
                         .bytes_deleted
@@ -602,10 +648,35 @@ async fn collect_orphans_impl(
                 Err(error) => return Err(map_object_error(error)),
             }
         }
+        if consumed < page_len {
+            // A partially consumed page is listed again next time. Account
+            // for our own deletions so surviving entries are not skipped.
+            cursor.offset = consumed.saturating_sub(deleted_on_page);
+            break;
+        }
+        cursor.offset = 0;
         let Some(next) = listed.next else {
+            cursor.page = PageToken::first();
             break;
         };
-        page = next;
+        cursor.page = next;
     }
+    save_gc_cursor(store, object_scope, cursor_key, cursor).await?;
     Ok(report)
+}
+
+async fn save_gc_cursor(
+    store: &dyn ObjectDriver,
+    scope: ObjectScope,
+    key: ObjectKey,
+    cursor: GcCursor,
+) -> Result<(), ArtifactError> {
+    let bytes = serde_json::to_vec(&cursor).map_err(|_| ArtifactError::InvalidMetadata {
+        message: Arc::from("artifact_gc_cursor_invalid"),
+    })?;
+    store
+        .put(scope, key, Bytes::from(bytes), object_metadata(None))
+        .await
+        .map_err(map_object_error)?;
+    Ok(())
 }

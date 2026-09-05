@@ -31,3 +31,14 @@ let config = S3ObjectStoreConfig::try_new("http://127.0.0.1:9000", "artifacts", 
     .expect("s3 config");
 let store = S3ArtifactStore::try_new(config).expect("s3 artifact store");
 ```
+
+Garbage collection saves a scope-local cursor at `artifacts/gc-cursor/v1`,
+outside the artifact listing prefix. Bounded calls continue through pinned
+prefixes, including after reopening the adapter. The cursor is a scan hint;
+reference validation, conditional deletion, and the orphan grace remain authoritative.
+
+The local backend uses OS-held exclusive locks on permanent `.lock` files.
+Process termination releases ownership automatically; the file's presence does
+not mean it is locked. Do not remove these files while any store is running.
+Stop older store processes before upgrading because the former lock-file
+presence protocol cannot coordinate with the new advisory locks.

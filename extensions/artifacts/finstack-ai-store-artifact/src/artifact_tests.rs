@@ -195,3 +195,65 @@ async fn pinned_objects_survive_gc_and_unpinned_objects_observe_grace() {
     );
     assert!(adapter.get(scope(), artifact).await.is_err());
 }
+
+#[tokio::test]
+async fn bounded_gc_advances_past_pinned_objects_across_adapter_restarts() {
+    bounded_gc(Arc::new(FakeObjectDriver::default())).await;
+}
+
+#[cfg(feature = "local")]
+#[tokio::test]
+async fn local_bounded_gc_keeps_scan_progress_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    bounded_gc(Arc::new(
+        crate::local::LocalObjectStore::try_new(dir.path().to_path_buf()).unwrap(),
+    ))
+    .await;
+}
+
+async fn bounded_gc(objects: Arc<dyn ObjectDriver>) {
+    let adapter = ObjectArtifactStore::new(objects.clone());
+    let mut artifacts = Vec::new();
+    for content in [b"one".as_slice(), b"two", b"three"] {
+        artifacts.push(
+            stage_required_artifact(
+                &adapter,
+                scope(),
+                Bytes::copy_from_slice(content),
+                metadata(),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    artifacts.sort_by_key(|a| {
+        finstack_ai_runtime::artifact::artifact_storage_key(&scope(), a)
+            .unwrap()
+            .to_hex()
+    });
+    adapter
+        .pin(
+            scope(),
+            artifacts[0].clone(),
+            ArtifactOwnerId::try_new("journal:retained").unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut deleted = 0;
+    for tick in 1..=12 {
+        // Recreate the adapter each time: scan progress belongs to the scope,
+        // not an unbounded in-process tenant map or one worker's lifetime.
+        let reopened = ObjectArtifactStore::new(objects.clone());
+        let report = reopened
+            .collect_orphans(scope(), Timestamp::from_unix_ms(tick * 400_000).unwrap(), 1)
+            .await
+            .unwrap();
+        assert!(report.examined <= 1);
+        deleted += report.deleted;
+    }
+    assert_eq!(deleted, 2);
+    adapter.get(scope(), artifacts[0].clone()).await.unwrap();
+    for artifact in &artifacts[1..] {
+        assert!(adapter.get(scope(), artifact.clone()).await.is_err());
+    }
+}

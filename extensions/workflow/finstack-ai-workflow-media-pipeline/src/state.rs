@@ -66,6 +66,11 @@ pub struct SceneState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RenderStatus {
+    /// One caller owns a durable tick claim. If that caller is interrupted,
+    /// the outcome is uncertain: advancing again returns the stored state
+    /// without dispatching tools. The host must reconcile provider effects
+    /// and update this row before resuming; claims never expire automatically.
+    Advancing,
     /// Scenes are still being generated.
     Running,
     /// All scenes are done; the final composition is in progress.

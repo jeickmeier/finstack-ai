@@ -172,6 +172,28 @@ impl MemoryObserver {
     }
 }
 
+fn capture_key(
+    id: Option<&crate::record::MemoryId>,
+    run: &str,
+    source: &str,
+    index: usize,
+) -> Arc<str> {
+    Arc::from(id.map_or_else(
+        || format!("capture:{run}:{source}:{index}"),
+        |id| {
+            format!(
+                "capture-id:{}",
+                finstack_ai_kernel::fixed_domain_digest!(
+                    "memory-capture-key",
+                    1,
+                    format!("{run}\0{source}\0{}", id.as_str()).as_bytes(),
+                )
+                .to_hex()
+            )
+        },
+    ))
+}
+
 impl Observer for MemoryObserver {
     fn descriptor(&self) -> ObserverDescriptor {
         self.descriptor.clone()
@@ -230,6 +252,10 @@ impl Observer for MemoryObserver {
                     continue;
                 }
 
+                // Extractor-assigned identities survive delivery boundaries;
+                // batch-local indices are only a fallback for custom extractors.
+                let idempotency_key =
+                    capture_key(candidate.id.as_ref(), &run_text, &ref_text, index);
                 let id = if let Some(id) = candidate.id.clone() {
                     id
                 } else {
@@ -265,9 +291,6 @@ impl Observer for MemoryObserver {
                     retention: RetentionPolicy::KeepUntilDeleted,
                     tombstoned: false,
                 };
-
-                let idempotency_key: Arc<str> =
-                    Arc::from(format!("capture:{run_text}:{ref_text}:{index}"));
 
                 // Store failures never propagate: losing an opportunistic
                 // capture is not run impact. Genuine misconfiguration is

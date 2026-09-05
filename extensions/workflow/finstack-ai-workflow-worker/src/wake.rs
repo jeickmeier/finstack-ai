@@ -108,7 +108,13 @@ pub trait WakeIndexStore: Send + Sync {
     fn delete(&self, tenant_scope: &str, session_id: SessionId) -> Result<(), WorkerError>;
 
     /// Every row (any tenant) that is due at `now` and not currently
-    /// under an open lease.
+    /// under an open lease, up to `limit`.
+    ///
+    /// Repeated bounded scans must make progress past previously returned
+    /// rows even when callers leave them unchanged (for example, unanswered
+    /// interactions). Built-in stores rotate in key order per store handle;
+    /// a newly opened handle starts at the beginning. Ordering is not stable
+    /// across calls. A zero limit does not advance the scan.
     ///
     /// # Errors
     ///

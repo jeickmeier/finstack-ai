@@ -70,10 +70,9 @@ pub trait MemoryExtractor: Send + Sync {
 ///
 /// Each resulting candidate's `source_ref` is the **first** contributing
 /// delta event's id for its group (not the id of whichever event happened
-/// to complete a marker line) — that keeps the `MemoryObserver`-assigned
-/// idempotency key (`capture:{run_id}:{event_id}:{candidate_index}`)
-/// deterministic across literal batch redelivery, since replays repeat the
-/// same event ids in the same order. A group's `sensitivity` is the
+/// to complete a marker line). Each candidate has an explicit ID derived
+/// from its originating run, event, and byte offset. Carried partial lines
+/// retain that offset so different lines cannot collide across batches. A group's `sensitivity` is the
 /// **highest** classification among the deltas that contributed text to it,
 /// so a candidate assembled partly from a more sensitive delta is never
 /// stored (and later recalled) under a lower one.
@@ -104,6 +103,7 @@ struct Residual {
     text: String,
     /// Identity the group's candidates are attributed to.
     source_ref: Arc<str>,
+    offset: usize,
     /// Highest sensitivity seen among contributing deltas.
     sensitivity: Sensitivity,
     /// First event of the batch that last extended this residual, used to
@@ -158,6 +158,7 @@ impl Default for RuleBasedExtractor {
 struct DeltaGroup {
     source_run: Arc<str>,
     source_ref: Arc<str>,
+    offset: usize,
     sensitivity: Sensitivity,
     text: String,
 }
@@ -169,10 +170,16 @@ impl RuleBasedExtractor {
         text: &str,
         source_run: &Arc<str>,
         source_ref: &Arc<str>,
+        offset: usize,
         sensitivity: Sensitivity,
         candidates: &mut Vec<CandidateMemory>,
     ) {
-        for line in text.lines() {
+        let mut next_offset = offset;
+        for chunk in text.split_inclusive('\n') {
+            let line_offset = next_offset;
+            next_offset = next_offset.saturating_add(chunk.len());
+            let line = chunk.strip_suffix('\n').unwrap_or(chunk);
+            let line = line.strip_suffix('\r').unwrap_or(line);
             let Some(rest) = line.strip_prefix(self.marker.as_ref()) else {
                 continue;
             };
@@ -186,7 +193,15 @@ impl RuleBasedExtractor {
                 .map(|token| Arc::<str>::from(token.to_ascii_lowercase()))
                 .collect();
             candidates.push(CandidateMemory {
-                id: None,
+                id: MemoryId::parse(
+                    &finstack_ai_kernel::fixed_domain_digest!(
+                        "memory-marker-line",
+                        1,
+                        format!("{source_run}\0{source_ref}\0{line_offset}").as_bytes(),
+                    )
+                    .to_hex(),
+                )
+                .ok(),
                 keywords,
                 body: Arc::from(body),
                 sensitivity,
@@ -220,6 +235,7 @@ impl RuleBasedExtractor {
                     &carried.text,
                     &source_run,
                     &carried.source_ref,
+                    carried.offset,
                     carried.sensitivity,
                     candidates,
                 );
@@ -254,6 +270,7 @@ impl MemoryExtractor for RuleBasedExtractor {
                 DeltaGroup {
                     source_run: Arc::from(event.run_id().to_string()),
                     source_ref: Arc::from(event.event_id().to_string()),
+                    offset: 0,
                     sensitivity: event.sensitivity(),
                     text: String::new(),
                 }
@@ -288,6 +305,7 @@ impl MemoryExtractor for RuleBasedExtractor {
             }
             group.sensitivity = max_sensitivity(group.sensitivity, carried.sensitivity);
             group.source_ref = carried.source_ref;
+            group.offset = carried.offset;
             group.text.insert_str(0, &carried.text);
         }
 
@@ -314,6 +332,7 @@ impl MemoryExtractor for RuleBasedExtractor {
                 scanned,
                 &group.source_run,
                 &group.source_ref,
+                group.offset,
                 group.sensitivity,
                 &mut candidates,
             );
@@ -329,6 +348,7 @@ impl MemoryExtractor for RuleBasedExtractor {
                 Residual {
                     text: trailing.to_owned(),
                     source_ref: Arc::clone(&group.source_ref),
+                    offset: group.offset.saturating_add(complete.len()),
                     sensitivity: group.sensitivity,
                     last_batch_head: batch_head,
                 },

@@ -157,3 +157,21 @@ onto the movie timeline as SRT and VTT sidecars.
   sidecar tracks, at the cost of a re-render to change it.
 - Use `sidecar` when captions must stay editable or translatable after the
   render, and `none` when the host adds its own caption layer downstream.
+
+## Tick ownership and interrupted submissions
+
+Each tick atomically claims the render by persisting `status: "advancing"`
+with its next revision before invoking leaf tools. Completed scene progress is
+saved under that claim immediately. Concurrent `advance` calls return the
+claimed state without issuing tools. A clean tick publishes its final status.
+
+An interrupted or failed progress write leaves `advancing` in place. It has no
+automatic expiry: a provider may already have accepted a paid submission even
+when no job ID was saved. Stop the original caller, inspect the saved stages and
+provider jobs, reconcile the outcome through `RenderStateStore::update` using
+the current revision, and only then restore `Running` or a terminal status.
+Never clear a live claim or automatically resubmit an uncertain stage.
+
+Compatibility: readers must accept the new `RenderStatus::Advancing` variant
+(`"advancing"` in JSON). Existing rows remain readable. Upgrade all readers and
+drivers together; older drivers do not enforce tick ownership.

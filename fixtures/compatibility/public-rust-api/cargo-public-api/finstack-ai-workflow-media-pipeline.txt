@@ -49,6 +49,7 @@ impl core::fmt::Display for finstack_ai_workflow_media_pipeline::PipelineError
 pub fn finstack_ai_workflow_media_pipeline::PipelineError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_workflow_media_pipeline::PipelineError
 pub enum finstack_ai_workflow_media_pipeline::RenderStatus
+pub finstack_ai_workflow_media_pipeline::RenderStatus::Advancing
 pub finstack_ai_workflow_media_pipeline::RenderStatus::Completed
 pub finstack_ai_workflow_media_pipeline::RenderStatus::Composing
 pub finstack_ai_workflow_media_pipeline::RenderStatus::Failed

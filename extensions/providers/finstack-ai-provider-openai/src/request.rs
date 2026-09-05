@@ -251,20 +251,31 @@ fn map_input(
     }
     let instructions = concatenate_instructions(&messages[..prefix_len])?;
     let call_ids = provider_call_ids(messages);
-    let (mut input, suffix_start) = match continuation_state {
-        Some(state) => (
-            parse_continuation(state)?.replay_items,
+    let replay = continuation_state.map(parse_continuation).transpose()?;
+    let replay_index = if replay.is_some() {
+        Some(
             messages
                 .iter()
                 .rposition(|message| message.role() == MessageRole::Assistant)
-                .map_or(prefix_len, |index| index.saturating_add(1)),
-        ),
-        None => (Vec::new(), prefix_len),
+                .ok_or_else(|| request_error("continuation state has no assistant message"))?,
+        )
+    } else {
+        None
     };
-    for message in &messages[suffix_start..] {
-        input.extend(map_conversation_message(
-            message, &call_ids, resolved, model,
-        )?);
+    let mut input = Vec::new();
+    for (index, message) in messages.iter().enumerate().skip(prefix_len) {
+        // The envelope contains only the latest response output, not its
+        // input history. Replace that assistant message in place so opaque
+        // reasoning survives without dropping the preceding conversation.
+        if replay_index == Some(index) {
+            if let Some(envelope) = &replay {
+                input.extend(envelope.replay_items.iter().cloned());
+            }
+        } else {
+            input.extend(map_conversation_message(
+                message, &call_ids, resolved, model,
+            )?);
+        }
     }
     Ok((instructions, input))
 }
@@ -630,6 +641,21 @@ mod tests {
     }
 
     #[test]
+    fn orphaned_continuation_fails_closed() {
+        let continuation =
+            RawJson::parse(br#"{"provider":"openai.responses","version":1,"replay_items":[]}"#)
+                .unwrap();
+        let error = ResponsesRequest::try_from_draft(
+            &draft(b"{}"),
+            &model(),
+            Some(&continuation),
+            &BTreeMap::new(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
     fn continuation_replays_output_items_and_appends_new_tool_results() {
         let tool_call_id =
             finstack_ai_kernel::ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ac")
@@ -672,6 +698,8 @@ mod tests {
         let mut draft = draft(b"{}");
         draft.messages = Arc::from([
             text_message(MessageRole::System, "Be brief."),
+            text_message(MessageRole::User, "original question"),
+            text_message(MessageRole::Assistant, "earlier answer"),
             text_message(MessageRole::User, "hello"),
             assistant,
             tool,
@@ -689,13 +717,17 @@ mod tests {
         .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["instructions"], "Be brief.");
-        assert_eq!(value["input"].as_array().expect("input").len(), 3);
-        assert_eq!(value["input"][0]["type"], "function_call");
-        assert_eq!(value["input"][1]["type"], "reasoning");
-        assert_eq!(value["input"][2]["type"], "function_call_output");
-        assert_eq!(value["input"][2]["call_id"], "call_abc");
-        assert_eq!(value["input"][2]["output"], "ok");
-        assert_ne!(value["input"][0]["type"], "message");
+        assert_eq!(value["input"].as_array().expect("input").len(), 6);
+        assert_eq!(value["input"][3]["type"], "function_call");
+        assert_eq!(value["input"][4]["type"], "reasoning");
+        assert_eq!(value["input"][5]["type"], "function_call_output");
+        assert_eq!(value["input"][5]["call_id"], "call_abc");
+        assert_eq!(value["input"][5]["output"], "ok");
+        assert_eq!(value["input"][0]["content"][0]["text"], "original question");
+        assert_eq!(value["input"][1]["content"][0]["text"], "earlier answer");
+        assert_eq!(value["input"][2]["content"][0]["text"], "hello");
+        assert_eq!(value["store"], false);
+        assert!(value.get("previous_response_id").is_none());
     }
 
     #[test]

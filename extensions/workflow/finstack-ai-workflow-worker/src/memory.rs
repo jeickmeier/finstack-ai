@@ -26,6 +26,7 @@ struct MemoryInboxState {
 #[derive(Debug, Default)]
 pub struct MemoryWorkerStore {
     wake: Mutex<WakeRows>,
+    wake_cursor: Mutex<Option<(Arc<str>, SessionId)>>,
     fires: Mutex<FireRows>,
     inbox: Mutex<MemoryInboxState>,
 }
@@ -60,12 +61,25 @@ impl WakeIndexStore for MemoryWorkerStore {
 
     fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
         let wake = locked(&self.wake)?;
-        Ok(wake
-            .values()
+        let mut cursor = locked(&self.wake_cursor)?;
+        let (after, before) = match cursor.as_ref() {
+            Some(key) => (
+                wake.range((std::ops::Bound::Excluded(key), std::ops::Bound::Unbounded)),
+                wake.range((std::ops::Bound::Unbounded, std::ops::Bound::Included(key))),
+            ),
+            None => (wake.range(..), wake.range(..)),
+        };
+        let rows: Vec<WakeRow> = after
+            .chain(before.take(if cursor.is_some() { usize::MAX } else { 0 }))
+            .map(|(_, row)| row)
             .filter(|row| lease_open(row, now) && wake_due(row, now))
             .take(limit)
             .cloned()
-            .collect())
+            .collect();
+        if let Some(last) = rows.last() {
+            *cursor = Some((Arc::clone(&last.tenant_scope), last.session_id));
+        }
+        Ok(rows)
     }
 
     fn load_tenant(&self, tenant_scope: &str) -> Result<Vec<WakeRow>, WorkerError> {

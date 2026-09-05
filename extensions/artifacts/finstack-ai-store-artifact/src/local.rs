@@ -297,7 +297,7 @@ async fn acquire_mutation_lock(
     root: &Path,
     scope: &ObjectScope,
     key: &ObjectKey,
-) -> Result<CleanupGuard, ObjectError> {
+) -> Result<std::fs::File, ObjectError> {
     let scope_digest = scope.digest()?;
     let object_path = envelope_path(root, &scope_digest, key);
     let Some(parent) = object_path.parent() else {
@@ -311,17 +311,23 @@ async fn acquire_mutation_lock(
     let mut lock_name = object_path.as_os_str().to_os_string();
     lock_name.push(".lock");
     let lock_path = PathBuf::from(lock_name);
-    match tokio::fs::OpenOptions::new()
+    // Keep the inode permanently: unlinking a lock file permits two callers
+    // to lock different inodes for the same object. The OS releases the lock
+    // when the file handle closes, including after abrupt process termination.
+    let file = tokio::fs::OpenOptions::new()
+        .read(true)
         .write(true)
-        .create_new(true)
+        .create(true)
+        .truncate(false)
         .open(&lock_path)
         .await
-    {
-        Ok(_) => Ok(CleanupGuard::new(lock_path)),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            Err(ObjectError::Conflict)
-        }
-        Err(error) => Err(io_error(&error, key.as_str())),
+        .map_err(|error| io_error(&error, key.as_str()))?
+        .into_std()
+        .await;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(ObjectError::Conflict),
+        Err(std::fs::TryLockError::Error(error)) => Err(io_error(&error, key.as_str())),
     }
 }
 
@@ -731,6 +737,106 @@ mod tests {
             name: None,
             attributes: Metadata::empty(),
         }
+    }
+
+    #[tokio::test]
+    async fn existing_lock_file_is_reusable_but_active_lock_is_exclusive() {
+        let dir = tempfile::tempdir().unwrap();
+        let scope = scope("tenant-a");
+        let key = ObjectKey::try_new("locked").unwrap();
+        let first = acquire_mutation_lock(dir.path(), &scope, &key)
+            .await
+            .unwrap();
+        assert!(matches!(
+            acquire_mutation_lock(dir.path(), &scope, &key).await,
+            Err(ObjectError::Conflict)
+        ));
+        drop(first);
+        let second = acquire_mutation_lock(dir.path(), &scope, &key)
+            .await
+            .unwrap();
+        drop(second);
+        // A permanent lock inode is also precisely the residue left by the
+        // old create_new protocol after a crash. No cleanup is necessary.
+        let reopened = LocalObjectStore::try_new(dir.path().to_path_buf()).unwrap();
+        reopened
+            .put(
+                scope,
+                key,
+                Bytes::from_static(b"recovered"),
+                test_metadata(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn lock_holder_process() {
+        let Some(root) = std::env::var_os("FINSTACK_ARTIFACT_LOCK_TEST_ROOT") else {
+            return;
+        };
+        let _held = acquire_mutation_lock(
+            Path::new(&root),
+            &scope("tenant-a"),
+            &ObjectKey::try_new("locked").unwrap(),
+        )
+        .await
+        .unwrap();
+        println!("LOCK_HELD");
+        std::future::pending::<()>().await;
+    }
+
+    #[tokio::test]
+    async fn killed_process_releases_mutation_lock() {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+        struct ChildGuard(std::process::Child);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = ChildGuard(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "local::tests::lock_holder_process",
+                    "--nocapture",
+                ])
+                .env("FINSTACK_ARTIFACT_LOCK_TEST_ROOT", dir.path())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let ready = BufReader::new(child.0.stdout.take().unwrap())
+            .lines()
+            .take(16)
+            .any(|line| line.unwrap().contains("LOCK_HELD"));
+        assert!(ready);
+        let scope = scope("tenant-a");
+        let key = ObjectKey::try_new("locked").unwrap();
+        assert!(matches!(
+            acquire_mutation_lock(dir.path(), &scope, &key).await,
+            Err(ObjectError::Conflict)
+        ));
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        let reopened = LocalObjectStore::try_new(dir.path().to_path_buf()).unwrap();
+        reopened
+            .put(
+                scope.clone(),
+                key.clone(),
+                Bytes::from_static(b"after kill"),
+                test_metadata(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.get(scope, key).await.unwrap(),
+            Bytes::from_static(b"after kill")
+        );
     }
 
     #[tokio::test]

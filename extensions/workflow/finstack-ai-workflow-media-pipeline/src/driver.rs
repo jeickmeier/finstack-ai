@@ -5,7 +5,8 @@
 //! per-stage durability of an individual render lives in the adapter-owned
 //! [`RenderStateStore`] (the workflow-local cron adapter precedent). Every
 //! [`MediaPipelineDriver::advance`] call performs at most one leaf tool call per
-//! scene, so a tick is bounded and a crash resumes from the persisted stage.
+//! scene. A durable claim excludes concurrent ticks; progress is saved after
+//! each scene. Interrupted claims require host reconciliation before retry.
 
 use std::sync::Arc;
 
@@ -255,7 +256,9 @@ impl MediaPipelineDriver {
     ///
     /// At most one leaf tool call is issued per scene, and the number of
     /// scenes held in [`SceneStage::Polling`] never exceeds
-    /// `limits.max_concurrent_jobs`.
+    /// `limits.max_concurrent_jobs`. A durable [`RenderStatus::Advancing`]
+    /// claim is saved before dispatch. Concurrent callers only read that
+    /// claim; interruption requires host reconciliation, never a timed retry.
     ///
     /// # Errors
     ///
@@ -269,7 +272,10 @@ impl MediaPipelineDriver {
         render_id: &str,
     ) -> Result<RenderState, ToolError> {
         let mut state = self.status(ctx.run.locator.tenant_scope.as_ref(), render_id)?;
-        if matches!(state.status, RenderStatus::Completed | RenderStatus::Failed) {
+        if matches!(
+            state.status,
+            RenderStatus::Completed | RenderStatus::Failed | RenderStatus::Advancing
+        ) {
             return Ok(state);
         }
         let plan: MoviePlan = serde_json::from_str(&state.plan_json).map_err(|_| {
@@ -279,6 +285,19 @@ impl MediaPipelineDriver {
                 "persisted movie plan no longer matches the plan schema",
             )
         })?;
+
+        if ctx.run.cancellation.is_cancelled() {
+            return Ok(state);
+        }
+        let previous_status = state.status;
+        state.status = RenderStatus::Advancing;
+        if !self.state.update(&state).map_err(|_| store_failure())? {
+            return self.status(ctx.run.locator.tenant_scope.as_ref(), render_id);
+        }
+        state.revision = state.revision.saturating_add(1);
+        // Keep the persisted claim until the final write; intermediate
+        // progress saves must not reopen the render to a second caller.
+        state.status = previous_status;
 
         let mut in_flight = state
             .scenes
@@ -315,6 +334,7 @@ impl MediaPipelineDriver {
             } else if before == SceneStage::Polling && after != SceneStage::Polling {
                 in_flight = in_flight.saturating_sub(1);
             }
+            self.persist_progress(&mut state)?;
         }
 
         if !cancelled {
@@ -516,12 +536,7 @@ impl MediaPipelineDriver {
             .await?;
             state.transcript_srt_artifact = Some(srt);
             state.transcript_vtt_artifact = Some(vtt);
-            let won = self.state.update(state).map_err(|_| store_failure())?;
-            if !won {
-                // Lost the race; the caller reloads the newer row.
-                return Ok(());
-            }
-            state.revision = state.revision.saturating_add(1);
+            self.persist_progress(state)?;
             transcripts_staged_now = true;
         }
 
@@ -624,6 +639,17 @@ impl MediaPipelineDriver {
             Ok(bytes) => validate_retrieved_artifact(scope, artifact, &bytes).is_ok(),
             Err(_) => false,
         }
+    }
+
+    /// Save completed stages while retaining exclusive tick ownership.
+    fn persist_progress(&self, state: &mut RenderState) -> Result<(), ToolError> {
+        let mut claimed = state.clone();
+        claimed.status = RenderStatus::Advancing;
+        if !self.state.update(&claimed).map_err(|_| store_failure())? {
+            return Err(store_failure());
+        }
+        state.revision = state.revision.saturating_add(1);
+        Ok(())
     }
 
     /// Persist the tick. A lost CAS returns the newer persisted row.
@@ -924,6 +950,9 @@ async fn invoke_tool(
         execution: spec.execution,
         failure_policy: ToolFailurePolicy::ReturnToModel,
     };
+    if ctx.run.cancellation.is_cancelled() {
+        return Err(stage_error("pipeline tool dispatch was cancelled"));
+    }
     let mut stream = toolset.call(ctx.clone(), call).await?;
     let mut completed = None;
     while let Some(item) = stream.next().await {
