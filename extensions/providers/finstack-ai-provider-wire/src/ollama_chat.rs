@@ -153,7 +153,7 @@ impl OllamaChatAssembly {
             Arc::from([])
         } else {
             Arc::from([ContentBlock::Text(
-                TextBlock::try_new(self.text.clone()).map_err(|_| {
+                TextBlock::try_new(self.text.as_str()).map_err(|_| {
                     StreamNormError::response("assistant text exceeds the kernel bound")
                 })?,
             )])

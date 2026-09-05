@@ -9,6 +9,15 @@ use finstack_ai_kernel::{
 use super::{CommitCoordinator, CommitCoordinatorError};
 
 impl CommitCoordinator {
+    /// Commit zero-event composition records through the same append/apply boundary.
+    ///
+    /// Accepts only child-and-budget sidecar records and never calls an external
+    /// service. A sequence race reloads only the known session; equal durable
+    /// identities converge and different content fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a store/boundary failure, or [`CommitCoordinatorError::SidecarConflict`].
     pub(crate) async fn commit_composition_records(
         &mut self,
         batch_id: AppendBatchId,

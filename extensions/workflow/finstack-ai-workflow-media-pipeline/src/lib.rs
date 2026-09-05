@@ -20,7 +20,6 @@
 )]
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
-// The module doc above intentionally mirrors the brief's wording verbatim.
 #![allow(clippy::doc_markdown)]
 
 mod driver;

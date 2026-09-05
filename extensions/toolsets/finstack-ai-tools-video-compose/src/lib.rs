@@ -67,7 +67,7 @@ const PROBE_TOOL_ID: &str = "finstack.tools.probe_media";
 pub const VIDEO_COMPOSE_CONFIG_INVALID: &str = "video_compose_config_invalid";
 /// Stable argument-validation code.
 pub const VIDEO_COMPOSE_INVALID_ARGUMENTS: &str = "video_compose_invalid_arguments";
-/// Stable code for a `validate_spec` rejection (Task 5 attaches the reason).
+/// Stable code for a `validate_spec` rejection (the message carries the reason).
 pub const VIDEO_COMPOSE_SPEC_INVALID: &str = "video_compose_spec_invalid";
 /// Stable code for an `ffmpeg`/`ffprobe` process failure.
 pub const VIDEO_COMPOSE_FFMPEG_FAILED: &str = "video_compose_ffmpeg_failed";

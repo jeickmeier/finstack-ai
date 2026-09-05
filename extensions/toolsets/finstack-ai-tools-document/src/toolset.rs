@@ -421,7 +421,7 @@ async fn build_parse_output(
     let artifact = stage_required_artifact(
         store.as_ref(),
         scope,
-        Bytes::from(parsed.markdown.clone().into_bytes()),
+        Bytes::copy_from_slice(parsed.markdown.as_bytes()),
         ArtifactMetadata {
             kind: Arc::from("tool-output"),
             media_type: Arc::from("text/markdown"),

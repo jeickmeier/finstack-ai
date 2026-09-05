@@ -157,9 +157,7 @@ fn untouched(text: &str) {
     assert_eq!(detectors().redact(text), None, "should not redact: {text}");
 }
 
-// ---------------------------------------------------------------------------
-// Task 1: descriptor
-// ---------------------------------------------------------------------------
+// Descriptor
 
 #[test]
 fn descriptor_identity_and_order() {
@@ -217,9 +215,7 @@ fn configuration_digest_tracks_config() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Task 2: detection engine
-// ---------------------------------------------------------------------------
+// Detection engine
 
 #[test]
 fn emails_are_redacted() {
@@ -400,9 +396,7 @@ fn findings_report_detector_kinds_and_count() {
     assert_eq!(count, 2);
 }
 
-// ---------------------------------------------------------------------------
-// Task 3: BeforeModel draft rewrite
-// ---------------------------------------------------------------------------
+// BeforeModel draft rewrite
 
 #[test]
 fn user_secret_is_redacted_in_replace_draft() {
@@ -504,9 +498,7 @@ fn non_before_model_input_continues() {
     assert_eq!(outcome, StageOutcome::Continue);
 }
 
-// ---------------------------------------------------------------------------
-// Task 4: AfterModel output policy
-// ---------------------------------------------------------------------------
+// AfterModel output policy
 
 fn after_model_input(message: &Message) -> StageInput {
     let bytes = serde_json_canonicalizer::to_vec(message).expect("canonical message");
@@ -617,9 +609,7 @@ fn off_policy_ignores_after_model() {
     assert_eq!(outcome, StageOutcome::Continue);
 }
 
-// ---------------------------------------------------------------------------
-// Task 5: wrapping composition
-// ---------------------------------------------------------------------------
+// Wrapping composition
 
 use finstack_ai_kernel::{ComponentId, ComponentInvocation, InvocationRecovery, Version};
 use finstack_ai_runtime::ports::PortFuture;
@@ -842,9 +832,7 @@ fn wrapper_descriptor_adopts_inner_order() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// redaction constructor contract: constructor assembly identity
-// ---------------------------------------------------------------------------
+// Constructor assembly identity
 
 const STANDALONE_DEFAULT_DIGEST_HEX: &str =
     "8399ab7e4cf363b4663fc1a5450c3c5db1031fe3d9feeadc5fee4cf371de0522";

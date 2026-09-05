@@ -111,7 +111,7 @@ pub(crate) fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
     }
 }
 
-/// Hand generated media back to the model without inlining the bytes.
+/// Hand off generated media to the model without inlining the bytes.
 ///
 /// Generated audio and images are hundreds of kilobytes that a model cannot
 /// read and must not have to carry; when a store is configured the bytes are

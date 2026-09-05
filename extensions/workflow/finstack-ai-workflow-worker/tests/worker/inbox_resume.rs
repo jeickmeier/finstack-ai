@@ -19,7 +19,7 @@
 //! it is a genuinely separate responsibility, so each test's middle act
 //! proves the worker's own contract on its own terms — a claimed row whose
 //! run cannot reach a new wait within budget is a counted failure with its
-//! response preserved for redelivery, exactly like Task 9's
+//! response preserved for redelivery, exactly like
 //! `tick_keeps_the_inbox_entry_when_the_resume_cannot_park`
 //! (`tests/worker/tick.rs`) — before a final act
 //! (`drive_past_missing_facade_decisions`) stands in for that missing
@@ -279,7 +279,7 @@ fn tool_completion_command(
 }
 
 /// Binds the fixture model (and, for the interaction test, tool catalog)
-/// onto an attached session, exactly like the `BindPorts` used in Task 9.
+/// onto an attached session.
 struct BindPorts {
     model: Arc<dyn Model>,
     catalog: Option<Arc<ResolvedToolCatalog>>,

@@ -121,7 +121,7 @@ pub fn component_digest(bytes: &[u8]) -> String {
 }
 
 /// Workspace-pinned `wasmtime` crate version recorded in the engine field.
-pub const WASMTIME_CRATE_VERSION: &str = "47.0.3";
+pub const WASMTIME_CRATE_VERSION: &str = "47.0.4";
 
 /// `wasmtime` version plus the effective-config fingerprint used by this host.
 #[must_use]

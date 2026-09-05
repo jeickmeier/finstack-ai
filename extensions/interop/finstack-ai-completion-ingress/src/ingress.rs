@@ -85,8 +85,6 @@ impl CompletionIngress {
     ///
     /// Returns [`CompletionIngressConfigError`] for invalid keys.
     #[allow(clippy::needless_pass_by_value)]
-    // Public constructor intentionally takes ownership of the config: it's
-    // consumed once at construction, and callers typically build it inline.
     pub fn try_new(
         store: Arc<dyn JournalStore>,
         audit: Arc<SecurityAuditGate>,

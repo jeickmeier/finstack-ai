@@ -4,7 +4,7 @@ use super::types::ToolCallContext;
 /// Reject a tool call whose principal tenant scope disagrees with the locator.
 ///
 /// A principal with no tenant scope is accepted. A present scope must equal
-/// [`ToolCallContext::run`]` .locator.tenant_scope`. This is the shared
+/// `ctx.run.locator.tenant_scope`. This is the shared
 /// predicate used by shell and filesystem today.
 ///
 /// # Errors

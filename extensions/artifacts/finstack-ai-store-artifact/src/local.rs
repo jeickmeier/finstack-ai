@@ -692,9 +692,7 @@ async fn list_impl(
             .map_or(0, |index| index + 1),
         None => 0,
     };
-    let remaining = matching
-        .get(start_index.min(matching.len())..)
-        .unwrap_or(&[]);
+    let remaining = matching.get(start_index..).unwrap_or(&[]);
     let mut page_entries = Vec::new();
     let mut last_key = None;
     for (key, length) in remaining.iter().take(LIST_PAGE_SIZE) {

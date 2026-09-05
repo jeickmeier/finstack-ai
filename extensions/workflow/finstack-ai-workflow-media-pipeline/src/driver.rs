@@ -369,7 +369,6 @@ impl MediaPipelineDriver {
                     spec.end_frame.as_ref()
                 };
                 let Some(FrameSource::Prompt { prompt }) = source else {
-                    // Nothing to generate; fall through to the next stage.
                     advance_frame_stage(spec, index, state, start);
                     return Ok(());
                 };
@@ -416,29 +415,24 @@ impl MediaPipelineDriver {
                 Ok(())
             }
             SceneStage::Polling => {
-                let Some(job_id) = state
-                    .scenes
-                    .get(index)
-                    .and_then(|scene| scene.job_id.clone())
-                else {
-                    return Err(stage_error("polling scene has no job id"));
+                let arguments = {
+                    let job_id = state
+                        .scenes
+                        .get(index)
+                        .and_then(|scene| scene.job_id.as_deref())
+                        .ok_or_else(|| stage_error("polling scene has no job id"))?;
+                    json!({ "id": job_id, "wait_seconds": POLL_WAIT_SECONDS })
                 };
-                let result = invoke_tool(
-                    &self.media_tools,
-                    VIDEO_STATUS_TOOL,
-                    json!({ "id": job_id, "wait_seconds": POLL_WAIT_SECONDS }),
-                    ctx,
-                )
-                .await?;
+                let result =
+                    invoke_tool(&self.media_tools, VIDEO_STATUS_TOOL, arguments, ctx).await?;
                 let status = result
                     .get("status")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| stage_error("video status result carried no status"))?
-                    .to_owned();
+                    .ok_or_else(|| stage_error("video status result carried no status"))?;
                 let Some(scene) = state.scenes.get_mut(index) else {
                     return Ok(());
                 };
-                match status.as_str() {
+                match status {
                     "completed" => scene.stage = SceneStage::PendingDownload,
                     "failed" => {
                         if scene.resubmitted {
@@ -450,26 +444,21 @@ impl MediaPipelineDriver {
                             scene.stage = SceneStage::PendingSubmit;
                         }
                     }
-                    // `pending` / `in_progress` simply need another tick.
                     _ => {}
                 }
                 Ok(())
             }
             SceneStage::PendingDownload => {
-                let Some(job_id) = state
-                    .scenes
-                    .get(index)
-                    .and_then(|scene| scene.job_id.clone())
-                else {
-                    return Err(stage_error("download stage has no job id"));
+                let arguments = {
+                    let job_id = state
+                        .scenes
+                        .get(index)
+                        .and_then(|scene| scene.job_id.as_deref())
+                        .ok_or_else(|| stage_error("download stage has no job id"))?;
+                    json!({ "id": job_id })
                 };
-                let result = invoke_tool(
-                    &self.media_tools,
-                    VIDEO_DOWNLOAD_TOOL,
-                    json!({ "id": job_id }),
-                    ctx,
-                )
-                .await?;
+                let result =
+                    invoke_tool(&self.media_tools, VIDEO_DOWNLOAD_TOOL, arguments, ctx).await?;
                 let artifact = parse_artifact(&result)
                     .ok_or_else(|| stage_error("video download returned no artifact"))?;
                 if let Some(scene) = state.scenes.get_mut(index) {

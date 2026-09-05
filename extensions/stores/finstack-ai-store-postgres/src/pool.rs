@@ -148,10 +148,6 @@ impl<C: Send + 'static> Pool<C> {
     /// Returns the error from the connect function if a new connection must
     /// be opened and fails.
     pub(crate) async fn get(&self) -> Result<PooledClient<C>, StoreError> {
-        // `acquire_owned` requires an `Arc<Semaphore>` and never fails
-        // unless the semaphore has been explicitly closed, which this pool
-        // never does, so the only realistic outcome is waiting, not an
-        // error; still map defensively rather than unwrap.
         let permit = Arc::clone(&self.inner.semaphore)
             .acquire_owned()
             .await
@@ -293,11 +289,6 @@ impl<C> PooledClient<C> {
     /// connection can be opened by a later [`Pool::get`].
     pub(crate) fn discard(mut self) {
         self.discarded = true;
-        // Explicit drop makes the intent visible at the call site; the
-        // `Drop` impl below is what actually skips returning the client to
-        // the idle queue once `discarded` is set. The statement cache is
-        // dropped with `self`, along with the session those statements were
-        // prepared on.
         drop(self.client.take());
         drop(self.permit.take());
     }

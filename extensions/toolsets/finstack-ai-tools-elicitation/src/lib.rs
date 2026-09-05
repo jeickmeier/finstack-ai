@@ -392,7 +392,6 @@ fn typed_request(
         effect_id,
         tool.kind.into(),
         prompt_blocks(tool.prompt.as_ref(), arguments.context.as_deref())?,
-        // Wrapped and canonicalized once at registration; pass the bytes through.
         tool.response_schema.clone(),
         component,
     )

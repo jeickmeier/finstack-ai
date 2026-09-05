@@ -333,16 +333,19 @@ fn map_messages(
     // replays (the last one). Everything before and after it still maps from
     // the kernel transcript: `generateContent` is stateless, so dropping the
     // earlier user turns would erase the request the model is answering.
-    let replaced = match continuation {
-        Some(_) => messages
-            .iter()
-            .rposition(|message| message.role() == MessageRole::Assistant),
-        None => None,
+    let (replaced, mut replay_contents) = match continuation {
+        Some(state) => (
+            messages
+                .iter()
+                .rposition(|message| message.role() == MessageRole::Assistant),
+            Some(parse_continuation(state)?.replay_contents),
+        ),
+        None => (None, None),
     };
     for (index, message) in messages.iter().enumerate().skip(prefix_len) {
         if replaced == Some(index) {
-            if let Some(state) = continuation {
-                contents.extend(parse_continuation(state)?.replay_contents);
+            if let Some(replay) = replay_contents.take() {
+                contents.extend(replay);
             }
             continue;
         }
@@ -353,12 +356,9 @@ fn map_messages(
             model,
         )?);
     }
-    if let Some(state) = continuation
-        && replaced.is_none()
-    {
+    if let Some(mut spliced) = replay_contents {
         // No assistant turn to replace (deferred/recovery edge): replay first,
         // then the mapped conversation.
-        let mut spliced = parse_continuation(state)?.replay_contents;
         spliced.append(&mut contents);
         contents = spliced;
     }
@@ -788,7 +788,6 @@ mod tests {
         );
         assert!(value.get("thinking_level").is_none());
 
-        // Explicit override wins over the level and the model default.
         let mut override_draft = draft.clone();
         override_draft.settings.values = RawJson::parse(
             br#"{"gemini.thinking":{"thinkingBudget":2048},"thinking_level":"high"}"#,
@@ -807,7 +806,6 @@ mod tests {
             2_048
         );
 
-        // Model default applies with no settings at all.
         let mut default_draft = draft.clone();
         default_draft.settings.values = RawJson::parse(b"{}").expect("settings");
         let request = GenerateContentRequest::try_from_draft(
@@ -823,7 +821,6 @@ mod tests {
             1_024
         );
 
-        // Thinking off on the model still honors an explicit setting.
         let request = GenerateContentRequest::try_from_draft(&draft, &model(), None, &media())
             .expect("explicit thinking_level must be honored without the flag");
         let value = body(&request);
@@ -832,7 +829,6 @@ mod tests {
             4_096
         );
 
-        // A budget at or above maxOutputTokens is an error.
         let mut oversized = draft.clone();
         oversized.limits.max_output_tokens = 1_024;
         let error = GenerateContentRequest::try_from_draft(
@@ -844,7 +840,6 @@ mod tests {
         .expect_err("thinking budget must stay under maxOutputTokens");
         assert_eq!(error.code(), GEMINI_REQUEST_INVALID);
 
-        // No thinking configured at all leaves the knob off.
         let mut plain = draft.clone();
         plain.settings.values = RawJson::parse(b"{}").expect("settings");
         let request = GenerateContentRequest::try_from_draft(&plain, &model(), None, &media())
@@ -883,14 +878,12 @@ mod tests {
             "the framework schema tool must not reach functionDeclarations"
         );
 
-        // The prompted-mode tool must not ride along on a plain-text request.
         let mut prompted = draft.clone();
         prompted.output = OutputSpec::PlainText;
         let error = GenerateContentRequest::try_from_draft(&prompted, &model(), None, &media())
             .expect_err("submit_final_output must be rejected for native structured output");
         assert_eq!(error.code(), GEMINI_REQUEST_INVALID);
 
-        // Structured output without the framework tool has no schema to send.
         let mut missing = draft.clone();
         missing.tools = Arc::from([]);
         let error = GenerateContentRequest::try_from_draft(&missing, &model(), None, &media())
@@ -1035,12 +1028,10 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(b"pngdata")
         );
 
-        // The image flag gates image blocks.
         let error = GenerateContentRequest::try_from_draft(&draft, &model(), None, &resolved)
             .expect_err("image input must require the model flag");
         assert_eq!(error.code(), GEMINI_REQUEST_INVALID);
 
-        // Unresolved media fails closed.
         let error = GenerateContentRequest::try_from_draft(
             &draft,
             &model().with_input_images(true),

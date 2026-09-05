@@ -29,7 +29,7 @@ let config = HttpFetchConfig {
 let toolset = HttpFetchToolset::try_new(config).expect("fetch config");
 ```
 
-## HTML → Markdown (Task 10, spec §4.5)
+## HTML → Markdown (spec §4.5)
 
 Under `mode: "auto"` and `mode: "markdown"`, HTML bodies (`text/html`,
 `application/xhtml+xml`) are converted to Markdown before inlining;

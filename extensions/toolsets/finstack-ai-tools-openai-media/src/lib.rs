@@ -375,7 +375,7 @@ impl From<serde_json::Value> for MediaOutput {
     }
 }
 
-/// Hand generated media back without inlining the bytes when a store is set.
+/// Hand off generated media without inlining the bytes when a store is set.
 async fn deliver_media(
     route: &Route,
     bytes: Vec<u8>,

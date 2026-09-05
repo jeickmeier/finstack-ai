@@ -265,8 +265,7 @@ fn detector(
     })
 }
 
-// The wrap is the `Validate` fn-pointer contract, not a choice.
-#[allow(clippy::unnecessary_wraps)]
+#[allow(clippy::unnecessary_wraps, reason = "Validate fn-pointer contract")]
 fn validate_any(candidate: &str, _prev: Option<char>, _next: Option<char>) -> Option<usize> {
     Some(candidate.len())
 }

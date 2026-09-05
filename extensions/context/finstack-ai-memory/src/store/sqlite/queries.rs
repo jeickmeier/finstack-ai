@@ -1,4 +1,4 @@
-//! Record, receipt, search, and artefact-action queries.
+//! Record, receipt, search, and artifact-action queries.
 
 use std::sync::Arc;
 
@@ -1353,9 +1353,7 @@ fn search_embedding(
     let mut hits = Vec::new();
     for row in rows {
         let (record, blob) = row.map_err(|_| sqlite_unavailable())?;
-        // Defensively skip a row whose BLOB does not decode to a valid
-        // vector of the query's dimensionality (`dot` is `None` on a
-        // mismatch), rather than failing the whole search on one bad row.
+        // Skip an undecodable embedding BLOB so one bad row does not fail search.
         let Some(stored) = vector_from_blob(&blob) else {
             continue;
         };

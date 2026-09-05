@@ -149,8 +149,6 @@ impl InstructionsMiddleware {
     ///
     /// Returns a stable configuration reason for invalid entries or
     /// non-encodable content.
-    // `config` is taken by value to match the public constructor contract;
-    // the body only borrows it and does not need to retain ownership.
     #[allow(clippy::needless_pass_by_value)]
     pub fn try_new(config: PolicyInstructionsConfig) -> Result<Self, InstructionsError> {
         config.validate()?;

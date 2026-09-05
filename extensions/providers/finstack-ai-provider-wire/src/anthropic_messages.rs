@@ -411,7 +411,7 @@ impl AnthropicMessagesAssembly {
             assistant.push(ContentBlock::Json(JsonBlock::new(value)));
         } else if !self.text.is_empty() {
             assistant.push(ContentBlock::Text(
-                TextBlock::try_new(self.text.clone()).map_err(|_| {
+                TextBlock::try_new(self.text.as_str()).map_err(|_| {
                     StreamNormError::response("assistant text exceeds the kernel bound")
                 })?,
             ));

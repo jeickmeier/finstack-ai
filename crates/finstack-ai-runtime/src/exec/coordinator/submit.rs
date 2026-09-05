@@ -314,16 +314,12 @@ impl CommitCoordinator {
         }
     }
 
-    /// Commit zero-event composition records through the same append/apply boundary.
-    ///
-    /// This is intentionally narrower than general effect dispatch: it accepts
-    /// only child-and-budget sidecar contract child/budget sidecar records and never calls an external service.
-    /// A sequence race reloads only the known session; equal durable identities
-    /// converge and different content fails closed.
+    /// Recheck that the post-commit action is still authorized, then dispatch it.
     ///
     /// # Errors
     ///
-    /// Returns a store/boundary failure, or [`CommitCoordinatorError::SidecarConflict`]
+    /// Returns a stable code when the action is unauthorized, no dispatcher is
+    /// installed, or the dispatcher fails.
     pub(super) async fn dispatch_after_recheck(
         &self,
         action: PostCommitAction,

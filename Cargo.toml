@@ -202,10 +202,10 @@ finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "2.0
 wit-bindgen = { version = "0.57.1", default-features = false, features = ["macros", "realloc"] }
 # Newest crates.io release whose MSRV is ≤ 1.97.1. Do not enable the implicit
 # filesystem `cache` feature (TM-08 /  host-owned compile cache).
-wasmtime = { version = "47.0.3", default-features = false, features = ["runtime", "component-model", "async", "cranelift", "std"] }
+wasmtime = { version = "47.0.4", default-features = false, features = ["runtime", "component-model", "async", "cranelift", "std"] }
 # Same line as wasmtime. Host-only; deny-by-default WASI context. Do not enable
 # ambient inherit helpers as crate features ( / SEC-INV-006).
-wasmtime-wasi = { version = "47.0.3", default-features = false }
+wasmtime-wasi = { version = "47.0.4", default-features = false }
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }

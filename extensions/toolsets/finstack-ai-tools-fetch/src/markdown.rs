@@ -1388,12 +1388,11 @@ mod tests {
 
     #[test]
     fn lcg_high_bits_are_not_visibly_periodic() {
-        // Guards the fix for the reviewer's finding (b): the generator used
-        // `next_u64() % bound`, i.e. the LOW bits of an LCG, and `below(2)`
-        // degenerated into near-strict alternation. Two cheap checks that a
-        // strictly (or near-strictly) alternating sequence cannot pass: at
-        // least one run of three equal values, and a transition count far
-        // from the 511 an alternating sequence produces.
+        // `below` must use high LCG bits: low-bit `% bound` made `below(2)`
+        // nearly alternate. Two cheap checks that a strictly (or
+        // near-strictly) alternating sequence cannot pass: at least one run
+        // of three equal values, and a transition count far from the 511 an
+        // alternating sequence produces.
         let mut rng = Lcg(0x5EED_00F4_0000_0001);
         let bits: Vec<usize> = (0..512).map(|_| rng.below(2)).collect();
         let transitions = bits.windows(2).filter(|w| w[0] != w[1]).count();

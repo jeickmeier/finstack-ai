@@ -1557,19 +1557,6 @@ mod tests {
         validate_download_url("https://localhost/a.mp3", false).expect_err("localhost must fail");
     }
 
-    // `resolve_download_target_rejects_localhost` and
-    // `hostname_resolving_to_a_private_address_is_rejected` were dropped:
-    // both exercised the crate's former private resolve/select helpers,
-    // which are now `finstack-ai-net-guard`'s `resolve_and_pin` and
-    // `is_forbidden_destination` (private-address and localhost-rejection
-    // behavior is covered by that crate's own test suite —
-    // `extensions/net/finstack-ai-net-guard/src/tests.rs`:
-    // `one_private_address_rejects_the_whole_set`,
-    // `literal_hosts_skip_resolution_but_not_the_deny_check`,
-    // `forbidden_destination_covers_private_ranges`). Localhost rejection
-    // at the URL-vetting layer remains covered here by
-    // `validate_download_url_rejects_https_loopback_and_link_local`.
-
     #[test]
     fn base64_encoded_len_uses_div_ceil() {
         assert_eq!(base64_encoded_len(1), 4);

@@ -139,7 +139,6 @@ impl TextEmbedder for OllamaEmbedder {
 
     fn embed(&self, texts: Vec<Arc<str>>) -> PortFuture<Result<Vec<EmbeddingVector>, EmbedError>> {
         if texts.is_empty() {
-            // An empty batch is trivially embedded; do not touch the network.
             return Box::pin(async { Ok(Vec::new()) });
         }
         let prepared = self.prepare_payload(&texts);

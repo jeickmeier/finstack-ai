@@ -271,26 +271,26 @@ fn map_input(
     }
     let instructions = concatenate_instructions(&messages[..prefix_len])?;
     let call_ids = provider_call_ids(messages);
-    let replay = continuation_state.map(parse_continuation).transpose()?;
-    let replay_index = if replay.is_some() {
-        Some(
-            messages
+    let replay = match continuation_state {
+        Some(state) => {
+            let envelope = parse_continuation(state)?;
+            let index = messages
                 .iter()
                 .rposition(|message| message.role() == MessageRole::Assistant)
-                .ok_or_else(|| request_error("continuation state has no assistant message"))?,
-        )
-    } else {
-        None
+                .ok_or_else(|| request_error("continuation state has no assistant message"))?;
+            Some((index, envelope))
+        }
+        None => None,
     };
     let mut input = Vec::new();
     for (index, message) in messages.iter().enumerate().skip(prefix_len) {
         // The envelope contains only the latest response output, not its
         // input history. Replace that assistant message in place so opaque
         // reasoning survives without dropping the preceding conversation.
-        if replay_index == Some(index) {
-            if let Some(envelope) = &replay {
-                input.extend(envelope.replay_items.iter().cloned());
-            }
+        if let Some((replay_index, envelope)) = &replay
+            && *replay_index == index
+        {
+            input.extend(envelope.replay_items.iter().cloned());
         } else {
             input.extend(map_conversation_message(
                 message, &call_ids, resolved, model,

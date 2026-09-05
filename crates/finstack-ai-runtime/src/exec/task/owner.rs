@@ -217,10 +217,6 @@ impl RunTaskOwner {
 
     /// Spawn the bounded commit/model workers with a prepared model.
     ///
-    /// The ready handle is not returned until the default-no-op or provider
-    /// Model jobs can only be enqueued by the coordinator after the request
-    /// and effect records are committed/applied.
-    ///
     /// # Errors
     ///
     /// Returns configuration errors before publishing a run handle.

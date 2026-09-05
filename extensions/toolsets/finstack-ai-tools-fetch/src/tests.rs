@@ -296,7 +296,7 @@ async fn unknown_argument_fields_are_rejected() {
     assert_eq!(error.code(), super::FETCH_INVALID_ARGUMENTS);
 }
 
-// --- Task 11: `HttpFetchConfigSnapshot::from_json` -----------------------
+// `HttpFetchConfigSnapshot::from_json`
 
 #[test]
 fn snapshot_from_json_applies_defaults_for_absent_fields() {
@@ -379,7 +379,7 @@ fn snapshot_with_empty_allowlist_still_fails_at_try_new() {
     HttpFetchToolset::try_new(config).expect_err("empty allowlist is deny-by-default");
 }
 
-// --- Task 7: request pipeline -------------------------------------------
+// Request pipeline
 
 /// A fixture config with `allow_loopback_http: true`, letting loopback
 /// fixtures skip the allowlist per `HttpFetchConfig::allow_loopback_http`'s
@@ -503,7 +503,7 @@ async fn oversize_body_is_a_limit_error() {
 
 #[tokio::test]
 async fn invalid_utf8_body_without_store_is_an_error() {
-    // Task 9 semantics: within an inline-text essence (`text/plain` here),
+    // Within an inline-text essence (`text/plain` here),
     // a body that fails `String::from_utf8` falls through to the binary
     // path rather than being force-decoded with `String::from_utf8_lossy`
     // (that lossy path is now `mode: "text"` only). This exercises the
@@ -570,7 +570,7 @@ async fn invalid_utf8_body_under_text_essence_with_store_is_staged() {
     assert!(output.get("content").is_none(), "{output}");
 }
 
-// --- Task 9: mode handling and artifact staging -------------------------
+// Mode handling and artifact staging
 
 #[tokio::test]
 async fn binary_body_with_store_is_staged_as_an_artifact() {
@@ -896,7 +896,7 @@ async fn per_host_headers_are_sent_to_the_matching_host() {
     assert!(!request_without.contains("x-api"), "{request_without}");
 }
 
-// --- Task 8: manual redirects with per-hop re-vetting -------------------
+// Manual redirects with per-hop re-vetting
 
 /// Serve `responses.len()` requests in sequence on one listener, each as
 /// `(status, headers, body)`. Optionally reports each raw request onto
@@ -1163,7 +1163,7 @@ async fn headers_do_not_cross_hosts_on_redirect() {
     assert!(!request_b.contains("x-api"), "{request_b}");
 }
 
-// --- Task 10: HTML -> markdown -------------------------------------------
+// HTML -> markdown
 
 #[tokio::test]
 async fn html_body_converts_to_markdown_under_auto_mode() {

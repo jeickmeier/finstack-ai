@@ -271,9 +271,6 @@ async fn search_candidates(
         .chain(full_text_hits)
         .chain(semantic_hits)
     {
-        // The store already excludes tombstoned/superseded records; filter
-        // again defensively so a future store implementation cannot leak
-        // stale records into recall silently.
         if hit.record.tombstoned || hit.record.superseded_by.is_some() {
             continue;
         }
