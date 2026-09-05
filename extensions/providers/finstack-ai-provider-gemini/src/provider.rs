@@ -6,14 +6,14 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
 use finstack_ai_provider_wire::{GeminiGenerateContentAssembly, StreamNormError, StreamNormKind};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
     CancellationSignal, InputCapabilities, MediaResolveKind, Model, ModelCapabilities,
-    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName,
-    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
-    ResolveDraftMediaError, StructuredOutputCapability, resolve_draft_media,
+    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest,
+    ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError, StructuredOutputCapability,
+    resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -307,14 +307,6 @@ impl Model for GeminiProvider {
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
-    }
-
-    fn reconcile(
-        &self,
-        _ctx: ReconcileContext,
-        _effect: PendingModelEffect,
-    ) -> PortFuture<Result<ModelReconcileResult, ModelError>> {
-        Box::pin(async { Ok(ModelReconcileResult::Unknown) })
     }
 }
 

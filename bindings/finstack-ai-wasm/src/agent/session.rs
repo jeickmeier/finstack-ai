@@ -329,7 +329,10 @@ impl Lane {
         })
     }
 
-    /// Recover the parked run and respawn the Rust-owned run task.
+    /// Continue the parked run through its retained Rust-owned controller.
+    ///
+    /// Start with `Lane.run` and retain that live session's lane handles.
+    /// `Agent.openSession` restores journal state, not a resumable controller.
     #[wasm_bindgen(js_name = resume)]
     pub fn resume(&self, agent: &Agent) -> js_sys::Promise {
         let lane = self.inner.clone();

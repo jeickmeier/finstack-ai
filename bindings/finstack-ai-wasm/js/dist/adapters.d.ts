@@ -310,10 +310,13 @@ export declare function createMemoryArtifactStore(options: MemoryArtifactStoreOp
  * Host clock backed by `Date.now`, or an injected millisecond source.
  *
  * @param now - Optional Unix-ms source for tests.
+ * @returns A host clock using the selected Unix-millisecond source.
  */
 export declare function createHostClock(now?: () => number): HostClock;
 /**
  * Host random source backed by `crypto.getRandomValues`.
+ *
+ * @returns A cryptographically strong host random source.
  */
 export declare function createHostRandomSource(): HostRandomSource;
 //# sourceMappingURL=adapters.d.ts.map

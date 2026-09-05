@@ -66,7 +66,6 @@ impl finstack_ai_runtime::ports::model::port::Model for finstack_ai_provider_gem
 pub fn finstack_ai_provider_gemini::GeminiProvider::capabilities(&self, &finstack_ai_runtime::ports::model::identity::ModelName) -> finstack_ai_runtime::ports::model::profile::ModelCapabilities
 pub fn finstack_ai_provider_gemini::GeminiProvider::descriptor(&self) -> finstack_ai_runtime::ports::model::identity::ModelDescriptor
 pub fn finstack_ai_provider_gemini::GeminiProvider::estimate_input_tokens(&self, &finstack_ai_runtime::ports::model::identity::ModelName, &[u8]) -> core::result::Result<finstack_ai_runtime::ports::model::request::ModelTokenEstimate, finstack_ai_runtime::ports::model::error::ModelError>
-pub fn finstack_ai_provider_gemini::GeminiProvider::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::context::ModelReconcileResult, finstack_ai_runtime::ports::model::error::ModelError>>
 pub fn finstack_ai_provider_gemini::GeminiProvider::request(&self, finstack_ai_runtime::ports::model::context::ModelRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::stream::ModelEventStream, finstack_ai_runtime::ports::model::error::ModelError>>
 pub struct finstack_ai_provider_gemini::SecretHeader
 impl finstack_ai_provider_gemini::SecretHeader

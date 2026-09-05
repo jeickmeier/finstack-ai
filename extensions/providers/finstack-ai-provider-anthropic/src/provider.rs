@@ -6,12 +6,12 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
 use finstack_ai_provider_wire::{AnthropicMessagesAssembly, StreamNormError, StreamNormKind};
 use finstack_ai_runtime::ports::model::{
     MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate,
-    ReconcileContext, ResolveDraftMediaError, resolve_draft_media,
+    ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError,
+    resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -320,14 +320,6 @@ impl Model for AnthropicProvider {
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
-    }
-
-    fn reconcile(
-        &self,
-        _ctx: ReconcileContext,
-        _effect: PendingModelEffect,
-    ) -> finstack_ai_runtime::ports::PortFuture<Result<ModelReconcileResult, ModelError>> {
-        Box::pin(async { Ok(ModelReconcileResult::Unknown) })
     }
 }
 

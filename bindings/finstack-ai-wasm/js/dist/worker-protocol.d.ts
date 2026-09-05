@@ -166,6 +166,7 @@ export declare function decodeWorkerToMain(data: unknown): WorkerToMain;
  * Require a transferred batch buffer to stay inside the size bound.
  *
  * @param bytes - Transferred event-batch payload.
+ * @returns The validated transferred buffer.
  * @throws {FinstackError} When the buffer is missing or too large.
  */
 export declare function requireTransfer(bytes: unknown): ArrayBuffer;

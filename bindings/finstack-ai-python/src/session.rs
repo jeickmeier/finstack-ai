@@ -244,7 +244,10 @@ impl PyLane {
         })
     }
 
-    /// Recover the parked run and respawn the in-process owner.
+    /// Continue the parked run through its retained in-process controller.
+    ///
+    /// Start with `Lane.run` and retain that live session's lane handles.
+    /// `Agent.open_session` restores journal state, not a resumable controller.
     fn resume<'py>(
         &self,
         py: Python<'py>,

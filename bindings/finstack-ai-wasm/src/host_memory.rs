@@ -1,4 +1,4 @@
-//! Trusted JS / native host implementation of the `MemoryStore` port.
+//! Native callback fixture for the `MemoryStore` port.
 //!
 //! [`HostMemoryStore`] proxies the six `MemoryStore` operations as JSON
 //! envelopes to host callbacks named `memory_put`, `memory_get`,
@@ -6,9 +6,6 @@
 //! Each request/response round-trip is `{"ok": <value>} | {"error":
 //! {"code","message"}}`; a missing host method reports a stable
 //! `Unavailable` error rather than panicking.
-//!
-//! [`InProcessMemoryStore`] is re-exported for wasm consumers that skip host
-//! persistence entirely.
 
 use std::sync::Arc;
 
@@ -22,7 +19,6 @@ use finstack_ai::runtime::ports::PortFuture;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::host::{HostFailure, NativeHostResult};
 
 /// Stable reason code when a host callback for a `MemoryStore` operation is
@@ -32,12 +28,10 @@ const MEMORY_HOST_UNAVAILABLE: &str = "memory_host_unavailable";
 /// envelope/DTO shape.
 const MEMORY_HOST_RESULT_INVALID: &str = "memory_host_result_invalid";
 
-#[cfg(not(target_arch = "wasm32"))]
 type NativeMethod = Arc<dyn Fn(&str) -> Result<NativeHostResult, HostFailure> + Send + Sync>;
 
 /// Native host callbacks backing one [`HostMemoryStore`]. Any field left
 /// `None` reports [`MemoryStoreError::Unavailable`] for that operation.
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default, Clone)]
 pub struct HostMemoryCallbacks {
     /// Backing callback for [`MemoryStore::put`].
@@ -54,41 +48,19 @@ pub struct HostMemoryCallbacks {
     pub list: Option<NativeMethod>,
 }
 
-/// Host-backed [`MemoryStore`]. Delegates every operation to a trusted host
-/// (native callbacks in tests, a JS adapter on `wasm32`).
+/// Host-backed [`MemoryStore`] using trusted native callbacks.
 pub struct HostMemoryStore {
-    #[cfg(not(target_arch = "wasm32"))]
     put: Option<NativeMethod>,
-    #[cfg(not(target_arch = "wasm32"))]
     get: Option<NativeMethod>,
-    #[cfg(not(target_arch = "wasm32"))]
     search: Option<NativeMethod>,
-    #[cfg(not(target_arch = "wasm32"))]
     forget: Option<NativeMethod>,
-    #[cfg(not(target_arch = "wasm32"))]
     correct: Option<NativeMethod>,
-    #[cfg(not(target_arch = "wasm32"))]
     list: Option<NativeMethod>,
-    #[cfg(target_arch = "wasm32")]
-    adapter: wasm_bindgen::JsValue,
-    #[cfg(target_arch = "wasm32")]
-    put: Option<js_sys::Function>,
-    #[cfg(target_arch = "wasm32")]
-    get: Option<js_sys::Function>,
-    #[cfg(target_arch = "wasm32")]
-    search: Option<js_sys::Function>,
-    #[cfg(target_arch = "wasm32")]
-    forget: Option<js_sys::Function>,
-    #[cfg(target_arch = "wasm32")]
-    correct: Option<js_sys::Function>,
-    #[cfg(target_arch = "wasm32")]
-    list: Option<js_sys::Function>,
 }
 
 impl HostMemoryStore {
     /// Construct a native scripted store from individually optional
     /// callbacks.
-    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn from_callbacks(callbacks: HostMemoryCallbacks) -> Self {
         Self {
@@ -102,7 +74,6 @@ impl HostMemoryStore {
     }
 
     /// Construct a native scripted store where every operation is backed.
-    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn from_callback_fns(
         put: impl Fn(&str) -> Result<NativeHostResult, HostFailure> + Send + Sync + 'static,
@@ -120,23 +91,6 @@ impl HostMemoryStore {
             correct: Some(Arc::new(correct)),
             list: Some(Arc::new(list)),
         })
-    }
-
-    /// Construct a wasm32 store around a JS `MemoryStore` adapter. Methods
-    /// the adapter does not expose report `Unavailable` when called.
-    #[cfg(target_arch = "wasm32")]
-    #[must_use]
-    pub fn from_js(adapter: wasm_bindgen::JsValue) -> Self {
-        let method = |name| crate::host::extract_optional_method(&adapter, name);
-        Self {
-            put: method("memory_put"),
-            get: method("memory_get"),
-            search: method("memory_search"),
-            forget: method("memory_forget"),
-            correct: method("memory_correct"),
-            list: method("memory_list"),
-            adapter,
-        }
     }
 }
 
@@ -159,7 +113,7 @@ impl MemoryStore for HostMemoryStore {
         }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.put.clone(), encoded, |body| {
+        Self::call(self.put.clone(), encoded, |body| {
             parse_envelope::<PutOutcomeWire>(body).map(Into::into)
         })
     }
@@ -173,7 +127,7 @@ impl MemoryStore for HostMemoryStore {
         let Ok(encoded) = serde_json::to_string(&GetRequestWire { scope, id }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.get.clone(), encoded, move |body| {
+        Self::call(self.get.clone(), encoded, move |body| {
             let record = parse_envelope::<Option<MemoryRecord>>(body)?;
             record
                 .map(|record| validate_host_record(record, &expected_scope))
@@ -199,7 +153,7 @@ impl MemoryStore for HostMemoryStore {
         }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.search.clone(), encoded, move |body| {
+        Self::call(self.search.clone(), encoded, move |body| {
             parse_envelope::<Vec<MemoryHitWire>>(body)?
                 .into_iter()
                 .map(|hit| {
@@ -224,7 +178,7 @@ impl MemoryStore for HostMemoryStore {
         }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.forget.clone(), encoded, |body| {
+        Self::call(self.forget.clone(), encoded, |body| {
             parse_envelope::<()>(body)
         })
     }
@@ -251,7 +205,7 @@ impl MemoryStore for HostMemoryStore {
         }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.correct.clone(), encoded, |body| {
+        Self::call(self.correct.clone(), encoded, |body| {
             parse_envelope::<()>(body)
         })
     }
@@ -268,7 +222,7 @@ impl MemoryStore for HostMemoryStore {
         }) else {
             return Box::pin(async { Err(unavailable(MEMORY_HOST_RESULT_INVALID)) });
         };
-        self.call(self.list.clone(), encoded, move |body| {
+        Self::call(self.list.clone(), encoded, move |body| {
             let listing: MemoryListing = parse_envelope::<MemoryListingWire>(body)?.into();
             for record in &listing.records {
                 validate_host_record(record.clone(), &expected_scope)?;
@@ -278,80 +232,35 @@ impl MemoryStore for HostMemoryStore {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-type OptionalMethod = Option<NativeMethod>;
-#[cfg(target_arch = "wasm32")]
-type OptionalMethod = Option<js_sys::Function>;
-
 impl HostMemoryStore {
     /// Dispatch one host round-trip for `encoded`, decoding the envelope
     /// body with `decode`. Common to every `MemoryStore` operation; a
     /// missing `method` reports `Unavailable` without calling the host.
-    // `self` is only read on wasm32 (to clone `self.adapter`); the native
-    // arm is a free function in all but name.
-    #[allow(clippy::unused_self)]
     fn call<T: Send + 'static>(
-        &self,
-        method: OptionalMethod,
+        method: Option<NativeMethod>,
         encoded: String,
         decode: impl FnOnce(&str) -> Result<T, MemoryStoreError> + Send + 'static,
     ) -> PortFuture<Result<T, MemoryStoreError>> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let Some(callback) = method else {
-                return Box::pin(async { Err(unavailable(MEMORY_HOST_UNAVAILABLE)) });
-            };
-            Box::pin(async move {
-                let result = callback(&encoded).map_err(native_failure)?;
-                let body = native_result_body(result)?;
-                decode(&body)
-            })
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let Some(method) = method else {
-                return Box::pin(async { Err(unavailable(MEMORY_HOST_UNAVAILABLE)) });
-            };
-            let adapter = self.adapter.clone();
-            Box::pin(async move {
-                let body = invoke_memory_json(&adapter, &method, &encoded).await?;
-                decode(&body)
-            })
-        }
+        let Some(callback) = method else {
+            return Box::pin(async { Err(unavailable(MEMORY_HOST_UNAVAILABLE)) });
+        };
+        Box::pin(async move {
+            let result = callback(&encoded).map_err(native_failure)?;
+            let body = native_result_body(result)?;
+            decode(&body)
+        })
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn native_failure(failure: HostFailure) -> MemoryStoreError {
     unavailable(failure.message())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn native_result_body(result: NativeHostResult) -> Result<String, MemoryStoreError> {
     match result {
         NativeHostResult::Object(body) => Ok(body),
         NativeHostResult::Items(_) => Err(unavailable(MEMORY_HOST_RESULT_INVALID)),
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn invoke_memory_json(
-    adapter: &wasm_bindgen::JsValue,
-    method: &js_sys::Function,
-    encoded: &str,
-) -> Result<String, MemoryStoreError> {
-    let result = crate::host::invoke_host(
-        adapter,
-        method,
-        &[wasm_bindgen::JsValue::from_str(encoded)],
-        None,
-    )
-    .await
-    .map_err(|_| unavailable(MEMORY_HOST_UNAVAILABLE))?;
-    let crate::host::HostJsResult::Value(value) = result else {
-        return Err(unavailable(MEMORY_HOST_RESULT_INVALID));
-    };
-    crate::host::stringify_js(&value).map_err(|_| unavailable(MEMORY_HOST_RESULT_INVALID))
 }
 
 fn unavailable(message: &str) -> MemoryStoreError {
@@ -576,7 +485,7 @@ impl From<MemoryListingWire> for MemoryListing {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::{HostMemoryStore, MEMORY_HOST_UNAVAILABLE};
     use crate::executor::block_on_ready;

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use finstack_ai_kernel::OperationLocator;
 
-use crate::context::CONTEXT_RECOVERY_UNCERTAIN;
 use crate::coordinator::{CommitCoordinator, PostCommitDispatcher};
 use crate::driver::host_driver;
 use crate::event_hub::event_hub;
@@ -13,7 +12,6 @@ use crate::ids::{Clock, RandomSource};
 use crate::observer::{
     OBSERVER_DELIVERY_FAILED, OBSERVER_SHUTDOWN_TIMEOUT, OBSERVER_SUBSCRIPTION_FAILED,
 };
-use crate::ports::context::InvocationResumeAction;
 use crate::ports::model::{CancellationSignal, LockedModelContextProfile, ReadyModel};
 use crate::ports::observer::{Observer, ObserverDiagnostic};
 use crate::ports::tool::{ResolvedToolCatalog, ToolResumeAction, ToolStreamAssembler};
@@ -24,9 +22,8 @@ use crate::run_types::{
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
-    model_resume_retry_seed, prepare_tool_batch_if_ready, resume_pending_context_effects,
-    resume_pending_model_effect, resume_pending_tool_effects, tool_resume_retry_seeds,
-    validate_model_binding,
+    model_resume_retry_seed, prepare_tool_batch_if_ready, resume_pending_model_effect,
+    resume_pending_tool_effects, tool_resume_retry_seeds, validate_model_binding,
 };
 
 use super::dispatcher::HostDispatcher;
@@ -351,25 +348,6 @@ impl RunTaskOwner {
                 &parent,
             )
             .await?;
-            if let Some(providers) = coordinator.context_providers().cloned() {
-                match resume_pending_context_effects(
-                    &coordinator,
-                    providers.as_ref(),
-                    &sources,
-                    &parent,
-                )
-                .await?
-                {
-                    InvocationResumeAction::SuspendUncertain => {
-                        return Err(RunHandleError::Middleware {
-                            code: Arc::from(CONTEXT_RECOVERY_UNCERTAIN),
-                        });
-                    }
-                    InvocationResumeAction::UseRecorded
-                    | InvocationResumeAction::Recompute
-                    | InvocationResumeAction::Reconcile => {}
-                }
-            }
         }
         coordinator.install_dispatcher(Arc::clone(&dispatcher) as Arc<dyn PostCommitDispatcher>);
         // Built before the resume-path tool batch, not after it: a resumed run

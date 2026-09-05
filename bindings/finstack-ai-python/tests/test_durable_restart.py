@@ -1,8 +1,8 @@
 """Python durable-restart subset (N1–N2, I1 inspect, A1, completed open).
 
-``Agent.open_session`` still inspects only. ``Lane.resume`` respawns the
-parked owner after E3/E4a. Child-run and ``complete_external`` routing
-live on ``Run``.
+``Agent.open_session`` inspects journal state without restoring a controller.
+``Lane.resume`` continues a run parked through its retained live lane.
+Child-run and ``complete_external`` routing live on ``Run``.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import asyncio
 from typing import Any
 
 import finstack_ai
+import pytest
 
 from test_handles import _agent, _ollama_ndjson, _server
 from test_interactions import _resolution, _wait_for_interaction, _write_tool
@@ -52,11 +53,16 @@ def test_completed_run_inspects_after_open_session() -> None:
         asyncio.run(exercise(server))
 
 
-def test_awaiting_interaction_lane_survives_open_after_drop() -> None:
+def test_open_after_drop_preserves_active_run_but_cannot_resume_controller() -> None:
+    model_calls = 0
+    tool_calls = 0
+
     async def model_callback(
         context: finstack_ai.CallbackContext, request: dict[str, Any]
     ) -> dict[str, Any]:
         del context, request
+        nonlocal model_calls
+        model_calls += 1
         return {
             "text": "",
             "completion_id": "python-restart-write-1",
@@ -67,6 +73,8 @@ def test_awaiting_interaction_lane_survives_open_after_drop() -> None:
         context: finstack_ai.CallbackContext, request: dict[str, Any]
     ) -> dict[str, Any]:
         del context
+        nonlocal tool_calls
+        tool_calls += 1
         return {"output": {"ok": True, "value": request["call"]["arguments"]["value"]}}
 
     async def exercise() -> None:
@@ -98,16 +106,20 @@ def test_awaiting_interaction_lane_survives_open_after_drop() -> None:
         lane = await opened.lane("main")
         inspect = await lane.inspect()
         assert inspect["active_run_id"] == run_id
-        await lane.resume(agent)
-        inspect = await lane.inspect()
-        assert inspect["active_run_id"] == run_id
-        assert _resolution(pending, True)["interaction_id"] == pending["interaction_id"]
+        with pytest.raises(finstack_ai.ConfigurationError) as rejected:
+            await lane.resume(agent)
+        assert rejected.value.code == "agent_run_invalid_configuration"
+        assert "no in-process parked controller" in str(rejected.value)
+        assert await lane.inspect() == inspect
+        assert model_calls == 1
+        assert tool_calls == 0
 
     asyncio.run(exercise())
 
 
 def test_resume_respawns_parked_run_and_completes() -> None:
     model_calls = 0
+    tool_calls = 0
 
     async def model_callback(
         context: finstack_ai.CallbackContext, request: dict[str, Any]
@@ -127,6 +139,8 @@ def test_resume_respawns_parked_run_and_completes() -> None:
         context: finstack_ai.CallbackContext, request: dict[str, Any]
     ) -> dict[str, Any]:
         del context
+        nonlocal tool_calls
+        tool_calls += 1
         return {"output": {"ok": True, "value": request["call"]["arguments"]["value"]}}
 
     async def exercise() -> None:
@@ -147,13 +161,28 @@ def test_resume_respawns_parked_run_and_completes() -> None:
             ],
             "Use tools when needed.",
         )
-        run = agent.start("write 1")
+        session = await agent.create_session("python-local")
+        lane = await session.lane("main")
+        run = lane.run(agent, "write 1")
         pending = await _wait_for_interaction(run)
-        lane = await run.session.lane("main")
-        await lane.suspend()
-        await lane.resume(agent)
+        accepted = await lane.inspect()
+        assert accepted["active_run_id"] == run.locator.run_id
+        for _ in range(2):
+            await lane.suspend()
+            assert await lane.inspect() == accepted
+            await lane.resume(agent)
+            assert await lane.inspect() == accepted
+            assert (await run.list_interactions())[0]["interaction_id"] == pending[
+                "interaction_id"
+            ]
+        assert model_calls == 1
+        assert tool_calls == 0
         await run.resolve_interaction(_resolution(pending, True))
-        assert (await run.result()).text == "write complete"
+        result = await asyncio.wait_for(run.result(), timeout=5)
+        assert result.text == "write complete"
+        assert result.locator.run_id == run.locator.run_id
+        assert model_calls == 2
+        assert tool_calls == 1
 
     asyncio.run(exercise())
 

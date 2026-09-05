@@ -62,6 +62,7 @@ export declare class WorkerEventBatch {
     readonly firstSequence: number;
     readonly lastSequence: number;
     readonly droppedProgress: number;
+    /** @internal */
     constructor(bytes: ArrayBuffer, firstSequence: number, lastSequence: number, droppedProgress: number);
     /**
      * Expand the transferred snapshot into individual events.
@@ -91,6 +92,7 @@ export declare class WorkerEventBatch {
  */
 export declare class WorkerEvent {
     #private;
+    /** @internal */
     constructor(value: unknown);
     /** Event kind name such as `run_completed`. */
     get kind(): string;
@@ -112,6 +114,7 @@ export declare class WorkerEvent {
  */
 export declare class WorkerAgent {
     #private;
+    /** @internal */
     constructor(client: WorkerClient, agentId: string);
     /**
      * Start one run and return its proxy handle immediately.
@@ -151,10 +154,12 @@ export declare class WorkerAgent {
  */
 export declare class WorkerRun {
     #private;
+    /** @internal */
     constructor(client: WorkerClient, state: RunState);
     /**
      * Session locator captured when the worker accepted the run.
      *
+     * @returns The tenant, session, lane, and run identities.
      * @throws {FinstackError} When start has not been acknowledged yet.
      */
     get session(): SessionSnapshot;
@@ -184,9 +189,20 @@ export declare class WorkerRun {
      * ```
      */
     result(): Promise<RunResultSnapshot>;
-    /** Read the worker-hosted run's latest confirmed state. */
+    /**
+     * Read the worker-hosted run's latest confirmed state.
+     *
+     * @returns The latest semantic and lifecycle state.
+     * @throws {FinstackError} When the worker cannot return a valid snapshot.
+     */
     liveState(): Promise<RunStateSnapshot>;
-    /** Wait until the worker-hosted latest-only view advances. */
+    /**
+     * Wait until the worker-hosted latest-only view advances.
+     *
+     * @param revision - Last revision already observed.
+     * @returns The first newer confirmed state.
+     * @throws {FinstackError} When the worker cannot return a valid snapshot.
+     */
     waitForLiveState(revision: number): Promise<RunStateSnapshot>;
     /**
      * Submit idempotent durable cancellation.
@@ -228,20 +244,15 @@ export declare class WorkerRun {
  */
 export declare class WorkerClient {
     #private;
+    /** @internal */
     constructor(worker: Worker, policy: LagPolicy);
-    /** Allocate a unique protocol request id. */
-    nextId(): string;
     /**
-     * Construct one Agent inside the worker.
+     * Allocate a unique protocol request id.
      *
-     * @param options - Serializable factory payload. Do not pass JS handles.
-     * @returns A main-thread Agent proxy.
-     * @throws {FinstackError} When the worker rejects construction.
-     * @example
-     * ```ts
-     * const agent = await client.create({ scenario: "model-only" });
-     * ```
+     * @returns A client-scoped correlation id.
+     * @internal
      */
+    nextId(): string;
     /**
      * Inspect one stored session inside the worker.
      *
@@ -256,6 +267,17 @@ export declare class WorkerClient {
      * ```
      */
     inspectSession(sessionId: string): Promise<SessionInspectSnapshot>;
+    /**
+     * Construct one Agent inside the worker.
+     *
+     * @param options - Serializable factory payload. Do not pass JS handles.
+     * @returns A main-thread Agent proxy.
+     * @throws {FinstackError} When the worker rejects construction.
+     * @example
+     * ```ts
+     * const agent = await client.create({ scenario: "model-only" });
+     * ```
+     */
     create(options?: unknown): Promise<WorkerAgent>;
     /**
      * Cancel in-flight runs and terminate the Dedicated Worker.
@@ -267,9 +289,13 @@ export declare class WorkerClient {
      * ```
      */
     terminate(): Promise<void>;
+    /** @internal */
     startRun(agentId: string, input: string, options?: RunOptions): WorkerRun;
+    /** @internal */
     ack(state: RunState, lastSequence: number): void;
+    /** @internal */
     closeEvents(state: RunState): Promise<void>;
+    /** @internal */
     request(message: MainToWorker): Promise<WorkerToMain>;
 }
 /**

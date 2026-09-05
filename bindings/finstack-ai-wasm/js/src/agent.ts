@@ -1229,11 +1229,16 @@ export class Lane {
   }
 
   /**
-   * Recover the parked run and respawn its Rust-owned task.
+   * Continue the parked run through its retained Rust-owned controller.
+   *
+   * Start with `Lane.run` and suspend/resume through the same live session's
+   * lane handles. `Agent.openSession` restores journal state, not a resumable
+   * controller.
    *
    * @param agent - Resolved agent that supplies model and tool ports.
    * @returns A promise that settles after the owner respawns.
-   * @throws {FinstackError} When no run is suspended or restore fails.
+   * @throws {FinstackError} When no parked controller is retained, the agent
+   * differs from the accepted agent lock, or resuming fails.
    */
   async resume(agent: Agent): Promise<void> {
     try {

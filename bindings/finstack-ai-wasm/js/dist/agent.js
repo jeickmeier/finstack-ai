@@ -6,16 +6,26 @@ export { FinstackError } from "./errors.js";
 /** Bounded process-local compaction checkpoint cache policy. */
 export class HistoryCachePolicy {
     #handle;
+    /**
+     * Create a bounded checkpoint-cache policy.
+     *
+     * @param maxEntries - Maximum retained checkpoint count.
+     * @param maxBytes - Maximum aggregate retained bytes.
+     * @throws {Error} When WASM is not initialized or either bound is invalid.
+     */
     constructor(maxEntries = 64, maxBytes = 16 * 1024 * 1024) {
         requireWasm();
         this.#handle = new WasmHistoryCachePolicy(maxEntries, maxBytes);
     }
+    /** @returns A policy that retains no process-local checkpoints. */
     static disabled() {
         return new HistoryCachePolicy(0, 0);
     }
+    /** @returns Maximum retained checkpoint count. */
     get maxEntries() {
         return this.#handle.maxEntries;
     }
+    /** @returns Maximum aggregate retained bytes. */
     get maxBytes() {
         return this.#handle.maxBytes;
     }
@@ -77,6 +87,7 @@ function approvalGrantWire(value) {
  */
 export class Agent {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }
@@ -84,7 +95,12 @@ export class Agent {
     handle() {
         return this.#handle;
     }
-    /** Compose an agent with a fresh bounded process-local history cache. */
+    /**
+     * Compose an agent with a fresh bounded process-local history cache.
+     *
+     * @param policy - Cache bounds for the new immutable composition.
+     * @returns A new agent handle; this agent is unchanged.
+     */
     withHistoryCache(policy) {
         requireWasm();
         return new Agent(this.#handle.withHistoryCache(policy.handle()));
@@ -188,6 +204,10 @@ export class Agent {
      *
      * In-flight runs keep the previous lock. wasm-host fail-closed is a Rust
      * platform error, not a missing method.
+     *
+     * @returns A newly resolved immutable agent handle.
+     * @throws {FinstackError} When reconstruction fails or this agent was not
+     * builder-composed.
      */
     async reResolve() {
         requireWasm();
@@ -322,17 +342,22 @@ export class Agent {
  */
 export class Run {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }
     /**
      * Live session handle for this run.
+     *
+     * @returns The owning live session.
      */
     get session() {
         return new Session(this.#handle.session);
     }
     /**
      * Immutable operation locator snapshot.
+     *
+     * @returns Tenant, session, lane, and run identities.
      */
     get locator() {
         return new Locator(this.#handle.locator);
@@ -408,7 +433,12 @@ export class Run {
             throw FinstackError.fromUnknown(error);
         }
     }
-    /** Read the latest confirmed run-state snapshot. */
+    /**
+     * Read the latest confirmed run-state snapshot.
+     *
+     * @returns The latest semantic and lifecycle state.
+     * @throws {FinstackError} When the live runtime handle is unavailable.
+     */
     async liveState() {
         try {
             return (await this.#handle.liveState());
@@ -417,7 +447,13 @@ export class Run {
             throw FinstackError.fromUnknown(error);
         }
     }
-    /** Wait until the latest-only view advances beyond `revision`. */
+    /**
+     * Wait until the latest-only view advances beyond `revision`.
+     *
+     * @param revision - Last revision already observed.
+     * @returns The first newer confirmed state.
+     * @throws {FinstackError} When the revision is unsafe or the runtime stops.
+     */
     async waitForLiveState(revision) {
         try {
             return (await this.#handle.waitForLiveState(BigInt(asSafeInteger(revision, "live-state revision"))));
@@ -463,7 +499,12 @@ export class Run {
             throw FinstackError.fromUnknown(error);
         }
     }
-    /** List the outstanding typed interaction for this run (zero or one). */
+    /**
+     * List the outstanding typed interaction for this run.
+     *
+     * @returns Zero or one persisted interaction request.
+     * @throws {FinstackError} When the authenticated locator cannot be listed.
+     */
     async listInteractions() {
         try {
             return (await this.#handle.listInteractions());
@@ -476,6 +517,9 @@ export class Run {
      * Resolve the outstanding interaction through the live Rust-owned run.
      *
      * @param resolution - Canonical interaction resolution object.
+     * @returns A promise that settles after the resolution is committed.
+     * @throws {FinstackError} When the resolution conflicts, is expired, or is
+     * unauthorized.
      */
     async resolveInteraction(resolution) {
         try {
@@ -550,6 +594,7 @@ export class Run {
  */
 export class Locator {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }
@@ -583,6 +628,7 @@ export class Locator {
  */
 export class Session {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }
@@ -706,6 +752,7 @@ export class Session {
  */
 export class Lane {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }
@@ -789,7 +836,12 @@ export class Lane {
             throw FinstackError.fromUnknown(error);
         }
     }
-    /** Park the in-process driver without dropping the journal. */
+    /**
+     * Park the in-process driver without dropping the journal.
+     *
+     * @returns A promise that settles after the driver parks.
+     * @throws {FinstackError} When the journal cannot be loaded.
+     */
     async suspend() {
         try {
             await this.#handle.suspend();
@@ -798,7 +850,18 @@ export class Lane {
             throw FinstackError.fromUnknown(error);
         }
     }
-    /** Recover the parked run and respawn its Rust-owned task. */
+    /**
+     * Continue the parked run through its retained Rust-owned controller.
+     *
+     * Start with `Lane.run` and suspend/resume through the same live session's
+     * lane handles. `Agent.openSession` restores journal state, not a resumable
+     * controller.
+     *
+     * @param agent - Resolved agent that supplies model and tool ports.
+     * @returns A promise that settles after the owner respawns.
+     * @throws {FinstackError} When no parked controller is retained, the agent
+     * differs from the accepted agent lock, or resuming fails.
+     */
     async resume(agent) {
         try {
             await this.#handle.resume(agent.handle());
@@ -844,6 +907,7 @@ export class MemoryExternalIdentityMap {
  */
 export class RunResult {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }
@@ -897,6 +961,7 @@ export class RunResult {
  */
 export class Event {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }
@@ -940,6 +1005,7 @@ export class Event {
  */
 export class EventBatch {
     #handle;
+    /** @internal */
     constructor(handle) {
         this.#handle = handle;
     }

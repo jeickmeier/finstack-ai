@@ -1093,16 +1093,18 @@ class Lane:
                 lock is poisoned.
         """
     def resume(self, agent: Agent) -> Awaitable[None]:
-        """Recover the parked run and respawn the in-process owner.
+        """Continue the parked run through its retained in-process controller.
 
-        ``Agent.open_session`` still inspects only. Call this after open
-        to continue a parked run.
+        Start the run with :meth:`Lane.run`, then suspend and resume through
+        the same live session's lane handles. ``Agent.open_session`` only
+        restores journal state; its lanes cannot resume a controller.
 
         Args:
             agent: Resolved agent that supplies model and tool ports.
 
         Raises:
-            ConfigurationError: The lane has no suspended run.
+            ConfigurationError: No parked controller is retained, or the
+                agent differs from the accepted agent lock.
             RuntimeError: Restore or spawn fails.
         """
 

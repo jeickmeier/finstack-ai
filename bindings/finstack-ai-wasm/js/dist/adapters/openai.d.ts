@@ -23,6 +23,12 @@ export declare const OPENAI_DEFAULT_BASE_URL = "/finstack/openai";
  *
  * The adapter sends `store: false`, treats `response.completed` as the only
  * successful terminal event, and propagates `AbortSignal`.
+ *
+ * @param options - Same-origin proxy path, application headers, and optional
+ * model override.
+ * @returns A trusted host model suitable for {@link JsModel}.
+ * @throws {TypeError} When the proxy rejects the request or the SSE stream
+ * does not reach `response.completed`.
  */
 export declare function createOpenAIModel(options?: OpenAIOptions): HostModel;
 //# sourceMappingURL=openai.d.ts.map

@@ -8,6 +8,7 @@ import { encodeControl, decodeMainToWorker, } from "./worker-protocol.js";
  * boundary.
  *
  * @param factory - Creates one Agent from a serializable options payload.
+ * @returns Nothing; the function installs the worker message handler.
  * @example
  * ```ts
  * exposeWorkerHost({
