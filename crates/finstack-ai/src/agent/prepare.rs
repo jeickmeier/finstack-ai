@@ -282,189 +282,217 @@ impl Agent {
             publish_start_failure(execution, &error);
             return Err(error);
         }
-        let mut coordinator = match runtime.coordinator_for_run(Some(run_id)).await {
-            Ok(coordinator) => coordinator,
-            Err(error) => {
+        let lifecycle = execution
+            .upgrade()
+            .map(|inner| Arc::clone(&inner.lifecycle));
+        loop {
+            let mut coordinator = match runtime.coordinator_for_run(Some(run_id)).await {
+                Ok(coordinator) => coordinator,
+                Err(error) => {
+                    runtime.release_run(lane_id, run_id);
+                    let error = session_error(&error);
+                    publish_start_failure(execution, &error);
+                    return Err(error);
+                }
+            };
+            coordinator
+                .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
+            coordinator.install_capability_owners(self.capability_index.as_arc_owners());
+            let providers: Arc<[Arc<dyn ContextProvider>]> = self
+                .resolved
+                .run_plan()
+                .context_providers()
+                .iter()
+                .map(|component| Arc::clone(component.handle()))
+                .collect::<Vec<_>>()
+                .into();
+            coordinator.install_context_providers(providers);
+            if let Ok(mut cache) = self.history_cache.lock()
+                && let Some(checkpoint) =
+                    cache.candidate(session_id, lane_id, prepared.profile.digest)
+            {
+                coordinator.seed_compaction_checkpoint(checkpoint);
+            }
+            let observer_count = self.resolved.run_plan().observers().len();
+            let approval_grant = self
+                .resolved
+                .spec()
+                .map(|spec| spec.policy.approval_grant)
+                .unwrap_or_default();
+            let owner = if self.tools.is_empty() {
+                Box::pin(RunTaskOwner::spawn_with_model_and_artifacts(
+                    coordinator,
+                    run_task_config(observer_count, approval_grant),
+                    model_task_config(),
+                    Arc::clone(&prepared.model),
+                    prepared.profile.clone(),
+                    self.artifact_store
+                        .clone()
+                        .map(|store| (store, prepared.locator.clone())),
+                    AgentClock,
+                    AgentRandom,
+                ))
+                .await
+                .map_err(AgentRunError::runtime)
+            } else {
+                Box::pin(RunTaskOwner::spawn_with_model_tools_and_artifacts(
+                    coordinator,
+                    run_task_config(observer_count, approval_grant),
+                    model_task_config(),
+                    tool_task_config(),
+                    Arc::clone(&prepared.model),
+                    prepared.profile.clone(),
+                    Arc::clone(&self.tools),
+                    self.artifact_store
+                        .clone()
+                        .map(|store| (store, prepared.locator.clone())),
+                    AgentClock,
+                    AgentRandom,
+                ))
+                .await
+                .map_err(AgentRunError::runtime)
+            };
+            let mut owner = match owner {
+                Ok(owner) => owner,
+                Err(error) => {
+                    runtime.release_run(lane_id, run_id);
+                    publish_start_failure(execution, &error);
+                    return Err(error);
+                }
+            };
+            let handle = owner.handle();
+            if let Err(error) = runtime.bind_run_handle(lane_id, run_id, handle.clone()) {
+                let _shutdown = owner.shutdown().await;
                 runtime.release_run(lane_id, run_id);
                 let error = session_error(&error);
                 publish_start_failure(execution, &error);
                 return Err(error);
             }
-        };
-        coordinator
-            .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
-        coordinator.install_capability_owners(self.capability_index.as_arc_owners());
-        let providers: Arc<[Arc<dyn ContextProvider>]> = self
-            .resolved
-            .run_plan()
-            .context_providers()
-            .iter()
-            .map(|component| Arc::clone(component.handle()))
-            .collect::<Vec<_>>()
-            .into();
-        coordinator.install_context_providers(providers);
-        if let Ok(mut cache) = self.history_cache.lock()
-            && let Some(checkpoint) = cache.candidate(session_id, lane_id, prepared.profile.digest)
-        {
-            coordinator.seed_compaction_checkpoint(checkpoint);
-        }
-        let observer_count = self.resolved.run_plan().observers().len();
-        let approval_grant = self
-            .resolved
-            .spec()
-            .map(|spec| spec.policy.approval_grant)
-            .unwrap_or_default();
-        let owner = if self.tools.is_empty() {
-            Box::pin(RunTaskOwner::spawn_with_model_and_artifacts(
-                coordinator,
-                run_task_config(observer_count, approval_grant),
-                model_task_config(),
-                Arc::clone(&prepared.model),
-                prepared.profile.clone(),
-                self.artifact_store
-                    .clone()
-                    .map(|store| (store, prepared.locator.clone())),
-                AgentClock,
-                AgentRandom,
-            ))
-            .await
-            .map_err(AgentRunError::runtime)
-        } else {
-            Box::pin(RunTaskOwner::spawn_with_model_tools_and_artifacts(
-                coordinator,
-                run_task_config(observer_count, approval_grant),
-                model_task_config(),
-                tool_task_config(),
-                Arc::clone(&prepared.model),
-                prepared.profile.clone(),
-                Arc::clone(&self.tools),
-                self.artifact_store
-                    .clone()
-                    .map(|store| (store, prepared.locator.clone())),
-                AgentClock,
-                AgentRandom,
-            ))
-            .await
-            .map_err(AgentRunError::runtime)
-        };
-        let mut owner = match owner {
-            Ok(owner) => owner,
-            Err(error) => {
-                runtime.release_run(lane_id, run_id);
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-        };
-        let handle = owner.handle();
-        if let Err(error) = runtime.bind_run_handle(lane_id, run_id, handle.clone()) {
-            let _shutdown = owner.shutdown().await;
-            runtime.release_run(lane_id, run_id);
-            let error = session_error(&error);
-            publish_start_failure(execution, &error);
-            return Err(error);
-        }
-        let subscription = match handle
-            .subscribe_events(event_subscription(Sensitivity::Confidential))
-            .await
-        {
-            Ok(subscription) => subscription,
-            Err(error) => {
-                let error = AgentRunError::runtime_message(error.to_string());
-                let _shutdown = owner.shutdown().await;
-                runtime.release_run(lane_id, run_id);
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-        };
-        attach_plan_observers(&mut owner, self.resolved.run_plan().observers()).await;
-        publish_started(execution, handle.clone(), subscription);
-        let timeout = prepared.request.timeout;
-        let locator = prepared.locator.clone();
-        let effective_deadline = prepared.accepted.effective_deadline();
-        let result = driver::timeout(
-            timeout,
-            Box::pin(self.drive(
-                &handle,
-                session_id,
-                lane_id,
-                prepared.accepted,
-                prepared.request,
-                prepared.profile,
-                prepared.locator,
-                context_seed,
-            )),
-        )
-        .await;
-        let result = match result {
-            Ok(Ok(output)) => Ok(output),
-            Ok(Err(error)) => {
-                let state = handle.live_state();
-                if state.terminal.is_none() {
-                    match settle_controller_cancellation(
-                        &handle,
-                        CancellationInitiator::RuntimeShutdown,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(_) => Err(error),
-                        Err(uncertain) => Err(uncertain),
-                    }
-                } else {
-                    Err(error)
+            let subscription = match handle
+                .subscribe_events(event_subscription(Sensitivity::Confidential))
+                .await
+            {
+                Ok(subscription) => subscription,
+                Err(error) => {
+                    let error = AgentRunError::runtime_message(error.to_string());
+                    let _shutdown = owner.shutdown().await;
+                    runtime.release_run(lane_id, run_id);
+                    publish_start_failure(execution, &error);
+                    return Err(error);
                 }
-            }
-            Err(_) => settle_deadline_timeout(&handle, locator, timeout, effective_deadline).await,
-        };
-        let shutdown = owner.shutdown().await;
-        let graceful = matches!(
-            shutdown.outcome,
-            finstack_ai_runtime::run::ShutdownOutcome::Graceful
-        ) && !matches!(
-            handle.status(),
-            finstack_ai_runtime::run::RunStatus::Faulted { .. }
-        );
-        if graceful {
-            let Some(update) = owner.take_session_head() else {
-                let _invalidated = runtime.invalidate_session_head();
-                runtime.release_run(lane_id, run_id);
-                return Err(runtime_uncertainty(
-                    "graceful owner shutdown did not retain a confirmed session head",
-                ));
             };
-            if let Err(error) = runtime.adopt_session_head(update).await {
-                let _invalidated = runtime.invalidate_session_head();
+            attach_plan_observers(&mut owner, self.resolved.run_plan().observers()).await;
+            publish_started(execution, handle.clone(), subscription);
+            let timeout = prepared.request.timeout;
+            let locator = prepared.locator.clone();
+            let effective_deadline = prepared.accepted.effective_deadline();
+            let remaining = effective_deadline.map_or(timeout, |deadline| {
+                Duration::from_millis(
+                    u64::try_from(deadline.as_unix_ms().saturating_sub(
+                        NativeIds::now().map_or(deadline.as_unix_ms(), Timestamp::as_unix_ms),
+                    ))
+                    .unwrap_or(0),
+                )
+                .min(timeout)
+            });
+            let result = driver::timeout(
+                remaining,
+                Box::pin(self.drive(
+                    &handle,
+                    session_id,
+                    lane_id,
+                    prepared.accepted.clone(),
+                    prepared.request.clone(),
+                    prepared.profile.clone(),
+                    prepared.locator.clone(),
+                    context_seed.clone(),
+                )),
+            )
+            .await;
+            let result = match result {
+                Ok(Ok(output)) => Ok(output),
+                Ok(Err(error)) => {
+                    let state = handle.live_state();
+                    if matches!(state.terminal, Some(TerminalState::Cancelled(_))) {
+                        Err(AgentRunError::Cancelled)
+                    } else if state.terminal.is_none()
+                        && !lifecycle.as_ref().is_some_and(|control| control.parking())
+                    {
+                        match settle_controller_cancellation(
+                            &handle,
+                            CancellationInitiator::RuntimeShutdown,
+                            None,
+                        )
+                        .await
+                        {
+                            Ok(_) => Err(error),
+                            Err(uncertain) => Err(uncertain),
+                        }
+                    } else {
+                        Err(error)
+                    }
+                }
+                Err(_) => {
+                    settle_deadline_timeout(&handle, locator, timeout, effective_deadline).await
+                }
+            };
+            let shutdown = owner.shutdown().await;
+            let graceful = matches!(
+                shutdown.outcome,
+                finstack_ai_runtime::run::ShutdownOutcome::Graceful
+            ) && !matches!(
+                handle.status(),
+                finstack_ai_runtime::run::RunStatus::Faulted { .. }
+            );
+            if graceful {
+                let Some(update) = owner.take_session_head() else {
+                    let _invalidated = runtime.invalidate_session_head();
+                    runtime.release_run(lane_id, run_id);
+                    return Err(runtime_uncertainty(
+                        "graceful owner shutdown did not retain a confirmed session head",
+                    ));
+                };
+                if let Err(error) = runtime.adopt_session_head(update).await {
+                    let _invalidated = runtime.invalidate_session_head();
+                    runtime.release_run(lane_id, run_id);
+                    return Err(session_error(&error));
+                }
+                if let Some(checkpoint) = owner.take_compaction_checkpoint()
+                    && let Ok(mut cache) = self.history_cache.lock()
+                {
+                    cache.insert(session_id, lane_id, checkpoint);
+                }
+            } else if let Err(error) = runtime.invalidate_session_head() {
                 runtime.release_run(lane_id, run_id);
                 return Err(session_error(&error));
             }
-            if let Some(checkpoint) = owner.take_compaction_checkpoint()
-                && let Ok(mut cache) = self.history_cache.lock()
+            if handle.live_state().terminal.is_none()
+                && let Some(control) = &lifecycle
+                && control.parking()
             {
-                cache.insert(session_id, lane_id, checkpoint);
+                control.park().await;
+                continue;
             }
-        } else if let Err(error) = runtime.invalidate_session_head() {
+            if let Ok(output) = &result
+                && let Err(error) = runtime
+                    .append_message_from_run(
+                        lane_id,
+                        run_id,
+                        &output.message,
+                        LaneAppendIds {
+                            entry_record_id: NativeIds::generate()?,
+                            lane_moved_record_id: NativeIds::generate()?,
+                            batch_id: NativeIds::generate()?,
+                        },
+                    )
+                    .await
+            {
+                runtime.release_run(lane_id, run_id);
+                return Err(session_error(&error));
+            }
             runtime.release_run(lane_id, run_id);
-            return Err(session_error(&error));
+            return result;
         }
-        if let Ok(output) = &result
-            && let Err(error) = runtime
-                .append_message_from_run(
-                    lane_id,
-                    run_id,
-                    &output.message,
-                    LaneAppendIds {
-                        entry_record_id: NativeIds::generate()?,
-                        lane_moved_record_id: NativeIds::generate()?,
-                        batch_id: NativeIds::generate()?,
-                    },
-                )
-                .await
-        {
-            runtime.release_run(lane_id, run_id);
-            return Err(session_error(&error));
-        }
-        runtime.release_run(lane_id, run_id);
-        result
     }
 
     pub(super) fn context_messages(
@@ -754,6 +782,13 @@ async fn wait_for_terminal(
                 "runtime stopped before cancellation reached a durable terminal state",
             ));
         }
+        if matches!(
+            state.status,
+            finstack_ai_runtime::run::RunStatus::Stopped
+                | finstack_ai_runtime::run::RunStatus::ShuttingDown
+        ) {
+            return Err(AgentRunError::runtime_message("runtime owner stopped"));
+        }
         handle
             .wait_for_live_state(state.revision)
             .await
@@ -783,6 +818,13 @@ pub(super) async fn wait_for_phase(
                 "runtime task faulted: {code}"
             )));
         }
+        if matches!(
+            state.status,
+            finstack_ai_runtime::run::RunStatus::Stopped
+                | finstack_ai_runtime::run::RunStatus::ShuttingDown
+        ) {
+            return Err(AgentRunError::runtime_message("runtime owner stopped"));
+        }
         handle
             .wait_for_live_state(state.revision)
             .await
@@ -803,6 +845,13 @@ pub(super) async fn wait_for_cycle(
             return Err(AgentRunError::runtime_message(format!(
                 "runtime task faulted: {code}"
             )));
+        }
+        if matches!(
+            state.status,
+            finstack_ai_runtime::run::RunStatus::Stopped
+                | finstack_ai_runtime::run::RunStatus::ShuttingDown
+        ) {
+            return Err(AgentRunError::runtime_message("runtime owner stopped"));
         }
         handle
             .wait_for_live_state(state.revision)

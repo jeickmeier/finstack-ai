@@ -138,6 +138,8 @@ enum ReplayScope {
 
 /// One-run coordinator for the authoritative commit-before-effect path.
 pub struct CommitCoordinator {
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) run_control: Option<Arc<crate::exec::run_control::RunControl>>,
     kernel: Kernel,
     session: SessionProjection,
     store: Arc<dyn JournalStore>,
@@ -193,6 +195,8 @@ impl CommitCoordinator {
     #[must_use]
     pub fn new(store: Arc<dyn JournalStore>) -> Self {
         Self {
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            run_control: None,
             kernel: Kernel::default(),
             session: SessionProjection::default(),
             store,

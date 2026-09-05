@@ -7,7 +7,7 @@
 mod dispatcher;
 mod fault;
 mod handle;
-mod oneshot;
+pub(crate) mod oneshot;
 mod owner;
 mod shared;
 mod worker;

@@ -841,3 +841,190 @@ async fn slow_client_disconnects_and_keeps_terminal() {
 fn listen_policy_code_is_stable() {
     assert_eq!(ServerError::ListenInvalid.code(), "server_listen_invalid");
 }
+
+struct TenantVerifier;
+impl AuthVerifier for TenantVerifier {
+    fn verify(
+        &self,
+        method: &RemoteAuthMethod,
+        _: TransportKind,
+    ) -> Result<AuthContext, ServerError> {
+        let RemoteAuthMethod::Bearer { token } = method else {
+            return Err(ServerError::AuthenticationFailure);
+        };
+        AuthContext::try_new(token, "review-user")
+    }
+}
+#[tokio::test]
+async fn wrong_tenant_must_not_poison_writer() {
+    let server = Arc::new(
+        Server::bind(
+            ListenAddr::loopback(0),
+            Arc::new(TenantVerifier),
+            Some(Arc::new(RecordingSink::ready())),
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap(),
+    );
+    server
+        .hub()
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-b").unwrap());
+    for tenant in ["tenant-a", "tenant-b"] {
+        let (c, s) = tokio::io::duplex(65536);
+        let serving = server.clone();
+        let task = tokio::spawn(async move { serving.serve(s, TransportKind::Unix).await });
+        let mut client = RemoteClient::new(c);
+        let result = client
+            .reconnect(
+                &offer(),
+                RemoteAuthMethod::Bearer {
+                    token: tenant.into(),
+                },
+                locator(SESSION_ID),
+                tenant,
+                None,
+            )
+            .await;
+        if tenant == "tenant-a" {
+            assert!(result.is_err());
+        } else {
+            assert!(
+                result.is_ok(),
+                "legitimate tenant blocked after unauthorized open: {result:?}"
+            );
+        }
+        drop(client);
+        let _ = task.await;
+    }
+}
+#[tokio::test]
+async fn live_event_must_wake_idle_connection() {
+    let server = Arc::new(ready_server(RecordingSink::ready()).await);
+    server
+        .hub()
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").unwrap());
+    let (c, s) = tokio::io::duplex(65536);
+    let serving = server.clone();
+    let task =
+        tokio::spawn(async move { serving.serve(s, TransportKind::LoopbackPlaintext).await });
+    let mut client = RemoteClient::new(c);
+    client
+        .reconnect(
+            &offer(),
+            RemoteAuthMethod::Loopback,
+            locator(SESSION_ID),
+            "tenant-a",
+            None,
+        )
+        .await
+        .unwrap();
+    let grant = client.next_post_auth().await.unwrap();
+    assert!(matches!(
+        grant,
+        finstack_ai_protocol::RemotePostAuth::Grant { .. }
+    ));
+    server
+        .hub()
+        .with(SESSION_ID, |replica| replica.queue_live(live_event(1)))
+        .unwrap();
+    let next = tokio::time::timeout(Duration::from_millis(100), client.next_post_auth()).await;
+    task.abort();
+    assert!(
+        next.is_ok(),
+        "queued event was not delivered until client sends something"
+    );
+}
+
+#[tokio::test]
+async fn aborted_connection_releases_writer() {
+    let server = Arc::new(ready_server(RecordingSink::ready()).await);
+    server
+        .hub()
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").unwrap());
+    for _ in 0..2 {
+        let (c, s) = tokio::io::duplex(65536);
+        let serving = Arc::clone(&server);
+        let task =
+            tokio::spawn(async move { serving.serve(s, TransportKind::LoopbackPlaintext).await });
+        let mut client = RemoteClient::new(c);
+        client
+            .reconnect(
+                &offer(),
+                RemoteAuthMethod::Loopback,
+                locator(SESSION_ID),
+                "tenant-a",
+                None,
+            )
+            .await
+            .expect("writer available");
+        client.next_post_auth().await.expect("grant");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+}
+
+#[tokio::test]
+async fn outbound_wakeup_preserves_partial_incoming_frame() {
+    use finstack_ai_protocol::{
+        POST_AUTH_FRAME_MAX_BYTES, PayloadFamily, ProtocolEnvelope, RemotePostAuth,
+        decode_envelope, encode_envelope, encode_frame,
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let server = Arc::new(ready_server(RecordingSink::ready()).await);
+    server
+        .hub()
+        .insert(SessionReplica::try_new(SESSION_ID, "tenant-a").unwrap());
+    let (mut c, s) = tokio::io::duplex(65536);
+    let serving = Arc::clone(&server);
+    let task =
+        tokio::spawn(async move { serving.serve(s, TransportKind::LoopbackPlaintext).await });
+    {
+        let mut client = RemoteClient::new(&mut c);
+        client
+            .reconnect(
+                &offer(),
+                RemoteAuthMethod::Loopback,
+                locator(SESSION_ID),
+                "tenant-a",
+                None,
+            )
+            .await
+            .unwrap();
+        client.next_post_auth().await.unwrap();
+    }
+    let message = RemotePostAuth::Ack {
+        cursor: 0,
+        items: 1,
+        bytes: 1024,
+    };
+    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, &message).unwrap();
+    let frame = encode_frame(&payload, POST_AUTH_FRAME_MAX_BYTES).unwrap();
+    c.write_all(&frame[..2]).await.unwrap();
+    tokio::task::yield_now().await;
+    server
+        .hub()
+        .with(SESSION_ID, |replica| replica.queue_live(live_event(1)))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let mut header = [0; 4];
+        c.read_exact(&mut header).await.unwrap();
+        let mut payload = vec![0; u32::from_be_bytes(header) as usize];
+        c.read_exact(&mut payload).await.unwrap();
+        let message: ProtocolEnvelope<RemotePostAuth> =
+            decode_envelope(&payload, PayloadFamily::Remote, PROTOCOL_VERSION_V1).unwrap();
+        assert!(matches!(
+            message.into_body(),
+            RemotePostAuth::EventBatch { .. }
+        ));
+    })
+    .await
+    .expect("event while client frame is incomplete");
+    c.write_all(&frame[2..]).await.unwrap();
+    c.shutdown().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("connection completes")
+        .unwrap()
+        .expect("partial frame survived wakeup");
+}

@@ -524,10 +524,12 @@ async fn deferred_tool_parent() -> (AgentRun, Arc<dyn JournalStore>) {
     (parent, store)
 }
 
-async fn completing_child(store: Arc<dyn JournalStore>) -> AgentRun {
-    let model: Arc<dyn finstack_ai_runtime::ports::model::Model> = Arc::new(
-        ScriptedModel::from_plans(profile(), vec![completed("child done")]),
-    );
+async fn cancellable_child(store: Arc<dyn JournalStore>) -> AgentRun {
+    let mut plan = completed("child done");
+    plan.actions
+        .insert(0, ScriptedModelAction::Block(Arc::from("cancelled-child")));
+    let model: Arc<dyn finstack_ai_runtime::ports::model::Model> =
+        Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
     let agent = Agent::builder(
         AgentId::parse("test.agent.deferred-child").expect("agent"),
         BundleId::parse("test.bundle.deferred-child").expect("bundle"),
@@ -572,11 +574,11 @@ async fn recover_settles_outstanding_deferrals_and_is_idempotent() {
         .expect("recover state");
     let pending = outstanding_deferrals(commit.state());
     assert_eq!(pending.len(), 1);
-    let child = completing_child(Arc::clone(&store)).await;
+    let child = cancellable_child(Arc::clone(&store)).await;
     tokio::time::timeout(Duration::from_secs(3), child.cancel())
         .await
         .expect("child cancel timeout")
-        .ok();
+        .expect("child cancelled");
     let child_request = isolated_child_request(Arc::clone(&store), &parent).await;
     let bridge = ChildRunBridge::new(
         vec![Arc::new(CountingPlanner {

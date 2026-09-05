@@ -513,10 +513,14 @@ async fn invoke_middleware_component<C: Clock, R: RandomSource>(
         compaction_resume: invocation.resume.clone(),
     };
     let component_input = component_input(coordinator, resolved, invocation.input);
-    let result = match resolved
-        .middleware
-        .invoke(context, component_input.clone())
-        .await
+    let cancellation = context.run.cancellation.clone();
+    let result = match Box::pin(crate::exec::run_control::await_invocation(
+        coordinator,
+        invocation.sources,
+        &cancellation,
+        resolved.middleware.invoke(context, component_input.clone()),
+    ))
+    .await?
     {
         Ok(outcome) => validate_stage_outcome(&resolved.descriptor, &component_input, &outcome)
             .map(|()| outcome),

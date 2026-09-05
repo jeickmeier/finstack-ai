@@ -1,18 +1,18 @@
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::{KernelInput, TransitionEnv};
-use tokio::sync::{mpsc, oneshot, watch};
+pub(super) use crate::exec::run_control::RunCommand;
+use tokio::sync::{mpsc, watch};
 
-use crate::commit::CommitOutcome;
 use crate::event_hub::EventHubHandle;
 use crate::exec::live_state::{LiveRunState, LiveStatePublisher, session_head_update};
 use crate::observer::ObserverDiagnosticBuffer;
-use crate::run_types::{RunHandleError, RunLifecycle, RunStatus, ShutdownReport};
+use crate::run_types::{RunLifecycle, RunStatus, ShutdownReport};
 
 use super::handle::RunHandle;
 
 pub(super) struct Shared {
+    pub(super) control: Arc<crate::exec::run_control::RunControl>,
     pub(super) sender: Mutex<Option<mpsc::Sender<RunCommand>>>,
     pub(super) shutting_down: AtomicBool,
     pub(super) status: watch::Sender<RunStatus>,
@@ -38,6 +38,7 @@ impl Shared {
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
         let (live_state_sender, live_state_receiver) = watch::channel(LiveRunState::initial(state));
         let shared = Arc::new(Self {
+            control: Arc::default(),
             sender: Mutex::new(Some(sender)),
             shutting_down: AtomicBool::new(false),
             status: status_sender,
@@ -113,10 +114,4 @@ impl LiveStatePublisher for Shared {
             current.clone_from(&checkpoint.cloned());
         }
     }
-}
-
-pub(super) struct RunCommand {
-    pub(super) env: TransitionEnv,
-    pub(super) input: KernelInput,
-    pub(super) reply: oneshot::Sender<Result<CommitOutcome, RunHandleError>>,
 }

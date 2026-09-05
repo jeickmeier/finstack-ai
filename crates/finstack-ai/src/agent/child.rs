@@ -276,17 +276,18 @@ impl AgentRun {
         child: &Agent,
         request: AgentRunRequest,
     ) -> Result<Self, AgentRunError> {
-        if matches!(prepared.placement, ChildPlacement::RemoteChildSession) {
-            #[cfg(feature = "native-tokio")]
-            return accept_remote_child(self, prepared);
-            #[cfg(not(feature = "native-tokio"))]
-            return Err(AgentRunError::configuration(
-                AGENT_RUN_UNSUPPORTED_PLAN,
-                "remote child placement is not portable to wasm-host",
-            ));
-        }
         request.validate()?;
         let parent_accepted = self.wait_accepted().await?;
+        let normalized =
+            child_run_request(child, &request, prepared.placement, prepared.child.clone())?;
+        if prepared.parent_run_id != self.locator().run_id
+            || normalized.request_digest() != prepared.request_digest
+        {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "child acceptance does not match the prepared parent and request",
+            ));
+        }
         let commit = self
             .recover_commit()
             .await
@@ -304,6 +305,15 @@ impl AgentRun {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
                 "child preparation does not match the committed mapping",
+            ));
+        }
+        if matches!(prepared.placement, ChildPlacement::RemoteChildSession) {
+            #[cfg(feature = "native-tokio")]
+            return accept_remote_child(self, prepared);
+            #[cfg(not(feature = "native-tokio"))]
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_UNSUPPORTED_PLAN,
+                "remote child placement is not portable to wasm-host",
             ));
         }
         let accepted = child_acceptance(child, &request, prepared, &parent_accepted)?;
@@ -745,6 +755,7 @@ fn accept_remote_child(
         })?;
     Ok(AgentRun {
         inner: Arc::new(AgentRunInner {
+            lifecycle: Arc::new(super::lifecycle::ExecutionLifecycle::new(None)),
             locator: prepared.child.operation.clone(),
             store: Arc::clone(&parent.inner.store),
             child_runs: parent.inner.child_runs,

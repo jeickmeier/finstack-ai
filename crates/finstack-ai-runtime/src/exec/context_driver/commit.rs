@@ -30,6 +30,10 @@ pub(crate) struct ContextInvocation<'a, C, R> {
 ///
 /// Returns a stable context or identity error when the envelope cannot be
 /// constructed or the provider fails.
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep committed intent, cancellable invocation, and settlement ordering visible"
+)]
 pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
     coordinator: &mut crate::commit::CommitCoordinator,
     invocation: ContextInvocation<'_, C, R>,
@@ -102,18 +106,31 @@ pub(crate) async fn committed_context_call<C: Clock, R: RandomSource>(
             .ok_or_else(|| context_stage_error(crate::ports::context::CONTEXT_COMMIT_REQUIRED))?;
         (requested, envelope)
     };
-    let context = ContextCallContext {
-        run: invocation.run,
-        provider_index: invocation.provider_index,
-        chain_digest: invocation.chain_digest,
-    };
-    let call = CommittedContextCall::try_new(&envelope, context, invocation.request, &descriptor)
-        .map_err(|error| context_error(&error))?;
-    let result = if recovering {
-        call.resume(invocation.provider).await
-    } else {
-        call.invoke(invocation.provider).await
-    };
+    let cancellation = invocation.run.cancellation.clone();
+    let call = CommittedContextCall::try_new(
+        &envelope,
+        ContextCallContext {
+            run: invocation.run,
+            provider_index: invocation.provider_index,
+            chain_digest: invocation.chain_digest,
+        },
+        invocation.request,
+        &descriptor,
+    )
+    .map_err(|error| context_error(&error))?;
+    let result = Box::pin(crate::exec::run_control::await_invocation(
+        coordinator,
+        invocation.sources,
+        &cancellation,
+        async {
+            if recovering {
+                call.resume(invocation.provider).await
+            } else {
+                call.invoke(invocation.provider).await
+            }
+        },
+    ))
+    .await?;
     let settlement = context_settlement(&requested, &result)?;
     coordinator
         .submit(

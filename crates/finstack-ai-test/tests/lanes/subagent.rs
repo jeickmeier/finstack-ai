@@ -272,6 +272,12 @@ async fn subagent_start_await_incorporates_child_text() {
         ChildRunPolicy::Deny,
     )
     .await;
+    let spec = child.resolved().spec().expect("child spec");
+    let exact_child_ref = AgentRef {
+        id: spec.id.clone(),
+        bundle: child.resolved().lock().and_then(|lock| lock.bundle.as_ref()).map(|bundle| bundle.id.clone()),
+        spec_digest: spec.fingerprint().expect("child fingerprint"),
+    };
     let invoker = Arc::new(ParentStartInvoker {
         parent: Mutex::new(None),
         child,
@@ -284,7 +290,7 @@ async fn subagent_start_await_incorporates_child_text() {
             ChildRunPolicy::Allow { max_depth: 1 },
             Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
         )),
-        Arc::from([child_ref()]),
+        Arc::from([exact_child_ref]),
     )
     .expect("toolset");
     let gate = Arc::<str>::from("subagent-start-await");

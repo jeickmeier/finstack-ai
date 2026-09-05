@@ -2,9 +2,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::{KernelInput, TransitionEnv};
+pub(super) use crate::exec::run_control::RunCommand;
 
-use crate::commit::CommitOutcome;
 use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
 use crate::driver::host_driver::Signal;
 use crate::event_hub::EventHubHandle;
@@ -14,9 +13,8 @@ use crate::ports::model::ModelRequest;
 use crate::ports::tool::{ResolvedTool, ToolCallContext};
 use crate::run_types::{RunHandleError, RunLifecycle, RunStatus, ShutdownReport};
 
-use super::oneshot::OneshotSender;
-
 pub(super) struct Shared {
+    pub(super) control: Arc<crate::exec::run_control::RunControl>,
     pub(super) intake: Mutex<Option<Arc<CommandIntake>>>,
     pub(super) shutting_down: AtomicBool,
     pub(super) status: Mutex<RunStatus>,
@@ -43,6 +41,7 @@ impl Shared {
         initial_kernel_state: finstack_ai_kernel::KernelState,
     ) -> Arc<Self> {
         Arc::new(Self {
+            control: Arc::default(),
             intake: Mutex::new(Some(Arc::new(CommandIntake::new(capacity)))),
             shutting_down: AtomicBool::new(false),
             status: Mutex::new(RunStatus::Running),
@@ -191,12 +190,6 @@ impl CommandIntake {
             notified.await;
         }
     }
-}
-
-pub(super) struct RunCommand {
-    pub(super) env: TransitionEnv,
-    pub(super) input: KernelInput,
-    pub(super) reply: OneshotSender<Result<CommitOutcome, RunHandleError>>,
 }
 
 pub(super) enum HostWork {

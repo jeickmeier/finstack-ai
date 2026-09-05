@@ -12,6 +12,8 @@ pub(crate) mod live_state;
 pub(crate) mod middleware_driver;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) mod run_control;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) mod run_types;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) mod settlement;

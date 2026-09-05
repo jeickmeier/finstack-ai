@@ -48,6 +48,12 @@ pub fn encode_value(value: &CanonicalValue) -> Result<Vec<u8>, ProtocolError> {
 ///
 /// Returns limit, profile, or trailing-data failures.
 pub fn decode_value(bytes: &[u8]) -> Result<CanonicalValue, ProtocolError> {
+    if bytes.len() > CANONICAL_ENVELOPE_MAX_BYTES {
+        return Err(ProtocolError::limit(
+            "canonical_envelope",
+            CANONICAL_ENVELOPE_MAX_BYTES,
+        ));
+    }
     let mut decoder = Decoder {
         input: bytes,
         offset: 0,

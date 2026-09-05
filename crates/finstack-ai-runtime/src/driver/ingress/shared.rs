@@ -88,9 +88,13 @@ impl IngressCore {
         authorization: &AuthorizationEvidence,
         submission: Submission,
     ) -> Result<CommitCoordinator, ExternalRouteError> {
-        let coordinator = CommitCoordinator::recover(Arc::clone(&self.store), locator.session_id)
-            .await
-            .ok();
+        let coordinator = CommitCoordinator::recover_run(
+            Arc::clone(&self.store),
+            locator.session_id,
+            Some(locator.run_id),
+        )
+        .await
+        .ok();
         let failure = coordinator.as_ref().map_or(
             Some((SecurityAuditCategory::UnknownLocator, "unknown_locator")),
             |coordinator| {

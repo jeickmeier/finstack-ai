@@ -66,6 +66,7 @@ impl RunTaskOwner {
             coordinator.state().clone(),
         );
         coordinator.install_live_state_publisher(shared.clone());
+        coordinator.run_control = Some(Arc::clone(&shared.control));
         let handle = RunHandle {
             shared: Arc::clone(&shared),
         };
@@ -410,6 +411,7 @@ impl RunTaskOwner {
             coordinator.state().clone(),
         );
         coordinator.install_live_state_publisher(shared.clone());
+        coordinator.run_control = Some(Arc::clone(&shared.control));
         let handle = RunHandle {
             shared: Arc::clone(&shared),
         };

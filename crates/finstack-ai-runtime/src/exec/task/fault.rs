@@ -25,6 +25,7 @@ pub(super) fn fault_worker(
 /// Shares the `Stopped`-unless-`Faulted` rule with the host worker via
 /// [`RunLifecycle`]; only the async event-hub close differs by target.
 pub(super) async fn finish_worker(shared: &Shared) {
+    shared.control.close();
     shared.publish_stopped_unless_faulted();
     shared.events.close().await;
 }

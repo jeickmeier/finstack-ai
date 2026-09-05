@@ -18,6 +18,7 @@ use super::types::{AgentRunError, AgentRunOutput};
 use crate::ChildRunPolicy;
 
 pub(super) struct AgentRunInner {
+    pub(super) lifecycle: Arc<super::lifecycle::ExecutionLifecycle>,
     pub(super) locator: OperationLocator,
     pub(super) store: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     pub(super) child_runs: ChildRunPolicy,
@@ -70,6 +71,7 @@ pub(super) enum EventStreamState {
     Waiting,
     Active(EventSubscription),
     Busy,
+    Rebinding(Option<EventSubscription>),
     CloseRequested,
     Closed,
     StartupFailed(AgentRunError),
@@ -103,6 +105,14 @@ impl EventConsumerGuard {
                 *state = EventStreamState::Closed;
                 Ok(None)
             }
+            EventStreamState::Rebinding(_) => {
+                subscription.close();
+                let replacement = std::mem::replace(&mut *state, EventStreamState::Waiting);
+                if let EventStreamState::Rebinding(Some(next)) = replacement {
+                    *state = EventStreamState::Active(next);
+                }
+                Ok(batch)
+            }
             EventStreamState::Busy => {
                 if batch.is_some() {
                     *state = EventStreamState::Active(subscription);
@@ -134,6 +144,12 @@ impl Drop for EventConsumerGuard {
         };
         if matches!(&*state, EventStreamState::Busy) {
             *state = EventStreamState::Active(subscription);
+        } else if matches!(&*state, EventStreamState::Rebinding(_)) {
+            subscription.close();
+            let replacement = std::mem::replace(&mut *state, EventStreamState::Waiting);
+            if let EventStreamState::Rebinding(Some(next)) = replacement {
+                *state = EventStreamState::Active(next);
+            }
         } else {
             subscription.close();
             *state = EventStreamState::Closed;
@@ -390,6 +406,7 @@ impl AgentRun {
                 match &*state {
                     EventStreamState::Waiting
                     | EventStreamState::Busy
+                    | EventStreamState::Rebinding(_)
                     | EventStreamState::CloseRequested => None,
                     EventStreamState::Closed => return Ok(None),
                     EventStreamState::StartupFailed(error) => return Err(error.clone()),
@@ -414,7 +431,21 @@ impl AgentRun {
             };
             let batch = guard.subscription_mut()?.next_batch().await;
             events_fault(&self.inner)?;
-            return guard.finish(batch);
+            let batch = guard.finish(batch)?;
+            if batch.is_some() {
+                return Ok(batch);
+            }
+            // An old owner's closed hub is not the end of a parked run.
+            if matches!(
+                *self
+                    .inner
+                    .events
+                    .lock()
+                    .map_err(|_| AgentRunError::runtime_message(EVENT_LOCK_POISONED))?,
+                EventStreamState::Closed
+            ) {
+                return Ok(None);
+            }
         }
     }
 
@@ -429,9 +460,28 @@ impl AgentRun {
                 subscription.close();
                 *state = EventStreamState::Closed;
             }
-            EventStreamState::Busy => *state = EventStreamState::CloseRequested,
+            EventStreamState::Busy | EventStreamState::Rebinding(_) => {
+                *state = EventStreamState::CloseRequested;
+            }
             _ => *state = EventStreamState::Closed,
         }
+    }
+
+    pub(super) fn park_events(&self) -> Result<(), AgentRunError> {
+        let mut state = self
+            .inner
+            .events
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message(EVENT_LOCK_POISONED))?;
+        match &mut *state {
+            EventStreamState::Active(subscription) => {
+                subscription.close();
+                *state = EventStreamState::Waiting;
+            }
+            EventStreamState::Busy => *state = EventStreamState::Rebinding(None),
+            _ => {}
+        }
+        Ok(())
     }
 
     pub(crate) async fn runtime_handle(&self) -> Result<RunHandle, AgentRunError> {
@@ -486,6 +536,27 @@ impl AgentRun {
             ));
         }
         let handle = self.runtime_handle().await?;
+        // The priority control slot must not overtake this SDK run's initial
+        // acceptance. No caller authority exists in the kernel before that commit.
+        loop {
+            let state = handle.live_state();
+            if state.terminal.is_some() {
+                return Ok(());
+            }
+            if state.phase.is_some() {
+                break;
+            }
+            if !matches!(state.status, finstack_ai_runtime::run::RunStatus::Running) {
+                return Err(AgentRunError::runtime_message(
+                    "run stopped before acceptance",
+                ));
+            }
+            handle
+                .wait_for_live_state(state.revision)
+                .await
+                .map_err(AgentRunError::runtime)?;
+        }
+
         submit(
             &handle,
             NativeIds::cancellation_environment()?,
@@ -553,9 +624,13 @@ pub(super) fn publish_started(
         Ok(mut events) if matches!(*events, EventStreamState::Waiting) => {
             *events = EventStreamState::Active(subscription);
         }
+        Ok(mut events) if matches!(*events, EventStreamState::Rebinding(_)) => {
+            *events = EventStreamState::Rebinding(Some(subscription));
+        }
         Ok(_) => {}
         Err(_) => record_events_fault(&inner, EVENT_LOCK_POISONED),
     }
+    inner.lifecycle.started();
 }
 
 pub(super) fn publish_result(
@@ -571,4 +646,5 @@ pub(super) fn publish_result(
         record_events_fault(&inner, RESULT_LOCK_POISONED);
     }
     inner.result_ready.notify_waiters();
+    inner.lifecycle.finished();
 }

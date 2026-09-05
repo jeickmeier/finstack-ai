@@ -79,13 +79,21 @@ impl RunHandle {
             .clone()
             .ok_or(RunHandleError::ShuttingDown)?;
         let (reply, receive) = oneshot();
-        intake.push(RunCommand { env, input, reply }).await?;
+        if matches!(input, KernelInput::CancelRequested(_)) {
+            self.shared
+                .control
+                .push(RunCommand { env, input, reply })
+                .await?;
+        } else {
+            intake.push(RunCommand { env, input, reply }).await?;
+        }
         receive.await
     }
 
     /// Initiate idempotent shutdown and close shared intake.
     pub fn shutdown(&self) {
         if !self.shared.shutting_down.swap(true, Ordering::AcqRel) {
+            self.shared.control.close();
             if let Ok(intake) = self.shared.intake.lock()
                 && let Some(intake) = intake.as_ref()
             {

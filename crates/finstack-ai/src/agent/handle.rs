@@ -226,7 +226,28 @@ impl Agent {
             ));
         }
         let tools = prepare_tool_catalog(&resolved)?;
-        Ok(Self {
+        let specs: Arc<[CapabilitySpec]> = match resolved.composition() {
+            Some(recipe) => recipe
+                .capabilities
+                .values()
+                .map(|(_, capability)| capability.as_ref().clone())
+                .collect::<Vec<_>>()
+                .into(),
+            None if resolved
+                .lock()
+                .is_some_and(|lock| lock.capabilities.is_empty()) =>
+            {
+                Arc::from([])
+            }
+            None => {
+                return Err(AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "capability definitions are missing from the resolved composition",
+                ));
+            }
+        };
+        let index = CapabilityContributionIndex::from_specs(&specs);
+        let mut agent = Self {
             resolved,
             tools: Arc::new(tools),
             structured_output: None,
@@ -238,7 +259,9 @@ impl Agent {
             rebuild: None,
             history_cache_policy: HistoryCachePolicy::default(),
             history_cache: HistoryCache::shared(HistoryCachePolicy::default()),
-        })
+        };
+        agent.attach_capability_surface(specs, index, None)?;
+        Ok(agent)
     }
 
     /// Build a new agent from reconstructed catalogs.
@@ -526,6 +549,9 @@ impl Agent {
             .map(|spec| spec.policy.child_runs)
             .unwrap_or_default();
         let inner = Arc::new(AgentRunInner {
+            lifecycle: Arc::new(super::lifecycle::ExecutionLifecycle::new(Some(
+                prepared.accepted.resolved_agent_lock_digest(),
+            ))),
             locator,
             store,
             child_runs,

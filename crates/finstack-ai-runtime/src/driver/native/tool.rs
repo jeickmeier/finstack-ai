@@ -88,6 +88,7 @@ pub(crate) struct ToolDispatcher {
     active: ActiveEffects,
     per_tool: BTreeMap<ToolId, Arc<Semaphore>>,
     parent: CancellationSignal,
+    startup: Mutex<Option<Vec<ToolJob>>>,
 }
 
 impl ToolDispatcher {
@@ -111,7 +112,30 @@ impl ToolDispatcher {
             active: Arc::new(Mutex::new(BTreeMap::new())),
             per_tool,
             parent,
+            startup: Mutex::new(Some(Vec::new())),
         }
+    }
+
+    /// Transfer the finite recovered batch to an owned feeder after both job
+    /// and result consumers exist. Dispatch must not fill their channels while
+    /// the constructor still owns the coordinator.
+    pub(crate) fn finish_startup(&self) -> Result<PortFuture<()>, DispatchError> {
+        let pending = self
+            .startup
+            .lock()
+            .map_err(|_| DispatchError {
+                code: "tool_effect_registry_unavailable",
+            })?
+            .take()
+            .unwrap_or_default();
+        let jobs = self.jobs.clone();
+        Ok(Box::pin(async move {
+            for job in pending {
+                if jobs.send(job).await.is_err() {
+                    break;
+                }
+            }
+        }))
     }
 
     pub(crate) fn active(&self) -> ActiveEffects {
@@ -258,16 +282,33 @@ impl PostCommitDispatcher for ToolDispatcher {
                 };
                 let jobs = self.jobs.clone();
                 let active = Arc::clone(&self.active);
+                let job = ToolJob {
+                    seed,
+                    context,
+                    resolved,
+                };
+                {
+                    let Ok(mut startup) = self.startup.lock() else {
+                        return Box::pin(async {
+                            Err(DispatchError {
+                                code: "tool_effect_registry_unavailable",
+                            })
+                        });
+                    };
+                    if let Some(pending) = startup.as_mut() {
+                        if pending.len() >= finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS {
+                            return Box::pin(async {
+                                Err(DispatchError {
+                                    code: "tool_job_queue_full",
+                                })
+                            });
+                        }
+                        pending.push(job);
+                        return Box::pin(async { Ok(()) });
+                    }
+                }
                 Box::pin(async move {
-                    if jobs
-                        .send(ToolJob {
-                            seed,
-                            context,
-                            resolved,
-                        })
-                        .await
-                        .is_err()
-                    {
+                    if jobs.send(job).await.is_err() {
                         if let Ok(mut values) = active.lock() {
                             values.remove(&effect_id);
                         }

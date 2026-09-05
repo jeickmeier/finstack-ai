@@ -1193,14 +1193,17 @@ async fn resume_respawns_run_task_owner() {
     let mut plan = completed("resumed");
     plan.actions
         .insert(0, ScriptedModelAction::Block(Arc::clone(&gate)));
-    let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![plan.clone(), plan],
+    ));
     let control = model.control();
     let (agent, store) = model_only_agent(Arc::clone(&model)).await;
     let session = Session::create(store, "tenant-preview")
         .await
         .expect("session");
     let lane = session.lane("main").await.expect("main");
-    let _run = lane.run(&agent, request("resume me")).expect("run");
+    let run = lane.run(&agent, request("resume me")).expect("run");
     tokio::time::timeout(Duration::from_secs(3), async {
         while control.entries(&gate) == 0 {
             tokio::task::yield_now().await;
@@ -1224,6 +1227,12 @@ async fn resume_respawns_run_task_owner() {
     );
     let inspect = lane.inspect().await.expect("inspect after resume");
     assert_eq!(inspect.active_run_id, Some(run_id));
+    control.release(&gate);
+    run.close_events();
+    tokio::time::timeout(Duration::from_secs(3), run.result())
+        .await
+        .expect("resumed completion bounded")
+        .expect("resumed completion");
 }
 
 #[tokio::test]
@@ -2563,3 +2572,5 @@ async fn second_lane_turn_reuses_a_validated_compaction_checkpoint() {
     assert_eq!(compactor.summary_builds.load(Ordering::Acquire), 1);
     assert_eq!(compactor.cache_hits.load(Ordering::Acquire), 1);
 }
+
+mod regressions;

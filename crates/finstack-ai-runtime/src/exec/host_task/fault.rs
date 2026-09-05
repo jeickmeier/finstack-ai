@@ -41,6 +41,7 @@ pub(super) fn fault_shared(shared: &Shared, code: &'static str) {
 }
 
 pub(super) fn finish_worker(shared: &Shared) {
+    shared.control.close();
     shared.publish_stopped_unless_faulted();
     shared.events.close();
 }

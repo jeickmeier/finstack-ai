@@ -43,13 +43,27 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
             }
             CanonicalValue::Bytes(bytes) => visitor.visit_byte_buf(bytes),
             CanonicalValue::Text(text) => visitor.visit_string(text),
-            CanonicalValue::Array(items) => visitor.visit_seq(SeqDeserializer {
-                items: items.into_iter(),
-            }),
-            CanonicalValue::Map(entries) => visitor.visit_map(MapDeserializer {
-                entries: entries.into_iter(),
-                value: None,
-            }),
+            CanonicalValue::Array(items) => {
+                let mut sequence = SeqDeserializer {
+                    items: items.into_iter(),
+                };
+                let value = visitor.visit_seq(&mut sequence)?;
+                if sequence.items.len() != 0 {
+                    return Err(ProtocolError::codec("unconsumed array elements"));
+                }
+                Ok(value)
+            }
+            CanonicalValue::Map(entries) => {
+                let mut map = MapDeserializer {
+                    entries: entries.into_iter(),
+                    value: None,
+                };
+                let value = visitor.visit_map(&mut map)?;
+                if map.entries.len() != 0 || map.value.is_some() {
+                    return Err(ProtocolError::codec("unconsumed map entries"));
+                }
+                Ok(value)
+            }
             CanonicalValue::Float(bits) => visitor.visit_f64(f64::from_bits(bits)),
         }
     }

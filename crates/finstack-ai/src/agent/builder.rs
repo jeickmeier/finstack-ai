@@ -416,13 +416,7 @@ impl NativeAgentBuilder {
         let mut agent = Agent::try_from_resolved(Arc::new(resolved_agent))?;
         agent.history_cache_policy = self.history_cache_policy;
         agent.history_cache = HistoryCache::shared(self.history_cache_policy);
-        let contributions =
-            super::mask::CapabilityContributionIndex::from_specs(&self.capabilities);
-        agent.attach_capability_surface(
-            Arc::from(self.capabilities.clone()),
-            contributions,
-            self.activation_host.clone(),
-        )?;
+        agent.activation_host = self.activation_host.clone();
         agent.model_capabilities =
             resolve_model_variants(&self.capabilities, &bundle_resolver, &mut registry, &agent)
                 .await?

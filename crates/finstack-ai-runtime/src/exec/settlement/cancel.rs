@@ -161,10 +161,9 @@ fn idle_cancellation_class(
     if let Some(pending) = state.pending_extension_effect()
         && pending.requested.effect_id() == effect_id
     {
-        // Extension calls execute inline with the command worker. A later
-        // cancellation command can only observe one here after that call has
-        // returned without a durable settlement, so it is idle and can be
-        // classified from the committed retry-safety contract.
+        // The inline invocation waiter drops a cancelled call only after the
+        // cancellation commits, before reaching this idle classification.
+        // Recovery also reaches this path without an active invocation.
         return effect_idle_class(pending.requested.retry_safety(), true, force_all);
     }
     state.active_tool_batch().and_then(|batch| {

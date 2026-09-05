@@ -1,20 +1,10 @@
 //! Stateful `Lane` run, suspend, and resume orchestration.
 
-use std::sync::Arc;
+use finstack_ai_runtime::session::SessionError;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use finstack_ai_kernel::OperationLocator;
-use finstack_ai_runtime::ids::ExternalClock;
-use finstack_ai_runtime::ports::context::ContextProvider;
-use finstack_ai_runtime::ports::model::{
-    LockedModelContextProfile, ModelContextProfileOverride, resolve_model_context_profile,
-};
-use finstack_ai_runtime::ports::tool::ResolvedToolCatalog;
-use finstack_ai_runtime::session::SessionError;
-use finstack_ai_runtime::workflow::WorkflowSession;
-
 use super::handle::Agent;
-use super::prepare::{NativeIds, session_error};
+use super::prepare::session_error;
 use super::run::AgentRun;
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunRequest};
 
@@ -30,7 +20,6 @@ pub(crate) struct LaneLive {
     generation: u64,
     state: LaneState,
     run: Option<AgentRun>,
-    workflow: Option<WorkflowSession>,
 }
 
 fn next_generation() -> u64 {
@@ -43,12 +32,7 @@ fn run_is_settled(run: &AgentRun) -> bool {
 }
 
 fn live_is_releasable(live: &LaneLive) -> bool {
-    live.state == LaneState::Running
-        && live.run.as_ref().is_some_and(run_is_settled)
-        && live
-            .workflow
-            .as_ref()
-            .is_none_or(|workflow| !workflow.owner_is_live())
+    live.state == LaneState::Running && live.run.as_ref().is_some_and(run_is_settled)
 }
 
 fn reserve_run(lane: &crate::Lane) -> Result<u64, AgentRunError> {
@@ -70,7 +54,6 @@ fn reserve_run(lane: &crate::Lane) -> Result<u64, AgentRunError> {
             generation,
             state: LaneState::Running,
             run: None,
-            workflow: None,
         },
     );
     Ok(generation)
@@ -130,9 +113,6 @@ fn begin_suspend(lane: &crate::Lane) -> Result<Option<(u64, Option<AgentRun>)>, 
         return Err(SessionError::LaneBusy);
     }
     live.state = LaneState::Suspending;
-    if let Some(workflow) = live.workflow.as_mut() {
-        workflow.abort_owner();
-    }
     Ok(Some((live.generation, live.run.clone())))
 }
 
@@ -164,24 +144,13 @@ fn begin_resume(lane: &crate::Lane) -> Result<(u64, Option<AgentRun>), AgentRunE
         live.state = LaneState::Resuming;
         return Ok((live.generation, live.run.clone()));
     }
-    let generation = next_generation();
-    lanes.insert(
-        lane.lane_id(),
-        LaneLive {
-            generation,
-            state: LaneState::Resuming,
-            run: None,
-            workflow: None,
-        },
-    );
-    Ok((generation, None))
+    Err(AgentRunError::configuration(
+        AGENT_RUN_INVALID_CONFIGURATION,
+        "lane has no in-process parked controller; use explicit workflow recovery for a journal-only run",
+    ))
 }
 
-fn finish_resume(
-    lane: &crate::Lane,
-    generation: u64,
-    workflow: WorkflowSession,
-) -> Result<(), AgentRunError> {
+fn finish_resume(lane: &crate::Lane, generation: u64) -> Result<(), AgentRunError> {
     let mut lanes = lane
         .session()
         .live_lanes()
@@ -191,7 +160,6 @@ fn finish_resume(
         .get_mut(&lane.lane_id())
         .filter(|live| live.generation == generation)
         .ok_or_else(|| AgentRunError::runtime_message("lane resume was superseded"))?;
-    live.workflow = Some(workflow);
     live.state = LaneState::Running;
     Ok(())
 }
@@ -204,78 +172,6 @@ fn rollback_resume(lane: &crate::Lane, generation: u64) {
     {
         live.state = LaneState::Suspended;
     }
-}
-
-type WorkflowPorts = (
-    Arc<finstack_ai_runtime::ports::model::ReadyModel>,
-    LockedModelContextProfile,
-    Option<Arc<ResolvedToolCatalog>>,
-);
-
-fn workflow_ports(agent: &Agent) -> Result<WorkflowPorts, AgentRunError> {
-    let ready_model = Arc::clone(agent.resolved.run_plan().model().handle());
-    let model = ready_model.shared_model();
-    let descriptor = model.descriptor();
-    descriptor.validate().map_err(AgentRunError::model)?;
-    let name = descriptor.models.first().ok_or_else(|| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "resolved model advertises no names",
-        )
-    })?;
-    let capabilities = model.capabilities(name);
-    let profile = resolve_model_context_profile(
-        capabilities.context_profile,
-        None,
-        None::<&ModelContextProfileOverride>,
-        false,
-    )
-    .map_err(AgentRunError::model)?;
-    let catalog = (!agent.tools.is_empty()).then(|| Arc::clone(&agent.tools));
-    Ok((ready_model, profile, catalog))
-}
-
-fn workflow_error(error: &finstack_ai_runtime::workflow::WorkflowDriverError) -> AgentRunError {
-    AgentRunError::runtime_message(error.to_string())
-}
-
-async fn attach_workflow(
-    lane: &crate::Lane,
-    agent: &Agent,
-    locator: OperationLocator,
-) -> Result<WorkflowSession, AgentRunError> {
-    let now = NativeIds::now()?;
-    let (model, profile, catalog) = workflow_ports(agent)?;
-    WorkflowSession::trusted(
-        lane.session().journal_store(),
-        locator,
-        ExternalClock::new(now),
-    )
-    .await
-    .map_err(|error| workflow_error(&error))
-    .and_then(|session| {
-        agent.validate_restored_mask(session.last_state().active_capabilities())?;
-        let providers: Arc<[Arc<dyn ContextProvider>]> = agent
-            .resolved
-            .run_plan()
-            .context_providers()
-            .iter()
-            .map(|component| Arc::clone(component.handle()))
-            .collect::<Vec<_>>()
-            .into();
-        Ok(session
-            .with_ready_ports(model, profile, catalog)
-            .with_capability_owners(agent.capability_index.as_arc_owners())
-            .with_middleware_chain(Arc::clone(agent.resolved.run_plan().middleware_chain()))
-            .with_context_providers(providers)
-            .with_approval_grant(
-                agent
-                    .resolved
-                    .spec()
-                    .map(|spec| spec.policy.approval_grant)
-                    .unwrap_or_default(),
-            ))
-    })
 }
 
 impl crate::Lane {
@@ -326,23 +222,25 @@ impl crate::Lane {
         };
         if let Some(run) = run
             && let Ok(handle) = run.runtime_handle().await
+            && run.inner.lifecycle.request_park()
         {
+            run.park_events().map_err(|_| SessionError::Poisoned)?;
             handle.shutdown();
+            run.inner.lifecycle.wait_parked().await;
         }
         finish_suspend(self, generation)
     }
 
-    /// Recover the parked run and respawn [`finstack_ai_runtime::run::RunTaskOwner`].
+    /// Rebuild the parked owner and continue the original SDK run controller.
     ///
-    /// Restore uses [`finstack_ai_runtime::workflow::WorkflowSession::trusted`] plus
-    /// [`finstack_ai_runtime::workflow::WorkflowSession::with_ports`],
-    /// [`finstack_ai_runtime::workflow::WorkflowSession::with_middleware_chain`],
-    /// [`finstack_ai_runtime::workflow::WorkflowSession::with_context_providers`],
-    /// and the local-workflow restart respawn path.
+    /// The in-process controller retains the accepted request, context seed and
+    /// deadline. Resuming does not append a second user message or accept a new run.
     ///
     /// # Errors
     ///
-    /// Returns an unknown-run, recover, port, or spawn failure.
+    /// Returns an error when no in-process parked controller exists, the agent
+    /// lock differs, or rebuilding the owner fails. Journal-only recovery uses
+    /// the explicit runtime workflow API.
     pub async fn resume(&self, agent: &Agent) -> Result<(), AgentRunError> {
         Box::pin(self.resume_inner(agent)).await
     }
@@ -350,34 +248,24 @@ impl crate::Lane {
     async fn resume_inner(&self, agent: &Agent) -> Result<(), AgentRunError> {
         let (generation, run) = begin_resume(self)?;
         let result = Box::pin(async {
-            let inspect = self
-                .inspect()
-                .await
-                .map_err(|error| session_error(&error))?;
-            let run_id = inspect.active_run_id.ok_or_else(|| {
-                AgentRunError::configuration(
-                    AGENT_RUN_INVALID_CONFIGURATION,
-                    "lane has no suspended run to resume",
-                )
-            })?;
-            let locator = OperationLocator::try_new(
-                self.session().tenant_scope(),
-                self.session().session_id(),
-                self.lane_id(),
-                run_id,
-            )
-            .map_err(|error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            })?;
-            let mut workflow = attach_workflow(self, agent, locator).await?;
-            workflow
-                .respawn_owner()
-                .await
-                .map_err(|error| workflow_error(&error))?;
-            if let Some(run) = run.as_ref() {
-                run.recover_children().await?;
+            let run = run.as_ref().ok_or_else(|| AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "lane has no in-process parked controller; use explicit workflow recovery for a journal-only run",
+            ))?;
+            let digest = agent.resolved.lock().ok_or_else(|| AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION, "resume requires a resolved agent lock",
+            ))?.fingerprint().map_err(|error| AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string()))?;
+            if run.inner.lifecycle.lock_digest != Some(digest) {
+                return Err(AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, "resume agent differs from the accepted agent lock"));
             }
-            finish_resume(self, generation, workflow)
+            if !run.inner.lifecycle.resume() {
+                return Err(AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, "lane run is no longer parked"));
+            }
+            run.inner.lifecycle.wait_resumed().await;
+            // Startup failures replace the retained runtime handle.
+            run.runtime_handle().await?;
+            run.recover_children().await?;
+            finish_resume(self, generation)
         })
         .await;
         if result.is_err() {
@@ -393,7 +281,8 @@ impl crate::Lane {
         };
         guard
             .get(&self.lane_id())
-            .and_then(|live| live.workflow.as_ref())
-            .is_some_and(WorkflowSession::owner_is_live)
+            .filter(|live| live.state == LaneState::Running)
+            .and_then(|live| live.run.as_ref())
+            .is_some_and(|run| run.inner.result.lock().is_ok_and(|result| result.is_none()))
     }
 }

@@ -38,87 +38,99 @@ impl Agent {
         locator: OperationLocator,
         context_seed: LaneRunContext,
     ) -> Result<AgentRunOutput, AgentRunError> {
-        submit(
-            handle,
-            NativeIds::environment(1, 1, 0, 0, 0, 0)?,
-            KernelInput::AcceptRun(AcceptRun {
-                session_id,
-                lane_id,
-                accepted,
-            }),
-        )
-        .await?;
-        let lock = self.resolved.lock().ok_or_else(|| {
-            AgentRunError::configuration(
-                AGENT_RUN_INVALID_CONFIGURATION,
-                "native Agent requires an exact resolved lock",
-            )
-        })?;
-        let mut active = Vec::new();
-        for capability in lock
-            .capabilities
-            .iter()
-            .filter(|capability| capability.active)
-        {
-            let source = match capability.activation {
-                CapabilityActivation::Always => CapabilityActivationSource::Always,
-                CapabilityActivation::Application => CapabilityActivationSource::Application,
-                CapabilityActivation::Model => CapabilityActivationSource::Model,
-                CapabilityActivation::Disabled => {
-                    return Err(AgentRunError::configuration(
-                        AGENT_RUN_INVALID_CONFIGURATION,
-                        "a disabled capability cannot be active in a validated lock",
-                    ));
-                }
-            };
-            active.push(ActiveCapability {
-                capability_id: capability.id.clone(),
-                source,
-            });
-        }
-        let lock_digest = lock.fingerprint().map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
-        if let Some(host) = &self.activation_host {
-            host.set_lock_digest(lock_digest);
-            host.seed_active(locator.run_id, active.clone().into());
-        }
-        if !active.is_empty() {
+        if handle.live_state().phase.is_none() {
             submit(
                 handle,
-                NativeIds::environment(1, 0, 0, 0, 0, 0)?,
-                KernelInput::CapabilitiesActivated(CapabilitiesActivated {
-                    prior_plan_digest: None,
-                    resolved_plan_digest: lock_digest,
-                    active: active.into(),
+                NativeIds::environment(1, 1, 0, 0, 0, 0)?,
+                KernelInput::AcceptRun(AcceptRun {
+                    session_id,
+                    lane_id,
+                    accepted,
                 }),
             )
             .await?;
         }
-        if let Some(output) = &self.structured_output {
-            submit(
+        if handle.live_state().phase == Some(RunPhase::BeforeRun) {
+            let lock = self.resolved.lock().ok_or_else(|| {
+                AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "native Agent requires an exact resolved lock",
+                )
+            })?;
+            let mut active = Vec::new();
+            for capability in lock
+                .capabilities
+                .iter()
+                .filter(|capability| capability.active)
+            {
+                let source = match capability.activation {
+                    CapabilityActivation::Always => CapabilityActivationSource::Always,
+                    CapabilityActivation::Application => CapabilityActivationSource::Application,
+                    CapabilityActivation::Model => CapabilityActivationSource::Model,
+                    CapabilityActivation::Disabled => {
+                        return Err(AgentRunError::configuration(
+                            AGENT_RUN_INVALID_CONFIGURATION,
+                            "a disabled capability cannot be active in a validated lock",
+                        ));
+                    }
+                };
+                active.push(ActiveCapability {
+                    capability_id: capability.id.clone(),
+                    source,
+                });
+            }
+            let lock_digest = lock.fingerprint().map_err(|error| {
+                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+            })?;
+            if let Some(host) = &self.activation_host {
+                host.set_lock_digest(lock_digest);
+                host.seed_active(locator.run_id, active.clone().into());
+            }
+            if !active.is_empty() && handle.live_state().resolved_plan_digest.is_none() {
+                submit(
+                    handle,
+                    NativeIds::environment(1, 0, 0, 0, 0, 0)?,
+                    KernelInput::CapabilitiesActivated(CapabilitiesActivated {
+                        prior_plan_digest: None,
+                        resolved_plan_digest: lock_digest,
+                        active: active.into(),
+                    }),
+                )
+                .await?;
+            }
+            if let Some(output) = &self.structured_output {
+                submit(
+                    handle,
+                    NativeIds::environment(1, 0, 0, 0, 0, 0)?,
+                    KernelInput::ConfigureOutput(OutputConfiguration {
+                        output: OutputSpec::JsonSchema {
+                            schema: output.schema_ref.clone(),
+                        },
+                        end_strategy: OutputEndStrategy::Early,
+                    }),
+                )
+                .await?;
+            }
+        }
+        if handle.live_state().phase == Some(RunPhase::BeforeRun) {
+            submit_stage(
                 handle,
-                NativeIds::environment(1, 0, 0, 0, 0, 0)?,
-                KernelInput::ConfigureOutput(OutputConfiguration {
-                    output: OutputSpec::JsonSchema {
-                        schema: output.schema_ref.clone(),
-                    },
-                    end_strategy: OutputEndStrategy::Early,
-                }),
+                0,
+                Stage::BeforeRun,
+                ReducerStageOutcome::Continue,
+                StageIds::continued(),
             )
             .await?;
         }
-        submit_stage(
-            handle,
-            0,
-            Stage::BeforeRun,
-            ReducerStageOutcome::Continue,
-            StageIds::continued(),
-        )
-        .await?;
-
         loop {
             let state = handle.live_state();
+            if state.terminal.is_some() {
+                return output_from_live_state(handle, locator, &state, request.timeout);
+            }
+            if state.phase == Some(RunPhase::Sleeping) {
+                await_retry_cycle(handle, state.cycle, request.timeout).await?;
+                continue;
+            }
             self.validate_restored_mask(&state.active_capabilities)?;
             if let Some(host) = &self.activation_host {
                 host.seed_active(locator.run_id, Arc::clone(&state.active_capabilities));
@@ -129,50 +141,55 @@ impl Agent {
                     "run exceeded max_cycles before producing a final response",
                 ));
             }
-            let extra = self.extra_capability_instructions(&state.active_capabilities);
-            let messages =
-                self.context_messages(&context_seed, &state.committed_run_messages, &extra)?;
-            submit_stage(
-                handle,
-                state.cycle,
-                Stage::PrepareContext,
-                ReducerStageOutcome::ContextPrepared { messages },
-                StageIds::context(),
-            )
-            .await?;
+            if state.phase == Some(RunPhase::PreparingContext) {
+                let extra = self.extra_capability_instructions(&state.active_capabilities);
+                let messages =
+                    self.context_messages(&context_seed, &state.committed_run_messages, &extra)?;
+                submit_stage(
+                    handle,
+                    state.cycle,
+                    Stage::PrepareContext,
+                    ReducerStageOutcome::ContextPrepared { messages },
+                    StageIds::context(),
+                )
+                .await?;
+            }
             let state = handle.live_state();
-            let draft = model_draft(
-                request.model.clone(),
-                (!state.prepared_context_messages.is_empty())
-                    .then(|| Arc::clone(&state.prepared_context_messages))
-                    .ok_or_else(|| AgentRunError::runtime_message("prepared context is missing"))?,
-                self.live_tool_specs(&state.active_capabilities),
-                self.structured_output
-                    .as_ref()
-                    .map_or(OutputSpec::PlainText, |output| OutputSpec::JsonSchema {
-                        schema: output.schema_ref.clone(),
-                    }),
-                request.settings.clone(),
-                &profile,
-            )?;
-            let request_json =
-                RawJson::parse(draft.canonical_bytes().map_err(AgentRunError::model)?)
-                    .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-            submit_stage(
-                handle,
-                state.cycle,
-                Stage::BeforeModel,
-                ReducerStageOutcome::ModelRequestPrepared {
-                    request: request_json,
-                    component: None,
-                    output_contract: model_output_contract(),
-                    retry_safety: RetrySafety::SafeToRetry,
-                    deadline: None,
-                },
-                StageIds::model_request(),
-            )
-            .await?;
-
+            if state.phase == Some(RunPhase::BeforeModel) {
+                let draft = model_draft(
+                    request.model.clone(),
+                    (!state.prepared_context_messages.is_empty())
+                        .then(|| Arc::clone(&state.prepared_context_messages))
+                        .ok_or_else(|| {
+                            AgentRunError::runtime_message("prepared context is missing")
+                        })?,
+                    self.live_tool_specs(&state.active_capabilities),
+                    self.structured_output
+                        .as_ref()
+                        .map_or(OutputSpec::PlainText, |output| OutputSpec::JsonSchema {
+                            schema: output.schema_ref.clone(),
+                        }),
+                    request.settings.clone(),
+                    &profile,
+                )?;
+                let request_json =
+                    RawJson::parse(draft.canonical_bytes().map_err(AgentRunError::model)?)
+                        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+                submit_stage(
+                    handle,
+                    state.cycle,
+                    Stage::BeforeModel,
+                    ReducerStageOutcome::ModelRequestPrepared {
+                        request: request_json,
+                        component: None,
+                        output_contract: model_output_contract(),
+                        retry_safety: RetrySafety::SafeToRetry,
+                        deadline: None,
+                    },
+                    StageIds::model_request(),
+                )
+                .await?;
+            }
             let mut after_model = wait_for_phase(
                 handle,
                 &[

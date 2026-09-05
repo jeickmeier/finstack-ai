@@ -33,8 +33,16 @@ pub(super) fn validate_batch_shape(
     {
         return Ok(());
     }
-    if state.pending_extension_effect.is_some() {
-        return if extension_settlement_shape(state, records) {
+    let cancellation_shape = state.accepted.is_some()
+        && state.cancellation.is_none()
+        && matches!(records, [record] if matches!(record.body(), RecordBody::CancellationRequested(_)));
+    if state.pending_extension_effect.is_some()
+        && !matches!(
+            state.phase,
+            Some(RunPhase::Cancelling | RunPhase::Suspended)
+        )
+    {
+        return if extension_settlement_shape(state, records) || cancellation_shape {
             Ok(())
         } else {
             Err(KernelError::InvalidRecordOrder)
@@ -120,9 +128,6 @@ pub(super) fn validate_batch_shape(
             return Err(KernelError::TerminalStateImmutable);
         }
     };
-    let cancellation_shape = state.accepted.is_some()
-        && state.cancellation.is_none()
-        && matches!(records, [record] if matches!(record.body(), RecordBody::CancellationRequested(_)));
     let limit_shape = matches!(
         records,
         [limit, terminal]

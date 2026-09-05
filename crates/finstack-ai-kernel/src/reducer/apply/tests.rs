@@ -225,8 +225,12 @@ fn child_preparation_and_budget_replay_are_idempotent_and_conflict_closed() {
     );
 }
 
-#[test]
-fn extension_effect_replay_holds_cursor_until_terminal_settlement() {
+fn pending_extension_fixture() -> (
+    KernelState,
+    Timestamp,
+    crate::EffectId,
+    EffectOutputContract,
+) {
     let (mut state, timestamp) = accepted_before_finalize();
     state.phase = Some(RunPhase::BeforeRun);
     let effect_id = fixed_id::<crate::EffectTag>(40);
@@ -291,6 +295,49 @@ fn extension_effect_replay_holds_cursor_until_terminal_settlement() {
     );
     assert_eq!(requested_state.state_version, 7);
 
+    (requested_state, timestamp, effect_id, contract)
+}
+
+#[test]
+fn extension_cancellation_prefix_replays_and_round_trips() {
+    let (requested_state, timestamp, _, _) = pending_extension_fixture();
+    // Cancellation is a control record even while an extension owns the stage
+    // cursor. The same crash prefix must accept it on replay.
+    let cancellation_batch = CommittedBatch::try_new(
+        fixed_id::<crate::AppendBatchTag>(43),
+        2,
+        2,
+        vec![composition_envelope(
+            2,
+            timestamp,
+            fixed_id::<crate::SessionTag>(10),
+            fixed_id::<crate::LaneTag>(11),
+            fixed_id::<crate::RunTag>(12),
+            RecordBody::CancellationRequested(CancellationRequested {
+                request: CancellationRequest::try_new(
+                    fixed_id::<crate::CancellationRequestTag>(44),
+                    CancellationInitiator::RuntimeShutdown,
+                    None::<&str>,
+                )
+                .expect("cancellation"),
+            }),
+        )],
+    )
+    .expect("cancel batch");
+    let cancelling = apply(&requested_state, &cancellation_batch, 1)
+        .expect("cancel pending extension")
+        .0;
+    assert_eq!(cancelling.phase, Some(RunPhase::Cancelling));
+    assert!(cancelling.pending_extension_effect.is_some());
+    cancelling.validate().expect("valid cancellation prefix");
+    let decoded: KernelState =
+        serde_json::from_slice(&serde_json::to_vec(&cancelling).unwrap()).unwrap();
+    assert_eq!(decoded.state_hash(), cancelling.state_hash());
+}
+
+#[test]
+fn extension_effect_replay_holds_cursor_until_terminal_settlement() {
+    let (requested_state, timestamp, effect_id, contract) = pending_extension_fixture();
     let completed = crate::EffectCompleted::try_new(
         effect_id,
         contract,

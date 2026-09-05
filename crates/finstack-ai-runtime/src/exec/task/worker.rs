@@ -35,7 +35,7 @@ pub(super) async fn run_worker(
     mut receiver: mpsc::Receiver<RunCommand>,
     shared: Arc<Shared>,
 ) {
-    while let Some(command) = receiver.recv().await {
+    while let Some(command) = shared.control.next(receiver.recv()).await {
         if shared.shutting_down.load(Ordering::Acquire) {
             let _ = command.reply.send(Err(RunHandleError::ShuttingDown));
             continue;
@@ -124,7 +124,7 @@ pub(super) async fn run_worker_with_model<C, R>(
                     None => timer_path_open = false,
                 }
             }
-            command = receiver.recv() => {
+            command = shared.control.next(receiver.recv()) => {
                 let Some(command) = command else { break; };
                 if shared.shutting_down.load(Ordering::Acquire) {
                     let _ = command.reply.send(Err(RunHandleError::ShuttingDown));
@@ -331,7 +331,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                     Err(_) => due_poll_path_open = false,
                 }
             }
-            command = receiver.recv() => {
+            command = shared.control.next(receiver.recv()) => {
                 let Some(command) = command else { break; };
                 if shared.shutting_down.load(Ordering::Acquire) {
                     let _ = command.reply.send(Err(RunHandleError::ShuttingDown));

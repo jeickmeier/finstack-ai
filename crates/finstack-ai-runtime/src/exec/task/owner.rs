@@ -200,6 +200,7 @@ impl RunTaskOwner {
         let (sender, receiver) = mpsc::channel(config.command_capacity);
         let (shared, handle) = Shared::spawn(sender, event_handle, coordinator.state());
         coordinator.install_live_state_publisher(shared.clone());
+        coordinator.run_control = Some(Arc::clone(&shared.control));
         let mut tasks = JoinSet::new();
         tasks.spawn(run_worker(coordinator, receiver, shared));
         tasks.spawn(event_task.run());
@@ -383,6 +384,7 @@ impl RunTaskOwner {
 
         let (shared, handle) = Shared::spawn(sender, event_handle, coordinator.state());
         coordinator.install_live_state_publisher(shared.clone());
+        coordinator.run_control = Some(Arc::clone(&shared.control));
         let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         tasks.spawn(run_worker_with_model(
             coordinator,
@@ -657,7 +659,14 @@ impl RunTaskOwner {
 
         let (shared, handle) = Shared::spawn(sender, event_handle, coordinator.state());
         coordinator.install_live_state_publisher(shared.clone());
+        coordinator.run_control = Some(Arc::clone(&shared.control));
         let due_poll_clock = sources.clock();
+        let startup_tools =
+            tool_dispatcher
+                .finish_startup()
+                .map_err(|error| RunHandleError::Tool {
+                    code: Arc::from(error.code),
+                })?;
         tasks.spawn(run_worker_with_model_and_tools(
             coordinator,
             receiver,
@@ -697,6 +706,7 @@ impl RunTaskOwner {
                 run_config.shutdown_deadline,
             ),
         ));
+        tasks.spawn(startup_tools);
         tasks.spawn(run_timer_jobs(
             runtime_clock,
             Arc::clone(&timer_active),

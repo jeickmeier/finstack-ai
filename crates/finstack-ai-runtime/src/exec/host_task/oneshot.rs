@@ -4,7 +4,7 @@ use std::task::{Context, Poll};
 
 use crate::driver::host_driver::Signal;
 
-pub(super) fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
+pub(crate) fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
     let inner = Arc::new(OneshotInner {
         value: Mutex::new(None),
         signal: Signal::new(),
@@ -17,17 +17,17 @@ pub(super) fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
     )
 }
 
-pub(super) struct OneshotInner<T> {
+pub(crate) struct OneshotInner<T> {
     value: Mutex<Option<T>>,
     signal: Signal,
 }
 
-pub(super) struct OneshotSender<T> {
+pub(crate) struct OneshotSender<T> {
     inner: Arc<OneshotInner<T>>,
 }
 
 impl<T> OneshotSender<T> {
-    pub(super) fn send(self, value: T) {
+    pub(crate) fn send(self, value: T) {
         if let Ok(mut slot) = self.inner.value.lock() {
             *slot = Some(value);
         }
@@ -35,7 +35,7 @@ impl<T> OneshotSender<T> {
     }
 }
 
-pub(super) struct OneshotReceiver<T> {
+pub(crate) struct OneshotReceiver<T> {
     inner: Arc<OneshotInner<T>>,
 }
 

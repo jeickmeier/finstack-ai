@@ -70,16 +70,24 @@ impl RunHandle {
             .clone()
             .ok_or(RunHandleError::ShuttingDown)?;
         let (reply, receive) = oneshot::channel();
-        sender
-            .send(RunCommand { env, input, reply })
-            .await
-            .map_err(|_| self.closed_error())?;
+        if matches!(input, KernelInput::CancelRequested(_)) {
+            self.shared
+                .control
+                .push(RunCommand { env, input, reply })
+                .await?;
+        } else {
+            sender
+                .send(RunCommand { env, input, reply })
+                .await
+                .map_err(|_| self.closed_error())?;
+        }
         receive.await.map_err(|_| self.closed_error())?
     }
 
     /// Initiate idempotent shutdown and close shared intake.
     pub fn shutdown(&self) {
         if !self.shared.shutting_down.swap(true, Ordering::AcqRel) {
+            self.shared.control.close();
             if let Ok(mut sender) = self.shared.sender.lock() {
                 sender.take();
             }

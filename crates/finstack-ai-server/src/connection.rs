@@ -102,8 +102,9 @@ where
     }
 
     let plan = match hub.with(&session_id, |replica| {
+        let plan = replica.plan_reconnect(auth, &locator, last_known_durable_sequence)?;
         replica.claim_writer(connection_id)?;
-        replica.plan_reconnect(auth, &locator, last_known_durable_sequence)
+        Ok(plan)
     }) {
         Ok(plan) => plan,
         Err(err) => {
@@ -118,6 +119,11 @@ where
         }
     };
 
+    let _writer = WriterLease {
+        hub,
+        session_id: &session_id,
+        connection_id,
+    };
     Box::pin(emit_reconnect_plan(
         stream,
         hub,
@@ -127,7 +133,7 @@ where
         plan,
     ))
     .await?;
-    serve_post_barrier(stream, auth, audit, hub, credit, connection_id, &session_id).await
+    serve_post_barrier(stream, auth, audit, hub, credit, &session_id).await
 }
 
 async fn emit_reconnect_plan<S>(
@@ -211,70 +217,62 @@ async fn serve_post_barrier<S>(
     audit: &SecurityAuditGate,
     hub: &SessionHub,
     mut credit: CreditWindow,
-    connection_id: u64,
     session_id: &str,
 ) -> Result<(), ServerError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let ready = hub.with(session_id, |replica| Ok(replica.live_ready()))?;
+    let (mut reader, mut writer) = tokio::io::split(stream);
     loop {
-        if credit.items() == 0 {
-            match tokio::time::timeout(
-                credit.limits().ack_deadline,
-                read_post_auth(stream, POST_AUTH_FRAME_MAX_BYTES, auth.protocol_version()),
-            )
-            .await
-            {
-                Ok(Ok(RemotePostAuth::Ack { items, bytes, .. })) => {
-                    credit.ack(items, bytes);
-                    continue;
-                }
-                Ok(Ok(RemotePostAuth::Close { .. })) => {
-                    release_writer(hub, session_id, connection_id);
-                    return Ok(());
-                }
-                _ => {
-                    release_writer(hub, session_id, connection_id);
-                    return Err(ServerError::CreditTimeout);
-                }
-            }
-        }
-        let live = hub.with(session_id, |replica| {
-            Ok(replica.take_live(usize::try_from(credit.items()).unwrap_or(0)))
-        })?;
-        if !live.is_empty() {
-            let items = u32::try_from(live.len()).unwrap_or(u32::MAX);
-            let message = RemotePostAuth::EventBatch { events: live };
-            let bytes = u32::try_from(encode(&message)?.len()).unwrap_or(u32::MAX);
-            if let Err(err) = credit.consume(items, bytes) {
-                release_writer(hub, session_id, connection_id);
-                return Err(err);
-            }
-            write_post_auth(
-                stream,
-                POST_AUTH_FRAME_MAX_BYTES,
-                auth.protocol_version(),
-                &message,
-            )
-            .await?;
-        }
-
-        let incoming = match read_post_auth(
-            stream,
+        // Keep the frame read alive across outbound wakeups: cancelling read_exact
+        // after a partial header would lose the frame boundary.
+        let incoming = read_post_auth(
+            &mut reader,
             POST_AUTH_FRAME_MAX_BYTES,
             auth.protocol_version(),
-        )
-        .await
-        {
-            Ok(message) => message,
-            Err(ServerError::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-                release_writer(hub, session_id, connection_id);
-                return Ok(());
+        );
+        tokio::pin!(incoming);
+        let incoming = loop {
+            if credit.items() == 0 {
+                match timeout(credit.limits().ack_deadline, &mut incoming).await {
+                    Ok(Ok(RemotePostAuth::Ack { items, bytes, .. })) => {
+                        credit.ack(items, bytes);
+                        break None;
+                    }
+                    Ok(Ok(RemotePostAuth::Close { .. })) => return Ok(()),
+                    _ => return Err(ServerError::CreditTimeout),
+                }
             }
-            Err(err) => {
-                release_writer(hub, session_id, connection_id);
-                return Err(err);
+            let notified = ready.notified();
+            let live = hub.with(session_id, |replica| {
+                Ok(replica.take_live(usize::try_from(credit.items()).unwrap_or(0)))
+            })?;
+            if !live.is_empty() {
+                let items = u32::try_from(live.len()).unwrap_or(u32::MAX);
+                let message = RemotePostAuth::EventBatch { events: live };
+                let bytes = u32::try_from(encode(&message)?.len()).unwrap_or(u32::MAX);
+                credit.consume(items, bytes)?;
+                write_post_auth(
+                    &mut writer,
+                    POST_AUTH_FRAME_MAX_BYTES,
+                    auth.protocol_version(),
+                    &message,
+                )
+                .await?;
+                continue;
             }
+            tokio::select! {
+                result = &mut incoming => match result {
+                    Ok(message) => break Some(message),
+                    Err(ServerError::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+                    Err(err) => return Err(err),
+                },
+                () = notified => {}
+            }
+        };
+        let Some(incoming) = incoming else {
+            continue;
         };
         match incoming {
             RemotePostAuth::Ack { items, bytes, .. } => credit.ack(items, bytes),
@@ -282,7 +280,7 @@ where
                 match apply_command(hub, auth, audit, &command).await {
                     Ok(result) => {
                         write_post_auth(
-                            stream,
+                            &mut writer,
                             POST_AUTH_FRAME_MAX_BYTES,
                             auth.protocol_version(),
                             &RemotePostAuth::CommandResult { result },
@@ -290,13 +288,11 @@ where
                         .await?;
                     }
                     Err(err) => {
-                        release_writer(hub, session_id, connection_id);
                         return Err(err);
                     }
                 }
             }
             RemotePostAuth::Close { .. } => {
-                release_writer(hub, session_id, connection_id);
                 return Ok(());
             }
             _ => {
@@ -308,10 +304,21 @@ where
                     None,
                 )
                 .await?;
-                release_writer(hub, session_id, connection_id);
                 return Err(ServerError::UnknownLocator);
             }
         }
+    }
+}
+
+struct WriterLease<'a> {
+    hub: &'a SessionHub,
+    session_id: &'a str,
+    connection_id: u64,
+}
+
+impl Drop for WriterLease<'_> {
+    fn drop(&mut self) {
+        release_writer(self.hub, self.session_id, self.connection_id);
     }
 }
 

@@ -315,7 +315,12 @@ async fn tool_resume_settled_effect_never_calls_or_reconciles() {
     .expect("owner");
     drive_to_tools(&owner.handle(), &store, tools).await;
     let settled = wait_state(&store, |state| !state.tool_settlements().is_empty()).await;
-    let effect_id = *settled.state().tool_settlements().keys().next().expect("id");
+    let effect_id = *settled
+        .state()
+        .tool_settlements()
+        .keys()
+        .next()
+        .expect("id");
     let calls = toolset.call_count();
     owner.shutdown().await;
     let recovered = recover_session(&store).await;
@@ -388,7 +393,8 @@ async fn tool_resume_completed_subset_retries_outstanding_in_source_order() {
         .await
         .expect("respawn");
     let settled = wait_state(&store, |state| {
-        state.tool_settlements().contains_key(&first) && state.tool_settlements().contains_key(&second)
+        state.tool_settlements().contains_key(&first)
+            && state.tool_settlements().contains_key(&second)
     })
     .await;
     assert_eq!(toolset.call_count(), calls + 1);
@@ -494,9 +500,39 @@ async fn cancel_while_deferred_tool_does_not_issue_a_second_request() {
         .await
         .expect("cancel");
     wait_state(&store, |state| {
-        matches!(state.phase(), Some(RunPhase::Cancelled | RunPhase::Suspended))
+        matches!(
+            state.phase(),
+            Some(RunPhase::Cancelled | RunPhase::Suspended)
+        )
     })
     .await;
     assert_eq!(toolset.call_count(), 1);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn resume_more_tools_than_job_capacity() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        32,
+        (0..32).map(completed_tool).collect(),
+        vec![ToolReconcileResult::NotStarted; 32],
+        tool_spec("echo"),
+    );
+    let recovered =
+        crash_before_tool_dispatch(store.clone(), model.clone(), catalog.clone(), tools).await;
+    let result = tokio::time::timeout(
+        StdDuration::from_secs(2),
+        spawn_tool_owner(recovered, model, catalog, 2500, 2001),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "constructor blocked before job consumer spawn; reconcile_count={} call_count={}",
+        toolset.reconcile_count(),
+        toolset.call_count()
+    );
+    let mut owner = result.unwrap().expect("owner");
+    wait_state(&store, |state| state.phase() == Some(RunPhase::AfterToolBatch)).await;
+    assert_eq!(toolset.call_count(), 32);
     owner.shutdown().await;
 }

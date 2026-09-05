@@ -40,7 +40,7 @@ pub(super) async fn run_worker(
         if shared.shutting_down.load(Ordering::Acquire) {
             break;
         }
-        let Some(command) = intake.recv().await else {
+        let Some(command) = shared.control.next(intake.recv()).await else {
             break;
         };
         if shared.shutting_down.load(Ordering::Acquire) {
@@ -89,7 +89,7 @@ pub(super) async fn run_worker_with_effects<C, R>(
         if shared.shutting_down.load(Ordering::Acquire) {
             break;
         }
-        let Some(command) = intake.recv().await else {
+        let Some(command) = shared.control.next(intake.recv()).await else {
             break;
         };
         if shared.shutting_down.load(Ordering::Acquire) {
@@ -492,7 +492,7 @@ where
         }
 
         let mut notified = std::pin::pin!(completions.available.notified());
-        let mut recv = std::pin::pin!(intake.recv());
+        let mut recv = std::pin::pin!(shared.control.next(intake.recv()));
         let outcome = std::future::poll_fn(|cx| {
             if completions
                 .values
@@ -703,7 +703,7 @@ where
 {
     let mut drive = std::pin::pin!(drive);
     loop {
-        let mut recv = std::pin::pin!(intake.recv());
+        let mut recv = std::pin::pin!(shared.control.next(intake.recv()));
         let outcome = std::future::poll_fn(|cx| {
             if let Poll::Ready(command) = recv.as_mut().poll(cx) {
                 return Poll::Ready(DrivePoll::Command(command.map(Box::new)));

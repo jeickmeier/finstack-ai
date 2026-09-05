@@ -61,12 +61,6 @@ pub fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, ProtocolError
 ///
 /// Returns limit, profile, or typed-codec failures.
 pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ProtocolError> {
-    if bytes.len() > CANONICAL_ENVELOPE_MAX_BYTES {
-        return Err(ProtocolError::limit(
-            "canonical_envelope",
-            CANONICAL_ENVELOPE_MAX_BYTES,
-        ));
-    }
     de::from_canonical(decode_value(bytes)?)
 }
 

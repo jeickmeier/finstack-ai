@@ -19,6 +19,7 @@ mod drive;
 mod handle;
 mod history;
 mod lane;
+mod lifecycle;
 mod linked;
 mod mask;
 mod prepare;

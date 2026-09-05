@@ -1,7 +1,7 @@
 //! In-process session replica: single-writer, reconnect plan, idempotency.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use finstack_ai_protocol::{
     RemoteCommand, RemoteCommandId, RemoteCommandPayload, RemoteCommandResult, RemoteDurableStep,
@@ -45,6 +45,7 @@ pub struct SessionReplica {
     tenant_scope: String,
     durable: Vec<RemoteDurableStep>,
     live: Vec<RemoteEventView>,
+    live_ready: Arc<tokio::sync::Notify>,
     last_transient_sequence: Option<u64>,
     writer: Option<u64>,
     barrier_released: bool,
@@ -76,6 +77,7 @@ impl SessionReplica {
             tenant_scope,
             durable: Vec::new(),
             live: Vec::new(),
+            live_ready: Arc::default(),
             last_transient_sequence: None,
             writer: None,
             barrier_released: false,
@@ -138,12 +140,17 @@ impl SessionReplica {
         }
         self.last_transient_sequence = Some(event.transient_sequence());
         self.live.push(event);
+        self.live_ready.notify_one();
         Ok(())
     }
 
     /// Mark the reconnect barrier as sent so live events may follow.
     pub fn release_barrier(&mut self) {
         self.barrier_released = true;
+    }
+
+    pub(crate) fn live_ready(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.live_ready)
     }
 
     /// Drain up to `n` queued live events.
