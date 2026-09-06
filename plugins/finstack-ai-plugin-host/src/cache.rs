@@ -185,8 +185,9 @@ pub fn cache_key(parts: &CacheKeyParts) -> String {
 }
 
 /// Engine feature flags fixed by [`crate::PluginHost::try_new`]. Fuel and the
-/// store limiter are resource-limit claims; epoch interruption remains the
-/// cancel channel.
+/// store limiter are resource-limit claims. Cancellation uses per-store fuel
+/// yields; `epoch=true` only keeps Wasmtime from trapping stores that never
+/// set a deadline.
 pub const ENGINE_FEATURE_FLAGS: &str =
     "async=true,epoch=true,fuel=true,limiter=true,compiler=cranelift";
 

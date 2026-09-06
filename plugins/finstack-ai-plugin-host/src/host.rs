@@ -240,10 +240,8 @@ impl PluginHost {
     pub fn try_new(config: PluginHostConfig) -> Result<Self, PluginHostError> {
         let mut wasm_config = Config::new();
         #[allow(deprecated)]
-        {
-            // Plan lock: request async support. Wasmtime 47 treats this as a no-op.
-            wasm_config.async_support(true);
-        }
+        // Wasmtime 47 treats `async_support` as a no-op.
+        wasm_config.async_support(true);
         wasm_config.epoch_interruption(true);
         wasm_config.consume_fuel(true);
         let engine = Engine::new(&wasm_config)

@@ -1,7 +1,7 @@
 //! Wasmtime bindgen for checked-in `@0.0.4` and `@1.0.0` worlds.
 //!
 //! Guest exports are async so a cancelled call can leave guest code through
-//! epoch interruption. Host imports stay synchronous.
+//! per-store fuel yields. Host imports stay synchronous.
 
 /// Bindings for experimental `@0.0.4` `toolset-plugin`.
 pub mod toolset {

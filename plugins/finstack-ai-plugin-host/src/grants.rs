@@ -117,7 +117,7 @@ impl GrantResources {
     }
 }
 
-/// Validate a host-offered grant set. `secrets` cannot be offered in this PR.
+/// Validate a host-offered grant set. `secrets` cannot be offered.
 ///
 /// # Errors
 ///

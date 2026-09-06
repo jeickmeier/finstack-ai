@@ -18,7 +18,6 @@
 //! preview. Isolation is a property of this host, not of that descriptor.
 
 #![warn(missing_docs)]
-// Wasmtime component deserialize is an unsafe host boundary.
 #![warn(clippy::float_cmp)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]

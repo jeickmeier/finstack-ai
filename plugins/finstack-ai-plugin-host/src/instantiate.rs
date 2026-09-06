@@ -25,7 +25,6 @@ use crate::bindings::v1::toolset::finstack::ai_host::logging as logging_v1;
 use crate::bindings::v1::toolset::finstack::ai_types::types as types_v1;
 use crate::error::PluginHostError;
 use crate::grants::{GrantResources, can_link, validate_preopen_host_path};
-use crate::limits::{EffectiveLimits, store_limits};
 
 /// Send + Sync host-import state. This is not the in-process `RecordingLogger`
 /// (`RefCell`) from `finstack-ai-wit`.
@@ -492,21 +491,6 @@ fn wasi_ctx(
     Ok(builder.build())
 }
 
-/// Host state plus fuel for one instantiate.
-///
-/// # Errors
-///
-/// Returns [`PluginHostError::ConfigInvalid`] when a granted preopen host
-/// path fails validation, and [`PluginHostError::InstantiateFailed`] when a
-/// granted preopen cannot be opened.
-pub fn host_state_for(
-    limits: EffectiveLimits,
-    granted: &BTreeSet<String>,
-    resources: &GrantResources,
-) -> Result<HostState, PluginHostError> {
-    HostState::try_with_grants(store_limits(limits), granted, resources)
-}
-
 /// Run `work` until it completes or `cancel` fires.
 ///
 /// Cancelling drops the `work` future, which abandons that store's guest call.
@@ -585,8 +569,12 @@ async fn instantiate_with_host_imports(
     linker: &Linker<HostState>,
     component: &wasmtime::component::Component,
 ) -> Result<Store<HostState>, PluginHostError> {
-    let limits = EffectiveLimits::default();
-    let mut store = new_store(engine, HostState::new(store_limits(limits)), limits.fuel)?;
+    let limits = crate::limits::EffectiveLimits::default();
+    let mut store = new_store(
+        engine,
+        HostState::new(crate::limits::store_limits(limits)),
+        limits.fuel,
+    )?;
     linker
         .instantiate_async(&mut store, component)
         .await

@@ -301,14 +301,6 @@ mod tests {
     };
     use serde::Deserialize;
 
-    fn fixture_tenant_scope() -> &'static str {
-        "tenant-a"
-    }
-
-    fn fixture_decision_id() -> &'static str {
-        "decision-v1"
-    }
-
     #[derive(Debug, Deserialize, PartialEq, Eq)]
     struct EchoArgs {
         text: String,
@@ -344,9 +336,9 @@ mod tests {
 
     #[test]
     fn empty_context_is_rejected() {
-        let error = require_sanitized_context("", fixture_decision_id()).expect_err("empty");
+        let error = require_sanitized_context("", "decision-v1").expect_err("empty");
         assert_eq!(error.code, "plugin_call_context_invalid");
-        require_sanitized_context(fixture_tenant_scope(), fixture_decision_id()).expect("ok");
+        require_sanitized_context("tenant-a", "decision-v1").expect("ok");
     }
 
     #[test]

@@ -39,10 +39,8 @@ use crate::convert::{
 };
 use crate::error::{PLUGIN_GUEST_ERROR, PluginHostError};
 use crate::host::{InstancePolicy, PluginHost, PluginWorld, ReadyWasm};
-use crate::instantiate::{
-    HostState, host_state_for, map_wasmtime_error, new_store, with_cancellation,
-};
-use crate::limits::effective_limits;
+use crate::instantiate::{HostState, map_wasmtime_error, new_store, with_cancellation};
+use crate::limits::{effective_limits, store_limits};
 
 /// Live exclusive or serialized toolset instance for one WIT major.
 pub(crate) enum LiveToolset {
@@ -413,8 +411,6 @@ impl WasmPluginExtension {
 
 impl Extension for WasmPluginExtension {
     fn descriptor(&self) -> ExtensionDescriptor {
-        // Preview residual: ExtensionTrust has no IsolatedWasm variant.
-        // Isolation is a property of PluginHost, not of this descriptor.
         ExtensionDescriptor::trusted_in_process(
             self.manifest.identity.clone(),
             adapter_version(&self.manifest),
@@ -464,7 +460,7 @@ async fn instantiate_toolset(
     let limits = effective_limits(&ready.manifest, host.default_limits());
     let mut store = new_store(
         host.engine(),
-        host_state_for(limits, &ready.granted, host.grant_resources())?,
+        HostState::try_with_grants(store_limits(limits), &ready.granted, host.grant_resources())?,
         limits.fuel,
     )?;
     let linker = host.linker_for_world(
@@ -492,7 +488,7 @@ async fn instantiate_context(
     let limits = effective_limits(&ready.manifest, host.default_limits());
     let mut store = new_store(
         host.engine(),
-        host_state_for(limits, &ready.granted, host.grant_resources())?,
+        HostState::try_with_grants(store_limits(limits), &ready.granted, host.grant_resources())?,
         limits.fuel,
     )?;
     let linker = host.linker_for_world(
