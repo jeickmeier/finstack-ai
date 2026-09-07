@@ -248,7 +248,9 @@ mod tests {
         let mut engine = parts();
         engine.engine = engine_fingerprint_parts("0.0.0-test", ENGINE_FEATURE_FLAGS);
         let mut target = parts();
-        target.target = "linux-x86_64-cranelift-x86_64".to_owned();
+        // Must not equal `host_target()` on any CI OS/arch. Linux x86_64
+        // runners report `linux-x86_64-cranelift-x86_64`.
+        target.target = format!("not-{}", host_target());
         let mut abi = parts();
         abi.abi = abi_identity("context-plugin", "0.0.4");
         let keys = [
@@ -257,7 +259,10 @@ mod tests {
             cache_key(&target),
             cache_key(&abi),
         ];
-        assert!(keys.iter().all(|key| key != &base));
+        assert_ne!(keys[0], base, "digest must change the key");
+        assert_ne!(keys[1], base, "engine must change the key");
+        assert_ne!(keys[2], base, "target must change the key");
+        assert_ne!(keys[3], base, "abi must change the key");
         assert_eq!(
             keys.len(),
             keys.iter().collect::<std::collections::BTreeSet<_>>().len()

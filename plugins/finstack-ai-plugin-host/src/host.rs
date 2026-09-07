@@ -651,7 +651,9 @@ mod tests {
             ..base.clone()
         }));
         assert!(!host.cache_hit(&CacheKeyParts {
-            target: "linux-x86_64-cranelift-x86_64".into(),
+            // Must not equal `host_target()` on any CI OS/arch. Linux x86_64
+            // runners report `linux-x86_64-cranelift-x86_64`.
+            target: format!("not-{}", host_target()),
             ..base.clone()
         }));
         assert!(!host.cache_hit(&CacheKeyParts {
